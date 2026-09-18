@@ -28,6 +28,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "accounting",
+					root: "packages/accounting",
+					environment: "node",
+					include: ["src/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "sdk",
 					root: "packages/sdk",
 					environment: "node",
