@@ -26,7 +26,7 @@
 		"test": "vitest run",
 		"build": "bun run --filter '*' build",
 		"start:api": "bun run --cwd packages/server start",
-		"dev": "bun run telemetry daemon > /dev/null || echo 'motel did not start: traces are not being collected'; portless",
+		"dev": "motel daemon > /dev/null; portless",
 		"storybook": "bun run --cwd packages/web storybook",
 		"build:storybook": "bun run --cwd packages/web build:storybook",
 		"test:storybook": "bun run --cwd packages/web test:storybook",
@@ -35,8 +35,7 @@
 		"db:migrate": "bun run --cwd packages/core db:migrate",
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/server/src/seed.ts",
-		"telemetry": "MOTEL_RUNTIME_DIR=.motel MOTEL_OTEL_BASE_URL=http://127.0.0.1:27687 MOTEL_OTEL_SERVICE_NAME=sugabots motel",
-		"explore:traces": "bun run telemetry"
+		"explore:traces": "motel"
 	},
 	"overrides": {
 		"@effect/platform-node-shared": "4.0.0-beta.90"

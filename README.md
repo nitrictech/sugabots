@@ -202,8 +202,8 @@ bun run explore:traces  # browse the API's traces in motel
 
 `bun run dev` also starts [motel](https://github.com/kitlangton/motel) in the
 background, which collects the API's traces and logs into `.motel/` in this
-checkout; `explore:traces` browses them. Any OTLP/HTTP viewer works instead:
-set `OTEL_EXPORTER_OTLP_ENDPOINT` in `.env` (see `.env.example`).
+checkout; `explore:traces` browses them. Its settings, and the API's, are the
+tracing lines in `.env` (see `.env.example`); any OTLP/HTTP viewer works instead.
 
 | Directory            | Responsibility                                                      |
 | -------------------- | ------------------------------------------------------------------- |
