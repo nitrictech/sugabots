@@ -134,14 +134,17 @@ export const connectionTestResultSchema = Schema.Struct({
 export type ConnectionTestResult = typeof connectionTestResultSchema.Type;
 
 /**
- * Whether a tool may change something at the other end. The server's own
- * hints decide: `readOnlyHint` clears it, and `destructiveHint` is true unless
- * the server said otherwise, which is the spec's default. A tool that says
- * nothing is therefore taken to change things. This is ADR 002's mutating
- * flag: a failed turn after such a call is not retried on its own.
+ * Whether a tool may change something at the other end: anything the server
+ * has not marked read-only, which is also the spec's default for a tool that
+ * says nothing. `destructiveHint` plays no part. In the spec it only tells an
+ * overwriting change from an additive one, and an additive change is still a
+ * change: counting it as a read offered Linear's `create_issue_label` on a
+ * read-only connection, without asking. This is ADR 002's mutating flag: such a
+ * tool is left out while its connection is read-only, asks for approval
+ * otherwise, and a failed turn after it is not retried on its own.
  */
-export function connectionToolMutating(tool: Pick<ConnectionTool, "readOnly" | "destructive">) {
-	return tool.readOnly !== true && tool.destructive !== false;
+export function connectionToolMutating(tool: Pick<ConnectionTool, "readOnly">) {
+	return tool.readOnly !== true;
 }
 
 /**
