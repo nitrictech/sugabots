@@ -15,6 +15,7 @@ import { CollaborationThread } from "./CollaborationThread.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
 import { ToolCallRow } from "./ToolCallRow.tsx";
+import { TypingIndicator } from "./TypingIndicator.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -24,6 +25,12 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  * call is a compact row. So an agent that writes, asks another agent, and
  * writes again shows as a bubble, a child thread, and a bubble, in the order
  * it happened.
+ *
+ * A reply's words are drawn once it is finished, never as they stream. What an
+ * agent writes on the way is often the lead-in to a tool call ("Let me find the
+ * cycle:"), and that cannot be told until the call arrives, so words drawn live
+ * would be shown and then taken back. While the turn runs, one line says the
+ * agent is typing.
  */
 
 export function ThreadConversation({
@@ -57,11 +64,15 @@ export function ThreadConversation({
 	canAlwaysAllowToolCalls?: boolean;
 }) {
 	const lastMessage = messages.at(-1);
-	const showThinking = isRunning && lastMessage?.author.kind === "person";
+	// The turn has started but its reply has not been created yet.
+	const replyPending = isRunning && lastMessage?.author.kind === "person";
 	return (
 		<div className="flex flex-col gap-[17px]">
 			{messages.map((message, index) => {
 				const divider = dividers ? dividerBefore(messages[index - 1], message) : undefined;
+				const outgoing =
+					(message.author.kind === "person" && message.author.id === user.id) ||
+					(hostAgentOnRight && message.author.kind === "agent" && message.author.id === host.id);
 				return (
 					<Fragment key={message.id}>
 						{divider && <ActivityDivider>{divider}</ActivityDivider>}
@@ -115,64 +126,75 @@ export function ThreadConversation({
 									key={segment.key}
 									message={message}
 									text={segment.text}
-									outgoing={
-										(message.author.kind === "person" && message.author.id === user.id) ||
-										(hostAgentOnRight &&
-											message.author.kind === "agent" &&
-											message.author.id === host.id)
-									}
+									outgoing={outgoing}
 									mentionable={mentionable}
 									isLast={position === all.length - 1}
-									waitingOn={segment.waitingOn}
 								/>
 							);
 						})}
+						{message.author.kind === "agent" && isTyping(message) && (
+							<TypingIndicator
+								key={`${message.id}-typing`}
+								agent={message.author}
+								waitingOn={waitingOn(message)}
+								outgoing={outgoing}
+							/>
+						)}
 					</Fragment>
 				);
 			})}
-			{showThinking && <ThinkingBubble agent={host} outgoing={hostAgentOnRight} />}
+			{replyPending && <TypingIndicator agent={host} outgoing={hostAgentOnRight} />}
 		</div>
 	);
 }
 
+/**
+ * Whether a reply's turn is still going, so the typing line stands in for its
+ * words. A call waiting to be approved says the turn is stopped on it, and the
+ * line would say the same thing twice.
+ */
+function isTyping(message: Message): boolean {
+	const awaitingApproval = message.parts.some(
+		(part) => part.type === "tool_call" && part.status === "awaiting_approval",
+	);
+	return message.status === "streaming" && !awaitingApproval;
+}
+
+/** The collaborator a running reply has asked and not yet heard back from. */
+function waitingOn(message: Message): string | undefined {
+	const last = message.parts.at(-1);
+	return last?.type === "collaboration" ? last.agentName : undefined;
+}
+
 type Segment =
-	| { type: "text"; key: string; text: string; waitingOn?: string }
+	| { type: "text"; key: string; text: string }
 	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
 
 /**
- * The message's parts as things to draw. A streaming reply whose last part is
- * a collaboration or a tool call gets a trailing bubble that says what it is
- * waiting for, which is where its next words will land.
+ * The message's parts as things to draw. A reply still being written shows its
+ * collaborations and tool calls but none of its text, which waits until it is
+ * finished.
  */
 function segmentsOf(message: Message): Segment[] {
-	// A text run is keyed by where in the message it starts, which is stable as
-	// the run grows; a collaboration or tool call by its id.
+	const finished = message.status !== "streaming";
+	// A text run is keyed by where in the message it starts; a collaboration or
+	// tool call by its id.
 	let written = 0;
-	const segments: Segment[] = message.parts.map((part) => {
-		if (part.type === "text") {
-			const segment: Segment = { type: "text", key: `text@${written}`, text: part.text };
-			written += part.text.length;
-			return segment;
-		}
+	const segments: Segment[] = [];
+	for (const part of message.parts) {
 		if (part.type === "collaboration") {
-			return { type: "collaboration", key: part.id, collaboration: part };
+			segments.push({ type: "collaboration", key: part.id, collaboration: part });
+			continue;
 		}
-		return { type: "tool_call", key: part.id, toolCall: part };
-	});
-	const last = segments.at(-1);
-	if (
-		message.status === "streaming" &&
-		(last?.type === "collaboration" || last?.type === "tool_call")
-	) {
-		segments.push({
-			type: "text",
-			key: `text@${written}`,
-			text: "",
-			waitingOn: last.type === "collaboration" ? last.collaboration.agentName : last.toolCall.tool,
-		});
+		if (part.type === "tool_call") {
+			segments.push({ type: "tool_call", key: part.id, toolCall: part });
+			continue;
+		}
+		if (finished) segments.push({ type: "text", key: `text@${written}`, text: part.text });
+		written += part.text.length;
 	}
-	if (segments.length === 0) {
+	if (finished && segments.length === 0) {
 		segments.push({ type: "text", key: "text@0", text: "" });
 	}
 	return segments;
@@ -181,59 +203,26 @@ function segmentsOf(message: Message): Segment[] {
 /** The time or status beside an author's name, lighter so the name leads without a separator. */
 const authorDetailClass = "font-normal text-muted-foreground text-xs";
 
-function ThinkingBubble({ agent, outgoing }: { agent: AgentParticipant; outgoing: boolean }) {
-	return (
-		<article
-			aria-label={`${agent.name}, thinking`}
-			className={`agent-tint flex animate-rise motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
-			style={{ ["--agent-hue" as string]: agent.hue }}
-		>
-			<div className="relative max-w-[min(100%,480px)]">
-				<AgentAvatar
-					hue={agent.hue}
-					face={agent.face}
-					size={38}
-					ringed
-					className={`absolute -top-[11px] z-10 ${outgoing ? "-right-[15px]" : "-left-[15px]"}`}
-				/>
-				<div className="rounded-4xl bg-agent-wash px-5 py-3.5">
-					<div
-						className={`flex items-baseline gap-x-2 pb-1 font-semibold text-agent-name text-md ${outgoing ? "justify-end pr-5" : "pl-5"}`}
-					>
-						<span>{agent.name}</span>
-						<span className={authorDetailClass}>thinking…</span>
-					</div>
-					<ThinkingDots />
-				</div>
-			</div>
-		</article>
-	);
-}
-
 function MessageBubble({
 	message,
 	text,
 	outgoing,
 	mentionable,
 	isLast,
-	waitingOn,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
 	text: string;
 	outgoing: boolean;
 	mentionable: ThreadParticipant[];
-	/** Whether this is the message's last bubble, where its streaming state shows. */
+	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
-	/** The collaborator this bubble is waiting on before its words arrive. */
-	waitingOn?: string;
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
 	}
 	const agent = message.author.kind === "agent" ? message.author : undefined;
 	const fromAgent = agent !== undefined;
-	const streaming = isLast && message.status === "streaming";
 	const status = messageStatus(message);
 	return (
 		<article
@@ -267,29 +256,22 @@ function MessageBubble({
 						} ${fromAgent ? "text-agent-name" : "text-muted-foreground"}`}
 					>
 						<span>{message.author.name}</span>
-						{streaming ? (
-							<span className={authorDetailClass}>
-								{waitingOn ? `waiting on ${waitingOn}…` : "writing…"}
-							</span>
-						) : (
-							<Tooltip label={formatFullTimestamp(message.createdAt)} side="top">
-								<time
-									dateTime={message.createdAt}
-									className={`${authorDetailClass} cursor-default hover:underline`}
-								>
-									{formatTime(message.createdAt)}
-								</time>
-							</Tooltip>
-						)}
+						<Tooltip label={formatFullTimestamp(message.createdAt)} side="top">
+							<time
+								dateTime={message.createdAt}
+								className={`${authorDetailClass} cursor-default hover:underline`}
+							>
+								{formatTime(message.createdAt)}
+							</time>
+						</Tooltip>
 					</div>
 					{fromAgent ? (
-						<MessageMarkdown text={text} mentionable={mentionable} streaming={streaming} />
+						<MessageMarkdown text={text} mentionable={mentionable} />
 					) : (
 						<p className="m-0 whitespace-pre-wrap break-words text-foreground text-xl leading-relaxed">
 							{textWithMentions(text, mentionable)}
 						</p>
 					)}
-					{streaming && !text && <ThinkingDots />}
 					{isLast && message.status === "failed" && (
 						<p className="m-0 pt-2 text-destructive text-xs">
 							<span className="font-semibold">Reply failed</span>
@@ -331,16 +313,6 @@ function authorName(message: Message): string {
 	return message.author.kind === "routine_trigger"
 		? message.author.routineName
 		: message.author.name;
-}
-
-function ThinkingDots() {
-	return (
-		<span className="flex h-7 items-center gap-1.5 px-1" aria-hidden>
-			<span className="size-2 animate-bounce rounded-full bg-agent-name motion-reduce:animate-none" />
-			<span className="size-2 animate-bounce rounded-full bg-agent-name [animation-delay:150ms] motion-reduce:animate-none" />
-			<span className="size-2 animate-bounce rounded-full bg-agent-name [animation-delay:300ms] motion-reduce:animate-none" />
-		</span>
-	);
 }
 
 function ActivityDivider({ children }: { children: string }) {
@@ -425,9 +397,6 @@ function formatTime(createdAt: string): string {
 }
 
 function messageStatus(message: Message): string {
-	if (message.status === "streaming") {
-		return "writing";
-	}
 	if (message.status === "failed") {
 		return "failed";
 	}
