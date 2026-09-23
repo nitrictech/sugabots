@@ -1,4 +1,5 @@
 import type { ToolCallPart } from "@sugabots/contracts";
+import { useEffect, useState } from "react";
 import preview from "#storybook/preview";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { TypingIndicator } from "./TypingIndicator.tsx";
@@ -40,6 +41,30 @@ function working(...tools: string[]) {
 	return toolActivityOf({ parts: calls }, names);
 }
 
+const QUICK_STEPS = [
+	"sentry__search_issues",
+	"sentry__get_issue",
+	"sentry__get_event",
+	"acme__list_deals",
+	"web_search",
+];
+
+/** Makes a quick call every `QUICK_STEP_MS`, faster than the line lets a step go. */
+const QUICK_STEP_MS = 250;
+
+function QuickSteps() {
+	const [made, setMade] = useState(1);
+	useEffect(() => {
+		const next = setInterval(() => setMade((count) => count + 1), QUICK_STEP_MS);
+		return () => clearInterval(next);
+	}, []);
+	const rounds = Math.ceil(made / QUICK_STEPS.length);
+	const tools = Array.from({ length: rounds }, () => QUICK_STEPS)
+		.flat()
+		.slice(0, made);
+	return <TypingIndicator agent={agent} activity={working(...tools)} looks={looks} />;
+}
+
 const meta = preview.meta({
 	title: "Product/TypingIndicator",
 	component: TypingIndicator,
@@ -79,4 +104,12 @@ export const ABuiltInTool = meta.story({ args: { activity: working("web_search")
 /** On the side the agent's own bubbles are on, in a one-to-one chat. */
 export const OnTheAgentsSide = meta.story({
 	args: { activity: working("sentry__search_issues"), outgoing: true },
+});
+
+/**
+ * A call every quarter second: each step the line names stays for a second,
+ * and the ones that came and went in between are skipped rather than queued.
+ */
+export const ABurstOfQuickSteps = meta.story({
+	render: () => <QuickSteps />,
 });
