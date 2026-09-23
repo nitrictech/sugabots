@@ -1,5 +1,4 @@
 import { sessionUserSchema } from "@sugabots/contracts";
-import { closePool, getDb } from "@sugabots/core/database/client";
 import {
 	pod,
 	podMember,
@@ -7,10 +6,12 @@ import {
 	user,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { runOnPostgres } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { and, eq, or } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Schema } from "effect";
+import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { API_BASE_PATH } from "../config.ts";
 import type { Email } from "../email/mailer.ts";
@@ -30,12 +31,20 @@ import { createAuth } from "./auth.ts";
 
 const ORIGIN = "http://localhost:5173";
 
-afterAll(closePool);
+// better-auth's adapter only speaks node-postgres, so it gets a pool of its own.
+const authPool = new Pool({ connectionString: process.env.DATABASE_URL });
+const authDb = drizzle({ client: authPool });
+
+afterAll(async () => {
+	await authPool.end();
+	await closeDatabase();
+});
 
 describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	const sent: Email[] = [];
 	const auth = createAuth({
-		db: getDb(),
+		db: authDb,
+		run: runOnPostgres,
 		secret: "test-secret-not-used-anywhere-else",
 		baseUrl: "http://localhost:3000",
 		webOrigins: [ORIGIN],
@@ -115,10 +124,12 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		const workspace = (await created.json()) as { id: string };
 
 		//    It can search from the start, on Exa's free tier.
-		const [search] = await getDb()
-			.select({ preset: searchProvider.preset, enabled: searchProvider.enabled })
-			.from(searchProvider)
-			.where(eq(searchProvider.workspaceId, workspace.id));
+		const [search] = await onDatabase((db) =>
+			db
+				.select({ preset: searchProvider.preset, enabled: searchProvider.enabled })
+				.from(searchProvider)
+				.where(eq(searchProvider.workspaceId, workspace.id)),
+		);
 		expect(search).toEqual({ preset: "exa", enabled: true });
 
 		// 3. Invite somebody. The invitation goes out by email, and its id is a
@@ -159,14 +170,18 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 			[adaEmail, "admin"],
 			[bobEmail, "member"],
 		]);
-		const people = await getDb()
-			.select({ userId: user.id })
-			.from(user)
-			.where(or(eq(user.email, adaEmail), eq(user.email, bobEmail)));
-		const personalPods = await getDb()
-			.select({ ownerId: pod.ownerId })
-			.from(pod)
-			.where(and(eq(pod.workspaceId, workspace.id), eq(pod.kind, "personal")));
+		const people = await onDatabase((db) =>
+			db
+				.select({ userId: user.id })
+				.from(user)
+				.where(or(eq(user.email, adaEmail), eq(user.email, bobEmail))),
+		);
+		const personalPods = await onDatabase((db) =>
+			db
+				.select({ ownerId: pod.ownerId })
+				.from(pod)
+				.where(and(eq(pod.workspaceId, workspace.id), eq(pod.kind, "personal"))),
+		);
 		expect(personalPods.map(({ ownerId }) => ownerId).sort()).toEqual(
 			people.map(({ userId }) => userId).sort(),
 		);
@@ -293,16 +308,12 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		).toBe(200);
 
 		const [adaRow, bobRow] = await Promise.all([
-			getDb()
-				.select({ id: user.id })
-				.from(user)
-				.where(eq(user.email, adaEmail))
-				.then(([row]) => row),
-			getDb()
-				.select({ id: user.id })
-				.from(user)
-				.where(eq(user.email, bobEmail))
-				.then(([row]) => row),
+			onDatabase((db) =>
+				db.select({ id: user.id }).from(user).where(eq(user.email, adaEmail)),
+			).then(([row]) => row),
+			onDatabase((db) =>
+				db.select({ id: user.id }).from(user).where(eq(user.email, bobEmail)),
+			).then(([row]) => row),
 		]);
 		if (!adaRow) {
 			throw new Error("Could not find the workspace owner");
@@ -310,32 +321,38 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		if (!bobRow) {
 			throw new Error("Could not find the invited member");
 		}
-		const [bobPersonalPod] = await getDb()
-			.select({ id: pod.id })
-			.from(pod)
-			.where(
-				and(
-					eq(pod.workspaceId, workspace.id),
-					eq(pod.ownerId, bobRow.id),
-					eq(pod.kind, "personal"),
+		const [bobPersonalPod] = await onDatabase((db) =>
+			db
+				.select({ id: pod.id })
+				.from(pod)
+				.where(
+					and(
+						eq(pod.workspaceId, workspace.id),
+						eq(pod.ownerId, bobRow.id),
+						eq(pod.kind, "personal"),
+					),
 				),
-			);
+		);
 		if (!bobPersonalPod) throw new Error("Invited member has no Personal pod");
-		const [madePod] = await getDb()
-			.insert(pod)
-			.values({
-				workspaceId: workspace.id,
-				kind: "shared",
-				name: "Private",
-				slug: `private-${unique}`,
-			})
-			.returning();
+		const [madePod] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: workspace.id,
+					kind: "shared",
+					name: "Private",
+					slug: `private-${unique}`,
+				})
+				.returning(),
+		);
 		if (!madePod) {
 			throw new Error("Could not create the member's pod");
 		}
-		await getDb()
-			.insert(podMember)
-			.values({ workspaceId: workspace.id, podId: madePod.id, userId: bobRow.id });
+		await onDatabase((db) =>
+			db
+				.insert(podMember)
+				.values({ workspaceId: workspace.id, podId: madePod.id, userId: bobRow.id }),
+		);
 
 		const removed = await call(
 			"/auth/organization/remove-member",
@@ -355,20 +372,29 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		).toBe(200);
 
 		expect(
-			await getDb()
-				.select()
-				.from(podMember)
-				.where(and(eq(podMember.podId, madePod.id), eq(podMember.userId, bobRow.id))),
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(podMember)
+					.where(and(eq(podMember.podId, madePod.id), eq(podMember.userId, bobRow.id))),
+			),
 		).toEqual([]);
 		expect(
-			await getDb()
-				.select()
-				.from(workspaceMember)
-				.where(
-					and(eq(workspaceMember.workspaceId, workspace.id), eq(workspaceMember.userId, bobRow.id)),
-				),
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(workspaceMember)
+					.where(
+						and(
+							eq(workspaceMember.workspaceId, workspace.id),
+							eq(workspaceMember.userId, bobRow.id),
+						),
+					),
+			),
 		).toHaveLength(1);
-		expect(await getDb().select().from(pod).where(eq(pod.id, bobPersonalPod.id))).toEqual([]);
+		expect(
+			await onDatabase((db) => db.select().from(pod).where(eq(pod.id, bobPersonalPod.id))),
+		).toEqual([]);
 	});
 
 	it("rejects a token it never issued", async () => {
@@ -383,11 +409,13 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	 */
 	describe("workspace roles", () => {
 		async function membershipId(workspaceId: string, email: string) {
-			const [row] = await getDb()
-				.select({ id: workspaceMember.id })
-				.from(workspaceMember)
-				.innerJoin(user, eq(user.id, workspaceMember.userId))
-				.where(and(eq(workspaceMember.workspaceId, workspaceId), eq(user.email, email)));
+			const [row] = await onDatabase((db) =>
+				db
+					.select({ id: workspaceMember.id })
+					.from(workspaceMember)
+					.innerJoin(user, eq(user.id, workspaceMember.userId))
+					.where(and(eq(workspaceMember.workspaceId, workspaceId), eq(user.email, email))),
+			);
 			if (!row) throw new Error(`${email} is not in the workspace`);
 			return row.id;
 		}
@@ -449,11 +477,13 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 			);
 
 			expect(updated.status).toBe(400);
-			const [membership] = await getDb()
-				.select({ role: workspaceMember.role })
-				.from(workspaceMember)
-				.innerJoin(user, eq(user.id, workspaceMember.userId))
-				.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, bobEmail)));
+			const [membership] = await onDatabase((db) =>
+				db
+					.select({ role: workspaceMember.role })
+					.from(workspaceMember)
+					.innerJoin(user, eq(user.id, workspaceMember.userId))
+					.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, bobEmail))),
+			);
 			expect(membership?.role).toBe("member");
 		});
 
@@ -461,11 +491,13 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 			const unique = crypto.randomUUID().slice(0, 8);
 			const { ada, bobEmail, workspace } = await workspaceWithTwo(unique);
 			const roleOf = async () => {
-				const [row] = await getDb()
-					.select({ role: workspaceMember.role })
-					.from(workspaceMember)
-					.innerJoin(user, eq(user.id, workspaceMember.userId))
-					.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, bobEmail)));
+				const [row] = await onDatabase((db) =>
+					db
+						.select({ role: workspaceMember.role })
+						.from(workspaceMember)
+						.innerJoin(user, eq(user.id, workspaceMember.userId))
+						.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, bobEmail))),
+				);
 				return row?.role;
 			};
 
@@ -506,11 +538,13 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 					.status,
 			).toBe(200);
 
-			const [membership] = await getDb()
-				.select({ role: workspaceMember.role })
-				.from(workspaceMember)
-				.innerJoin(user, eq(user.id, workspaceMember.userId))
-				.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, kimEmail)));
+			const [membership] = await onDatabase((db) =>
+				db
+					.select({ role: workspaceMember.role })
+					.from(workspaceMember)
+					.innerJoin(user, eq(user.id, workspaceMember.userId))
+					.where(and(eq(workspaceMember.workspaceId, workspace.id), eq(user.email, kimEmail))),
+			);
 			expect(membership?.role).toBe("viewer");
 			expect((await me(kim)).status).toBe(200);
 		});
@@ -582,10 +616,9 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		it("lets somebody who created a shared pod leave the workspace", async () => {
 			const unique = crypto.randomUUID().slice(0, 8);
 			const { bob, bobEmail, workspace } = await workspaceWithTwo(unique);
-			const [bobRow] = await getDb()
-				.select({ id: user.id })
-				.from(user)
-				.where(eq(user.email, bobEmail));
+			const [bobRow] = await onDatabase((db) =>
+				db.select({ id: user.id }).from(user).where(eq(user.email, bobEmail)),
+			);
 			if (!bobRow) throw new Error("the invited member is missing");
 
 			const made = await runOnPostgres(
@@ -600,7 +633,9 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 			const left = await call("/auth/organization/leave", { organizationId: workspace.id }, bob);
 
 			expect(left.status).toBe(200);
-			expect(await getDb().select().from(pod).where(eq(pod.id, made.id))).toHaveLength(1);
+			expect(
+				await onDatabase((db) => db.select().from(pod).where(eq(pod.id, made.id))),
+			).toHaveLength(1);
 		});
 	});
 });
@@ -611,7 +646,8 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		sent.push(email);
 	};
 	const options = {
-		db: getDb(),
+		db: authDb,
+		run: runOnPostgres,
 		secret: "test-secret-not-used-anywhere-else",
 		baseUrl: "http://localhost:3000",
 		webOrigins: [ORIGIN],
@@ -659,10 +695,12 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		// them rather than better-auth's generic wording.
 		expect(await refused.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
 		expect(
-			await getDb()
-				.select()
-				.from(user)
-				.where(eq(user.email, `eve-${unique}@example.com`)),
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(user)
+					.where(eq(user.email, `eve-${unique}@example.com`)),
+			),
 		).toEqual([]);
 	});
 
@@ -701,7 +739,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	() => {
 		const sent: Email[] = [];
 		const auth = createAuth({
-			db: getDb(),
+			db: authDb,
+			run: runOnPostgres,
 			secret: "test-secret-not-used-anywhere-else",
 			baseUrl: "http://localhost:3000",
 			webOrigins: [ORIGIN],

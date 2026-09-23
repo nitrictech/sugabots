@@ -56,26 +56,28 @@ export class InvalidThreadHistoryCursor extends Data.TaggedError("InvalidThreadH
 export function threadStore(): ThreadStore {
 	return {
 		listVisible: (workspaceId, userId) =>
-			query(async (db) => {
-				const rows = await db
-					.select({ thread, running: hasPendingResponseJob(sql`${thread.id}`) })
-					.from(thread)
-					// Child threads, whether a system agent's or a collaboration's, are reached
-					// from the thread they hang off rather than listed beside it.
-					.where(
-						and(
-							eq(thread.workspaceId, workspaceId),
-							isNull(thread.parentThreadId),
-							reachesPod(thread.podId, userId),
-						),
-					)
-					.orderBy(desc(thread.updatedAt), desc(thread.id));
+			query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db
+						.select({ thread, running: hasPendingResponseJob(sql`${thread.id}`) })
+						.from(thread)
+						// Child threads, whether a system agent's or a collaboration's, are reached
+						// from the thread they hang off rather than listed beside it.
+						.where(
+							and(
+								eq(thread.workspaceId, workspaceId),
+								isNull(thread.parentThreadId),
+								reachesPod(thread.podId, userId),
+							),
+						)
+						.orderBy(desc(thread.updatedAt), desc(thread.id));
 
-				return rows.map(({ thread: row, running }) => toThread(row, running));
-			}),
+					return rows.map(({ thread: row, running }) => toThread(row, running));
+				}),
+			),
 
 		visibleThreadId: (threadId, userId) =>
-			query(async (db) => (await visibleThread(db, threadId, userId))?.id),
+			query((db) => visibleThread(db, threadId, userId)).pipe(Effect.map((row) => row?.id)),
 
 		getVisible: (threadId, userId, history = { limit: DEFAULT_THREAD_HISTORY_LIMIT }) =>
 			Effect.gen(function* () {
@@ -99,19 +101,19 @@ interface HistoryPoint {
 	id: string;
 }
 
-async function loadDetails(
+const loadDetails = Effect.fn("ThreadStore.loadDetails")(function* (
 	db: Executor,
 	threadRow: schema.ThreadRow,
 	userId: string,
 	history: { limit: number; before?: HistoryPoint } = { limit: DEFAULT_THREAD_HISTORY_LIMIT },
-): Promise<ThreadDetails> {
-	const participants = await loadParticipants(db, threadRow.id);
-	const crew = await loadCrew(db, { id: threadRow.podId, workspaceId: threadRow.workspaceId });
+) {
+	const participants = yield* loadParticipants(db, threadRow.id);
+	const crew = yield* loadCrew(db, { id: threadRow.podId, workspaceId: threadRow.workspaceId });
 
 	// One more than the page, so we know whether an older page exists without
 	// a second count query.
 	const { before } = history;
-	const page = await db
+	const page = yield* db
 		.select({
 			message,
 			failure: turn.error,
@@ -138,39 +140,39 @@ async function loadDetails(
 	const hasOlder = page.length > history.limit;
 	const messages = page.slice(0, history.limit).reverse();
 	const oldest = messages[0]?.message;
-	const placed = await loadPlacedParts(
+	const placed = yield* loadPlacedParts(
 		db,
 		messages.map(({ message: row }) => row.id),
 	);
 
-	const [activeTurn] = await db
+	const [activeTurn] = yield* db
 		.select({ id: turn.id })
 		.from(turn)
 		.where(and(eq(turn.threadId, threadRow.id), inArray(turn.status, ["running", "waiting"])))
 		.orderBy(desc(turn.startedAt), desc(turn.id))
 		.limit(1);
-	const [summaryRow] = await db
+	const [summaryRow] = yield* db
 		.select()
 		.from(threadSummary)
 		.where(eq(threadSummary.threadId, threadRow.id))
 		.limit(1);
-	const [pending] = await db
+	const [pending] = yield* db
 		.select({ running: hasPendingResponseJob(sql`${threadRow.id}::uuid`) })
 		.from(thread)
 		.where(eq(thread.id, threadRow.id));
 	const [execution] =
 		threadRow.type === "routine"
-			? await db
+			? yield* db
 					.select()
 					.from(routineExecution)
 					.where(eq(routineExecution.threadId, threadRow.id))
 					.limit(1)
 			: [];
 
-	const routineExecutionId = await findRoutineExecutionId(db, threadRow.id);
+	const routineExecutionId = yield* findRoutineExecutionId(db, threadRow.id);
 	// A thread whose pod has gone is a thread nobody may decide anything in,
 	// which is what a standing nobody holds says.
-	const standing = await podStandingFor(db, threadRow.podId, userId);
+	const standing = yield* podStandingFor(db, threadRow.podId, userId);
 	const may = (permission: PodPermission) => standing?.may(permission) ?? false;
 
 	return {
@@ -190,18 +192,21 @@ async function loadDetails(
 		),
 		olderMessagesCursor: hasOlder && oldest ? encodeHistoryCursor(oldest) : null,
 		summary: summaryRow ? toThreadSummary(summaryRow) : null,
-		summaryEnabled: await scribeIsSetUp(db, threadRow.workspaceId),
-		usage: await loadUsage(db, threadRow),
+		summaryEnabled: yield* scribeIsSetUp(db, threadRow.workspaceId),
+		usage: yield* loadUsage(db, threadRow),
 	};
-}
+});
 
 /**
  * Whether the workspace has chosen a model for its Scribe, which is what
  * decides whether summaries happen at all.
  */
-async function scribeIsSetUp(db: Executor, workspaceId: string): Promise<boolean> {
-	return (await findRunnableSystemAgent(db, workspaceId, SUMMARISE_SYSTEM_AGENT)) !== undefined;
-}
+const scribeIsSetUp = Effect.fn("ThreadStore.scribeIsSetUp")(function* (
+	db: Executor,
+	workspaceId: string,
+) {
+	return (yield* findRunnableSystemAgent(db, workspaceId, SUMMARISE_SYSTEM_AGENT)) !== undefined;
+});
 
 /**
  * What the thread has cost, summed over its own turns and its system agents' turns
@@ -211,14 +216,17 @@ async function scribeIsSetUp(db: Executor, workspaceId: string): Promise<boolean
  * sum would look like a smaller number rather than an unknown one, and the
  * product rule is that an unknown cost is shown as unavailable, never invented.
  */
-async function loadUsage(db: Executor, threadRow: schema.ThreadRow): Promise<ThreadUsage> {
+const loadUsage = Effect.fn("ThreadStore.loadUsage")(function* (
+	db: Executor,
+	threadRow: schema.ThreadRow,
+) {
 	const measured = (field: string) =>
 		sql<number>`count(${turn.usage} ->> ${field}) filter (where ${turn.usage} is not null)`.mapWith(
 			Number,
 		);
 	const summed = (field: string) => sql<string | null>`sum((${turn.usage} ->> ${field})::numeric)`;
 
-	const [totals] = await db
+	const [totals] = yield* db
 		.select({
 			accountedTurns: sql<number>`count(*) filter (where ${turn.usage} is not null)`.mapWith(
 				Number,
@@ -243,7 +251,7 @@ async function loadUsage(db: Executor, threadRow: schema.ThreadRow): Promise<Thr
 		.innerJoin(thread, eq(thread.id, turn.threadId))
 		.where(or(eq(thread.id, threadRow.id), eq(thread.parentThreadId, threadRow.id)));
 
-	const [latest] = await db
+	const [latest] = yield* db
 		.select({ usedTokens: turn.contextTokens, capacityTokens: turn.contextCapacity })
 		.from(turn)
 		.where(and(eq(turn.threadId, threadRow.id), isNotNull(turn.contextTokens)))
@@ -266,8 +274,8 @@ async function loadUsage(db: Executor, threadRow: schema.ThreadRow): Promise<Thr
 			latest?.usedTokens != null
 				? { usedTokens: latest.usedTokens, capacityTokens: latest.capacityTokens }
 				: null,
-	};
-}
+	} satisfies ThreadUsage;
+});
 
 function toThreadSummary(row: schema.ThreadSummaryRow): ThreadSummary {
 	return {

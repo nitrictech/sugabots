@@ -9,7 +9,13 @@ import {
 } from "@sugabots/contracts";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { type Database, type Executor, query, transaction } from "../../database/database.ts";
+import {
+	type Database,
+	type Executor,
+	type QueryFailure,
+	query,
+	transaction,
+} from "../../database/database.ts";
 import type { PendingEvent, PublishEvents } from "../../database/events/publish.ts";
 import {
 	type AgentRow,
@@ -463,36 +469,38 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 					if (!suspended) {
 						return yield* Effect.die(new Error("Locked turn could not be suspended"));
 					}
-					const parked = yield* query(async (db) => {
-						const rows = [];
-						for (const approval of approvals) {
-							const [row] = await db
-								.insert(toolCall)
-								.values({
-									id: approval.id,
-									threadId: prepared.context.thread.id,
-									messageId: prepared.responseMessage.id,
-									turnId: prepared.turnId,
-									tool: approval.tool,
-									sdkToolCallId: approval.sdkToolCallId,
-									approvalId: approval.approvalId,
-									approvalStatus: "pending",
-									approvalReason: approval.reason ?? null,
-									connectionId: approval.connectionId,
-									connectionRevision: approval.connectionRevision,
-									remoteToolName: approval.remoteToolName,
-									input: boundedJson(approval.input),
-									executionInput: executionJson(approval.input),
-									status: "awaiting_approval",
-									mutating: true,
-									atOffset: approval.atOffset,
-								})
-								.returning();
-							if (!row) throw new Error("Tool approval insert returned no row");
-							rows.push(row);
-						}
-						return rows;
-					});
+					const parked = yield* query((db) =>
+						Effect.gen(function* () {
+							const rows = [];
+							for (const approval of approvals) {
+								const [row] = yield* db
+									.insert(toolCall)
+									.values({
+										id: approval.id,
+										threadId: prepared.context.thread.id,
+										messageId: prepared.responseMessage.id,
+										turnId: prepared.turnId,
+										tool: approval.tool,
+										sdkToolCallId: approval.sdkToolCallId,
+										approvalId: approval.approvalId,
+										approvalStatus: "pending",
+										approvalReason: approval.reason ?? null,
+										connectionId: approval.connectionId,
+										connectionRevision: approval.connectionRevision,
+										remoteToolName: approval.remoteToolName,
+										input: boundedJson(approval.input),
+										executionInput: executionJson(approval.input),
+										status: "awaiting_approval",
+										mutating: true,
+										atOffset: approval.atOffset,
+									})
+									.returning();
+								if (!row) throw new Error("Tool approval insert returned no row");
+								rows.push(row);
+							}
+							return rows;
+						}),
+					);
 					yield* query((db) =>
 						db
 							.update(message)
@@ -629,15 +637,17 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 			),
 
 		isCancellationRequested: (prepared) =>
-			query(async (db) => {
-				const [row] = await db
-					.select({ requested: turn.cancelRequested })
-					.from(turn)
-					.where(eq(turn.id, prepared.turnId))
-					.limit(1);
-				// A turn that has vanished should stop too.
-				return row?.requested ?? true;
-			}),
+			query((db) =>
+				Effect.gen(function* () {
+					const [row] = yield* db
+						.select({ requested: turn.cancelRequested })
+						.from(turn)
+						.where(eq(turn.id, prepared.turnId))
+						.limit(1);
+					// A turn that has vanished should stop too.
+					return row?.requested ?? true;
+				}),
+			),
 
 		requestCancel: (turnId, userId) =>
 			transaction(
@@ -785,8 +795,11 @@ interface TurnScope {
  * Pod membership is still a real check: it is what stops a job naming an agent
  * from another pod or another workspace.
  */
-async function loadTurnScope(db: Executor, claimed: ClaimedTurn): Promise<TurnScope | undefined> {
-	const [row] = await db
+const loadTurnScope = Effect.fn("TurnStore.loadTurnScope")(function* (
+	db: Executor,
+	claimed: ClaimedTurn,
+): Effect.fn.Return<TurnScope | undefined, QueryFailure> {
+	const [row] = yield* db
 		.select({
 			threadId: thread.id,
 			chatId: thread.chatId,
@@ -814,36 +827,35 @@ async function loadTurnScope(db: Executor, claimed: ClaimedTurn): Promise<TurnSc
 		.where(eq(thread.id, claimed.threadId))
 		.limit(1);
 	return row;
-}
+});
 
-async function routineExecutionRejectsNewTurns(
-	db: Executor,
-	executionId: string,
-): Promise<boolean> {
-	const [execution] = await db
-		.select({
-			state: routineExecution.state,
-			pendingTerminalState: routineExecution.pendingTerminalState,
-		})
-		.from(routineExecution)
-		.where(eq(routineExecution.id, executionId))
-		.limit(1);
-	if (!execution) return true;
-	return (
-		execution.pendingTerminalState !== null ||
-		execution.state === "completed" ||
-		execution.state === "failed" ||
-		execution.state === "cancelled"
-	);
-}
+const routineExecutionRejectsNewTurns = Effect.fn("TurnStore.routineExecutionRejectsNewTurns")(
+	function* (db: Executor, executionId: string) {
+		const [execution] = yield* db
+			.select({
+				state: routineExecution.state,
+				pendingTerminalState: routineExecution.pendingTerminalState,
+			})
+			.from(routineExecution)
+			.where(eq(routineExecution.id, executionId))
+			.limit(1);
+		if (!execution) return true;
+		return (
+			execution.pendingTerminalState !== null ||
+			execution.state === "completed" ||
+			execution.state === "failed" ||
+			execution.state === "cancelled"
+		);
+	},
+);
 
-async function finishInterruptedTurn(
+const finishInterruptedTurn = Effect.fn("TurnStore.finishInterruptedTurn")(function* (
 	db: Executor,
 	turnId: string,
 	status: "failed" | "cancelled",
 	error: string,
-): Promise<void> {
-	await db
+) {
+	yield* db
 		.update(turn)
 		.set({
 			status,
@@ -852,27 +864,27 @@ async function finishInterruptedTurn(
 			finishedAt: new Date(),
 		})
 		.where(eq(turn.id, turnId));
-	await db.update(message).set({ status }).where(eq(message.turnId, turnId));
-	await abandonRunningToolCalls(db, turnId, error);
-}
+	yield* db.update(message).set({ status }).where(eq(message.turnId, turnId));
+	yield* abandonRunningToolCalls(db, turnId, error);
+});
 
-async function terminateClaimedTurn(
+const terminateClaimedTurn = Effect.fn("TurnStore.terminateClaimedTurn")(function* (
 	db: Executor,
 	jobId: string,
-): Promise<{ state: "failed" | "cancelled"; error?: string } | undefined> {
-	const [active] = await db
+): Effect.fn.Return<{ state: "failed" | "cancelled"; error?: string } | undefined, QueryFailure> {
+	const [active] = yield* db
 		.select({ id: turn.id, status: turn.status, error: turn.error })
 		.from(turn)
 		.where(and(eq(turn.jobId, jobId), inArray(turn.status, ["running", "waiting"])))
 		.limit(1);
 	if (!active) return undefined;
-	await finishInterruptedTurn(db, active.id, "cancelled", "Routine execution ended");
+	yield* finishInterruptedTurn(db, active.id, "cancelled", "Routine execution ended");
 	return { state: "cancelled" };
-}
+});
 
 /** The other crew agents placed in the pod: who this agent may collaborate with. */
-async function loadCrew(db: Executor, scope: TurnScope) {
-	return db
+const loadCrew = (db: Executor, scope: TurnScope) =>
+	db
 		.select({
 			id: agent.id,
 			name: agent.name,
@@ -889,19 +901,18 @@ async function loadCrew(db: Executor, scope: TurnScope) {
 			),
 		)
 		.orderBy(agent.name);
-}
 
 /**
  * The turn row and its reply message. A retry of the same trigger reopens the
  * existing pair rather than adding a second reply beside the first.
  */
-async function openTurn(
+const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 	db: Executor,
 	claimed: ClaimedTurn,
 	scope: TurnScope,
 	/** The agent's model, already resolved: a turn is never opened without one. */
 	model: string,
-): Promise<
+): Effect.fn.Return<
 	| {
 			turnId: string;
 			response: MessageRow;
@@ -911,9 +922,10 @@ async function openTurn(
 	| {
 			notRunnableReason: string;
 			terminalOutcome?: { state: "failed" | "cancelled"; error?: string };
-	  }
+	  },
+	QueryFailure
 > {
-	const [existing] = await db
+	const [existing] = yield* db
 		.select({
 			id: turn.id,
 			jobId: turn.jobId,
@@ -938,13 +950,13 @@ async function openTurn(
 		}
 		if (existing.cancelRequested) {
 			const error = "Turn cancelled";
-			await finishInterruptedTurn(db, existing.id, "cancelled", error);
+			yield* finishInterruptedTurn(db, existing.id, "cancelled", error);
 			return {
 				notRunnableReason: error,
 				terminalOutcome: { state: "cancelled" },
 			};
 		}
-		const [uncertainMutation] = await db
+		const [uncertainMutation] = yield* db
 			.select({ id: toolCall.id })
 			.from(toolCall)
 			.where(
@@ -957,7 +969,7 @@ async function openTurn(
 			.limit(1);
 		if (existing.mutationStarted && (!existing.checkpoint || uncertainMutation)) {
 			const error = "A mutating tool may have run before the worker stopped";
-			await finishInterruptedTurn(db, existing.id, "failed", error);
+			yield* finishInterruptedTurn(db, existing.id, "failed", error);
 			return {
 				notRunnableReason: error,
 				terminalOutcome: { state: "failed", error },
@@ -970,7 +982,7 @@ async function openTurn(
 			) {
 				return { notRunnableReason: "The suspended turn no longer belongs to this job" };
 			}
-			const [resumed] = await db
+			const [resumed] = yield* db
 				.update(turn)
 				.set({ status: "running" })
 				.where(
@@ -983,7 +995,7 @@ async function openTurn(
 				)
 				.returning({ id: turn.id });
 			if (!resumed) return { notRunnableReason: "The suspended turn can no longer resume" };
-			const [response] = await db
+			const [response] = yield* db
 				.select()
 				.from(message)
 				.where(eq(message.turnId, existing.id))
@@ -996,7 +1008,7 @@ async function openTurn(
 				resumed: true,
 			};
 		}
-		await db
+		yield* db
 			.update(turn)
 			.set({
 				status: "running",
@@ -1006,7 +1018,7 @@ async function openTurn(
 				jobId: claimed.id,
 			})
 			.where(eq(turn.id, existing.id));
-		const [response] = await db
+		const [response] = yield* db
 			.update(message)
 			.set({ status: "streaming", parts: [], content: "" })
 			.where(eq(message.turnId, existing.id))
@@ -1015,11 +1027,11 @@ async function openTurn(
 			throw new Error("A turn being retried has no reply message");
 		}
 		// The reply starts again, so the calls its first attempt made go with its parts.
-		await deleteToolCallsOf(db, response.id);
+		yield* deleteToolCallsOf(db, response.id);
 		return { turnId: existing.id, response, resumed: false };
 	}
 
-	const [created] = await db
+	const [created] = yield* db
 		.insert(turn)
 		.values({
 			threadId: scope.threadId,
@@ -1035,7 +1047,7 @@ async function openTurn(
 	if (!created) {
 		throw new Error("Turn insert returned no row");
 	}
-	const [response] = await db
+	const [response] = yield* db
 		.insert(message)
 		.values({
 			threadId: scope.threadId,
@@ -1051,18 +1063,18 @@ async function openTurn(
 		throw new Error("Reply message insert returned no row");
 	}
 	return { turnId: created.id, response, resumed: false };
-}
+});
 
 /**
  * loadHistory returns up to one hundred completed messages, excluding the
  * response currently being written.
  */
-async function loadHistory(
+const loadHistory = Effect.fn("TurnStore.loadHistory")(function* (
 	db: Executor,
 	threadId: string,
 	responseMessageId: string,
-): Promise<Message[]> {
-	const newestFirst = await db
+) {
+	const newestFirst = yield* db
 		.select({ message, ...participantColumns })
 		.from(message)
 		.leftJoin(user, eq(user.id, message.authorUserId))
@@ -1077,12 +1089,12 @@ async function loadHistory(
 		.orderBy(desc(message.createdAt), desc(message.id))
 		.limit(MAX_HISTORY_MESSAGES);
 	const rows = newestFirst.reverse();
-	const placed = await loadPlacedParts(
+	const placed = yield* loadPlacedParts(
 		db,
 		rows.map(({ message: row }) => row.id),
 	);
 	return rows.map(({ message: row, ...author }) => toMessage(row, author, placed(row.id)));
-}
+});
 
 /** The stored parts of a reply: its text, split around the collaborations and tool calls it made. */
 function replyParts(reply: ReplyDraft): StoredMessagePart[] {

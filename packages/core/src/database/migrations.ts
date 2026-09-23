@@ -1,8 +1,9 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import type { Pool } from "pg";
+import type { PgClient } from "@effect/sql-pg";
+import { makeWithDefaults } from "drizzle-orm/effect-postgres";
+import { migrate } from "drizzle-orm/effect-postgres/migrator";
+import { Effect } from "effect";
 
 /** Where `drizzle-kit generate` writes migrations. */
 const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "../../drizzle");
@@ -12,9 +13,12 @@ const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "../../d
  * using the same `drizzle.__drizzle_migrations` bookkeeping as
  * `drizzle-kit migrate`. Not safe to run from two processes at once.
  */
-export async function applyMigrations(pool: Pool): Promise<void> {
-	await migrate(drizzle({ client: pool }), {
-		migrationsFolder: MIGRATIONS_FOLDER,
-		migrationsTable: "__drizzle_migrations",
-	});
-}
+export const applyMigrations: Effect.Effect<void, never, PgClient.PgClient> = Effect.gen(
+	function* () {
+		const db = yield* makeWithDefaults();
+		yield* migrate(db, {
+			migrationsFolder: MIGRATIONS_FOLDER,
+			migrationsTable: "__drizzle_migrations",
+		});
+	},
+).pipe(Effect.orDie);

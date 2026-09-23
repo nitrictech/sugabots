@@ -1,4 +1,6 @@
-import { Pool } from "pg";
+import { PgClient } from "@effect/sql-pg";
+import { Effect } from "effect";
+import { clientLayer } from "./database.ts";
 import { applyMigrations } from "./migrations.ts";
 import { testDatabaseUrl } from "./test-database.ts";
 
@@ -27,45 +29,40 @@ export default async function prepareTestDatabase(project: {
 	if (!url) {
 		return;
 	}
-	await createIfMissing(url);
-
-	const pool = new Pool({ connectionString: url });
-	try {
-		await applyMigrations(pool);
-		await empty(pool);
-	} finally {
-		await pool.end();
-	}
+	await Effect.runPromise(createIfMissing(url));
+	await Effect.runPromise(
+		Effect.andThen(applyMigrations, empty).pipe(Effect.provide(clientLayer(url))),
+	);
 }
 
 /** Connects to the server's default database to create ours. */
-async function createIfMissing(url: string): Promise<void> {
-	const wanted = new URL(url);
-	const name = wanted.pathname.replace(/^\//, "");
+function createIfMissing(url: string): Effect.Effect<void> {
+	const name = new URL(url).pathname.replace(/^\//, "");
 	const server = new URL(url);
 	server.pathname = "/postgres";
 
-	const pool = new Pool({ connectionString: server.toString() });
-	try {
-		const { rowCount } = await pool.query("select 1 from pg_database where datname = $1", [name]);
-		if (rowCount === 0) {
+	return Effect.gen(function* () {
+		const client = yield* PgClient.PgClient;
+		const existing = yield* client.unsafe("select 1 from pg_database where datname = $1", [name]);
+		if (existing.length === 0) {
 			// The name comes from a URL rather than from a request, and Postgres
 			// has no parameter form for an identifier here.
-			await pool.query(`create database "${name.replace(/"/g, '""')}"`);
+			yield* client.unsafe(`create database "${name.replace(/"/g, '""')}"`);
 		}
-	} finally {
-		await pool.end();
-	}
+	}).pipe(Effect.orDie, Effect.provide(clientLayer(server.toString())));
 }
 
 /** Every table the app owns, emptied in one statement so foreign keys allow it. */
-async function empty(pool: Pool): Promise<void> {
-	const { rows } = await pool.query<{ name: string }>(
+const empty = Effect.gen(function* () {
+	const client = yield* PgClient.PgClient;
+	const rows = yield* client.unsafe<{ name: string }>(
 		`select quote_ident(tablename) as name from pg_tables
 		 where schemaname = 'public' and tablename <> '__drizzle_migrations'`,
 	);
 	if (rows.length === 0) {
 		return;
 	}
-	await pool.query(`truncate ${rows.map((row) => row.name).join(", ")} restart identity cascade`);
-}
+	yield* client.unsafe(
+		`truncate ${rows.map((row) => row.name).join(", ")} restart identity cascade`,
+	);
+}).pipe(Effect.orDie);

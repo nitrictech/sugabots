@@ -15,26 +15,27 @@ import { facilitatorWorkerLayer } from "@sugabots/core/conversations/turns/facil
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import { turnWorkerLayer } from "@sugabots/core/conversations/turns/worker";
-import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
+import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
-import { Layer, ManagedRuntime } from "effect";
-import type { Pool } from "pg";
+import { type Context, Layer, ManagedRuntime } from "effect";
 
 /**
- * Everything in the process that has a lifetime: the database pool, and the
- * background loops that run for as long as the process does.
+ * The background loops that run for as long as the process does.
  *
  * Each is a layer, so disposing the runtime stops them in the reverse of the
  * order they started, and nothing needs a `stop()` that somebody has to call
- * in the right order. The stores are not here: they are plain objects with no
- * state of their own, built in `index.ts` and handed to whoever needs them.
+ * in the right order. The database is not theirs: it is built before them,
+ * because the event bus they are handed needs it first, and it outlives them,
+ * so whoever built it closes it after disposing this. The stores are not here
+ * either: they are plain objects with no state of their own, built in
+ * `index.ts` and handed to whoever needs them.
  */
 export interface RuntimeOptions {
-	/** One pool for the process. The runtime closes it on dispose. */
-	pool: Pool;
+	/** The process's database, already open. */
+	database: Context.Context<Database>;
 	/** Where durable events live, for the nightly prune. */
 	eventStore: EventStore;
 	/** Where the turn worker publishes token deltas and watches for collaborators' answers. */
@@ -56,7 +57,7 @@ export interface RuntimeOptions {
 }
 
 export function makeRuntime({
-	pool,
+	database: databaseContext,
 	eventStore,
 	bus,
 	model,
@@ -70,7 +71,7 @@ export function makeRuntime({
 	connectionTools,
 	publishEvents,
 }: RuntimeOptions) {
-	const database = databaseLayer(pool);
+	const database = Layer.succeedContext(databaseContext);
 	const background = Layer.mergeAll(
 		eventPruningLayer(eventStore),
 		...(routines

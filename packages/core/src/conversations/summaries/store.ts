@@ -114,65 +114,72 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 			// together or not at all.
 			transaction(
 				Effect.flatMap(
-					query(async (db) => {
-						const scope = await loadSummarisedThread(db, claimed);
-						if (!scope) {
-							return new JobNotRunnable({
-								reason: "The thread, the agent that triggered it, or its message is gone",
-							});
-						}
-						const summariser = await findRunnableSystemAgent(
-							db,
-							scope.workspaceId,
-							SUMMARISE_SYSTEM_AGENT,
-						);
-						if (!summariser) {
-							return new JobNotRunnable({
-								reason: "This workspace has chosen no model for the Scribe",
-							});
-						}
+					query((db) =>
+						Effect.gen(function* () {
+							const scope = yield* loadSummarisedThread(db, claimed);
+							if (!scope) {
+								return new JobNotRunnable({
+									reason: "The thread, the agent that triggered it, or its message is gone",
+								});
+							}
+							const summariser = yield* findRunnableSystemAgent(
+								db,
+								scope.workspaceId,
+								SUMMARISE_SYSTEM_AGENT,
+							);
+							if (!summariser) {
+								return new JobNotRunnable({
+									reason: "This workspace has chosen no model for the Scribe",
+								});
+							}
 
-						// One query at a time: inside a transaction the executor is a single
-						// connection, and queries sent concurrently down one are not run concurrently
-						// anyway. The driver queues them, and warns that it is about to stop accepting
-						// them at all.
-						const previous = await loadThreadSummary(db, scope.threadId);
-						const transcriptRows = await loadTranscript(db, scope.threadId);
-						const sourceIndex = transcriptRows.findIndex(
-							(row) => row.id === claimed.payload.sourceMessageId,
-						);
-						if (sourceIndex === -1) {
-							throw new Error("Thread summary source message disappeared during preparation");
-						}
-						const previousSourceIndex = previous
-							? transcriptRows.findIndex((row) => row.id === previous.sourceMessageId)
-							: -1;
-						if (previousSourceIndex >= sourceIndex) {
-							return new JobNotRunnable({
-								reason: "The thread is already summarised to this message",
-							});
-						}
+							// One query at a time: inside a transaction the executor is a single
+							// connection, and queries sent concurrently down one are not run concurrently
+							// anyway. The driver queues them, and warns that it is about to stop accepting
+							// them at all.
+							const previous = yield* loadThreadSummary(db, scope.threadId);
+							const transcriptRows = yield* loadTranscript(db, scope.threadId);
+							const sourceIndex = transcriptRows.findIndex(
+								(row) => row.id === claimed.payload.sourceMessageId,
+							);
+							if (sourceIndex === -1) {
+								throw new Error("Thread summary source message disappeared during preparation");
+							}
+							const previousSourceIndex = previous
+								? transcriptRows.findIndex((row) => row.id === previous.sourceMessageId)
+								: -1;
+							if (previousSourceIndex >= sourceIndex) {
+								return new JobNotRunnable({
+									reason: "The thread is already summarised to this message",
+								});
+							}
 
-						const systemAgentThreadId = await systemAgentThreadFor(db, scope, summariser.id);
-						const turnId = await openSystemAgentTurn(db, claimed, systemAgentThreadId, summariser);
+							const systemAgentThreadId = yield* systemAgentThreadFor(db, scope, summariser.id);
+							const turnId = yield* openSystemAgentTurn(
+								db,
+								claimed,
+								systemAgentThreadId,
+								summariser,
+							);
 
-						return {
-							job: claimed,
-							turnId,
-							threadId: scope.threadId,
-							workspaceId: scope.workspaceId,
-							sourceMessageId: claimed.payload.sourceMessageId,
-							threadTitle: scope.threadTitle,
-							model: summariser.model,
-							previousContent: previous?.content,
-							transcript: transcriptRows
-								.slice(
-									Math.max(0, previousSourceIndex + 1 - SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES),
-									sourceIndex + 1,
-								)
-								.flatMap(({ entry }) => (entry ? [entry] : [])),
-						};
-					}),
+							return {
+								job: claimed,
+								turnId,
+								threadId: scope.threadId,
+								workspaceId: scope.workspaceId,
+								sourceMessageId: claimed.payload.sourceMessageId,
+								threadTitle: scope.threadTitle,
+								model: summariser.model,
+								previousContent: previous?.content,
+								transcript: transcriptRows
+									.slice(
+										Math.max(0, previousSourceIndex + 1 - SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES),
+										sourceIndex + 1,
+									)
+									.flatMap(({ entry }) => (entry ? [entry] : [])),
+							};
+						}),
+					),
 					(outcome) =>
 						outcome instanceof JobNotRunnable ? Effect.fail(outcome) : Effect.succeed(outcome),
 				),
@@ -276,11 +283,11 @@ interface SummarisedThread {
 }
 
 /** The thread, if it still exists with this host and this source message. */
-async function loadSummarisedThread(
+const loadSummarisedThread = Effect.fn("SummaryStore.loadSummarisedThread")(function* (
 	db: Executor,
 	claimed: ClaimedSummary,
-): Promise<SummarisedThread | undefined> {
-	const [row] = await db
+) {
+	const [row] = yield* db
 		.select({
 			threadId: thread.id,
 			podId: thread.podId,
@@ -301,20 +308,26 @@ async function loadSummarisedThread(
 		.where(eq(thread.id, claimed.threadId))
 		.limit(1);
 	return row;
-}
+});
 
 /** A thread's current summary, and the last message it covers. */
-export async function loadThreadSummary(db: Executor, threadId: string) {
-	const [row] = await db
+export const loadThreadSummary = Effect.fn("SummaryStore.loadThreadSummary")(function* (
+	db: Executor,
+	threadId: string,
+) {
+	const [row] = yield* db
 		.select({ content: threadSummary.content, sourceMessageId: threadSummary.sourceMessageId })
 		.from(threadSummary)
 		.where(eq(threadSummary.threadId, threadId))
 		.limit(1);
 	return row;
-}
+});
 
-async function loadTranscript(db: Executor, threadId: string) {
-	const rows = await db
+const loadTranscript = Effect.fn("SummaryStore.loadTranscript")(function* (
+	db: Executor,
+	threadId: string,
+) {
+	const rows = yield* db
 		.select({
 			message,
 			...participantColumns,
@@ -324,7 +337,7 @@ async function loadTranscript(db: Executor, threadId: string) {
 		.leftJoin(agent, eq(agent.id, message.authorAgentId))
 		.where(and(eq(message.threadId, threadId), eq(message.status, "complete")))
 		.orderBy(asc(message.createdAt), asc(message.id));
-	const placed = await loadPlacedParts(
+	const placed = yield* loadPlacedParts(
 		db,
 		rows.map(({ message: row }) => row.id),
 	);
@@ -346,7 +359,7 @@ async function loadTranscript(db: Executor, threadId: string) {
 				: undefined,
 		};
 	});
-}
+});
 
 /**
  * The system agent's own thread under the one being summarised: one per system agent per
@@ -357,12 +370,12 @@ function summariesTitle(threadTitle: string): string {
 	return `Summaries of ${threadTitle}`;
 }
 
-async function systemAgentThreadFor(
+const systemAgentThreadFor = Effect.fn("SummaryStore.systemAgentThreadFor")(function* (
 	db: Executor,
 	scope: SummarisedThread,
 	summariserId: string,
-): Promise<string> {
-	const [created] = await db
+) {
+	const [created] = yield* db
 		.insert(thread)
 		.values({
 			workspaceId: scope.workspaceId,
@@ -382,7 +395,7 @@ async function systemAgentThreadFor(
 	if (created) {
 		return created.id;
 	}
-	const [existing] = await db
+	const [existing] = yield* db
 		.select({ id: thread.id })
 		.from(thread)
 		.where(
@@ -396,16 +409,16 @@ async function systemAgentThreadFor(
 		throw new Error("Preparing a thread summary returned no system-agent thread");
 	}
 	return existing.id;
-}
+});
 
 /** The system agent's turn for this source message: reopened on a retry, created otherwise. */
-async function openSystemAgentTurn(
+const openSystemAgentTurn = Effect.fn("SummaryStore.openSystemAgentTurn")(function* (
 	db: Executor,
 	claimed: ClaimedSummary,
 	systemAgentThreadId: string,
 	summariser: { id: string; model: string },
-): Promise<string> {
-	const [existing] = await db
+) {
+	const [existing] = yield* db
 		.select({ id: turn.id })
 		.from(turn)
 		.where(
@@ -416,13 +429,13 @@ async function openSystemAgentTurn(
 		)
 		.limit(1);
 	if (existing) {
-		await db
+		yield* db
 			.update(turn)
 			.set({ status: "running", error: null, finishedAt: null })
 			.where(eq(turn.id, existing.id));
 		return existing.id;
 	}
-	const [created] = await db
+	const [created] = yield* db
 		.insert(turn)
 		.values({
 			threadId: systemAgentThreadId,
@@ -437,4 +450,4 @@ async function openSystemAgentTurn(
 		throw new Error("Turn insert returned no row");
 	}
 	return created.id;
-}
+});

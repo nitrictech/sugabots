@@ -96,30 +96,34 @@ export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
  * its tools returned. Returns the events that announce it, for the caller's
  * own transaction to publish.
  */
-export async function abandonRunningToolCalls(
-	db: Executor,
-	turnId: string,
-	error: string,
-): Promise<PendingEvent[]> {
-	const rows = await db
-		.update(toolCall)
-		.set({
-			status: "failed",
-			approvalStatus: sql`case when ${toolCall.approvalStatus} = 'pending' then 'denied' else ${toolCall.approvalStatus} end`,
-			error,
-			finishedAt: new Date(),
-		})
-		.where(
-			and(eq(toolCall.turnId, turnId), inArray(toolCall.status, ["running", "awaiting_approval"])),
-		)
-		.returning();
-	return rows.map((row) => toolCallEvent("tool_call.completed", row));
-}
+export const abandonRunningToolCalls = Effect.fn("ToolCallStore.abandonRunningToolCalls")(
+	function* (db: Executor, turnId: string, error: string) {
+		const rows = yield* db
+			.update(toolCall)
+			.set({
+				status: "failed",
+				approvalStatus: sql`case when ${toolCall.approvalStatus} = 'pending' then 'denied' else ${toolCall.approvalStatus} end`,
+				error,
+				finishedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(toolCall.turnId, turnId),
+					inArray(toolCall.status, ["running", "awaiting_approval"]),
+				),
+			)
+			.returning();
+		return rows.map((row): PendingEvent => toolCallEvent("tool_call.completed", row));
+	},
+);
 
 /** Forgets a reply's tool calls, for a retry that starts the reply again. */
-export async function deleteToolCallsOf(db: Executor, messageId: string): Promise<void> {
-	await db.delete(toolCall).where(eq(toolCall.messageId, messageId));
-}
+export const deleteToolCallsOf = Effect.fn("ToolCallStore.deleteToolCallsOf")(function* (
+	db: Executor,
+	messageId: string,
+) {
+	yield* db.delete(toolCall).where(eq(toolCall.messageId, messageId));
+});
 
 function finished(outcome: ToolCallOutcome): Pick<ToolCallRow, "status" | "output" | "error"> {
 	return "error" in outcome

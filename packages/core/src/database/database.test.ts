@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import { Cause, Context, Data, Deferred, Effect, Exit, Fiber, ManagedRuntime } from "effect";
-import { Pool } from "pg";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import {
 	afterCommit,
 	type Database,
@@ -14,12 +13,10 @@ import {
 import { isUniqueViolation } from "./errors.ts";
 
 /**
- * What the transaction bridge has to guarantee, against a real Postgres.
- *
- * Everything here is about the seam in `database.ts`: an Effect runs inside
- * drizzle's promise callback and has to come back with its cause intact, and
- * the transaction has to end the way the Effect did. None of that is visible
- * from the types, so it is checked.
+ * What `transaction` has to guarantee, against a real Postgres: the
+ * transaction ends the way the Effect did, nested ones are savepoints, and
+ * deferred work waits for the commit. None of that is visible from the types,
+ * so it is checked.
  */
 
 const url = process.env.DATABASE_URL;
@@ -27,7 +24,7 @@ if (!url) {
 	throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
 }
 
-const database = layer(new Pool({ connectionString: url }));
+const database = layer(url);
 const table = `database_test_${Date.now().toString(36)}`;
 
 /** One runtime, so every case shares one pool and the layer is built once. */
@@ -46,10 +43,12 @@ afterAll(async () => {
 const insert = (n: number) =>
 	query((db) => db.execute(sql.raw(`insert into "${table}" (n) values (${n})`)));
 
-const count = query<number>(async (db) => {
-	const rows = await db.execute(sql.raw(`select count(*)::int as n from "${table}"`));
-	return (rows.rows[0] as { n: number }).n;
-});
+const count = query((db) =>
+	Effect.map(
+		db.execute<{ n: number }>(sql.raw(`select count(*)::int as n from "${table}"`), "objects"),
+		([row]) => row?.n,
+	),
+);
 
 class Rejected extends Data.TaggedError("Rejected") {}
 
@@ -154,48 +153,6 @@ it("inherits services and references across transaction and savepoint callbacks"
 			inner: ["request", "local"],
 		}),
 	);
-});
-
-it("does not finish interruption until drizzle's transaction promise settles", async () => {
-	const root = await runtime.runPromise(query(async (db) => db));
-	const original = root.transaction.bind(root);
-	const rolledBack = Promise.withResolvers<void>();
-	const release = Promise.withResolvers<void>();
-	const inserted = Deferred.makeUnsafe<void>();
-	const transactionSpy = vi.spyOn(root, "transaction").mockImplementation(async (use, config) => {
-		try {
-			return await original(use, config);
-		} finally {
-			rolledBack.resolve();
-			await release.promise;
-		}
-	});
-	const started = runtime.runFork(
-		transaction(
-			Effect.gen(function* () {
-				yield* insert(40);
-				yield* Deferred.succeed(inserted, undefined);
-				return yield* Effect.never;
-			}),
-		),
-	);
-	let interrupted = false;
-	try {
-		await Effect.runPromise(Deferred.await(inserted));
-		const interrupting = Effect.runPromise(Fiber.interrupt(started)).then(() => {
-			interrupted = true;
-		});
-		await rolledBack.promise;
-		expect(interrupted).toBe(false);
-		release.resolve();
-		await interrupting;
-		expect(interrupted).toBe(true);
-		expect(await run(count)).toStrictEqual(Exit.succeed(1));
-	} finally {
-		release.resolve();
-		await Effect.runPromise(Fiber.interrupt(started));
-		transactionSpy.mockRestore();
-	}
 });
 
 it("rolls back only the inner work when a nested transaction fails", async () => {

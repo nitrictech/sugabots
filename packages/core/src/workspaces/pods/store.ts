@@ -160,20 +160,20 @@ const create: PodStore["create"] = (workspaceId, creator, { name, slug }) =>
 
 const ensurePersonal: PodStore["ensurePersonal"] = (workspaceId, owner, model) =>
 	transaction(
-		query(async (db) =>
-			podSeenBy(
-				podStanding(await provisionPersonalPod(db, workspaceId, owner.userId, model), owner, true),
+		query((db) =>
+			Effect.map(provisionPersonalPod(db, workspaceId, owner.userId, model), (personal) =>
+				podSeenBy(podStanding(personal, owner, true)),
 			),
 		),
 	);
 
-export async function provisionPersonalPod(
+export const provisionPersonalPod = Effect.fn("PodStore.provisionPersonalPod")(function* (
 	db: Executor,
 	workspaceId: string,
 	userId: string,
 	model?: string,
-): Promise<schema.PodRow> {
-	const [created] = await db
+) {
+	const [created] = yield* db
 		.insert(pod)
 		.values({
 			workspaceId,
@@ -187,23 +187,22 @@ export async function provisionPersonalPod(
 		.returning();
 	const personal =
 		created ??
-		(await db
+		(yield* db
 			.select()
 			.from(pod)
 			.where(
 				and(eq(pod.workspaceId, workspaceId), eq(pod.ownerId, userId), eq(pod.kind, "personal")),
 			)
-			.limit(1)
-			.then(([existing]) => existing));
+			.limit(1))[0];
 	if (!personal) {
 		throw new Error("Personal pod could not be provisioned");
 	}
 
-	await db
+	yield* db
 		.insert(podMember)
 		.values({ workspaceId, podId: personal.id, userId })
 		.onConflictDoNothing({ target: [podMember.podId, podMember.userId] });
-	const [createdAssistant] = await db
+	const [createdAssistant] = yield* db
 		.insert(agent)
 		.values({
 			workspaceId,
@@ -221,13 +220,13 @@ export async function provisionPersonalPod(
 		.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
 		.returning({ id: agent.id });
 	if (!createdAssistant && model !== undefined) {
-		await db
+		yield* db
 			.update(agent)
 			.set({ model })
 			.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant")));
 	}
 	return personal;
-}
+});
 
 const update: PodStore["update"] = (workspaceId, podId, input) =>
 	Effect.gen(function* () {
@@ -299,8 +298,8 @@ const remove: PodStore["remove"] = (workspaceId, podId) =>
 
 export const podStore: PodStore = {
 	listVisible: (workspaceId, actor) =>
-		query(async (db) => {
-			const rows = await db
+		query((db) =>
+			db
 				.select({
 					pod,
 					isExplicitMember: sql<boolean>`${podMember.id} is not null`,
@@ -308,10 +307,12 @@ export const podStore: PodStore = {
 				.from(pod)
 				.leftJoin(podMember, and(eq(podMember.podId, pod.id), eq(podMember.userId, actor.userId)))
 				.where(and(eq(pod.workspaceId, workspaceId), reachesPod(pod.id, actor.userId)))
-				.orderBy(asc(pod.name));
-
-			return rows.map((row) => podSeenBy(podStanding(row.pod, actor, row.isExplicitMember)));
-		}),
+				.orderBy(asc(pod.name)),
+		).pipe(
+			Effect.map((rows) =>
+				rows.map((row) => podSeenBy(podStanding(row.pod, actor, row.isExplicitMember))),
+			),
+		),
 
 	create,
 	ensurePersonal,
@@ -319,8 +320,8 @@ export const podStore: PodStore = {
 	remove,
 
 	listMembers: (podId) =>
-		query(async (db) => {
-			const rows = await db
+		query((db) =>
+			db
 				.select({
 					userId: user.id,
 					name: user.name,
@@ -331,10 +332,10 @@ export const podStore: PodStore = {
 				.from(podMember)
 				.innerJoin(user, eq(user.id, podMember.userId))
 				.where(eq(podMember.podId, podId))
-				.orderBy(asc(user.name));
-
-			return rows.map((row) => ({ ...row, addedAt: row.addedAt.toISOString() }));
-		}),
+				.orderBy(asc(user.name)),
+		).pipe(
+			Effect.map((rows) => rows.map((row) => ({ ...row, addedAt: row.addedAt.toISOString() }))),
+		),
 
 	addMember: (workspaceId, podId, userId) =>
 		Effect.gen(function* () {
@@ -350,7 +351,8 @@ export const podStore: PodStore = {
 			}
 
 			const inserted = yield* query((db) =>
-				db.execute(sql`
+				db.execute<{ id: string }>(
+					sql`
 					insert into ${podMember} ("workspace_id", "pod_id", "user_id")
 					select ${pod.workspaceId}, ${pod.id}, ${userId}
 					from ${pod}
@@ -361,10 +363,12 @@ export const podStore: PodStore = {
 					and ${pod.workspaceId} = ${workspaceId}
 					on conflict ("pod_id", "user_id") do nothing
 					returning "id"
-				`),
+				`,
+					"objects",
+				),
 			);
 
-			if (inserted.rows.length > 0) {
+			if (inserted.length > 0) {
 				return "added";
 			}
 
@@ -388,28 +392,30 @@ export const podStore: PodStore = {
 		}),
 
 	removeMember: (workspaceId, podId, userId) =>
-		query(async (db) => {
-			const [target] = await db
-				.select({ kind: pod.kind })
-				.from(pod)
-				.where(and(eq(pod.id, podId), eq(pod.workspaceId, workspaceId)))
-				.limit(1);
-			if (target?.kind === "personal") {
-				return "personal_pod";
-			}
-			const removed = await db
-				.delete(podMember)
-				.where(
-					and(
-						eq(podMember.workspaceId, workspaceId),
-						eq(podMember.podId, podId),
-						eq(podMember.userId, userId),
-					),
-				)
-				.returning({ id: podMember.id });
+		query((db) =>
+			Effect.gen(function* () {
+				const [target] = yield* db
+					.select({ kind: pod.kind })
+					.from(pod)
+					.where(and(eq(pod.id, podId), eq(pod.workspaceId, workspaceId)))
+					.limit(1);
+				if (target?.kind === "personal") {
+					return "personal_pod";
+				}
+				const removed = yield* db
+					.delete(podMember)
+					.where(
+						and(
+							eq(podMember.workspaceId, workspaceId),
+							eq(podMember.podId, podId),
+							eq(podMember.userId, userId),
+						),
+					)
+					.returning({ id: podMember.id });
 
-			return removed.length > 0 ? "removed" : "not_a_member";
-		}),
+				return removed.length > 0 ? "removed" : "not_a_member";
+			}),
+		),
 };
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */

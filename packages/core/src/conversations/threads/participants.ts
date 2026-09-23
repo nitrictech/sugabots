@@ -1,7 +1,7 @@
 import type { Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, threadParticipant, user } from "../../database/schema.ts";
@@ -115,11 +115,11 @@ export function toMessage(
 }
 
 /** Everyone in a thread, in the order they joined. */
-export async function loadParticipants(
+export const loadParticipants = Effect.fn("Participants.loadParticipants")(function* (
 	db: Executor,
 	threadId: string,
-): Promise<ThreadParticipant[]> {
-	const rows = await db
+) {
+	const rows = yield* db
 		.select(participantColumns)
 		.from(threadParticipant)
 		.leftJoin(user, eq(user.id, threadParticipant.userId))
@@ -127,7 +127,7 @@ export async function loadParticipants(
 		.where(eq(threadParticipant.threadId, threadId))
 		.orderBy(asc(threadParticipant.createdAt), asc(threadParticipant.id));
 	return rows.map(toParticipant);
-}
+});
 
 /**
  * The agents a thread may mention or collaborate with: its pod's crew, whether
@@ -140,11 +140,11 @@ export async function loadParticipants(
  *
  * System agents are left out: a Scribe or a facilitator is not somebody you talk to.
  */
-export async function loadCrew(
+export const loadCrew = Effect.fn("Participants.loadCrew")(function* (
 	db: Executor,
 	pod: { id: string; workspaceId: string },
-): Promise<ThreadParticipant[]> {
-	const rows = await db
+) {
+	const rows = yield* db
 		.select({
 			id: agent.id,
 			name: agent.name,
@@ -161,5 +161,5 @@ export async function loadCrew(
 			),
 		)
 		.orderBy(asc(agent.name));
-	return rows.map((row) => ({ kind: "agent", ...row }));
-}
+	return rows.map((row): ThreadParticipant => ({ kind: "agent", ...row }));
+});

@@ -1,9 +1,8 @@
 import type { WorkspaceRole } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
-import { closeDatabase, onPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
 import {
 	ActionForbidden,
 	authorization as databaseAuthorization,
@@ -30,7 +29,6 @@ import {
  * one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
-	const db = getDb();
 	const store = onPostgres(podStore);
 	const agents = onPostgres(agentStore);
 	const authorization = onPostgres(databaseAuthorization);
@@ -48,7 +46,6 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
@@ -56,29 +53,35 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		// against a database that has the dev seed in it.
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-		const [made] = await db
-			.insert(workspace)
-			.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-			.returning();
-		const [other] = await db
-			.insert(workspace)
-			.values({ name: `Other ${stamp}`, slug: `other-${stamp}` })
-			.returning();
+		const [made] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
+				.returning(),
+		);
+		const [other] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Other ${stamp}`, slug: `other-${stamp}` })
+				.returning(),
+		);
 		if (!made || !other) {
 			throw new Error("could not create the test workspaces");
 		}
 		workspaceId = made.id;
 		otherWorkspaceId = other.id;
 
-		const people = await db
-			.insert(user)
-			.values([
-				{ name: "Ada", email: `ada-${stamp}@example.com` },
-				{ name: "Sam", email: `sam-${stamp}@example.com` },
-				{ name: "Kim", email: `kim-${stamp}@example.com` },
-				{ name: "Lee", email: `lee-${stamp}@example.com` },
-			])
-			.returning();
+		const people = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values([
+					{ name: "Ada", email: `ada-${stamp}@example.com` },
+					{ name: "Sam", email: `sam-${stamp}@example.com` },
+					{ name: "Kim", email: `kim-${stamp}@example.com` },
+					{ name: "Lee", email: `lee-${stamp}@example.com` },
+				])
+				.returning(),
+		);
 		const [ada, sam, kim, lee] = people;
 		if (!ada || !sam || !kim || !lee) {
 			throw new Error("could not create the test people");
@@ -88,13 +91,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		outsiderId = kim.id;
 		viewerId = lee.id;
 
-		await db.insert(workspaceMember).values([
-			{ workspaceId, userId: adminId, role: "admin" },
-			{ workspaceId, userId: memberId, role: "member" },
-			{ workspaceId, userId: viewerId, role: "viewer" },
-			{ workspaceId: otherWorkspaceId, userId: adminId, role: "admin" },
-			{ workspaceId: otherWorkspaceId, userId: outsiderId, role: "member" },
-		]);
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId: adminId, role: "admin" },
+				{ workspaceId, userId: memberId, role: "member" },
+				{ workspaceId, userId: viewerId, role: "viewer" },
+				{ workspaceId: otherWorkspaceId, userId: adminId, role: "admin" },
+				{ workspaceId: otherWorkspaceId, userId: outsiderId, role: "member" },
+			]),
+		);
 	});
 
 	describe("creating", () => {
@@ -110,10 +115,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			// serve every pod in it, and are set up once for all of them.
 			const made = await store.create(workspaceId, asAdmin(), { name: "Product", slug: "product" });
 
-			const placed = await db
-				.select({ key: agent.systemAgentKey })
-				.from(agent)
-				.where(and(eq(agent.podId, made.id), isNotNull(agent.systemAgentKey)));
+			const placed = await onDatabase((db) =>
+				db
+					.select({ key: agent.systemAgentKey })
+					.from(agent)
+					.where(and(eq(agent.podId, made.id), isNotNull(agent.systemAgentKey))),
+			);
 			expect(placed).toEqual([]);
 		});
 
@@ -138,7 +145,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" }).catch(() => {});
 			await store.create(workspaceId, asAdmin(), { name: "Dup", slug: "suga" }).catch(() => {});
 
-			const rows = await db.select().from(pod);
+			const rows = await onDatabase((db) => db.select().from(pod));
 			expect(rows.filter((row) => row.workspaceId === workspaceId)).toHaveLength(2);
 		});
 	});
@@ -173,7 +180,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
 
 			await expect(
-				db.insert(podMember).values({ workspaceId, podId: made.id, userId: outsiderId }),
+				onDatabase((db) =>
+					db.insert(podMember).values({ workspaceId, podId: made.id, userId: outsiderId }),
+				),
 			).rejects.toThrow();
 		});
 
@@ -181,12 +190,16 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
 			await store.addMember(workspaceId, made.id, memberId);
 
-			await db
-				.delete(workspaceMember)
-				.where(
-					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
-				);
-			await db.insert(workspaceMember).values({ workspaceId, userId: memberId });
+			await onDatabase((db) =>
+				db
+					.delete(workspaceMember)
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
+					),
+			);
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: memberId }),
+			);
 
 			expect(await store.listVisible(workspaceId, asMember())).toEqual([]);
 			expect((await store.listMembers(made.id)).map(({ userId }) => userId)).not.toContain(
@@ -201,10 +214,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	describe("personal pods", () => {
 		it("provisions one private pod and a customizable default assistant", async () => {
 			const personal = await store.ensurePersonal(workspaceId, asMember(), "first-model");
-			const [assistant] = await db
-				.select()
-				.from(agent)
-				.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant")));
+			const [assistant] = await onDatabase((db) =>
+				db
+					.select()
+					.from(agent)
+					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
+			);
 			if (!assistant) throw new Error("Personal Assistant was not provisioned");
 
 			expect(personal).toMatchObject({ kind: "personal", ownerId: memberId });
@@ -214,16 +229,20 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				prompt: PERSONAL_ASSISTANT_PROMPT,
 			});
 
-			await db
-				.update(agent)
-				.set({ name: "Friday", prompt: "Keep this customization." })
-				.where(eq(agent.id, assistant.id));
+			await onDatabase((db) =>
+				db
+					.update(agent)
+					.set({ name: "Friday", prompt: "Keep this customization." })
+					.where(eq(agent.id, assistant.id)),
+			);
 			await store.ensurePersonal(workspaceId, asMember(), "second-model");
 
-			const provisioned = await db
-				.select()
-				.from(agent)
-				.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant")));
+			const provisioned = await onDatabase((db) =>
+				db
+					.select()
+					.from(agent)
+					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
+			);
 			expect(provisioned).toHaveLength(1);
 			expect(provisioned[0]).toMatchObject({
 				name: "Friday",
@@ -234,10 +253,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("is invisible to other members and workspace administrators", async () => {
 			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
-			const [assistant] = await db
-				.select({ id: agent.id })
-				.from(agent)
-				.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant")));
+			const [assistant] = await onDatabase((db) =>
+				db
+					.select({ id: agent.id })
+					.from(agent)
+					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
+			);
 			if (!assistant) throw new Error("Personal Assistant was not provisioned");
 
 			expect(await authorization.pod(memberId, personal.id, "pod.delete")).toMatchObject({
@@ -259,7 +280,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 			expect(await store.addMember(workspaceId, personal.id, adminId)).toBe("personal_pod");
 			await expect(
-				db.insert(podMember).values({ workspaceId, podId: personal.id, userId: adminId }),
+				onDatabase((db) =>
+					db.insert(podMember).values({ workspaceId, podId: personal.id, userId: adminId }),
+				),
 			).rejects.toThrow();
 		});
 
@@ -415,12 +438,14 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await store.removeMember(workspaceId, made.id, adminId);
 			expect(await authorization.pod(adminId, made.id, "pod.read")).toBeDefined();
 
-			await db
-				.update(workspaceMember)
-				.set({ role: "member" })
-				.where(
-					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
-				);
+			await onDatabase((db) =>
+				db
+					.update(workspaceMember)
+					.set({ role: "member" })
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
+					),
+			);
 
 			await expect(authorization.pod(adminId, made.id, "pod.read")).rejects.toThrow(ResourceHidden);
 			expect(await store.listVisible(workspaceId, actor(adminId, "member"))).toEqual([]);
@@ -428,12 +453,14 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("grants nothing for a role it does not recognise", async () => {
 			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await db
-				.update(workspaceMember)
-				.set({ role: "admin,member" })
-				.where(
-					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
-				);
+			await onDatabase((db) =>
+				db
+					.update(workspaceMember)
+					.set({ role: "admin,member" })
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
+					),
+			);
 
 			await expect(authorization.pod(adminId, made.id, "pod.read")).rejects.toThrow(ResourceHidden);
 		});
@@ -483,29 +510,39 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await store.ensurePersonal(workspaceId, asAdmin(), "test-model");
 
 			// What better-auth's beforeRemoveMember hook does, then the removal.
-			await db
-				.delete(pod)
-				.where(
-					and(eq(pod.workspaceId, workspaceId), eq(pod.ownerId, adminId), eq(pod.kind, "personal")),
-				);
-			await db
-				.delete(workspaceMember)
-				.where(
-					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
-				);
+			await onDatabase((db) =>
+				db
+					.delete(pod)
+					.where(
+						and(
+							eq(pod.workspaceId, workspaceId),
+							eq(pod.ownerId, adminId),
+							eq(pod.kind, "personal"),
+						),
+					),
+			);
+			await onDatabase((db) =>
+				db
+					.delete(workspaceMember)
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
+					),
+			);
 
-			const [survivor] = await db.select().from(pod).where(eq(pod.id, made.id));
+			const [survivor] = await onDatabase((db) => db.select().from(pod).where(eq(pod.id, made.id)));
 			expect(survivor).toMatchObject({ ownerId: null });
 		});
 
 		it("refuses a Personal pod with no owner", async () => {
 			await expect(
-				db.insert(pod).values({
-					workspaceId,
-					kind: "personal",
-					name: "Personal",
-					slug: `orphan-${Date.now()}`,
-				}),
+				onDatabase((db) =>
+					db.insert(pod).values({
+						workspaceId,
+						kind: "personal",
+						name: "Personal",
+						slug: `orphan-${Date.now()}`,
+					}),
+				),
 			).rejects.toThrow();
 		});
 	});
@@ -540,16 +577,18 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		/** The workspace's Facilitator, set up or not. */
 		async function placeFacilitator(model: string | null) {
-			await db.insert(agent).values({
-				workspaceId,
-				podId: null,
-				name: "Facilitator",
-				handle: "facilitator",
-				systemAgentKey: "facilitate",
-				hue: 205,
-				face: "bar",
-				model,
-			});
+			await onDatabase((db) =>
+				db.insert(agent).values({
+					workspaceId,
+					podId: null,
+					name: "Facilitator",
+					handle: "facilitator",
+					systemAgentKey: "facilitate",
+					hue: 205,
+					face: "bar",
+					model,
+				}),
+			);
 		}
 	});
 });

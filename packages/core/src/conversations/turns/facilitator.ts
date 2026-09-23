@@ -1,7 +1,13 @@
 import { streamEvent, type ThreadType, threadChannel } from "@sugabots/contracts";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Cause, Duration, Effect, Exit, type Layer, Ref } from "effect";
-import { type Database, type Executor, query, transaction } from "../../database/database.ts";
+import {
+	type Database,
+	type Executor,
+	type QueryFailure,
+	query,
+	transaction,
+} from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
 import {
@@ -325,12 +331,12 @@ export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal):
  * forth with the host until the run cap stopped the thread. Taking it off the
  * list makes that unsayable rather than merely discouraged.
  */
-export async function loadFacilitatorScope(
+export const loadFacilitatorScope = Effect.fn("Facilitator.loadFacilitatorScope")(function* (
 	db: Executor,
 	threadId: string,
 	triggerMessageId: string,
-): Promise<FacilitatorScope | undefined> {
-	const [scope] = await db
+): Effect.fn.Return<FacilitatorScope | undefined, QueryFailure> {
+	const [scope] = yield* db
 		.select({
 			workspaceId: thread.workspaceId,
 			podId: thread.podId,
@@ -349,11 +355,15 @@ export async function loadFacilitatorScope(
 	// No model, no facilitation. Borrowing the host's would put a question
 	// nobody asked in front of a model nobody chose for the job, and a pod
 	// cannot switch routing on before this model is chosen anyway.
-	const facilitator = await findRunnableSystemAgent(db, scope.workspaceId, FACILITATE_SYSTEM_AGENT);
+	const facilitator = yield* findRunnableSystemAgent(
+		db,
+		scope.workspaceId,
+		FACILITATE_SYSTEM_AGENT,
+	);
 	if (!facilitator) {
 		return undefined;
 	}
-	const [justSpoke] = await db
+	const [justSpoke] = yield* db
 		.select({ agentId: message.authorAgentId })
 		.from(message)
 		.where(and(eq(message.id, triggerMessageId), eq(message.threadId, threadId)))
@@ -362,7 +372,7 @@ export async function loadFacilitatorScope(
 	// connection, and queries sent concurrently down one are not run concurrently
 	// anyway. The driver queues them, and warns that it is about to stop accepting
 	// them at all.
-	const crewRows = await db
+	const crewRows = yield* db
 		.select({
 			id: agent.id,
 			name: agent.name,
@@ -372,12 +382,12 @@ export async function loadFacilitatorScope(
 		.from(agent)
 		.where(and(eq(agent.podId, scope.podId), isNull(agent.systemAgentKey)))
 		.orderBy(agent.name);
-	const participantRows = await db
+	const participantRows = yield* db
 		.select({ agentId: threadParticipant.agentId, personName: user.name })
 		.from(threadParticipant)
 		.leftJoin(user, eq(user.id, threadParticipant.userId))
 		.where(eq(threadParticipant.threadId, threadId));
-	const recentRows = await db
+	const recentRows = yield* db
 		.select({
 			content: message.content,
 			personName: user.name,
@@ -414,7 +424,7 @@ export async function loadFacilitatorScope(
 					},
 		),
 	};
-}
+});
 
 function handleOf(name: string): string {
 	return name

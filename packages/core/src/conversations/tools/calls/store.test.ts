@@ -1,7 +1,6 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../../database/client.ts";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { eventPublisher } from "../../../database/events/publish.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
@@ -17,7 +16,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
-import { closeDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { type PreparedTurn, type TurnCheckpoint, turnStore } from "../../turns/store.ts";
@@ -39,7 +38,6 @@ import {
  * calls still running.
  */
 describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () => {
-	const db = getDb();
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const calls: Promised<ToolCallStore> = onPostgres(toolCallStore(publishEvents));
 	const approvals: Promised<ToolApprovalStore> = onPostgres(toolApprovalStore(publishEvents));
@@ -56,67 +54,78 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: `Tool calls ${suffix}`, slug: `tool-calls-${suffix}` })
-			.returning();
-		const [member] = await db
-			.insert(user)
-			.values({ name: "Sam", email: `tool-calls-${suffix}@example.com` })
-			.returning();
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Tool calls ${suffix}`, slug: `tool-calls-${suffix}` })
+				.returning(),
+		);
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `tool-calls-${suffix}@example.com` })
+				.returning(),
+		);
 		if (!space || !member) throw new Error("fixture");
 		workspaceId = space.id;
 		memberId = member.id;
 		// An admin, because granting a standing approval in a shared pod is
 		// administration; the ordinary-approval path is covered by the route tests.
-		await db.insert(workspaceMember).values({ workspaceId, userId: memberId, role: "admin" });
-		const [room] = await db
-			.insert(pod)
-			.values({
-				workspaceId,
-				kind: "shared",
-				name: "Room",
-				slug: `room-${suffix}`,
-				createdById: memberId,
-			})
-			.returning();
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: memberId, role: "admin" }),
+		);
+		const [room] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					kind: "shared",
+					name: "Room",
+					slug: `room-${suffix}`,
+					createdById: memberId,
+				})
+				.returning(),
+		);
 		if (!room) throw new Error("fixture");
 		podId = room.id;
-		await db.insert(podMember).values({ workspaceId, podId, userId: memberId });
-		const [host] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId,
-				name: `Host ${suffix}`,
-				handle: handleFromName(`Host ${suffix}`),
-				hue: 1,
-				face: "bar",
-				model: "m",
-				createdById: memberId,
-			})
-			.returning({ id: agent.id });
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
+		const [host] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId,
+					name: `Host ${suffix}`,
+					handle: handleFromName(`Host ${suffix}`),
+					hue: 1,
+					face: "bar",
+					model: "m",
+					createdById: memberId,
+				})
+				.returning({ id: agent.id }),
+		);
 		if (!host) throw new Error("fixture");
 		hostId = host.id;
-		const [connected] = await db
-			.insert(connection)
-			.values({
-				workspaceId,
-				podId,
-				name: `Linear ${suffix}`,
-				handle: `linear-${suffix}`,
-				url: "https://linear.example.com/mcp",
-				authKind: "header",
-				enabled: true,
-				allowMutating: true,
-				createdById: memberId,
-			})
-			.returning({ id: connection.id });
+		const [connected] = await onDatabase((db) =>
+			db
+				.insert(connection)
+				.values({
+					workspaceId,
+					podId,
+					name: `Linear ${suffix}`,
+					handle: `linear-${suffix}`,
+					url: "https://linear.example.com/mcp",
+					authKind: "header",
+					enabled: true,
+					allowMutating: true,
+					createdById: memberId,
+				})
+				.returning({ id: connection.id }),
+		);
 		if (!connected) throw new Error("fixture");
 		connectionId = connected.id;
 		const opened = await chats.getOrCreate({
@@ -137,13 +146,17 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 	/** Claims the queued turn for the thread's host and prepares it, so a reply message exists. */
 	async function openReply(): Promise<PreparedTurn> {
-		const [queued] = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.threadId, threadId), eq(job.status, "queued")));
+		const [queued] = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.threadId, threadId), eq(job.status, "queued"))),
+		);
 		if (!queued || !("agentId" in queued.payload && "triggerMessageId" in queued.payload))
 			throw new Error("no turn queued");
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
+		);
 		return turns.prepare({
 			id: queued.id,
 			threadId,
@@ -231,19 +244,21 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			},
 			[pending],
 		);
-		const [otherWaitingJob] = await db
-			.insert(job)
-			.values({
-				kind: "turn",
-				threadId,
-				payload: {
-					agentId: hostId,
-					triggerMessageId: prepared.job.payload.triggerMessageId,
-				},
-				dedupeKey: `other-waiting-${crypto.randomUUID()}`,
-				status: "waiting",
-			})
-			.returning({ id: job.id });
+		const [otherWaitingJob] = await onDatabase((db) =>
+			db
+				.insert(job)
+				.values({
+					kind: "turn",
+					threadId,
+					payload: {
+						agentId: hostId,
+						triggerMessageId: prepared.job.payload.triggerMessageId,
+					},
+					dedupeKey: `other-waiting-${crypto.randomUUID()}`,
+					status: "waiting",
+				})
+				.returning({ id: job.id }),
+		);
 		if (!otherWaitingJob) throw new Error("other waiting job was not created");
 
 		const decided = await approvals.decide({
@@ -254,20 +269,20 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			decision: "always_allow",
 		});
 		expect(decided.approval?.status).toBe("allowed");
-		const [queued] = await db
-			.select({ status: job.status })
-			.from(job)
-			.where(eq(job.id, prepared.job.id));
+		const [queued] = await onDatabase((db) =>
+			db.select({ status: job.status }).from(job).where(eq(job.id, prepared.job.id)),
+		);
 		expect(queued?.status).toBe("queued");
-		const [stillWaiting] = await db
-			.select({ status: job.status })
-			.from(job)
-			.where(eq(job.id, otherWaitingJob.id));
+		const [stillWaiting] = await onDatabase((db) =>
+			db.select({ status: job.status }).from(job).where(eq(job.id, otherWaitingJob.id)),
+		);
 		expect(stillWaiting?.status).toBe("waiting");
 		expect(await approvals.listRules(workspaceId, podId)).toMatchObject([
 			{ agentId: hostId, connectionId, toolName: "create_issue" },
 		]);
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
+		);
 		prepared = await turns.prepare({ ...prepared.job, attempts: 1 });
 
 		const execution = {
@@ -364,17 +379,21 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 		// Demoted, which takes their standing approvals with them: the rule is
 		// still stored, and nothing may act on it.
-		await db
-			.update(workspaceMember)
-			.set({ role: "member" })
-			.where(
-				and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
-			);
+		await onDatabase((db) =>
+			db
+				.update(workspaceMember)
+				.set({ role: "member" })
+				.where(
+					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
+				),
+		);
 
 		expect([...(await approvals.allowedToolKeys(hostId, { workspaceId, podId }, offered))]).toEqual(
 			[],
 		);
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
+		);
 		prepared = await turns.prepare({ ...prepared.job, attempts: 1 });
 		await expect(
 			approvals.beginExecution({
@@ -421,12 +440,16 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			}),
 			[pending],
 		);
-		const [stranger] = await db
-			.insert(user)
-			.values({ name: "Kim", email: `stranger-${crypto.randomUUID()}@example.com` })
-			.returning();
+		const [stranger] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Kim", email: `stranger-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
 		if (!stranger) throw new Error("fixture");
-		await db.insert(workspaceMember).values({ workspaceId, userId: stranger.id, role: "member" });
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: stranger.id, role: "member" }),
+		);
 
 		await expect(
 			approvals.decide({
@@ -442,8 +465,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 	it("recovers a checkpointed turn left running by a stopped worker", async () => {
 		const saved = checkpoint();
 		expect(await turns.suspend(prepared, saved, [])).toBe(true);
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id));
-		await db.update(turn).set({ status: "running" }).where(eq(turn.id, prepared.turnId));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
+		);
+		await onDatabase((db) =>
+			db.update(turn).set({ status: "running" }).where(eq(turn.id, prepared.turnId)),
+		);
 
 		const resumed = await turns.prepare({ ...prepared.job, attempts: 1 });
 
@@ -457,36 +484,48 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			triggerMessageId: prepared.job.payload.triggerMessageId,
 			reason: "mention" as const,
 		};
-		await db.insert(job).values({
-			kind: "turn",
-			threadId,
-			payload: deferredPayload,
-			dedupeKey: prepared.job.dedupeKey,
-		});
+		await onDatabase((db) =>
+			db.insert(job).values({
+				kind: "turn",
+				threadId,
+				payload: deferredPayload,
+				dedupeKey: prepared.job.dedupeKey,
+			}),
+		);
 		const saved = checkpoint();
 		await turns.suspend(prepared, saved, []);
-		const [waiting] = await db.select().from(job).where(eq(job.id, prepared.job.id));
+		const [waiting] = await onDatabase((db) =>
+			db.select().from(job).where(eq(job.id, prepared.job.id)),
+		);
 		expect(waiting).toMatchObject({ status: "waiting", deferredPayload });
 
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
+		);
 		const resumed = await turns.prepare({ ...prepared.job, attempts: 1 });
 		await turns.complete(resumed, saved.reply, { usage: {} });
 
-		const [next] = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.dedupeKey, prepared.job.dedupeKey), eq(job.status, "queued")));
+		const [next] = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.dedupeKey, prepared.job.dedupeKey), eq(job.status, "queued"))),
+		);
 		expect(next?.payload).toEqual(deferredPayload);
 	});
 
 	it("finalizes a durable cancellation instead of reopening it after a crash", async () => {
-		await db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId));
+		await onDatabase((db) =>
+			db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId)),
+		);
 
 		await expect(turns.prepare(prepared.job)).rejects.toMatchObject({
 			_tag: "JobNotRunnable",
 			terminalOutcome: { state: "cancelled" },
 		});
-		const [stopped] = await db.select().from(turn).where(eq(turn.id, prepared.turnId));
+		const [stopped] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+		);
 		expect(stopped).toMatchObject({ status: "cancelled", checkpoint: null });
 	});
 
@@ -529,12 +568,16 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			userId: memberId,
 			decision: "allow_once",
 		});
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
+		);
 		prepared = await turns.prepare({ ...prepared.job, attempts: 1 });
-		await db
-			.update(connection)
-			.set({ configurationRevision: 2 })
-			.where(eq(connection.id, connectionId));
+		await onDatabase((db) =>
+			db
+				.update(connection)
+				.set({ configurationRevision: 2 })
+				.where(eq(connection.id, connectionId)),
+		);
 
 		await expect(
 			approvals.beginExecution({
@@ -585,11 +628,15 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 		await turns.cancel(prepared, { content: "", collaborations: [], toolCalls: [] });
 
-		const [row] = await db.select().from(toolCall).where(eq(toolCall.id, opened.id));
+		const [row] = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
+		);
 		expect(row).toMatchObject({ status: "failed", error: "Turn cancelled" });
 		expect(row?.finishedAt).not.toBeNull();
 		expect(await calls.close(opened.id, { output: { late: true } })).toBeUndefined();
-		const [stillFailed] = await db.select().from(toolCall).where(eq(toolCall.id, opened.id));
+		const [stillFailed] = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
+		);
 		expect(stillFailed).toMatchObject({ status: "failed", error: "Turn cancelled" });
 	});
 
@@ -605,27 +652,31 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			},
 			[],
 		);
-		const [otherWaitingJob] = await db
-			.insert(job)
-			.values({
-				kind: "turn",
-				threadId,
-				payload: {
-					agentId: hostId,
-					triggerMessageId: prepared.job.payload.triggerMessageId,
-				},
-				dedupeKey: `other-cancel-${crypto.randomUUID()}`,
-				status: "waiting",
-			})
-			.returning({ id: job.id });
+		const [otherWaitingJob] = await onDatabase((db) =>
+			db
+				.insert(job)
+				.values({
+					kind: "turn",
+					threadId,
+					payload: {
+						agentId: hostId,
+						triggerMessageId: prepared.job.payload.triggerMessageId,
+					},
+					dedupeKey: `other-cancel-${crypto.randomUUID()}`,
+					status: "waiting",
+				})
+				.returning({ id: job.id }),
+		);
 		if (!otherWaitingJob) throw new Error("other waiting job was not created");
 
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(true);
 
-		const rows = await db
-			.select({ id: job.id, status: job.status })
-			.from(job)
-			.where(inArray(job.id, [prepared.job.id, otherWaitingJob.id]));
+		const rows = await onDatabase((db) =>
+			db
+				.select({ id: job.id, status: job.status })
+				.from(job)
+				.where(inArray(job.id, [prepared.job.id, otherWaitingJob.id])),
+		);
 		expect(rows).toEqual(
 			expect.arrayContaining([
 				{ id: prepared.job.id, status: "cancelled" },
@@ -638,26 +689,32 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		const empty = { content: "", collaborations: [], toolCalls: [] };
 
 		expect(await turns.fail(prepared, empty, "provider down")).toBe(true);
-		let [row] = await db.select().from(job).where(eq(job.id, prepared.job.id));
+		let [row] = await onDatabase((db) => db.select().from(job).where(eq(job.id, prepared.job.id)));
 		expect(row?.status).toBe("queued");
 
-		await db.update(job).set({ status: "running", attempts: 2 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 2 }).where(eq(job.id, prepared.job.id)),
+		);
 		const retried = await turns.prepare({ ...prepared.job, attempts: 2 });
 
 		// The retry could act again, so the job stops here for a person (ADR 002).
 		expect(await turns.fail(retried, { ...empty, acted: true }, "provider down")).toBe(false);
-		[row] = await db.select().from(job).where(eq(job.id, prepared.job.id));
+		[row] = await onDatabase((db) => db.select().from(job).where(eq(job.id, prepared.job.id)));
 		expect(row?.status).toBe("failed");
 	});
 
 	it("forgets the previous attempt's calls when a turn is retried", async () => {
 		const opened = await calls.open(from(0));
 		await turns.fail(prepared, { content: "", collaborations: [], toolCalls: [] }, "provider down");
-		await db.update(job).set({ status: "running", attempts: 2 }).where(eq(job.id, prepared.job.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 2 }).where(eq(job.id, prepared.job.id)),
+		);
 
 		await turns.prepare({ ...prepared.job, attempts: 2 });
 
-		const rows = await db.select().from(toolCall).where(eq(toolCall.id, opened.id));
+		const rows = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
+		);
 		expect(rows).toEqual([]);
 	});
 });

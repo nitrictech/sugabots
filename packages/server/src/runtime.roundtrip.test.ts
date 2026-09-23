@@ -6,7 +6,6 @@ import { collaborationStore } from "@sugabots/core/conversations/tools/collabora
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
-import { closePool, getDb } from "@sugabots/core/database/client";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
@@ -22,9 +21,9 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
+import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeRuntime } from "./runtime.ts";
 
@@ -33,10 +32,10 @@ import { makeRuntime } from "./runtime.ts";
  * collaborate tool, the helper's turn runs on the same worker, and the host's
  * turn should finish as soon as the helper's does, not when the wait expires.
  */
+const database = await databaseForTests.context();
+const eventStore = await databaseForTests.runPromise(postgresEventStore);
+
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
-	const db = getDb();
-	const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-	const eventStore = postgresEventStore(db);
 	const bus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(bus);
 	const turns = turnStore(publishEvents);
@@ -65,7 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 	};
 
 	const runtime = makeRuntime({
-		pool,
+		database,
 		eventStore,
 		bus,
 		model,
@@ -80,64 +79,74 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 
 	afterAll(async () => {
 		await runtime.dispose();
-		await closePool();
+		await closeDatabase();
 	});
 
 	/** A workspace with a pod, a host agent and a helper the host can collaborate with. */
 	async function aRoom(routing?: { facilitator: boolean }) {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: `RT ${suffix}`, slug: `rt-${suffix}` })
-			.returning();
-		const [member] = await db
-			.insert(user)
-			.values({ name: "Sam", email: `rt-${suffix}@example.com` })
-			.returning();
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `RT ${suffix}`, slug: `rt-${suffix}` })
+				.returning(),
+		);
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `rt-${suffix}@example.com` })
+				.returning(),
+		);
 		if (!space || !member) throw new Error("fixture");
-		await db.insert(workspaceMember).values({ workspaceId: space.id, userId: member.id });
-		const [madePod] = await db
-			.insert(pod)
-			.values({
-				workspaceId: space.id,
-				ownerId: member.id,
-				kind: "shared",
-				name: "Room",
-				slug: `room-${suffix}`,
-				createdById: member.id,
-				...(routing ? { routing } : {}),
-			})
-			.returning();
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId: space.id, userId: member.id }),
+		);
+		const [madePod] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: space.id,
+					ownerId: member.id,
+					kind: "shared",
+					name: "Room",
+					slug: `room-${suffix}`,
+					createdById: member.id,
+					...(routing ? { routing } : {}),
+				})
+				.returning(),
+		);
 		if (!madePod) throw new Error("fixture");
-		await db
-			.insert(podMember)
-			.values({ workspaceId: space.id, podId: madePod.id, userId: member.id });
-		const crew = await db
-			.insert(agent)
-			.values([
-				{
-					workspaceId: space.id,
-					podId: madePod.id,
-					name: "Host",
-					handle: "host",
-					hue: 1,
-					face: "bar",
-					model: "m",
-					createdById: member.id,
-				},
-				{
-					workspaceId: space.id,
-					podId: madePod.id,
-					name: "Helper",
-					handle: "helper",
-					description: "Has pets.",
-					hue: 2,
-					face: "dots",
-					model: "m",
-					createdById: member.id,
-				},
-			])
-			.returning({ id: agent.id, name: agent.name });
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId: space.id, podId: madePod.id, userId: member.id }),
+		);
+		const crew = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values([
+					{
+						workspaceId: space.id,
+						podId: madePod.id,
+						name: "Host",
+						handle: "host",
+						hue: 1,
+						face: "bar",
+						model: "m",
+						createdById: member.id,
+					},
+					{
+						workspaceId: space.id,
+						podId: madePod.id,
+						name: "Helper",
+						handle: "helper",
+						description: "Has pets.",
+						hue: 2,
+						face: "dots",
+						model: "m",
+						createdById: member.id,
+					},
+				])
+				.returning({ id: agent.id, name: agent.name }),
+		);
 		const host = crew.find((one) => one.name === "Host");
 		if (!host) throw new Error("fixture");
 		return { space, member, pod: madePod, host };
@@ -176,22 +185,25 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		const deadline = Date.now() + 10_000;
 		let hostTurn: { status: string } | undefined;
 		while (Date.now() < deadline) {
-			[hostTurn] = await db
-				.select({ status: turn.status })
-				.from(turn)
-				.where(and(eq(turn.threadId, opened.mainThreadId), eq(turn.agentId, host.id)));
+			[hostTurn] = await onDatabase((db) =>
+				db
+					.select({ status: turn.status })
+					.from(turn)
+					.where(and(eq(turn.threadId, opened.mainThreadId), eq(turn.agentId, host.id))),
+			);
 			if (hostTurn?.status === "done") break;
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 		const elapsed = Date.now() - started;
-		const [made] = await db
-			.select()
-			.from(collaboration)
-			.where(eq(collaboration.parentThreadId, opened.mainThreadId));
-		const [reply] = await db
-			.select({ content: message.content })
-			.from(message)
-			.where(and(eq(message.threadId, opened.mainThreadId), eq(message.authorAgentId, host.id)));
+		const [made] = await onDatabase((db) =>
+			db.select().from(collaboration).where(eq(collaboration.parentThreadId, opened.mainThreadId)),
+		);
+		const [reply] = await onDatabase((db) =>
+			db
+				.select({ content: message.content })
+				.from(message)
+				.where(and(eq(message.threadId, opened.mainThreadId), eq(message.authorAgentId, host.id))),
+		);
 
 		expect(hostTurn?.status).toBe("done");
 		expect(made).toMatchObject({ status: "answered", answer: "A dog named Krypto." });
@@ -218,10 +230,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		const deadline = Date.now() + 10_000;
 		let answered: { childThreadId: string; status: string } | undefined;
 		while (Date.now() < deadline) {
-			[answered] = await db
-				.select({ childThreadId: collaboration.childThreadId, status: collaboration.status })
-				.from(collaboration)
-				.where(eq(collaboration.parentThreadId, opened.mainThreadId));
+			[answered] = await onDatabase((db) =>
+				db
+					.select({ childThreadId: collaboration.childThreadId, status: collaboration.status })
+					.from(collaboration)
+					.where(eq(collaboration.parentThreadId, opened.mainThreadId)),
+			);
 			if (answered?.status === "answered") break;
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
@@ -229,19 +243,22 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		// Long enough for a route job to have been claimed and run if one existed.
 		await new Promise((resolve) => setTimeout(resolve, 1_500));
 
-		const childJobs = await db
-			.select({ kind: job.kind })
-			.from(job)
-			.where(eq(job.threadId, answered.childThreadId));
-		const childMessages = await db
-			.select({ id: message.id })
-			.from(message)
-			.where(eq(message.threadId, answered.childThreadId));
+		const childJobs = await onDatabase((db) =>
+			db.select({ kind: job.kind }).from(job).where(eq(job.threadId, answered.childThreadId)),
+		);
+		const childMessages = await onDatabase((db) =>
+			db
+				.select({ id: message.id })
+				.from(message)
+				.where(eq(message.threadId, answered.childThreadId)),
+		);
 
-		const parentJobs = await db
-			.select({ kind: job.kind, status: job.status })
-			.from(job)
-			.where(and(eq(job.threadId, opened.mainThreadId), eq(job.kind, "facilitate")));
+		const parentJobs = await onDatabase((db) =>
+			db
+				.select({ kind: job.kind, status: job.status })
+				.from(job)
+				.where(and(eq(job.threadId, opened.mainThreadId), eq(job.kind, "facilitate"))),
+		);
 		expect(parentJobs).toHaveLength(0);
 
 		expect(answered.status).toBe("answered");

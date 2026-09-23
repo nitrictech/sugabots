@@ -62,8 +62,8 @@ const ROLES_THAT_MAY_FINISH_ONBOARDING = rolesWith("workspace.providers.manage")
 const complete: OnboardingStore["complete"] = (userId, workspaceId, podId, agentId) =>
 	transaction(
 		Effect.gen(function* () {
-			const eligible = yield* query(async (db) => {
-				const [row] = await db
+			const eligible = yield* query((db) =>
+				db
 					.select({ agentId: agent.id })
 					.from(workspaceMember)
 					.innerJoin(pod, and(eq(pod.id, podId), eq(pod.workspaceId, workspaceMember.workspaceId)))
@@ -104,9 +104,9 @@ const complete: OnboardingStore["complete"] = (userId, workspaceId, podId, agent
 						),
 					)
 					.limit(1)
-					.for("update");
-				return row;
-			});
+					.for("update")
+					.pipe(Effect.map(([row]) => row)),
+			);
 
 			if (!eligible) {
 				return false;
@@ -120,8 +120,8 @@ const complete: OnboardingStore["complete"] = (userId, workspaceId, podId, agent
 const completeAcceptedInvite: OnboardingStore["completeAcceptedInvite"] = (userId, invitationId) =>
 	transaction(
 		Effect.gen(function* () {
-			const accepted = yield* query(async (db) => {
-				const [row] = await db
+			const accepted = yield* query((db) =>
+				db
 					.select({ workspaceId: workspaceInvite.workspaceId, role: workspaceMember.role })
 					.from(workspaceInvite)
 					.innerJoin(user, and(eq(user.id, userId), eq(user.email, workspaceInvite.email)))
@@ -134,9 +134,9 @@ const completeAcceptedInvite: OnboardingStore["completeAcceptedInvite"] = (userI
 					)
 					.where(and(eq(workspaceInvite.id, invitationId), eq(workspaceInvite.status, "accepted")))
 					.limit(1)
-					.for("update");
-				return row;
-			});
+					.for("update")
+					.pipe(Effect.map(([row]) => row)),
+			);
 
 			if (!accepted) {
 				return undefined;
@@ -173,14 +173,13 @@ const markCompleted = (userId: string) =>
 
 export const onboardingStore: OnboardingStore = {
 	isCompleted: (userId) =>
-		query(async (db) => {
-			const [row] = await db
+		query((db) =>
+			db
 				.select({ completedAt: user.onboardingCompletedAt })
 				.from(user)
 				.where(eq(user.id, userId))
-				.limit(1);
-			return row?.completedAt != null;
-		}),
+				.limit(1),
+		).pipe(Effect.map(([row]) => row?.completedAt != null)),
 	complete,
 	completeAcceptedInvite,
 };

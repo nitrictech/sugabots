@@ -1,4 +1,5 @@
 import type { CollaborationPart, ToolCallPart } from "@sugabots/contracts";
+import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { loadCollaborationParts } from "./collaborations.ts";
 import { loadToolCallParts } from "./tool-calls.ts";
@@ -13,14 +14,14 @@ export interface PlacedPartsOf {
 }
 
 /** The referenced parts of each of these messages, as a lookup by message id. */
-export async function loadPlacedParts(
+export const loadPlacedParts = Effect.fn("PlacedParts.loadPlacedParts")(function* (
 	db: Executor,
 	messageIds: readonly string[],
-): Promise<(messageId: string) => PlacedPartsOf> {
-	const collaborations = await loadCollaborationParts(db, messageIds);
-	const toolCalls = await loadToolCallParts(db, messageIds);
-	return (messageId) => ({
+) {
+	const collaborations = yield* loadCollaborationParts(db, messageIds);
+	const toolCalls = yield* loadToolCallParts(db, messageIds);
+	return (messageId: string): PlacedPartsOf => ({
 		collaborations: collaborations.get(messageId),
 		toolCalls: toolCalls.get(messageId),
 	});
-}
+});

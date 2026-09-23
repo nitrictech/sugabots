@@ -239,12 +239,12 @@ function standingFromRow(row: StandingRow, userId: string): PodStanding {
  * store settling a tool call — starts here, so none of them reconstructs the
  * facts its own way.
  */
-export function podStandingFor(
+export const podStandingFor = Effect.fn("Authorization.podStandingFor")(function* (
 	db: Executor,
 	podId: string,
 	userId: string,
-): Promise<PodStanding | undefined> {
-	return db
+) {
+	const [row] = yield* db
 		.select(standingColumns)
 		.from(pod)
 		.leftJoin(
@@ -253,9 +253,9 @@ export function podStandingFor(
 		)
 		.leftJoin(podMember, and(eq(podMember.podId, pod.id), eq(podMember.userId, userId)))
 		.where(eq(pod.id, podId))
-		.limit(1)
-		.then(([row]) => (row ? standingFromRow(row, userId) : undefined));
-}
+		.limit(1);
+	return row ? standingFromRow(row, userId) : undefined;
+});
 
 /**
  * Visibility first, then the action.

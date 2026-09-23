@@ -1,7 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { user, workspace } from "../../database/schema.ts";
-import { closeDatabase, onPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
 import { aesCredentialCipher } from "./credentials.ts";
 import { modelProviderStore } from "./store.ts";
 
@@ -13,7 +12,6 @@ import { modelProviderStore } from "./store.ts";
  * once. Needs a migrated database and skips without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("discovered models, against Postgres", () => {
-	const db = getDb();
 	const store = onPostgres(
 		modelProviderStore(aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"))),
 	);
@@ -24,19 +22,22 @@ describe.skipIf(!process.env.DATABASE_URL)("discovered models, against Postgres"
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await db
-			.insert(workspace)
-			.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-			.returning();
-		const [person] = await db
-			.insert(user)
-			.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-			.returning();
+		const [made] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
+				.returning(),
+		);
+		const [person] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
+				.returning(),
+		);
 		if (!made || !person) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
 		userId = person.id;

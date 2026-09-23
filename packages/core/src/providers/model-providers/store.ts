@@ -229,13 +229,12 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 			yield* ensureSeeded(workspaceId);
 			const values = providerValues(input, cipher);
 			const inserted = yield* queryCatching(
-				async (db) => {
-					const [row] = await db
+				(db) =>
+					db
 						.insert(modelProvider)
 						.values({ workspaceId, createdById: userId, ...values })
-						.returning();
-					return row;
-				},
+						.returning()
+						.pipe(Effect.map(([row]) => row)),
 				(failure) => (isUniqueViolation(failure) ? new ModelProviderNameConflict() : undefined),
 			);
 			if (!inserted) {
@@ -329,23 +328,23 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 		create,
 		update,
 		remove: (workspaceId, providerId) =>
-			query(
-				async (db) =>
-					(
-						await db
-							.delete(modelProvider)
-							.where(
-								and(
-									eq(modelProvider.id, providerId),
-									eq(modelProvider.workspaceId, workspaceId),
-									or(
-										isNull(modelProvider.preset),
-										notInArray(modelProvider.preset, [...seededPresets]),
-									),
+			Effect.map(
+				query((db) =>
+					db
+						.delete(modelProvider)
+						.where(
+							and(
+								eq(modelProvider.id, providerId),
+								eq(modelProvider.workspaceId, workspaceId),
+								or(
+									isNull(modelProvider.preset),
+									notInArray(modelProvider.preset, [...seededPresets]),
 								),
-							)
-							.returning({ id: modelProvider.id })
-					).length > 0,
+							),
+						)
+						.returning({ id: modelProvider.id }),
+				),
+				(rows) => rows.length > 0,
 			),
 		connection,
 		resolve: (workspaceId, modelId) =>
@@ -387,22 +386,22 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 		addModels: (workspaceId, providerId, models) =>
 			models.length === 0
 				? Effect.succeed(0)
-				: query(
-						async (db) =>
-							(
-								await db
-									.insert(providerModel)
-									.values(
-										models.map((model) => ({
-											...model,
-											workspaceId,
-											providerId,
-											enabled: false,
-										})),
-									)
-									.onConflictDoNothing()
-									.returning({ id: providerModel.id })
-							).length,
+				: Effect.map(
+						query((db) =>
+							db
+								.insert(providerModel)
+								.values(
+									models.map((model) => ({
+										...model,
+										workspaceId,
+										providerId,
+										enabled: false,
+									})),
+								)
+								.onConflictDoNothing()
+								.returning({ id: providerModel.id }),
+						),
+						(rows) => rows.length,
 					),
 		syncDiscovered: (workspaceId, providerId, models) =>
 			models.length === 0
@@ -456,59 +455,59 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 		setModelEnabled: (workspaceId, providerId, ids, enabled) =>
 			ids.length === 0
 				? Effect.succeed(0)
-				: query(
-						async (db) =>
-							(
-								await db
-									.update(providerModel)
-									.set({ enabled })
-									.where(
-										and(
-											eq(providerModel.workspaceId, workspaceId),
-											eq(providerModel.providerId, providerId),
-											inArray(providerModel.id, ids),
-										),
-									)
-									.returning({ id: providerModel.id })
-							).length,
+				: Effect.map(
+						query((db) =>
+							db
+								.update(providerModel)
+								.set({ enabled })
+								.where(
+									and(
+										eq(providerModel.workspaceId, workspaceId),
+										eq(providerModel.providerId, providerId),
+										inArray(providerModel.id, ids),
+									),
+								)
+								.returning({ id: providerModel.id }),
+						),
+						(rows) => rows.length,
 					),
 		updateModel: (workspaceId, providerId, id, input) =>
-			query(
-				async (db) =>
-					(
-						await db
-							.update(providerModel)
-							.set({
-								enabled: input.enabled,
-								capabilities: input.capabilities,
-								disabledCapabilities: input.disabledCapabilities,
-							})
-							.where(
-								and(
-									eq(providerModel.workspaceId, workspaceId),
-									eq(providerModel.providerId, providerId),
-									eq(providerModel.id, id),
-								),
-							)
-							.returning({ id: providerModel.id })
-					).length,
+			Effect.map(
+				query((db) =>
+					db
+						.update(providerModel)
+						.set({
+							enabled: input.enabled,
+							capabilities: input.capabilities,
+							disabledCapabilities: input.disabledCapabilities,
+						})
+						.where(
+							and(
+								eq(providerModel.workspaceId, workspaceId),
+								eq(providerModel.providerId, providerId),
+								eq(providerModel.id, id),
+							),
+						)
+						.returning({ id: providerModel.id }),
+				),
+				(rows) => rows.length,
 			),
 		removeModel: (workspaceId, providerId, id) =>
-			query(
-				async (db) =>
-					(
-						await db
-							.delete(providerModel)
-							.where(
-								and(
-									eq(providerModel.workspaceId, workspaceId),
-									eq(providerModel.providerId, providerId),
-									eq(providerModel.id, id),
-									eq(providerModel.source, "manual"),
-								),
-							)
-							.returning({ id: providerModel.id })
-					).length > 0,
+			Effect.map(
+				query((db) =>
+					db
+						.delete(providerModel)
+						.where(
+							and(
+								eq(providerModel.workspaceId, workspaceId),
+								eq(providerModel.providerId, providerId),
+								eq(providerModel.id, id),
+								eq(providerModel.source, "manual"),
+							),
+						)
+						.returning({ id: providerModel.id }),
+				),
+				(rows) => rows.length > 0,
 			),
 		listEnabled: (workspaceId) =>
 			Effect.gen(function* () {

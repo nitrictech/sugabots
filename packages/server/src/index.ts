@@ -12,7 +12,7 @@ import { connectionTools as connectionToolsFor } from "@sugabots/core/conversati
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
-import { effectRunner } from "@sugabots/core/database/database";
+import { layer as databaseLayer, effectRunner } from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
@@ -33,6 +33,7 @@ import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { ManagedRuntime } from "effect";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
 import { API_BASE_PATH, configFromEnv } from "./config.ts";
@@ -60,11 +61,18 @@ const {
 	mailer,
 } = config;
 
-// One pool, shared with better-auth, which needs a plain drizzle handle.
-const pool = new Pool({ connectionString: config.databaseUrl });
-const db = drizzle({ client: pool });
+const database = ManagedRuntime.make(databaseLayer(config.databaseUrl));
+// Opens the pool now, so a process that cannot reach its database dies here
+// rather than answering 500 to whoever arrives first.
+const databaseContext = await database.context();
+const run = effectRunner(database);
+
+// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
+// of its own until it can be ported onto the one above.
+const authPool = new Pool({ connectionString: config.databaseUrl });
 const auth = createAuth({
-	db,
+	db: drizzle({ client: authPool }),
+	run,
 	secret,
 	baseUrl,
 	webOrigins,
@@ -73,9 +81,12 @@ const auth = createAuth({
 	requireEmailVerification,
 });
 
-const eventStore = postgresEventStore(db);
+const eventStore = await database.runPromise(postgresEventStore);
 // Every process runs a worker, so what one writes the others must hear about.
-const bus = createEventBus({ store: eventStore, relay: postgresEventRelay(pool, eventStore) });
+const bus = createEventBus({
+	store: eventStore,
+	relay: await database.runPromise(postgresEventRelay(eventStore)),
+});
 const publishEvents = eventPublisher(bus);
 
 const httpClients = createEgressHttpClients({
@@ -131,7 +142,7 @@ const connectionTools = connectionToolsFor({
 	oauth: {
 		providers: oauthProviders({
 			connections: stores.connections,
-			run: (effect) => runtime.runPromise(effect),
+			run: (effect) => database.runPromise(effect),
 			redirectUrl: `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}/connections/oauth/callback`,
 		}),
 		fetch: oauthClient,
@@ -139,7 +150,7 @@ const connectionTools = connectionToolsFor({
 });
 
 const runtime = makeRuntime({
-	pool,
+	database: databaseContext,
 	eventStore,
 	bus,
 	model,
@@ -153,8 +164,6 @@ const runtime = makeRuntime({
 	connectionTools,
 	publishEvents,
 });
-const run = effectRunner(runtime);
-
 const app = createApp({
 	auth,
 	webOrigins,
@@ -169,8 +178,7 @@ const app = createApp({
 	model,
 });
 
-// Builds the layer now, so a process that cannot start dies here rather than
-// answering 500 to whoever arrives first.
+// Starts the background loops, which nothing else would until first used.
 await runtime.context();
 
 const http = mount(app);
@@ -198,6 +206,8 @@ async function stop() {
 	await bus.close();
 	await closeServer();
 	await runtime.dispose();
+	await database.dispose();
+	await authPool.end();
 	await httpClients.close();
 	await webFetchClient.close();
 	await oauthClient.close();

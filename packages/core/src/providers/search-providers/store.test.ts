@@ -1,7 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { workspace } from "../../database/schema.ts";
-import { closeDatabase, onPostgres, type Promised } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
 import { aesCredentialCipher } from "../model-providers/credentials.ts";
 import { type SearchProviderStore, searchProviderStore } from "./store.ts";
 
@@ -10,7 +9,6 @@ import { type SearchProviderStore, searchProviderStore } from "./store.ts";
  * rather than added to, and what a turn is given to search with.
  */
 describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres", () => {
-	const db = getDb();
 	const cipher = aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"));
 	const providers: Promised<SearchProviderStore> = onPostgres(searchProviderStore(cipher));
 	const userId = null as unknown as string;
@@ -18,15 +16,16 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: `Search ${suffix}`, slug: `search-${suffix}` })
-			.returning();
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Search ${suffix}`, slug: `search-${suffix}` })
+				.returning(),
+		);
 		if (!space) throw new Error("fixture");
 		workspaceId = space.id;
 	});

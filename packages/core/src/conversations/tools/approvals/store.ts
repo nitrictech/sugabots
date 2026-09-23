@@ -101,52 +101,56 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 	return {
 		allowedToolKeys: (agentId, scope, tools) => {
 			if (tools.length === 0) return Effect.succeed(new Set());
-			return query(async (db) => {
-				const connectionIds = [...new Set(tools.map((tool) => tool.connectionId))];
-				const rows = await db
-					.select({
-						connectionId: toolApprovalRule.connectionId,
-						connectionRevision: toolApprovalRule.connectionRevision,
-						toolName: toolApprovalRule.toolName,
-						...grantorColumns,
-					})
-					.from(toolApprovalRule)
-					.innerJoin(pod, eq(pod.id, toolApprovalRule.podId))
-					.leftJoin(
-						workspaceMember,
-						and(
-							eq(workspaceMember.workspaceId, toolApprovalRule.workspaceId),
-							eq(workspaceMember.userId, toolApprovalRule.createdById),
-						),
-					)
-					.leftJoin(
-						podMember,
-						and(
-							eq(podMember.podId, toolApprovalRule.podId),
-							eq(podMember.userId, toolApprovalRule.createdById),
-						),
-					)
-					.where(
-						and(
-							eq(toolApprovalRule.agentId, agentId),
-							eq(toolApprovalRule.workspaceId, scope.workspaceId),
-							eq(toolApprovalRule.podId, scope.podId),
-							inArray(toolApprovalRule.connectionId, connectionIds),
-						),
-					);
-				const allowed = new Set(
-					rows
-						.filter(grantorStillMayAlwaysAllow)
-						.map((row) => `${row.connectionId}:${row.connectionRevision}:${row.toolName}`),
-				);
-				return new Set(
-					tools
-						.filter((tool) =>
-							allowed.has(`${tool.connectionId}:${tool.connectionRevision}:${tool.remoteToolName}`),
+			return query((db) =>
+				Effect.gen(function* () {
+					const connectionIds = [...new Set(tools.map((tool) => tool.connectionId))];
+					const rows = yield* db
+						.select({
+							connectionId: toolApprovalRule.connectionId,
+							connectionRevision: toolApprovalRule.connectionRevision,
+							toolName: toolApprovalRule.toolName,
+							...grantorColumns,
+						})
+						.from(toolApprovalRule)
+						.innerJoin(pod, eq(pod.id, toolApprovalRule.podId))
+						.leftJoin(
+							workspaceMember,
+							and(
+								eq(workspaceMember.workspaceId, toolApprovalRule.workspaceId),
+								eq(workspaceMember.userId, toolApprovalRule.createdById),
+							),
 						)
-						.map((tool) => tool.key),
-				);
-			});
+						.leftJoin(
+							podMember,
+							and(
+								eq(podMember.podId, toolApprovalRule.podId),
+								eq(podMember.userId, toolApprovalRule.createdById),
+							),
+						)
+						.where(
+							and(
+								eq(toolApprovalRule.agentId, agentId),
+								eq(toolApprovalRule.workspaceId, scope.workspaceId),
+								eq(toolApprovalRule.podId, scope.podId),
+								inArray(toolApprovalRule.connectionId, connectionIds),
+							),
+						);
+					const allowed = new Set(
+						rows
+							.filter(grantorStillMayAlwaysAllow)
+							.map((row) => `${row.connectionId}:${row.connectionRevision}:${row.toolName}`),
+					);
+					return new Set(
+						tools
+							.filter((tool) =>
+								allowed.has(
+									`${tool.connectionId}:${tool.connectionRevision}:${tool.remoteToolName}`,
+								),
+							)
+							.map((tool) => tool.key),
+					);
+				}),
+			);
 		},
 
 		responsesForTurn: (turnId, approvalIds) =>
@@ -543,29 +547,31 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 			),
 
 		listRules: (workspaceId, podId) =>
-			query(async (db) => {
-				const rows = await db
-					.select({
-						rule: toolApprovalRule,
-						agentName: agent.name,
-						connectionName: connection.name,
-					})
-					.from(toolApprovalRule)
-					.innerJoin(agent, eq(agent.id, toolApprovalRule.agentId))
-					.innerJoin(connection, eq(connection.id, toolApprovalRule.connectionId))
-					.where(
-						and(eq(toolApprovalRule.workspaceId, workspaceId), eq(toolApprovalRule.podId, podId)),
-					);
-				return rows.map(({ rule, agentName, connectionName }) => ({
-					id: rule.id,
-					agentId: rule.agentId,
-					agentName,
-					connectionId: rule.connectionId,
-					connectionName,
-					toolName: rule.toolName,
-					createdAt: rule.createdAt.toISOString(),
-				}));
-			}),
+			query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db
+						.select({
+							rule: toolApprovalRule,
+							agentName: agent.name,
+							connectionName: connection.name,
+						})
+						.from(toolApprovalRule)
+						.innerJoin(agent, eq(agent.id, toolApprovalRule.agentId))
+						.innerJoin(connection, eq(connection.id, toolApprovalRule.connectionId))
+						.where(
+							and(eq(toolApprovalRule.workspaceId, workspaceId), eq(toolApprovalRule.podId, podId)),
+						);
+					return rows.map(({ rule, agentName, connectionName }) => ({
+						id: rule.id,
+						agentId: rule.agentId,
+						agentName,
+						connectionId: rule.connectionId,
+						connectionName,
+						toolName: rule.toolName,
+						createdAt: rule.createdAt.toISOString(),
+					}));
+				}),
+			),
 
 		revokeRule: (workspaceId, podId, ruleId) =>
 			Effect.map(

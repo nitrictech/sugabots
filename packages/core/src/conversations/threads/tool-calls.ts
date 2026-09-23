@@ -1,5 +1,6 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { eq, inArray } from "drizzle-orm";
+import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { type ToolCallRow, toolCall, user } from "../../database/schema.ts";
 
@@ -13,15 +14,15 @@ import { type ToolCallRow, toolCall, user } from "../../database/schema.ts";
  */
 
 /** The tool calls made in each of these messages, keyed by message id. */
-export async function loadToolCallParts(
+export const loadToolCallParts = Effect.fn("ToolCalls.loadToolCallParts")(function* (
 	db: Executor,
 	messageIds: readonly string[],
-): Promise<Map<string, ToolCallPart[]>> {
+) {
 	const byMessage = new Map<string, ToolCallPart[]>();
 	if (messageIds.length === 0) {
 		return byMessage;
 	}
-	const rows = await db
+	const rows = yield* db
 		.select({ call: toolCall, decidedByName: user.name })
 		.from(toolCall)
 		.leftJoin(user, eq(user.id, toolCall.decidedById))
@@ -33,7 +34,7 @@ export async function loadToolCallParts(
 		byMessage.set(call.messageId, parts);
 	}
 	return byMessage;
-}
+});
 
 export function toToolCallPart(
 	row: ToolCallRow,

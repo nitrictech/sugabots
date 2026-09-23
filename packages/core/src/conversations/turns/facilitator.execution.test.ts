@@ -123,7 +123,7 @@ const runWithoutDatabase = <A, E>(effect: Effect.Effect<A, E, Database>) =>
 	Effect.runPromise(
 		effect.pipe(
 			Effect.provideService(Database, {
-				executor: Effect.die(new Error("This test has no database")),
+				execute: () => Effect.die(new Error("This test has no database")),
 				transaction: (work) => work,
 			}),
 		),
