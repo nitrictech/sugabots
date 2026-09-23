@@ -1,4 +1,5 @@
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
+import { useEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { useElapsedSince } from "@/lib/elapsed.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -20,12 +21,17 @@ import {
  * the whole of the turn until then.
  *
  * It says the agent is typing, or, while one of its tools is running, which
- * step it is on and for how long. The service is shown as its mark rather than
- * its name: at this size the logo is read faster than the word. The product's
- * own tools are no one's service, so they carry no mark.
+ * step it is on. The service is shown as its mark rather than its name: at this
+ * size the logo is read faster than the word. The product's own tools are no
+ * one's service, so they carry no mark. Each step stays long enough to be read,
+ * and the time counts from the first step, so it says how long the work has
+ * taken rather than restarting with every call.
  */
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
+
+/** A call that finishes faster than this is still named for this long. */
+const MINIMUM_STEP_SHOWN_MS = 1_000;
 
 export function TypingIndicator({
 	agent,
@@ -44,8 +50,9 @@ export function TypingIndicator({
 	/** Sits under the agent, so it follows the side the agent's bubbles are on. */
 	outgoing?: boolean;
 }) {
-	const step = activity?.latest?.status === "running" ? activity.latest : undefined;
-	const elapsedMs = useElapsedSince(step?.startedAt);
+	const elapsedMs = useElapsedSince(activity?.startedAt);
+	const running = activity?.latest?.status === "running" ? activity.latest : undefined;
+	const step = useHeldCall(running);
 	return (
 		<div
 			role="status"
@@ -71,7 +78,7 @@ export function TypingIndicator({
 				<i />
 				<i />
 			</span>
-			{step && <span className="shrink-0 font-mono">{formatTotal(elapsedMs)}</span>}
+			{activity?.startedAt && <span className="shrink-0 font-mono">{formatTotal(elapsedMs)}</span>}
 		</div>
 	);
 }
@@ -105,4 +112,31 @@ function StepLabel({
 			</span>
 		</>
 	);
+}
+
+/**
+ * `latest`, except that once a call is shown it stays for at least
+ * `MINIMUM_STEP_SHOWN_MS`, and so does its going. Calls that come and go inside
+ * that time are skipped: when it is up, whatever is newest takes over, so a
+ * burst of quick calls never leaves the line behind the work.
+ */
+function useHeldCall(latest: ToolCallPart | undefined): ToolCallPart | undefined {
+	const [shown, setShown] = useState(latest);
+	const shownAtMs = useRef(Date.now());
+	useEffect(() => {
+		if (latest?.id === shown?.id) return;
+		const show = () => {
+			setShown(latest);
+			shownAtMs.current = Date.now();
+		};
+		const waitMs = shownAtMs.current + MINIMUM_STEP_SHOWN_MS - Date.now();
+		if (!shown || waitMs <= 0) {
+			show();
+			return;
+		}
+		const timer = setTimeout(show, waitMs);
+		return () => clearTimeout(timer);
+	}, [latest, shown]);
+	// The shown call's own updates, such as it finishing, come through as they happen.
+	return latest?.id === shown?.id ? latest : shown;
 }
