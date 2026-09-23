@@ -6,7 +6,7 @@ import type {
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type ComponentProps, useEffect, useState } from "react";
 import { expect, screen, userEvent } from "storybook/test";
 import preview from "#storybook/preview";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -226,4 +226,46 @@ export const NarratedBetweenToolCalls = meta.story({
 			]),
 		],
 	},
+});
+
+/** How long the looping reply below spends typing before it lands. */
+const ARRIVING_TYPING_MS = 2_500;
+
+const arrivingAnswer = [
+	"There are two high-priority issues in Cycle 33:",
+	"",
+	"1. **NIT-1846** — Investigate and resolve slow initial chat history load time",
+	"2. **NIT-1819** — Trying to enable a provider causes a layout shift and error",
+	"",
+	"Both are in progress.",
+].join("\n");
+
+/** Types for a moment, then lands, then starts again, so the arrival can be watched. */
+function ArrivingReply(props: ComponentProps<typeof ThreadConversation>) {
+	// Even ticks type, odd ticks land; each pair is a fresh reply.
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const next = setInterval(() => setTick((count) => count + 1), ARRIVING_TYPING_MS);
+		return () => clearInterval(next);
+	}, []);
+	const round = Math.floor(tick / 2);
+	const landed = tick % 2 === 1;
+	const answer = reply(`0199a3a0-0000-7000-8000-0000000003${String(round).padStart(2, "0")}`, [
+		{ type: "text", text: arrivingAnswer },
+	]);
+	return (
+		<ThreadConversation
+			{...props}
+			messages={[
+				message("0199a3a0-0000-7000-8000-000000000108", person, "What's in the current cycle?"),
+				landed ? answer : { ...answer, status: "streaming", parts: [], content: "" },
+			]}
+		/>
+	);
+}
+
+/** A reply landing while the thread is open: it grows out of the typing line and reveals its words. */
+export const AReplyArriving = meta.story({
+	args: { messages: [] },
+	render: (args) => <ArrivingReply {...args} />,
 });
