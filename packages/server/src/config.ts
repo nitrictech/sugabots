@@ -52,6 +52,12 @@ export interface Config {
 	requireEmailVerification: boolean;
 	/** Delivery for verification and invitation emails. */
 	mailer: Mailer;
+	/**
+	 * The standard `OTEL_*` variables, passed through for Effect's OTLP
+	 * exporter to read. Without an endpoint and `OTEL_TRACES_EXPORTER=otlp`,
+	 * nothing is exported.
+	 */
+	openTelemetryEnv: Record<string, string>;
 }
 
 export interface ConfigDependencies {
@@ -142,7 +148,16 @@ export function configFromEnv(
 		allowOpenSignUp,
 		requireEmailVerification,
 		mailer: configuredMailer ?? consoleMailer,
+		openTelemetryEnv: openTelemetryEnvFrom(env),
 	};
+}
+
+function openTelemetryEnvFrom(env: NodeJS.ProcessEnv): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(env).filter(
+			(entry): entry is [string, string] => entry[0].startsWith("OTEL_") && entry[1] !== undefined,
+		),
+	);
 }
 
 function booleanFromEnv(value: string, name: string): boolean {

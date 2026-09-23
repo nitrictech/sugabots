@@ -33,12 +33,13 @@ import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
 import { API_BASE_PATH, configFromEnv } from "./config.ts";
 import { createApp } from "./http/app.ts";
 import { mount } from "./http/mount.ts";
+import { observabilityLayer } from "./observability.ts";
 import { channelAccess } from "./routes/events/access.ts";
 import { makeRuntime } from "./runtime.ts";
 import { VERSION } from "./version.ts";
@@ -61,7 +62,14 @@ const {
 	mailer,
 } = config;
 
-const database = ManagedRuntime.make(databaseLayer(config.databaseUrl));
+// The tracer goes in with the database so that everything run on either
+// runtime is traced: routes, better-auth's hooks, the background loops, and
+// the statements they all send.
+const database = ManagedRuntime.make(
+	databaseLayer(config.databaseUrl).pipe(
+		Layer.provideMerge(observabilityLayer(config.openTelemetryEnv)),
+	),
+);
 // Opens the pool now, so a process that cannot reach its database dies here
 // rather than answering 500 to whoever arrives first.
 const databaseContext = await database.context();

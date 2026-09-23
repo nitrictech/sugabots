@@ -45,6 +45,7 @@ import { requireWorkspace } from "./authorisation.ts";
 import { limitJsonBody } from "./body.ts";
 import { onError, onNotFound } from "./errors.ts";
 import type { RunHandler } from "./handler.ts";
+import { requestTracing } from "./tracing.ts";
 
 /**
  * The API, as one chained Hono app.
@@ -103,18 +104,22 @@ export function createApp({
 	auth,
 	webOrigins,
 	authorization,
-	run,
+	run: runUntraced,
 	stores,
 	events,
 	httpClients,
 	validateProviderUrl,
 	model,
 }: AppOptions) {
+	const tracing = requestTracing(runUntraced);
+	const { run } = tracing;
 	const resolveSession = betterAuthSessionResolver(auth);
 	const origins = trustedOrigins({ baseUrl, webOrigins });
 	const apiUrl = `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}`;
 
 	const app = new Hono<AuthEnv>();
+
+	app.use("*", tracing.middleware);
 
 	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
 	// send Authorization, but the token issuance header is not exposed to pages.

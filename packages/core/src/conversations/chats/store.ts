@@ -99,63 +99,68 @@ export interface ChatStore {
 
 export function chatStore(publishEvents: PublishEvents): ChatStore {
 	return {
-		getOrCreate: (input) =>
-			transaction(
-				Effect.gen(function* () {
-					yield* lock(`chat:${input.podId}:${input.hostAgentId}`);
-					const visible = yield* query((db) => visibleChatForScope(db, input));
-					if (!visible.allowed) return yield* new ChatPlacementRejected();
-					if (visible.chat) return toChat(visible.chat);
+		getOrCreate: Effect.fn("ChatStore.getOrCreate")(function* (input) {
+			yield* lock(`chat:${input.podId}:${input.hostAgentId}`);
+			const visible = yield* query((db) => visibleChatForScope(db, input));
+			if (!visible.allowed) return yield* new ChatPlacementRejected();
+			if (visible.chat) return toChat(visible.chat);
 
-					const [main] = yield* query((db) =>
-						db
-							.insert(thread)
-							.values({
-								workspaceId: input.workspaceId,
-								podId: input.podId,
-								hostAgentId: input.hostAgentId,
-								type: "chat",
-								title: "Chat",
-								initiatorUserId: input.userId,
-							})
-							.returning(),
-					);
-					if (!main) return yield* Effect.die(new Error("Main thread insert returned no row"));
-					const [created] = yield* query((db) =>
-						db
-							.insert(chat)
-							.values({ ...input, initiatorUserId: input.userId, mainThreadId: main.id })
-							.returning(),
-					);
-					if (!created) return yield* Effect.die(new Error("Chat insert returned no row"));
-					yield* query((db) =>
-						db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
-					);
-					yield* query((db) =>
-						db.insert(threadParticipant).values([
-							{ threadId: main.id, userId: input.userId },
-							{ threadId: main.id, agentId: input.hostAgentId },
-						]),
-					);
-					return toChat(created);
-				}),
-			),
+			const [main] = yield* query((db) =>
+				db
+					.insert(thread)
+					.values({
+						workspaceId: input.workspaceId,
+						podId: input.podId,
+						hostAgentId: input.hostAgentId,
+						type: "chat",
+						title: "Chat",
+						initiatorUserId: input.userId,
+					})
+					.returning(),
+			);
+			if (!main) return yield* Effect.die(new Error("Main thread insert returned no row"));
+			const [created] = yield* query((db) =>
+				db
+					.insert(chat)
+					.values({ ...input, initiatorUserId: input.userId, mainThreadId: main.id })
+					.returning(),
+			);
+			if (!created) return yield* Effect.die(new Error("Chat insert returned no row"));
+			yield* query((db) =>
+				db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
+			);
+			yield* query((db) =>
+				db.insert(threadParticipant).values([
+					{ threadId: main.id, userId: input.userId },
+					{ threadId: main.id, agentId: input.hostAgentId },
+				]),
+			);
+			return toChat(created);
+		}, transaction),
 
-		messages: (chatId, userId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
-			Effect.gen(function* () {
-				const visible = yield* query((db) => visibleChat(db, chatId, userId));
-				if (!visible) return undefined;
-				const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
-				return yield* query((db) => loadMainMessages(db, visible, page.limit, before));
-			}),
+		messages: Effect.fn("ChatStore.messages")(function* (
+			chatId: string,
+			userId: string,
+			page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT },
+		) {
+			yield* Effect.annotateCurrentSpan("chat.id", chatId);
+			const visible = yield* query((db) => visibleChat(db, chatId, userId));
+			if (!visible) return undefined;
+			const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
+			return yield* query((db) => loadMainMessages(db, visible, page.limit, before));
+		}),
 
-		history: (chatId, userId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
-			Effect.gen(function* () {
-				const visible = yield* query((db) => visibleChat(db, chatId, userId));
-				if (!visible) return undefined;
-				const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
-				return yield* query((db) => loadHistory(db, visible, page.limit, before));
-			}),
+		history: Effect.fn("ChatStore.history")(function* (
+			chatId: string,
+			userId: string,
+			page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT },
+		) {
+			yield* Effect.annotateCurrentSpan("chat.id", chatId);
+			const visible = yield* query((db) => visibleChat(db, chatId, userId));
+			if (!visible) return undefined;
+			const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
+			return yield* query((db) => loadHistory(db, visible, page.limit, before));
+		}),
 
 		sendMain: (input) =>
 			transaction(
