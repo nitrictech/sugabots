@@ -1,4 +1,4 @@
-import type { SystemAgent } from "@sugabots/contracts";
+import type { SystemAgent, WorkspaceModelsResponse } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
@@ -39,19 +39,23 @@ const notSetUp: SystemAgent = { ...facilitator, model: null };
 const modelsUrl = `${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/model-providers/models`;
 const systemAgentsUrl = `${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/system-agents`;
 
-const models = {
+const models: WorkspaceModelsResponse = {
 	models: [
 		{
 			modelId: "claude-sonnet-4-20250514",
 			providerId: "0199a3a0-0000-7000-8000-000000000002",
 			providerName: "Anthropic",
-			providerPreset: "anthropic" as const,
+			providerPreset: "anthropic",
+			providerActive: true,
+			displayName: null,
 		},
 		{
 			modelId: "claude-3-5-haiku-20241022",
 			providerId: "0199a3a0-0000-7000-8000-000000000002",
 			providerName: "Anthropic",
-			providerPreset: "anthropic" as const,
+			providerPreset: "anthropic",
+			providerActive: true,
+			displayName: null,
 		},
 	],
 };
@@ -94,8 +98,8 @@ const meta = preview.meta({
 			http.get(systemAgentsUrl, () => HttpResponse.json([notSetUp, facilitator])),
 			http.patch(`${systemAgentsUrl}/*`, () =>
 				HttpResponse.json(
-					{ error: { code: "internal", message: "This preview does not save the model." } },
-					{ status: 503 },
+					{ _tag: "InternalServerError", message: "This preview does not save the model." },
+					{ status: 500 },
 				),
 			),
 		);
