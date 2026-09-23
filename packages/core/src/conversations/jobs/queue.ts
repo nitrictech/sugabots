@@ -1,6 +1,6 @@
 import { and, eq, ne, type SQL, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { type Database, query, transaction } from "../../database/database.ts";
+import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import { type JobKind, type JobPayloadOf, job } from "../../database/schema.ts";
 
 /**
@@ -131,8 +131,16 @@ const lockDedupeKey = (dedupeKey: string) =>
 export const claimNextJob = <Kind extends JobKind>(
 	kind: Kind,
 ): Effect.Effect<ClaimedJob<Kind> | undefined, never, Database> =>
-	query(async (db) => {
-		const result = await db.execute(sql`
+	query((db) =>
+		Effect.gen(function* () {
+			const rows = yield* db.execute<{
+				id: string;
+				thread_id: string;
+				payload: JobPayloadOf<Kind>;
+				dedupe_key: string;
+				attempts: number;
+			}>(
+				sql`
 			with candidate as (
 				select queued.id
 				from ${job} queued
@@ -152,24 +160,21 @@ export const claimNextJob = <Kind extends JobKind>(
 			set status = 'running', attempts = attempts + 1, locked_at = now(), updated_at = now()
 			where id = (select id from candidate)
 			returning id, thread_id, payload, dedupe_key, attempts
-		`);
-		const [claimed] = result.rows as Array<{
-			id: string;
-			thread_id: string;
-			payload: JobPayloadOf<Kind>;
-			dedupe_key: string;
-			attempts: number;
-		}>;
-		return claimed
-			? {
-					id: claimed.id,
-					threadId: claimed.thread_id,
-					payload: claimed.payload,
-					dedupeKey: claimed.dedupe_key,
-					attempts: claimed.attempts,
-				}
-			: undefined;
-	});
+		`,
+				"objects",
+			);
+			const [claimed] = rows;
+			return claimed
+				? {
+						id: claimed.id,
+						threadId: claimed.thread_id,
+						payload: claimed.payload,
+						dedupeKey: claimed.dedupe_key,
+						attempts: claimed.attempts,
+					}
+				: undefined;
+		}),
+	);
 
 /**
  * Puts back jobs left `running` by a process that stopped mid-way, so they are
@@ -232,11 +237,11 @@ export const failJob = (jobId: string, error: string): Effect.Effect<void, never
 	).pipe(Effect.asVoid);
 
 /** Queues work coalesced while an approval was waiting, after its owning job ends. */
-export async function queueDeferredJob(
-	db: import("../../database/database.ts").Executor,
+export const queueDeferredJob = Effect.fn("JobQueue.queueDeferredJob")(function* (
+	db: Executor,
 	jobId: string,
-): Promise<void> {
-	const [ended] = await db
+) {
+	const [ended] = yield* db
 		.select({
 			kind: job.kind,
 			threadId: job.threadId,
@@ -247,9 +252,9 @@ export async function queueDeferredJob(
 		.where(eq(job.id, jobId))
 		.limit(1);
 	if (!ended?.payload) return;
-	await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ended.dedupeKey}, 0))`);
-	await db.update(job).set({ deferredPayload: null }).where(eq(job.id, jobId));
-	await db
+	yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ended.dedupeKey}, 0))`);
+	yield* db.update(job).set({ deferredPayload: null }).where(eq(job.id, jobId));
+	yield* db
 		.insert(job)
 		.values({
 			kind: ended.kind,
@@ -258,7 +263,7 @@ export async function queueDeferredJob(
 			payload: ended.payload,
 		})
 		.onConflictDoNothing();
-}
+});
 
 /**
  * Records a failed attempt. The job is queued again with a growing delay, or
@@ -310,16 +315,15 @@ export const retryUnlessSuperseded = (
 export const hasQueuedDuplicate = (
 	claimed: Pick<ClaimedJob<JobKind>, "id" | "dedupeKey">,
 ): Effect.Effect<boolean, never, Database> =>
-	query(async (db) => {
-		const [newer] = await db
+	query((db) =>
+		db
 			.select({ id: job.id })
 			.from(job)
 			.where(
 				and(eq(job.dedupeKey, claimed.dedupeKey), eq(job.status, "queued"), ne(job.id, claimed.id)),
 			)
-			.limit(1);
-		return newer !== undefined;
-	});
+			.limit(1),
+	).pipe(Effect.map((newer) => newer.length > 0));
 
 const cancelQueuedDuplicates = (claimed: Pick<ClaimedJob<JobKind>, "id" | "dedupeKey">) =>
 	query((db) =>

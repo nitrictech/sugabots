@@ -53,14 +53,14 @@ export interface SearchProviderStore {
 
 export function searchProviderStore(cipher: CredentialCipher): SearchProviderStore {
 	const load = (workspaceId: string) =>
-		query(async (db) => {
-			const [row] = await db
+		query((db) =>
+			db
 				.select()
 				.from(searchProvider)
 				.where(eq(searchProvider.workspaceId, workspaceId))
-				.limit(1);
-			return row;
-		});
+				.limit(1)
+				.pipe(Effect.map(([row]) => row)),
+		);
 
 	const connection: SearchProviderStore["connection"] = (workspaceId) =>
 		Effect.map(load(workspaceId), (row) => (row ? toConnection(row, cipher) : undefined));
@@ -119,14 +119,14 @@ export function searchProviderStore(cipher: CredentialCipher): SearchProviderSto
 			}),
 
 		remove: (workspaceId) =>
-			query(
-				async (db) =>
-					(
-						await db
-							.delete(searchProvider)
-							.where(eq(searchProvider.workspaceId, workspaceId))
-							.returning({ id: searchProvider.id })
-					).length > 0,
+			Effect.map(
+				query((db) =>
+					db
+						.delete(searchProvider)
+						.where(eq(searchProvider.workspaceId, workspaceId))
+						.returning({ id: searchProvider.id }),
+				),
+				(rows) => rows.length > 0,
 			),
 
 		connection,
@@ -159,12 +159,10 @@ export function searchProviderStore(cipher: CredentialCipher): SearchProviderSto
  * Gives a new workspace the default provider, switched on, so `web_search`
  * works before anyone opens settings. Uses Exa's free tier by default.
  */
-export async function provisionDefaultSearchProvider(
-	db: Executor,
-	workspaceId: string,
-	userId: string,
-): Promise<void> {
-	await db
+export const provisionDefaultSearchProvider = Effect.fn(
+	"SearchProviderStore.provisionDefaultSearchProvider",
+)(function* (db: Executor, workspaceId: string, userId: string) {
+	yield* db
 		.insert(searchProvider)
 		.values({
 			workspaceId,
@@ -174,7 +172,7 @@ export async function provisionDefaultSearchProvider(
 			createdById: userId,
 		})
 		.onConflictDoNothing({ target: searchProvider.workspaceId });
-}
+});
 
 /** The connection, or nothing when the preset needs a key the row lacks. */
 function toConnection(

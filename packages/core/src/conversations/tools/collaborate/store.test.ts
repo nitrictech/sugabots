@@ -1,7 +1,6 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../../database/client.ts";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { eventPublisher } from "../../../database/events/publish.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
@@ -19,7 +18,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
-import { closeDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { modelPrompt } from "../../turns/context.ts";
@@ -31,7 +30,6 @@ import { CollaborationRefused, type CollaborationStore, collaborationStore } fro
  * how a collaboration moves between the asking agent and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
-	const db = getDb();
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const collaborations: Promised<CollaborationStore> = onPostgres(
 		collaborationStore(publishEvents),
@@ -53,63 +51,70 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: `Collaboration ${suffix}`, slug: `collaboration-${suffix}` })
-			.returning();
-		const [member] = await db
-			.insert(user)
-			.values({ name: "Sam", email: `collaboration-${suffix}@example.com` })
-			.returning();
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Collaboration ${suffix}`, slug: `collaboration-${suffix}` })
+				.returning(),
+		);
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `collaboration-${suffix}@example.com` })
+				.returning(),
+		);
 		if (!space || !member) throw new Error("fixture");
 		workspaceId = space.id;
 		memberId = member.id;
-		await db.insert(workspaceMember).values({ workspaceId, userId: memberId });
-		const [room] = await db
-			.insert(pod)
-			.values({
-				workspaceId,
-				ownerId: memberId,
-				kind: "shared",
-				name: "Room",
-				slug: `room-${suffix}`,
-				createdById: memberId,
-			})
-			.returning();
+		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: memberId }));
+		const [room] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					ownerId: memberId,
+					kind: "shared",
+					name: "Room",
+					slug: `room-${suffix}`,
+					createdById: memberId,
+				})
+				.returning(),
+		);
 		if (!room) throw new Error("fixture");
 		podId = room.id;
-		await db.insert(podMember).values({ workspaceId, podId, userId: memberId });
-		const crew = await db
-			.insert(agent)
-			.values([
-				{
-					workspaceId,
-					podId,
-					name: `Host ${suffix}`,
-					handle: handleFromName(`Host ${suffix}`),
-					hue: 1,
-					face: "bar",
-					model: "m",
-					createdById: memberId,
-				},
-				{
-					workspaceId,
-					podId,
-					name: `Helper ${suffix}`,
-					handle: handleFromName(`Helper ${suffix}`),
-					description: "Knows things.",
-					hue: 2,
-					face: "dots",
-					model: "m",
-					createdById: memberId,
-				},
-			])
-			.returning({ id: agent.id, name: agent.name });
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
+		const crew = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values([
+					{
+						workspaceId,
+						podId,
+						name: `Host ${suffix}`,
+						handle: handleFromName(`Host ${suffix}`),
+						hue: 1,
+						face: "bar",
+						model: "m",
+						createdById: memberId,
+					},
+					{
+						workspaceId,
+						podId,
+						name: `Helper ${suffix}`,
+						handle: handleFromName(`Helper ${suffix}`),
+						description: "Knows things.",
+						hue: 2,
+						face: "dots",
+						model: "m",
+						createdById: memberId,
+					},
+				])
+				.returning({ id: agent.id, name: agent.name }),
+		);
 		const [hostRow, helperRow] = crew;
 		if (!hostRow || !helperRow) throw new Error("fixture");
 		host = hostRow;
@@ -141,13 +146,17 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 	/** Claims the queued turn for a thread's host and prepares it, so a reply message exists. */
 	async function openReply(threadId: string, agentId: string) {
-		const [queued] = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.threadId, threadId), eq(job.status, "queued")));
+		const [queued] = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.threadId, threadId), eq(job.status, "queued"))),
+		);
 		if (!queued || !("agentId" in queued.payload && "triggerMessageId" in queued.payload))
 			throw new Error("no turn queued");
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
+		);
 		const prepared = await turns.prepare({
 			id: queued.id,
 			threadId,
@@ -205,10 +214,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		const visibleThreadIds = (await threads.listVisible(workspaceId, memberId)).map(({ id }) => id);
 		expect(visibleThreadIds).toEqual(expect.arrayContaining([rootThreadId, helperMainThreadId]));
 		expect(visibleThreadIds).toHaveLength(2);
-		const queued = await db
-			.select()
-			.from(job)
-			.where(eq(job.threadId, opened.collaboration.threadId));
+		const queued = await onDatabase((db) =>
+			db.select().from(job).where(eq(job.threadId, opened.collaboration.threadId)),
+		);
 		expect(queued).toMatchObject([
 			{ kind: "turn", status: "queued", payload: { agentId: helper.id } },
 		]);
@@ -222,10 +230,12 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		expect((await chats.history(helperChatId, memberId))?.items).toEqual([
 			expect.objectContaining({ threadId: opened.collaboration.threadId }),
 		]);
-		const recipientEvents = await db
-			.select({ payload: event.payload })
-			.from(event)
-			.where(eq(event.channel, workspaceChannel(workspaceId)));
+		const recipientEvents = await onDatabase((db) =>
+			db
+				.select({ payload: event.payload })
+				.from(event)
+				.where(eq(event.channel, workspaceChannel(workspaceId))),
+		);
 		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
 			expect.objectContaining({
 				type: "chat.thread_changed",
@@ -263,7 +273,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		await expect(collaborations.open({ from: from(), to: host.name, brief: "?" })).rejects.toThrow(
 			/cannot collaborate with itself/,
 		);
-		const rows = await db.select().from(thread).where(eq(thread.parentThreadId, rootThreadId));
+		const rows = await onDatabase((db) =>
+			db.select().from(thread).where(eq(thread.parentThreadId, rootThreadId)),
+		);
 		expect(rows).toHaveLength(0);
 	});
 
@@ -302,10 +314,12 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 		expect(await collaborations.readAnswer(opened.collaboration.id)).toBe("Nothing alarming.");
 		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe(false);
-		const resumes = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued")));
+		const resumes = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued"))),
+		);
 		expect(resumes).toHaveLength(0);
 	});
 
@@ -315,31 +329,39 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			threadId: opened.collaboration.threadId,
 			answer: "Nothing alarming.",
 		});
-		await db
-			.update(message)
-			.set({
-				status: "complete",
-				content: "I checked.",
-				parts: [
-					{ type: "text", text: "I asked for help." },
-					{ type: "collaboration", collaborationId: opened.collaboration.id },
-					{ type: "text", text: " Everything is fine." },
-				],
-			})
-			.where(eq(message.id, reply.messageId));
-		await db
-			.update(turn)
-			.set({ status: "done", finishedAt: new Date() })
-			.where(eq(turn.id, reply.turnId));
-		await db
-			.update(job)
-			.set({ status: "done" })
-			.where(and(eq(job.threadId, rootThreadId), eq(job.status, "running")));
-		await db.insert(threadSummary).values({
-			threadId: rootThreadId,
-			sourceMessageId: reply.messageId,
-			content: "The release was checked.",
-		});
+		await onDatabase((db) =>
+			db
+				.update(message)
+				.set({
+					status: "complete",
+					content: "I checked.",
+					parts: [
+						{ type: "text", text: "I asked for help." },
+						{ type: "collaboration", collaborationId: opened.collaboration.id },
+						{ type: "text", text: " Everything is fine." },
+					],
+				})
+				.where(eq(message.id, reply.messageId)),
+		);
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "done", finishedAt: new Date() })
+				.where(eq(turn.id, reply.turnId)),
+		);
+		await onDatabase((db) =>
+			db
+				.update(job)
+				.set({ status: "done" })
+				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "running"))),
+		);
+		await onDatabase((db) =>
+			db.insert(threadSummary).values({
+				threadId: rootThreadId,
+				sourceMessageId: reply.messageId,
+				content: "The release was checked.",
+			}),
+		);
 		await chats.sendMain({
 			chatId: hostChatId,
 			userId: memberId,
@@ -387,14 +409,16 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			answer: "Late, but fine.",
 		});
 
-		const resumes = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued")));
+		const resumes = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued"))),
+		);
 		expect(resumes).toMatchObject([
 			{ kind: "turn", payload: { agentId: host.id, triggerMessageId: reply.messageId } },
 		]);
-		const [row] = await db.select().from(turn).where(eq(turn.id, reply.turnId));
+		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
 	});
 });

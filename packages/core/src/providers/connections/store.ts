@@ -107,8 +107,8 @@ export interface ConnectionStore {
 
 export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 	const load = (workspaceId: string, podId: string, connectionId: string) =>
-		query(async (db) => {
-			const [row] = await db
+		query((db) =>
+			db
 				.select()
 				.from(connection)
 				.where(
@@ -118,18 +118,16 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 						eq(connection.podId, podId),
 					),
 				)
-				.limit(1);
-			return row;
-		});
+				.limit(1),
+		).pipe(Effect.map(([row]) => row));
 	const loadInWorkspace = (workspaceId: string, connectionId: string) =>
-		query(async (db) => {
-			const [row] = await db
+		query((db) =>
+			db
 				.select()
 				.from(connection)
 				.where(and(eq(connection.id, connectionId), eq(connection.workspaceId, workspaceId)))
-				.limit(1);
-			return row;
-		});
+				.limit(1),
+		).pipe(Effect.map(([row]) => row));
 
 	return {
 		list: (workspaceId, podId) =>
@@ -157,9 +155,9 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 					secretHeader: oauth ? null : (input.secretHeader ?? null),
 					secretEncrypted: !oauth && input.secret ? cipher.encrypt(input.secret) : null,
 				};
-				const inserted = yield* queryCatching(
-					async (db) => {
-						const [row] = await db
+				const [inserted] = yield* queryCatching(
+					(db) =>
+						db
 							.insert(connection)
 							.values({
 								workspaceId,
@@ -168,9 +166,7 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 								handle: handleFromName(values.name),
 								...values,
 							})
-							.returning();
-						return row;
-					},
+							.returning(),
 					(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
 				);
 				if (!inserted) {
@@ -225,21 +221,18 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 			}),
 
 		remove: (workspaceId, podId, connectionId) =>
-			query(
-				async (db) =>
-					(
-						await db
-							.delete(connection)
-							.where(
-								and(
-									eq(connection.id, connectionId),
-									eq(connection.workspaceId, workspaceId),
-									eq(connection.podId, podId),
-								),
-							)
-							.returning({ id: connection.id })
-					).length > 0,
-			),
+			query((db) =>
+				db
+					.delete(connection)
+					.where(
+						and(
+							eq(connection.id, connectionId),
+							eq(connection.workspaceId, workspaceId),
+							eq(connection.podId, podId),
+						),
+					)
+					.returning({ id: connection.id }),
+			).pipe(Effect.map((deleted) => deleted.length > 0)),
 
 		target: (workspaceId, podId, connectionId) =>
 			Effect.map(load(workspaceId, podId, connectionId), (row) => row && toTarget(row, cipher)),
@@ -286,8 +279,8 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 			}),
 
 		byOauthState: (state) =>
-			query(async (db) => {
-				const [row] = await db
+			query((db) =>
+				db
 					.select({
 						workspaceId: connection.workspaceId,
 						podId: connection.podId,
@@ -295,9 +288,8 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 					})
 					.from(connection)
 					.where(eq(connection.oauthState, state))
-					.limit(1);
-				return row;
-			}),
+					.limit(1),
+			).pipe(Effect.map(([row]) => row)),
 
 		recordTest: (workspaceId, connectionId, configurationUpdatedAt, outcome) =>
 			Effect.asVoid(

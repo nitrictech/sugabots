@@ -178,20 +178,20 @@ const remove: AgentStore["remove"] = (workspaceId, agentId) =>
 
 /** Which system agent an agent is, if any, which decides whether it may change. */
 function systemAgentKeyOf(workspaceId: string, agentId: string) {
-	return query(async (db) => {
-		const [row] = await db
+	return query((db) =>
+		db
 			.select({ systemAgentKey: agent.systemAgentKey })
 			.from(agent)
 			.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
-			.limit(1);
-		return row;
-	});
+			.limit(1)
+			.pipe(Effect.map(([row]) => row)),
+	);
 }
 
 export const agentStore: AgentStore = {
 	listVisible: (workspaceId, userId) =>
-		query(async (db) => {
-			const rows = await db
+		query((db) =>
+			db
 				.select({ agent })
 				.from(agent)
 				// `reachesPod` already answers false for a system agent's null pod,
@@ -204,12 +204,15 @@ export const agentStore: AgentStore = {
 						reachesPod(agent.podId, userId),
 					),
 				)
-				.orderBy(asc(agent.name));
-			return rows.flatMap((row) => {
-				const crew = crewAgentRow(row.agent);
-				return crew ? [toAgent(crew)] : [];
-			});
-		}),
+				.orderBy(asc(agent.name)),
+		).pipe(
+			Effect.map((rows) =>
+				rows.flatMap((row) => {
+					const crew = crewAgentRow(row.agent);
+					return crew ? [toAgent(crew)] : [];
+				}),
+			),
+		),
 
 	get: (agentId) =>
 		Effect.gen(function* () {

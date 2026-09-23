@@ -1,33 +1,29 @@
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Cause, Context, Effect, Exit, Layer, type ManagedRuntime } from "effect";
-import type { Pool } from "pg";
+import { PgClient } from "@effect/sql-pg";
+import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
+import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
+import { Cause, Context, Effect, Exit, Layer, type ManagedRuntime, Redacted } from "effect";
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 
 /**
  * The database, as a service.
  *
- * Two things it gives us that a shared handle does not. The pool's lifetime is
- * the layer's, so shutdown is ordered by scope exit rather than by a `stop()`
- * somebody has to remember to call. And `transaction` composes: an Effect built
- * from other Effects runs inside one Postgres transaction, and a failure, or an
- * interruption before the commit, rolls it back.
+ * The pool's lifetime is the layer's, so shutdown is ordered by scope exit
+ * rather than by a `stop()` somebody has to remember to call. And
+ * `transaction` composes: an Effect built from other Effects runs inside one
+ * Postgres transaction, and a failure, or an interruption before the commit,
+ * rolls it back.
  *
- * Drizzle stays behind this service's promise boundary.
+ * There is one drizzle handle and no transaction object to pass around.
+ * `@effect/sql` keeps the open transaction on the fiber, so a query made
+ * through the handle inside `transaction` runs on the transaction's
+ * connection, and a nested `transaction` becomes a savepoint.
  */
 
-/** Anything a drizzle query can run against: the pool, or a transaction. */
-export type Executor = NodePgDatabase;
+/** The drizzle handle every query is built on. */
+export type Executor = EffectPgDatabase;
 
-type Transaction = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
-
-/**
- * CurrentTransaction holds the transaction in progress, if there is one.
- *
- * Its default keeps it out of the requirements channel: a store method reads
- * the current executor without requiring an open transaction.
- */
-export const CurrentTransaction = Context.Reference("Database/CurrentTransaction", {
-	defaultValue: (): Transaction | undefined => undefined,
-});
+/** How a query run through drizzle's effect driver can fail. */
+export type QueryFailure = EffectDrizzleQueryError | SqlError;
 
 /**
  * Work waiting for the outermost transaction to commit. `undefined` outside
@@ -61,150 +57,71 @@ const loggingFailure = (work: Effect.Effect<void>): Effect.Effect<void> =>
 export class Database extends Context.Service<
 	Database,
 	{
-		/** Where to send a query right now: the open transaction, or the pool. */
-		readonly executor: Effect.Effect<Executor>;
+		/** Runs `run` against the handle, keeping a driver failure as a failure. */
+		readonly execute: <A>(
+			run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
+		) => Effect.Effect<A, QueryFailure>;
 		/** Runs `use` in one transaction, rolling back if it fails or is interrupted. */
 		readonly transaction: <A, E, R>(use: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	}
 >()("Database") {}
 
 /**
- * transactionalise runs Effects through drizzle's transaction promise callback.
- * Three details preserve transaction semantics across the promise boundary.
+ * The outermost transaction is a real `begin`/`commit`; work deferred with
+ * `afterCommit` anywhere inside runs once the commit has happened, in the
+ * order it was deferred.
  *
- * The caller's context is captured with `Effect.context`, so services and
- * references survive the crossing. A fresh `runPromiseExit` would start
- * with an empty context and lose them.
+ * A nested one is a savepoint, so an inner failure rolls back only the inner
+ * work. Joining the outer transaction instead would mean an inner failure the
+ * caller recovers from stays committed, which is not what anybody writing
+ * `transaction(...)` expects. Work deferred inside the savepoint joins the
+ * outer transaction's only if the savepoint succeeds; a rolled-back savepoint
+ * takes its announcements with it.
  *
- * The exit is carried out on a thrown value. Throwing is the only way to make
- * drizzle emit a rollback, but throwing the error itself would lose the
- * difference between a failure, a defect and an interrupt. Resuming with
- * `Effect.failCause` hands the caller the original cause intact.
- *
- * Interruption waits for the rollback. The canceler returned from
- * `Effect.callback` awaits the settled promise, so the interrupting fiber
- * does not continue until Postgres has finished.
+ * A failure to begin or commit is a defect: no store can do anything about it.
  */
-function transactionalise(root: NodePgDatabase) {
+function transactional(client: PgClient.PgClient) {
 	return <A, E, R>(use: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-		Effect.flatMap(CurrentTransaction, (open) =>
-			open === undefined ? outermost(root, use) : savepoint(open, use),
-		);
+		Effect.gen(function* () {
+			const outer = yield* AfterCommit;
+			const inner: Array<Effect.Effect<void>> = [];
+			const value = yield* client
+				.withTransaction(Effect.provideService(use, AfterCommit, inner))
+				.pipe(Effect.catchIf(isSqlError, Effect.die)) as Effect.Effect<A, E, R>;
+			if (outer) {
+				outer.push(...inner);
+				return value;
+			}
+			// The commit has happened, so the announcements must too, even if the
+			// fibre is being interrupted.
+			yield* Effect.uninterruptible(Effect.forEach(inner, loggingFailure, { discard: true }));
+			return value;
+		});
 }
 
-/**
- * A real `begin`/`commit`. Work deferred with `afterCommit` anywhere inside
- * runs once the commit has happened, in the order it was deferred.
- */
-function outermost<A, E, R>(root: NodePgDatabase, use: Effect.Effect<A, E, R>) {
-	return Effect.gen(function* () {
-		const waiting: Array<Effect.Effect<void>> = [];
-		const context = yield* Effect.context<R>();
-		const value = yield* within(root, Effect.provideService(use, AfterCommit, waiting), context);
-		// The commit has happened, so the announcements must too, even if the
-		// fibre is being interrupted.
-		yield* Effect.uninterruptible(Effect.forEach(waiting, loggingFailure, { discard: true }));
-		return value;
-	});
-}
+/** A pool at `url`, closed when the layer's scope is. */
+export const clientLayer = (url: string): Layer.Layer<PgClient.PgClient> =>
+	PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie);
 
-/**
- * Nested: drizzle issues a savepoint, so an inner failure rolls back only the
- * inner work. Joining the outer transaction instead would mean an inner
- * failure the caller recovers from stays committed, which is not what anybody
- * writing `transaction(...)` expects.
- *
- * Work deferred inside the savepoint joins the outer transaction's only if the
- * savepoint succeeds; a rolled-back savepoint takes its announcements with it.
- */
-function savepoint<A, E, R>(open: Transaction, use: Effect.Effect<A, E, R>) {
-	return Effect.gen(function* () {
-		const outer = yield* AfterCommit;
-		const inner: Array<Effect.Effect<void>> = [];
-		const context = yield* Effect.context<R>();
-		const value = yield* within(open, Effect.provideService(use, AfterCommit, inner), context);
-		if (outer) {
-			outer.push(...inner);
-		} else {
-			yield* Effect.forEach(inner, loggingFailure, { discard: true });
-		}
-		return value;
-	});
-}
-
-/** Runs `use` inside `executor`'s transaction — a `begin`, or a savepoint. */
-function within<A, E, R>(
-	executor: NodePgDatabase | Transaction,
-	use: Effect.Effect<A, E, R>,
-	context: Context.Context<R>,
-): Effect.Effect<A, E> {
-	return Effect.callback<A, E>((resume, signal) => {
-		const runToExit = Effect.runPromiseExitWith(context);
-		const settled = executor
-			.transaction(async (transaction) => {
-				const exit = await runToExit(Effect.provideService(use, CurrentTransaction, transaction), {
-					signal,
-				});
-				if (Exit.isFailure(exit)) {
-					throw new CarriedExit(exit);
-				}
-				return exit.value;
-			})
-			.then(
-				(value) => resume(Effect.succeed(value)),
-				(thrown) =>
-					resume(
-						thrown instanceof CarriedExit
-							? Effect.failCause(thrown.exit.cause as Cause.Cause<E>)
-							: Effect.die(thrown),
-					),
-			);
-		return Effect.promise(() => settled);
-	});
-}
-
-/**
- * Wraps an exit so it survives being thrown through drizzle's callback.
- *
- * The field is declared and assigned rather than being a constructor parameter
- * property: Node runs this source with type stripping only, and a parameter
- * property needs code generated for it. Vitest transforms fully and would not
- * have noticed.
- */
-class CarriedExit {
-	readonly exit: Exit.Failure<unknown, unknown>;
-
-	constructor(exit: Exit.Failure<unknown, unknown>) {
-		this.exit = exit;
-	}
-}
-
-/**
- * Takes the pool rather than opening one, because better-auth needs a plain
- * handle to the same database and two pools to one Postgres is two connection
- * budgets and two shutdown paths. Closing it is still the layer's job, so it
- * happens on scope exit with everything else.
- */
-export const layer = (pool: Pool): Layer.Layer<Database> =>
+/** The pool at `url`, and drizzle on it. The pool closes when the layer's scope does. */
+export const layer = (url: string): Layer.Layer<Database | PgClient.PgClient> =>
 	Layer.effect(
 		Database,
 		Effect.gen(function* () {
-			yield* Effect.addFinalizer(() => Effect.promise(() => pool.end()));
-			const root = drizzle({ client: pool });
+			const client = yield* PgClient.PgClient;
+			const root = yield* makeWithDefaults();
 			return {
-				executor: Effect.map(CurrentTransaction, (open) => open ?? root),
-				transaction: transactionalise(root),
+				execute: (run) => run(root),
+				transaction: transactional(client),
 			};
 		}),
-	);
+	).pipe(Layer.provideMerge(clientLayer(url)));
 
-/** A query against whichever executor is current. The store's whole vocabulary. */
+/** A query against the pool, or the open transaction. The store's whole vocabulary. */
 export const query = <A>(
-	run: (executor: Executor) => Promise<A>,
+	run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
 ): Effect.Effect<A, never, Database> =>
-	Effect.flatMap(Database, ({ executor }) =>
-		Effect.flatMap(executor, (against) => Effect.promise(() => run(against))),
-	);
+	Effect.flatMap(Database, ({ execute }) => Effect.orDie(execute(run)));
 
 /** Runs `use` in one transaction. Rolls back on failure and on interruption. */
 export const transaction = <A, E, R>(
@@ -213,35 +130,29 @@ export const transaction = <A, E, R>(
 	Effect.flatMap(Database, ({ transaction: run }) => run(use));
 
 /**
- * A query whose rejection may be an answer rather than a fault.
+ * A query whose failure may be an answer rather than a fault.
  *
- * `recognise` gets the raw driver rejection and returns the domain error it
+ * `recognise` gets the driver's failure and returns the domain error it
  * means, or `undefined` if it means nothing — a unique violation on the name
  * column is a conflict the caller handles; anything else is a bug and stays a
- * defect. Without this a store has to catch inside the promise and smuggle the
- * outcome back as a sentinel value, because `query` has already turned the
- * rejection into a defect that no `catchTag` can reach.
+ * defect.
  */
 export const queryCatching = <A, Failure>(
-	run: (executor: Executor) => Promise<A>,
-	recognise: (failure: unknown) => Failure | undefined,
+	run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
+	recognise: (failure: QueryFailure) => Failure | undefined,
 ): Effect.Effect<A, Failure, Database> =>
 	// Wrapped in `transaction` so that inside one it becomes a savepoint.
 	// Postgres aborts the whole transaction on a constraint violation, so
 	// recovering from one without a savepoint leaves every later statement
 	// failing with "current transaction is aborted" — the recovery would look
-	// like it worked and the next write would not. Outside a transaction this
-	// is one `begin`/`commit` around a single statement, which is what the
-	// driver does implicitly anyway.
+	// like it worked and the next write would not.
 	transaction(
-		Effect.flatMap(Database, ({ executor }) =>
-			Effect.flatMap(executor, (against) =>
-				Effect.tryPromise({ try: () => run(against), catch: (cause) => cause }).pipe(
-					Effect.catch((cause) => {
-						const meant = recognise(cause);
-						return meant === undefined ? Effect.die(cause) : Effect.fail(meant);
-					}),
-				),
+		Effect.flatMap(Database, ({ execute }) =>
+			execute(run).pipe(
+				Effect.catch((failure) => {
+					const meant = recognise(failure);
+					return meant === undefined ? Effect.die(failure) : Effect.fail(meant);
+				}),
 			),
 		),
 	);

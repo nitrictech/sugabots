@@ -2,7 +2,6 @@ import { type ChatMessageItem, handleFromName } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { createEventBus } from "../../database/events/bus.ts";
 import { eventPublisher } from "../../database/events/publish.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
@@ -22,13 +21,14 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { routineStore } from "../routines/store.ts";
 import { chatStore } from "./store.ts";
 
+const eventStore = await runOnPostgres(postgresEventStore);
+
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
-	const db = getDb();
-	const publishEvents = eventPublisher(createEventBus({ store: postgresEventStore(db) }));
+	const publishEvents = eventPublisher(createEventBus({ store: eventStore }));
 	const store = onPostgres(chatStore(publishEvents));
 	let workspaceId: string;
 	let podId: string;
@@ -38,63 +38,70 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
-		await db.delete(job);
+		await onDatabase((db) => db.delete(job));
 		const suffix = crypto.randomUUID();
-		const [person] = await db
-			.insert(user)
-			.values({ name: "Chat member", email: `chat-${suffix}@example.com` })
-			.returning();
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: "Chat workspace", slug: `chat-${suffix}` })
-			.returning();
+		const [person] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Chat member", email: `chat-${suffix}@example.com` })
+				.returning(),
+		);
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Chat workspace", slug: `chat-${suffix}` })
+				.returning(),
+		);
 		if (!person || !space) throw new Error("Could not create chat test identity");
 		userId = person.id;
 		workspaceId = space.id;
-		await db.insert(workspaceMember).values({ workspaceId, userId });
-		const [room] = await db
-			.insert(pod)
-			.values({
-				workspaceId,
-				ownerId: userId,
-				kind: "shared",
-				name: "Chat pod",
-				slug: `chat-${suffix}`,
-				createdById: userId,
-			})
-			.returning();
+		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId }));
+		const [room] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					ownerId: userId,
+					kind: "shared",
+					name: "Chat pod",
+					slug: `chat-${suffix}`,
+					createdById: userId,
+				})
+				.returning(),
+		);
 		if (!room) throw new Error("Could not create chat test pod");
 		podId = room.id;
-		await db.insert(podMember).values({ workspaceId, podId, userId });
-		const [host, recipient] = await db
-			.insert(agent)
-			.values([
-				{
-					workspaceId,
-					podId,
-					name: "Personal Agent",
-					handle: handleFromName(`Personal Agent ${suffix}`),
-					hue: 120,
-					face: "bar",
-					model: "test/model",
-					createdById: userId,
-				},
-				{
-					workspaceId,
-					podId,
-					name: "Impersonal Agent",
-					handle: handleFromName(`Impersonal Agent ${suffix}`),
-					hue: 240,
-					face: "square",
-					model: "test/model",
-					createdById: userId,
-				},
-			])
-			.returning();
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId }));
+		const [host, recipient] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values([
+					{
+						workspaceId,
+						podId,
+						name: "Personal Agent",
+						handle: handleFromName(`Personal Agent ${suffix}`),
+						hue: 120,
+						face: "bar",
+						model: "test/model",
+						createdById: userId,
+					},
+					{
+						workspaceId,
+						podId,
+						name: "Impersonal Agent",
+						handle: handleFromName(`Impersonal Agent ${suffix}`),
+						hue: 240,
+						face: "square",
+						model: "test/model",
+						createdById: userId,
+					},
+				])
+				.returning(),
+		);
 		if (!host || !recipient) throw new Error("Could not create chat test agents");
 		agentId = host.id;
 		recipientAgentId = recipient.id;
@@ -107,7 +114,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 			store.getOrCreate(input),
 		]);
 		expect(retried.id).toBe(first.id);
-		expect(await db.select().from(chat).where(eq(chat.id, first.id))).toHaveLength(1);
+		expect(
+			await onDatabase((db) => db.select().from(chat).where(eq(chat.id, first.id))),
+		).toHaveLength(1);
 
 		const sent = await store.sendMain({
 			chatId: first.id,
@@ -116,7 +125,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 			content: "Investigate this over several steps",
 		});
 		expect(sent?.threadId).toBe(first.mainThreadId);
-		expect(await db.select().from(job).where(eq(job.threadId, first.mainThreadId))).toHaveLength(1);
+		expect(
+			await onDatabase((db) => db.select().from(job).where(eq(job.threadId, first.mainThreadId))),
+		).toHaveLength(1);
 		expect((await store.history(first.id, userId))?.items).toHaveLength(0);
 		expect((await store.messages(first.id, userId))?.items.map((item) => item.kind)).toEqual([
 			"message",
@@ -124,15 +135,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	});
 
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
-		await db.update(agent).set({ model: null }).where(eq(agent.id, agentId));
+		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const messageId = crypto.randomUUID();
 
 		await expect(
 			store.sendMain({ chatId: current.id, userId, messageId, content: "Anyone there?" }),
 		).rejects.toThrow("has no model chosen");
-		expect(await db.select().from(message).where(eq(message.id, messageId))).toHaveLength(0);
-		expect(await db.select().from(job)).toHaveLength(0);
+		expect(
+			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
+		).toHaveLength(0);
+		expect(await onDatabase((db) => db.select().from(job))).toHaveLength(0);
 	});
 
 	it("retries the same message without creating another message or job", async () => {
@@ -151,8 +164,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 			content: "A simple question",
 		});
 		expect(retried).toEqual(first);
-		expect(await db.select().from(message).where(eq(message.id, messageId))).toHaveLength(1);
-		expect(await db.select().from(job)).toHaveLength(1);
+		expect(
+			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
+		).toHaveLength(1);
+		expect(await onDatabase((db) => db.select().from(job))).toHaveLength(1);
 	});
 
 	it("includes Routine runs in the main Chat timeline", async () => {
@@ -211,32 +226,36 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		});
 		const olderMessageId = crypto.randomUUID();
 		const newerMessageId = crypto.randomUUID();
-		await db.insert(message).values([
-			{
-				id: olderMessageId,
-				threadId: current.mainThreadId,
-				authorUserId: userId,
-				kind: "text",
-				status: "complete",
-				parts: [{ type: "text", text: "Older message" }],
-				content: "Older message",
-				createdAt: new Date("2026-09-18T09:00:00.000Z"),
-			},
-			{
-				id: newerMessageId,
-				threadId: current.mainThreadId,
-				authorUserId: userId,
-				kind: "text",
-				status: "complete",
-				parts: [{ type: "text", text: "Newer message" }],
-				content: "Newer message",
-				createdAt: new Date("2026-09-18T11:00:00.000Z"),
-			},
-		]);
-		await db
-			.update(routineExecution)
-			.set({ acceptedAt: new Date("2026-09-18T10:00:00.000Z") })
-			.where(eq(routineExecution.id, accepted.executionId));
+		await onDatabase((db) =>
+			db.insert(message).values([
+				{
+					id: olderMessageId,
+					threadId: current.mainThreadId,
+					authorUserId: userId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Older message" }],
+					content: "Older message",
+					createdAt: new Date("2026-09-18T09:00:00.000Z"),
+				},
+				{
+					id: newerMessageId,
+					threadId: current.mainThreadId,
+					authorUserId: userId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Newer message" }],
+					content: "Newer message",
+					createdAt: new Date("2026-09-18T11:00:00.000Z"),
+				},
+			]),
+		);
+		await onDatabase((db) =>
+			db
+				.update(routineExecution)
+				.set({ acceptedAt: new Date("2026-09-18T10:00:00.000Z") })
+				.where(eq(routineExecution.id, accepted.executionId)),
+		);
 
 		const firstPage = await store.messages(current.id, userId, { limit: 2 });
 		expect(firstPage?.items.map(timelineItemId)).toEqual([accepted.executionId, newerMessageId]);
@@ -272,61 +291,71 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		});
 		if (!trigger) throw new Error("Could not create collaboration trigger");
 		const collaborationId = crypto.randomUUID();
-		const [askingTurn] = await db
-			.insert(turn)
-			.values({
-				threadId: initiatorChat.mainThreadId,
-				agentId,
-				triggerMessageId: trigger.id,
-				status: "done",
-				model: "test/model",
-				startedAt: new Date(),
-				finishedAt: new Date(),
-				reason: "default",
-			})
-			.returning();
+		const [askingTurn] = await onDatabase((db) =>
+			db
+				.insert(turn)
+				.values({
+					threadId: initiatorChat.mainThreadId,
+					agentId,
+					triggerMessageId: trigger.id,
+					status: "done",
+					model: "test/model",
+					startedAt: new Date(),
+					finishedAt: new Date(),
+					reason: "default",
+				})
+				.returning(),
+		);
 		if (!askingTurn) throw new Error("Could not create asking turn");
-		const [parentMessage] = await db
-			.insert(message)
-			.values({
-				threadId: initiatorChat.mainThreadId,
-				authorAgentId: agentId,
-				kind: "text",
-				status: "complete",
-				parts: [{ type: "collaboration", collaborationId }],
-				content: "",
-				turnId: askingTurn.id,
-			})
-			.returning();
-		const [child] = await db
-			.insert(thread)
-			.values({
-				workspaceId,
-				podId,
-				hostAgentId: recipientAgentId,
-				chatId: initiatorChat.id,
-				type: "collaboration",
-				title: "Compare the launch plans",
-				parentThreadId: initiatorChat.mainThreadId,
-				initiatorUserId: userId,
-			})
-			.returning();
+		const [parentMessage] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: initiatorChat.mainThreadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "collaboration", collaborationId }],
+					content: "",
+					turnId: askingTurn.id,
+				})
+				.returning(),
+		);
+		const [child] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId,
+					podId,
+					hostAgentId: recipientAgentId,
+					chatId: initiatorChat.id,
+					type: "collaboration",
+					title: "Compare the launch plans",
+					parentThreadId: initiatorChat.mainThreadId,
+					initiatorUserId: userId,
+				})
+				.returning(),
+		);
 		if (!parentMessage || !child) throw new Error("Could not create collaboration threads");
-		await db.insert(threadParticipant).values([
-			{ threadId: child.id, agentId },
-			{ threadId: child.id, agentId: recipientAgentId },
-		]);
-		await db.insert(collaboration).values({
-			id: collaborationId,
-			parentThreadId: initiatorChat.mainThreadId,
-			parentMessageId: parentMessage.id,
-			turnId: askingTurn.id,
-			childThreadId: child.id,
-			collaboratorAgentId: recipientAgentId,
-			brief: "Compare the launch plans",
-			status: "waiting",
-			atOffset: 0,
-		});
+		await onDatabase((db) =>
+			db.insert(threadParticipant).values([
+				{ threadId: child.id, agentId },
+				{ threadId: child.id, agentId: recipientAgentId },
+			]),
+		);
+		await onDatabase((db) =>
+			db.insert(collaboration).values({
+				id: collaborationId,
+				parentThreadId: initiatorChat.mainThreadId,
+				parentMessageId: parentMessage.id,
+				turnId: askingTurn.id,
+				childThreadId: child.id,
+				collaboratorAgentId: recipientAgentId,
+				brief: "Compare the launch plans",
+				status: "waiting",
+				atOffset: 0,
+			}),
+		);
 
 		const outbound = await store.messages(initiatorChat.id, userId);
 		const inbound = await store.messages(recipientChat.id, userId);

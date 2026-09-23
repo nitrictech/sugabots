@@ -1,30 +1,35 @@
 import { type Channel, streamEvent } from "@sugabots/contracts";
-import { Pool } from "pg";
-import { afterAll, describe, expect, it } from "vitest";
-import { getDb } from "../client.ts";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { closeDatabase, databaseForTests, runOnPostgres } from "../testing.ts";
 import { createEventBus, type Delivery, type OwnedEventBus } from "./bus.ts";
 import { postgresEventRelay } from "./relay.ts";
-import { postgresEventStore } from "./store.ts";
+import { type EventStore, postgresEventStore } from "./store.ts";
 
 /**
  * Two buses in one test process stand in for two API processes: each has its
  * own subscribers and relay identity, and they share only Postgres.
  */
 describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses", () => {
-	const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-	const store = postgresEventStore(getDb());
+	let store: EventStore;
 	const channel = `thread:relay-${Date.now()}` as const satisfies Channel;
 	const buses: OwnedEventBus[] = [];
 
-	function processBus(): OwnedEventBus {
-		const bus = createEventBus({ store, relay: postgresEventRelay(pool, store) });
+	beforeAll(async () => {
+		store = await runOnPostgres(postgresEventStore);
+	});
+
+	async function processBus(): Promise<OwnedEventBus> {
+		const bus = createEventBus({
+			store,
+			relay: await databaseForTests.runPromise(postgresEventRelay(store)),
+		});
 		buses.push(bus);
 		return bus;
 	}
 
 	afterAll(async () => {
 		await Promise.all(buses.map((bus) => bus.close()));
-		await pool.end();
+		await closeDatabase();
 	});
 
 	/** Collects deliveries on a channel until `count` have arrived. */
@@ -55,8 +60,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 	}
 
 	it("delivers a committed event to the other process's subscribers, once", async () => {
-		const writer = processBus();
-		const reader = processBus();
+		const writer = await processBus();
+		const reader = await processBus();
 		await listening();
 		const heardByReader = collect(reader, 1);
 		const heardByWriter = collect(writer, 1);
@@ -73,8 +78,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 	});
 
 	it("carries an ephemeral event, and fetches a durable one too large to carry", async () => {
-		const writer = processBus();
-		const reader = processBus();
+		const writer = await processBus();
+		const reader = await processBus();
 		await listening();
 		const heard = collect(reader, 2);
 

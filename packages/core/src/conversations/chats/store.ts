@@ -223,8 +223,11 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 const lock = (key: string) =>
 	query((db) => db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`));
 
-async function visibleChatForScope(db: Executor, input: ChatScope) {
-	const [allowed] = await db
+const visibleChatForScope = Effect.fn("ChatStore.visibleChatForScope")(function* (
+	db: Executor,
+	input: ChatScope,
+) {
+	const [allowed] = yield* db
 		.select({ id: pod.id })
 		.from(pod)
 		.innerJoin(
@@ -245,33 +248,37 @@ async function visibleChatForScope(db: Executor, input: ChatScope) {
 		)
 		.limit(1);
 	const [existing] = allowed
-		? await db
+		? yield* db
 				.select()
 				.from(chat)
 				.where(and(eq(chat.podId, input.podId), eq(chat.hostAgentId, input.hostAgentId)))
 				.limit(1)
 		: [];
 	return { allowed: allowed !== undefined, chat: existing };
-}
+});
 
-async function visibleChat(db: Executor, chatId: string, userId: string) {
+const visibleChat = Effect.fn("ChatStore.visibleChat")(function* (
+	db: Executor,
+	chatId: string,
+	userId: string,
+) {
 	if (!isUuid(chatId)) return undefined;
-	const [row] = await db
+	const [row] = yield* db
 		.select({ chat })
 		.from(chat)
 		.where(and(eq(chat.id, chatId), reachesPod(chat.podId, userId)))
 		.limit(1);
 	return row?.chat;
-}
+});
 
-async function agentModel(db: Executor, agentId: string) {
-	const [row] = await db
+const agentModel = Effect.fn("ChatStore.agentModel")(function* (db: Executor, agentId: string) {
+	const [row] = yield* db
 		.select({ model: agent.model })
 		.from(agent)
 		.where(eq(agent.id, agentId))
 		.limit(1);
 	return row?.model ?? null;
-}
+});
 
 function toChat(row: schema.ChatRow): Chat {
 	return {
@@ -297,33 +304,36 @@ function userMessage(id: string, threadId: string, userId: string, content: stri
 	};
 }
 
-async function messageById(db: Executor, id: string) {
-	const [row] = await db.select().from(message).where(eq(message.id, id)).limit(1);
+const messageById = Effect.fn("ChatStore.messageById")(function* (db: Executor, id: string) {
+	const [row] = yield* db.select().from(message).where(eq(message.id, id)).limit(1);
 	return row;
-}
+});
 
-async function publicMessage(db: Executor, row: schema.MessageRow): Promise<Message> {
-	const [author] = await db
+const publicMessage = Effect.fn("ChatStore.publicMessage")(function* (
+	db: Executor,
+	row: schema.MessageRow,
+) {
+	const [author] = yield* db
 		.select({ userId: user.id, userName: user.name, userImage: user.image })
 		.from(user)
 		.where(eq(user.id, row.authorUserId ?? ""))
 		.limit(1);
 	if (!author) throw new Error("Chat message author no longer exists");
 	return toMessage(row, personAuthor(author));
-}
+});
 
 interface CursorPoint {
 	createdAt: Date;
 	id: string;
 }
 
-async function loadMainMessages(
+const loadMainMessages = Effect.fn("ChatStore.loadMainMessages")(function* (
 	db: Executor,
 	chatRow: schema.ChatRow,
 	limit: number,
 	before?: CursorPoint,
-): Promise<ChatMessagesPage> {
-	const messageRows = await db
+) {
+	const messageRows = yield* db
 		.select({ message, ...participantColumns })
 		.from(message)
 		.leftJoin(user, eq(user.id, message.authorUserId))
@@ -336,7 +346,7 @@ async function loadMainMessages(
 		)
 		.orderBy(desc(message.createdAt), desc(message.id))
 		.limit(limit + 1);
-	const collaborationRows = await db
+	const collaborationRows = yield* db
 		.select({ collaboration, ...participantColumns })
 		.from(collaboration)
 		.innerJoin(message, eq(message.id, collaboration.parentMessageId))
@@ -355,7 +365,7 @@ async function loadMainMessages(
 		)
 		.orderBy(desc(collaboration.createdAt), desc(collaboration.id))
 		.limit(limit + 1);
-	const routineRows = await db
+	const routineRows = yield* db
 		.select({
 			id: routineExecution.id,
 			threadId: routineExecution.threadId,
@@ -426,7 +436,7 @@ async function loadMainMessages(
 				: right.createdAt.getTime() - left.createdAt.getTime(),
 		)
 		.slice(0, limit);
-	const placed = await loadPlacedParts(
+	const placed = yield* loadPlacedParts(
 		db,
 		page.flatMap((candidate) => (candidate.kind === "message" ? [candidate.id] : [])),
 	);
@@ -442,15 +452,15 @@ async function loadMainMessages(
 		}),
 		nextCursor: candidates.length > limit && oldest ? encodeCursor(oldest) : null,
 	};
-}
+});
 
-async function loadHistory(
+const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 	db: Executor,
 	chatRow: schema.ChatRow,
 	limit: number,
 	before?: CursorPoint,
-): Promise<ChatHistoryPage> {
-	const rows = await db
+) {
+	const rows = yield* db
 		.select()
 		.from(thread)
 		.where(
@@ -473,12 +483,12 @@ async function loadHistory(
 	const items: ChatHistoryEntry[] = [];
 	for (const row of page) {
 		if (row.type !== "collaboration" && row.type !== "routine") continue;
-		const [pending] = await db
+		const [pending] = yield* db
 			.select({ running: hasPendingResponseJob(sql`${thread.id}`) })
 			.from(thread)
 			.where(eq(thread.id, row.id))
 			.limit(1);
-		const [latestTurn] = await db
+		const [latestTurn] = yield* db
 			.select({ status: turn.status })
 			.from(turn)
 			.where(eq(turn.threadId, row.id))
@@ -486,7 +496,7 @@ async function loadHistory(
 			.limit(1);
 		const [execution] =
 			row.type === "routine"
-				? await db
+				? yield* db
 						.select({
 							id: routineExecution.id,
 							routineId: routineExecution.routineId,
@@ -503,7 +513,7 @@ async function loadHistory(
 			parentThreadId: row.parentThreadId,
 			type: row.type,
 			title: row.title,
-			participants: await loadParticipants(db, row.id),
+			participants: yield* loadParticipants(db, row.id),
 			status: execution
 				? execution.state
 				: (pending?.running ?? false)
@@ -536,7 +546,7 @@ async function loadHistory(
 				? encodeCursor({ id: oldest.id, createdAt: oldest.updatedAt })
 				: null,
 	};
-}
+});
 
 const beforeCondition = (
 	date: typeof message.createdAt | typeof thread.updatedAt,

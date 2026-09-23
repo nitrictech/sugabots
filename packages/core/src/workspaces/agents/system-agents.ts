@@ -1,6 +1,7 @@
 import type { AgentFace, SystemAgent, SystemAgentKey } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent } from "../../database/schema.ts";
 
@@ -58,14 +59,14 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
  * Safe to repeat: an existing row is left exactly as it is, so a second call
  * never puts an administrator's chosen model back to unset.
  */
-export async function ensureSystemAgents(
+export const ensureSystemAgents = Effect.fn("SystemAgents.ensureSystemAgents")(function* (
 	db: Executor,
 	input: { workspaceId: string; createdById: string },
-): Promise<void> {
+) {
 	for (const definition of SYSTEM_AGENTS) {
-		await ensureSystemAgent(db, input.workspaceId, input.createdById, definition);
+		yield* ensureSystemAgent(db, input.workspaceId, input.createdById, definition);
 	}
-}
+});
 
 /**
  * The workspace's system agent, whether or not it has been set up.
@@ -73,18 +74,18 @@ export async function ensureSystemAgents(
  * For reading configuration. Anything about to run a model wants
  * {@link findRunnableSystemAgent}, whose absence already means "do not run".
  */
-export async function findSystemAgent(
+export const findSystemAgent = Effect.fn("SystemAgents.findSystemAgent")(function* (
 	db: Executor,
 	workspaceId: string,
 	key: SystemAgentKey,
-): Promise<{ id: string; model: string | null } | undefined> {
-	const [row] = await db
+) {
+	const [row] = yield* db
 		.select({ id: agent.id, model: agent.model })
 		.from(agent)
 		.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, key)))
 		.limit(1);
 	return row;
-}
+});
 
 /**
  * The system agent and the model it runs on, or nothing when no model has been
@@ -94,12 +95,12 @@ export async function findSystemAgent(
  * and forget that it may not be set up: here `undefined` is the whole answer,
  * and what comes back names a model.
  */
-export async function findRunnableSystemAgent(
+export const findRunnableSystemAgent = Effect.fn("SystemAgents.findRunnableSystemAgent")(function* (
 	db: Executor,
 	workspaceId: string,
 	key: SystemAgentKey,
-): Promise<{ id: string; model: string } | undefined> {
-	const [row] = await db
+) {
+	const [row] = yield* db
 		.select({ id: agent.id, model: agent.model })
 		.from(agent)
 		.where(
@@ -111,11 +112,14 @@ export async function findRunnableSystemAgent(
 		)
 		.limit(1);
 	return row?.model == null ? undefined : { id: row.id, model: row.model };
-}
+});
 
 /** Every system agent in the workspace, as the settings screens read them. */
-export async function listSystemAgents(db: Executor, workspaceId: string): Promise<SystemAgent[]> {
-	const rows = await db
+export const listSystemAgents = Effect.fn("SystemAgents.listSystemAgents")(function* (
+	db: Executor,
+	workspaceId: string,
+) {
+	const rows = yield* db
 		.select({ key: agent.systemAgentKey, model: agent.model })
 		.from(agent)
 		.where(and(eq(agent.workspaceId, workspaceId), isNotNull(agent.systemAgentKey)));
@@ -123,23 +127,25 @@ export async function listSystemAgents(db: Executor, workspaceId: string): Promi
 	// Driven by the definitions rather than by the rows, so the name, the face
 	// and the order come from the product and only the model comes from the
 	// database. A workspace missing a row reads as one that is not set up.
-	return SYSTEM_AGENTS.map((definition) => ({
-		key: definition.key,
-		name: definition.name,
-		description: definition.description,
-		hue: definition.hue,
-		face: definition.face,
-		model: modelOf.get(definition.key) ?? null,
-	}));
-}
+	return SYSTEM_AGENTS.map(
+		(definition): SystemAgent => ({
+			key: definition.key,
+			name: definition.name,
+			description: definition.description,
+			hue: definition.hue,
+			face: definition.face,
+			model: modelOf.get(definition.key) ?? null,
+		}),
+	);
+});
 
-async function ensureSystemAgent(
+const ensureSystemAgent = Effect.fn("SystemAgents.ensureSystemAgent")(function* (
 	db: Executor,
 	workspaceId: string,
 	createdById: string,
 	definition: SystemAgentDefinition,
-): Promise<string> {
-	const [created] = await db
+) {
+	const [created] = yield* db
 		.insert(agent)
 		.values({
 			workspaceId,
@@ -159,7 +165,7 @@ async function ensureSystemAgent(
 	if (created) {
 		return created.id;
 	}
-	const [existing] = await db
+	const [existing] = yield* db
 		.select({ id: agent.id })
 		.from(agent)
 		.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, definition.key)))
@@ -168,4 +174,4 @@ async function ensureSystemAgent(
 		throw new Error(`The ${definition.key} system agent could not be created or found`);
 	}
 	return existing.id;
-}
+});

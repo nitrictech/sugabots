@@ -1,12 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { pod, user, workspace, workspaceMember } from "../../database/schema.ts";
-import { closeDatabase, onPostgres, type Promised } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
 import { aesCredentialCipher } from "../model-providers/credentials.ts";
 import { ConnectionNameTaken, type ConnectionStore, connectionStore } from "./store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () => {
-	const db = getDb();
 	const cipher = aesCredentialCipher(Buffer.alloc(32, 9).toString("base64"));
 	const connections: Promised<ConnectionStore> = onPostgres(connectionStore(cipher));
 	let workspaceId: string;
@@ -16,44 +14,51 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: `Connections ${suffix}`, slug: `connections-${suffix}` })
-			.returning();
-		const [person] = await db
-			.insert(user)
-			.values({ name: "Sam", email: `connections-${suffix}@example.com` })
-			.returning();
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Connections ${suffix}`, slug: `connections-${suffix}` })
+				.returning(),
+		);
+		const [person] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `connections-${suffix}@example.com` })
+				.returning(),
+		);
 		if (!space || !person) throw new Error("fixture");
 		workspaceId = space.id;
 		userId = person.id;
-		await db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" });
-		const [room, otherRoom] = await db
-			.insert(pod)
-			.values([
-				{
-					workspaceId,
-					ownerId: userId,
-					kind: "shared",
-					name: "Support",
-					slug: `support-${suffix}`,
-					createdById: userId,
-				},
-				{
-					workspaceId,
-					ownerId: userId,
-					kind: "shared",
-					name: "Sales",
-					slug: `sales-${suffix}`,
-					createdById: userId,
-				},
-			])
-			.returning();
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
+		);
+		const [room, otherRoom] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values([
+					{
+						workspaceId,
+						ownerId: userId,
+						kind: "shared",
+						name: "Support",
+						slug: `support-${suffix}`,
+						createdById: userId,
+					},
+					{
+						workspaceId,
+						ownerId: userId,
+						kind: "shared",
+						name: "Sales",
+						slug: `sales-${suffix}`,
+						createdById: userId,
+					},
+				])
+				.returning(),
+		);
 		if (!room || !otherRoom) throw new Error("pod fixture");
 		podId = room.id;
 		otherPodId = otherRoom.id;

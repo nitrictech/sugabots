@@ -1,5 +1,6 @@
 import type { CollaborationPart } from "@sugabots/contracts";
 import { eq, inArray } from "drizzle-orm";
+import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, collaboration } from "../../database/schema.ts";
@@ -14,15 +15,15 @@ import { agent, collaboration } from "../../database/schema.ts";
  */
 
 /** The collaborations made in each of these messages, keyed by message id. */
-export async function loadCollaborationParts(
+export const loadCollaborationParts = Effect.fn("Collaborations.loadCollaborationParts")(function* (
 	db: Executor,
 	messageIds: readonly string[],
-): Promise<Map<string, CollaborationPart[]>> {
+) {
 	const byMessage = new Map<string, CollaborationPart[]>();
 	if (messageIds.length === 0) {
 		return byMessage;
 	}
-	const rows = await db
+	const rows = yield* db
 		.select({ collaboration, collaboratorName: agent.name })
 		.from(collaboration)
 		.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
@@ -33,7 +34,7 @@ export async function loadCollaborationParts(
 		byMessage.set(row.collaboration.parentMessageId, parts);
 	}
 	return byMessage;
-}
+});
 
 export function toCollaborationPart(
 	row: schema.CollaborationRow,

@@ -1,4 +1,5 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
+import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -10,6 +11,7 @@ import { bearer } from "better-auth/plugins/bearer";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Effect } from "effect";
 import { API_BASE_PATH, trustedOrigins, webUrl } from "../config.ts";
 import type { Mailer } from "../email/mailer.ts";
 import { admitSignUp } from "./sign-up.ts";
@@ -44,13 +46,15 @@ import { admitSignUp } from "./sign-up.ts";
 
 export interface AuthOptions {
 	/**
-	 * The database better-auth owns its tables in.
+	 * The database better-auth owns its tables in, as node-postgres drizzle:
+	 * its adapter speaks nothing else.
 	 *
-	 * Passed rather than reached for: `createAuth` used to call `getDb()`, which
-	 * meant the one service sitting under identity could not be built without a
-	 * live pool, and the HTTP tests had to fake `Auth` with a cast instead.
+	 * Passed rather than reached for, so the one service sitting under identity
+	 * can be built without a live pool.
 	 */
 	db: NodePgDatabase;
+	/** Runs the application's own writes, which its hooks make on the main pool. */
+	run: RunEffect;
 	/** Signing key for sessions and tokens. */
 	secret: string;
 	/** Where a browser reaches the API, without `API_BASE_PATH`. */
@@ -103,6 +107,7 @@ function requireSupportedRole(role: string | undefined): void {
 
 export function createAuth({
 	db,
+	run,
 	secret,
 	baseUrl,
 	webOrigins,
@@ -138,7 +143,7 @@ export function createAuth({
 				create: {
 					// By address, not by session: an invitee has no account yet.
 					before: async (creating) => {
-						await admitSignUp(db, allowOpenSignUp, creating.email);
+						await run(admitSignUp(allowOpenSignUp, creating.email));
 					},
 				},
 			},
@@ -184,16 +189,22 @@ export function createAuth({
 				requireEmailVerificationOnInvitation: requireEmailVerification,
 				organizationHooks: {
 					afterCreateOrganization: async ({ organization, user }) => {
-						await db.transaction(async (tx) => {
-							// All orgs start with websearch enabled using Exa's free tier
-							await provisionDefaultSearchProvider(tx, organization.id, user.id);
-							// The Scribe and the Facilitator belong to the workspace, so this
-							// is where they arrive, with no model until an admin chooses one.
-							await ensureSystemAgents(tx, {
-								workspaceId: organization.id,
-								createdById: user.id,
-							});
-						});
+						await run(
+							transaction(
+								query((db) =>
+									Effect.gen(function* () {
+										// All orgs start with websearch enabled using Exa's free tier
+										yield* provisionDefaultSearchProvider(db, organization.id, user.id);
+										// The Scribe and the Facilitator belong to the workspace, so this
+										// is where they arrive, with no model until an admin chooses one.
+										yield* ensureSystemAgents(db, {
+											workspaceId: organization.id,
+											createdById: user.id,
+										});
+									}),
+								),
+							),
+						);
 					},
 					beforeCreateInvitation: async ({ invitation }) => {
 						requireSupportedRole(invitation.role);
@@ -211,13 +222,17 @@ export function createAuth({
 						requireSupportedRole(newRole);
 					},
 					afterAddMember: async ({ member }) => {
-						await db.transaction((transaction) =>
-							provisionPersonalPod(transaction, member.organizationId, member.userId),
+						await run(
+							transaction(
+								query((db) => provisionPersonalPod(db, member.organizationId, member.userId)),
+							),
 						);
 					},
 					afterAcceptInvitation: async ({ member }) => {
-						await db.transaction((transaction) =>
-							provisionPersonalPod(transaction, member.organizationId, member.userId),
+						await run(
+							transaction(
+								query((db) => provisionPersonalPod(db, member.organizationId, member.userId)),
+							),
 						);
 					},
 				},

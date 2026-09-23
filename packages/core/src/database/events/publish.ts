@@ -46,14 +46,17 @@ export function eventPublisher(bus: Pick<EventBus, "publishCommitted">): Publish
  * Channels are locked in sorted order so two transactions touching the same
  * pair cannot deadlock.
  */
-async function appendEvents(db: Executor, pending: PendingEvent[]): Promise<CommittedEvent[]> {
+const appendEvents = Effect.fn("EventPublisher.appendEvents")(function* (
+	db: Executor,
+	pending: PendingEvent[],
+) {
 	for (const channel of [...new Set(pending.map(({ channel }) => channel))].sort()) {
-		await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${channel}, 0))`);
+		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${channel}, 0))`);
 	}
 
 	const committed: CommittedEvent[] = [];
 	for (const pendingEvent of pending) {
-		const [row] = await db
+		const [row] = yield* db
 			.insert(event)
 			.values({
 				channel: pendingEvent.channel,
@@ -67,4 +70,4 @@ async function appendEvents(db: Executor, pending: PendingEvent[]): Promise<Comm
 		committed.push({ ...pendingEvent, seq: row.seq });
 	}
 	return committed;
-}
+});

@@ -1,8 +1,8 @@
 import { type Channel, EVENT_VERSION, type EventType, type StreamEvent } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../client.ts";
 import { event } from "../schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../testing.ts";
 import { type EventStore, memoryEventStore, postgresEventStore } from "./store.ts";
 
 /**
@@ -37,17 +37,19 @@ const stores = [
 	{
 		name: "postgres",
 		skip: !process.env.DATABASE_URL,
-		make: () => postgresEventStore(getDb()),
+		make: () => runOnPostgres(postgresEventStore),
 		backdate: async (seq: number) => {
-			await getDb()
-				.update(event)
-				.set({ createdAt: new Date(Date.now() - DAY_MS) })
-				.where(eq(event.seq, seq));
+			await onDatabase((db) =>
+				db
+					.update(event)
+					.set({ createdAt: new Date(Date.now() - DAY_MS) })
+					.where(eq(event.seq, seq)),
+			);
 		},
 	},
 ];
 
-afterAll(closePool);
+afterAll(closeDatabase);
 
 for (const { name, skip, make, backdate } of stores) {
 	describe.skipIf(skip)(`${name} event store`, () => {
@@ -56,9 +58,9 @@ for (const { name, skip, make, backdate } of stores) {
 		// previous run left in it, cannot affect the result.
 		let channel: Channel;
 
-		beforeEach(() => {
+		beforeEach(async () => {
 			clock = new Date(Date.now() - DAY_MS);
-			store = make();
+			store = await make();
 			channel = `thread:${crypto.randomUUID()}`;
 		});
 

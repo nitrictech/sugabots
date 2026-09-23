@@ -157,30 +157,34 @@ export interface RoutineStore {
 export function routineStore(publishEvents: PublishEvents): RoutineStore {
 	const store: RoutineStore = {
 		list: (workspaceId, agentId) =>
-			query(async (db) => {
-				const rows = await db
-					.select()
-					.from(routine)
-					.where(
-						and(
-							eq(routine.workspaceId, workspaceId),
-							eq(routine.agentId, agentId),
-							isNull(routine.deletedAt),
-						),
-					)
-					.orderBy(asc(routine.name));
-				return rows.map(toRoutine);
-			}),
+			query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db
+						.select()
+						.from(routine)
+						.where(
+							and(
+								eq(routine.workspaceId, workspaceId),
+								eq(routine.agentId, agentId),
+								isNull(routine.deletedAt),
+							),
+						)
+						.orderBy(asc(routine.name));
+					return rows.map(toRoutine);
+				}),
+			),
 
 		get: (workspaceId, agentId, routineId) =>
-			query(async (db) => {
-				const [row] = await db
-					.select()
-					.from(routine)
-					.where(routineScope(workspaceId, agentId, routineId))
-					.limit(1);
-				return row ? toRoutine(row) : undefined;
-			}),
+			query((db) =>
+				Effect.gen(function* () {
+					const [row] = yield* db
+						.select()
+						.from(routine)
+						.where(routineScope(workspaceId, agentId, routineId))
+						.limit(1);
+					return row ? toRoutine(row) : undefined;
+				}),
+			),
 
 		create: (workspaceId, agentId, createdById, input) =>
 			Effect.gen(function* () {
@@ -443,45 +447,47 @@ export function routineStore(publishEvents: PublishEvents): RoutineStore {
 		) =>
 			Effect.gen(function* () {
 				const before = page.cursor ? yield* decodeExecutionCursor(page.cursor) : undefined;
-				return yield* query(async (db) => {
-					const [definition] = await db
-						.select({ id: routine.id })
-						.from(routine)
-						.where(
-							and(
-								eq(routine.id, routineId),
-								eq(routine.workspaceId, workspaceId),
-								eq(routine.agentId, agentId),
-							),
-						)
-						.limit(1);
-					if (!definition) return undefined;
-					const rows = await db
-						.select()
-						.from(routineExecution)
-						.where(
-							and(
-								eq(routineExecution.routineId, routineId),
-								before
-									? or(
-											lt(routineExecution.acceptedAt, before.acceptedAt),
-											and(
-												eq(routineExecution.acceptedAt, before.acceptedAt),
-												lt(routineExecution.id, before.id),
-											),
-										)
-									: undefined,
-							),
-						)
-						.orderBy(desc(routineExecution.acceptedAt), desc(routineExecution.id))
-						.limit(page.limit + 1);
-					const items = rows.slice(0, page.limit);
-					const oldest = items.at(-1);
-					return {
-						items: items.map(toRoutineExecution),
-						nextCursor: rows.length > page.limit && oldest ? encodeExecutionCursor(oldest) : null,
-					};
-				});
+				return yield* query((db) =>
+					Effect.gen(function* () {
+						const [definition] = yield* db
+							.select({ id: routine.id })
+							.from(routine)
+							.where(
+								and(
+									eq(routine.id, routineId),
+									eq(routine.workspaceId, workspaceId),
+									eq(routine.agentId, agentId),
+								),
+							)
+							.limit(1);
+						if (!definition) return undefined;
+						const rows = yield* db
+							.select()
+							.from(routineExecution)
+							.where(
+								and(
+									eq(routineExecution.routineId, routineId),
+									before
+										? or(
+												lt(routineExecution.acceptedAt, before.acceptedAt),
+												and(
+													eq(routineExecution.acceptedAt, before.acceptedAt),
+													lt(routineExecution.id, before.id),
+												),
+											)
+										: undefined,
+								),
+							)
+							.orderBy(desc(routineExecution.acceptedAt), desc(routineExecution.id))
+							.limit(page.limit + 1);
+						const items = rows.slice(0, page.limit);
+						const oldest = items.at(-1);
+						return {
+							items: items.map(toRoutineExecution),
+							nextCursor: rows.length > page.limit && oldest ? encodeExecutionCursor(oldest) : null,
+						};
+					}),
+				);
 			}),
 
 		claimNext: () =>
@@ -669,25 +675,27 @@ export function routineStore(publishEvents: PublishEvents): RoutineStore {
 				Effect.gen(function* () {
 					yield* lock(`routine-trigger:${routineId}`);
 					const row = isUuid(routineId)
-						? yield* query(async (db) => {
-								const [found] = await db
-									.select({
-										digest: routine.webhookSecretDigest,
-										workspaceId: routine.workspaceId,
-										agentId: routine.agentId,
-									})
-									.from(routine)
-									.where(
-										and(
-											eq(routine.id, routineId),
-											eq(routine.triggerKind, "webhook"),
-											eq(routine.state, "enabled"),
-											isNull(routine.deletedAt),
-										),
-									)
-									.limit(1);
-								return found;
-							})
+						? yield* query((db) =>
+								Effect.gen(function* () {
+									const [found] = yield* db
+										.select({
+											digest: routine.webhookSecretDigest,
+											workspaceId: routine.workspaceId,
+											agentId: routine.agentId,
+										})
+										.from(routine)
+										.where(
+											and(
+												eq(routine.id, routineId),
+												eq(routine.triggerKind, "webhook"),
+												eq(routine.state, "enabled"),
+												isNull(routine.deletedAt),
+											),
+										)
+										.limit(1);
+									return found;
+								}),
+							)
 						: undefined;
 					const valid = yield* Effect.promise(() =>
 						verifySecret(secret, row?.digest ?? DUMMY_SECRET_DIGEST),
@@ -788,8 +796,10 @@ function settleRoutineThread(
 ) {
 	return transaction(
 		Effect.gen(function* () {
-			const target = yield* query(async (db) => {
-				const result = await db.execute(sql`
+			const target = yield* query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db.execute<{ id: string }>(
+						sql`
 					with recursive ancestors as (
 						select id, parent_thread_id from ${thread} where id = ${threadId}
 						union all
@@ -802,16 +812,30 @@ function settleRoutineThread(
 					join ancestors on ancestors.id = execution.thread_id
 					where execution.state = 'running'
 					limit 1
-				`);
-				return result.rows[0] as { id: string } | undefined;
-			});
+				`,
+						"objects",
+					);
+					return rows[0];
+				}),
+			);
 			if (!target) return false;
 			const settlementLockKey = routineSettlementLockKey(target.id);
 			yield* query((db) =>
 				db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${settlementLockKey}, 0))`),
 			);
-			const status = yield* query(async (db) => {
-				const result = await db.execute(sql`
+			const status = yield* query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db.execute<{
+						id: string;
+						thread_id: string;
+						workspace_id: string;
+						active: boolean;
+						last_turn_status: string | null;
+						last_turn_error: string | null;
+						pending_terminal_state: "failed" | "cancelled" | null;
+						pending_terminal_error: string | null;
+					}>(
+						sql`
 					with recursive tree as (
 						select root.id
 						from ${thread} root
@@ -850,36 +874,33 @@ function settleRoutineThread(
 						) as last_turn_error
 					from ${routineExecution} execution
 					where execution.id = ${target.id} and execution.state = 'running'
-				`);
-				return result.rows[0] as
-					| {
-							id: string;
-							thread_id: string;
-							workspace_id: string;
-							active: boolean;
-							last_turn_status: string | null;
-							last_turn_error: string | null;
-							pending_terminal_state: "failed" | "cancelled" | null;
-							pending_terminal_error: string | null;
-					  }
-					| undefined;
-			});
+				`,
+						"objects",
+					);
+					return rows[0];
+				}),
+			);
 			if (!status) return false;
 			let pendingState = status.pending_terminal_state;
 			let pendingError = status.pending_terminal_error;
 			let active = status.active;
 			if (outcome) {
-				const affectedThreadIds = yield* query(async (db) => {
-					const result = await db.execute(sql`
+				const affectedThreadIds = yield* query((db) =>
+					Effect.gen(function* () {
+						const rows = yield* db.execute<{ id: string }>(
+							sql`
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
 							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
 						)
 						select id from tree
-					`);
-					return (result.rows as Array<{ id: string }>).map(({ id }) => id);
-				});
+					`,
+							"objects",
+						);
+						return rows.map(({ id }) => id);
+					}),
+				);
 				if (pendingState !== "failed") {
 					pendingState = outcome.state;
 					pendingError = outcome.state === "failed" ? (outcome.error ?? null) : null;
@@ -986,8 +1007,10 @@ function settleRoutineThread(
 							and ${job.status} in ('queued', 'waiting')
 					`),
 				);
-				active = yield* query(async (db) => {
-					const result = await db.execute(sql`
+				active = yield* query((db) =>
+					Effect.gen(function* () {
+						const rows = yield* db.execute<{ active: boolean }>(
+							sql`
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
@@ -1002,9 +1025,12 @@ function settleRoutineThread(
 							join tree on tree.id = active_turn.thread_id
 							where active_turn.status = 'running'
 						) as active
-					`);
-					return (result.rows[0] as { active: boolean } | undefined)?.active ?? false;
-				});
+					`,
+							"objects",
+						);
+						return rows[0]?.active ?? false;
+					}),
+				);
 				yield* publishEvents(
 					affectedThreadIds.map((affectedThreadId) => ({
 						channel: threadChannel(affectedThreadId),
@@ -1036,15 +1062,17 @@ function settleRoutineThread(
 					.returning({ id: routineExecution.id }),
 			);
 			if (!settled) return false;
-			const chatId = yield* query(async (db) => {
-				const [root] = await db
-					.select({ chatId: thread.chatId })
-					.from(thread)
-					.where(eq(thread.id, status.thread_id))
-					.limit(1);
-				if (!root?.chatId) throw new Error("Routine thread has no Chat");
-				return root.chatId;
-			});
+			const chatId = yield* query((db) =>
+				Effect.gen(function* () {
+					const [root] = yield* db
+						.select({ chatId: thread.chatId })
+						.from(thread)
+						.where(eq(thread.id, status.thread_id))
+						.limit(1);
+					if (!root?.chatId) throw new Error("Routine thread has no Chat");
+					return root.chatId;
+				}),
+			);
 			yield* publishEvents([
 				{
 					channel: workspaceChannel(status.workspace_id),

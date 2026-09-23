@@ -2,7 +2,6 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { query, transaction } from "../../database/database.ts";
 import {
 	agent,
@@ -18,7 +17,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { type ClaimedTurn, turnStore as createTurnStore } from "../turns/store.ts";
 import {
 	InvalidRoutineExecutionCursor,
@@ -28,7 +27,6 @@ import {
 } from "./store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
-	const db = getDb();
 	const routineEffects = routineStore(() => Effect.void);
 	const store = onPostgres(routineEffects);
 	let workspaceId: string;
@@ -38,54 +36,63 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
-		await db.delete(job);
-		await db
-			.update(routineExecution)
-			.set({ state: "cancelled", finishedAt: new Date() })
-			.where(eq(routineExecution.state, "queued"));
+		await onDatabase((db) => db.delete(job));
+		await onDatabase((db) =>
+			db
+				.update(routineExecution)
+				.set({ state: "cancelled", finishedAt: new Date() })
+				.where(eq(routineExecution.state, "queued")),
+		);
 		const suffix = crypto.randomUUID();
-		const [person] = await db
-			.insert(user)
-			.values({ name: "Routine owner", email: `routine-${suffix}@example.com` })
-			.returning();
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: "Routine workspace", slug: `routine-${suffix}` })
-			.returning();
+		const [person] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Routine owner", email: `routine-${suffix}@example.com` })
+				.returning(),
+		);
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Routine workspace", slug: `routine-${suffix}` })
+				.returning(),
+		);
 		if (!person || !space) throw new Error("Could not create Routine test identity");
 		userId = person.id;
 		workspaceId = space.id;
-		await db.insert(workspaceMember).values({ workspaceId, userId });
-		const [room] = await db
-			.insert(pod)
-			.values({
-				workspaceId,
-				ownerId: userId,
-				kind: "shared",
-				name: "Routine pod",
-				slug: `routine-${suffix}`,
-				createdById: userId,
-			})
-			.returning();
+		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId }));
+		const [room] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					ownerId: userId,
+					kind: "shared",
+					name: "Routine pod",
+					slug: `routine-${suffix}`,
+					createdById: userId,
+				})
+				.returning(),
+		);
 		if (!room) throw new Error("Could not create Routine test pod");
 		podId = room.id;
-		const [owner] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId,
-				name: "Routine Agent",
-				handle: handleFromName(`Routine Agent ${suffix}`),
-				hue: 120,
-				face: "bar",
-				model: "test/model",
-				createdById: userId,
-			})
-			.returning();
+		const [owner] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId,
+					name: "Routine Agent",
+					handle: handleFromName(`Routine Agent ${suffix}`),
+					hue: 120,
+					face: "bar",
+					model: "test/model",
+					createdById: userId,
+				})
+				.returning(),
+		);
 		if (!owner) throw new Error("Could not create Routine test agent");
 		agentId = owner.id;
 	});
@@ -113,77 +120,88 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		if (!claimed || claimed.id !== accepted.executionId) {
 			throw new Error("Could not claim settlement test execution");
 		}
-		const [triggerMessage] = await db
-			.select({ id: message.id })
-			.from(message)
-			.where(eq(message.threadId, accepted.threadId));
+		const [triggerMessage] = await onDatabase((db) =>
+			db.select({ id: message.id }).from(message).where(eq(message.threadId, accepted.threadId)),
+		);
 		if (!triggerMessage) throw new Error("Settlement test trigger message is missing");
 		const now = new Date();
-		const [askingTurn] = await db
-			.insert(turn)
-			.values({
-				threadId: accepted.threadId,
-				agentId,
-				triggerMessageId: triggerMessage.id,
-				status: "done",
-				model: "test/model",
-				startedAt: now,
-				finishedAt: now,
-			})
-			.returning();
+		const [askingTurn] = await onDatabase((db) =>
+			db
+				.insert(turn)
+				.values({
+					threadId: accepted.threadId,
+					agentId,
+					triggerMessageId: triggerMessage.id,
+					status: "done",
+					model: "test/model",
+					startedAt: now,
+					finishedAt: now,
+				})
+				.returning(),
+		);
 		if (!askingTurn) throw new Error("Could not create settlement test turn");
-		const [parentMessage] = await db
-			.insert(message)
-			.values({
-				threadId: accepted.threadId,
-				authorAgentId: agentId,
-				kind: "text",
-				status: "complete",
-				parts: [],
-				content: "Delegating.",
-				turnId: askingTurn.id,
-			})
-			.returning();
-		const [childThread] = await db
-			.insert(thread)
-			.values({
-				workspaceId,
-				podId,
-				hostAgentId: agentId,
-				type: "collaboration",
-				title: "Delegated work",
-				parentThreadId: accepted.threadId,
-			})
-			.returning();
+		const [parentMessage] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: accepted.threadId,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "Delegating.",
+					turnId: askingTurn.id,
+				})
+				.returning(),
+		);
+		const [childThread] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId,
+					podId,
+					hostAgentId: agentId,
+					type: "collaboration",
+					title: "Delegated work",
+					parentThreadId: accepted.threadId,
+				})
+				.returning(),
+		);
 		if (!parentMessage || !childThread) {
 			throw new Error("Could not create settlement test collaboration thread");
 		}
-		const [activeCollaboration] = await db
-			.insert(collaboration)
-			.values({
-				parentThreadId: accepted.threadId,
-				parentMessageId: parentMessage.id,
-				turnId: askingTurn.id,
-				childThreadId: childThread.id,
-				collaboratorAgentId: agentId,
-				brief: "Complete delegated work",
-				status,
-				atOffset: 0,
-			})
-			.returning();
-		const [facilitateJob] = await db
-			.insert(job)
-			.values({
-				kind: "facilitate",
-				threadId: childThread.id,
-				payload: { triggerMessageId: triggerMessage.id },
-				dedupeKey: `facilitate:${childThread.id}`,
-			})
-			.returning();
-		const [turnJob] = await db
-			.select()
-			.from(job)
-			.where(and(eq(job.threadId, accepted.threadId), eq(job.kind, "turn")));
+		const [activeCollaboration] = await onDatabase((db) =>
+			db
+				.insert(collaboration)
+				.values({
+					parentThreadId: accepted.threadId,
+					parentMessageId: parentMessage.id,
+					turnId: askingTurn.id,
+					childThreadId: childThread.id,
+					collaboratorAgentId: agentId,
+					brief: "Complete delegated work",
+					status,
+					atOffset: 0,
+				})
+				.returning(),
+		);
+		const [facilitateJob] = await onDatabase((db) =>
+			db
+				.insert(job)
+				.values({
+					kind: "facilitate",
+					threadId: childThread.id,
+					payload: { triggerMessageId: triggerMessage.id },
+					dedupeKey: `facilitate:${childThread.id}`,
+				})
+				.returning(),
+		);
+		const [turnJob] = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(and(eq(job.threadId, accepted.threadId), eq(job.kind, "turn"))),
+		);
 		if (!activeCollaboration || !facilitateJob || !turnJob) {
 			throw new Error("Could not create settlement test active work");
 		}
@@ -238,20 +256,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		const suffix = crypto.randomUUID();
 		// A system agent belongs to the workspace and sits in no pod, which is
 		// itself why a Routine cannot name one: a Routine runs in a pod.
-		const [systemAgent] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId: null,
-				name: `Summariser ${suffix}`,
-				handle: handleFromName(`Summariser ${suffix}`),
-				hue: 0,
-				face: "bar",
-				model: "test/model",
-				createdById: userId,
-				systemAgentKey: "summarise",
-			})
-			.returning();
+		const [systemAgent] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId: null,
+					name: `Summariser ${suffix}`,
+					handle: handleFromName(`Summariser ${suffix}`),
+					hue: 0,
+					face: "bar",
+					model: "test/model",
+					createdById: userId,
+					systemAgentKey: "summarise",
+				})
+				.returning(),
+		);
 		if (!systemAgent) throw new Error("Could not create system agent");
 		await expect(
 			store.create(workspaceId, systemAgent.id, userId, {
@@ -289,9 +309,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		const original = first.duplicate ? retried : first;
 		const duplicate = first.duplicate ? first : retried;
 		expect(duplicate).toEqual({ ...original, duplicate: true });
-		expect(await db.select().from(thread).where(eq(thread.id, original.threadId))).toHaveLength(1);
 		expect(
-			await db.select().from(message).where(eq(message.threadId, original.threadId)),
+			await onDatabase((db) => db.select().from(thread).where(eq(thread.id, original.threadId))),
+		).toHaveLength(1);
+		expect(
+			await onDatabase((db) =>
+				db.select().from(message).where(eq(message.threadId, original.threadId)),
+			),
 		).toHaveLength(1);
 
 		await store.update(workspaceId, agentId, created.routine.id, {
@@ -321,10 +345,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				requestedByUserId: userId,
 			},
 		});
-		const [executionThread] = await db
-			.select()
-			.from(thread)
-			.where(eq(thread.id, accepted.threadId));
+		const [executionThread] = await onDatabase((db) =>
+			db.select().from(thread).where(eq(thread.id, accepted.threadId)),
+		);
 		expect(executionThread?.title).toHaveLength(80);
 	});
 
@@ -400,22 +423,26 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		const secondClaim = await store.claimNext();
 		expect(firstClaim?.id).toBe(accepted[0]?.executionId);
 		expect(secondClaim?.routineId).toBe(secondRoutine.routine.id);
-		await db
-			.update(job)
-			.set({ status: "done" })
-			.where(eq(job.threadId, firstClaim?.threadId ?? ""));
+		await onDatabase((db) =>
+			db
+				.update(job)
+				.set({ status: "done" })
+				.where(eq(job.threadId, firstClaim?.threadId ?? "")),
+		);
 		expect(await store.settleThread(firstClaim?.threadId ?? "")).toBe(true);
 		const thirdClaim = await store.claimNext();
 		expect(thirdClaim?.id).toBe(accepted[1]?.executionId);
-		const queued = await db
-			.select()
-			.from(routineExecution)
-			.where(
-				and(
-					eq(routineExecution.routineId, firstRoutine.routine.id),
-					eq(routineExecution.state, "queued"),
+		const queued = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(
+					and(
+						eq(routineExecution.routineId, firstRoutine.routine.id),
+						eq(routineExecution.state, "queued"),
+					),
 				),
-			);
+		);
 		expect(queued).toHaveLength(0);
 	});
 
@@ -429,17 +456,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 			expect(await store.settleThread(fixture.childThread.id, { state, error })).toBe(true);
 
-			const [execution] = await db
-				.select()
-				.from(routineExecution)
-				.where(eq(routineExecution.id, fixture.accepted.executionId));
-			const [settledCollaboration] = await db
-				.select()
-				.from(collaboration)
-				.where(eq(collaboration.id, fixture.activeCollaboration.id));
+			const [execution] = await onDatabase((db) =>
+				db
+					.select()
+					.from(routineExecution)
+					.where(eq(routineExecution.id, fixture.accepted.executionId)),
+			);
+			const [settledCollaboration] = await onDatabase((db) =>
+				db.select().from(collaboration).where(eq(collaboration.id, fixture.activeCollaboration.id)),
+			);
 			const settledJobs = await Promise.all(
 				[fixture.turnJob.id, fixture.facilitateJob.id].map(async (id) => {
-					const [row] = await db.select().from(job).where(eq(job.id, id));
+					const [row] = await onDatabase((db) => db.select().from(job).where(eq(job.id, id)));
 					return row;
 				}),
 			);
@@ -469,30 +497,34 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 		expect(await store.settleThread(fixture.childThread.id)).toBe(false);
 
-		const [execution] = await db
-			.select()
-			.from(routineExecution)
-			.where(eq(routineExecution.id, fixture.accepted.executionId));
-		const [activeCollaboration] = await db
-			.select()
-			.from(collaboration)
-			.where(eq(collaboration.id, fixture.activeCollaboration.id));
+		const [execution] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, fixture.accepted.executionId)),
+		);
+		const [activeCollaboration] = await onDatabase((db) =>
+			db.select().from(collaboration).where(eq(collaboration.id, fixture.activeCollaboration.id)),
+		);
 		expect(execution).toMatchObject({ state: "running", finishedAt: null });
 		expect(activeCollaboration?.status).toBe("waiting");
 	});
 
 	it("waits for a running parent turn before finalizing a child failure", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
-		const [parentTurn] = await db
-			.select()
-			.from(turn)
-			.where(eq(turn.threadId, fixture.accepted.threadId));
+		const [parentTurn] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.threadId, fixture.accepted.threadId)),
+		);
 		if (!parentTurn) throw new Error("Settlement test parent turn is missing");
-		await db
-			.update(turn)
-			.set({ status: "running", finishedAt: null })
-			.where(eq(turn.id, parentTurn.id));
-		await db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id));
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "running", finishedAt: null })
+				.where(eq(turn.id, parentTurn.id)),
+		);
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id)),
+		);
 
 		expect(
 			await store.settleThread(fixture.childThread.id, {
@@ -501,11 +533,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			}),
 		).toBe(false);
 
-		const [pendingExecution] = await db
-			.select()
-			.from(routineExecution)
-			.where(eq(routineExecution.id, fixture.accepted.executionId));
-		const [cancelledParentTurn] = await db.select().from(turn).where(eq(turn.id, parentTurn.id));
+		const [pendingExecution] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, fixture.accepted.executionId)),
+		);
+		const [cancelledParentTurn] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.id, parentTurn.id)),
+		);
 		expect(pendingExecution).toMatchObject({
 			state: "running",
 			pendingTerminalState: "failed",
@@ -514,17 +550,23 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		});
 		expect(cancelledParentTurn?.cancelRequested).toBe(true);
 
-		await db
-			.update(turn)
-			.set({ status: "cancelled", finishedAt: new Date() })
-			.where(eq(turn.id, parentTurn.id));
-		await db.update(job).set({ status: "cancelled" }).where(eq(job.id, fixture.turnJob.id));
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "cancelled", finishedAt: new Date() })
+				.where(eq(turn.id, parentTurn.id)),
+		);
+		await onDatabase((db) =>
+			db.update(job).set({ status: "cancelled" }).where(eq(job.id, fixture.turnJob.id)),
+		);
 		expect(await store.settleThread(fixture.accepted.threadId)).toBe(true);
 
-		const [settledExecution] = await db
-			.select()
-			.from(routineExecution)
-			.where(eq(routineExecution.id, fixture.accepted.executionId));
+		const [settledExecution] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, fixture.accepted.executionId)),
+		);
 		expect(settledExecution).toMatchObject({
 			state: "failed",
 			error: "Child model failed",
@@ -536,44 +578,51 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 	it("rejects a claimed turn after terminal settlement begins", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
-		const [parentTurn] = await db
-			.select()
-			.from(turn)
-			.where(eq(turn.threadId, fixture.accepted.threadId));
+		const [parentTurn] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.threadId, fixture.accepted.threadId)),
+		);
 		if (!parentTurn) throw new Error("Settlement test parent turn is missing");
-		await db
-			.update(turn)
-			.set({ status: "running", finishedAt: null })
-			.where(eq(turn.id, parentTurn.id));
-		const [childTrigger] = await db
-			.insert(message)
-			.values({
-				threadId: fixture.childThread.id,
-				authorAgentId: agentId,
-				kind: "text",
-				status: "complete",
-				parts: [],
-				content: "Start claimed child work.",
-			})
-			.returning();
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "running", finishedAt: null })
+				.where(eq(turn.id, parentTurn.id)),
+		);
+		const [childTrigger] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: fixture.childThread.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "Start claimed child work.",
+				})
+				.returning(),
+		);
 		if (!childTrigger) throw new Error("Could not create settlement test child trigger");
 		const childPayload = {
 			agentId,
 			triggerMessageId: childTrigger.id,
 			reason: "collaboration" as const,
 		};
-		const [childJob] = await db
-			.insert(job)
-			.values({
-				kind: "turn",
-				threadId: fixture.childThread.id,
-				payload: childPayload,
-				dedupeKey: `claimed-child:${fixture.childThread.id}`,
-				status: "running",
-			})
-			.returning();
+		const [childJob] = await onDatabase((db) =>
+			db
+				.insert(job)
+				.values({
+					kind: "turn",
+					threadId: fixture.childThread.id,
+					payload: childPayload,
+					dedupeKey: `claimed-child:${fixture.childThread.id}`,
+					status: "running",
+				})
+				.returning(),
+		);
 		if (!childJob) throw new Error("Could not create settlement test child job");
-		await db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id)),
+		);
 
 		expect(
 			await store.settleThread(fixture.childThread.id, {
@@ -591,60 +640,69 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		};
 		await expect(turns.prepare(claimedChild)).rejects.toThrow("The Routine execution has ended");
 
-		await Promise.all([
-			db
-				.update(turn)
-				.set({ status: "cancelled", finishedAt: new Date() })
-				.where(eq(turn.id, parentTurn.id)),
-			db.update(job).set({ status: "cancelled" }).where(eq(job.id, fixture.turnJob.id)),
-			db.update(job).set({ status: "cancelled" }).where(eq(job.id, childJob.id)),
-		]);
+		await onDatabase((db) =>
+			Effect.all([
+				db
+					.update(turn)
+					.set({ status: "cancelled", finishedAt: new Date() })
+					.where(eq(turn.id, parentTurn.id)),
+				db.update(job).set({ status: "cancelled" }).where(eq(job.id, fixture.turnJob.id)),
+				db.update(job).set({ status: "cancelled" }).where(eq(job.id, childJob.id)),
+			]),
+		);
 		expect(await store.settleThread(fixture.accepted.threadId)).toBe(true);
 	});
 
 	it("serializes concurrent final workers so one settles the execution", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
-		const [parentTurn] = await db
-			.select()
-			.from(turn)
-			.where(eq(turn.threadId, fixture.accepted.threadId));
+		const [parentTurn] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.threadId, fixture.accepted.threadId)),
+		);
 		if (!parentTurn) throw new Error("Settlement test parent turn is missing");
-		const [childTrigger] = await db
-			.insert(message)
-			.values({
-				threadId: fixture.childThread.id,
-				authorAgentId: agentId,
-				kind: "text",
-				status: "complete",
-				parts: [],
-				content: "Start child work.",
-			})
-			.returning();
-		if (!childTrigger) throw new Error("Could not create settlement test child trigger");
-		const [childTurn] = await db
-			.insert(turn)
-			.values({
-				threadId: fixture.childThread.id,
-				agentId,
-				triggerMessageId: childTrigger.id,
-				status: "running",
-				model: "test/model",
-				startedAt: new Date(),
-			})
-			.returning();
-		if (!childTurn) throw new Error("Could not create settlement test child turn");
-		await db
-			.update(turn)
-			.set({ status: "running", finishedAt: null })
-			.where(eq(turn.id, parentTurn.id));
-		await Promise.all([
-			db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id)),
-			db.update(job).set({ status: "running" }).where(eq(job.id, fixture.facilitateJob.id)),
+		const [childTrigger] = await onDatabase((db) =>
 			db
-				.update(collaboration)
-				.set({ status: "failed" })
-				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
-		]);
+				.insert(message)
+				.values({
+					threadId: fixture.childThread.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "Start child work.",
+				})
+				.returning(),
+		);
+		if (!childTrigger) throw new Error("Could not create settlement test child trigger");
+		const [childTurn] = await onDatabase((db) =>
+			db
+				.insert(turn)
+				.values({
+					threadId: fixture.childThread.id,
+					agentId,
+					triggerMessageId: childTrigger.id,
+					status: "running",
+					model: "test/model",
+					startedAt: new Date(),
+				})
+				.returning(),
+		);
+		if (!childTurn) throw new Error("Could not create settlement test child turn");
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "running", finishedAt: null })
+				.where(eq(turn.id, parentTurn.id)),
+		);
+		await onDatabase((db) =>
+			Effect.all([
+				db.update(job).set({ status: "running" }).where(eq(job.id, fixture.turnJob.id)),
+				db.update(job).set({ status: "running" }).where(eq(job.id, fixture.facilitateJob.id)),
+				db
+					.update(collaboration)
+					.set({ status: "failed" })
+					.where(eq(collaboration.id, fixture.activeCollaboration.id)),
+			]),
+		);
 
 		let arrivals = 0;
 		let release: (() => void) | undefined;
@@ -677,10 +735,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			finish(childTurn.id, fixture.facilitateJob.id, fixture.childThread.id),
 		]);
 		expect(results.sort()).toEqual([false, true]);
-		const [execution] = await db
-			.select()
-			.from(routineExecution)
-			.where(eq(routineExecution.id, fixture.accepted.executionId));
+		const [execution] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, fixture.accepted.executionId)),
+		);
 		expect(execution).toMatchObject({ state: "completed", finishedAt: expect.any(Date) });
 	});
 
@@ -690,10 +750,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			instructions: "Check recent activity.",
 			trigger: { kind: "cron", expression: "*/15 * * * *", timezone: "UTC" },
 		});
-		await db
-			.update(routine)
-			.set({ nextScheduledAt: new Date("2026-09-18T10:00:00Z") })
-			.where(eq(routine.id, created.routine.id));
+		await onDatabase((db) =>
+			db
+				.update(routine)
+				.set({ nextScheduledAt: new Date("2026-09-18T10:00:00Z") })
+				.where(eq(routine.id, created.routine.id)),
+		);
 		const now = new Date("2026-09-18T12:37:40Z");
 		const accepted = await store.processNextDue(now);
 		expect(accepted?.duplicate).toBe(false);
@@ -703,7 +765,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			kind: "cron",
 			scheduledAt: "2026-09-18T12:30:00.000Z",
 		});
-		const [updated] = await db.select().from(routine).where(eq(routine.id, created.routine.id));
+		const [updated] = await onDatabase((db) =>
+			db.select().from(routine).where(eq(routine.id, created.routine.id)),
+		);
 		expect(updated?.nextScheduledAt?.toISOString()).toBe("2026-09-18T12:45:00.000Z");
 		expect(await store.processNextDue(now)).toBeUndefined();
 	});

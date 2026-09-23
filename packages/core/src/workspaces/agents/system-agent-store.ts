@@ -88,14 +88,13 @@ export const systemAgentStore: SystemAgentStore = {
  * routing on, and the screen that says why, read the same fact.
  */
 export function facilitatorIsSetUp(workspaceId: string): Effect.Effect<boolean, never, Database> {
-	return query(async (db) => {
-		const [row] = await db
+	return query((db) =>
+		db
 			.select({ model: agent.model })
 			.from(agent)
 			.where(
 				and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, FACILITATE_SYSTEM_AGENT)),
 			)
-			.limit(1);
-		return row?.model != null;
-	});
+			.limit(1),
+	).pipe(Effect.map(([row]) => row?.model != null));
 }

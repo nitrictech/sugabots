@@ -1,6 +1,12 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { Pool } from "pg";
-import { Database, effectRunner, layer } from "./database.ts";
+import {
+	Database,
+	type Executor,
+	effectRunner,
+	layer,
+	type QueryFailure,
+	query,
+} from "./database.ts";
 
 /**
  * A real database, for the store tests.
@@ -20,13 +26,17 @@ if (!url) {
 	throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
 }
 
-export const databaseForTests = ManagedRuntime.make(layer(new Pool({ connectionString: url })));
+export const databaseForTests = ManagedRuntime.make(layer(url));
 
 /** Closes the pool. Call from `afterAll` in any file that uses `onPostgres`. */
 export const closeDatabase = (): Promise<void> => databaseForTests.dispose();
 
 /** Runs one Effect against the test database. */
 export const runOnPostgres = effectRunner(databaseForTests);
+
+/** Runs one query against the test database, for a case's fixtures and checks. */
+export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailure>): Promise<A> =>
+	runOnPostgres(query(run));
 
 /** The same store with its methods returning promises. */
 export type Promised<Store> = {
@@ -54,6 +64,6 @@ export function onPostgres<Store extends object>(store: Store): Promised<Store> 
  * the executor dies and names itself.
  */
 export const noDatabase: Layer.Layer<Database> = Layer.succeed(Database, {
-	executor: Effect.die(new Error("This test has no database")),
+	execute: () => Effect.die(new Error("This test has no database")),
 	transaction: (use) => use,
 });

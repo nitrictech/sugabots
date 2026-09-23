@@ -1,6 +1,7 @@
 import type { Channel, StreamEvent } from "@sugabots/contracts";
-import { and, asc, eq, gt, lt } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { and, asc, count, eq, gt, lt } from "drizzle-orm";
+import { Effect } from "effect";
+import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
 import { event } from "../schema.ts";
 
 /**
@@ -40,49 +41,71 @@ export interface EventStore {
 	prune(before: Date): Promise<number>;
 }
 
-export function postgresEventStore(db: NodePgDatabase): EventStore {
-	return {
-		async append(channel, payload) {
-			const [row] = await db
-				.insert(event)
-				.values({ channel, type: payload.type, payload })
-				.returning({ seq: event.seq });
+/**
+ * The store on the database the Effect is run with. Its methods are promises
+ * because the bus above it is, so it keeps the context it was built in to run
+ * its queries on.
+ */
+export const postgresEventStore: Effect.Effect<EventStore, never, Database> = Effect.gen(
+	function* () {
+		const context = yield* Effect.context<Database>();
+		const run = <A>(statement: (db: Executor) => Effect.Effect<A, QueryFailure>) =>
+			Effect.runPromiseWith(context)(query(statement));
 
-			if (!row) {
-				throw new Error(`Storing a ${payload.type} on ${channel} returned no row`);
-			}
-			return row.seq;
-		},
+		return {
+			async append(channel, payload) {
+				const [row] = await run((db) =>
+					db
+						.insert(event)
+						.values({ channel, type: payload.type, payload })
+						.returning({ seq: event.seq }),
+				);
 
-		async replay(channel, since, limit) {
-			const rows = await db
-				.select({ seq: event.seq, payload: event.payload })
-				.from(event)
-				.where(and(eq(event.channel, channel), gt(event.seq, since)))
-				.orderBy(asc(event.seq))
-				.limit(limit);
+				if (!row) {
+					throw new Error(`Storing a ${payload.type} on ${channel} returned no row`);
+				}
+				return row.seq;
+			},
 
-			return rows.map((row) => ({ seq: row.seq, event: row.payload }));
-		},
+			async replay(channel, since, limit) {
+				const rows = await run((db) =>
+					db
+						.select({ seq: event.seq, payload: event.payload })
+						.from(event)
+						.where(and(eq(event.channel, channel), gt(event.seq, since)))
+						.orderBy(asc(event.seq))
+						.limit(limit),
+				);
 
-		async has(channel, seq) {
-			const rows = await db
-				.select({ seq: event.seq })
-				.from(event)
-				.where(and(eq(event.channel, channel), eq(event.seq, seq)))
-				.limit(1);
+				return rows.map((row) => ({ seq: row.seq, event: row.payload }));
+			},
 
-			return rows.length > 0;
-		},
+			async has(channel, seq) {
+				const rows = await run((db) =>
+					db
+						.select({ seq: event.seq })
+						.from(event)
+						.where(and(eq(event.channel, channel), eq(event.seq, seq)))
+						.limit(1),
+				);
 
-		async prune(before) {
-			// The count, not the rows. A week of events is the largest result set
-			// this process would ever pull back, and it was only being counted.
-			const deleted = await db.delete(event).where(lt(event.createdAt, before));
-			return deleted.rowCount ?? 0;
-		},
-	};
-}
+				return rows.length > 0;
+			},
+
+			async prune(before) {
+				// The count, not the rows. A week of events is the largest result set
+				// this process would ever pull back, and it was only being counted.
+				const [counted] = await run((db) => {
+					const deleted = db
+						.$with("deleted")
+						.as(db.delete(event).where(lt(event.createdAt, before)).returning({ seq: event.seq }));
+					return db.with(deleted).select({ removed: count() }).from(deleted);
+				});
+				return counted?.removed ?? 0;
+			},
+		};
+	},
+);
 
 interface MemoryRow extends StoredEvent {
 	channel: Channel;

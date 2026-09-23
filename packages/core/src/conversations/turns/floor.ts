@@ -7,7 +7,13 @@ import {
 } from "@sugabots/contracts";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Effect } from "effect";
-import { type Database, type Executor, query, transaction } from "../../database/database.ts";
+import {
+	type Database,
+	type Executor,
+	type QueryFailure,
+	query,
+	transaction,
+} from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import {
 	agent,
@@ -182,11 +188,11 @@ export const giveFloor = (
 	);
 
 /** What `decideFloor` needs from the database, for one thread and message. */
-async function loadFloorScope(
+const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
-): Promise<Omit<FloorInput, "content" | "author">> {
-	const [scope] = await db
+): Effect.fn.Return<Omit<FloorInput, "content" | "author">, QueryFailure> {
+	const [scope] = yield* db
 		.select({
 			hostAgentId: thread.hostAgentId,
 			podId: thread.podId,
@@ -204,17 +210,17 @@ async function loadFloorScope(
 	// connection, and queries sent concurrently down one are not run concurrently
 	// anyway. The driver queues them, and warns that it is about to stop accepting
 	// them at all.
-	const crew = await db
+	const crew = yield* db
 		.select({ id: agent.id, handle: agent.handle })
 		.from(agent)
 		.where(and(eq(agent.podId, scope.podId), isNull(agent.systemAgentKey)));
-	const participants = await db
+	const participants = yield* db
 		.select({ agentId: threadParticipant.agentId })
 		.from(threadParticipant)
 		.where(eq(threadParticipant.threadId, committed.threadId));
 	// Newest first, this message included: how long agents have been talking
 	// among themselves, and who among them spoke last.
-	const recent = await db
+	const recent = yield* db
 		.select({ id: message.id, authorAgentId: message.authorAgentId })
 		.from(message)
 		.where(and(eq(message.threadId, committed.threadId), eq(message.status, "complete")))
@@ -237,4 +243,4 @@ async function loadFloorScope(
 		lastAgentSpeakerId: previous?.authorAgentId ?? undefined,
 		agentRun,
 	};
-}
+});

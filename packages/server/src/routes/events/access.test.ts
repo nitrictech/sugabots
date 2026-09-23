@@ -1,6 +1,5 @@
 import { handleFromName } from "@sugabots/contracts";
 import { threadStore } from "@sugabots/core/conversations/threads/store";
-import { closePool, getDb } from "@sugabots/core/database/client";
 import {
 	agent,
 	pod,
@@ -10,7 +9,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { runOnPostgres } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -35,80 +34,97 @@ it("denies event access when no access dependency is configured", async () => {
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
-	afterAll(closePool);
+	afterAll(closeDatabase);
 
 	/**
 	 * A workspace with a member in a shared pod, an administrator who is not in
 	 * it, and one person left outside the workspace.
 	 */
 	async function fixture() {
-		const db = getDb();
 		const suffix = crypto.randomUUID();
 
-		const [member] = await db
-			.insert(user)
-			.values({ name: "Member", email: `member-${suffix}@example.com` })
-			.returning();
-		const [outsider] = await db
-			.insert(user)
-			.values({ name: "Outsider", email: `outsider-${suffix}@example.com` })
-			.returning();
-		const [administrator] = await db
-			.insert(user)
-			.values({ name: "Admin", email: `admin-${suffix}@example.com` })
-			.returning();
-		const [space] = await db
-			.insert(workspace)
-			.values({ name: "Test", slug: `test-${suffix}` })
-			.returning();
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Member", email: `member-${suffix}@example.com` })
+				.returning(),
+		);
+		const [outsider] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Outsider", email: `outsider-${suffix}@example.com` })
+				.returning(),
+		);
+		const [administrator] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Admin", email: `admin-${suffix}@example.com` })
+				.returning(),
+		);
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Test", slug: `test-${suffix}` })
+				.returning(),
+		);
 
 		if (!member || !outsider || !administrator || !space) {
 			throw new Error("fixture did not insert");
 		}
 
-		await db.insert(workspaceMember).values([
-			{ workspaceId: space.id, userId: member.id },
-			{ workspaceId: space.id, userId: administrator.id, role: "admin" },
-		]);
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId: space.id, userId: member.id },
+				{ workspaceId: space.id, userId: administrator.id, role: "admin" },
+			]),
+		);
 
 		// A pod the member is in, with a thread hosted by an agent placed there.
-		const [room] = await db
-			.insert(pod)
-			.values({
-				workspaceId: space.id,
-				kind: "shared",
-				name: "Room",
-				slug: `room-${suffix}`,
-				createdById: member.id,
-			})
-			.returning();
-		const [host] = await db
-			.insert(agent)
-			.values({
-				workspaceId: space.id,
-				podId: room?.id ?? "",
-				name: `Host ${suffix}`,
-				handle: handleFromName(`Host ${suffix}`),
-				hue: 1,
-				face: "bar",
-				model: "m",
-			})
-			.returning();
+		const [room] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: space.id,
+					kind: "shared",
+					name: "Room",
+					slug: `room-${suffix}`,
+					createdById: member.id,
+				})
+				.returning(),
+		);
+		const [host] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId: space.id,
+					podId: room?.id ?? "",
+					name: `Host ${suffix}`,
+					handle: handleFromName(`Host ${suffix}`),
+					hue: 1,
+					face: "bar",
+					model: "m",
+				})
+				.returning(),
+		);
 		if (!room || !host) {
 			throw new Error("fixture did not insert");
 		}
-		await db.insert(podMember).values({ workspaceId: space.id, podId: room.id, userId: member.id });
-		const [conversation] = await db
-			.insert(thread)
-			.values({
-				workspaceId: space.id,
-				podId: room.id,
-				hostAgentId: host.id,
-				type: "chat",
-				title: "A thread",
-				initiatorUserId: member.id,
-			})
-			.returning();
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId: space.id, podId: room.id, userId: member.id }),
+		);
+		const [conversation] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId: space.id,
+					podId: room.id,
+					hostAgentId: host.id,
+					type: "chat",
+					title: "A thread",
+					initiatorUserId: member.id,
+				})
+				.returning(),
+		);
 		if (!conversation) {
 			throw new Error("fixture did not insert");
 		}
@@ -183,15 +199,17 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 
 	it("takes the channel away once the administrator is demoted", async () => {
 		const { access, administrator, space, conversation } = await fixture();
-		await getDb()
-			.update(workspaceMember)
-			.set({ role: "member" })
-			.where(
-				and(
-					eq(workspaceMember.workspaceId, space.id),
-					eq(workspaceMember.userId, administrator.id),
+		await onDatabase((db) =>
+			db
+				.update(workspaceMember)
+				.set({ role: "member" })
+				.where(
+					and(
+						eq(workspaceMember.workspaceId, space.id),
+						eq(workspaceMember.userId, administrator.id),
+					),
 				),
-			);
+		);
 
 		expect(await access.thread(session(administrator.id), conversation.id)).toBeUndefined();
 	});

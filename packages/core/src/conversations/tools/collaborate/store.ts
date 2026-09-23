@@ -257,14 +257,16 @@ export function collaborationStore(publishEvents: PublishEvents): CollaborationS
 			),
 
 		readAnswer: (collaborationId) =>
-			query(async (db) => {
-				const [row] = await db
-					.select({ answer: collaboration.answer })
-					.from(collaboration)
-					.where(eq(collaboration.id, collaborationId))
-					.limit(1);
-				return row?.answer ?? undefined;
-			}),
+			query((db) =>
+				Effect.gen(function* () {
+					const [row] = yield* db
+						.select({ answer: collaboration.answer })
+						.from(collaboration)
+						.where(eq(collaboration.id, collaborationId))
+						.limit(1);
+					return row?.answer ?? undefined;
+				}),
+			),
 
 		deliverAnswer: ({ threadId, answer }) =>
 			transaction(
@@ -295,23 +297,34 @@ export function collaborationStore(publishEvents: PublishEvents): CollaborationS
 	};
 }
 
-async function loadThreadRow(db: Executor, threadId: string) {
-	const [row] = await db.select().from(thread).where(eq(thread.id, threadId)).limit(1);
+const loadThreadRow = Effect.fn("CollaborationStore.loadThreadRow")(function* (
+	db: Executor,
+	threadId: string,
+) {
+	const [row] = yield* db.select().from(thread).where(eq(thread.id, threadId)).limit(1);
 	return row;
-}
+});
 
-async function findAgentChat(db: Executor, podId: string, hostAgentId: string) {
-	const [row] = await db
+const findAgentChat = Effect.fn("CollaborationStore.findAgentChat")(function* (
+	db: Executor,
+	podId: string,
+	hostAgentId: string,
+) {
+	const [row] = yield* db
 		.select({ id: chat.id })
 		.from(chat)
 		.where(and(eq(chat.podId, podId), eq(chat.hostAgentId, hostAgentId)))
 		.limit(1);
 	return row;
-}
+});
 
 /** A crew agent placed in the thread's pod, by the name the model used. */
-async function findCrewByName(db: Executor, parent: schema.ThreadRow, name: string) {
-	const [row] = await db
+const findCrewByName = Effect.fn("CollaborationStore.findCrewByName")(function* (
+	db: Executor,
+	parent: schema.ThreadRow,
+	name: string,
+) {
+	const [row] = yield* db
 		.select({ id: agent.id, name: agent.name })
 		.from(agent)
 		.where(
@@ -324,36 +337,45 @@ async function findCrewByName(db: Executor, parent: schema.ThreadRow, name: stri
 		)
 		.limit(1);
 	return row;
-}
+});
 
 /** The thread's parent, grandparent and so on, nearest first. */
-async function loadAncestors(db: Executor, start: schema.ThreadRow): Promise<schema.ThreadRow[]> {
+const loadAncestors = Effect.fn("CollaborationStore.loadAncestors")(function* (
+	db: Executor,
+	start: schema.ThreadRow,
+) {
 	const ancestors: schema.ThreadRow[] = [];
 	let current: schema.ThreadRow | undefined = start;
 	while (current?.parentThreadId && ancestors.length <= MAX_DEPTH) {
-		current = await loadThreadRow(db, current.parentThreadId);
+		current = yield* loadThreadRow(db, current.parentThreadId);
 		if (current) {
 			ancestors.push(current);
 		}
 	}
 	return ancestors;
-}
+});
 
-async function hasCollaboratedThisTurn(db: Executor, turnId: string): Promise<boolean> {
-	const [existing] = await db
+const hasCollaboratedThisTurn = Effect.fn("CollaborationStore.hasCollaboratedThisTurn")(function* (
+	db: Executor,
+	turnId: string,
+) {
+	const [existing] = yield* db
 		.select({ id: collaboration.id })
 		.from(collaboration)
 		.where(eq(collaboration.turnId, turnId))
 		.limit(1);
 	return existing !== undefined;
-}
+});
 
 /**
  * The collaboration, locked for update so a transition is serialised, with the
  * names the announcement and the resume turn need.
  */
-async function lockCollaboration(db: Executor, by: ReturnType<typeof eq>) {
-	const [row] = await db
+const lockCollaboration = Effect.fn("CollaborationStore.lockCollaboration")(function* (
+	db: Executor,
+	by: ReturnType<typeof eq>,
+) {
+	const [row] = yield* db
 		.select({ collaboration, collaboratorName: agent.name, askingAgentId: message.authorAgentId })
 		.from(collaboration)
 		.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
@@ -369,15 +391,15 @@ async function lockCollaboration(db: Executor, by: ReturnType<typeof eq>) {
 		collaboratorName: row.collaboratorName,
 		askingAgentId: row.askingAgentId,
 	};
-}
+});
 
-async function writeStatus(
+const writeStatus = Effect.fn("CollaborationStore.writeStatus")(function* (
 	db: Executor,
 	collaborationId: string,
 	change: Pick<schema.CollaborationRow, "status"> &
 		Partial<Pick<schema.CollaborationRow, "answer">>,
-): Promise<schema.CollaborationRow> {
-	const [updated] = await db
+) {
+	const [updated] = yield* db
 		.update(collaboration)
 		.set(change)
 		.where(eq(collaboration.id, collaborationId))
@@ -386,7 +408,7 @@ async function writeStatus(
 		throw new Error("Collaboration disappeared during update");
 	}
 	return updated;
-}
+});
 
 function firstLine(text: string): string {
 	const line = text.split(/\r?\n/, 1)[0]?.trim() ?? "";

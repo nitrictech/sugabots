@@ -1,7 +1,6 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { closePool, getDb } from "../../database/client.ts";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
 import { eventPublisher } from "../../database/events/publish.ts";
@@ -18,7 +17,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
@@ -31,9 +30,9 @@ import { threadStore } from "./store.ts";
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
 
+const eventStore = await runOnPostgres(postgresEventStore);
+
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
-	const db = getDb();
-	const eventStore = postgresEventStore(db);
 	const eventBus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(eventBus);
 	const store = onPostgres(threadStore());
@@ -72,26 +71,29 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 
 	afterAll(async () => {
 		await closeDatabase();
-		await closePool();
 	});
 
 	beforeEach(async () => {
 		// The queue is global, so `claimNext` would otherwise hand back whatever
 		// an earlier run left queued. This is the only test file that queues jobs,
 		// and vitest runs a file's cases one after another.
-		await db.delete(job);
+		await onDatabase((db) => db.delete(job));
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [workspaceRow] = await db
-			.insert(workspace)
-			.values({ name: `Thread test ${suffix}`, slug: `thread-test-${suffix}` })
-			.returning();
-		const people = await db
-			.insert(user)
-			.values([
-				{ name: "Sam", email: `thread-sam-${suffix}@example.com` },
-				{ name: "Kim", email: `thread-kim-${suffix}@example.com` },
-			])
-			.returning();
+		const [workspaceRow] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Thread test ${suffix}`, slug: `thread-test-${suffix}` })
+				.returning(),
+		);
+		const people = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values([
+					{ name: "Sam", email: `thread-sam-${suffix}@example.com` },
+					{ name: "Kim", email: `thread-kim-${suffix}@example.com` },
+				])
+				.returning(),
+		);
 		const [member, outsider] = people;
 		if (!workspaceRow || !member || !outsider) {
 			throw new Error("Could not create thread test records");
@@ -100,60 +102,68 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		memberId = member.id;
 		outsiderId = outsider.id;
 
-		await db.insert(workspaceMember).values([
-			{ workspaceId, userId: memberId },
-			{ workspaceId, userId: outsiderId },
-		]);
-		const [podRow] = await db
-			.insert(pod)
-			.values({
-				workspaceId,
-				ownerId: memberId,
-				kind: "shared",
-				name: "Suga-Team",
-				slug: `suga-${suffix}`,
-				createdById: memberId,
-			})
-			.returning();
-		const [agentRow] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId: podRow?.id ?? "",
-				name: `Release agent ${suffix}`,
-				handle: handleFromName(`Release agent ${suffix}`),
-				hue: 150,
-				face: "bar",
-				model: "claude-opus-4-1-20250805",
-				createdById: memberId,
-			})
-			.returning();
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId: memberId },
+				{ workspaceId, userId: outsiderId },
+			]),
+		);
+		const [podRow] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					ownerId: memberId,
+					kind: "shared",
+					name: "Suga-Team",
+					slug: `suga-${suffix}`,
+					createdById: memberId,
+				})
+				.returning(),
+		);
+		const [agentRow] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId: podRow?.id ?? "",
+					name: `Release agent ${suffix}`,
+					handle: handleFromName(`Release agent ${suffix}`),
+					hue: 150,
+					face: "bar",
+					model: "claude-opus-4-1-20250805",
+					createdById: memberId,
+				})
+				.returning(),
+		);
 		if (!podRow || !agentRow) {
 			throw new Error("Could not create thread scope");
 		}
 		podId = podRow.id;
 		agentId = agentRow.id;
-		await db.insert(podMember).values({ workspaceId, podId, userId: memberId });
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 		// The system agents belong to the workspace, not to the pod, and each is
 		// set up by being given a model.
-		const placed = await db
-			.insert(agent)
-			.values(
-				SYSTEM_AGENTS.map((definition) => ({
-					workspaceId,
-					podId: null,
-					createdById: memberId,
-					name: definition.name,
-					handle: handleFromName(definition.name),
-					systemAgentKey: definition.key,
-					description: definition.description,
-					hue: definition.hue,
-					face: definition.face,
-					model: SYSTEM_AGENT_MODEL,
-					prompt: definition.prompt,
-				})),
-			)
-			.returning({ id: agent.id });
+		const placed = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values(
+					SYSTEM_AGENTS.map((definition) => ({
+						workspaceId,
+						podId: null,
+						createdById: memberId,
+						name: definition.name,
+						handle: handleFromName(definition.name),
+						systemAgentKey: definition.key,
+						description: definition.description,
+						hue: definition.hue,
+						face: definition.face,
+						model: SYSTEM_AGENT_MODEL,
+						prompt: definition.prompt,
+					})),
+				)
+				.returning({ id: agent.id }),
+		);
 		if (placed.length !== SYSTEM_AGENTS.length) {
 			throw new Error("Could not create the workspace's system agents");
 		}
@@ -164,19 +174,21 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		// mention picks. Only the host could take a turn, so every routed turn was
 		// discarded as "the thread or its host agent no longer exists" and the
 		// person saw a reply that never arrived.
-		const [otherRow] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId,
-				name: `Second agent ${Date.now()}`,
-				handle: handleFromName(`Second agent ${Date.now()}`),
-				hue: 200,
-				face: "dots",
-				model: "claude-opus-4-1-20250805",
-				createdById: memberId,
-			})
-			.returning({ id: agent.id });
+		const [otherRow] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId,
+					name: `Second agent ${Date.now()}`,
+					handle: handleFromName(`Second agent ${Date.now()}`),
+					hue: 200,
+					face: "dots",
+					model: "claude-opus-4-1-20250805",
+					createdById: memberId,
+				})
+				.returning({ id: agent.id }),
+		);
 		if (!otherRow) throw new Error("Could not create the second agent");
 
 		const details = await createThread({
@@ -194,7 +206,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				reason: "mention",
 			}),
 		);
-		const [queued] = (await db.select().from(job)).filter(
+		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) =>
 				row.kind === "turn" &&
 				row.threadId === details.thread.id &&
@@ -221,19 +233,21 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		// The summary is about the thread, not about whoever spoke last. Tying it
 		// to the host meant a shared thread stopped being summarised as soon as
 		// anyone else replied.
-		const [otherRow] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId,
-				name: `Third agent ${Date.now()}`,
-				handle: handleFromName(`Third agent ${Date.now()}`),
-				hue: 40,
-				face: "dots",
-				model: "claude-opus-4-1-20250805",
-				createdById: memberId,
-			})
-			.returning({ id: agent.id });
+		const [otherRow] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId,
+					name: `Third agent ${Date.now()}`,
+					handle: handleFromName(`Third agent ${Date.now()}`),
+					hue: 40,
+					face: "dots",
+					model: "claude-opus-4-1-20250805",
+					createdById: memberId,
+				})
+				.returning({ id: agent.id }),
+		);
 		if (!otherRow) throw new Error("Could not create the third agent");
 
 		const details = await createThread({
@@ -248,7 +262,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		await runOnPostgres(
 			queueSummary({ threadId: details.thread.id, agentId: otherRow.id, sourceMessageId }),
 		);
-		const [queued] = (await db.select().from(job)).filter(
+		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "thread_summary" && row.threadId === details.thread.id,
 		);
 		if (!queued || !("sourceMessageId" in queued.payload)) {
@@ -269,19 +283,21 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	it("keeps the agent who just spoke off the router's list", async () => {
 		// Two agents answering each other in turn is the loop this prevents: the
 		// router picked the same agent again, and again, until the run cap.
-		const [otherRow] = await db
-			.insert(agent)
-			.values({
-				workspaceId,
-				podId,
-				name: `Fourth agent ${Date.now()}`,
-				handle: handleFromName(`Fourth agent ${Date.now()}`),
-				hue: 90,
-				face: "dots",
-				model: "claude-opus-4-1-20250805",
-				createdById: memberId,
-			})
-			.returning({ id: agent.id });
+		const [otherRow] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId,
+					name: `Fourth agent ${Date.now()}`,
+					handle: handleFromName(`Fourth agent ${Date.now()}`),
+					hue: 90,
+					face: "dots",
+					model: "claude-opus-4-1-20250805",
+					createdById: memberId,
+				})
+				.returning({ id: agent.id }),
+		);
 		if (!otherRow) throw new Error("Could not create the fourth agent");
 
 		const details = await createThread({
@@ -291,17 +307,19 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Who is talking?",
 		});
-		const [reply] = await db
-			.insert(message)
-			.values({
-				threadId: details.thread.id,
-				authorAgentId: otherRow.id,
-				kind: "text",
-				status: "complete",
-				content: "I just said something.",
-				parts: [{ type: "text", text: "I just said something." }],
-			})
-			.returning({ id: message.id });
+		const [reply] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: details.thread.id,
+					authorAgentId: otherRow.id,
+					kind: "text",
+					status: "complete",
+					content: "I just said something.",
+					parts: [{ type: "text", text: "I just said something." }],
+				})
+				.returning({ id: message.id }),
+		);
 		if (!reply) throw new Error("Could not record the reply");
 
 		const scope = await runOnPostgres(
@@ -322,8 +340,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Anyone there?",
 		});
-		await db.update(agent).set({ model: null }).where(eq(agent.id, agentId));
-		const [queued] = (await db.select().from(job)).filter(
+		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
+		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "turn" && row.threadId === details.thread.id,
 		);
 		if (!queued || !("triggerMessageId" in queued.payload) || !("reason" in queued.payload)) {
@@ -346,10 +364,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	it("does not facilitate at all until the workspace has chosen a Facilitator model", async () => {
 		// The old arrangement borrowed the host agent's model here, which put a
 		// question nobody asked in front of a model nobody chose for the job.
-		await db
-			.update(agent)
-			.set({ model: null })
-			.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "facilitate")));
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ model: null })
+				.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "facilitate"))),
+		);
 		const details = await createThread({
 			workspaceId,
 			podId,
@@ -368,10 +388,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	});
 
 	it("reports summaries as off until the workspace has chosen a Scribe model", async () => {
-		await db
-			.update(agent)
-			.set({ model: null })
-			.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "summarise")));
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ model: null })
+				.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "summarise"))),
+		);
 		const created = await createThread({
 			workspaceId,
 			podId,
@@ -403,7 +425,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				parts: [{ type: "text", text: "Check the release\nPay attention to migrations." }],
 			},
 		]);
-		const queuedTurns = (await db.select().from(job)).filter(
+		const queuedTurns = (await onDatabase((db) => db.select().from(job))).filter(
 			(queued) => queued.threadId === details.thread.id,
 		);
 		expect(queuedTurns).toMatchObject([
@@ -430,39 +452,42 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		}
 		const firstCreatedAt = new Date("2026-09-10T03:59:59.000Z");
 		const sharedCreatedAt = new Date("2026-09-10T04:00:00.000Z");
-		await db
-			.update(message)
-			.set({ createdAt: firstCreatedAt })
-			.where(eq(message.id, firstMessageId));
+		await onDatabase((db) =>
+			db.update(message).set({ createdAt: firstCreatedAt }).where(eq(message.id, firstMessageId)),
+		);
 		const historyIdPrefix = crypto.randomUUID().slice(0, 24);
 		const historyIds = Array.from(
 			{ length: 124 },
 			(_, index) => `${historyIdPrefix}${(index + 1).toString(16).padStart(12, "0")}`,
 		);
-		await db.insert(message).values(
-			historyIds.map((id, index) => ({
-				id,
-				threadId: details.thread.id,
-				authorUserId: memberId,
-				kind: "text" as const,
-				status: "complete" as const,
-				parts: [{ type: "text" as const, text: `Message ${String(index + 1).padStart(3, "0")}` }],
-				content: `Message ${String(index + 1).padStart(3, "0")}`,
-				createdAt: sharedCreatedAt,
-			})),
+		await onDatabase((db) =>
+			db.insert(message).values(
+				historyIds.map((id, index) => ({
+					id,
+					threadId: details.thread.id,
+					authorUserId: memberId,
+					kind: "text" as const,
+					status: "complete" as const,
+					parts: [{ type: "text" as const, text: `Message ${String(index + 1).padStart(3, "0")}` }],
+					content: `Message ${String(index + 1).padStart(3, "0")}`,
+					createdAt: sharedCreatedAt,
+				})),
+			),
 		);
-		await db.insert(turn).values(
-			historyIds.map((triggerMessageId) => ({
-				threadId: details.thread.id,
-				agentId,
-				triggerMessageId,
-				status: "done" as const,
-				model: "test/model",
-				usage: { modelCalls: 1, inputTokens: 2, outputTokens: 3, totalTokens: 5 },
-				reportedCost: "0.01",
-				startedAt: sharedCreatedAt,
-				finishedAt: sharedCreatedAt,
-			})),
+		await onDatabase((db) =>
+			db.insert(turn).values(
+				historyIds.map((triggerMessageId) => ({
+					threadId: details.thread.id,
+					agentId,
+					triggerMessageId,
+					status: "done" as const,
+					model: "test/model",
+					usage: { modelCalls: 1, inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+					reportedCost: "0.01",
+					startedAt: sharedCreatedAt,
+					finishedAt: sharedCreatedAt,
+				})),
+			),
 		);
 
 		const pages = [];
@@ -523,59 +548,71 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	});
 
 	it("rejects thread pods and hosts from another workspace at the database boundary", async () => {
-		const [otherWorkspace] = await db
-			.insert(workspace)
-			.values({ name: "Other thread workspace", slug: `other-thread-${crypto.randomUUID()}` })
-			.returning();
+		const [otherWorkspace] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Other thread workspace", slug: `other-thread-${crypto.randomUUID()}` })
+				.returning(),
+		);
 		if (!otherWorkspace) {
 			throw new Error("Could not create other thread workspace");
 		}
-		await db.insert(workspaceMember).values({ workspaceId: otherWorkspace.id, userId: memberId });
-		const [foreignPod] = await db
-			.insert(pod)
-			.values({
-				workspaceId: otherWorkspace.id,
-				ownerId: memberId,
-				kind: "shared",
-				name: "Foreign",
-				slug: "foreign",
-			})
-			.returning();
-		const [foreignAgent] = await db
-			.insert(agent)
-			.values({
-				workspaceId: otherWorkspace.id,
-				podId: foreignPod?.id ?? "",
-				name: "Foreign agent",
-				handle: "foreign-agent",
-				hue: 20,
-				face: "bar",
-				model: "test/model",
-			})
-			.returning();
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId: otherWorkspace.id, userId: memberId }),
+		);
+		const [foreignPod] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: otherWorkspace.id,
+					ownerId: memberId,
+					kind: "shared",
+					name: "Foreign",
+					slug: "foreign",
+				})
+				.returning(),
+		);
+		const [foreignAgent] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId: otherWorkspace.id,
+					podId: foreignPod?.id ?? "",
+					name: "Foreign agent",
+					handle: "foreign-agent",
+					hue: 20,
+					face: "bar",
+					model: "test/model",
+				})
+				.returning(),
+		);
 		if (!foreignPod || !foreignAgent) {
 			throw new Error("Could not create foreign thread scope");
 		}
 
 		await expect(
-			db.insert(thread).values({
-				workspaceId,
-				podId: foreignPod.id,
-				hostAgentId: agentId,
-				type: "chat",
-				title: "Foreign pod",
-				initiatorUserId: memberId,
-			}),
+			onDatabase((db) =>
+				db.insert(thread).values({
+					workspaceId,
+					podId: foreignPod.id,
+					hostAgentId: agentId,
+					type: "chat",
+					title: "Foreign pod",
+					initiatorUserId: memberId,
+				}),
+			),
 		).rejects.toThrow();
 		await expect(
-			db.insert(thread).values({
-				workspaceId,
-				podId,
-				hostAgentId: foreignAgent.id,
-				type: "chat",
-				title: "Foreign host",
-				initiatorUserId: memberId,
-			}),
+			onDatabase((db) =>
+				db.insert(thread).values({
+					workspaceId,
+					podId,
+					hostAgentId: foreignAgent.id,
+					type: "chat",
+					title: "Foreign host",
+					initiatorUserId: memberId,
+				}),
+			),
 		).rejects.toThrow();
 	});
 
@@ -589,12 +626,16 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 
 		await onPostgres(agentStore).remove(workspaceId, agentId);
-		expect(await db.select().from(thread).where(eq(thread.id, details.thread.id))).toHaveLength(0);
+		expect(
+			await onDatabase((db) => db.select().from(thread).where(eq(thread.id, details.thread.id))),
+		).toHaveLength(0);
 		await expect(onPostgres(podStore).remove(workspaceId, podId)).resolves.toBeUndefined();
 	});
 
 	it("adds each human sender to the participant stack", async () => {
-		await db.insert(podMember).values({ workspaceId, podId, userId: outsiderId });
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: outsiderId }),
+		);
 		const details = await createThread({
 			workspaceId,
 			podId,
@@ -629,21 +670,23 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			throw new Error("Thread test has no trigger message");
 		}
 
-		await db.insert(turn).values([
-			{
-				threadId: details.thread.id,
-				agentId,
-				triggerMessageId,
-				status: "done",
-				model: "claude-opus-4-1-20250805",
-				usage: { modelCalls: 2, inputTokens: 1_200, outputTokens: 300, totalTokens: 1_500 },
-				reportedCost: "0.0125",
-				contextTokens: 1_200,
-				contextCapacity: 200_000,
-				startedAt: new Date("2026-09-10T04:00:00.000Z"),
-				finishedAt: new Date("2026-09-10T04:00:03.000Z"),
-			},
-		]);
+		await onDatabase((db) =>
+			db.insert(turn).values([
+				{
+					threadId: details.thread.id,
+					agentId,
+					triggerMessageId,
+					status: "done",
+					model: "claude-opus-4-1-20250805",
+					usage: { modelCalls: 2, inputTokens: 1_200, outputTokens: 300, totalTokens: 1_500 },
+					reportedCost: "0.0125",
+					contextTokens: 1_200,
+					contextCapacity: 200_000,
+					startedAt: new Date("2026-09-10T04:00:00.000Z"),
+					finishedAt: new Date("2026-09-10T04:00:03.000Z"),
+				},
+			]),
+		);
 
 		expect((await store.getVisible(details.thread.id, memberId))?.usage).toEqual({
 			modelCalls: 2,
@@ -663,13 +706,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
 		});
-		const [turnJob] = (await db.select().from(job)).filter(
+		const [turnJob] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "turn" && row.threadId === details.thread.id,
 		);
 		if (!turnJob || !("agentId" in turnJob.payload && "triggerMessageId" in turnJob.payload)) {
 			throw new Error("Thread test has no turn job");
 		}
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
+		);
 		const preparedTurn = await turns.prepare({
 			id: turnJob.id,
 			threadId: turnJob.threadId,
@@ -691,13 +736,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		);
 		await turns.queueSummary(preparedTurn);
 
-		const [summaryJob] = (await db.select().from(job)).filter(
+		const [summaryJob] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "thread_summary" && row.threadId === details.thread.id,
 		);
 		if (!summaryJob || !("sourceMessageId" in summaryJob.payload)) {
 			throw new Error("Completed turn did not queue a thread summary");
 		}
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, summaryJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, summaryJob.id)),
+		);
 		const preparedSummary = await summaries.prepare({
 			id: summaryJob.id,
 			threadId: summaryJob.threadId,
@@ -712,15 +759,16 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 
 		// The summariser works in its own thread hanging off the one it summarises,
 		// so its turns never appear in the conversation people are having.
-		const [summaryTurn] = await db
-			.select({ threadId: turn.threadId })
-			.from(turn)
-			.where(eq(turn.id, preparedSummary.turnId));
+		const [summaryTurn] = await onDatabase((db) =>
+			db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, preparedSummary.turnId)),
+		);
 		expect(summaryTurn?.threadId).not.toBe(details.thread.id);
-		const [systemAgentThread] = await db
-			.select({ systemAgentKey: thread.systemAgentKey, parentThreadId: thread.parentThreadId })
-			.from(thread)
-			.where(eq(thread.id, summaryTurn?.threadId as string));
+		const [systemAgentThread] = await onDatabase((db) =>
+			db
+				.select({ systemAgentKey: thread.systemAgentKey, parentThreadId: thread.parentThreadId })
+				.from(thread)
+				.where(eq(thread.id, summaryTurn?.threadId as string)),
+		);
 		expect(systemAgentThread).toMatchObject({
 			systemAgentKey: "summarise",
 			parentThreadId: details.thread.id,
@@ -744,12 +792,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		// The thread holding the summaries is named after its parent, and the
 		// first summary is what gives the parent a real title — so without this
 		// its own name kept the sentence somebody originally typed.
-		const [summariesThread] = await db
-			.select({ title: thread.title })
-			.from(thread)
-			.where(
-				and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
-			);
+		const [summariesThread] = await onDatabase((db) =>
+			db
+				.select({ title: thread.title })
+				.from(thread)
+				.where(
+					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
+				),
+		);
 		expect(summariesThread?.title).toBe("Summaries of Verify the release");
 		expect(refreshed?.summary).toMatchObject({
 			content: "The release work is complete.",
@@ -770,7 +820,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
-		const [nextTurnJob] = (await db.select().from(job)).filter(
+		const [nextTurnJob] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "turn" && row.status === "queued" && row.threadId === details.thread.id,
 		);
 		if (
@@ -779,7 +829,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		) {
 			throw new Error("Thread test has no follow-up turn job");
 		}
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextTurnJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextTurnJob.id)),
+		);
 		const nextTurn = await turns.prepare({
 			id: nextTurnJob.id,
 			threadId: nextTurnJob.threadId,
@@ -802,7 +854,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			{ usage: {} },
 		);
 		await turns.queueSummary(nextTurn);
-		const [nextSummaryJob] = (await db.select().from(job)).filter(
+		const [nextSummaryJob] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) =>
 				row.kind === "thread_summary" &&
 				row.status === "queued" &&
@@ -811,10 +863,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!nextSummaryJob || !("sourceMessageId" in nextSummaryJob.payload)) {
 			throw new Error("Thread test has no follow-up summary job");
 		}
-		await db
-			.update(job)
-			.set({ status: "running", attempts: 1 })
-			.where(eq(job.id, nextSummaryJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextSummaryJob.id)),
+		);
 		const nextSummary = await summaries.prepare({
 			id: nextSummaryJob.id,
 			threadId: nextSummaryJob.threadId,
@@ -847,13 +898,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Wait for review",
 		});
-		const [turnJob] = (await db.select().from(job)).filter(
+		const [turnJob] = (await onDatabase((db) => db.select().from(job))).filter(
 			(row) => row.kind === "turn" && row.threadId === details.thread.id,
 		);
 		if (!turnJob || !("agentId" in turnJob.payload && "triggerMessageId" in turnJob.payload)) {
 			throw new Error("Thread test has no turn job");
 		}
-		await db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id));
+		await onDatabase((db) =>
+			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
+		);
 		const prepared = await turns.prepare({
 			id: turnJob.id,
 			threadId: turnJob.threadId,
@@ -895,9 +948,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 		expect(await turns.claimNext()).toBeUndefined();
 		await turns.requeueInterrupted();
-		expect((await db.select().from(job)).filter((row) => row.kind === "turn")).toMatchObject([
-			{ id: claimed?.id, status: "queued" },
-		]);
+		expect(
+			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
+		).toMatchObject([{ id: claimed?.id, status: "queued" }]);
 
 		await runOnPostgres(
 			queueSummary({ threadId: details.thread.id, agentId, sourceMessageId: triggerMessageId }),
@@ -909,7 +962,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 		await summaries.requeueInterrupted();
 		expect(
-			(await db.select().from(job)).filter((row) => row.kind === "thread_summary"),
+			(await onDatabase((db) => db.select().from(job))).filter(
+				(row) => row.kind === "thread_summary",
+			),
 		).toMatchObject([{ id: claimedSummary?.id, status: "queued" }]);
 	});
 

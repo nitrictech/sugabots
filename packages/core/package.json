@@ -9,7 +9,7 @@
 	"scripts": {
 		"db:generate": "drizzle-kit generate",
 		"db:push": "drizzle-kit push",
-		"db:migrate": "drizzle-kit migrate",
+		"db:migrate": "node --env-file-if-exists=../../.env src/database/migrate.ts",
 		"db:studio": "drizzle-kit studio",
 		"typecheck": "tsc --noEmit"
 	},
@@ -17,6 +17,7 @@
 		"@ai-sdk/anthropic": "^4.0.52",
 		"@ai-sdk/mcp": "^2.0.49",
 		"@ai-sdk/openai": "^4.0.65",
+		"@effect/sql-pg": "catalog:",
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@mozilla/readability": "^0.6.0",
 		"@sugabots/contracts": "workspace:*",
@@ -26,12 +27,12 @@
 		"drizzle-orm": "catalog:",
 		"effect": "catalog:",
 		"linkedom": "^0.18.13",
-		"pg": "^8.23.0",
 		"turndown": "^7.2.4",
 		"undici": "7.29.1"
 	},
 	"devDependencies": {
 		"@types/pg": "catalog:",
-		"@types/turndown": "^5.0.6"
+		"@types/turndown": "^5.0.6",
+		"pg": "^8.23.0"
 	}
 }
