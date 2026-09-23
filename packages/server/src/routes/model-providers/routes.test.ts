@@ -5,19 +5,16 @@ import {
 	type NewModelProvider,
 	providerPreset,
 } from "@sugabots/contracts";
-import { effectRunner } from "@sugabots/core/database/database";
-import { noDatabase } from "@sugabots/core/database/testing";
 import {
 	ModelProviderNameConflict,
 	type ModelProviderStore,
 } from "@sugabots/core/providers/model-providers/store";
 import { createEgressUrlValidator } from "@sugabots/core/providers/network/egress";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionResolver } from "../../auth/session.ts";
-import { onError } from "../../http/errors.ts";
-import { createModelProviderRoutes } from "./routes.ts";
+import { createTestApp, type TestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
@@ -32,9 +29,6 @@ const authorization = testAuthorization({
 	id: WORKSPACE_ID,
 	roles: { [USER_ID]: "admin" },
 });
-
-/** These cases answer from the fake store, so nothing reaches the database. */
-const run = effectRunner(ManagedRuntime.make(noDatabase));
 
 /** A store method no case in this file is expected to reach. */
 const unused = () => Effect.die(new Error("This case does not use this store method"));
@@ -124,16 +118,14 @@ function routes(
 		isEnabled: unused,
 		...overrides,
 	};
-	const app = createModelProviderRoutes({
+	const app = createTestApp({
 		resolveSession,
 		authorization,
-		run,
-		modelProviders: store,
+		stores: { modelProviders: store },
 		httpClients: { for: () => unreachableProvider },
 		validateProviderUrl: createEgressUrlValidator({ allowPrivateNetwork }),
 		model: { stream: () => Effect.fail(new Error("This case does not ask a model")) },
 	});
-	app.onError(onError);
 	return {
 		create,
 		update,
@@ -141,10 +133,7 @@ function routes(
 	};
 }
 
-function createLocalProvider(
-	app: ReturnType<typeof createModelProviderRoutes>,
-	baseUrl = "http://localhost:11434/v1",
-) {
+function createLocalProvider(app: TestApp, baseUrl = "http://localhost:11434/v1") {
 	return app.request(`/workspaces/${WORKSPACE_ID}/model-providers`, {
 		method: "POST",
 		headers: { authorization: "Bearer good-token", "content-type": "application/json" },

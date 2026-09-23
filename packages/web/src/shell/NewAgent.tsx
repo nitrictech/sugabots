@@ -117,8 +117,8 @@ export function NewAgentDialog({
 				{create.error && (
 					<Alert>
 						{failureMessage(create.error, {
-							conflict: "An agent with that name already exists. Try another name.",
-							forbidden: "Only a workspace admin can create an agent.",
+							Conflict: "An agent with that name already exists. Try another name.",
+							Forbidden: "Only a workspace admin can create an agent.",
 						})}
 					</Alert>
 				)}

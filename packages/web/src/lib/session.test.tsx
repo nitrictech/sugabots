@@ -1,4 +1,6 @@
+import { InternalServerError, Unauthorized } from "@sugabots/contracts/http";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useSession } from "@/lib/session.ts";
 import { sam } from "@/test-api.tsx";
@@ -7,7 +9,7 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 beforeEach(() => {
-	client.api.me.$get.mockResolvedValue(Response.json(sam));
+	client.api.me.mockReturnValue(Effect.succeed(sam));
 });
 
 afterEach(() => {
@@ -18,26 +20,22 @@ afterEach(() => {
 it("keeps an authenticated user during a transient refresh failure", async () => {
 	const { result } = renderHook(useSession);
 	await waitFor(() => expect(result.current.user).toEqual(sam));
-	client.api.me.$get.mockResolvedValue(
-		Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
-	);
+	client.api.me.mockReturnValue(Effect.fail(new InternalServerError({ message: "Unavailable" })));
 
 	await act(async () => {
-		await expect(result.current.refresh()).rejects.toMatchObject({ code: "internal" });
+		await expect(result.current.refresh()).rejects.toMatchObject({ _tag: "InternalServerError" });
 	});
 
 	expect(result.current.user).toEqual(sam);
-	expect(result.current.error).toMatchObject({ code: "internal" });
+	expect(result.current.error).toMatchObject({ _tag: "InternalServerError" });
 });
 
 it("can retry an initial transient session failure", async () => {
-	client.api.me.$get
-		.mockResolvedValueOnce(
-			Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
-		)
-		.mockResolvedValueOnce(Response.json(sam));
+	client.api.me
+		.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: "Unavailable" })))
+		.mockReturnValueOnce(Effect.succeed(sam));
 	const { result } = renderHook(useSession);
-	await waitFor(() => expect(result.current.error).toMatchObject({ code: "internal" }));
+	await waitFor(() => expect(result.current.error).toMatchObject({ _tag: "InternalServerError" }));
 
 	await act(async () => {
 		await result.current.refresh();
@@ -57,9 +55,7 @@ it("discovers a cookie session without checking for a local token", async () => 
 });
 
 it("clears authentication when the API rejects the session", async () => {
-	client.api.me.$get.mockResolvedValue(
-		Response.json({ error: { code: "unauthorized", message: "Expired" } }, { status: 401 }),
-	);
+	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: "Expired" })));
 	const { result } = renderHook(useSession);
 
 	await waitFor(() => expect(result.current.user).toBeNull());
@@ -70,20 +66,20 @@ it("clears authentication when the API rejects the session", async () => {
 it("rides out the API restarting, without showing a dead end first", async () => {
 	// What a save in development looks like from the browser: the request never
 	// reaches the API, twice, and then it is back.
-	client.api.me.$get
-		.mockRejectedValueOnce(new TypeError("Failed to fetch"))
-		.mockRejectedValueOnce(new TypeError("Failed to fetch"))
-		.mockResolvedValue(Response.json(sam));
+	client.api.me
+		.mockReturnValueOnce(Effect.fail(new TypeError("Failed to fetch")))
+		.mockReturnValueOnce(Effect.fail(new TypeError("Failed to fetch")))
+		.mockReturnValue(Effect.succeed(sam));
 
 	const { result } = renderHook(useSession);
 
 	await waitFor(() => expect(result.current.user).toEqual(sam), { timeout: 3_000 });
 	expect(result.current.error).toBeUndefined();
-	expect(client.api.me.$get).toHaveBeenCalledTimes(3);
+	expect(client.api.me).toHaveBeenCalledTimes(3);
 });
 
 it("says so once the API has stopped answering for good", async () => {
-	client.api.me.$get.mockRejectedValue(new TypeError("Failed to fetch"));
+	client.api.me.mockReturnValue(Effect.fail(new TypeError("Failed to fetch")));
 
 	const { result } = renderHook(useSession);
 

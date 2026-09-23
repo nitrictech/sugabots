@@ -1,5 +1,6 @@
-import { isEmailUnverified, unwrap } from "@sugabots/sdk";
+import { isEmailUnverified } from "@sugabots/sdk";
 import { useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { useEffect, useEffectEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -27,8 +28,8 @@ function invitationFailureMessage(failure: unknown): string {
 		return "Verify your email address before accepting. We sent a link when you signed up, and signing in again sends another.";
 	}
 	return failureMessage(failure, {
-		forbidden: `Not yours to accept${wrongAccount}`,
-		bad_request: `This invitation cannot be accepted${wrongAccount}`,
+		Forbidden: `Not yours to accept${wrongAccount}`,
+		BadRequest: `This invitation cannot be accepted${wrongAccount}`,
 	});
 }
 
@@ -78,8 +79,8 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 	async function finishAcceptance(reportFailure = true): Promise<boolean> {
 		let confirmed = false;
 		try {
-			const result = await unwrap(
-				client.api.onboarding["complete-invite"].$post({ json: { invitationId: id } }),
+			const result = await Effect.runPromise(
+				client.api.onboarding.completeInvite({ payload: { invitationId: id } }),
 			);
 			confirmed = true;
 			setAccepted(true);

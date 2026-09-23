@@ -1,6 +1,6 @@
 import type { SystemAgent, SystemAgentKey } from "@sugabots/contracts";
-import { unwrap } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -47,10 +47,8 @@ export function useBuiltInAgents() {
 	return useQuery({
 		queryKey: ["built-in-agents", workspaceId],
 		queryFn: workspaceId
-			? () =>
-					unwrap(
-						client.api.workspaces[":workspaceId"]["system-agents"].$get({ param: { workspaceId } }),
-					)
+			? ({ signal }) =>
+					Effect.runPromise(client.api.systemAgents.list({ params: { workspaceId } }), { signal })
 			: skipToken,
 	});
 }
@@ -74,11 +72,8 @@ export function useChooseBuiltInAgentModel(key: SystemAgentKey) {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			return await unwrap(
-				client.api.workspaces[":workspaceId"]["system-agents"][":key"].$patch({
-					param: { workspaceId, key },
-					json: { model },
-				}),
+			return await Effect.runPromise(
+				client.api.systemAgents.update({ params: { workspaceId, key }, payload: { model } }),
 			);
 		},
 		onSuccess: async () => {

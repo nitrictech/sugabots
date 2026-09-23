@@ -92,8 +92,8 @@ function NewPodDialog({ onCreated }: { onCreated: (podId: string) => Promise<voi
 				{create.error && (
 					<Alert>
 						{failureMessage(create.error, {
-							conflict: "A pod with that address already exists. Try another name.",
-							forbidden: "Only a workspace admin can create a pod.",
+							Conflict: "A pod with that address already exists. Try another name.",
+							Forbidden: "Only a workspace admin can create a pod.",
 						})}
 					</Alert>
 				)}

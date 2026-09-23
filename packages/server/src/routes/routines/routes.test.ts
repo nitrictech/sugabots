@@ -3,7 +3,7 @@ import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp } from "../../http/app.test-support.ts";
-import { MAX_JSON_BODY_BYTES } from "../../http/body.ts";
+import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
 
 const ROUTINE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const OTHER_ROUTINE_ID = "0199a3a0-0000-7000-8000-000000000002";

@@ -13,10 +13,6 @@
 		"@sugabots/contracts": "workspace:*",
 		"better-auth": "catalog:",
 		"effect": "catalog:",
-		"eventsource-parser": "^4.1.0",
-		"hono": "catalog:"
-	},
-	"devDependencies": {
-		"@sugabots/server": "workspace:*"
+		"eventsource-parser": "^4.1.0"
 	}
 }

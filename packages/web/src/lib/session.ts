@@ -1,5 +1,6 @@
 import type { SessionUser } from "@sugabots/contracts";
-import { ApiError, unwrap } from "@sugabots/sdk";
+import { isApiFailure } from "@sugabots/sdk";
+import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
 
@@ -35,8 +36,8 @@ export interface Session {
 const UNREACHABLE_RETRIES = 6;
 const RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 3_000, 3_000];
 
-/** An `ApiError` is the API answering. Anything else never got there. */
-const unreachable = (failure: unknown) => !(failure instanceof ApiError);
+/** One of the API's failures is the API answering. Anything else never got there. */
+const unreachable = (failure: unknown) => !isApiFailure(failure);
 
 export function useSession(): Session {
 	const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
@@ -55,13 +56,13 @@ export function useSession(): Session {
 	const ask = useCallback(async (attempt: number): Promise<void> => {
 		clearTimeout(retry.current);
 		try {
-			const who = await unwrap(client.api.me.$get());
+			const who = await Effect.runPromise(client.api.me());
 			if (!live.current) return;
 			setUser(who);
 			setError(undefined);
 		} catch (failure) {
 			if (!live.current) return;
-			if (failure instanceof ApiError && failure.code === "unauthorized") {
+			if (isApiFailure(failure) && failure._tag === "Unauthorized") {
 				setUser(null);
 				setError(undefined);
 				return;

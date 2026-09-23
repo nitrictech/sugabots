@@ -1,16 +1,16 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionResolver } from "../../auth/session.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
-import type { AppType } from "../../http/app.ts";
+import { createTestApp, type TestApp } from "../../http/app.test-support.ts";
 import { openChannelAccess } from "./access.test-support.ts";
 import type { ChannelAccess } from "./access.ts";
 import type { StreamOptions } from "./routes.ts";
 
 /**
- * The stream routes, driven through `app.request()`: no socket, no database,
+ * The stream routes, driven through `createTestApp`: no socket, no database,
  * but a real Response whose body is parsed the way a client parses it.
  */
 
@@ -49,7 +49,7 @@ interface Frame {
  * a `Last-Event-ID` resumes from.
  */
 async function open(
-	app: AppType,
+	app: TestApp,
 	path: string,
 	{ lastEventId, token = "good-token" }: { lastEventId?: string; token?: string } = {},
 ) {
@@ -113,8 +113,8 @@ describe("authorisation", () => {
 	it("answers 404, not 403, for a resource the caller cannot see", async () => {
 		// Telling the caller a thread exists but is not theirs is itself a leak.
 		const { app } = server({
-			workspace: async () => undefined,
-			thread: async () => undefined,
+			workspace: () => Effect.succeed(undefined),
+			thread: () => Effect.succeed(undefined),
 		});
 
 		const response = await app.request(`/threads/${THREAD}/events`, {
@@ -128,8 +128,8 @@ describe("authorisation", () => {
 		// A thread's events publish on its root thread's channel, so the id in the
 		// path and the channel listened to are routinely different.
 		const { app, bus } = server({
-			workspace: async () => undefined,
-			thread: async () => "thread:root",
+			workspace: () => Effect.succeed(undefined),
+			thread: () => Effect.succeed("thread:root"),
 		});
 
 		const stream = await open(app, `/threads/${THREAD}/events`);
@@ -244,8 +244,8 @@ describe("the stream", () => {
 	it.each(["revoked", "changed"])("ends when thread access is %s", async (change) => {
 		let channel: "thread:root" | "thread:other" | undefined = "thread:root";
 		const { app, bus } = server({
-			workspace: async () => undefined,
-			thread: async () => channel,
+			workspace: () => Effect.succeed(undefined),
+			thread: () => Effect.succeed(channel),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);
 		await bus.publish("thread:root", rawEvent("message.created"));

@@ -1,5 +1,5 @@
 import type { Connection, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
-import { effectRunner } from "@sugabots/core/database/database";
+import { ConnectionsApi } from "@sugabots/contracts/http/groups/connections";
 import { noDatabase } from "@sugabots/core/database/testing";
 import type { listServerTools } from "@sugabots/core/providers/connections/mcp";
 import type {
@@ -9,11 +9,17 @@ import type {
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import { createEgressUrlValidator } from "@sugabots/core/providers/network/egress";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
 import { describe, expect, it, vi } from "vitest";
+import { sessionLayer } from "../../auth/middleware.ts";
 import type { SessionResolver } from "../../auth/session.ts";
-import { onError } from "../../http/errors.ts";
-import { createConnectionRoutes } from "./routes.ts";
+import { API_BASE_PATH } from "../../config.ts";
+import { BASE_URL } from "../../http/app.test-support.ts";
+import { authoriseLayer } from "../../http/authorisation.ts";
+import { validateRequestLayer } from "../../http/validation.ts";
+import { type ConnectionRoutesOptions, connectionRoutes } from "./routes.ts";
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
@@ -46,7 +52,31 @@ const authorization = testAuthorization({
 	],
 });
 
-const run = effectRunner(ManagedRuntime.make(noDatabase));
+/**
+ * The connections group alone, behind the same session and authorisation
+ * middleware as the process. Not `createTestApp`, because these cases replace
+ * the MCP and OAuth calls, which the full route table has no seam for.
+ */
+function serve(options: ConnectionRoutesOptions) {
+	const routes = HttpApiBuilder.layer(HttpApi.make("sugabots").add(ConnectionsApi)).pipe(
+		Layer.provide(
+			connectionRoutes(options).pipe(
+				Layer.provide([
+					sessionLayer(resolveSession),
+					authoriseLayer(authorization),
+					validateRequestLayer,
+				]),
+			),
+		),
+		HttpRouter.provideRequest(noDatabase),
+		Layer.provide([noDatabase, HttpServer.layerServices]),
+	);
+	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+	return {
+		request: (path: string, init?: RequestInit) =>
+			handler(new Request(new URL(`${API_BASE_PATH}${path}`, BASE_URL), init)),
+	};
+}
 
 function stored(extra: Partial<Connection> = {}): Connection {
 	return {
@@ -149,13 +179,11 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 		authorizationUrl: "https://auth.example/authorize?state=s-1",
 	}));
 	const finish = vi.fn<typeof finishAuthorization>(async () => undefined);
-	const app = createConnectionRoutes({
-		resolveSession,
+	const app = serve({
 		authorization,
-		run,
 		connections: {
 			...store,
-			byOauthState: (state) =>
+			byOauthState: (state: string) =>
 				Effect.sync(() =>
 					held && state === "s-1"
 						? { workspaceId: held.workspaceId, podId: held.podId, connectionId: held.id }
@@ -173,7 +201,6 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 			finish,
 		},
 	});
-	app.onError(onError);
 	return {
 		app,
 		create,
@@ -454,8 +481,10 @@ describe("connecting from the catalog", () => {
 		});
 
 		expect(response.status).toBe(400);
-		const body = (await response.json()) as { error: { message: string } };
-		expect(body.error.message).toContain("does not support dynamic client registration");
+		expect(await response.json()).toMatchObject({
+			_tag: "BadRequest",
+			message: expect.stringContaining("does not support dynamic client registration"),
+		});
 		expect(harness.remove).toHaveBeenCalledWith(WORKSPACE_ID, POD_ID, CONNECTION_ID);
 		expect(harness.connection()).toBeUndefined();
 	});

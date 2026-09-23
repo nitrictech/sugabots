@@ -15,9 +15,16 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { API_BASE_PATH } from "../config.ts";
 import type { Email } from "../email/mailer.ts";
-import { createTestApp } from "../http/app.test-support.ts";
-import { mount } from "../http/mount.ts";
+import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
 import { createAuth } from "./auth.ts";
+
+/** The test app addressed as the process serves it, so better-auth answers where its own client looks. */
+function atServerRoot(app: TestApp) {
+	return {
+		request: (path: string, init?: RequestInit) =>
+			app.fetch(new Request(new URL(path, BASE_URL), init)),
+	};
+}
 
 /**
  * The whole of NIT-1758, end to end, against a real database: somebody signs
@@ -56,7 +63,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	});
 	// Mounted as the process mounts it, so better-auth answers where its own
 	// links point.
-	const app = mount(createTestApp({ auth, webOrigins: [ORIGIN] }));
+	const app = atServerRoot(createTestApp({ auth, webOrigins: [ORIGIN] }));
 
 	/** Signs somebody up and returns the bearer token they were given. */
 	async function signUp(name: string, email: string): Promise<string> {
@@ -656,13 +663,13 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 	};
 	// The same database seen under both policies: a member invites from the
 	// open one, and the invitee arrives at the closed one.
-	const open = mount(
+	const open = atServerRoot(
 		createTestApp({
 			auth: createAuth({ ...options, allowOpenSignUp: true }),
 			webOrigins: [ORIGIN],
 		}),
 	);
-	const closed = mount(
+	const closed = atServerRoot(
 		createTestApp({
 			auth: createAuth({ ...options, allowOpenSignUp: false }),
 			webOrigins: [ORIGIN],
@@ -750,7 +757,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			allowOpenSignUp: true,
 			requireEmailVerification: true,
 		});
-		const app = mount(createTestApp({ auth, webOrigins: [ORIGIN] }));
+		const app = atServerRoot(createTestApp({ auth, webOrigins: [ORIGIN] }));
 
 		function post(path: string, body: unknown) {
 			return app.request(`${API_BASE_PATH}${path}`, {

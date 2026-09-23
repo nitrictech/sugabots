@@ -7,12 +7,12 @@
 		"packages/*"
 	],
 	"catalog": {
+		"@effect/platform-node": "4.0.0-rc.115",
 		"@effect/sql-pg": "4.0.0-rc.115",
 		"@types/pg": "^8.23.1",
 		"better-auth": "^1.7.3",
 		"drizzle-orm": "1.0.0-rc.5-5935859",
 		"effect": "4.0.0-rc.115",
-		"hono": "^4.13.7",
 		"vite": "^8.2.2"
 	},
 	"engines": {
@@ -37,9 +37,6 @@
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/server/src/seed.ts",
 		"explore:traces": "motel"
-	},
-	"overrides": {
-		"@effect/platform-node-shared": "4.0.0-beta.90"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",

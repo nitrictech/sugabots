@@ -1,8 +1,9 @@
-import { apiErrorCodeForStatus, type WorkspaceRole } from "@sugabots/contracts";
+import type { WorkspaceRole } from "@sugabots/contracts";
+import { InternalServerError } from "@sugabots/contracts/http";
 import { createAuthClient } from "better-auth/client";
 import { organizationClient } from "better-auth/client/plugins";
 import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access";
-import { ApiError } from "./errors.ts";
+import { failureForStatus, isApiFailure } from "./errors.ts";
 import type { TokenStore } from "./tokens.ts";
 
 /**
@@ -13,7 +14,7 @@ import type { TokenStore } from "./tokens.ts";
  * vocabulary: better-auth calls a tenant an organisation, and everywhere else
  * in this product it is a workspace. The wrapper below is that rename, plus one
  * other thing — better-auth returns `{ data, error }` where the rest of this
- * client throws `ApiError`, and callers should not have to know which half of
+ * client throws the API's own failures, and callers should not have to know which half of
  * the API they are talking to.
  */
 
@@ -103,33 +104,29 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 
 			/** Withdraws an invitation, so its link stops working. */
 			cancelInvite: (invitationId: string) =>
-				inOurWords(orThrow(auth.organization.cancelInvitation({ invitationId }))),
+				orThrow(auth.organization.cancelInvitation({ invitationId })),
 
 			/** Leaves a workspace. Refused to the last administrator. */
 			leave: (workspaceId: string) =>
-				inOurWords(orThrow(auth.organization.leave({ organizationId: workspaceId }))),
+				orThrow(auth.organization.leave({ organizationId: workspaceId })),
 
 			/** `memberId` is the membership row's id, which `members` returns. */
 			updateRole: (input: { workspaceId: string; memberId: string; role: WorkspaceRole }) =>
-				inOurWords(
-					orThrow(
-						auth.organization.updateMemberRole({
-							organizationId: input.workspaceId,
-							memberId: input.memberId,
-							role: input.role,
-						}),
-					),
+				orThrow(
+					auth.organization.updateMemberRole({
+						organizationId: input.workspaceId,
+						memberId: input.memberId,
+						role: input.role,
+					}),
 				),
 
 			/** Takes somebody out of the workspace, and their Personal pod with them. */
 			removeMember: (input: { workspaceId: string; memberId: string }) =>
-				inOurWords(
-					orThrow(
-						auth.organization.removeMember({
-							organizationId: input.workspaceId,
-							memberIdOrEmail: input.memberId,
-						}),
-					),
+				orThrow(
+					auth.organization.removeMember({
+						organizationId: input.workspaceId,
+						memberIdOrEmail: input.memberId,
+					}),
 				),
 
 			/** `resend` refreshes an invitation that is already outstanding. */
@@ -139,15 +136,13 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 				workspaceId: string;
 				resend?: boolean;
 			}) =>
-				inOurWords(
-					orThrow(
-						auth.organization.inviteMember({
-							email: input.email,
-							role: input.role ?? "member",
-							organizationId: input.workspaceId,
-							...(input.resend ? { resend: true } : {}),
-						}),
-					),
+				orThrow(
+					auth.organization.inviteMember({
+						email: input.email,
+						role: input.role ?? "member",
+						organizationId: input.workspaceId,
+						...(input.resend ? { resend: true } : {}),
+					}),
 				),
 
 			/** Read an invitation before signing in, to show who invited whom. */
@@ -193,7 +188,7 @@ interface Failure {
  * administrator, and its creator role is `admin`. The renaming this module
  * exists for has to reach the failures too — the moment somebody is told they
  * cannot do something is the worst moment for the vocabulary to slip. Keyed by
- * better-auth's own error code, which `orThrow` keeps as `details`; anything
+ * better-auth's own error code, which `orThrow` also keeps as `details`; anything
  * not listed is passed through as it came.
  */
 const REPHRASED: Record<string, string> = {
@@ -206,21 +201,6 @@ const REPHRASED: Record<string, string> = {
 	YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER: "Only an administrator can remove somebody",
 };
 
-async function inOurWords<T>(call: Promise<T>): Promise<T> {
-	try {
-		return await call;
-	} catch (failure) {
-		if (!(failure instanceof ApiError) || typeof failure.details !== "string") {
-			throw failure;
-		}
-		const rephrased = REPHRASED[failure.details];
-		if (!rephrased) {
-			throw failure;
-		}
-		throw new ApiError(failure.code, rephrased, failure.status, failure.details);
-	}
-}
-
 /** better-auth answers with `{ data, error }`; this client throws instead. */
 async function orThrow<T>(
 	call: PromiseLike<{ data: T | null; error: Failure | null }>,
@@ -229,15 +209,15 @@ async function orThrow<T>(
 
 	if (error) {
 		const status = error.status ?? 500;
-		throw new ApiError(
-			apiErrorCodeForStatus(status),
-			error.message ?? error.statusText ?? `Request failed with status ${status}`,
-			status,
-			error.code,
-		);
+		const message =
+			(error.code && REPHRASED[error.code]) ??
+			error.message ??
+			error.statusText ??
+			`Request failed with status ${status}`;
+		throw failureForStatus(status, message, error.code);
 	}
 	if (data === null) {
-		throw new ApiError("internal", "The auth service returned no data", 500);
+		throw new InternalServerError({ message: "The auth service returned no data" });
 	}
 
 	return data;
@@ -254,7 +234,7 @@ async function orThrow<T>(
  */
 export function isEmailUnverified(failure: unknown): boolean {
 	return (
-		failure instanceof ApiError &&
+		isApiFailure(failure) &&
 		typeof failure.details === "string" &&
 		emailUnverifiedCodes.has(failure.details)
 	);

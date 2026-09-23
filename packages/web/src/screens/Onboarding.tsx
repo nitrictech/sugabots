@@ -229,7 +229,7 @@ function WorkspaceStep({
 					{(create.error || update.error) && (
 						<Alert>
 							{failureMessage(create.error ?? update.error, {
-								conflict: "That workspace address is already taken.",
+								Conflict: "That workspace address is already taken.",
 							})}
 						</Alert>
 					)}
