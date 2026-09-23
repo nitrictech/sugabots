@@ -1,5 +1,5 @@
 import type { Message, SessionUser, ThreadParticipant } from "@sugabots/contracts";
-import { expect } from "storybook/test";
+import { expect, screen, userEvent } from "storybook/test";
 import preview from "#storybook/preview";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
@@ -57,6 +57,23 @@ const meta = preview.meta({
 			</div>
 		),
 	],
+});
+
+/** Hovering a message's time shows the full date and time, with the year for an earlier year. */
+export const FullTimestampOnHover = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.hover(canvas.getByText(/\d:\d{2}/, { selector: "time" }));
+		// Date order and clock style follow the browser's locale; the year and seconds are what matter.
+		await expect(await screen.findByText(/2025 at \d{1,2}:\d{2}:46/)).toBeVisible();
+	},
+	args: {
+		messages: [
+			{
+				...message("0199a3a0-0000-7000-8000-000000000106", person, "Is the release still on?"),
+				createdAt: "2025-08-05T05:46:46.000Z",
+			},
+		],
+	},
 });
 
 /** A fenced code block whose lines are far wider than the bubble. */
