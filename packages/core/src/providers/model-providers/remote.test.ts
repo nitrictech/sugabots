@@ -5,7 +5,7 @@ import { noDatabase } from "../../database/testing.ts";
 import type { EgressHttpClients } from "../network/egress.ts";
 import { type DiscoveredModel, emptyRegistry, type ModelRegistry } from "./dialects/index.ts";
 import { registryFrom } from "./dialects/registry.ts";
-import { fetchProviderModels } from "./remote.ts";
+import { fetchProviderModels, testProvider } from "./remote.ts";
 import type { ProviderConnection } from "./store.ts";
 
 /** Discovery reads the connection the fake store hands it, so nothing reaches the database. */
@@ -255,6 +255,28 @@ it("keeps a listed model when Ollama cannot describe it", async () => {
 	]);
 });
 
+it("rejects invalid OpenRouter keys even when the public model list is accessible", async () => {
+	const found = connection({
+		preset: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		apiKey: "invalid-openrouter-key",
+	});
+	const models = store(found);
+	const httpClient = async (url: string) =>
+		url === "https://openrouter.ai/api/v1/models"
+			? Response.json({ data: [] })
+			: new Response(null, { status: 401, statusText: "Unauthorized" });
+	const { httpClients } = clients(httpClient);
+
+	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
+	expect(result).toMatchObject({
+		reachable: false,
+		error: "Provider returned 401 Unauthorized",
+	});
+	await expect(discover(models, found, httpClient).result).rejects.toThrow("401 Unauthorized");
+	expect(models.synced).toEqual([]);
+});
+
 it("reads OpenRouter's own account of what a model can do", async () => {
 	const found = connection({ baseUrl: "https://openrouter.ai/api/v1" });
 	const models = store(found);
@@ -285,6 +307,10 @@ it("reads OpenRouter's own account of what a model can do", async () => {
 
 	await discover(models, found, httpClient).result;
 
+	expect(httpClient).toHaveBeenCalledWith(
+		"https://openrouter.ai/api/v1/models/user",
+		expect.objectContaining({ headers: { authorization: "Bearer secret" } }),
+	);
 	expect(models.synced[0]).toEqual([
 		{
 			modelId: "openai/gpt-4o",
