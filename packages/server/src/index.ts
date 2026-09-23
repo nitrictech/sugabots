@@ -66,9 +66,7 @@ const {
 // runtime is traced: routes, better-auth's hooks, the background loops, and
 // the statements they all send.
 const database = ManagedRuntime.make(
-	databaseLayer(config.databaseUrl).pipe(
-		Layer.provideMerge(observabilityLayer(config.openTelemetryEnv)),
-	),
+	databaseLayer(config.databaseUrl).pipe(Layer.provideMerge(observabilityLayer)),
 );
 // Opens the pool now, so a process that cannot reach its database dies here
 // rather than answering 500 to whoever arrives first.
