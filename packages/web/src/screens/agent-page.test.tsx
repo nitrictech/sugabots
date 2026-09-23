@@ -116,8 +116,8 @@ describe("a member", () => {
 		expect(await screen.findByLabelText("System prompt")).toBeDefined();
 	});
 
-	it("lists the enabled connections inherited from the pod", async () => {
-		const connection: Connection = {
+	function linearConnection(over: Partial<Connection> = {}): Connection {
+		return {
 			id: "0199a3a0-0000-7000-8000-0000000000f1",
 			workspaceId: linear.workspaceId,
 			podId: linear.podId,
@@ -137,14 +137,78 @@ describe("a member", () => {
 			lastTestedAt: "2026-09-19T00:00:00.000Z",
 			lastTestError: null,
 			createdAt: "2026-09-19T00:00:00.000Z",
+			...over,
 		};
-		client.api.connections.list.mockReturnValue(Effect.succeed([connection]));
+	}
+
+	/** A read, an additive change, and an overwriting one, as Linear describes them. */
+	const readsAndWrites: Connection["tools"] = [
+		{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
+		{ name: "create_issue_label", description: null, readOnly: false, destructive: false },
+		{ name: "save_issue", description: null, readOnly: false, destructive: true },
+	];
+
+	it("lists the enabled connections inherited from the pod", async () => {
+		client.api.connections.list.mockReturnValue(Effect.succeed([linearConnection()]));
 		mount(page);
 		await showTab("Tools");
 
 		expect(await screen.findByText("Linear")).toBeDefined();
 		expect(screen.getByText("1 tool")).toBeDefined();
 		expect(screen.getByRole("link", { name: "View pod connections" })).toBeDefined();
+	});
+
+	it("shows every change a read-only connection offers as not available to the agent", async () => {
+		client.api.connections.list.mockReturnValue(
+			Effect.succeed([linearConnection({ tools: readsAndWrites })]),
+		);
+		mount(page);
+		await showTab("Tools");
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: /Linear.*1 tool · 2 not available/ }),
+		);
+
+		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
+		const free = within(tools).getByRole("region", { name: "Runs freely" });
+		expect(within(free).getByText("List Issues")).toBeDefined();
+		const unavailable = within(tools).getByRole("region", { name: "Not available" });
+		expect(within(unavailable).getByText("Create Issue Label")).toBeDefined();
+		expect(within(unavailable).getByText("Save Issue")).toBeDefined();
+	});
+
+	it("says which changes ask first and which this agent may always make", async () => {
+		const connection = linearConnection({ tools: readsAndWrites, allowMutating: true });
+		client.api.connections.list.mockReturnValue(Effect.succeed([connection]));
+		client.api.toolApprovals.listRules.mockReturnValue(
+			Effect.succeed([
+				{
+					id: "0199a3a0-0000-7000-8000-0000000000f2",
+					agentId: linear.id,
+					agentName: linear.name,
+					connectionId: connection.id,
+					connectionName: connection.name,
+					toolName: "save_issue",
+					createdAt: "2026-09-19T00:00:00.000Z",
+				},
+			]),
+		);
+		mount(page);
+		await showTab("Tools");
+
+		fireEvent.click(await screen.findByRole("button", { name: /Linear.*3 tools/ }));
+
+		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
+		const asks = within(tools).getByRole("region", { name: "Asks first" });
+		expect(within(asks).getByText("Create Issue Label")).toBeDefined();
+		await waitFor(() =>
+			expect(
+				within(within(tools).getByRole("region", { name: "Always allowed" })).getByText(
+					"Save Issue",
+				),
+			).toBeDefined(),
+		);
+		expect(within(tools).queryByRole("region", { name: "Not available" })).toBeNull();
 	});
 
 	it("is offered renaming but not deleting", async () => {

@@ -2,7 +2,7 @@ import {
 	type Agent,
 	type AgentUpdate,
 	builtInToolCatalog,
-	connectionToolMutating,
+	connectionPresetFor,
 	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
@@ -10,7 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Ellipsis } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useDeleteAgent, useUpdateAgent } from "@/lib/agents.ts";
-import { useConnections } from "@/lib/connections.ts";
+import { useConnections, useToolApprovalRules } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -31,6 +31,7 @@ import { Tab, TabPanel, Tabs, TabsList } from "@/ui/tabs.tsx";
 import { Textarea } from "@/ui/textarea.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { AgentModelPicker } from "./AgentModelPicker.tsx";
+import { AgentToolsDialog, agentToolsOf } from "./AgentToolAccess.tsx";
 import { RoutinesSettings } from "./RoutinesSettings.tsx";
 
 /*
@@ -476,6 +477,8 @@ function BuiltInTools({
 
 function InheritedConnections({ agent, pod }: { agent: Agent; pod: Pod }) {
 	const connections = useConnections(pod.id);
+	const rules = useToolApprovalRules(pod.id);
+	const [openConnectionId, setOpenConnectionId] = useState<string>();
 	if (connections.isPending) {
 		return <LabeledField label="Pod connections">Loading connections...</LabeledField>;
 	}
@@ -492,18 +495,35 @@ function InheritedConnections({ agent, pod }: { agent: Agent; pod: Pod }) {
 			{enabled.length > 0 ? (
 				<Card>
 					{enabled.map((connection) => {
-						const availableTools = connection.allowMutating
-							? connection.tools.length
-							: connection.tools.filter((tool) => !connectionToolMutating(tool)).length;
+						const tools = agentToolsOf(connection, rules.data ?? [], agent.id);
+						const unavailable = tools.filter((entry) => entry.access === "unavailable").length;
+						const available = tools.length - unavailable;
+						const presetId = connectionPresetFor(connection.url)?.id;
 						return (
-							<div key={connection.id} className="flex min-h-12 items-center gap-3 px-4 py-2">
-								<ConnectionMark name={connection.name} hue={agent.hue} />
-								<span className="min-w-0 flex-1 truncate font-medium text-base text-heading">
-									{connection.name}
-								</span>
-								<span className="text-muted-foreground text-sm">
-									{availableTools} {availableTools === 1 ? "tool" : "tools"}
-								</span>
+							<div key={connection.id}>
+								<button
+									type="button"
+									onClick={() => setOpenConnectionId(connection.id)}
+									className="focus-ring flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 py-2 text-left hover:bg-sunken"
+								>
+									<ConnectionMark presetId={presetId} name={connection.name} hue={agent.hue} />
+									<span className="min-w-0 flex-1 truncate font-medium text-base text-heading">
+										{connection.name}
+									</span>
+									<span className="text-muted-foreground text-sm">
+										{available} {available === 1 ? "tool" : "tools"}
+										{unavailable > 0 && ` · ${unavailable} not available`}
+									</span>
+								</button>
+								<AgentToolsDialog
+									agentName={agent.name}
+									connection={connection}
+									tools={tools}
+									presetId={presetId}
+									markHue={agent.hue}
+									open={openConnectionId === connection.id}
+									onOpenChange={(open) => setOpenConnectionId(open ? connection.id : undefined)}
+								/>
 							</div>
 						);
 					})}
