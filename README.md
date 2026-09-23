@@ -185,34 +185,8 @@ migrates or several instances share a database.
 
 To host the web app on an origin of its own instead, name that origin in
 `WEB_ORIGIN` and build the web app with `VITE_API_URL`; the image still
-serves its own copy at its own address. See
-[ADR 007](docs/adr-007-web-origin.md) for the design.
+serves its own copy at its own address.
 
-## Development
+## Contributing
 
-Useful project commands:
-
-```sh
-bun run check           # lint, typecheck, and test
-bun run build           # build all packages
-bun run format          # apply Biome formatting fixes
-bun run db:studio       # inspect the database with Drizzle Studio
-bun run explore:traces  # browse the API's traces in motel
-```
-
-`bun run dev` also starts [motel](https://github.com/kitlangton/motel) in the
-background, which collects the API's traces and logs into `.motel/` in this
-checkout; `explore:traces` browses them. Its settings, and the API's, are the
-tracing lines in `.env` (see `.env.example`); any OTLP/HTTP viewer works instead.
-
-| Directory            | Responsibility                                                      |
-| -------------------- | ------------------------------------------------------------------- |
-| `packages/contracts` | Portable API schemas and shared wire types                          |
-| `packages/core`      | Domain modules, database schema and migrations, stores, and workers |
-| `packages/server`    | Hono API, authentication, configuration, and process composition    |
-| `packages/sdk`       | Typed API, authentication, and reconnecting SSE client              |
-| `packages/web`       | React and Vite web app                                              |
-
-Architecture decisions and deeper implementation notes live in [`docs`](docs/).
-
-For Storybook setup, UI testing, and AI agent integration, see the [UI development guide](docs/ui-development.md).
+To work on Sugabots, see [CONTRIBUTING.md](CONTRIBUTING.md).

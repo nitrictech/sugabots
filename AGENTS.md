@@ -1,8 +1,10 @@
-## Branches, Commits and PRs
+## Contributing
 
-Branch names should be short (2-5 words), hyphen-separated, no slashes, no prefixes (e.g. `auth-token-refresh`, `dark-mode-toggle`).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) is the source for project commands, layout, and conventions. Read its:
 
-Commits & PR titles must use `conventional commits` format (i.e. `type(optional scope): description`). Use scope regularly. Use commit message bodies sparingly. Keep PR descriptions short, don't reiterate anything that's clear from reading the code (e.g. `feat(api): add rate-limit headers`, `docs: add setup walkthrough`, `refactor(web): extract form validation`). When a PR is related to an Issue, link it to the issue.
+- "Commands" section before running checks, builds, or database tools.
+- "Branches, commits, and PRs" section before creating a branch, committing, or opening a PR.
+- "UI development" section before changing components, views, or stories.
 
 ## Style and Practices
 
@@ -32,7 +34,6 @@ Write only what the current task needs. Keep behavior, preconditions, and side e
 
 ## UI development
 
-- Read `docs/ui-development.md` when changing components, views, or stories.
 - Start `bun run storybook` and use the `storybook` MCP's `docs-list` and `docs-show` to find existing components and verify their APIs. If the MCP is unavailable, inspect colocated stories and component types directly.
 - Use `get-storybook-story-instructions` before editing stories. Keep stories beside production components and cover meaningful states with deterministic fixtures.
 - Reuse the semantic tokens in `packages/web/src/app.css` and the controls in `packages/web/src/ui/`.
