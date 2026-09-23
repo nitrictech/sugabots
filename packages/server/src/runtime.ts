@@ -20,7 +20,7 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
-import { Layer, ManagedRuntime } from "effect";
+import { ConfigProvider, Layer, ManagedRuntime } from "effect";
 import type { Pool } from "pg";
 import { observabilityLayer } from "./observability.ts";
 
@@ -54,8 +54,12 @@ export interface RuntimeOptions {
 	connectionTools: ConnectionTools;
 	/** For the facilitator to announce who it invited. */
 	publishEvents: PublishEvents;
-	/** The `OTEL_*` variables saying where traces and logs are exported. Unset, nowhere. */
-	openTelemetryEnv?: Record<string, string>;
+	/**
+	 * Where the runtime's layers read configuration, such as the `OTEL_*`
+	 * variables saying where traces and logs go. The process environment by
+	 * default; tests pass one to export nowhere or somewhere of their own.
+	 */
+	configProvider?: ConfigProvider.ConfigProvider;
 }
 
 export function makeRuntime({
@@ -72,7 +76,7 @@ export function makeRuntime({
 	builtInTools,
 	connectionTools,
 	publishEvents,
-	openTelemetryEnv = {},
+	configProvider,
 }: RuntimeOptions) {
 	const database = databaseLayer(pool);
 	const background = Layer.mergeAll(
@@ -97,10 +101,9 @@ export function makeRuntime({
 
 	// Merged rather than provided, so the tracer is in the runtime's own
 	// context: every effect it runs is traced, not only the layers it builds.
+	const process = Layer.merge(database, background).pipe(Layer.provideMerge(observabilityLayer));
 	return ManagedRuntime.make(
-		Layer.merge(database, background).pipe(
-			Layer.provideMerge(observabilityLayer(openTelemetryEnv)),
-		),
+		configProvider ? process.pipe(Layer.provide(ConfigProvider.layer(configProvider))) : process,
 	);
 }
 

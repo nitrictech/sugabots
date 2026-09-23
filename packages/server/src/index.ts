@@ -152,7 +152,6 @@ const runtime = makeRuntime({
 	builtInTools,
 	connectionTools,
 	publishEvents,
-	openTelemetryEnv: config.openTelemetryEnv,
 });
 const run = effectRunner(runtime);
 

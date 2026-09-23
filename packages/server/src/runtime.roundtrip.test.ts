@@ -23,7 +23,7 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { and, eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { ConfigProvider, Effect } from "effect";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeRuntime } from "./runtime.ts";
@@ -76,6 +76,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		builtInTools: noBuiltInTools,
 		connectionTools: noConnectionTools,
 		publishEvents,
+		// Export nowhere, whatever the developer's .env points the API at.
+		configProvider: ConfigProvider.fromUnknown({}),
 	});
 
 	afterAll(async () => {

@@ -107,20 +107,6 @@ describe("configFromEnv", () => {
 		).toBe(true);
 	});
 
-	it("hands the exporter only the OTEL_ variables, so it exports nowhere unless told where", () => {
-		const base = {
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-			PATH: "/usr/bin",
-		};
-		expect(configFromEnv(base).openTelemetryEnv).toStrictEqual({});
-		expect(
-			configFromEnv({ ...base, OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.example" })
-				.openTelemetryEnv,
-		).toStrictEqual({ OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.example" });
-	});
-
 	it("requires an explicit boolean to allow private model provider networking", () => {
 		const base = {
 			DATABASE_URL,
