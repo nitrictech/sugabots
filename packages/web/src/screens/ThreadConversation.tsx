@@ -16,24 +16,31 @@ import { CollaborationThread } from "./CollaborationThread.tsx";
 import { MessageActions } from "./MessageActions.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
-import { ToolCallRow } from "./ToolCallRow.tsx";
+import { DeniedToolLine, ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
-import { toolActivityOf } from "./tool-activity.ts";
+import { isNarration, splitToolKey, toolActivityOf } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
 /*
- * A message is drawn as its parts, in order: each run of text is a bubble,
- * each collaboration is the child thread it opened, at full width, and each tool
- * call is a compact row. So an agent that writes, asks another agent, and
- * writes again shows as a bubble, a child thread, and a bubble, in the order
- * it happened.
+ * A message is drawn as its parts, in order: text is a bubble and each
+ * collaboration is the child thread it opened, at full width. So an agent that
+ * writes, asks another agent, and writes again shows as a bubble, a child
+ * thread, and a bubble, in the order it happened.
  *
- * A reply's words are drawn once it is finished, never as they stream. What an
- * agent writes on the way is often the lead-in to a tool call ("Let me find the
- * cycle:"), and that cannot be told until the call arrives, so words drawn live
- * would be shown and then taken back. While the turn runs, one line says the
- * agent is typing.
+ * A reply is drawn once it is finished, never as it streams. What the agent
+ * writes on the way is often the lead-in to a tool call ("Let me find the
+ * cycle:"), and that cannot be told until the call arrives, so a reply drawn
+ * live would show words and then take them back. While the turn runs, one line
+ * says the agent is typing, or which step it is on.
+ *
+ * Tool calls are not drawn as parts at all. They belong to the turn rather than
+ * to the transcript, so once the reply lands they leave nothing behind — the
+ * step count on the message's own action bar is the way to what they did. What
+ * the agent said just before a call is narration and goes with them: the thread
+ * shows the answer, and the activity log how it got there. The exception is a
+ * write waiting to be approved, and one that was refused: those stopped or
+ * changed the reply, so they stay in the thread, mid-turn included.
  */
 
 export function ThreadConversation({
@@ -78,13 +85,13 @@ export function ThreadConversation({
 		<div className="flex flex-col gap-[17px]">
 			{messages.map((message, index) => {
 				const divider = dividers ? dividerBefore(messages[index - 1], message) : undefined;
+				const activity = toolActivityOf(message, names);
 				const outgoing =
 					(message.author.kind === "person" && message.author.id === user.id) ||
 					(hostAgentOnRight && message.author.kind === "agent" && message.author.id === host.id);
-				const activity = toolActivityOf(message, names);
 				const segments = segmentsOf(message);
-				// The message's state and its action bar belong to its last bubble,
-				// which a tool call or a collaboration may come after.
+				// Tool calls draw nothing, so the message's state and its action bar
+				// belong to the last bubble rather than to the last part.
 				const lastBubble = segments.findLastIndex((segment) => segment.type === "text");
 				return (
 					<Fragment key={message.id}>
@@ -123,17 +130,38 @@ export function ThreadConversation({
 								);
 							}
 							if (segment.type === "tool_call") {
-								return (
-									<ToolCallRow
-										key={segment.key}
-										call={segment.toolCall}
-										threadId={message.threadId}
-										podId={podId}
-										canApprove={canApproveToolCalls}
-										canAlwaysAllow={canAlwaysAllowToolCalls}
-									/>
-								);
+								const call = segment.toolCall;
+								const pending =
+									call.status === "awaiting_approval" && call.approval?.status === "pending";
+								// Only an agent calls tools; the check narrows the author for the card.
+								if (pending && message.author.kind === "agent") {
+									return (
+										<ToolApprovalCard
+											key={segment.key}
+											call={call}
+											agent={message.author}
+											threadId={message.threadId}
+											podId={podId}
+											canApprove={canApproveToolCalls}
+											canAlwaysAllow={canAlwaysAllowToolCalls}
+											look={looks.get(splitToolKey(call.tool).handle)}
+										/>
+									);
+								}
+								if (call.approval?.status === "denied" && message.author.kind === "agent") {
+									return (
+										<DeniedToolLine
+											key={segment.key}
+											call={call}
+											agent={message.author}
+											look={looks.get(splitToolKey(call.tool).handle)}
+										/>
+									);
+								}
+								// Every other call is the turn's own business: the log holds it.
+								return null;
 							}
+							const isLast = position === lastBubble;
 							return (
 								<MessageBubble
 									key={segment.key}
@@ -141,9 +169,9 @@ export function ThreadConversation({
 									text={segment.text}
 									outgoing={outgoing}
 									mentionable={mentionable}
-									isLast={position === lastBubble}
+									isLast={isLast}
 									actions={
-										position === lastBubble && message.author.kind === "agent" ? (
+										isLast && message.author.kind === "agent" ? (
 											<MessageActions
 												text={textOf(message)}
 												activity={activity}
@@ -159,7 +187,9 @@ export function ThreadConversation({
 							<TypingIndicator
 								key={`${message.id}-typing`}
 								agent={message.author}
+								activity={activity}
 								waitingOn={waitingOn(message)}
+								looks={looks}
 								outgoing={outgoing}
 							/>
 						)}
@@ -172,9 +202,9 @@ export function ThreadConversation({
 }
 
 /**
- * Whether a reply's turn is still going, so the typing line stands in for its
- * words. A call waiting to be approved says the turn is stopped on it, and the
- * line would say the same thing twice.
+ * Whether a reply's turn is still going, so the typing line stands in for it.
+ * A call waiting to be approved has its own card saying the turn is stopped on
+ * it, and the line would say the same thing twice.
  */
 function isTyping(message: Message): boolean {
 	const awaitingApproval = message.parts.some(
@@ -189,11 +219,17 @@ function waitingOn(message: Message): string | undefined {
 	return last?.type === "collaboration" ? last.agentName : undefined;
 }
 
-/** Everything the message actually said, for the copy action. */
+/** A pending approval or a refusal: the only tool calls the thread draws. */
+function drawsInThread(call: ToolCallPart): boolean {
+	const pending = call.status === "awaiting_approval" && call.approval?.status === "pending";
+	return pending || call.approval?.status === "denied";
+}
+
+/** What the message's bubbles say, narration left out, for the copy action. */
 function textOf(message: Message): string {
 	return message.parts
-		.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-		.map((part) => part.text)
+		.filter((_, index) => !isNarration(message.parts, index))
+		.map((part) => (part.type === "text" ? part.text : ""))
 		.join("");
 }
 
@@ -203,9 +239,9 @@ type Segment =
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
 
 /**
- * The message's parts as things to draw. A reply still being written shows its
- * collaborations and tool calls but none of its text, which waits until it is
- * finished.
+ * The message's parts as things to draw, leaving out narration and every tool
+ * call but a pending approval or a refusal. A reply still being written shows
+ * only those and its collaborations: its text waits until it is finished.
  */
 function segmentsOf(message: Message): Segment[] {
 	const finished = message.status !== "streaming";
@@ -213,20 +249,28 @@ function segmentsOf(message: Message): Segment[] {
 	// tool call by its id.
 	let written = 0;
 	const segments: Segment[] = [];
-	for (const part of message.parts) {
+	message.parts.forEach((part, index) => {
 		if (part.type === "collaboration") {
 			segments.push({ type: "collaboration", key: part.id, collaboration: part });
-			continue;
+			return;
 		}
 		if (part.type === "tool_call") {
-			segments.push({ type: "tool_call", key: part.id, toolCall: part });
-			continue;
+			if (drawsInThread(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
+			return;
 		}
-		if (finished) segments.push({ type: "text", key: `text@${written}`, text: part.text });
+		if (finished && !isNarration(message.parts, index)) {
+			segments.push({ type: "text", key: `text@${written}`, text: part.text });
+		}
 		written += part.text.length;
-	}
-	if (finished && segments.length === 0) {
-		segments.push({ type: "text", key: "text@0", text: "" });
+	});
+	/*
+	 * A reply that called a tool and wrote nothing has no text part at all —
+	 * `messagePartsFor` adds none to empty content. It still needs a bubble: that
+	 * is where its author, its time, a failure and the way into its activity all
+	 * hang.
+	 */
+	if (finished && !segments.some((segment) => segment.type === "text")) {
+		segments.push({ type: "text", key: `text@${written}`, text: "" });
 	}
 	return segments;
 }
