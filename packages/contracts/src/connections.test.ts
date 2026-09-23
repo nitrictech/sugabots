@@ -1,6 +1,7 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+	type ConnectionTool,
 	connectionToolKey,
 	connectionToolMutating,
 	connectionUpdateSchema,
@@ -36,12 +37,22 @@ describe("a connection's secret header", () => {
 });
 
 describe("a connection's tools on a turn", () => {
-	it("takes a tool to change things unless the server marked it read-only or not destructive", () => {
-		expect(connectionToolMutating({ readOnly: true, destructive: null })).toBe(false);
-		expect(connectionToolMutating({ readOnly: null, destructive: false })).toBe(false);
-		expect(connectionToolMutating({ readOnly: false, destructive: true })).toBe(true);
-		// The spec's default: a tool that says nothing may be destructive.
-		expect(connectionToolMutating({ readOnly: null, destructive: null })).toBe(true);
+	it("takes a tool to change things unless the server marked it read-only", () => {
+		expect(connectionToolMutating({ readOnly: true })).toBe(false);
+		expect(connectionToolMutating({ readOnly: false })).toBe(true);
+		// The spec's default: a tool that says nothing may change things.
+		expect(connectionToolMutating({ readOnly: null })).toBe(true);
+	});
+
+	it("counts an additive change as a change, whatever its destructive hint", () => {
+		// As Linear describes it: not read-only, and only adds.
+		const createIssueLabel: ConnectionTool = {
+			name: "create_issue_label",
+			description: "Create a new Linear issue label.",
+			readOnly: false,
+			destructive: false,
+		};
+		expect(connectionToolMutating(createIssueLabel)).toBe(true);
 	});
 
 	it("keys a tool by the connection's handle, in characters every provider accepts", () => {
