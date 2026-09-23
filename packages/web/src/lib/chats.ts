@@ -1,5 +1,4 @@
 import type { Chat, ChatMessageItem, NewMessage, SessionUser } from "@sugabots/contracts";
-import { unwrap } from "@sugabots/sdk";
 import {
 	skipToken,
 	useInfiniteQuery,
@@ -7,6 +6,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -20,12 +20,13 @@ export function useChat(podId: string | undefined, hostAgentId: string) {
 		queryKey: ["chat", workspaceId, podId, hostAgentId],
 		queryFn:
 			workspaceId && podId
-				? async () =>
-						unwrap(
-							client.api.workspaces[":workspaceId"].chats.$post({
-								param: { workspaceId },
-								json: { podId, hostAgentId },
+				? ({ signal }) =>
+						Effect.runPromise(
+							client.api.chats.getOrCreate({
+								params: { workspaceId },
+								payload: { podId, hostAgentId },
 							}),
+							{ signal },
 						)
 				: skipToken,
 	});
@@ -35,12 +36,13 @@ export function useChatMessages(chatId: string | undefined) {
 	const query = useInfiniteQuery({
 		queryKey: ["chat-messages", chatId],
 		queryFn: chatId
-			? ({ pageParam }: { pageParam: string | undefined }) =>
-					unwrap(
-						client.api.chats[":chatId"].messages.$get({
-							param: { chatId },
-							query: { limit: String(PAGE_SIZE), cursor: pageParam },
+			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
+					Effect.runPromise(
+						client.api.chats.messages({
+							params: { chatId },
+							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
+						{ signal },
 					)
 			: skipToken,
 		initialPageParam: undefined as string | undefined,
@@ -63,12 +65,13 @@ export function useChatHistory(chatId: string | undefined) {
 				? RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS
 				: false,
 		queryFn: chatId
-			? ({ pageParam }: { pageParam: string | undefined }) =>
-					unwrap(
-						client.api.chats[":chatId"].history.$get({
-							param: { chatId },
-							query: { limit: String(PAGE_SIZE), cursor: pageParam },
+			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
+					Effect.runPromise(
+						client.api.chats.history({
+							params: { chatId },
+							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
+						{ signal },
 					)
 			: skipToken,
 		initialPageParam: undefined as string | undefined,
@@ -85,11 +88,8 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 	return useMutation({
 		mutationFn: async (input: NewMessage) => {
 			if (!chat) throw new NotReadyError();
-			return unwrap(
-				client.api.chats[":chatId"].messages.$post({
-					param: { chatId: chat.id },
-					json: input,
-				}),
+			return Effect.runPromise(
+				client.api.chats.send({ params: { chatId: chat.id }, payload: input }),
 			);
 		},
 		onMutate: async (input) => {

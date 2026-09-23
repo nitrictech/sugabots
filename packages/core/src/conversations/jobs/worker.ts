@@ -12,7 +12,7 @@ import type { Database } from "../../database/database.ts";
  * do that; see `turns/worker.ts` and `summaries/worker.ts`.
  */
 export interface WorkerOptions<Claimed> {
-	/** For log lines. */
+	/** For log lines, and the name of the span each claimed job runs in. Startup recovery is `${name} recovery`. */
 	name: string;
 	/** Puts back jobs a previous process left `running`. Retried until it succeeds. */
 	requeueInterrupted: () => Effect.Effect<void, never, Database>;
@@ -42,6 +42,7 @@ export function workerLayer<Claimed>({
 		Effect.tapCause(logged("recovery failed")),
 		Effect.catchCause(() => Effect.fail("retry" as const)),
 		Effect.retry(Schedule.spaced(Duration.millis(pollIntervalMs))),
+		Effect.withSpan(`${name} recovery`),
 	);
 
 	const claimAndRun = Effect.gen(function* () {
@@ -49,7 +50,7 @@ export function workerLayer<Claimed>({
 		if (!claimed) {
 			return false;
 		}
-		yield* run(claimed);
+		yield* run(claimed).pipe(Effect.withSpan(name), Effect.withTracerEnabled(true));
 		return true;
 	}).pipe(
 		Effect.tapDefect(logged("iteration failed")),
@@ -57,9 +58,11 @@ export function workerLayer<Claimed>({
 	);
 
 	// Straight on to the next job when there was one; a short wait when the queue was empty.
+	// Untraced, because an empty queue is asked several times a second and each
+	// ask would be a trace of its own; a claimed job turns tracing back on.
 	const poll = Effect.flatMap(claimAndRun, (busy) =>
 		busy ? Effect.void : Effect.sleep(Duration.millis(pollIntervalMs)),
-	).pipe(Effect.forever);
+	).pipe(Effect.forever, Effect.withTracerEnabled(false));
 
 	return Layer.effectDiscard(
 		Effect.forkScoped(

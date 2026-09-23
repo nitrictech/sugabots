@@ -1,6 +1,6 @@
 import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
-import type { RunEffect } from "@sugabots/core/database/database";
+import type { Database } from "@sugabots/core/database/database";
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import { Effect } from "effect";
 import type { Session } from "../../auth/session.ts";
@@ -21,38 +21,37 @@ import type { Session } from "../../auth/session.ts";
  * It is an interface so stream routes can be tested without a database.
  */
 export interface ChannelAccess {
-	workspace(session: Session, workspaceId: string): Promise<Channel | undefined>;
-	thread(session: Session, threadId: string): Promise<Channel | undefined>;
+	workspace(
+		session: Session,
+		workspaceId: string,
+	): Effect.Effect<Channel | undefined, never, Database>;
+	thread(session: Session, threadId: string): Effect.Effect<Channel | undefined, never, Database>;
 }
 
 export function channelAccess(
 	authorization: Authorization,
 	threads: Pick<ThreadStore, "visibleThreadId">,
-	run: RunEffect,
 ): ChannelAccess {
 	return {
-		async workspace(session, workspaceId) {
-			const allowed = await run(
-				Effect.result(authorization.workspace(session.user.id, workspaceId, "workspace.read")),
-			);
-			return allowed._tag === "Success" ? workspaceChannel(workspaceId) : undefined;
-		},
+		workspace: (session, workspaceId) =>
+			authorization.workspace(session.user.id, workspaceId, "workspace.read").pipe(
+				Effect.match({
+					onSuccess: () => workspaceChannel(workspaceId),
+					onFailure: () => undefined,
+				}),
+			),
 
-		async thread(session, threadId) {
-			const visibleId = await run(threads.visibleThreadId(threadId, session.user.id));
-			return visibleId ? threadChannel(visibleId) : undefined;
-		},
+		thread: (session, threadId) =>
+			Effect.map(threads.visibleThreadId(threadId, session.user.id), (visibleId) =>
+				visibleId ? threadChannel(visibleId) : undefined,
+			),
 	};
 }
 
 /** Grants nothing. The default, so a stream route is never open by omission. */
 export function closedChannelAccess(): ChannelAccess {
 	return {
-		async workspace() {
-			return undefined;
-		},
-		async thread() {
-			return undefined;
-		},
+		workspace: () => Effect.succeed(undefined),
+		thread: () => Effect.succeed(undefined),
 	};
 }

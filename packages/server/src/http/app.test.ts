@@ -1,9 +1,9 @@
-import { errorResponseSchema, healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
+import { healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type { SessionResolver } from "../auth/session.ts";
 import { createTestApp } from "./app.test-support.ts";
-import { MAX_JSON_BODY_BYTES } from "./body.ts";
+import { MAX_JSON_BODY_BYTES } from "./validation.ts";
 
 const user = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
@@ -93,13 +93,11 @@ describe("GET /me", () => {
 });
 
 describe("unknown routes", () => {
-	it("answer with the error envelope, not Hono's default text", async () => {
+	it("answer in the API's error shape, not an empty body", async () => {
 		const response = await app.request("/nope");
 
 		expect(response.status).toBe(404);
-		expect(Schema.decodeUnknownSync(errorResponseSchema)(await response.json()).error.code).toBe(
-			"not_found",
-		);
+		expect(await response.json()).toMatchObject({ _tag: "NotFound" });
 	});
 });
 
@@ -115,9 +113,10 @@ describe("JSON body limit", () => {
 		});
 
 		expect(response.status).toBe(413);
-		expect(Schema.decodeUnknownSync(errorResponseSchema)(await response.json()).error.code).toBe(
-			"bad_request",
-		);
+		expect(await response.json()).toEqual({
+			_tag: "PayloadTooLarge",
+			message: "JSON body exceeds the 64 KiB limit",
+		});
 	});
 
 	it("rejects an oversized streamed JSON body without content-length", async () => {
@@ -205,9 +204,10 @@ describe("cookie request origins", () => {
 			});
 
 			expect(response.status).toBe(403);
-			expect(
-				Schema.decodeUnknownSync(errorResponseSchema)(await response.json()).error.message,
-			).toBe("Untrusted request origin");
+			expect(await response.json()).toEqual({
+				_tag: "Forbidden",
+				message: "Untrusted request origin",
+			});
 		},
 	);
 

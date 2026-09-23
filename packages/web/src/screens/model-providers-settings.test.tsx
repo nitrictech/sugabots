@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiAnswers, modelProviders, mount } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
@@ -33,15 +34,15 @@ describe("a provider's API key", () => {
 
 describe("a model's capabilities", () => {
 	it("can be switched off within what the provider reports, and not on beyond it", async () => {
-		const route = client.api.workspaces[":workspaceId"]["model-providers"];
+		const providers = client.api.modelProviders;
 		const [openai] = modelProviders;
 		const [gpt] = openai?.models ?? [];
 		if (!openai || !gpt) throw new Error("fixture");
-		route[":providerId"].models[":modelId"].$patch.mockImplementation(async () => {
-			route.$get.mockResolvedValue(
-				Response.json([{ ...openai, models: [{ ...gpt, disabledCapabilities: ["vision"] }] }]),
+		providers.updateModel.mockImplementation(() => {
+			providers.list.mockReturnValue(
+				Effect.succeed([{ ...openai, models: [{ ...gpt, disabledCapabilities: ["vision"] }] }]),
 			);
-			return Response.json({ updated: 1 });
+			return Effect.succeed({ updated: 1 });
 		});
 		mount("/settings/providers");
 
@@ -56,9 +57,9 @@ describe("a model's capabilities", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
-			expect(route[":providerId"].models[":modelId"].$patch).toHaveBeenCalledWith({
-				param: { workspaceId: expect.any(String), providerId: openai.id, modelId: gpt.id },
-				json: { disabledCapabilities: ["vision"] },
+			expect(providers.updateModel).toHaveBeenCalledWith({
+				params: { workspaceId: expect.any(String), providerId: openai.id, modelId: gpt.id },
+				payload: { disabledCapabilities: ["vision"] },
 			}),
 		);
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Capabilities" })).toBeNull());

@@ -1,85 +1,58 @@
-import { type ApiErrorCode, apiErrorCodeForStatus, errorResponseSchema } from "@sugabots/contracts";
+import {
+	type ApiFailure,
+	BadRequest,
+	Conflict,
+	Forbidden,
+	InternalServerError,
+	NotFound,
+	PayloadTooLarge,
+	Unauthorized,
+} from "@sugabots/contracts/http";
 import { Schema } from "effect";
 
-/** A failed request, decoded from the API's error envelope. */
-export class ApiError extends Error {
-	readonly code: ApiErrorCode;
-	readonly status: number;
-	readonly details: unknown;
+const failureSchema = Schema.Union([
+	BadRequest,
+	Unauthorized,
+	Forbidden,
+	NotFound,
+	Conflict,
+	PayloadTooLarge,
+	InternalServerError,
+]);
 
-	constructor(code: ApiErrorCode, message: string, status: number, details?: unknown) {
-		super(message);
-		this.name = "ApiError";
-		this.code = code;
-		this.status = status;
-		this.details = details;
-	}
-}
-
-/** The part of a Hono RPC response `unwrap` needs. */
-interface JsonResponse<T> {
-	readonly ok: boolean;
-	readonly status: number;
-	json(): Promise<T>;
-}
+/** Whether `failure` is the API answering, rather than a request that never got there. */
+export const isApiFailure = Schema.is(failureSchema);
 
 /**
- * Turns a route call into its body, or throws `ApiError`.
- *
- * Hono RPC hands back a `Response`, which leaves every caller to check `ok` and
- * decode the envelope. This does it once:
- *
- * ```ts
- * const me = await unwrap(client.api.me.$get());
- * ```
- *
+ * The failure a status means, for the parts of the API the generated client
+ * does not decode: better-auth's routes, and the event streams.
  */
-export async function unwrap<T>(response: JsonResponse<T> | Promise<JsonResponse<T>>): Promise<T> {
-	const resolved = await response;
-	let body: unknown;
-	try {
-		body = await resolved.json();
-	} catch {
-		if (resolved.ok) {
-			throw new ApiError(
-				"internal",
-				"The successful response did not contain valid JSON",
-				resolved.status,
-			);
-		}
+export function failureForStatus(status: number, message: string, details?: unknown): ApiFailure {
+	const fields = { message, details };
+	switch (status) {
+		case 400:
+			return new BadRequest(fields);
+		case 401:
+			return new Unauthorized(fields);
+		case 403:
+			return new Forbidden(fields);
+		case 404:
+			return new NotFound(fields);
+		case 409:
+			return new Conflict(fields);
+		case 413:
+			return new PayloadTooLarge(fields);
+		default:
+			return status >= 500 ? new InternalServerError(fields) : new BadRequest(fields);
 	}
-
-	if (resolved.ok) {
-		return body as T;
-	}
-
-	throw toApiError(body, resolved.status);
 }
 
-/** Checks a response from an endpoint that intentionally returns no body. */
-export async function unwrapEmpty(
-	response: JsonResponse<unknown> | Promise<JsonResponse<unknown>>,
-): Promise<void> {
-	const resolved = await response;
-	if (resolved.ok) {
-		return;
+/** The API's own failure if `body` is one, or the one its status means. */
+export function failureFromResponse(body: unknown, status: number): ApiFailure {
+	const decoded = Schema.decodeUnknownResult(failureSchema)(body);
+	if (decoded._tag === "Success") {
+		return decoded.success;
 	}
-
-	throw toApiError(await resolved.json().catch(() => undefined), resolved.status);
-}
-
-/** Reads the envelope if there is one, and falls back to the status. */
-export function toApiError(body: unknown, status: number, fallback?: string): ApiError {
-	const envelope = Schema.decodeUnknownResult(errorResponseSchema)(body);
-	if (envelope._tag === "Success") {
-		const { code, message, details } = envelope.success.error;
-		return new ApiError(code, message, status, details);
-	}
-
-	// Not our envelope: better-auth's own error shape, or a proxy's error page.
-	return new ApiError(
-		apiErrorCodeForStatus(status),
-		fallback ?? `Request failed with status ${status}`,
-		status,
-	);
+	// Not ours: a proxy's error page, or a body that never arrived.
+	return failureForStatus(status, `Request failed with status ${status}`);
 }

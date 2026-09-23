@@ -20,5 +20,9 @@ export const routineDispatcherLayer = ({
 			),
 		),
 	);
-	return Layer.effectDiscard(Effect.forkScoped(iteration.pipe(Effect.forever)));
+	// Untraced, because it polls several times a second and each poll would be a
+	// trace of its own. What it dispatches is traced by the turn worker.
+	return Layer.effectDiscard(
+		Effect.forkScoped(iteration.pipe(Effect.forever, Effect.withTracerEnabled(false))),
+	);
 };

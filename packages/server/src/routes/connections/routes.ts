@@ -1,8 +1,5 @@
-import {
-	connectFromCatalogSchema,
-	connectionUpdateSchema,
-	newConnectionSchema,
-} from "@sugabots/contracts";
+import { BadRequest, Conflict, CurrentUser, NotFound } from "@sugabots/contracts/http";
+import type { Database } from "@sugabots/core/database/database";
 import type { listServerTools } from "@sugabots/core/providers/connections/mcp";
 import {
 	beginAuthorization,
@@ -10,37 +7,25 @@ import {
 	type OAuthProviders,
 	oauthProviders,
 } from "@sugabots/core/providers/connections/oauth";
-import {
-	type ConnectionDoesNotUseOAuth,
-	type ConnectionNeededNoSignIn,
-	type ConnectionNotFound,
-	type ConnectionOAuthStartFailed,
-	type ConnectionUrlNotAllowed,
-	connectionOperations,
-} from "@sugabots/core/providers/connections/operations";
-import type {
-	ConnectionNameTaken,
-	ConnectionStore,
-} from "@sugabots/core/providers/connections/store";
+import { connectionOperations } from "@sugabots/core/providers/connections/operations";
+import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type {
 	EgressHttpClient,
 	EgressHttpClients,
 	EgressUrlValidator,
 } from "@sugabots/core/providers/network/egress";
 import type { Authorization } from "@sugabots/core/workspaces/access";
-import { Hono } from "hono";
-import { type AuthEnv, requireSession } from "../../auth/middleware.ts";
-import type { SessionResolver } from "../../auth/session.ts";
-import { requirePod } from "../../http/authorisation.ts";
-import { body } from "../../http/body.ts";
-import { asHttpError, HttpError } from "../../http/errors.ts";
-import type { RunHandler } from "../../http/handler.ts";
+import { Effect } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { ServerApi } from "../../http/api.ts";
+import { grantedPod } from "../../http/authorisation.ts";
+import { asHttpError } from "../../http/errors.ts";
 
 export interface ConnectionRoutesOptions {
-	resolveSession: SessionResolver;
-	authorization: Authorization;
-	run: RunHandler;
 	connections: ConnectionStore;
+	/** Asked again when a sign-in comes back, since authority can lapse while the caller is away. */
+	authorization: Authorization;
 	httpClients: EgressHttpClients;
 	validateProviderUrl: EgressUrlValidator;
 	listTools?: typeof listServerTools;
@@ -54,168 +39,131 @@ export interface ConnectionRoutesOptions {
 	};
 }
 
-export function createConnectionRoutes({
-	resolveSession,
-	authorization,
-	run,
+export function connectionRoutes({
 	connections,
+	authorization,
 	httpClients,
 	validateProviderUrl,
 	listTools,
 	oauth,
 }: ConnectionRoutesOptions) {
-	const session = requireSession(resolveSession);
-	const readsConnections = requirePod(authorization, run, "connection.read");
-	const managesConnections = requirePod(authorization, run, "connection.manage");
-	const root = "/pods/:podId/connections";
-	const providers =
-		oauth.providers ??
-		oauthProviders({
-			connections,
-			run: (effect) => run(effect),
-			redirectUrl: oauth.redirectUrl,
-		});
-	const operations = connectionOperations({
-		connections,
-		authorization,
-		httpClients,
-		validateProviderUrl,
-		listTools,
-		oauth: {
-			providers,
-			fetch: oauth.fetch,
-			begin: oauth.begin ?? beginAuthorization,
-			finish: oauth.finish ?? finishAuthorization,
-		},
-	});
+	return HttpApiBuilder.group(ServerApi, "connections", (handlers) =>
+		Effect.gen(function* () {
+			// The OAuth library calls back with promises, so the stored providers
+			// run their queries against the database the routes were built with.
+			const database = yield* Effect.context<Database>();
+			const providers =
+				oauth.providers ??
+				oauthProviders({
+					connections,
+					run: (effect) => Effect.runPromise(Effect.provideContext(effect, database)),
+					redirectUrl: oauth.redirectUrl,
+				});
+			const operations = connectionOperations({
+				connections,
+				authorization,
+				httpClients,
+				validateProviderUrl,
+				listTools,
+				oauth: {
+					providers,
+					fetch: oauth.fetch,
+					begin: oauth.begin ?? beginAuthorization,
+					finish: oauth.finish ?? finishAuthorization,
+				},
+			});
 
-	return new Hono<AuthEnv>()
-		.get(root, session, readsConnections, async (c) => {
-			const { pod } = c.get("pod");
-			return c.json(await run(operations.list(pod.workspaceId, pod.id)));
-		})
-		.post(root, session, managesConnections, body(newConnectionSchema), async (c) => {
-			const { pod } = c.get("pod");
-			const created = await run(
-				operations
-					.create(pod.workspaceId, pod.id, c.get("session").user.id, c.req.valid("json"))
-					.pipe(asHttpError(connectionErrors)),
-			);
-			return c.json(created, 201);
-		})
-		.get(`${root}/:connectionId`, session, readsConnections, async (c) =>
-			c.json(
-				await run(
-					operations
-						.get(c.get("pod").pod.workspaceId, c.get("pod").pod.id, c.req.param("connectionId"))
-						.pipe(asHttpError(connectionErrors)),
-				),
-			),
-		)
-		.patch(
-			`${root}/:connectionId`,
-			session,
-			managesConnections,
-			body(connectionUpdateSchema),
-			async (c) =>
-				c.json(
-					await run(
+			return handlers
+				.handle("list", () =>
+					Effect.flatMap(grantedPod, ({ pod }) => operations.list(pod.workspaceId, pod.id)),
+				)
+				.handle("create", ({ payload }) =>
+					Effect.flatMap(grantedPod, ({ pod, actor }) =>
 						operations
-							.update(
-								c.get("pod").pod.workspaceId,
-								c.get("pod").pod.id,
-								c.req.param("connectionId"),
-								c.req.valid("json"),
-							)
+							.create(pod.workspaceId, pod.id, actor.userId, payload)
 							.pipe(asHttpError(connectionErrors)),
 					),
-				),
-		)
-		.delete(`${root}/:connectionId`, session, managesConnections, async (c) => {
-			await run(
-				operations
-					.remove(c.get("pod").pod.workspaceId, c.get("pod").pod.id, c.req.param("connectionId"))
-					.pipe(asHttpError(connectionErrors)),
-			);
-			return c.body(null, 204);
-		})
-		.post(`${root}/:connectionId/test`, session, managesConnections, async (c) =>
-			c.json(
-				await run(
-					operations
-						.test(c.get("pod").pod.workspaceId, c.get("pod").pod.id, c.req.param("connectionId"))
-						.pipe(asHttpError(connectionErrors)),
-				),
-			),
-		)
-		.post(
-			`${root}/connect`,
-			session,
-			managesConnections,
-			body(connectFromCatalogSchema),
-			async (c) => {
-				const { pod } = c.get("pod");
-				const result = await run(
-					operations
-						.connectFromCatalog(
-							pod.workspaceId,
-							pod.id,
-							c.get("session").user.id,
-							c.req.valid("json"),
-						)
-						.pipe(asHttpError(connectionErrors)),
+				)
+				.handle("get", ({ params }) =>
+					Effect.flatMap(grantedPod, ({ pod }) =>
+						operations
+							.get(pod.workspaceId, pod.id, params.connectionId)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("update", ({ params, payload }) =>
+					Effect.flatMap(grantedPod, ({ pod }) =>
+						operations
+							.update(pod.workspaceId, pod.id, params.connectionId, payload)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("remove", ({ params }) =>
+					Effect.flatMap(grantedPod, ({ pod }) =>
+						operations
+							.remove(pod.workspaceId, pod.id, params.connectionId)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("test", ({ params }) =>
+					Effect.flatMap(grantedPod, ({ pod }) =>
+						operations
+							.test(pod.workspaceId, pod.id, params.connectionId)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("connectFromCatalog", ({ payload }) =>
+					Effect.flatMap(grantedPod, ({ pod, actor }) =>
+						operations
+							.connectFromCatalog(pod.workspaceId, pod.id, actor.userId, payload)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("startOAuth", ({ params }) =>
+					Effect.flatMap(grantedPod, ({ pod }) =>
+						operations
+							.startOAuth(pod.workspaceId, pod.id, params.connectionId)
+							.pipe(asHttpError(connectionErrors)),
+					),
+				)
+				.handle("oauthCallback", ({ request, query }) =>
+					Effect.gen(function* () {
+						// A HEAD must not spend the one-time code a GET would.
+						if (request.method === "HEAD") {
+							return HttpServerResponse.empty({ status: 405, headers: { allow: "GET" } });
+						}
+						const { id: userId } = yield* CurrentUser;
+						const outcome = yield* operations
+							.completeOAuth(userId, {
+								code: query.code,
+								state: query.state,
+								error: query.error,
+								errorDescription: query.error_description,
+							})
+							.pipe(asHttpError(connectionErrors));
+						const back = new URL(oauth.returnTo);
+						if ("failed" in outcome) {
+							back.searchParams.set("oauth_error", outcome.failed);
+						} else {
+							back.pathname = `${back.pathname.replace(/\/$/, "")}/${outcome.connected.podId}`;
+							back.searchParams.set("connected", outcome.connected.connectionId);
+						}
+						return HttpServerResponse.redirect(back.toString(), { status: 302 });
+					}),
 				);
-				return c.json(result, 201);
-			},
-		)
-		.post(`${root}/:connectionId/oauth/start`, session, managesConnections, async (c) =>
-			c.json(
-				await run(
-					operations
-						.startOAuth(
-							c.get("pod").pod.workspaceId,
-							c.get("pod").pod.id,
-							c.req.param("connectionId"),
-						)
-						.pipe(asHttpError(connectionErrors)),
-				),
-			),
-		)
-		.get("/connections/oauth/callback", session, async (c) => {
-			if (c.req.method === "HEAD") {
-				return c.body(null, 405, { Allow: "GET" });
-			}
-			const { code, state, error, error_description: errorDescription } = c.req.query();
-			const outcome = await run(
-				operations
-					.completeOAuth(c.get("session").user.id, {
-						code,
-						state,
-						error,
-						errorDescription,
-					})
-					.pipe(asHttpError(connectionErrors)),
-			);
-			const back = new URL(oauth.returnTo);
-			if ("failed" in outcome) {
-				back.searchParams.set("oauth_error", outcome.failed);
-			} else {
-				back.pathname = `${back.pathname.replace(/\/$/, "")}/${outcome.connected.podId}`;
-				back.searchParams.set("connected", outcome.connected.connectionId);
-			}
-			return c.redirect(back.toString(), 302);
-		});
+		}),
+	);
 }
 
 const connectionErrors = {
-	ConnectionNameTaken: (failure: ConnectionNameTaken) => new HttpError("conflict", failure.message),
-	ConnectionNotFound: (failure: ConnectionNotFound) => new HttpError("not_found", failure.message),
-	ConnectionUrlNotAllowed: (failure: ConnectionUrlNotAllowed) =>
-		new HttpError("bad_request", failure.message),
-	ConnectionOAuthStartFailed: (failure: ConnectionOAuthStartFailed) =>
-		new HttpError("bad_request", failure.message),
-	ConnectionDoesNotUseOAuth: (failure: ConnectionDoesNotUseOAuth) =>
-		new HttpError("bad_request", failure.message),
-	ConnectionNeededNoSignIn: (failure: ConnectionNeededNoSignIn) =>
-		new HttpError("bad_request", failure.message),
+	ConnectionNameTaken: (failure: { message: string }) => new Conflict({ message: failure.message }),
+	ConnectionNotFound: (failure: { message: string }) => new NotFound({ message: failure.message }),
+	ConnectionUrlNotAllowed: (failure: { message: string }) =>
+		new BadRequest({ message: failure.message }),
+	ConnectionOAuthStartFailed: (failure: { message: string }) =>
+		new BadRequest({ message: failure.message }),
+	ConnectionDoesNotUseOAuth: (failure: { message: string }) =>
+		new BadRequest({ message: failure.message }),
+	ConnectionNeededNoSignIn: (failure: { message: string }) =>
+		new BadRequest({ message: failure.message }),
 };

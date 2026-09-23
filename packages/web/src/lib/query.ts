@@ -1,4 +1,4 @@
-import { ApiError } from "@sugabots/sdk";
+import { isApiFailure } from "@sugabots/sdk";
 import { QueryClient } from "@tanstack/react-query";
 
 /**
@@ -23,7 +23,7 @@ export function createQueryClient(): QueryClient {
 			queries: {
 				staleTime: 30_000,
 				retry: (attempt, failure) =>
-					attempt < 1 && !(failure instanceof ApiError && failure.code !== "internal"),
+					attempt < 1 && !(isApiFailure(failure) && failure._tag !== "InternalServerError"),
 			},
 			mutations: { retry: false },
 		},

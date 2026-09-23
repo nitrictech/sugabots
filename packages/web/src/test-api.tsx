@@ -9,9 +9,11 @@ import {
 	type SystemAgent,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
+import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
+import { Effect } from "effect";
 import { vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
 import { createAppRouter } from "@/router.tsx";
@@ -307,43 +309,32 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			expiresAt: new Date("2026-09-24T00:00:00.000Z"),
 		},
 	]);
-	client.api.onboarding.$get.mockResolvedValue(Response.json({ completed: true }));
-	client.api.onboarding["complete-invite"].$post.mockImplementation(async () =>
+	client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
+	client.api.onboarding.completeInvite.mockImplementation(() =>
 		client.auth.workspaces.acceptInvite.mock.calls.length > 0
-			? Response.json({ workspaceId: WORKSPACE })
-			: Response.json({ error: { code: "bad_request", message: "Pending" } }, { status: 400 }),
+			? Effect.succeed({ workspaceId: WORKSPACE })
+			: Effect.fail(new BadRequest({ message: "Pending" })),
 	);
 	const inPod = role === "admin" ? ADMIN_IN_POD : role === "member" ? MEMBER_IN_POD : VIEWER_IN_POD;
-	client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-		Response.json(pods.map((pod) => ({ ...pod, permissions: inPod }) satisfies Pod)),
+	client.api.pods.list.mockReturnValue(
+		Effect.succeed(pods.map((pod) => ({ ...pod, permissions: inPod }) satisfies Pod)),
 	);
-	client.api.workspaces[":workspaceId"]["personal-pod"].$post.mockResolvedValue(
-		Response.json(pods[0], { status: 201 }),
+	client.api.pods.ensurePersonal.mockReturnValue(Effect.succeed(pods[0]));
+	client.api.pods.listMembers.mockReturnValue(Effect.succeed([]));
+	client.api.agents.list.mockReturnValue(Effect.succeed(agents));
+	client.api.systemAgents.list.mockReturnValue(Effect.succeed(builtInAgents));
+	client.api.connections.list.mockReturnValue(Effect.succeed([]));
+	client.api.toolApprovals.listRules.mockReturnValue(Effect.succeed([]));
+	client.api.threads.list.mockReturnValue(Effect.succeed([]));
+	client.api.routines.list.mockReturnValue(Effect.succeed([]));
+	client.api.chats.getOrCreate.mockReturnValue(
+		Effect.fail(new NotFound({ message: "No chat fixture" })),
 	);
-	// Asked once per pod, and a Response body reads once, so a fresh one each time.
-	client.api.pods[":podId"].members.$get.mockImplementation(async () => Response.json([]));
-	client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(Response.json(agents));
-	client.api.workspaces[":workspaceId"]["system-agents"].$get.mockResolvedValue(
-		Response.json(builtInAgents),
-	);
-	client.api.pods[":podId"].connections.$get.mockResolvedValue(Response.json([]));
-	client.api.pods[":podId"]["tool-approval-rules"].$get.mockResolvedValue(Response.json([]));
-	client.api.workspaces[":workspaceId"].threads.$get.mockResolvedValue(Response.json([]));
-	client.api.agents[":agentId"].routines.$get.mockResolvedValue(Response.json([]));
-	client.api.workspaces[":workspaceId"].chats.$post.mockResolvedValue(
-		Response.json({ error: { code: "not_found", message: "No chat fixture" } }, { status: 404 }),
-	);
-	client.api.chats[":chatId"].messages.$get.mockResolvedValue(
-		Response.json({ items: [], nextCursor: null }),
-	);
-	client.api.chats[":chatId"].history.$get.mockResolvedValue(
-		Response.json({ items: [], nextCursor: null }),
-	);
-	client.api.threads[":threadId"].$get.mockResolvedValue(
-		Response.json({ error: { code: "not_found", message: "No such thread" } }, { status: 404 }),
-	);
-	client.api.workspaces[":workspaceId"].me.$get.mockResolvedValue(
-		Response.json({
+	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+	client.api.threads.get.mockReturnValue(Effect.fail(new NotFound({ message: "No such thread" })));
+	client.api.workspaceAccess.mockReturnValue(
+		Effect.succeed({
 			role,
 			permissions: {
 				createPods: role === "admin",
@@ -353,11 +344,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			},
 		}),
 	);
-	client.api.workspaces[":workspaceId"]["model-providers"].$get.mockResolvedValue(
-		Response.json(modelProviders),
-	);
-	client.api.workspaces[":workspaceId"]["model-providers"].models.$get.mockResolvedValue(
-		Response.json({
+	client.api.modelProviders.list.mockReturnValue(Effect.succeed(modelProviders));
+	client.api.modelProviders.listEnabledModels.mockReturnValue(
+		Effect.succeed({
 			models: MODELS.map((modelId) => ({
 				providerId: "0199a3a0-0000-7000-8000-0000000000c1",
 				providerName: "Anthropic",
@@ -368,6 +357,15 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			})),
 		}),
 	);
+}
+
+/**
+ * An answer a case gives later, to see what the page does while a request is
+ * still in flight: the endpoint returns `effect`, which waits for `answer`.
+ */
+export function pendingAnswer() {
+	const { promise, resolve } = Promise.withResolvers<Effect.Effect<unknown, unknown>>();
+	return { effect: Effect.flatten(Effect.promise(() => promise)), answer: resolve };
 }
 
 export function quietEventStream(...events: StreamEvent[]) {

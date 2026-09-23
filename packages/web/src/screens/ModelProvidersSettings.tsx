@@ -75,7 +75,7 @@ function ProviderRail({
 	onSelect,
 	onAdd,
 }: {
-	providers: ModelProvider[];
+	providers: readonly ModelProvider[];
 	selected?: ModelProvider;
 	onSelect: (id: string) => void;
 	onAdd: () => void;
@@ -795,7 +795,7 @@ function AddProvider({
 	onBack,
 	onCreated,
 }: {
-	existing: ModelProvider[];
+	existing: readonly ModelProvider[];
 	onBack: () => void;
 	onCreated: (id: string) => void;
 }) {

@@ -1,5 +1,5 @@
 import type { SessionUser, ThreadDetails, ThreadParticipant } from "@sugabots/contracts";
-import { ApiError } from "@sugabots/sdk";
+import { isApiFailure } from "@sugabots/sdk";
 import { useLayoutEffect, useRef } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
@@ -91,7 +91,7 @@ export function ThreadPage({
 		return null;
 	}
 	if (!details) {
-		const notFound = query.error instanceof ApiError && query.error.code === "not_found";
+		const notFound = isApiFailure(query.error) && query.error._tag === "NotFound";
 		return (
 			<EmptyState
 				title={notFound || !query.error ? "No such thread here" : "Could not load this thread"}

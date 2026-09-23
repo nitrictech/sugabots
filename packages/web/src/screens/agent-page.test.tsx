@@ -1,5 +1,7 @@
 import type { Connection, Routine } from "@sugabots/contracts";
+import { Conflict, InternalServerError } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	agents,
@@ -10,6 +12,7 @@ import {
 	MODELS,
 	mount,
 	open,
+	pendingAnswer,
 	pods,
 	triager,
 	workspace,
@@ -51,13 +54,13 @@ afterEach(() => {
 });
 
 function answers(change: Partial<typeof linear>): void {
-	client.api.agents[":agentId"].$patch.mockResolvedValue(Response.json({ ...linear, ...change }));
+	client.api.agents.update.mockReturnValue(Effect.succeed({ ...linear, ...change }));
 }
 
 function rosterAnswers(change: Partial<typeof linear>): void {
 	answers(change);
-	client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-		Response.json(agents.map((one) => (one.id === linear.id ? { ...one, ...change } : one))),
+	client.api.agents.list.mockReturnValue(
+		Effect.succeed(agents.map((one) => (one.id === linear.id ? { ...one, ...change } : one))),
 	);
 }
 
@@ -135,7 +138,7 @@ describe("a member", () => {
 			lastTestError: null,
 			createdAt: "2026-09-19T00:00:00.000Z",
 		};
-		client.api.pods[":podId"].connections.$get.mockResolvedValue(Response.json([connection]));
+		client.api.connections.list.mockReturnValue(Effect.succeed([connection]));
 		mount(page);
 		await showTab("Tools");
 
@@ -188,8 +191,8 @@ describe("an admin", () => {
 	});
 
 	it("previews the next Routine run as the schedule changes", async () => {
-		client.api.agents[":agentId"].routines["schedule-preview"].$post.mockResolvedValue(
-			Response.json([
+		client.api.routines.previewSchedule.mockReturnValue(
+			Effect.succeed([
 				"2026-09-21T09:00:00.000Z",
 				"2026-09-22T09:00:00.000Z",
 				"2026-09-23T09:00:00.000Z",
@@ -201,12 +204,10 @@ describe("an admin", () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].routines["schedule-preview"].$post).toHaveBeenCalledWith(
-				{
-					param: { agentId: linear.id },
-					json: { expression: "0 9 * * 1-5", timezone },
-				},
-			);
+			expect(client.api.routines.previewSchedule).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { expression: "0 9 * * 1-5", timezone },
+			});
 		});
 		const dialog = await screen.findByRole("dialog", { name: "New routine" });
 		expect(
@@ -223,19 +224,17 @@ describe("an admin", () => {
 
 		fireEvent.click(within(dialog).getByRole("button", { name: "Every day" }));
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].routines["schedule-preview"].$post).toHaveBeenCalledWith(
-				{
-					param: { agentId: linear.id },
-					json: { expression: "0 9 * * *", timezone },
-				},
-			);
+			expect(client.api.routines.previewSchedule).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { expression: "0 9 * * *", timezone },
+			});
 		});
 	});
 
 	it("saves schedule presets as cron in the detected timezone", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-		client.api.agents[":agentId"].routines.$post.mockResolvedValue(
-			Response.json({
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({
 				routine: {
 					...scheduledRoutine,
 					trigger: {
@@ -265,9 +264,9 @@ describe("an admin", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save routine" }));
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].routines.$post).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: {
+			expect(client.api.routines.create).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: {
 					name: "Evening review",
 					instructions: "Review the day.",
 					state: "enabled",
@@ -278,12 +277,8 @@ describe("an admin", () => {
 	});
 
 	it("shows scheduled Routines in plain language", async () => {
-		client.api.agents[":agentId"].routines.$get.mockResolvedValue(
-			Response.json([scheduledRoutine]),
-		);
-		client.api.agents[":agentId"].routines[":routineId"].executions.$get.mockResolvedValue(
-			Response.json({ items: [], nextCursor: null }),
-		);
+		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine]));
+		client.api.routines.executions.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		mount(page);
 		await showTab("Routines");
 
@@ -300,24 +295,16 @@ describe("an admin", () => {
 	});
 
 	it("shows Routine action failures on the affected row", async () => {
-		client.api.agents[":agentId"].routines.$get.mockResolvedValue(Response.json([webhookRoutine]));
-		client.api.agents[":agentId"].routines[":routineId"].executions.$get.mockResolvedValue(
-			Response.json({ items: [], nextCursor: null }),
+		client.api.routines.list.mockReturnValue(Effect.succeed([webhookRoutine]));
+		client.api.routines.executions.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+		client.api.routines.run.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Run unavailable" })),
 		);
-		client.api.agents[":agentId"].routines[":routineId"].run.$post.mockResolvedValue(
-			Response.json({ error: { code: "internal", message: "Run unavailable" } }, { status: 500 }),
+		client.api.routines.update.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Update unavailable" })),
 		);
-		client.api.agents[":agentId"].routines[":routineId"].$patch.mockResolvedValue(
-			Response.json(
-				{ error: { code: "internal", message: "Update unavailable" } },
-				{ status: 500 },
-			),
-		);
-		client.api.agents[":agentId"].routines[":routineId"].secret.$post.mockResolvedValue(
-			Response.json(
-				{ error: { code: "internal", message: "Rotation unavailable" } },
-				{ status: 500 },
-			),
+		client.api.routines.rotateSecret.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Rotation unavailable" })),
 		);
 		mount(page);
 		await showTab("Routines");
@@ -360,7 +347,7 @@ describe("an admin", () => {
 		});
 
 		await waitFor(() => expect(screen.queryByLabelText("System prompt")).toBeNull());
-		expect(client.api.agents[":agentId"].$patch).not.toHaveBeenCalled();
+		expect(client.api.agents.update).not.toHaveBeenCalled();
 	});
 
 	it("renames the agent from its menu", async () => {
@@ -373,15 +360,15 @@ describe("an admin", () => {
 		fireEvent.change(await screen.findByLabelText("Name"), {
 			target: { value: `  ${renamed.name}  ` },
 		});
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json(agents.map((agent) => (agent.id === linear.id ? renamed : agent))),
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed(agents.map((agent) => (agent.id === linear.id ? renamed : agent))),
 		);
 		fireEvent.click(await screen.findByRole("button", { name: "Save name" }));
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: { name: renamed.name },
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { name: renamed.name },
 			});
 		});
 		expect((await screen.findAllByText(renamed.name)).length).toBeGreaterThan(0);
@@ -389,11 +376,8 @@ describe("an admin", () => {
 	});
 
 	it("keeps a rejected rename open with the entered name", async () => {
-		client.api.agents[":agentId"].$patch.mockResolvedValue(
-			Response.json(
-				{ error: { code: "conflict", message: "An agent with that name already exists" } },
-				{ status: 409 },
-			),
+		client.api.agents.update.mockReturnValue(
+			Effect.fail(new Conflict({ message: "An agent with that name already exists" })),
 		);
 		mount(page);
 
@@ -417,9 +401,9 @@ describe("an admin", () => {
 		fireEvent.blur(description);
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: { description: "Digs through calls." },
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { description: "Digs through calls." },
 			});
 		});
 	});
@@ -429,38 +413,29 @@ describe("an admin", () => {
 
 		fireEvent.blur(await screen.findByLabelText("Description"));
 
-		expect(client.api.agents[":agentId"].$patch).not.toHaveBeenCalled();
+		expect(client.api.agents.update).not.toHaveBeenCalled();
 	});
 
 	it("writes the description once while a save is pending", async () => {
-		let answerUpdate: (response: Response) => void = () => {};
-		client.api.agents[":agentId"].$patch.mockReturnValue(
-			new Promise<Response>((resolve) => {
-				answerUpdate = resolve;
-			}),
-		);
+		const update = pendingAnswer();
+		client.api.agents.update.mockReturnValue(update.effect);
 		mount(page);
 		const description = await screen.findByLabelText("Description");
 		fireEvent.change(description, { target: { value: "Pending description" } });
 		fireEvent.blur(description);
-		await waitFor(() => expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledOnce());
+		await waitFor(() => expect(client.api.agents.update).toHaveBeenCalledOnce());
 
 		fireEvent.blur(description);
-		expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledOnce();
+		expect(client.api.agents.update).toHaveBeenCalledOnce();
 
-		answerUpdate(
-			Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
-		);
+		update.answer(Effect.fail(new InternalServerError({ message: "Unavailable" })));
 		expect(await screen.findByRole("alert")).toBeDefined();
 		expect((description as HTMLInputElement).value).toBe("Pending description");
 	});
 
 	it("says so when the API refuses a change, rather than losing it silently", async () => {
-		client.api.agents[":agentId"].$patch.mockResolvedValue(
-			Response.json(
-				{ error: { code: "conflict", message: "An agent called that already exists" } },
-				{ status: 409 },
-			),
+		client.api.agents.update.mockReturnValue(
+			Effect.fail(new Conflict({ message: "An agent called that already exists" })),
 		);
 		mount(page);
 
@@ -492,7 +467,7 @@ describe("an admin", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Revert" }));
 
 		expect((prompt as HTMLTextAreaElement).value).toBe("Be brief.");
-		expect(client.api.agents[":agentId"].$patch).not.toHaveBeenCalled();
+		expect(client.api.agents.update).not.toHaveBeenCalled();
 	});
 
 	it("counts the prompt against its limit", async () => {
@@ -517,17 +492,17 @@ describe("an admin", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: { prompt: "Be terse." },
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { prompt: "Be terse." },
 			});
 		});
 		expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
 	});
 
 	it("keeps a rejected prompt open with its draft", async () => {
-		client.api.agents[":agentId"].$patch.mockResolvedValue(
-			Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
+		client.api.agents.update.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Unavailable" })),
 		);
 		mount(page);
 		await showTab("Prompt");
@@ -544,31 +519,29 @@ describe("an admin", () => {
 	});
 
 	it("clears a crew agent's model too, which stops it until one is chosen again", async () => {
-		client.api.agents[":agentId"].$patch.mockResolvedValue(
-			Response.json({ ...linear, model: null }),
-		);
+		client.api.agents.update.mockReturnValue(Effect.succeed({ ...linear, model: null }));
 		mount(page);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Clear the model" }));
 
 		await waitFor(() =>
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: { model: null },
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { model: null },
 			}),
 		);
 	});
 
 	it("keeps a rejected model selected for another save attempt", async () => {
-		client.api.agents[":agentId"].$patch.mockResolvedValue(
-			Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
+		client.api.agents.update.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Unavailable" })),
 		);
 		mount(page);
 		fireEvent.click(await screen.findByRole("button", { name: "Choose a model" }));
 
 		(await screen.findByRole("option", { name: MODELS[1] })).click();
 
-		await waitFor(() => expect(client.api.agents[":agentId"].$patch).toHaveBeenCalled());
+		await waitFor(() => expect(client.api.agents.update).toHaveBeenCalled());
 		expect(await screen.findByRole("alert")).toBeDefined();
 		expect((screen.getByRole("combobox", { name: "Model" }) as HTMLInputElement).value).toBe(
 			MODELS[1],
@@ -586,9 +559,9 @@ describe("an admin", () => {
 		fireEvent.click(search);
 
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
-				json: { disabledTools: ["web_search"] },
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: { disabledTools: ["web_search"] },
 			});
 		});
 		const off = await screen.findByRole("switch", { name: "Turn on Search the web" });
@@ -598,9 +571,9 @@ describe("an admin", () => {
 		rosterAnswers({ disabledTools: [] });
 		fireEvent.click(off);
 		await waitFor(() => {
-			expect(client.api.agents[":agentId"].$patch).toHaveBeenLastCalledWith({
-				param: { agentId: linear.id },
-				json: { disabledTools: [] },
+			expect(client.api.agents.update).toHaveBeenLastCalledWith({
+				params: { agentId: linear.id },
+				payload: { disabledTools: [] },
 			});
 		});
 	});
@@ -614,17 +587,17 @@ describe("an admin", () => {
 	});
 
 	it("deletes the agent after asking, and returns to the list", async () => {
-		client.api.agents[":agentId"].$delete.mockResolvedValue(new Response(null, { status: 204 }));
+		client.api.agents.remove.mockReturnValue(Effect.void);
 		const router = mount(page);
 
 		open(await screen.findByRole("button", { name: `${linear.name} options` }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete agent" }));
-		expect(client.api.agents[":agentId"].$delete).not.toHaveBeenCalled();
+		expect(client.api.agents.remove).not.toHaveBeenCalled();
 		fireEvent.click(await screen.findByRole("button", { name: "Yes, delete" }));
 
 		await waitFor(() =>
-			expect(client.api.agents[":agentId"].$delete).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
+			expect(client.api.agents.remove).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
 			}),
 		);
 		await waitFor(() => expect(router.state.location.pathname).toBe(`/settings/pods/${suga.id}`));
@@ -644,8 +617,8 @@ describe("a built-in agent", () => {
 	});
 
 	it("says what is not happening while no model has been chosen, and offers one", async () => {
-		client.api.workspaces[":workspaceId"]["system-agents"].$get.mockResolvedValue(
-			Response.json(builtInAgents.map((one) => ({ ...one, model: null }))),
+		client.api.systemAgents.list.mockReturnValue(
+			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
 		);
 		mount(page);
 
@@ -655,8 +628,8 @@ describe("a built-in agent", () => {
 	});
 
 	it("saves the model an administrator chooses for the whole workspace", async () => {
-		client.api.workspaces[":workspaceId"]["system-agents"][":key"].$patch.mockResolvedValue(
-			Response.json({ ...facilitator, model: MODELS[1] }),
+		client.api.systemAgents.update.mockReturnValue(
+			Effect.succeed({ ...facilitator, model: MODELS[1] }),
 		);
 		mount(page);
 
@@ -664,36 +637,30 @@ describe("a built-in agent", () => {
 		(await screen.findByRole("option", { name: MODELS[1] })).click();
 
 		await waitFor(() =>
-			expect(
-				client.api.workspaces[":workspaceId"]["system-agents"][":key"].$patch,
-			).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id, key: "facilitate" },
-				json: { model: MODELS[1] },
+			expect(client.api.systemAgents.update).toHaveBeenCalledWith({
+				params: { workspaceId: workspace.id, key: "facilitate" },
+				payload: { model: MODELS[1] },
 			}),
 		);
 	});
 
 	it("clears the model in use, which is how it is switched off", async () => {
-		client.api.workspaces[":workspaceId"]["system-agents"][":key"].$patch.mockResolvedValue(
-			Response.json({ ...facilitator, model: null }),
-		);
+		client.api.systemAgents.update.mockReturnValue(Effect.succeed({ ...facilitator, model: null }));
 		mount(page);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Clear the model" }));
 
 		await waitFor(() =>
-			expect(
-				client.api.workspaces[":workspaceId"]["system-agents"][":key"].$patch,
-			).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id, key: "facilitate" },
-				json: { model: null },
+			expect(client.api.systemAgents.update).toHaveBeenCalledWith({
+				params: { workspaceId: workspace.id, key: "facilitate" },
+				payload: { model: null },
 			}),
 		);
 	});
 
 	it("offers nothing to clear while no model has been chosen", async () => {
-		client.api.workspaces[":workspaceId"]["system-agents"].$get.mockResolvedValue(
-			Response.json(builtInAgents.map((one) => ({ ...one, model: null }))),
+		client.api.systemAgents.list.mockReturnValue(
+			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
 		);
 		mount(page);
 
@@ -702,8 +669,8 @@ describe("a built-in agent", () => {
 	});
 
 	it("checks the chosen model on the job the built-in agent does, and says how it went", async () => {
-		client.api.workspaces[":workspaceId"]["model-trials"].$post.mockResolvedValue(
-			Response.json({
+		client.api.modelTrials.run.mockReturnValue(
+			Effect.succeed({
 				systemAgentKey: "facilitate",
 				model: facilitator.model,
 				rating: "poor",
@@ -728,9 +695,9 @@ describe("a built-in agent", () => {
 		expect(await screen.findByText("poor")).toBeDefined();
 		expect(screen.getByText(/Too often wrong/)).toBeDefined();
 		expect(screen.getByText("1/3")).toBeDefined();
-		expect(client.api.workspaces[":workspaceId"]["model-trials"].$post).toHaveBeenCalledWith({
-			param: { workspaceId: workspace.id },
-			json: { systemAgentKey: "facilitate", model: facilitator.model },
+		expect(client.api.modelTrials.run).toHaveBeenCalledWith({
+			params: { workspaceId: workspace.id },
+			payload: { systemAgentKey: "facilitate", model: facilitator.model },
 		});
 	});
 });

@@ -1,6 +1,6 @@
 import type { Agent, AgentUpdate, NewAgentInPod } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -16,7 +16,7 @@ import { useWorkspace } from "@/lib/workspace.ts";
  * an admin sees all of them because placing agents into pods is their job.
  */
 export function useAgents(): {
-	agents: Agent[] | undefined;
+	agents: readonly Agent[] | undefined;
 	isPending: boolean;
 	error: unknown;
 	refetch: () => Promise<unknown>;
@@ -27,7 +27,8 @@ export function useAgents(): {
 	const query = useQuery({
 		queryKey: ["agents", workspaceId],
 		queryFn: workspaceId
-			? () => unwrap(client.api.workspaces[":workspaceId"].agents.$get({ param: { workspaceId } }))
+			? ({ signal }) =>
+					Effect.runPromise(client.api.agents.list({ params: { workspaceId } }), { signal })
 			: skipToken,
 	});
 
@@ -58,11 +59,10 @@ export function useModels(enabled = true) {
 		queryKey: ["models", workspaceId],
 		queryFn:
 			workspaceId && enabled
-				? () =>
-						unwrap(
-							client.api.workspaces[":workspaceId"]["model-providers"].models.$get({
-								param: { workspaceId },
-							}),
+				? ({ signal }) =>
+						Effect.runPromise(
+							client.api.modelProviders.listEnabledModels({ params: { workspaceId } }),
+							{ signal },
 						)
 				: skipToken,
 	});
@@ -73,20 +73,11 @@ export function useCreateAgent(podId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
-		mutationFn: async (input: NewAgentInPod) => {
+		mutationFn: (input: NewAgentInPod) => {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			const agent = await unwrap(
-				client.api.pods[":podId"].agents.$post({
-					param: { podId },
-					json: input,
-				}),
-			);
-			if (!agent) {
-				throw new Error("Agent creation returned no agent");
-			}
-			return agent;
+			return Effect.runPromise(client.api.agents.create({ params: { podId }, payload: input }));
 		},
 		onSuccess: invalidate,
 	});
@@ -105,7 +96,7 @@ export function useUpdateAgent(agentId: string) {
 
 	return useMutation({
 		mutationFn: (input: AgentUpdate) =>
-			unwrap(client.api.agents[":agentId"].$patch({ param: { agentId }, json: input })),
+			Effect.runPromise(client.api.agents.update({ params: { agentId }, payload: input })),
 		onMutate: async (input) => {
 			await queries.cancelQueries({ queryKey: rosterKey });
 			const before = queries.getQueryData<Agent[]>(rosterKey);
@@ -129,7 +120,7 @@ export function useDeleteAgent() {
 
 	return useMutation({
 		mutationFn: (agentId: string) =>
-			unwrapEmpty(client.api.agents[":agentId"].$delete({ param: { agentId } })),
+			Effect.runPromise(client.api.agents.remove({ params: { agentId } })),
 		onSuccess: invalidate,
 	});
 }

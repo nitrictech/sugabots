@@ -1,50 +1,23 @@
+import { Api, Authorise, Session } from "@sugabots/contracts/http";
+import { HttpApi } from "effect/unstable/httpapi";
 import { describe, expect, it } from "vitest";
+import { type AccessRule, accessRuleFor } from "./access-policy.ts";
 import { createTestApp } from "./app.test-support.ts";
-import { permissionRequiredBy } from "./authorisation.ts";
 
 /**
- * Every route fails closed, and every route says what it lets somebody do.
+ * Every endpoint fails closed, and every endpoint says what it lets somebody do.
  *
- * The other HTTP tests each check one route they know about. This one asks the
- * router what routes exist, so a route added without a session check, or
- * without naming the permission it needs, fails here rather than shipping.
- * "Which routes did we forget to authorise?" is the question that breaches a
- * multi-tenant product.
- *
- * Routes are named by their pattern, not listed by hand: adding a route to the
- * chain in `app.ts` adds it to this test automatically.
+ * The other HTTP tests each check one route they know about. This one reads
+ * the API definition, so an endpoint added without a session check, or
+ * without a rule in `accessPolicy`, fails here rather than shipping. "Which routes did
+ * we forget to authorise?" is the question that breaches a multi-tenant
+ * product.
  */
 
 /** Public by intent. Anything else reaching here without credentials is a bug. */
-const OPEN_ROUTES = new Set(["/health", "/hooks/routines/:routineId"]);
+const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
 
-/**
- * Routes addressed at something that is not a workspace, a pod or an agent, so
- * there is no id for a `require*` middleware to resolve. Each is scoped by
- * `reachesPod` — the same rule those middlewares apply — inside the store it
- * calls, and the test for that route is where the scoping is asserted.
- *
- * Listing one here is a claim that has to be true. Anything not listed must
- * name its permission at the route.
- */
-const AUTHORISED_BY_REACH: Record<string, string> = {
-	"GET /me": "the signed-in person, and nothing about a workspace",
-	"GET /onboarding": "the signed-in person's own progress",
-	"POST /onboarding/complete": "onboarding/store.ts checks the pod and agent named",
-	"POST /onboarding/complete-invite": "matches the invitation against this account",
-	"GET /threads/:threadId": "threads/store.ts scopes by visibleThread",
-	"POST /turns/:turnId/cancel": "turns/store.ts scopes by visibleThread",
-	"GET /chats/:chatId/messages": "chats/store.ts scopes by visibleChat",
-	"GET /chats/:chatId/history": "chats/store.ts scopes by visibleChat",
-	"POST /chats/:chatId/messages": "chats/store.ts scopes by visibleChat",
-	"GET /workspaces/:workspaceId/events": "events/access.ts asks Authorization itself",
-	"GET /threads/:threadId/events": "events/access.ts asks the same thread visibility",
-	"GET /connections/oauth/callback":
-		"connections/operations.ts asks again on the way back from the provider",
-};
-
-/** better-auth owns its own wildcard and does its own authorisation. */
-const DELEGATED_PREFIX = "/auth";
+const STRANGER = "0199a3a0-0000-7000-8000-0000000000ee";
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspaceId: "0199a3a0-0000-7000-8000-000000000001",
@@ -60,7 +33,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	routineId: "0199a3a0-0000-7000-8000-000000000009",
 	toolCallId: "0199a3a0-0000-7000-8000-00000000000a",
 	ruleId: "0199a3a0-0000-7000-8000-00000000000b",
-	// A built-in agent is addressed by its key, not by an id.
+	// A system agent is addressed by its key, not by an id.
 	key: "summarise",
 	id: "0199a3a0-0000-7000-8000-000000000008",
 };
@@ -75,72 +48,95 @@ function fill(pattern: string): string {
 	});
 }
 
-interface Route {
+interface Endpoint {
+	name: string;
 	method: string;
 	path: string;
-	/** The permission its chain names, if any. */
-	permission?: string;
+	behindSession: boolean;
+	behindAuthorise: boolean;
+	rule: AccessRule | undefined;
 }
 
-/**
- * Hono registers one entry per handler, so a route's middleware and its
- * handler share a method and a path. Middleware registered with `use` is
- * `ALL`, and is not a route of its own.
- */
-function declaredRoutes(): Route[] {
-	const app = createTestApp({ resolveSession: async () => null });
-	const seen = new Map<string, Route>();
-	for (const { method, path, handler } of app.routes) {
-		if (method === "ALL" || path.startsWith(DELEGATED_PREFIX) || OPEN_ROUTES.has(path)) {
-			continue;
-		}
-		const key = `${method} ${path}`;
-		const found = seen.get(key) ?? { method, path };
-		seen.set(key, { ...found, permission: found.permission ?? permissionRequiredBy(handler) });
-	}
-	return [...seen.values()].sort((a, b) =>
-		`${a.path}${a.method}`.localeCompare(`${b.path}${b.method}`),
-	);
+function declaredEndpoints(): Endpoint[] {
+	const endpoints: Endpoint[] = [];
+	HttpApi.reflect(Api, {
+		onGroup: () => {},
+		onEndpoint: ({ group, endpoint, middleware }) => {
+			endpoints.push({
+				name: `${endpoint.method} ${endpoint.path}`,
+				method: endpoint.method,
+				path: endpoint.path,
+				behindSession: [...middleware].some(({ key }) => key === Session.key),
+				behindAuthorise: [...middleware].some(({ key }) => key === Authorise.key),
+				rule: accessRuleFor(group.identifier, endpoint.identifier),
+			});
+		},
+	});
+	return endpoints.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-const routes = declaredRoutes();
-const named = routes.map((route) => [`${route.method} ${route.path}` as const, route] as const);
+const protectedEndpoints = declaredEndpoints()
+	.filter((endpoint) => !OPEN_ENDPOINTS.has(endpoint.name))
+	.map((endpoint) => [endpoint.name, endpoint] as const);
 
-describe("every route requires a session", () => {
-	it("discovers protected routes", () => {
-		expect(routes.length).toBeGreaterThan(20);
+/** An endpoint whose rule names a permission, checked against an id in its path. */
+const idAddressed = protectedEndpoints.filter(([, { rule }]) => rule && !("reach" in rule));
+
+function requestTo({ method, path }: Endpoint) {
+	return {
+		method,
+		headers: { "content-type": "application/json" },
+		body: method === "GET" || method === "DELETE" ? undefined : "{}",
+		path: fill(path),
+	};
+}
+
+describe("every endpoint requires a session", () => {
+	it("discovers protected endpoints", () => {
+		expect(protectedEndpoints.length).toBeGreaterThan(20);
 	});
 
-	it.each(named)("%s refuses an anonymous caller", async (_name, { method, path }) => {
-		const app = createTestApp({ resolveSession: async () => null });
+	it.each(protectedEndpoints)("%s is behind Session and Authorise", (_name, endpoint) => {
+		expect(endpoint.behindSession).toBe(true);
+		expect(endpoint.behindAuthorise).toBe(true);
+	});
 
-		const response = await app.request(fill(path), {
-			method,
-			headers: { "content-type": "application/json" },
-			body: method === "GET" || method === "DELETE" ? undefined : "{}",
-		});
+	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
+		const app = createTestApp({ resolveSession: async () => null });
+		const { path, ...init } = requestTo(endpoint);
+
+		const response = await app.request(path, init);
 
 		expect(response.status).toBe(401);
 	});
+
+	it("has no stale open endpoints", () => {
+		const declared = new Set(declaredEndpoints().map(({ name }) => name));
+		expect([...OPEN_ENDPOINTS].filter((name) => !declared.has(name))).toEqual([]);
+	});
 });
 
-describe("every route names the permission it needs", () => {
-	it.each(named)("%s", (name, route) => {
-		if (route.permission === undefined) {
-			expect(
-				AUTHORISED_BY_REACH[name],
-				`${name} names no permission. Add requireWorkspace/requirePod/requireAgent to its ` +
-					"chain, or record in AUTHORISED_BY_REACH where it is scoped instead.",
-			).toBeDefined();
-			return;
+describe("every endpoint says what it lets somebody do", () => {
+	it.each(protectedEndpoints)("%s has a rule in accessPolicy", (_name, { rule }) => {
+		expect(rule).toBeDefined();
+		if (rule && "reach" in rule) {
+			expect(rule.reach, "a reach rule names where the endpoint is scoped").not.toBe("");
 		}
-		expect(AUTHORISED_BY_REACH[name], `${name} both names a permission and claims reach`).toBe(
-			undefined,
-		);
 	});
 
-	it("has no stale entries in AUTHORISED_BY_REACH", () => {
-		const declared = new Set<string>(named.map(([name]) => name));
-		expect(Object.keys(AUTHORISED_BY_REACH).filter((name) => !declared.has(name))).toEqual([]);
-	});
+	it.each(idAddressed)(
+		"%s refuses a signed-in stranger before reading the request",
+		async (_name, endpoint) => {
+			const app = createTestApp({
+				resolveSession: async () => ({
+					user: { id: STRANGER, email: "stranger@example.com", name: "Stranger", image: null },
+				}),
+			});
+			const { path, ...init } = requestTo(endpoint);
+
+			const response = await app.request(path, init);
+
+			expect(response.status).toBe(404);
+		},
+	);
 });

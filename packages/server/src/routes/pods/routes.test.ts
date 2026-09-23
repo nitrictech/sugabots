@@ -1,5 +1,6 @@
 import type { Pod } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING, errorResponseSchema, podSchema } from "@sugabots/contracts";
+import { DEFAULT_POD_ROUTING, podSchema } from "@sugabots/contracts";
+import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { podPermissions } from "@sugabots/core/workspaces/permissions";
 import { PersonalPodFixed, type PodStore, SlugTaken } from "@sugabots/core/workspaces/pods/store";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
@@ -16,7 +17,7 @@ import { createTestApp } from "../../http/app.test-support.ts";
  *
  * The rules these are mostly about: an admin reaches every shared pod without
  * being in it, a member reaches only the pods they have joined, and anything
- * the caller cannot reach is `not_found` rather than `forbidden`, so an id
+ * the caller cannot reach is `NotFound` rather than `Forbidden`, so an id
  * cannot be probed for.
  */
 
@@ -183,8 +184,10 @@ const as = (token: string, init: RequestInit = {}) => ({
 
 const json = (value: unknown) => ({ method: "POST", body: JSON.stringify(value) });
 
-const errorCode = async (response: Response) =>
-	Schema.decodeUnknownSync(errorResponseSchema)(await response.json()).error.code;
+const failure = Schema.Union([BadRequest, Conflict, Forbidden, NotFound]);
+
+const errorTag = async (response: Response) =>
+	Schema.decodeUnknownSync(failure)(await response.json())._tag;
 
 describe("GET /workspaces/:workspaceId/pods", () => {
 	it("lists the pods a member can see", async () => {
@@ -200,7 +203,7 @@ describe("GET /workspaces/:workspaceId/pods", () => {
 		const response = await app().request(`/workspaces/${WORKSPACE}/pods`, as("outsider-token"));
 
 		expect(response.status).toBe(404);
-		expect(await errorCode(response)).toBe("not_found");
+		expect(await errorTag(response)).toBe("NotFound");
 	});
 
 	it("answers no to a workspace id that is not a uuid, rather than failing", async () => {
@@ -226,7 +229,7 @@ describe("POST /workspaces/:workspaceId/pods", () => {
 		);
 
 		expect(response.status).toBe(403);
-		expect(await errorCode(response)).toBe("forbidden");
+		expect(await errorTag(response)).toBe("Forbidden");
 	});
 
 	it("rejects a name nothing can be slugged from", async () => {
@@ -246,9 +249,7 @@ describe("POST /workspaces/:workspaceId/pods", () => {
 		);
 
 		expect(response.status).toBe(400);
-		expect(
-			Schema.decodeUnknownSync(errorResponseSchema)(await response.json()).error.details,
-		).toBeDefined();
+		expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).details).toBeDefined();
 	});
 
 	it("reports a taken slug as a conflict", async () => {
@@ -260,7 +261,7 @@ describe("POST /workspaces/:workspaceId/pods", () => {
 		);
 
 		expect(response.status).toBe(409);
-		expect(await errorCode(response)).toBe("conflict");
+		expect(await errorTag(response)).toBe("Conflict");
 	});
 });
 

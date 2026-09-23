@@ -1,7 +1,8 @@
 import { resetEvent, type StreamEvent, streamEventSchema } from "@sugabots/contracts";
+import { type ApiFailure, InternalServerError } from "@sugabots/contracts/http";
 import { Schema } from "effect";
 import { createParser } from "eventsource-parser";
-import { ApiError, toApiError } from "./errors.ts";
+import { failureFromResponse } from "./errors.ts";
 import type { TokenStore } from "./tokens.ts";
 
 /**
@@ -119,10 +120,10 @@ function createEventStream(context: StreamContext): EventStream {
 				// a dropped socket, a restart, a 503, a rate limit — is worth
 				// waiting out.
 				if (
-					error instanceof ApiError &&
+					error instanceof StreamRefused &&
 					(isPermanent(error.status) || (error.status >= 200 && error.status < 300))
 				) {
-					throw error;
+					throw error.failure;
 				}
 			}
 			if (!signal.aborted) {
@@ -138,6 +139,23 @@ function createEventStream(context: StreamContext): EventStream {
 		},
 		close: () => closing.abort(),
 	};
+}
+
+/**
+ * A response that ended a connection, with the status it came with: whether
+ * to reconnect is decided by the status, and what the caller sees is the
+ * failure.
+ */
+class StreamRefused {
+	constructor(
+		readonly failure: ApiFailure,
+		readonly status: number,
+	) {}
+}
+
+/** A successful response that is not a usable stream. Reconnecting would get the same. */
+function malformed(message: string, status: number): StreamRefused {
+	return new StreamRefused(new InternalServerError({ message }), status);
 }
 
 interface Message {
@@ -167,18 +185,17 @@ async function connect(
 		return undefined;
 	}
 	if (!response.ok) {
-		throw toApiError(await response.json().catch(() => undefined), response.status);
-	}
-	const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-	if (contentType !== "text/event-stream") {
-		throw new ApiError(
-			"internal",
-			"The event stream returned an invalid content type",
+		throw new StreamRefused(
+			failureFromResponse(await response.json().catch(() => undefined), response.status),
 			response.status,
 		);
 	}
+	const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+	if (contentType !== "text/event-stream") {
+		throw malformed("The event stream returned an invalid content type", response.status);
+	}
 	if (!response.body) {
-		throw new ApiError("internal", "The event stream returned no body", response.status);
+		throw malformed("The event stream returned no body", response.status);
 	}
 
 	return readMessages(response.body);
@@ -216,7 +233,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 				buffered = buffered.slice(lineEnd + delimiterLength);
 				eventChars += line.length;
 				if (eventChars > MAX_EVENT_CHARS) {
-					throw new ApiError("internal", "The event stream frame exceeded the size limit", 200);
+					throw malformed("The event stream frame exceeded the size limit", 200);
 				}
 
 				parser.feed(line);
@@ -229,7 +246,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 			}
 
 			if (eventChars + buffered.length > MAX_EVENT_CHARS) {
-				throw new ApiError("internal", "The event stream frame exceeded the size limit", 200);
+				throw malformed("The event stream frame exceeded the size limit", 200);
 			}
 		}
 	} finally {

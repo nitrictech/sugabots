@@ -1,6 +1,7 @@
 import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
 import { withPlacedPart } from "@/lib/thread-events.ts";
@@ -72,9 +73,7 @@ describe("a tool call row", () => {
 			mutating: true,
 			approval: { status: "pending", decidedByName: null, decidedAt: null },
 		};
-		client.api.pods[":podId"]["tool-calls"][":toolCallId"].approval.$post.mockResolvedValue(
-			Response.json(pending),
-		);
+		client.api.toolApprovals.decide.mockReturnValue(Effect.succeed(pending));
 		render(
 			<QueryClientProvider client={createQueryClient()}>
 				<ToolCallRow
@@ -92,14 +91,12 @@ describe("a tool call row", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
 
 		await waitFor(() =>
-			expect(
-				client.api.pods[":podId"]["tool-calls"][":toolCallId"].approval.$post,
-			).toHaveBeenCalledWith({
-				param: {
+			expect(client.api.toolApprovals.decide).toHaveBeenCalledWith({
+				params: {
 					podId: "0199a3a0-0000-7000-8000-000000000002",
 					toolCallId: call.id,
 				},
-				json: { decision: "allow_once" },
+				payload: { decision: "allow_once" },
 			}),
 		);
 	});

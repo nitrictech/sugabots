@@ -1,11 +1,19 @@
-import { handleFromName, streamEvent, type ThreadDetails } from "@sugabots/contracts";
+import {
+	DEFAULT_THREAD_HISTORY_LIMIT,
+	handleFromName,
+	streamEvent,
+	type ThreadDetails,
+} from "@sugabots/contracts";
+import { Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	controlledEventStream,
 	linear,
 	mount,
+	pendingAnswer,
 	pods,
 	sam,
 	triager,
@@ -134,7 +142,7 @@ describe("thread navigation", () => {
 				},
 			],
 		};
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(failed));
+		client.api.threads.get.mockReturnValue(Effect.succeed(failed));
 		mount(`/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findByText("Reply failed")).toBeDefined();
@@ -142,10 +150,10 @@ describe("thread navigation", () => {
 	});
 
 	it("uses the thread participant as host when the workspace roster fails", async () => {
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json({ error: { code: "internal", message: "Unavailable" } }, { status: 500 }),
+		client.api.agents.list.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Unavailable" })),
 		);
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(threadDetails));
+		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 
 		mount(`/threads/${threadDetails.thread.id}`);
 
@@ -154,9 +162,7 @@ describe("thread navigation", () => {
 	});
 
 	it("distinguishes a failed thread request from a missing thread", async () => {
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({ error: { code: "forbidden", message: "Unavailable" } }, { status: 403 }),
-		);
+		client.api.threads.get.mockReturnValue(Effect.fail(new Forbidden({ message: "Unavailable" })));
 
 		mount(`/threads/${threadDetails.thread.id}`);
 
@@ -165,7 +171,7 @@ describe("thread navigation", () => {
 	});
 
 	it("collapses and restores the wide thread summary", async () => {
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(threadDetails));
+		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 		const router = mount(`/threads/${threadDetails.thread.id}`);
 		await screen.findByRole("complementary", { name: "Chat summary" });
 
@@ -179,8 +185,8 @@ describe("thread navigation", () => {
 	});
 
 	it("says the Scribe has no model, and where to set it up", async () => {
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({ ...threadDetails, summary: null, summaryEnabled: false }),
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({ ...threadDetails, summary: null, summaryEnabled: false }),
 		);
 		mount(`/threads/${threadDetails.thread.id}`);
 
@@ -192,8 +198,8 @@ describe("thread navigation", () => {
 
 	it("tells a member why there is no summary without a link they cannot follow", async () => {
 		apiAnswers({ role: "member" });
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({ ...threadDetails, summary: null, summaryEnabled: false }),
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({ ...threadDetails, summary: null, summaryEnabled: false }),
 		);
 		mount(`/threads/${threadDetails.thread.id}`);
 
@@ -209,7 +215,7 @@ describe("thread navigation", () => {
 			summary: null,
 			summaryEnabled: undefined,
 		};
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(withoutTheField));
+		client.api.threads.get.mockReturnValue(Effect.succeed(withoutTheField));
 		mount(`/threads/${threadDetails.thread.id}`);
 
 		expect(
@@ -222,7 +228,7 @@ describe("thread navigation", () => {
 		const threadUpdates = controlledEventStream();
 		client.events.thread.mockReturnValue(threadUpdates.stream);
 		let current: ThreadDetails = { ...threadDetails, summary: null };
-		client.api.threads[":threadId"].$get.mockImplementation(async () => Response.json(current));
+		client.api.threads.get.mockImplementation(() => Effect.succeed(current));
 		mount(`/threads/${threadDetails.thread.id}`);
 		expect(
 			await screen.findAllByText("A summary will appear after the first agent reply."),
@@ -237,8 +243,8 @@ describe("thread navigation", () => {
 	});
 
 	it("labels missing provider cost and context capacity as unavailable", async () => {
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				usage: {
 					...threadDetails.usage,
@@ -257,7 +263,7 @@ describe("thread navigation", () => {
 	it("applies streamed agent messages to the thread cache", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(threadDetails));
+		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 		mount(`/threads/${threadDetails.thread.id}`);
 		await screen.findByText("The release notes are ready.");
 
@@ -327,7 +333,7 @@ describe("thread navigation", () => {
 			content: "",
 			createdAt: "2026-09-10T04:03:00.000Z",
 		};
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(threadDetails));
+		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 		mount(`/threads/${threadDetails.thread.id}`);
 		await screen.findByText("The release notes are ready.");
 
@@ -353,8 +359,8 @@ describe("thread navigation", () => {
 		expect(await screen.findByText("Release checked")).toBeDefined();
 
 		// The row was last flushed with half the text; a refetch must not jump back to it.
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				messages: [
 					...threadDetails.messages,
@@ -363,7 +369,7 @@ describe("thread navigation", () => {
 			}),
 		);
 		updates.emit(streamEvent("thread.changed", { threadId: threadDetails.thread.id }));
-		await waitFor(() => expect(client.api.threads[":threadId"].$get).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(client.api.threads.get).toHaveBeenCalledTimes(2));
 
 		// A delta already applied is not appended again; the next one is.
 		updates.emit(
@@ -400,8 +406,8 @@ describe("thread navigation", () => {
 			parts: [{ type: "text" as const, text: "Earlier context" }],
 			createdAt: "2026-09-10T03:00:00.000Z",
 		};
-		client.api.threads[":threadId"].$get.mockImplementation(async (request) =>
-			Response.json(
+		client.api.threads.get.mockImplementation((request) =>
+			Effect.succeed(
 				request.query?.cursor
 					? {
 							...threadDetails,
@@ -417,9 +423,9 @@ describe("thread navigation", () => {
 
 		expect(await screen.findByText("Earlier context")).toBeDefined();
 		expect(screen.getAllByText("Draft release notes", { selector: "p" })).toHaveLength(1);
-		expect(client.api.threads[":threadId"].$get).toHaveBeenCalledWith({
-			param: { threadId: threadDetails.thread.id },
-			query: { cursor },
+		expect(client.api.threads.get).toHaveBeenCalledWith({
+			params: { threadId: threadDetails.thread.id },
+			query: { cursor, limit: DEFAULT_THREAD_HISTORY_LIMIT },
 		});
 
 		updates.emit(
@@ -443,14 +449,11 @@ describe("thread navigation", () => {
 		client.events.thread.mockReturnValue(updates.stream);
 		const currentMessage = threadDetails.messages[1];
 		if (!currentMessage) throw new Error("Thread fixture is missing its agent reply");
-		let answerOlder: (response: Response) => void = () => {};
-		const olderPage = new Promise<Response>((resolve) => {
-			answerOlder = resolve;
-		});
-		client.api.threads[":threadId"].$get.mockImplementation((request) =>
+		const olderPage = pendingAnswer();
+		client.api.threads.get.mockImplementation((request) =>
 			request.query?.cursor
-				? olderPage
-				: Promise.resolve(Response.json({ ...threadDetails, olderMessagesCursor: "older-page" })),
+				? olderPage.effect
+				: Effect.succeed({ ...threadDetails, olderMessagesCursor: "older-page" }),
 		);
 		mount(`/threads/${threadDetails.thread.id}`);
 		fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
@@ -465,8 +468,8 @@ describe("thread navigation", () => {
 		);
 		expect(await screen.findByText("Completed while paging")).toBeDefined();
 
-		answerOlder(
-			Response.json({
+		olderPage.answer(
+			Effect.succeed({
 				...threadDetails,
 				thread: { ...threadDetails.thread, title: "Stale page title" },
 				messages: [{ ...currentMessage, content: "Stale page message" }],
@@ -481,13 +484,10 @@ describe("thread navigation", () => {
 	});
 
 	it("reports a failure to load older messages", async () => {
-		client.api.threads[":threadId"].$get.mockImplementation(async (request) =>
+		client.api.threads.get.mockImplementation((request) =>
 			request.query?.cursor
-				? Response.json(
-						{ error: { code: "internal", message: "History unavailable" } },
-						{ status: 500 },
-					)
-				: Response.json({ ...threadDetails, olderMessagesCursor: "older-page" }),
+				? Effect.fail(new InternalServerError({ message: "History unavailable" }))
+				: Effect.succeed({ ...threadDetails, olderMessagesCursor: "older-page" }),
 		);
 		mount(`/threads/${threadDetails.thread.id}`);
 
@@ -500,10 +500,7 @@ describe("thread navigation", () => {
 	it("refetches when an event arrives before the initial thread data", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
-		let answerInitial: (response: Response) => void = () => {};
-		const initial = new Promise<Response>((resolve) => {
-			answerInitial = resolve;
-		});
+		const initial = pendingAnswer();
 		const incoming = {
 			id: "0199a3a0-0000-7000-8000-0000000000c4",
 			threadId: threadDetails.thread.id,
@@ -521,10 +518,10 @@ describe("thread navigation", () => {
 			content: "Arrived early",
 			createdAt: "2026-09-10T04:03:00.000Z",
 		};
-		client.api.threads[":threadId"].$get
-			.mockReturnValueOnce(initial)
-			.mockImplementation(async () =>
-				Response.json({ ...threadDetails, messages: [...threadDetails.messages, incoming] }),
+		client.api.threads.get
+			.mockReturnValueOnce(initial.effect)
+			.mockImplementation(() =>
+				Effect.succeed({ ...threadDetails, messages: [...threadDetails.messages, incoming] }),
 			);
 		mount(`/threads/${threadDetails.thread.id}`);
 		await waitFor(() => expect(client.events.thread).toHaveBeenCalled());
@@ -532,15 +529,15 @@ describe("thread navigation", () => {
 		updates.emit(
 			streamEvent("message.created", { threadId: threadDetails.thread.id, message: incoming }),
 		);
-		answerInitial(Response.json(threadDetails));
+		initial.answer(Effect.succeed(threadDetails));
 
 		expect(await screen.findByText("Arrived early")).toBeDefined();
-		expect(client.api.threads[":threadId"].$get).toHaveBeenCalledTimes(2);
+		expect(client.api.threads.get).toHaveBeenCalledTimes(2);
 	});
 
 	it("recognizes a mention before that agent has spoken", async () => {
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				messages: [
 					{
@@ -559,8 +556,8 @@ describe("thread navigation", () => {
 	it("matches complete mention handles without matching prefixes or email text", async () => {
 		const firstMessage = threadDetails.messages[0];
 		if (!firstMessage) throw new Error("Thread fixture is missing its opening message");
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				messages: [
 					{
@@ -589,8 +586,8 @@ describe("thread navigation", () => {
 		}
 		const asked = "Is **this** bold?";
 		const answered = "**Tim's bill** is high.\n\n- Look up plans\n- Draft a note";
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				messages: [
 					{ ...personMessage, content: asked, parts: [{ type: "text", text: asked }] },
@@ -612,8 +609,8 @@ describe("thread navigation", () => {
 		}
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json({
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
 				...threadDetails,
 				thread: { ...threadDetails.thread, status: "running" },
 				messages: [personMessage],
@@ -647,7 +644,7 @@ describe("thread navigation", () => {
 	it("closes the thread stream when leaving the thread", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
-		client.api.threads[":threadId"].$get.mockResolvedValue(Response.json(threadDetails));
+		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 		const router = mount(`/threads/${threadDetails.thread.id}`);
 		await screen.findByText("The release notes are ready.");
 

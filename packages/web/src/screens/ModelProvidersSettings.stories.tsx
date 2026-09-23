@@ -81,14 +81,14 @@ const meta = preview.meta({
 			http.get(providersUrl, () => HttpResponse.json([provider])),
 			http.all(`${providersUrl}/*`, () =>
 				HttpResponse.json(
-					{ error: { code: "internal", message: "This preview does not save provider changes." } },
-					{ status: 503 },
+					{ _tag: "InternalServerError", message: "This preview does not save provider changes." },
+					{ status: 500 },
 				),
 			),
 			http.post(providersUrl, () =>
 				HttpResponse.json(
-					{ error: { code: "internal", message: "This preview does not create providers." } },
-					{ status: 503 },
+					{ _tag: "InternalServerError", message: "This preview does not create providers." },
+					{ status: 500 },
 				),
 			),
 		);
@@ -160,8 +160,8 @@ export const LoadFailed = meta.story({
 		msw.use(
 			http.get(providersUrl, () =>
 				HttpResponse.json(
-					{ error: { code: "internal", message: "Providers are temporarily unavailable." } },
-					{ status: 503 },
+					{ _tag: "InternalServerError", message: "Providers are temporarily unavailable." },
+					{ status: 500 },
 				),
 			),
 		);

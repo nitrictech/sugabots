@@ -1,6 +1,6 @@
 import type { SystemAgentKey } from "@sugabots/contracts";
-import { unwrap } from "@sugabots/sdk";
 import { useMutation } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -20,11 +20,8 @@ export function useModelTrial() {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			return unwrap(
-				client.api.workspaces[":workspaceId"]["model-trials"].$post({
-					param: { workspaceId },
-					json: input,
-				}),
+			return Effect.runPromise(
+				client.api.modelTrials.run({ params: { workspaceId }, payload: input }),
 			);
 		},
 	});

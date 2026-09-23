@@ -1,6 +1,12 @@
-import type { Message, Thread, ThreadDetails, ToolApprovalDecision } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
+import {
+	DEFAULT_THREAD_HISTORY_LIMIT,
+	type Message,
+	type Thread,
+	type ThreadDetails,
+	type ToolApprovalDecision,
+} from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { mergeThreadMessages } from "@/lib/thread-events.ts";
@@ -14,7 +20,8 @@ export function useThreads() {
 	const query = useQuery({
 		queryKey: ["threads", workspaceId],
 		queryFn: workspaceId
-			? () => unwrap(client.api.workspaces[":workspaceId"].threads.$get({ param: { workspaceId } }))
+			? ({ signal }) =>
+					Effect.runPromise(client.api.threads.list({ params: { workspaceId } }), { signal })
 			: skipToken,
 	});
 
@@ -44,17 +51,21 @@ function keepStreamedText(current: ThreadDetails): (fetched: Message) => Message
 export function useThread(threadId: string | undefined) {
 	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
-	const query = useQuery({
+	const query = useQuery<ThreadDetails>({
 		queryKey,
 		refetchInterval: (current) =>
 			current.state.data?.thread.status === "running" ? RUNNING_THREAD_REFETCH_INTERVAL_MS : false,
 		queryFn: threadId
-			? async () => {
-					const latest = await unwrap(
-						client.api.threads[":threadId"].$get({ param: { threadId }, query: {} }),
+			? async ({ signal }): Promise<ThreadDetails> => {
+					const latest = await Effect.runPromise(
+						client.api.threads.get({
+							params: { threadId },
+							query: { limit: DEFAULT_THREAD_HISTORY_LIMIT },
+						}),
+						{ signal },
 					);
 					const current = queries.getQueryData<ThreadDetails>(queryKey);
-					if (!latest || !current) {
+					if (!current) {
 						return latest;
 					}
 					const retainedOlderMessages = current.messages.length > latest.messages.length;
@@ -74,13 +85,12 @@ export function useThread(threadId: string | undefined) {
 	const older = useMutation({
 		mutationFn: async (cursor: string) => {
 			if (!threadId) throw new NotReadyError();
-			const page = await unwrap(
-				client.api.threads[":threadId"].$get({ param: { threadId }, query: { cursor } }),
+			return Effect.runPromise(
+				client.api.threads.get({
+					params: { threadId },
+					query: { cursor, limit: DEFAULT_THREAD_HISTORY_LIMIT },
+				}),
 			);
-			if (!page) {
-				throw new Error("Thread history returned no page");
-			}
-			return page;
 		},
 		onSuccess: (page) => {
 			queries.setQueryData<ThreadDetails>(queryKey, (current) =>
@@ -108,7 +118,7 @@ export function useThread(threadId: string | undefined) {
 }
 
 export function threadsForAgent(
-	threads: Thread[] | undefined,
+	threads: readonly Thread[] | undefined,
 	agentId: string,
 	podId?: string,
 ): Thread[] {
@@ -121,7 +131,7 @@ export function useCancelTurn(threadId: string) {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: async (turnId: string) => {
-			await unwrapEmpty(client.api.turns[":turnId"].cancel.$post({ param: { turnId } }));
+			await Effect.runPromise(client.api.threads.cancelTurn({ params: { turnId } }));
 		},
 		onSuccess: async () => {
 			await queries.invalidateQueries({ queryKey: ["thread", threadId] });
@@ -139,11 +149,8 @@ export function useReviewToolCall(threadId: string, podId: string) {
 			toolCallId: string;
 			decision: ToolApprovalDecision["decision"];
 		}) =>
-			unwrap(
-				client.api.pods[":podId"]["tool-calls"][":toolCallId"].approval.$post({
-					param: { podId, toolCallId },
-					json: { decision },
-				}),
+			Effect.runPromise(
+				client.api.toolApprovals.decide({ params: { podId, toolCallId }, payload: { decision } }),
 			),
 		onSuccess: async () => {
 			await Promise.all([

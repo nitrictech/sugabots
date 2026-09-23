@@ -1,11 +1,11 @@
 import type { Channel } from "@sugabots/contracts";
+import { CurrentUser, NotFound } from "@sugabots/contracts/http";
+import type { Database } from "@sugabots/core/database/database";
 import type { Delivery, EventBus } from "@sugabots/core/database/events/bus";
-import { Duration, Effect, Queue, Schedule, Stream } from "effect";
-import { type Context, Hono } from "hono";
-import { type AuthEnv, requireSession } from "../../auth/middleware.ts";
-import type { SessionResolver } from "../../auth/session.ts";
-import { HttpError } from "../../http/errors.ts";
-import type { RunHandler } from "../../http/handler.ts";
+import { Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
+import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { ServerApi } from "../../http/api.ts";
 import type { ChannelAccess } from "./access.ts";
 
 /**
@@ -30,12 +30,13 @@ const PING = Duration.seconds(15);
 const MAX_AGE = Duration.minutes(30);
 
 const STREAM_HEADERS = {
-	"content-type": "text/event-stream",
 	// Private workspace events must not be written to an intermediary cache.
 	"cache-control": "no-store",
 	// nginx otherwise buffers proxied responses and delays event delivery.
 	"x-accel-buffering": "no",
 };
+
+const STREAM_CONTENT_TYPE = "text/event-stream";
 
 export interface StreamOptions {
 	ping?: Duration.Input;
@@ -43,56 +44,49 @@ export interface StreamOptions {
 }
 
 export interface EventRoutesOptions {
-	resolveSession: SessionResolver;
 	bus: EventBus;
 	access: ChannelAccess;
-	/** Runs the stream's Effect on the process runtime, so cancelling the response interrupts it. */
-	run: RunHandler;
 	stream?: StreamOptions;
 }
 
 /** The workspace and thread streams, with authorization resolved before streaming. */
-export function createEventRoutes({
-	resolveSession,
-	bus,
-	access,
-	run,
-	stream,
-}: EventRoutesOptions) {
-	const session = requireSession(resolveSession);
-	return new Hono<AuthEnv>()
-		.get("/workspaces/:workspaceId/events", session, async (c) => {
-			const identity = c.get("session");
-			const workspaceId = c.req.param("workspaceId");
-			const channel = await access.workspace(identity, workspaceId);
-			if (c.req.method === "HEAD" && channel) {
-				return new Response(null, { headers: STREAM_HEADERS });
+export function eventRoutes({ bus, access, stream }: EventRoutesOptions) {
+	const streamFor = (
+		request: HttpServerRequest.HttpServerRequest,
+		resolve: (user: CurrentUser["Service"]) => Effect.Effect<Channel | undefined, never, Database>,
+	) =>
+		Effect.gen(function* () {
+			const user = yield* CurrentUser;
+			const channel = yield* resolve(user);
+			if (!channel) {
+				return yield* new NotFound({ message: "No such stream" });
 			}
-			return streamChannel({
-				c,
+			if (request.method === "HEAD") {
+				return HttpServerResponse.empty({
+					status: 200,
+					headers: { ...STREAM_HEADERS, "content-type": STREAM_CONTENT_TYPE },
+				});
+			}
+			return yield* streamChannel({
 				bus,
 				channel,
-				run,
+				since: resumeFrom(request.headers["last-event-id"]),
 				options: stream,
-				stillAuthorized: async () => (await access.workspace(identity, workspaceId)) === channel,
-			});
-		})
-		.get("/threads/:threadId/events", session, async (c) => {
-			const identity = c.get("session");
-			const threadId = c.req.param("threadId");
-			const channel = await access.thread(identity, threadId);
-			if (c.req.method === "HEAD" && channel) {
-				return new Response(null, { headers: STREAM_HEADERS });
-			}
-			return streamChannel({
-				c,
-				bus,
-				channel,
-				run,
-				options: stream,
-				stillAuthorized: async () => (await access.thread(identity, threadId)) === channel,
+				stillAuthorized: Effect.suspend(() => resolve(user)).pipe(
+					Effect.map((current) => current === channel),
+				),
 			});
 		});
+
+	return HttpApiBuilder.group(ServerApi, "events", (handlers) =>
+		handlers
+			.handle("workspace", ({ params, request }) =>
+				streamFor(request, (user) => access.workspace({ user }, params.workspaceId)),
+			)
+			.handle("thread", ({ params, request }) =>
+				streamFor(request, (user) => access.thread({ user }, params.threadId)),
+			),
+	);
 }
 
 /** One event, as the wire format. */
@@ -104,38 +98,50 @@ function frame({ seq, event }: Delivery): string {
 }
 
 /**
- * Streams a channel to the caller.
+ * Streams a channel the caller's authorisation resolved to.
  *
- * `channel` is what the route's authorisation resolved to, and `undefined`
- * means the caller may not have it. That is answered with 404 rather than 403:
- * a stream for a thread you cannot see should not confirm the thread exists.
+ * A channel the caller may not have is answered with 404 before this, rather
+ * than 403: a stream for a thread you cannot see should not confirm the thread
+ * exists.
  */
-async function streamChannel<E extends AuthEnv>({
-	c,
+const streamChannel = Effect.fnUntraced(function* ({
 	bus,
 	channel,
-	run,
+	since,
 	options: { ping = PING, maxAge = MAX_AGE } = {},
 	stillAuthorized,
 }: {
-	c: Context<E>;
 	bus: EventBus;
-	channel: Channel | undefined;
-	run: RunHandler;
-	options?: StreamOptions;
+	channel: Channel;
+	since: number | undefined;
+	options?: StreamOptions | undefined;
 	/**
 	 * Re-asked before every event. It is the only thing that notices access
 	 * being revoked mid-stream, which is why it is required.
 	 */
-	stillAuthorized: () => Promise<boolean>;
-}): Promise<Response> {
-	if (!channel) {
-		throw new HttpError("not_found", "No such stream");
-	}
-
-	const since = resumeFrom(c.req.header("last-event-id"));
+	stillAuthorized: Effect.Effect<boolean, never, Database>;
+}) {
 	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
-	const ready = Promise.withResolvers<void>();
+	const ready = yield* Deferred.make<void>();
+	const runPromise = Effect.runPromiseWith(yield* Effect.context<Database>());
+	// Each re-check is a trace of its own, linked to the stream's request. As a
+	// child of the request it would sit under a span that is not exported until
+	// the stream closes, up to `maxAge` later.
+	const streamSpan = yield* Effect.option(Effect.currentParentSpan);
+	const stillAuthorizedFor = ({ seq, event }: Delivery) =>
+		runPromise(
+			stillAuthorized.pipe(
+				Effect.withSpan("EventStream.recheckAccess", {
+					root: true,
+					links: Option.toArray(streamSpan).map((span) => ({ span, attributes: {} })),
+					attributes: {
+						"event.channel": channel,
+						"event.type": event.type,
+						...(seq === undefined ? {} : { "event.seq": seq }),
+					},
+				}),
+			),
+		);
 
 	// Abort wakes a parked bus iterator before its cleanup waits for it to finish.
 	const subscribed = Stream.callback<string>(
@@ -156,7 +162,7 @@ async function streamChannel<E extends AuthEnv>({
 							since,
 							signal: leaving.signal,
 						})) {
-							if (!(await stillAuthorized()) || leaving.signal.aborted) {
+							if (!(await stillAuthorizedFor(delivery)) || leaving.signal.aborted) {
 								break;
 							}
 							if (
@@ -176,7 +182,7 @@ async function streamChannel<E extends AuthEnv>({
 						Queue.endUnsafe(queue);
 					}
 				})();
-				ready.resolve();
+				Deferred.doneUnsafe(ready, Effect.void);
 			}),
 		{ bufferSize: 16 },
 	);
@@ -192,12 +198,17 @@ async function streamChannel<E extends AuthEnv>({
 		{ haltStrategy: "left" },
 	);
 
-	const body = await run(withPings.pipe(Stream.encodeText, Stream.toReadableStreamEffect()));
-	// The response must not precede subscription setup, or immediate live events are lost.
-	await ready.promise;
+	// Started here rather than when the response is written, and not answered
+	// until the subscription is set up, or events published straight after the
+	// response arrives are lost.
+	const body = yield* withPings.pipe(Stream.encodeText, Stream.toReadableStreamEffect());
+	yield* Deferred.await(ready);
 
-	return new Response(body, { headers: STREAM_HEADERS });
-}
+	return HttpServerResponse.stream(
+		Stream.fromReadableStream({ evaluate: () => body, onError: (cause) => cause }),
+		{ headers: STREAM_HEADERS, contentType: STREAM_CONTENT_TYPE },
+	);
+});
 
 /**
  * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a

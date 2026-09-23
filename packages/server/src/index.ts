@@ -1,5 +1,5 @@
-import type { Server } from "node:http";
-import { serve } from "@hono/node-server";
+import { createServer } from "node:http";
+import { NodeHttpServer } from "@effect/platform-node";
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { routineStore } from "@sugabots/core/conversations/routines/store";
 import { summaryStore } from "@sugabots/core/conversations/summaries/store";
@@ -33,12 +33,13 @@ import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Layer, ManagedRuntime } from "effect";
+import { Duration, Layer, ManagedRuntime } from "effect";
+import { HttpRouter } from "effect/unstable/http";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
 import { API_BASE_PATH, configFromEnv } from "./config.ts";
-import { createApp } from "./http/app.ts";
-import { mount } from "./http/mount.ts";
+import { apiLayer } from "./http/app.ts";
+import { webAppLayer } from "./http/mount.ts";
 import { observabilityLayer } from "./observability.ts";
 import { channelAccess } from "./routes/events/access.ts";
 import { makeRuntime } from "./runtime.ts";
@@ -170,15 +171,14 @@ const runtime = makeRuntime({
 	connectionTools,
 	publishEvents,
 });
-const app = createApp({
+const api = apiLayer({
 	auth,
 	webOrigins,
 	baseUrl,
 	oauthFetch: oauthClient,
 	authorization,
-	run,
 	stores,
-	events: { bus, access: channelAccess(authorization, stores.threads, run) },
+	events: { bus, access: channelAccess(authorization, stores.threads) },
 	httpClients,
 	validateProviderUrl,
 	model,
@@ -187,12 +187,6 @@ const app = createApp({
 // Starts the background loops, which nothing else would until first used.
 await runtime.context();
 
-const http = mount(app);
-
-const server = serve({ fetch: http.fetch, port }, ({ port: bound }) => {
-	console.log(`sugabots ${VERSION} listening on http://localhost:${bound}`);
-});
-
 /**
  * How long a client gets to finish what it was sent before its socket is cut.
  *
@@ -200,7 +194,18 @@ const server = serve({ fetch: http.fetch, port }, ({ port: bound }) => {
  * cannot restart. A request still running here was going to be abandoned by
  * the restart anyway.
  */
-const SHUTDOWN_GRACE_MS = 3_000;
+const SHUTDOWN_GRACE = Duration.seconds(3);
+
+const server = ManagedRuntime.make(
+	HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
+		Layer.provide(
+			NodeHttpServer.layer(createServer, { port, gracefulShutdownTimeout: SHUTDOWN_GRACE }),
+		),
+		Layer.provide(Layer.succeedContext(databaseContext)),
+	),
+);
+await server.context();
+console.log(`sugabots ${VERSION} listening on http://localhost:${port}`);
 
 let stopping = false;
 async function stop() {
@@ -210,33 +215,13 @@ async function stop() {
 	// socket open for as long as its browser is there. Closing the server first
 	// would wait on clients that never hang up.
 	await bus.close();
-	await closeServer();
+	await server.dispose();
 	await runtime.dispose();
 	await database.dispose();
 	await authPool.end();
 	await httpClients.close();
 	await webFetchClient.close();
 	await oauthClient.close();
-}
-
-function closeServer(): Promise<void> {
-	// `serve` is typed as either an HTTP/1 or an HTTP/2 server, and only the
-	// former has the connection controls. Given no `createServer` it is the
-	// former, so these are there; asking is cheaper than asserting it.
-	const sockets = server as Partial<Pick<Server, "closeAllConnections" | "closeIdleConnections">>;
-	return new Promise((resolve) => {
-		const cut = setTimeout(() => {
-			sockets.closeAllConnections?.();
-			resolve();
-		}, SHUTDOWN_GRACE_MS);
-		server.close(() => {
-			clearTimeout(cut);
-			resolve();
-		});
-		// Keep-alive sockets with nothing on them would otherwise hold the close
-		// open for their full idle timeout.
-		sockets.closeIdleConnections?.();
-	});
 }
 
 process.once("SIGINT", () => void stop());

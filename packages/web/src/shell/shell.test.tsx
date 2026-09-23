@@ -1,6 +1,8 @@
 import type { Pod } from "@sugabots/contracts";
-import { ApiError } from "@sugabots/sdk";
+import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
+import { failureForStatus } from "@sugabots/sdk";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chooseWorkspace } from "@/lib/workspace.ts";
 import {
@@ -15,6 +17,7 @@ import {
 	mount,
 	OWN_PERSONAL_POD,
 	open,
+	pendingAnswer,
 	pods,
 	sam,
 	triager,
@@ -230,11 +233,9 @@ describe("the roster", () => {
 			slug: "personal-test",
 			permissions: OWN_PERSONAL_POD,
 		};
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json([...pods, personalPod]),
-		);
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json([
+		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([
 				...agents,
 				{
 					...agents[0],
@@ -346,9 +347,7 @@ describe("the roster", () => {
 			name: "Support",
 			slug: "support",
 		};
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json([...pods, empty]),
-		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, empty]));
 		mount(linearPage);
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace" });
@@ -367,9 +366,7 @@ describe("the roster", () => {
 			slug: "support",
 			permissions: VIEWER_IN_POD,
 		};
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json([...pods, empty]),
-		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, empty]));
 		mount(linearPage);
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace" });
@@ -516,7 +513,7 @@ describe("routes", () => {
 
 	it("keeps a signed-in user without a workspace out of the shell", async () => {
 		client.auth.workspaces.list.mockResolvedValue([]);
-		client.api.onboarding.$get.mockResolvedValue(Response.json({ completed: false }));
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		const router = mount(linearPage);
 
 		expect(
@@ -529,7 +526,7 @@ describe("routes", () => {
 	});
 
 	it("keeps an incomplete workspace in onboarding across direct links", async () => {
-		client.api.onboarding.$get.mockResolvedValue(Response.json({ completed: false }));
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		const personalPod = {
 			...pods[0],
 			id: "0199a3a0-0000-7000-8000-0000000000af",
@@ -538,9 +535,9 @@ describe("routes", () => {
 			name: "Personal",
 			slug: "personal-test",
 		};
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(Response.json([personalPod]));
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json([
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([
 				{
 					...agents[0],
 					id: "0199a3a0-0000-7000-8000-0000000000bf",
@@ -613,10 +610,9 @@ describe("routes", () => {
 
 	it("shows why a sign-up was refused rather than asking for verification", async () => {
 		client.auth.signUp.mockRejectedValue(
-			new ApiError(
-				"forbidden",
-				"Signups are invite only. Ask a member to invite you.",
+			failureForStatus(
 				403,
+				"Signups are invite only. Ask a member to invite you.",
 				"SIGN_UP_CLOSED",
 			),
 		);
@@ -630,7 +626,7 @@ describe("routes", () => {
 
 	it("asks an unverified account to open its link when it logs in", async () => {
 		client.auth.signIn.mockRejectedValue(
-			new ApiError("forbidden", "Email not verified", 403, "EMAIL_NOT_VERIFIED"),
+			failureForStatus(403, "Email not verified", "EMAIL_NOT_VERIFIED"),
 		);
 		mount("/", null);
 
@@ -658,10 +654,9 @@ describe("routes", () => {
 
 	it("tells an invitee to verify rather than blaming the address", async () => {
 		client.auth.workspaces.invitation.mockRejectedValue(
-			new ApiError(
-				"forbidden",
-				"Email verification required to view or list invitations for the session email",
+			failureForStatus(
 				403,
+				"Email verification required to view or list invitations for the session email",
 				"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
 			),
 		);
@@ -699,8 +694,8 @@ describe("routes", () => {
 	});
 
 	it("resumes an accepted invitation after the page was reloaded", async () => {
-		client.api.onboarding["complete-invite"].$post.mockResolvedValue(
-			Response.json({ workspaceId: workspace.id }),
+		client.api.onboarding.completeInvite.mockReturnValue(
+			Effect.succeed({ workspaceId: workspace.id }),
 		);
 		const refresh = vi.fn().mockResolvedValue(undefined);
 		const router = mount("/invite/an-invitation", sam, refresh);
@@ -734,9 +729,7 @@ describe("routes", () => {
 	});
 
 	it("distinguishes a failed agent roster from an unknown agent", async () => {
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json({ error: { code: "forbidden", message: "Unavailable" } }, { status: 403 }),
-		);
+		client.api.agents.list.mockReturnValue(Effect.fail(new Forbidden({ message: "Unavailable" })));
 		mount(linearPage);
 
 		expect(await screen.findByText("Could not load this agent")).toBeDefined();
@@ -751,26 +744,22 @@ describe("routes", () => {
 	});
 
 	it("says so when the workspace has no agents in it yet", async () => {
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(Response.json([]));
+		client.api.agents.list.mockReturnValue(Effect.succeed([]));
 		mount("/agents");
 
 		expect(await screen.findByText("No agents yet")).toBeDefined();
 	});
 
 	it("waits for pods before deciding the workspace has no agents", async () => {
-		let answerPods: (response: Response) => void = () => {};
-		client.api.workspaces[":workspaceId"].pods.$get.mockReturnValue(
-			new Promise<Response>((resolve) => {
-				answerPods = resolve;
-			}),
-		);
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(Response.json([]));
+		const podList = pendingAnswer();
+		client.api.pods.list.mockReturnValue(podList.effect);
+		client.api.agents.list.mockReturnValue(Effect.succeed([]));
 		mount("/agents");
 
-		await waitFor(() => expect(client.api.workspaces[":workspaceId"].pods.$get).toHaveBeenCalled());
+		await waitFor(() => expect(client.api.pods.list).toHaveBeenCalled());
 		expect(screen.queryByText("No agents yet")).toBeNull();
 
-		answerPods(Response.json(pods));
+		podList.answer(Effect.succeed(pods));
 		expect(await screen.findByText("No agents yet")).toBeDefined();
 	});
 });
@@ -807,7 +796,7 @@ describe("creating a pod", () => {
 
 	it("creates one and puts it in the rail", async () => {
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
-		client.api.workspaces[":workspaceId"].pods.$post.mockResolvedValue(Response.json(made));
+		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
 		mount("/settings/pods");
 		(await screen.findByRole("button", { name: "New pod" })).click();
@@ -817,23 +806,21 @@ describe("creating a pod", () => {
 			target: { value: "Platform" },
 		});
 
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json([...pods, made]),
-		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, made]));
 		within(dialog).getByRole("button", { name: "Create pod" }).click();
 
 		await waitFor(() => {
-			expect(client.api.workspaces[":workspaceId"].pods.$post).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id },
-				json: { name: "Platform" },
+			expect(client.api.pods.create).toHaveBeenCalledWith({
+				params: { workspaceId: workspace.id },
+				payload: { name: "Platform" },
 			});
 		});
 		expect(await screen.findByRole("heading", { name: "Platform" })).toBeDefined();
 	});
 
 	it("says so when the address is already taken, and keeps the form open", async () => {
-		client.api.workspaces[":workspaceId"].pods.$post.mockResolvedValue(
-			Response.json({ error: { code: "conflict", message: "already exists" } }, { status: 409 }),
+		client.api.pods.create.mockReturnValue(
+			Effect.fail(new Conflict({ message: "already exists" })),
 		);
 
 		mount("/settings/pods");
@@ -860,9 +847,7 @@ describe("Personal pod settings", () => {
 			slug: "personal-test",
 			permissions: OWN_PERSONAL_POD,
 		};
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json([personalPod, ...pods]),
-		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 
 		mount(`/settings/pods/${personalPod.id}`);
 
@@ -914,7 +899,7 @@ describe("creating an agent", () => {
 			model: MODELS[0] as string,
 			podId: pods[0]?.id as string,
 		};
-		client.api.pods[":podId"].agents.$post.mockResolvedValue(Response.json(made, { status: 201 }));
+		client.api.agents.create.mockReturnValue(Effect.succeed(made));
 		const router = mount(`/settings/pods/${pods[0]?.id}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
 
@@ -922,15 +907,13 @@ describe("creating an agent", () => {
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: `  ${made.name}  ` },
 		});
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json([...agents, made]),
-		);
+		client.api.agents.list.mockReturnValue(Effect.succeed([...agents, made]));
 		within(dialog).getByRole("button", { name: "Create agent" }).click();
 
 		await waitFor(() => {
-			expect(client.api.pods[":podId"].agents.$post).toHaveBeenCalledWith({
-				param: { podId: made.podId },
-				json: {
+			expect(client.api.agents.create).toHaveBeenCalledWith({
+				params: { podId: made.podId },
+				payload: {
 					name: made.name,
 					model: made.model,
 				},
@@ -944,8 +927,8 @@ describe("creating an agent", () => {
 	});
 
 	it("keeps a duplicate-name error in the creation form", async () => {
-		client.api.pods[":podId"].agents.$post.mockResolvedValue(
-			Response.json({ error: { code: "conflict", message: "already exists" } }, { status: 409 }),
+		client.api.agents.create.mockReturnValue(
+			Effect.fail(new Conflict({ message: "already exists" })),
 		);
 		mount(`/settings/pods/${pods[0]?.id}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
@@ -1034,17 +1017,12 @@ describe("workspace settings", () => {
 	};
 
 	function mountOllama(provider: typeof ollama = ollama) {
-		client.api.workspaces[":workspaceId"]["model-providers"].$get.mockResolvedValue(
-			Response.json([provider]),
-		);
-		client.api.workspaces[":workspaceId"]["model-providers"][
-			":providerId"
-		].$patch.mockResolvedValue(Response.json(provider));
+		client.api.modelProviders.list.mockReturnValue(Effect.succeed([provider]));
+		client.api.modelProviders.update.mockReturnValue(Effect.succeed(provider));
 		mount("/settings/providers");
 	}
 
-	const patched = () =>
-		client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].$patch;
+	const patched = () => client.api.modelProviders.update;
 
 	it("shows the Ollama connection locked in, and needs no key to list models", async () => {
 		mountOllama();
@@ -1066,8 +1044,8 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id, providerId: ollama.id },
-				json: { baseUrl: "http://studio.local:9000/v1" },
+				params: { workspaceId: workspace.id, providerId: ollama.id },
+				payload: { baseUrl: "http://studio.local:9000/v1" },
 			});
 		});
 	});
@@ -1094,8 +1072,8 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id, providerId: ollama.id },
-				json: { baseUrl: "http://127.0.0.1:11434/v1" },
+				params: { workspaceId: workspace.id, providerId: ollama.id },
+				payload: { baseUrl: "http://127.0.0.1:11434/v1" },
 			});
 		});
 	});
@@ -1109,8 +1087,8 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id, providerId: ollama.id },
-				json: { baseUrl: ollama.baseUrl, apiKey: null },
+				params: { workspaceId: workspace.id, providerId: ollama.id },
+				payload: { baseUrl: ollama.baseUrl, apiKey: null },
 			});
 		});
 	});
@@ -1129,9 +1107,7 @@ describe("workspace settings", () => {
 			modelCount: 0,
 			enabledModelCount: 0,
 		};
-		client.api.workspaces[":workspaceId"]["model-providers"].$post.mockResolvedValue(
-			Response.json(provider),
-		);
+		client.api.modelProviders.create.mockReturnValue(Effect.succeed(provider));
 		mount("/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
@@ -1145,9 +1121,9 @@ describe("workspace settings", () => {
 		fireEvent.click(screen.getAllByRole("button", { name: "Add provider" }).at(-1) as HTMLElement);
 
 		await waitFor(() => {
-			expect(client.api.workspaces[":workspaceId"]["model-providers"].$post).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id },
-				json: {
+			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
+				params: { workspaceId: workspace.id },
+				payload: {
 					name: provider.name,
 					baseUrl: provider.baseUrl,
 					apiFormat: "openai",
@@ -1169,9 +1145,7 @@ describe("workspace settings", () => {
 			modelCount: 0,
 			enabledModelCount: 0,
 		};
-		client.api.workspaces[":workspaceId"]["model-providers"].$post.mockResolvedValue(
-			Response.json(groq),
-		);
+		client.api.modelProviders.create.mockReturnValue(Effect.succeed(groq));
 		mount("/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
@@ -1186,21 +1160,16 @@ describe("workspace settings", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Add Groq" }));
 
 		await waitFor(() => {
-			expect(client.api.workspaces[":workspaceId"]["model-providers"].$post).toHaveBeenCalledWith({
-				param: { workspaceId: workspace.id },
-				json: { preset: "groq", apiKey: "gsk-test" },
+			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
+				params: { workspaceId: workspace.id },
+				payload: { preset: "groq", apiKey: "gsk-test" },
 			});
 		});
 	});
 
 	it("labels provider credentials and reports connection failures where they happen", async () => {
-		client.api.workspaces[":workspaceId"]["model-providers"][
-			":providerId"
-		].test.$post.mockResolvedValue(
-			Response.json(
-				{ error: { code: "internal", message: "Provider unavailable" } },
-				{ status: 500 },
-			),
+		client.api.modelProviders.test.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Provider unavailable" })),
 		);
 		mount("/settings/providers");
 
@@ -1226,16 +1195,9 @@ describe("workspace settings", () => {
 			modelCount: 0,
 			enabledModelCount: 0,
 		};
-		client.api.workspaces[":workspaceId"]["model-providers"].$get.mockResolvedValue(
-			Response.json([custom]),
-		);
-		client.api.workspaces[":workspaceId"]["model-providers"][
-			":providerId"
-		].models.$post.mockResolvedValue(
-			Response.json(
-				{ error: { code: "internal", message: "Could not add model" } },
-				{ status: 500 },
-			),
+		client.api.modelProviders.list.mockReturnValue(Effect.succeed([custom]));
+		client.api.modelProviders.addModel.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Could not add model" })),
 		);
 		mount("/settings/providers");
 		fireEvent.click(await screen.findByRole("button", { name: "Add model" }));
@@ -1437,7 +1399,7 @@ describe("workspace settings", () => {
 
 	it("lets somebody with no workspace start their first one", async () => {
 		client.auth.workspaces.list.mockResolvedValue([]);
-		client.api.onboarding.$get.mockResolvedValue(Response.json({ completed: false }));
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.auth.workspaces.create.mockResolvedValue({
 			id: "0199a3a0-0000-7000-8000-0000000000f9",
 			name: "Nitric",
@@ -1461,7 +1423,7 @@ describe("workspace settings", () => {
 
 	it("keeps a rejected workspace name and creation form open", async () => {
 		client.auth.workspaces.list.mockResolvedValue([]);
-		client.api.onboarding.$get.mockResolvedValue(Response.json({ completed: false }));
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.auth.workspaces.create.mockRejectedValue(new Error("Offline"));
 		mount("/settings");
 		const name = await screen.findByLabelText("Workspace name");
@@ -1532,8 +1494,8 @@ describe("pod settings", () => {
 	};
 
 	it("offers facilitator routing for automated threads", async () => {
-		client.api.pods[":podId"].$patch.mockResolvedValue(
-			Response.json({ ...suga, routing: { facilitator: true } }),
+		client.api.pods.update.mockReturnValue(
+			Effect.succeed({ ...suga, routing: { facilitator: true } }),
 		);
 		mount(podPage);
 		await openRouting();
@@ -1547,21 +1509,21 @@ describe("pod settings", () => {
 		fireEvent.click(decides);
 
 		await waitFor(() =>
-			expect(client.api.pods[":podId"].$patch).toHaveBeenCalledWith({
-				param: { podId: suga.id },
-				json: { routing: { facilitator: true } },
+			expect(client.api.pods.update).toHaveBeenCalledWith({
+				params: { podId: suga.id },
+				payload: { routing: { facilitator: true } },
 			}),
 		);
 	});
 
 	it("turns facilitator routing off for the quiet option", async () => {
-		client.api.workspaces[":workspaceId"].pods.$get.mockResolvedValue(
-			Response.json(
+		client.api.pods.list.mockReturnValue(
+			Effect.succeed(
 				pods.map((pod) => (pod.id === suga.id ? { ...pod, routing: { facilitator: true } } : pod)),
 			),
 		);
-		client.api.pods[":podId"].$patch.mockResolvedValue(
-			Response.json({ ...suga, routing: { facilitator: false } }),
+		client.api.pods.update.mockReturnValue(
+			Effect.succeed({ ...suga, routing: { facilitator: false } }),
 		);
 		mount(podPage);
 		await openRouting();
@@ -1569,9 +1531,9 @@ describe("pod settings", () => {
 		fireEvent.click(await screen.findByRole("radio", { name: "Nobody" }));
 
 		await waitFor(() =>
-			expect(client.api.pods[":podId"].$patch).toHaveBeenCalledWith({
-				param: { podId: suga.id },
-				json: { routing: { facilitator: false } },
+			expect(client.api.pods.update).toHaveBeenCalledWith({
+				params: { podId: suga.id },
+				payload: { routing: { facilitator: false } },
 			}),
 		);
 	});
@@ -1588,8 +1550,8 @@ describe("pod settings", () => {
 
 	it("tells a member the Facilitator is unset without offering a link they cannot follow", async () => {
 		apiAnswers({ role: "member" });
-		client.api.workspaces[":workspaceId"]["system-agents"].$get.mockResolvedValue(
-			Response.json(builtInAgents.map((one) => ({ ...one, model: null }))),
+		client.api.systemAgents.list.mockReturnValue(
+			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
 		);
 		mount(podPage);
 		await openRouting();
@@ -1599,8 +1561,8 @@ describe("pod settings", () => {
 	});
 
 	it("cannot hand the floor to a Facilitator with no model, and says where to set it up", async () => {
-		client.api.workspaces[":workspaceId"]["system-agents"].$get.mockResolvedValue(
-			Response.json(builtInAgents.map((one) => ({ ...one, model: null }))),
+		client.api.systemAgents.list.mockReturnValue(
+			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
 		);
 		mount(podPage);
 		await openRouting();
@@ -1611,7 +1573,7 @@ describe("pod settings", () => {
 			"/settings/built-in-agents/facilitate",
 		);
 		fireEvent.click(option);
-		expect(client.api.pods[":podId"].$patch).not.toHaveBeenCalled();
+		expect(client.api.pods.update).not.toHaveBeenCalled();
 	});
 
 	it("lists only crew in a pod, with nothing to say about built-in agents", async () => {
@@ -1624,7 +1586,7 @@ describe("pod settings", () => {
 	});
 
 	it("confirms agent deletion in a dialog", async () => {
-		client.api.agents[":agentId"].$delete.mockResolvedValue(new Response(null, { status: 204 }));
+		client.api.agents.remove.mockReturnValue(Effect.void);
 		mount(podPage);
 
 		const agentLink = await screen.findByRole("link", { name: linear.name });
@@ -1633,35 +1595,33 @@ describe("pod settings", () => {
 		fireEvent.click(within(row).getByRole("button", { name: "Delete" }));
 
 		expect(await screen.findByRole("dialog", { name: `Delete ${linear.name}?` })).toBeDefined();
-		expect(client.api.agents[":agentId"].$delete).not.toHaveBeenCalled();
+		expect(client.api.agents.remove).not.toHaveBeenCalled();
 		fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
 
 		await waitFor(() =>
-			expect(client.api.agents[":agentId"].$delete).toHaveBeenCalledWith({
-				param: { agentId: linear.id },
+			expect(client.api.agents.remove).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
 			}),
 		);
 	});
 
 	it("adds somebody from the workspace", async () => {
-		client.api.pods[":podId"].members.$post.mockResolvedValue(new Response(null, { status: 204 }));
+		client.api.pods.addMember.mockReturnValue(Effect.void);
 		mount(podPage);
 
 		open(await screen.findByRole("button", { name: "Invite" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: sam.name }));
 
 		await waitFor(() =>
-			expect(client.api.pods[":podId"].members.$post).toHaveBeenCalledWith({
-				param: { podId: suga.id },
-				json: { userId: sam.id },
+			expect(client.api.pods.addMember).toHaveBeenCalledWith({
+				params: { podId: suga.id },
+				payload: { userId: sam.id },
 			}),
 		);
 	});
 
 	it("says when everyone in the workspace is already in", async () => {
-		client.api.pods[":podId"].members.$get.mockImplementation(async () =>
-			Response.json([samInPod, jyeInPod]),
-		);
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
 		mount(podPage);
 
 		open(await screen.findByRole("button", { name: "Invite" }));
@@ -1675,9 +1635,7 @@ describe("pod settings", () => {
 
 	it("offers a member the lists and none of the controls", async () => {
 		apiAnswers({ role: "member" });
-		client.api.pods[":podId"].members.$get.mockImplementation(async () =>
-			Response.json([samInPod]),
-		);
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod]));
 		mount(podPage);
 
 		// The roster behind the settings window names agents too.
@@ -1700,28 +1658,25 @@ describe("pod settings", () => {
 	});
 
 	it("deletes the pod after asking, and returns to the list", async () => {
-		client.api.pods[":podId"].$delete.mockResolvedValue(new Response(null, { status: 204 }));
+		client.api.pods.remove.mockReturnValue(Effect.void);
 		const router = mount(podPage);
 
 		open(await screen.findByRole("button", { name: `${suga.name} options` }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete pod" }));
-		expect(client.api.pods[":podId"].$delete).not.toHaveBeenCalled();
+		expect(client.api.pods.remove).not.toHaveBeenCalled();
 		fireEvent.click(await screen.findByRole("button", { name: "Yes, delete" }));
 
 		await waitFor(() =>
-			expect(client.api.pods[":podId"].$delete).toHaveBeenCalledWith({
-				param: { podId: suga.id },
+			expect(client.api.pods.remove).toHaveBeenCalledWith({
+				params: { podId: suga.id },
 			}),
 		);
 		await waitFor(() => expect(router.state.location.pathname).toBe("/settings/pods"));
 	});
 
 	it("says so when a pod with threads cannot be deleted", async () => {
-		client.api.pods[":podId"].$delete.mockResolvedValue(
-			Response.json(
-				{ error: { code: "conflict", message: "The pod still has threads" } },
-				{ status: 409 },
-			),
+		client.api.pods.remove.mockReturnValue(
+			Effect.fail(new Conflict({ message: "The pod still has threads" })),
 		);
 		mount(podPage);
 

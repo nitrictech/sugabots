@@ -34,6 +34,7 @@ const sweep = (store: EventStore, retentionDays: number) =>
 				: Effect.void,
 		),
 		Effect.catchCause((cause) => Effect.sync(() => console.error("pruning events failed", cause))),
+		Effect.withSpan("Event prune"),
 	);
 
 /**
