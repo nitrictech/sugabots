@@ -1,6 +1,8 @@
 import type { ConnectionUpdate, NewConnection } from "@sugabots/contracts";
+import { connectionPresetFor, hueFromText } from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
+import { useMemo } from "react";
 import { client } from "@/api.ts";
 
 export function useConnections(podId: string) {
@@ -9,6 +11,37 @@ export function useConnections(podId: string) {
 		queryFn: ({ signal }) =>
 			Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal }),
 	});
+}
+
+/** How a connection is named and marked wherever its tools are shown. */
+export interface ConnectionLook {
+	name: string;
+	/** The catalog entry its logo comes from, when it came from one. */
+	presetId?: string;
+	hue: number;
+}
+
+/**
+ * The pod's connections by the handle that prefixes their tool keys, so a
+ * `sentry__search_issues` in a transcript can be shown as Sentry's. A handle
+ * missing from the map belongs to a connection that has since been removed;
+ * callers write the handle out rather than dropping the step.
+ */
+export function useConnectionLooks(podId: string): ReadonlyMap<string, ConnectionLook> {
+	const connections = useConnections(podId);
+	const found = connections.data;
+	return useMemo(() => {
+		const looks = new Map<string, ConnectionLook>();
+		for (const connection of found ?? []) {
+			const preset = connectionPresetFor(connection.url);
+			looks.set(connection.handle, {
+				name: connection.name,
+				presetId: preset?.id,
+				hue: preset?.hue ?? hueFromText(connection.name),
+			});
+		}
+		return looks;
+	}, [found]);
 }
 
 export function useToolApprovalRules(podId: string) {

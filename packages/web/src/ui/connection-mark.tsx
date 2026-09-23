@@ -10,6 +10,13 @@ import { connectionLetters } from "@sugabots/contracts";
  * draws in several colours goes in `colourMarks`, as published; none of the
  * current entries needs it.
  */
+/** `xs` is for a mark inline in a line of text, where a tile would tower over it. */
+const sizes = {
+	xs: { box: "size-4 rounded-xs", glyph: "size-2.5", letters: "text-[8px]" },
+	sm: { box: "size-8 rounded-lg", glyph: "size-4", letters: "text-xs" },
+	default: { box: "size-10 rounded-xl", glyph: "size-5", letters: "text-sm" },
+} as const;
+
 export function ConnectionMark({
 	presetId,
 	name,
@@ -20,18 +27,18 @@ export function ConnectionMark({
 	name: string;
 	/** The tint for a lettered mark. */
 	hue: number;
-	size?: "default" | "sm";
+	size?: keyof typeof sizes;
 }) {
 	const glyph = presetId ? marks[presetId] : undefined;
 	const colour = presetId ? colourMarks[presetId] : undefined;
-	const box = size === "sm" ? "size-8 rounded-lg" : "size-10 rounded-xl";
+	const { box, glyph: glyphSize, letters } = sizes[size];
 	if (colour) {
 		return (
 			<span
 				aria-hidden
 				className={`grid shrink-0 place-items-center border border-border-subtle bg-card ${box}`}
 			>
-				<svg viewBox={colour.viewBox} className={size === "sm" ? "size-4" : "size-5"} aria-hidden>
+				<svg viewBox={colour.viewBox} className={glyphSize} aria-hidden>
 					<g transform={colour.transform}>
 						{colour.paths.map((path) => (
 							<path key={path.d.slice(0, 40)} d={path.d} fill={path.fill} />
@@ -51,12 +58,7 @@ export function ConnectionMark({
 					color: darkBrands.has(presetId ?? "") ? "var(--foreground)" : glyph.hex,
 				}}
 			>
-				<svg
-					viewBox="0 0 24 24"
-					className={size === "sm" ? "size-4" : "size-5"}
-					fill="currentColor"
-					aria-hidden
-				>
+				<svg viewBox="0 0 24 24" className={glyphSize} fill="currentColor" aria-hidden>
 					<path d={glyph.d} />
 				</svg>
 			</span>
@@ -65,9 +67,7 @@ export function ConnectionMark({
 	return (
 		<span
 			aria-hidden
-			className={`agent-tint grid shrink-0 place-items-center bg-agent-wash font-semibold text-agent-name ${box} ${
-				size === "sm" ? "text-xs" : "text-sm"
-			}`}
+			className={`agent-tint grid shrink-0 place-items-center bg-agent-wash font-semibold text-agent-name ${box} ${letters}`}
 			style={{ ["--agent-hue" as string]: hue }}
 		>
 			{connectionLetters(name)}
