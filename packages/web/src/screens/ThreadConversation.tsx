@@ -9,6 +9,7 @@ import type {
 import { Fragment } from "react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ChatActivityRow } from "./ChatActivityRow.tsx";
 import { CollaborationThread } from "./CollaborationThread.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
@@ -177,6 +178,9 @@ function segmentsOf(message: Message): Segment[] {
 	return segments;
 }
 
+/** The time or status beside an author's name, lighter so the name leads without a separator. */
+const authorDetailClass = "font-normal text-muted-foreground text-xs";
+
 function ThinkingBubble({ agent, outgoing }: { agent: AgentParticipant; outgoing: boolean }) {
 	return (
 		<article
@@ -194,11 +198,10 @@ function ThinkingBubble({ agent, outgoing }: { agent: AgentParticipant; outgoing
 				/>
 				<div className="rounded-4xl bg-agent-wash px-5 py-3.5">
 					<div
-						className={`flex items-baseline gap-x-1.5 pb-1 font-semibold text-agent-name text-md ${outgoing ? "justify-end pr-5" : "pl-5"}`}
+						className={`flex items-baseline gap-x-2 pb-1 font-semibold text-agent-name text-md ${outgoing ? "justify-end pr-5" : "pl-5"}`}
 					>
 						<span>{agent.name}</span>
-						<span aria-hidden>·</span>
-						<span>thinking…</span>
+						<span className={authorDetailClass}>thinking…</span>
 					</div>
 					<ThinkingDots />
 				</div>
@@ -259,16 +262,24 @@ function MessageBubble({
 					className={`min-w-0 rounded-4xl px-5 py-3.5 ${fromAgent ? "bg-agent-wash" : "bg-muted"}`}
 				>
 					<div
-						className={`flex flex-wrap items-baseline gap-x-1.5 pb-1 font-semibold text-md ${
+						className={`flex flex-wrap items-baseline gap-x-2 pb-1 font-semibold text-md ${
 							outgoing ? "justify-end pr-5" : "pl-5"
 						} ${fromAgent ? "text-agent-name" : "text-muted-foreground"}`}
 					>
 						<span>{message.author.name}</span>
-						<span aria-hidden>·</span>
 						{streaming ? (
-							<span>{waitingOn ? `waiting on ${waitingOn}…` : "writing…"}</span>
+							<span className={authorDetailClass}>
+								{waitingOn ? `waiting on ${waitingOn}…` : "writing…"}
+							</span>
 						) : (
-							<time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+							<Tooltip label={formatFullTimestamp(message.createdAt)} side="top">
+								<time
+									dateTime={message.createdAt}
+									className={`${authorDetailClass} cursor-default hover:underline`}
+								>
+									{formatTime(message.createdAt)}
+								</time>
+							</Tooltip>
 						)}
 					</div>
 					{fromAgent ? (
@@ -364,7 +375,14 @@ function dividerBefore(previous: Message | undefined, current: Message): string 
 	return `${hours} ${hours === 1 ? "hour" : "hours"} later`;
 }
 
-function formatDay(date: Date): string {
+const dateWithYear: Intl.DateTimeFormatOptions = {
+	month: "short",
+	day: "numeric",
+	year: "numeric",
+};
+
+/** "Today", "Yesterday", or the date in `dateFormat`. */
+function formatDay(date: Date, dateFormat = dateWithYear): string {
 	const today = new Date();
 	if (sameDay(date, today)) {
 		return "Today";
@@ -374,11 +392,22 @@ function formatDay(date: Date): string {
 	if (sameDay(date, yesterday)) {
 		return "Yesterday";
 	}
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
+	return new Intl.DateTimeFormat(undefined, dateFormat).format(date);
+}
+
+/** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */
+function formatFullTimestamp(createdAt: string): string {
+	const date = new Date(createdAt);
+	const dateFormat: Intl.DateTimeFormatOptions =
+		date.getFullYear() === new Date().getFullYear()
+			? { month: "short", day: "numeric" }
+			: dateWithYear;
+	const time = new Intl.DateTimeFormat(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+		second: "2-digit",
 	}).format(date);
+	return `${formatDay(date, dateFormat)} at ${time}`;
 }
 
 function sameDay(left: Date, right: Date): boolean {
