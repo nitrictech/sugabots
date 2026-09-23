@@ -1,4 +1,6 @@
 import type { Message, SessionUser, ThreadParticipant } from "@sugabots/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { expect, screen, userEvent } from "storybook/test";
 import preview from "#storybook/preview";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -40,6 +42,8 @@ function message(id: string, author: Message["author"], content: string): Messag
 	};
 }
 
+const POD = "0199a3a0-0000-7000-8000-00000000000b";
+
 const meta = preview.meta({
 	title: "Product/ThreadConversation",
 	component: ThreadConversation,
@@ -48,14 +52,25 @@ const meta = preview.meta({
 		isRunning: false,
 		mentionable: [host, person],
 		user,
-		podId: "0199a3a0-0000-7000-8000-00000000000b",
+		podId: POD,
 	},
 	decorators: [
-		(Story) => (
-			<div className="mx-auto max-w-home py-4">
-				<Story />
-			</div>
-		),
+		function WithQueries(Story) {
+			// The pod has no connections, so its tools are named without a mark.
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connections", POD], []);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<div className="mx-auto max-w-home py-4">
+						<Story />
+					</div>
+				</QueryClientProvider>
+			);
+		},
 	],
 });
 

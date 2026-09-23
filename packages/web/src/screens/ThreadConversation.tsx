@@ -6,16 +6,19 @@ import type {
 	ThreadParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
-import { Fragment } from "react";
+import { Fragment, type ReactNode, useMemo } from "react";
+import { useConnectionLooks } from "@/lib/connections.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ChatActivityRow } from "./ChatActivityRow.tsx";
 import { CollaborationThread } from "./CollaborationThread.tsx";
+import { MessageActions } from "./MessageActions.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
 import { ToolCallRow } from "./ToolCallRow.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
+import { toolActivityOf } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -66,6 +69,11 @@ export function ThreadConversation({
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
 	const replyPending = isRunning && lastMessage?.author.kind === "person";
+	const looks = useConnectionLooks(podId);
+	const names = useMemo(
+		() => new Map([...looks].map(([handle, look]) => [handle, look.name])),
+		[looks],
+	);
 	return (
 		<div className="flex flex-col gap-[17px]">
 			{messages.map((message, index) => {
@@ -73,10 +81,15 @@ export function ThreadConversation({
 				const outgoing =
 					(message.author.kind === "person" && message.author.id === user.id) ||
 					(hostAgentOnRight && message.author.kind === "agent" && message.author.id === host.id);
+				const activity = toolActivityOf(message, names);
+				const segments = segmentsOf(message);
+				// The message's state and its action bar belong to its last bubble,
+				// which a tool call or a collaboration may come after.
+				const lastBubble = segments.findLastIndex((segment) => segment.type === "text");
 				return (
 					<Fragment key={message.id}>
 						{divider && <ActivityDivider>{divider}</ActivityDivider>}
-						{segmentsOf(message).map((segment, position, all) => {
+						{segments.map((segment, position) => {
 							if (segment.type === "collaboration") {
 								if (onOpenCollaboration) {
 									const recipient = mentionable.find(
@@ -128,7 +141,17 @@ export function ThreadConversation({
 									text={segment.text}
 									outgoing={outgoing}
 									mentionable={mentionable}
-									isLast={position === all.length - 1}
+									isLast={position === lastBubble}
+									actions={
+										position === lastBubble && message.author.kind === "agent" ? (
+											<MessageActions
+												text={textOf(message)}
+												activity={activity}
+												looks={looks}
+												at={message.createdAt}
+											/>
+										) : undefined
+									}
 								/>
 							);
 						})}
@@ -164,6 +187,14 @@ function isTyping(message: Message): boolean {
 function waitingOn(message: Message): string | undefined {
 	const last = message.parts.at(-1);
 	return last?.type === "collaboration" ? last.agentName : undefined;
+}
+
+/** Everything the message actually said, for the copy action. */
+function textOf(message: Message): string {
+	return message.parts
+		.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+		.map((part) => part.text)
+		.join("");
 }
 
 type Segment =
@@ -209,6 +240,7 @@ function MessageBubble({
 	outgoing,
 	mentionable,
 	isLast,
+	actions,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
@@ -217,6 +249,8 @@ function MessageBubble({
 	mentionable: ThreadParticipant[];
 	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
+	/** Copy and activity, shown beside the bubble's top on hover and on focus. */
+	actions?: ReactNode;
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
@@ -224,12 +258,19 @@ function MessageBubble({
 	const agent = message.author.kind === "agent" ? message.author : undefined;
 	const fromAgent = agent !== undefined;
 	const status = messageStatus(message);
+	/*
+	 * Level with the name line, and sticky: on a reply taller than the screen the
+	 * bar stays in view while any of it is, and leaves with it, since sticky
+	 * never takes an element outside its parent.
+	 */
+	const pinnedActions = actions && <div className="sticky top-3 shrink-0 pt-2">{actions}</div>;
 	return (
 		<article
 			aria-label={`${message.author.name}, ${status}`}
-			className={`agent-tint flex animate-rise motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
+			className={`group/message agent-tint flex animate-rise items-start gap-1.5 motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
 			style={agent ? { ["--agent-hue" as string]: agent.hue } : undefined}
 		>
+			{outgoing && pinnedActions}
 			<div className="relative max-w-[min(100%,480px)]">
 				{message.author.kind === "agent" ? (
 					<AgentAvatar
@@ -283,6 +324,7 @@ function MessageBubble({
 					)}
 				</div>
 			</div>
+			{!outgoing && pinnedActions}
 		</article>
 	);
 }

@@ -1,14 +1,17 @@
 import type {
 	AgentParticipant,
+	Connection,
 	Message,
 	MessagePart,
 	SessionUser,
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Effect } from "effect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
+import { client } from "@/test-client.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -67,6 +70,28 @@ function reply(parts: MessagePart[], over: Partial<Message> = {}): Message {
 	};
 }
 
+function connection(handle: string, name: string, url: string): Connection {
+	return {
+		id: `0199a3a0-0000-7000-8000-00000000${handle.length}aa1`,
+		workspaceId: "0199a3a0-0000-7000-8000-0000000000a1",
+		podId: POD,
+		name,
+		handle,
+		url,
+		auth: "oauth",
+		signedIn: true,
+		secretHeader: null,
+		hasSecret: false,
+		enabled: true,
+		allowMutating: true,
+		status: "connected",
+		tools: [],
+		lastTestedAt: null,
+		lastTestError: null,
+		createdAt: "2026-09-18T08:00:00.000Z",
+	};
+}
+
 /** Renders the thread, and returns `update` to redraw it as a live thread would. */
 function show(messages: Message[], over: { canApprove?: boolean; canAlwaysAllow?: boolean } = {}) {
 	const queryClient = createQueryClient();
@@ -89,9 +114,39 @@ function show(messages: Message[], over: { canApprove?: boolean; canAlwaysAllow?
 	return { update: (shown: Message[]) => view.rerender(thread(shown)) };
 }
 
+beforeEach(() => {
+	client.api.connections.list.mockReturnValue(
+		Effect.succeed([
+			connection("sentry", "Sentry", "https://mcp.sentry.dev/mcp"),
+			connection("linear", "Linear", "https://mcp.linear.app/mcp"),
+		]),
+	);
+});
+
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
+});
+
+describe("a finished reply that used tools", () => {
+	const answered = reply([
+		toolCall("sentry__search_issues"),
+		toolCall("sentry__search_issues"),
+		toolCall("sentry__search_issues"),
+		toolCall("linear__list_issues"),
+		{ type: "text", text: "Yes — 41 events, all on checkout." },
+	]);
+
+	it("opens the steps behind the message, counted, from its action bar", async () => {
+		show([answered]);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Show activity · 4 steps" }));
+
+		const log = await screen.findByRole("dialog");
+		expect(log.textContent).toContain("4 steps");
+		expect(within(log).getByText("Sentry ·")).toBeDefined();
+		expect(within(log).getByText("Linear ·")).toBeDefined();
+	});
 });
 
 describe("a reply still being written", () => {
