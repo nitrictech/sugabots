@@ -312,85 +312,6 @@ describe("thread navigation", () => {
 		expect(await screen.findAllByText("Updating after new messages")).not.toHaveLength(0);
 	});
 
-	it("keeps streamed text when a refetch during the turn returns less of it", async () => {
-		const updates = controlledEventStream();
-		client.events.thread.mockReturnValue(updates.stream);
-		const messageId = "0199a3a0-0000-7000-8000-0000000000c5";
-		const streaming = {
-			id: messageId,
-			threadId: threadDetails.thread.id,
-			author: {
-				kind: "agent" as const,
-				id: linear.id,
-				name: linear.name,
-				handle: handleFromName(linear.name),
-				hue: linear.hue,
-				face: linear.face,
-			},
-			kind: "text" as const,
-			status: "streaming" as const,
-			parts: [],
-			content: "",
-			createdAt: "2026-09-10T04:03:00.000Z",
-		};
-		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
-		mount(`/threads/${threadDetails.thread.id}`);
-		await screen.findByText("The release notes are ready.");
-
-		updates.emit(
-			streamEvent("message.created", { threadId: threadDetails.thread.id, message: streaming }),
-		);
-		updates.emit(
-			streamEvent("message.delta", {
-				threadId: threadDetails.thread.id,
-				messageId,
-				offset: 0,
-				text: "Release ",
-			}),
-		);
-		updates.emit(
-			streamEvent("message.delta", {
-				threadId: threadDetails.thread.id,
-				messageId,
-				offset: 8,
-				text: "checked",
-			}),
-		);
-		expect(await screen.findByText("Release checked")).toBeDefined();
-
-		// The row was last flushed with half the text; a refetch must not jump back to it.
-		client.api.threads.get.mockReturnValue(
-			Effect.succeed({
-				...threadDetails,
-				messages: [
-					...threadDetails.messages,
-					{ ...streaming, content: "Release ", parts: [{ type: "text", text: "Release " }] },
-				],
-			}),
-		);
-		updates.emit(streamEvent("thread.changed", { threadId: threadDetails.thread.id }));
-		await waitFor(() => expect(client.api.threads.get).toHaveBeenCalledTimes(2));
-
-		// A delta already applied is not appended again; the next one is.
-		updates.emit(
-			streamEvent("message.delta", {
-				threadId: threadDetails.thread.id,
-				messageId,
-				offset: 8,
-				text: "checked",
-			}),
-		);
-		updates.emit(
-			streamEvent("message.delta", {
-				threadId: threadDetails.thread.id,
-				messageId,
-				offset: 15,
-				text: " twice",
-			}),
-		);
-		expect(await screen.findByText("Release checked twice")).toBeDefined();
-	});
-
 	it("loads and deduplicates older messages while keeping live updates", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
@@ -602,7 +523,7 @@ describe("thread navigation", () => {
 		expect(screen.getByText(asked)).toBeDefined();
 	});
 
-	it("replaces the thinking bubble when the streamed reply starts", async () => {
+	it("says the agent is typing from when the turn starts until its reply is finished", async () => {
 		const [personMessage, agentMessage] = threadDetails.messages;
 		if (!personMessage || !agentMessage) {
 			throw new Error("Thread fixture is missing its conversation");
@@ -617,7 +538,7 @@ describe("thread navigation", () => {
 			}),
 		);
 		mount(`/threads/${threadDetails.thread.id}`);
-		expect(await screen.findByLabelText(`${linear.name}, thinking`)).toBeDefined();
+		expect(await screen.findByRole("status", { name: `${linear.name}, typing` })).toBeDefined();
 
 		updates.emit(
 			streamEvent("message.created", {
@@ -625,9 +546,6 @@ describe("thread navigation", () => {
 				message: { ...agentMessage, status: "streaming", content: "", parts: [] },
 			}),
 		);
-
-		await waitFor(() => expect(screen.queryByLabelText(`${linear.name}, thinking`)).toBeNull());
-		expect(screen.getByLabelText(`${linear.name}, writing`)).toBeDefined();
 
 		updates.emit(
 			streamEvent("message.delta", {
@@ -637,8 +555,22 @@ describe("thread navigation", () => {
 				text: "Release ",
 			}),
 		);
+		// One line for the whole turn, and none of the reply until it is done.
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalled());
+		expect(screen.getAllByRole("status", { name: `${linear.name}, typing` })).toHaveLength(1);
+		expect(screen.queryByText("Release")).toBeNull();
 
-		await screen.findByText("Release");
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: threadDetails.thread.id,
+				messageId: agentMessage.id,
+				content: "Release notes drafted.",
+				status: "complete",
+			}),
+		);
+
+		expect(await screen.findByText("Release notes drafted.")).toBeDefined();
+		expect(screen.queryByRole("status", { name: `${linear.name}, typing` })).toBeNull();
 	});
 
 	it("closes the thread stream when leaving the thread", async () => {

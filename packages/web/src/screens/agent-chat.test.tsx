@@ -438,7 +438,7 @@ describe("ongoing agent Chat", () => {
 		expect(composer.value).toBe("Send the update");
 	});
 
-	it("keeps following the latest message while the agent writes", async () => {
+	it("keeps following the latest message while the agent works, and when it answers", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
 		mount(`/agents/${linear.id}`);
@@ -464,16 +464,16 @@ describe("ongoing agent Chat", () => {
 		updates.emit(
 			streamEvent("message.created", { threadId: chat.mainThreadId, message: streaming }),
 		);
-		await screen.findByText("Starting");
+		await screen.findByText("is typing");
 		await waitFor(() => expect(messages.scrollTop).toBe(1_400));
 
 		scrollHeight = 1_700;
 		updates.emit(
-			streamEvent("message.delta", {
+			streamEvent("message.completed", {
 				threadId: chat.mainThreadId,
 				messageId: streaming.id,
-				offset: streaming.content.length,
-				text: " the response",
+				content: "Starting the response",
+				status: "complete",
 			}),
 		);
 		await screen.findByText("Starting the response");
