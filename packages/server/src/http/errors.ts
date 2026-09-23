@@ -3,6 +3,7 @@ import { Data, Effect } from "effect";
 import type { ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { currentTraceId } from "./tracing.ts";
 
 /**
  * One error envelope for the whole API. Nothing builds a failure response by
@@ -76,7 +77,7 @@ function envelope({ code, reason, details }: HttpError): ErrorResponse {
 export const onError: ErrorHandler = (error, c) => {
 	const failure = toHttpError(error);
 	if (failure.status >= 500) {
-		console.error(`${c.req.method} ${c.req.path} failed`, error);
+		console.error(`${c.req.method} ${c.req.path} failed (trace ${currentTraceId()})`, error);
 	}
 	return c.json(envelope(failure), failure.status);
 };
