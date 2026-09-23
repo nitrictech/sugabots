@@ -1,5 +1,5 @@
 /*
- * What jsdom does not have and Base UI needs.
+ * What jsdom does not have and the web app needs.
  *
  * Mostly measurement: the primitives ask how big something is, and where the
  * pointer is, before deciding how to draw it — and jsdom says everything is
@@ -7,6 +7,11 @@
  * menu never opens, which reads as a bug in the component rather than in the
  * environment.
  */
+
+import { vi } from "vitest";
+
+// jsdom cannot paint canvases; browser stories exercise the real renderer.
+vi.mock("hashvatar", () => ({ renderHashvatar: vi.fn(() => () => {}) }));
 
 if (!("ResizeObserver" in globalThis)) {
 	globalThis.ResizeObserver = class {

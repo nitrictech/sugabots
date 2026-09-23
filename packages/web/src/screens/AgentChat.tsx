@@ -397,7 +397,12 @@ function ThreadSummary({
 								{participant.kind === "agent" ? (
 									<AgentAvatar hue={participant.hue} face={participant.face} size={21} />
 								) : (
-									<PersonAvatar name={participant.name} image={participant.image} size={21} />
+									<PersonAvatar
+										name={participant.name}
+										email={participant.email}
+										image={participant.image}
+										size={21}
+									/>
 								)}
 								<span
 									className={

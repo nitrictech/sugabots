@@ -52,7 +52,12 @@ export function AccountMenu({ session }: { session: Session }) {
 					aria-label={user ? `${user.name} and settings` : "Account"}
 					className="focus-ring flex w-full cursor-pointer items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-sidebar-accent motion-reduce:transition-none"
 				>
-					<PersonAvatar name={user?.name ?? "?"} image={user?.image} size={34} />
+					<PersonAvatar
+						name={user?.name ?? "?"}
+						email={user?.email ?? ""}
+						image={user?.image}
+						size={34}
+					/>
 					<span className="min-w-0 flex-1">
 						<span className="block truncate font-semibold text-base text-heading">
 							{user?.name ?? "Account"}

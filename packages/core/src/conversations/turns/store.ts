@@ -293,6 +293,7 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 						responseMessage: toMessage(response, {
 							userId: null,
 							userName: null,
+							userEmail: null,
 							userImage: null,
 							agentId: scope.agentId,
 							agentName: scope.agentName,

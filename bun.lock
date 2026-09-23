@@ -94,6 +94,7 @@
         "class-variance-authority": "^0.7.1",
         "cn": "^0.2.6",
         "effect": "catalog:",
+        "hashvatar": "^0.1.2",
         "lucide-react": "^1.43.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
@@ -1122,6 +1123,8 @@
     "graphql": ["graphql@16.14.2", "", {}, "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="],
 
     "has-symbols": ["has-symbols@1.1.0", "", {}, "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ=="],
+
+    "hashvatar": ["hashvatar@0.1.2", "", { "peerDependencies": { "react": ">=17" }, "optionalPeers": ["react"] }, "sha512-RdGvT8Ct0qTzDwAFkJACurTiCJ+Pv7YBwvq4YCKX6ZPNFvOPsb9nCc7Leh3jgxZCgutnCjaWEkYm7p4lVQaq1g=="],
 
     "hasown": ["hasown@2.0.4", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A=="],
 

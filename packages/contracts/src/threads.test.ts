@@ -71,6 +71,7 @@ describe("thread contracts", () => {
 				kind: "person",
 				id: ID,
 				name: "Sam",
+				email: "sam@example.com",
 				handle: "sam",
 				image: null,
 			}),
@@ -106,7 +107,14 @@ describe("thread contracts", () => {
 		const message = {
 			id: ID,
 			threadId: ID,
-			author: { kind: "person", id: ID, name: "Sam", handle: "sam", image: null },
+			author: {
+				kind: "person",
+				id: ID,
+				name: "Sam",
+				email: "sam@example.com",
+				handle: "sam",
+				image: null,
+			},
 			kind: "text",
 			status: "complete",
 			parts: [

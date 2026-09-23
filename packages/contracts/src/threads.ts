@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { agentFaceSchema, agentHueSchema } from "./agents.ts";
+import { emailSchema } from "./email.ts";
 import { routineExecutionSchema, routineTriggerAuthorSchema } from "./routines.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -54,6 +55,7 @@ const personParticipantSchema = Schema.Struct({
 	kind: Schema.Literal("person"),
 	id: uuidSchema,
 	name: Schema.String,
+	email: emailSchema,
 	/** Derived from the name; how the person is mentioned. */
 	handle: Schema.String,
 	image: Schema.NullOr(Schema.String),

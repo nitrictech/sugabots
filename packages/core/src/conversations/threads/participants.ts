@@ -20,6 +20,7 @@ import type { PlacedPartsOf } from "./placed-parts.ts";
 export const participantColumns = {
 	userId: user.id,
 	userName: user.name,
+	userEmail: user.email,
 	userImage: user.image,
 	agentId: agent.id,
 	agentName: agent.name,
@@ -31,6 +32,7 @@ export const participantColumns = {
 export interface ParticipantRow {
 	userId: string | null;
 	userName: string | null;
+	userEmail: string | null;
 	userImage: string | null;
 	agentId: string | null;
 	agentName: string | null;
@@ -40,11 +42,12 @@ export interface ParticipantRow {
 }
 
 export function toParticipant(row: ParticipantRow): ThreadParticipant {
-	if (row.userId && row.userName) {
+	if (row.userId && row.userName && row.userEmail) {
 		return {
 			kind: "person",
 			id: row.userId,
 			name: row.userName,
+			email: row.userEmail,
 			handle: handleFromName(row.userName),
 			image: row.userImage,
 		};
@@ -66,6 +69,7 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 export function personAuthor(person: {
 	userId: string;
 	userName: string;
+	userEmail: string;
 	userImage: string | null;
 }): ParticipantRow {
 	return {

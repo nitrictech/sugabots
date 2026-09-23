@@ -104,6 +104,7 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 						kind: "person",
 						id: user.id,
 						name: user.name,
+						email: user.email,
 						handle: user.name
 							.toLocaleLowerCase()
 							.replace(/[^a-z0-9]+/g, "-")

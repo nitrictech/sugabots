@@ -73,10 +73,6 @@
 	--sidebar-accent: light-dark(#e9e7e1, #232329);
 	--sidebar-accent-foreground: light-dark(#2f3339, #e9e8e6);
 
-	/* A person with no photo: initials on a warm disc. */
-	--person-avatar: light-dark(#dcd8d3, #35353c);
-	--person-avatar-foreground: light-dark(#4b5057, #c9c8cd);
-
 	/*
 	 * The shadcn contract.
 	 *
@@ -175,8 +171,6 @@
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-accent: var(--sidebar-accent);
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-	--color-person-avatar: var(--person-avatar);
-	--color-person-avatar-foreground: var(--person-avatar-foreground);
 	--color-agent-fill: var(--agent-fill);
 	--color-agent-ink: var(--agent-ink);
 	--color-agent-wash: var(--agent-wash);

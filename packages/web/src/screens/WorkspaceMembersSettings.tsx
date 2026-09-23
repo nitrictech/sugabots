@@ -18,6 +18,7 @@ import {
 	useWorkspaceMembers,
 } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
+import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogTitle } from "@/ui/dialog.tsx";
@@ -166,17 +167,12 @@ function Roster({
 							key={member.id}
 							className="flex min-h-16 flex-wrap items-center gap-3 border-border-subtle border-b px-4 py-3 last:border-b-0"
 						>
-							{member.user.image ? (
-								<img
-									src={member.user.image}
-									alt=""
-									className="size-9 shrink-0 rounded-full object-cover"
-								/>
-							) : (
-								<span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted font-semibold text-heading text-sm">
-									{member.user.name.trim().charAt(0).toUpperCase() || "?"}
-								</span>
-							)}
+							<PersonAvatar
+								name={member.user.name}
+								email={member.user.email}
+								image={member.user.image}
+								size={36}
+							/>
 							<div className="min-w-0 flex-1">
 								<p className="truncate font-medium text-heading text-md">
 									{member.user.name}

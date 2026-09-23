@@ -17,6 +17,7 @@ const participants: ThreadParticipant[] = [
 		kind: "person",
 		id: "0199a3a0-0000-7000-8000-000000000002",
 		name: "Sam Rivera",
+		email: "sam.rivera@example.com",
 		handle: "sam-rivera",
 		image: null,
 	},

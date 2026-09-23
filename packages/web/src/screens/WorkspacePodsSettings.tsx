@@ -509,7 +509,12 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 									>
 										{/* Hidden from the name, or the initials would read as part of it. */}
 										<span aria-hidden>
-											<PersonAvatar name={member.user.name} image={member.user.image} size={22} />
+											<PersonAvatar
+												name={member.user.name}
+												email={member.user.email}
+												image={member.user.image}
+												size={22}
+											/>
 										</span>
 										<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
 									</DropdownMenuItem>
@@ -528,7 +533,12 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 				<Card>
 					{members.data?.map((member: PodMember) => (
 						<li key={member.userId} className="flex min-h-12 items-center gap-3 px-3.5 py-2">
-							<PersonAvatar name={member.name} image={member.image} size={28} />
+							<PersonAvatar
+								name={member.name}
+								email={member.email}
+								image={member.image}
+								size={28}
+							/>
 							<span className="min-w-0 flex-1 truncate font-medium text-base text-heading">
 								{member.name}
 							</span>

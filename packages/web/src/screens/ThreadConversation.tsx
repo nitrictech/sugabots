@@ -253,6 +253,7 @@ function MessageBubble({
 				) : (
 					<PersonAvatar
 						name={message.author.name}
+						email={message.author.email}
 						image={message.author.image}
 						size={34}
 						className={`absolute -top-[11px] z-10 border-[2.5px] border-card ${outgoing ? "-right-[15px]" : "-left-[15px]"}`}

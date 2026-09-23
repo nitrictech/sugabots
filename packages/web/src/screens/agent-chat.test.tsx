@@ -61,6 +61,7 @@ const person = {
 	kind: "person" as const,
 	id: sam.id,
 	name: sam.name,
+	email: sam.email,
 	handle: handleFromName(sam.name),
 	image: null,
 };

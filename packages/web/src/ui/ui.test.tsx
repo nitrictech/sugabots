@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { renderHashvatar } from "hashvatar";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -42,15 +43,37 @@ describe("IconButton", () => {
 });
 
 describe("PersonAvatar", () => {
-	it("falls back to initials until there is a photo", () => {
-		render(<PersonAvatar name="Ryan Eyes" />);
+	it("shows initials over the generated avatar", () => {
+		render(<PersonAvatar name="Ryan Eyes" email="ryan@example.com" />);
 
 		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
 	});
 
 	it("gives two letters for a single name, so a stack stays even", () => {
-		render(<PersonAvatar name="Jye" />);
+		render(<PersonAvatar name="Jye" email="jye@example.com" />);
 
 		expect(screen.getByTitle("Jye").textContent).toBe("JY");
+	});
+
+	it("uses the user's photo when available", () => {
+		render(<PersonAvatar name="Ryan Eyes" email="ryan@example.com" image="/ryan.png" />);
+
+		expect(screen.getByTitle("Ryan Eyes").querySelector("img")?.getAttribute("src")).toBe(
+			"/ryan.png",
+		);
+		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("");
+	});
+
+	it("uses normalized email for the generated avatar even when the name stays the same", () => {
+		const { rerender } = render(<PersonAvatar name="Ryan Eyes" email="RYAN@Example.com " />);
+		expect(vi.mocked(renderHashvatar).mock.lastCall?.[1]).toMatchObject({
+			hash: "ryan@example.com",
+			mode: "dither",
+		});
+
+		rerender(<PersonAvatar name="Ryan Eyes" email="ryan+new@example.com" />);
+		expect(vi.mocked(renderHashvatar).mock.lastCall?.[1]).toMatchObject({
+			hash: "ryan+new@example.com",
+		});
 	});
 });

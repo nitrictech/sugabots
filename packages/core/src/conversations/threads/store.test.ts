@@ -44,6 +44,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	let agentId: string;
 	let memberId: string;
 	let outsiderId: string;
+	let outsiderEmail: string;
 
 	async function createThread(input: {
 		workspaceId: string;
@@ -101,6 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		workspaceId = workspaceRow.id;
 		memberId = member.id;
 		outsiderId = outsider.id;
+		outsiderEmail = outsider.email;
 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
@@ -653,7 +655,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 
 		expect((await store.getVisible(details.thread.id, memberId))?.participants).toEqual(
-			expect.arrayContaining([expect.objectContaining({ kind: "person", id: outsiderId })]),
+			expect.arrayContaining([
+				expect.objectContaining({ kind: "person", id: outsiderId, email: outsiderEmail }),
+			]),
 		);
 	});
 

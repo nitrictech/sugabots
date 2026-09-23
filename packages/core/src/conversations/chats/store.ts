@@ -319,7 +319,7 @@ const publicMessage = Effect.fn("ChatStore.publicMessage")(function* (
 	row: schema.MessageRow,
 ) {
 	const [author] = yield* db
-		.select({ userId: user.id, userName: user.name, userImage: user.image })
+		.select({ userId: user.id, userName: user.name, userEmail: user.email, userImage: user.image })
 		.from(user)
 		.where(eq(user.id, row.authorUserId ?? ""))
 		.limit(1);

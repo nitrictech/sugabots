@@ -55,7 +55,7 @@ const details: ThreadDetails = {
 		latestContext: null,
 	},
 	participants: [
-		{ kind: "person", id: USER, name: "Sam", handle: "sam", image: null },
+		{ kind: "person", id: USER, name: "Sam", email: "sam@example.com", handle: "sam", image: null },
 		{
 			kind: "agent",
 			id: AGENT,
@@ -70,7 +70,14 @@ const details: ThreadDetails = {
 		{
 			id: "0199a3a0-0000-7000-8000-000000000007",
 			threadId: THREAD,
-			author: { kind: "person", id: USER, name: "Sam", handle: "sam", image: null },
+			author: {
+				kind: "person",
+				id: USER,
+				name: "Sam",
+				email: "sam@example.com",
+				handle: "sam",
+				image: null,
+			},
 			kind: "text",
 			status: "complete",
 			parts: [{ type: "text", text: "Check the release" }],

@@ -220,6 +220,7 @@ function message() {
 			kind: "person" as const,
 			id: "00000000-0000-4000-8000-000000000005",
 			name: "Sam",
+			email: "sam@example.com",
 			handle: "sam",
 			image: null,
 		},

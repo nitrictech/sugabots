@@ -135,7 +135,12 @@ export function ChatComposer({
 								{participant.kind === "agent" ? (
 									<AgentAvatar hue={participant.hue} face={participant.face} size={30} />
 								) : (
-									<PersonAvatar name={participant.name} image={participant.image} size={30} />
+									<PersonAvatar
+										name={participant.name}
+										email={participant.email}
+										image={participant.image}
+										size={30}
+									/>
 								)}
 								<span className="min-w-0 flex-1">
 									<span className="block truncate font-semibold text-heading text-base">

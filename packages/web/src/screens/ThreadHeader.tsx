@@ -144,6 +144,7 @@ export function ParticipantStack({
 						<PersonAvatar
 							key={participant.id}
 							name={participant.name}
+							email={participant.email}
 							image={participant.image}
 							size={30}
 							className={

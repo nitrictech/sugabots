@@ -53,7 +53,14 @@ const threadDetails: ThreadDetails = {
 		latestContext: { usedTokens: 96_000, capacityTokens: 200_000 },
 	},
 	participants: [
-		{ kind: "person", id: sam.id, name: sam.name, handle: handleFromName(sam.name), image: null },
+		{
+			kind: "person",
+			id: sam.id,
+			name: sam.name,
+			email: sam.email,
+			handle: handleFromName(sam.name),
+			image: null,
+		},
 		{
 			kind: "agent",
 			id: linear.id,
@@ -91,6 +98,7 @@ const threadDetails: ThreadDetails = {
 				kind: "person",
 				id: sam.id,
 				name: sam.name,
+				email: sam.email,
 				handle: handleFromName(sam.name),
 				image: null,
 			},
