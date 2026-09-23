@@ -349,6 +349,7 @@
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-unfold: unfold 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-chat-panel-in: chat-panel-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	--animate-reply-in: reply-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
 	@keyframes rise {
 		from {
@@ -358,6 +359,18 @@
 		to {
 			opacity: 1;
 			transform: translateY(0);
+		}
+	}
+
+	/* Grows out of the typing line it replaces, from the avatar's corner. */
+	@keyframes reply-in {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.96);
+		}
+		to {
+			opacity: 1;
+			transform: none;
 		}
 	}
 
@@ -390,6 +403,59 @@
 
 .chat-activity-row:hover {
 	background: var(--sunken);
+}
+
+/*
+ * A reply that finished while it was being watched grows to fit its words,
+ * from its name line down, so it reads as arriving rather than as swapped in.
+ * The words are all there from the start: the grid track opens from nothing to
+ * their height, and a soft edge at the bottom stops them being cut off hard
+ * while it does. Set `--reveal-duration` for how long it takes.
+ */
+/* Registered so it animates smoothly; an initial value may not use `rem`, or the registration is dropped. */
+@property --reveal-edge {
+	syntax: "<length-percentage>";
+	inherits: false;
+	initial-value: 100%;
+}
+
+.reply-grow {
+	display: grid;
+	animation: reply-grow var(--reveal-duration, 500ms) cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both;
+}
+
+.reply-grow > * {
+	min-height: 0;
+	mask-image: linear-gradient(
+		to bottom,
+		#000 calc(var(--reveal-edge) - 3rem),
+		transparent var(--reveal-edge)
+	);
+	animation: reply-grow-edge var(--reveal-duration, 500ms) cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both;
+}
+
+@keyframes reply-grow {
+	from {
+		grid-template-rows: 0fr;
+	}
+	to {
+		grid-template-rows: 1fr;
+	}
+}
+
+/* Clipped only while growing, so a focused code block's ring is not cut off once it has. */
+@keyframes reply-grow-edge {
+	from {
+		--reveal-edge: 100%;
+		overflow: clip;
+	}
+	99.9% {
+		overflow: clip;
+	}
+	to {
+		--reveal-edge: calc(100% + 3rem);
+		overflow: visible;
+	}
 }
 
 .chat-working-dots {
@@ -460,7 +526,13 @@
 
 @media (prefers-reduced-motion: reduce) {
 	.chat-thread-panel,
-	.chat-working-dots i {
+	.chat-working-dots i,
+	.reply-grow,
+	.reply-grow > * {
 		animation: none;
+	}
+
+	.reply-grow > * {
+		mask-image: none;
 	}
 }

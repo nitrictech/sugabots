@@ -181,6 +181,26 @@ describe("a reply that wrote a line before each tool call", () => {
 	});
 });
 
+describe("a reply arriving", () => {
+	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
+
+	it("grows to fit its words when it finished while the thread was open", () => {
+		const { update } = show([reply([answer], { status: "streaming" })]);
+
+		update([reply([answer])]);
+
+		const words = screen.getByText("Here are the 2 issues in Cycle 33.");
+		expect(words.closest(".reply-grow")).not.toBeNull();
+	});
+
+	it("simply shows a reply that was already finished when the thread opened", () => {
+		show([reply([answer])]);
+
+		const words = screen.getByText("Here are the 2 issues in Cycle 33.");
+		expect(words.closest(".reply-grow")).toBeNull();
+	});
+});
+
 describe("a reply that wrote nothing but used tools", () => {
 	// A turn that called a tool and produced no text has no text part at all —
 	// `messagePartsFor` adds none when the content is empty. The bubble is where

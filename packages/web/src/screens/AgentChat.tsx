@@ -16,6 +16,7 @@ import {
 	useOptimisticChatItems,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
+import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -97,6 +98,8 @@ export function AgentChat({
 			positionedAtLatest.current = true;
 		}
 	}, [latestItemRevision]);
+
+	useFollowContentGrowth(viewport, followingLatest);
 
 	useEffect(() => {
 		if (threadId && items.length > itemCountAtOpen.current) setNewInChat(true);

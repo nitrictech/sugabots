@@ -6,7 +6,7 @@ import type {
 	ThreadParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
-import { Fragment, type ReactNode, useMemo } from "react";
+import { Fragment, type ReactNode, useMemo, useRef } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -81,6 +81,7 @@ export function ThreadConversation({
 		() => new Map([...looks].map(([handle, look]) => [handle, look.name])),
 		[looks],
 	);
+	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
 		<div className="flex flex-col gap-[17px]">
 			{messages.map((message, index) => {
@@ -170,6 +171,7 @@ export function ThreadConversation({
 									outgoing={outgoing}
 									mentionable={mentionable}
 									isLast={isLast}
+									arrivedLive={message.status !== "streaming" && watchedWritten.has(message.id)}
 									actions={
 										isLast && message.author.kind === "agent" ? (
 											<MessageActions
@@ -199,6 +201,28 @@ export function ThreadConversation({
 			{replyPending && <TypingIndicator agent={host} outgoing={hostAgentOnRight} />}
 		</div>
 	);
+}
+
+/**
+ * The ids of replies this thread has seen while they were still being written.
+ * One that is finished and in here arrived while someone watched, as opposed
+ * to being loaded with the thread's history. Only ever added to, so a reply
+ * keeps its arrival for as long as the thread stays open.
+ */
+function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySet<string> {
+	const seen = useRef(new Set<string>());
+	for (const message of messages) {
+		if (message.status === "streaming") seen.current.add(message.id);
+	}
+	return seen.current;
+}
+
+/** How long a reply takes to grow to fit its words: longer for more of them, within bounds. */
+const REVEAL_MS = { minimum: 400, maximum: 700, perCharacter: 0.5 };
+
+function revealDurationMs(text: string): number {
+	const scaled = REVEAL_MS.minimum + text.length * REVEAL_MS.perCharacter;
+	return Math.round(Math.min(scaled, REVEAL_MS.maximum));
 }
 
 /**
@@ -284,6 +308,7 @@ function MessageBubble({
 	outgoing,
 	mentionable,
 	isLast,
+	arrivedLive,
 	actions,
 }: {
 	message: Message;
@@ -293,6 +318,8 @@ function MessageBubble({
 	mentionable: ThreadParticipant[];
 	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
+	/** Finished while the thread was open, so it arrives rather than simply being there. */
+	arrivedLive: boolean;
 	/** Copy and activity, shown beside the bubble's top on hover and on focus. */
 	actions?: ReactNode;
 }) {
@@ -311,7 +338,11 @@ function MessageBubble({
 	return (
 		<article
 			aria-label={`${message.author.name}, ${status}`}
-			className={`group/message agent-tint flex animate-rise items-start gap-1.5 motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
+			className={`group/message agent-tint flex items-start gap-1.5 motion-reduce:animate-none ${
+				arrivedLive
+					? `animate-reply-in ${outgoing ? "origin-top-right" : "origin-top-left"}`
+					: "animate-rise"
+			} ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
 			style={agent ? { ["--agent-hue" as string]: agent.hue } : undefined}
 		>
 			{outgoing && pinnedActions}
@@ -350,7 +381,16 @@ function MessageBubble({
 							</time>
 						</Tooltip>
 					</div>
-					{fromAgent ? (
+					{fromAgent && arrivedLive ? (
+						<div
+							className="reply-grow"
+							style={{ ["--reveal-duration" as string]: `${revealDurationMs(text)}ms` }}
+						>
+							<div>
+								<MessageMarkdown text={text} mentionable={mentionable} />
+							</div>
+						</div>
+					) : fromAgent ? (
 						<MessageMarkdown text={text} mentionable={mentionable} />
 					) : (
 						<p className="m-0 whitespace-pre-wrap break-words text-foreground text-xl leading-relaxed">

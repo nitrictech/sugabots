@@ -2,6 +2,7 @@ import type { SessionUser, ThreadDetails, ThreadParticipant } from "@sugabots/co
 import { isApiFailure } from "@sugabots/sdk";
 import { useLayoutEffect, useRef } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -86,6 +87,7 @@ export function ThreadPage({
 		window.addEventListener("resize", followAfterResize);
 		return () => window.removeEventListener("resize", followAfterResize);
 	}, []);
+	useFollowContentGrowth(conversationViewport, followLatest);
 
 	if (query.isPending) {
 		return null;
