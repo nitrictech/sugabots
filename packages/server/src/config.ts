@@ -54,8 +54,9 @@ export interface Config {
 	mailer: Mailer;
 	/**
 	 * The standard `OTEL_*` variables, passed through for Effect's OTLP
-	 * exporter to read. Without an endpoint and `OTEL_TRACES_EXPORTER=otlp`,
-	 * nothing is exported.
+	 * exporter to read. In development, traces and logs go to this checkout's
+	 * motel unless these say otherwise; in production, nowhere unless they
+	 * name an endpoint and `OTEL_TRACES_EXPORTER=otlp`.
 	 */
 	openTelemetryEnv: Record<string, string>;
 }
@@ -148,16 +149,29 @@ export function configFromEnv(
 		allowOpenSignUp,
 		requireEmailVerification,
 		mailer: configuredMailer ?? consoleMailer,
-		openTelemetryEnv: openTelemetryEnvFrom(env),
+		openTelemetryEnv: openTelemetryEnvFrom(env, environment),
 	};
 }
 
-function openTelemetryEnvFrom(env: NodeJS.ProcessEnv): Record<string, string> {
-	return Object.fromEntries(
+/** Where `bun run telemetry` has motel listen. Must match the port in the root package.json. */
+const DEVELOPMENT_OTLP_ENDPOINT = "http://127.0.0.1:27687";
+
+function openTelemetryEnvFrom(
+	env: NodeJS.ProcessEnv,
+	environment: Environment,
+): Record<string, string> {
+	const given = Object.fromEntries(
 		Object.entries(env).filter(
 			(entry): entry is [string, string] => entry[0].startsWith("OTEL_") && entry[1] !== undefined,
 		),
 	);
+	if (environment !== "development") return given;
+	return {
+		OTEL_EXPORTER_OTLP_ENDPOINT: DEVELOPMENT_OTLP_ENDPOINT,
+		OTEL_TRACES_EXPORTER: "otlp",
+		OTEL_LOGS_EXPORTER: "otlp",
+		...given,
+	};
 }
 
 function booleanFromEnv(value: string, name: string): boolean {

@@ -107,6 +107,43 @@ describe("configFromEnv", () => {
 		).toBe(true);
 	});
 
+	it("exports telemetry to this checkout's motel in development unless told otherwise", () => {
+		const base = {
+			DATABASE_URL,
+			BETTER_AUTH_SECRET: "s",
+			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
+		};
+
+		expect(configFromEnv(base).openTelemetryEnv).toStrictEqual({
+			OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:27687",
+			OTEL_TRACES_EXPORTER: "otlp",
+			OTEL_LOGS_EXPORTER: "otlp",
+		});
+		expect(
+			configFromEnv({ ...base, OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318" })
+				.openTelemetryEnv.OTEL_EXPORTER_OTLP_ENDPOINT,
+		).toBe("http://localhost:4318");
+		expect(
+			configFromEnv({ ...base, OTEL_SDK_DISABLED: "true" }).openTelemetryEnv.OTEL_SDK_DISABLED,
+		).toBe("true");
+	});
+
+	it("exports telemetry nowhere in production unless told where", () => {
+		const productionEnv = {
+			NODE_ENV: "production",
+			DATABASE_URL,
+			BETTER_AUTH_SECRET: "x".repeat(32),
+			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
+			EMAIL_WEBHOOK_URL: "https://mailer.example/send",
+			PATH: "/usr/bin",
+		};
+		expect(configFromEnv(productionEnv).openTelemetryEnv).toStrictEqual({});
+		expect(
+			configFromEnv({ ...productionEnv, OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.example" })
+				.openTelemetryEnv,
+		).toStrictEqual({ OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.example" });
+	});
+
 	it("requires an explicit boolean to allow private model provider networking", () => {
 		const base = {
 			DATABASE_URL,

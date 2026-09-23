@@ -7,4 +7,5 @@ coverage/
 .env*
 !.env.example
 .temp/
+.motel/
 .claude/worktrees/
