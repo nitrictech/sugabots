@@ -19,5 +19,9 @@ export const routineSchedulerLayer = ({
 			),
 		),
 	);
-	return Layer.effectDiscard(Effect.forkScoped(iteration.pipe(Effect.forever)));
+	// Untraced, because an idle poll would be a trace of its own every interval.
+	// The turn a due Routine starts is traced by the turn worker.
+	return Layer.effectDiscard(
+		Effect.forkScoped(iteration.pipe(Effect.forever, Effect.withTracerEnabled(false))),
+	);
 };
