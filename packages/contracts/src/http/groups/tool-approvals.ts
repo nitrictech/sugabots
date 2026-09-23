@@ -4,7 +4,7 @@ import { toolCallPartSchema } from "../../threads.ts";
 import { toolApprovalDecisionSchema, toolApprovalRuleSchema } from "../../tool-approvals.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { Conflict } from "../errors.ts";
-import { Access, Authorise, Session } from "../middleware.ts";
+import { Authorise, Session } from "../middleware.ts";
 
 export class ToolApprovalsApi extends HttpApiGroup.make("toolApprovals")
 	.add(
@@ -17,14 +17,14 @@ export class ToolApprovalsApi extends HttpApiGroup.make("toolApprovals")
 			payload: toolApprovalDecisionSchema,
 			success: toolCallPartSchema,
 			error: Conflict,
-		}).annotate(Access, { pod: "approval.decide" }),
+		}),
 		HttpApiEndpoint.get("listRules", "/pods/:podId/tool-approval-rules", {
 			params: { podId: uuidSchema },
 			success: Schema.Array(toolApprovalRuleSchema),
-		}).annotate(Access, { pod: "pod.read" }),
+		}),
 		HttpApiEndpoint.delete("revokeRule", "/pods/:podId/tool-approval-rules/:ruleId", {
 			params: { podId: uuidSchema, ruleId: Schema.String },
-		}).annotate(Access, { pod: "approval.revoke" }),
+		}),
 	)
 	.middleware(Authorise)
 	.middleware(Session) {}

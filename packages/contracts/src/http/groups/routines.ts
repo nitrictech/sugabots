@@ -16,7 +16,7 @@ import {
 } from "../../routines.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, Unauthorized } from "../errors.ts";
-import { Access, Authorise, Session } from "../middleware.ts";
+import { Authorise, Session } from "../middleware.ts";
 
 const agent = { agentId: uuidSchema };
 const routine = { agentId: uuidSchema, routineId: Schema.String };
@@ -31,7 +31,6 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		params: agent,
 		success: Schema.Array(routineSchema),
 	})
-		.annotate(Access, { agent: "routine.read" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.post("create", "/agents/:agentId/routines", {
@@ -40,7 +39,6 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		success: routineWriteResultSchema.pipe(HttpApiSchema.status(201)),
 		error: Conflict,
 	})
-		.annotate(Access, { agent: "routine.manage" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.post("previewSchedule", "/agents/:agentId/routines/schedule-preview", {
@@ -48,14 +46,12 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		payload: routineSchedulePreviewSchema,
 		success: routineScheduleOccurrencesSchema,
 	})
-		.annotate(Access, { agent: "routine.manage" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.get("get", "/agents/:agentId/routines/:routineId", {
 		params: routine,
 		success: routineSchema,
 	})
-		.annotate(Access, { agent: "routine.read" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.patch("update", "/agents/:agentId/routines/:routineId", {
@@ -64,13 +60,11 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		success: routineWriteResultSchema,
 		error: Conflict,
 	})
-		.annotate(Access, { agent: "routine.manage" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.delete("remove", "/agents/:agentId/routines/:routineId", {
 		params: routine,
 	})
-		.annotate(Access, { agent: "routine.manage" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.post("run", "/agents/:agentId/routines/:routineId/run", {
@@ -79,14 +73,12 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		success: acceptedRoutineExecutionSchema.pipe(HttpApiSchema.status(202)),
 		error: Conflict,
 	})
-		.annotate(Access, { agent: "routine.run" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.post("rotateSecret", "/agents/:agentId/routines/:routineId/secret", {
 		params: routine,
 		success: routineSecretSchema,
 	})
-		.annotate(Access, { agent: "routine.manage" })
 		.middleware(Authorise)
 		.middleware(Session),
 	HttpApiEndpoint.get("executions", "/agents/:agentId/routines/:routineId/executions", {
@@ -94,7 +86,6 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		query: routineExecutionPageQuerySchema,
 		success: routineExecutionPageSchema,
 	})
-		.annotate(Access, { agent: "routine.history.read" })
 		.middleware(Authorise)
 		.middleware(Session),
 	// Any JSON body, carried to the Routine as its trigger's payload. The

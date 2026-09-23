@@ -1,7 +1,6 @@
 import { Context } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import type { SessionUser } from "../api.ts";
-import type { PodPermission, WorkspacePermission } from "../permissions.ts";
 import {
 	BadRequest,
 	Forbidden,
@@ -28,25 +27,8 @@ export class Session extends HttpApiMiddleware.Service<Session, { provides: Curr
 ) {}
 
 /**
- * What an endpoint lets the caller do, declared on the endpoint itself.
- *
- * `workspace`, `pod` and `agent` name the permission to check against the
- * `:workspaceId`, `:podId` or `:agentId` in the path. `reach` is for an
- * endpoint addressed at something narrower — a thread, a chat, a turn — whose
- * store scopes the query to the pods the caller reaches; the string says
- * where, because that claim has to stay true.
- */
-export type AccessRule =
-	| { readonly workspace: WorkspacePermission }
-	| { readonly pod: PodPermission }
-	| { readonly agent: PodPermission }
-	| { readonly reach: string };
-
-/** The annotation `Authorise` reads. Every endpoint behind `Session` carries one. */
-export class Access extends Context.Service<Access, AccessRule>()("sugabots/http/Access") {}
-
-/**
- * Checks the endpoint's `Access` rule before its request is decoded.
+ * Checks what the endpoint lets the caller do before its request is decoded.
+ * The rules are the server's (`packages/server/src/http/access-policy.ts`).
  *
  * Anything the caller cannot reach is `NotFound`, never `Forbidden`, because
  * `Forbidden` confirms an id exists. `Forbidden` is for something the caller

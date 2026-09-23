@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
-import { Access, Authorise, Session } from "../middleware.ts";
+import { Authorise, Session } from "../middleware.ts";
 
 /**
  * Live updates as Server-Sent Events: one stream per open thread, one per
@@ -16,11 +16,11 @@ export class EventsApi extends HttpApiGroup.make("events")
 		HttpApiEndpoint.get("workspace", "/workspaces/:workspaceId/events", {
 			params: { workspaceId: Schema.String },
 			success: eventStream,
-		}).annotate(Access, { reach: "events/access.ts asks Authorization itself" }),
+		}),
 		HttpApiEndpoint.get("thread", "/threads/:threadId/events", {
 			params: { threadId: Schema.String },
 			success: eventStream,
-		}).annotate(Access, { reach: "events/access.ts asks the same thread visibility" }),
+		}),
 	)
 	.middleware(Authorise)
 	.middleware(Session) {}

@@ -1,4 +1,4 @@
-import { Access, Authorise, CurrentUser, Forbidden, NotFound } from "@sugabots/contracts/http";
+import { Authorise, CurrentUser, Forbidden, NotFound } from "@sugabots/contracts/http";
 import type { Database } from "@sugabots/core/database/database";
 import type {
 	AgentStanding,
@@ -9,10 +9,11 @@ import type {
 } from "@sugabots/core/workspaces/access";
 import { Context, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
+import { accessRuleFor } from "./access-policy.ts";
 import { asHttpError } from "./errors.ts";
 
 /**
- * The `Authorise` middleware: each endpoint's `Access` rule, checked against
+ * The `Authorise` middleware: each endpoint's rule in `accessPolicy`, checked against
  * the id in its path before the request is decoded.
  *
  * What the check found is handed to the handler through `grantedWorkspace`,
@@ -48,7 +49,7 @@ function granted<Standing>(
 ): Effect.Effect<Standing> {
 	return Effect.flatMap(Effect.service(reference), (standing) =>
 		standing === undefined
-			? Effect.die(new Error(`This endpoint's Access rule grants no ${scope}`))
+			? Effect.die(new Error(`This endpoint's access rule grants no ${scope}`))
 			: Effect.succeed(standing),
 	);
 }
@@ -61,12 +62,12 @@ export function authoriseLayer(authorization: Authorization) {
 			const decide = <Standing>(decision: Effect.Effect<Standing, AuthorizationDenied, Database>) =>
 				decision.pipe(asHttpError(denials), Effect.provideContext(database));
 
-			return (httpEffect, { endpoint }) =>
+			return (httpEffect, { group, endpoint }) =>
 				Effect.gen(function* () {
-					const rule = Context.getOrUndefined(endpoint.annotations, Access);
+					const rule = accessRuleFor(group.identifier, endpoint.identifier);
 					if (rule === undefined) {
 						return yield* Effect.die(
-							new Error(`${endpoint.method} ${endpoint.path} declares no Access rule`),
+							new Error(`${endpoint.method} ${endpoint.path} has no rule in accessPolicy`),
 						);
 					}
 					if ("reach" in rule) {

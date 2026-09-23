@@ -1,7 +1,7 @@
-import { Access, type AccessRule, Api, Authorise, Session } from "@sugabots/contracts/http";
-import { Context } from "effect";
+import { Api, Authorise, Session } from "@sugabots/contracts/http";
 import { HttpApi } from "effect/unstable/httpapi";
 import { describe, expect, it } from "vitest";
+import { type AccessRule, accessRuleFor } from "./access-policy.ts";
 import { createTestApp } from "./app.test-support.ts";
 
 /**
@@ -9,7 +9,7 @@ import { createTestApp } from "./app.test-support.ts";
  *
  * The other HTTP tests each check one route they know about. This one reads
  * the API definition, so an endpoint added without a session check, or
- * without an `Access` rule, fails here rather than shipping. "Which routes did
+ * without a rule in `accessPolicy`, fails here rather than shipping. "Which routes did
  * we forget to authorise?" is the question that breaches a multi-tenant
  * product.
  */
@@ -61,14 +61,14 @@ function declaredEndpoints(): Endpoint[] {
 	const endpoints: Endpoint[] = [];
 	HttpApi.reflect(Api, {
 		onGroup: () => {},
-		onEndpoint: ({ endpoint, middleware }) => {
+		onEndpoint: ({ group, endpoint, middleware }) => {
 			endpoints.push({
 				name: `${endpoint.method} ${endpoint.path}`,
 				method: endpoint.method,
 				path: endpoint.path,
 				behindSession: [...middleware].some(({ key }) => key === Session.key),
 				behindAuthorise: [...middleware].some(({ key }) => key === Authorise.key),
-				rule: Context.getOrUndefined(endpoint.annotations, Access),
+				rule: accessRuleFor(group.identifier, endpoint.identifier),
 			});
 		},
 	});
@@ -117,7 +117,7 @@ describe("every endpoint requires a session", () => {
 });
 
 describe("every endpoint says what it lets somebody do", () => {
-	it.each(protectedEndpoints)("%s declares an Access rule", (_name, { rule }) => {
+	it.each(protectedEndpoints)("%s has a rule in accessPolicy", (_name, { rule }) => {
 		expect(rule).toBeDefined();
 		if (rule && "reach" in rule) {
 			expect(rule.reach, "a reach rule names where the endpoint is scoped").not.toBe("");
