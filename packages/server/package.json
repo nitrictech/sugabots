@@ -1,0 +1,28 @@
+{
+	"name": "@sugabots/server",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/http/app.ts"
+	},
+	"scripts": {
+		"dev": "node --watch --env-file-if-exists=../../.env src/index.ts",
+		"start": "node --env-file-if-exists=../../.env src/index.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@hono/node-server": "^2.1.1",
+		"@hono/standard-validator": "^0.4.0",
+		"@sugabots/contracts": "workspace:*",
+		"@sugabots/core": "workspace:*",
+		"better-auth": "catalog:",
+		"drizzle-orm": "catalog:",
+		"effect": "catalog:",
+		"hono": "catalog:",
+		"pg": "^8.23.0"
+	},
+	"devDependencies": {
+		"@types/pg": "catalog:"
+	}
+}

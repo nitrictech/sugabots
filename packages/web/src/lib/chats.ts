@@ -1,0 +1,146 @@
+import type { Chat, ChatMessageItem, NewMessage, SessionUser } from "@sugabots/contracts";
+import { unwrap } from "@sugabots/sdk";
+import {
+	skipToken,
+	useInfiniteQuery,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
+import { client } from "@/api.ts";
+import { NotReadyError } from "@/lib/failure.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
+
+const PAGE_SIZE = 30;
+const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
+
+export function useChat(podId: string | undefined, hostAgentId: string) {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["chat", workspaceId, podId, hostAgentId],
+		queryFn:
+			workspaceId && podId
+				? async () =>
+						unwrap(
+							client.api.workspaces[":workspaceId"].chats.$post({
+								param: { workspaceId },
+								json: { podId, hostAgentId },
+							}),
+						)
+				: skipToken,
+	});
+}
+
+export function useChatMessages(chatId: string | undefined) {
+	const query = useInfiniteQuery({
+		queryKey: ["chat-messages", chatId],
+		queryFn: chatId
+			? ({ pageParam }: { pageParam: string | undefined }) =>
+					unwrap(
+						client.api.chats[":chatId"].messages.$get({
+							param: { chatId },
+							query: { limit: String(PAGE_SIZE), cursor: pageParam },
+						}),
+					)
+			: skipToken,
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) => page?.nextCursor ?? undefined,
+	});
+	const items = query.data?.pages
+		.slice()
+		.reverse()
+		.flatMap((page) => page?.items ?? []);
+	return { ...query, items: items ?? [] };
+}
+
+export function useChatHistory(chatId: string | undefined) {
+	const query = useInfiniteQuery({
+		queryKey: ["chat-history", chatId],
+		refetchInterval: (current) =>
+			current.state.data?.pages.some((page) =>
+				page?.items.some((entry) => entry.status === "queued" || entry.status === "running"),
+			)
+				? RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS
+				: false,
+		queryFn: chatId
+			? ({ pageParam }: { pageParam: string | undefined }) =>
+					unwrap(
+						client.api.chats[":chatId"].history.$get({
+							param: { chatId },
+							query: { limit: String(PAGE_SIZE), cursor: pageParam },
+						}),
+					)
+			: skipToken,
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) => page?.nextCursor ?? undefined,
+	});
+	return {
+		...query,
+		entries: query.data?.pages.flatMap((page) => page?.items ?? []) ?? [],
+	};
+}
+
+export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: async (input: NewMessage) => {
+			if (!chat) throw new NotReadyError();
+			return unwrap(
+				client.api.chats[":chatId"].messages.$post({
+					param: { chatId: chat.id },
+					json: input,
+				}),
+			);
+		},
+		onMutate: async (input) => {
+			if (!chat) return;
+			await queries.cancelQueries({ queryKey: ["chat-messages", chat.id] });
+			const optimistic: ChatMessageItem = {
+				kind: "message",
+				message: {
+					id: input.id,
+					threadId: chat.mainThreadId,
+					author: {
+						kind: "person",
+						id: user.id,
+						name: user.name,
+						handle: user.name
+							.toLocaleLowerCase()
+							.replace(/[^a-z0-9]+/g, "-")
+							.replace(/(^-|-$)/g, ""),
+						image: user.image,
+					},
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: input.message }],
+					content: input.message,
+					createdAt: new Date().toISOString(),
+				},
+			};
+			queries.setQueryData(["chat-optimistic", chat.id], (items: ChatMessageItem[] = []) => [
+				...items,
+				optimistic,
+			]);
+		},
+		onSettled: async (_result, _error, input) => {
+			if (!chat) return;
+			queries.setQueryData<ChatMessageItem[]>(["chat-optimistic", chat.id], (items) =>
+				items?.filter((item) => item.kind !== "message" || item.message.id !== input.id),
+			);
+			await Promise.all([
+				queries.invalidateQueries({ queryKey: ["chat-messages", chat.id] }),
+				queries.invalidateQueries({ queryKey: ["chat-history", chat.id] }),
+				queries.invalidateQueries({ queryKey: ["thread", chat.mainThreadId] }),
+			]);
+		},
+	});
+}
+
+export function useOptimisticChatItems(chatId: string | undefined): ChatMessageItem[] {
+	const query = useQuery<ChatMessageItem[]>({
+		queryKey: ["chat-optimistic", chatId],
+		queryFn: skipToken,
+		initialData: [],
+	});
+	return query.data ?? [];
+}

@@ -1,0 +1,59 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"includes": [
+			"**",
+			"!**/dist",
+			"!**/node_modules",
+			"!**/*.svg",
+			"!packages/core/drizzle",
+			"!packages/web/.storybook/public/mockServiceWorker.js"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 100
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double"
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"packages/web/src/ui/dialog.tsx",
+				"packages/web/src/ui/dropdown-menu.tsx",
+				"packages/web/src/ui/select.tsx",
+				"packages/web/src/ui/textarea.tsx"
+			],
+			"linter": {
+				"enabled": false
+			}
+		}
+	]
+}

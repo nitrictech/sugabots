@@ -1,0 +1,216 @@
+import type { ChatStore } from "@sugabots/core/conversations/chats/store";
+import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
+import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
+import { noToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
+import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { effectRunner } from "@sugabots/core/database/database";
+import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
+import { memoryEventStore } from "@sugabots/core/database/events/store";
+import { noDatabase } from "@sugabots/core/database/testing";
+import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
+import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
+import type {
+	EgressHttpClients,
+	EgressUrlValidator,
+} from "@sugabots/core/providers/network/egress";
+import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { type Authorization, closedAuthorization } from "@sugabots/core/workspaces/access";
+import { type AgentStore, crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/store";
+import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
+import type { PodStore } from "@sugabots/core/workspaces/pods/store";
+import { Effect, ManagedRuntime } from "effect";
+import type { Auth } from "../auth/auth.ts";
+import type { SessionResolver } from "../auth/session.ts";
+import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
+import type { StreamOptions } from "../routes/events/routes.ts";
+import { createApp, type Stores } from "./app.ts";
+
+type TestIdentity =
+	| { auth: Auth; resolveSession?: never }
+	| { auth?: never; resolveSession: SessionResolver };
+
+type TestAppOptions = TestIdentity & {
+	webOrigins?: string[];
+	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
+	authorization?: Authorization;
+	/** The stores a case is about. Anything left out answers nothing. */
+	stores?: Partial<Stores>;
+	httpClients?: EgressHttpClients;
+	validateProviderUrl?: EgressUrlValidator;
+	model?: TurnModel;
+};
+
+/** The test API's address. */
+export const BASE_URL = "http://localhost:3000";
+/** A browser origin the test app trusts besides its own. */
+export const WEB_ORIGIN = "http://localhost:5173";
+
+/**
+ * The complete route table over fakes that grant nothing, reach nothing and
+ * store nothing, so a case supplies only what it is about.
+ */
+export function createTestApp(options: TestAppOptions) {
+	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
+	return createApp({
+		auth: options.auth ?? authForSessionResolver(options.resolveSession),
+		webOrigins: options.webOrigins ?? [WEB_ORIGIN],
+		baseUrl: BASE_URL,
+		authorization: options.authorization ?? closedAuthorization(),
+		run: effectRunner(ManagedRuntime.make(noDatabase)),
+		stores: { ...emptyStores, ...options.stores },
+		events: {
+			bus,
+			access: options.events?.access ?? closedChannelAccess(),
+			stream: options.events?.stream,
+		},
+		model: options.model ?? {
+			stream: () => Effect.fail(new Error("This test app has no model")),
+		},
+		httpClients: options.httpClients ?? {
+			for: () => async () => new Response(null, { status: 503 }),
+		},
+		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
+		oauthFetch: async () => new Response(null, { status: 503 }),
+	});
+}
+
+function authForSessionResolver(resolveSession: SessionResolver): Auth {
+	return {
+		handler: async () => new Response(null, { status: 404 }),
+		api: {
+			getSession: ({ headers }: { headers: Headers }) => {
+				return resolveSession(headers);
+			},
+		},
+	} as unknown as Auth;
+}
+
+/**
+ * A store method a test app never wires but the interface requires. Dying names
+ * the method, rather than handing back an `undefined` typed as a real value
+ * that fails somewhere else entirely.
+ */
+function notStubbed(method: string): Effect.Effect<never> {
+	return Effect.die(new Error(`${method} has no test double. Pass one to createTestApp.`));
+}
+
+const emptyPodStore: PodStore = {
+	listVisible: () => Effect.succeed([]),
+	create: () => notStubbed("pods.create"),
+	ensurePersonal: () => notStubbed("pods.ensurePersonal"),
+	update: () => notStubbed("pods.update"),
+	remove: () => Effect.void,
+	listMembers: () => Effect.succeed([]),
+	addMember: () => Effect.succeed("not_workspace_member"),
+	removeMember: () => Effect.succeed("not_a_member" as const),
+};
+
+const emptyAgentStore: AgentStore = {
+	listVisible: () => Effect.succeed([]),
+	get: () => Effect.succeed(undefined),
+	fromRow: (row) => {
+		const crew = crewAgentRow(row);
+		return Effect.succeed(crew ? toAgent(crew) : undefined);
+	},
+	create: () => notStubbed("agents.create"),
+	update: () => notStubbed("agents.update"),
+	remove: () => Effect.void,
+};
+
+const emptyThreadStore: ThreadStore = {
+	listVisible: () => Effect.succeed([]),
+	visibleThreadId: () => Effect.succeed(undefined),
+	getVisible: () => Effect.succeed(undefined),
+};
+
+const emptyChatStore: ChatStore = {
+	getOrCreate: () => notStubbed("chats.getOrCreate"),
+	messages: () => Effect.succeed(undefined),
+	history: () => Effect.succeed(undefined),
+	sendMain: () => Effect.succeed(undefined),
+};
+
+const emptyRoutineStore: RoutineStore = {
+	list: () => Effect.succeed([]),
+	get: () => Effect.succeed(undefined),
+	create: () => notStubbed("routines.create"),
+	update: () => notStubbed("routines.update"),
+	remove: () => Effect.void,
+	acceptTrigger: () => notStubbed("routines.acceptTrigger"),
+	listExecutions: () => Effect.succeed(undefined),
+	claimNext: () => Effect.succeed(undefined),
+	settleThread: () => Effect.succeed(false),
+	reconcileRunning: () => Effect.void,
+	processNextDue: () => Effect.succeed(undefined),
+	rotateSecret: () => notStubbed("routines.rotateSecret"),
+	acceptWebhook: () => Effect.succeed(undefined),
+};
+
+const emptyConnectionStore: ConnectionStore = {
+	list: () => Effect.succeed([]),
+	get: () => Effect.succeed(undefined),
+	create: () => notStubbed("connections.create"),
+	update: () => Effect.succeed(undefined),
+	remove: () => Effect.succeed(false),
+	target: () => Effect.succeed(undefined),
+	targetsForPod: () => Effect.succeed([]),
+	recordTest: () => Effect.void,
+	oauthRecord: () => Effect.succeed(undefined),
+	saveOauthRecord: () => Effect.void,
+	byOauthState: () => Effect.succeed(undefined),
+};
+
+const emptySearchProviderStore: SearchProviderStore = {
+	get: () => Effect.succeed(undefined),
+	replace: () => notStubbed("searchProviders.replace"),
+	update: () => Effect.succeed(undefined),
+	remove: () => Effect.succeed(false),
+	connection: () => Effect.succeed(undefined),
+	resolve: () => Effect.succeed(undefined),
+	recordTest: () => Effect.void,
+};
+
+const emptyModelProviderStore: ModelProviderStore = {
+	list: () => Effect.succeed([]),
+	get: () => Effect.succeed(undefined),
+	create: () => notStubbed("modelProviders.create"),
+	update: () => Effect.succeed(undefined),
+	remove: () => Effect.succeed(false),
+	connection: () => Effect.succeed(undefined),
+	resolve: () => Effect.succeed(undefined),
+	recordTest: () => Effect.void,
+	addModels: () => Effect.succeed(0),
+	syncDiscovered: () => Effect.succeed({ added: 0, updated: 0 }),
+	setModelEnabled: () => Effect.succeed(0),
+	updateModel: () => Effect.succeed(0),
+	removeModel: () => Effect.succeed(false),
+	listEnabled: () => Effect.succeed({ models: [] }),
+	isEnabled: () => Effect.succeed(false),
+};
+
+const emptyOnboardingStore: OnboardingStore = {
+	isCompleted: () => Effect.succeed(true),
+	complete: () => Effect.succeed(false),
+	completeAcceptedInvite: () => Effect.succeed(undefined),
+};
+
+const emptySystemAgentStore: SystemAgentStore = {
+	list: () => Effect.succeed([]),
+	setModel: () => notStubbed("systemAgents.setModel"),
+};
+
+const emptyStores: Stores = {
+	pods: emptyPodStore,
+	agents: emptyAgentStore,
+	systemAgents: emptySystemAgentStore,
+	onboarding: emptyOnboardingStore,
+	modelProviders: emptyModelProviderStore,
+	searchProviders: emptySearchProviderStore,
+	connections: emptyConnectionStore,
+	threads: emptyThreadStore,
+	chats: emptyChatStore,
+	routines: emptyRoutineStore,
+	turns: { requestCancel: () => Effect.succeed(false) },
+	approvals: noToolApprovalStore,
+};

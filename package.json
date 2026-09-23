@@ -1,0 +1,50 @@
+{
+	"name": "sugabots",
+	"private": true,
+	"type": "module",
+	"packageManager": "bun@1.4.2",
+	"workspaces": [
+		"packages/*"
+	],
+	"catalog": {
+		"@types/pg": "^8.23.1",
+		"better-auth": "^1.7.3",
+		"drizzle-orm": "1.0.0-rc.4",
+		"effect": "4.0.0-rc.115",
+		"hono": "^4.13.7",
+		"vite": "^8.2.2"
+	},
+	"engines": {
+		"node": ">=26"
+	},
+	"scripts": {
+		"prepare": "effect-tsgo patch --typescript --no-oxlint",
+		"check": "bun run lint && bun run typecheck && bun run test",
+		"lint": "biome ci .",
+		"format": "biome check --write .",
+		"typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
+		"test": "vitest run",
+		"build": "bun run --filter '*' build",
+		"start:api": "bun run --cwd packages/server start",
+		"dev": "portless",
+		"storybook": "bun run --cwd packages/web storybook",
+		"build:storybook": "bun run --cwd packages/web build:storybook",
+		"test:storybook": "bun run --cwd packages/web test:storybook",
+		"db:generate": "bun run --cwd packages/core db:generate",
+		"db:push": "bun run --cwd packages/core db:push",
+		"db:migrate": "bun run --cwd packages/core db:migrate",
+		"db:studio": "bun run --cwd packages/core db:studio",
+		"db:seed": "node --env-file-if-exists=.env packages/server/src/seed.ts"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.12",
+		"@effect/tsgo": "^0.45.0",
+		"@types/node": "^26.5.0",
+		"@vitejs/plugin-react": "^6.1.1",
+		"drizzle-kit": "1.0.0-rc.4",
+		"portless": "^0.15.6",
+		"typescript": "^7.0.2",
+		"vite": "catalog:",
+		"vitest": "^5.0.0"
+	}
+}

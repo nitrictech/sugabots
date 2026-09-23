@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+
+    # The migrations run against this, and the API's tests then query it, so a
+    # migration that does not apply fails CI. Same major as compose.yml.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: sugabots
+          POSTGRES_PASSWORD: sugabots
+          POSTGRES_DB: sugabots
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://sugabots:sugabots@localhost:5432/sugabots
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      # Bun installs and runs the scripts; Node runs tsc, Vitest and packages/server,
+      # and the server relies on unflagged type stripping. Pin it.
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Migrate
+        run: bun run db:migrate
+
+      - name: Check
+        run: bun run check
+
+      - name: Build
+        run: bun run build
+
+  storybook:
+    name: Storybook
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bun run --cwd packages/web playwright install --with-deps chromium
+
+      - name: Test stories
+        run: bun run test:storybook
+
+      - name: Build Storybook
+        run: bun run build:storybook

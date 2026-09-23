@@ -1,0 +1,521 @@
+import type { RouterHistory } from "@tanstack/react-router";
+import {
+	createRootRouteWithContext,
+	createRoute,
+	createRouter,
+	lazyRouteComponent,
+	Navigate,
+	redirect,
+	useNavigate,
+} from "@tanstack/react-router";
+import { useAgent, useAgents } from "@/lib/agents.ts";
+import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
+import { useOnboarding } from "@/lib/onboarding.ts";
+import { usePods } from "@/lib/pods.ts";
+import type { Session } from "@/lib/session.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
+import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import { SettingsDialog } from "@/screens/SettingsDialog.tsx";
+import { Panes, Shell } from "@/shell/Shell.tsx";
+import { EmptyState } from "@/ui/empty-state.tsx";
+
+const AgentPage = lazyRouteComponent(() => import("@/screens/AgentPage.tsx"), "AgentPage");
+const Invite = lazyRouteComponent(() => import("@/screens/Invite.tsx"), "Invite");
+const Login = lazyRouteComponent(() => import("@/screens/Login.tsx"), "Login");
+const Onboarding = lazyRouteComponent(() => import("@/screens/Onboarding.tsx"), "Onboarding");
+const ThreadPage = lazyRouteComponent(() => import("@/screens/ThreadPage.tsx"), "ThreadPage");
+/*
+ * The settings sections are a chunk of their own; the window they open in is
+ * not. `SettingsDialog` is imported eagerly so the click opens something, and
+ * its `Suspense` holds the space the sections land in.
+ */
+const WorkspaceSettings = lazyRouteComponent(
+	() => import("@/screens/WorkspaceSettings.tsx"),
+	"WorkspaceSettings",
+);
+
+/*
+ * The routes, declared rather than generated.
+ *
+ * A file-based tree would write `routeTree.gen.ts` for us; a hand-built one
+ * keeps the shape of the app readable in one screen and adds nothing for CI to
+ * regenerate or for Biome to be told to skip. The tree is small and the paths
+ * are the product's vocabulary, so it is worth reading:
+ *
+ *   /                        redirects to /agents
+ *   /login
+ *   /invite/$id
+ *   /settings                workspace settings
+ *   /agents                  picks the first agent you can see
+ *   /agents/$agent           one agent's thread history and new-thread composer
+ *   /settings/agents/$agent  workspace-owned agent configuration
+ *   /settings/pods/$pod      workspace pod detail
+ *   /settings/built-in-agents/$key   the Scribe or the Facilitator
+ *   /threads/$thread         one thread
+ *
+ * A pod is a property of a thread and not a segment of its address: an agent
+ * may be in several pods, and a thread is already in exactly one, so putting
+ * the pod in the path would only give the same thread two addresses.
+ *
+ * An agent is addressed by its id rather than a slug, because it has no slug:
+ * a person renames an agent the way they rename a colleague's nickname, and
+ * every link to it would break.
+ *
+ */
+
+export interface RouterContext {
+	session: Session;
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+	notFoundComponent: () => (
+		<div className="grid h-full place-items-center bg-sunken">
+			<EmptyState title="There is nothing at this address">
+				The link may be old, or the workspace may have moved on.
+			</EmptyState>
+		</div>
+	),
+});
+
+/** `?invite=` from the invitations NIT-1758 sent before there was a route. */
+interface RootSearch {
+	invite?: string;
+}
+
+const validateInviteSearch = (search: Record<string, unknown>): RootSearch => ({
+	invite: typeof search.invite === "string" ? search.invite : undefined,
+});
+
+const indexRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/",
+	validateSearch: validateInviteSearch,
+	beforeLoad: ({ search }) => {
+		// Invitation links already in inboxes and docker logs point at `/?invite=`.
+		// They keep working: the route is the new shape, this is the old one.
+		if (search.invite !== undefined) {
+			throw redirect({ to: "/invite/$id", params: { id: search.invite } });
+		}
+		// Which agent to land on depends on the pods this person is in, which
+		// is a request. `/agents` makes it from inside the shell, so the frame is
+		// on screen while it resolves rather than after.
+		throw redirect({ to: "/agents" });
+	},
+});
+
+const loginRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/login",
+	validateSearch: validateInviteSearch,
+	component: LoginRoute,
+});
+
+function LoginRoute() {
+	const { session } = loginRoute.useRouteContext();
+	const { invite } = loginRoute.useSearch();
+	const navigate = useNavigate();
+
+	if (session.user) {
+		return invite !== undefined ? (
+			<Navigate to="/invite/$id" params={{ id: invite }} replace />
+		) : (
+			<Navigate to="/" replace />
+		);
+	}
+
+	return (
+		<Login
+			inviteId={invite}
+			onSignedIn={async () => {
+				await session.refresh();
+				await navigate({
+					to: invite !== undefined ? "/invite/$id" : "/",
+					params: invite !== undefined ? { id: invite } : undefined,
+					replace: true,
+				});
+			}}
+		/>
+	);
+}
+
+const inviteRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/invite/$id",
+	beforeLoad: ({ context, params }) => {
+		// An invitation is accepted as somebody. Sign in first, and come back:
+		// the id rides along so the link is not lost on the way.
+		if (context.session.user === null) {
+			throw redirect({ to: "/login", search: { invite: params.id } });
+		}
+	},
+	component: InviteRoute,
+});
+
+function InviteRoute() {
+	const { session } = inviteRoute.useRouteContext();
+	const { id } = inviteRoute.useParams();
+	const navigate = useNavigate();
+
+	return (
+		<Invite
+			id={id}
+			onDone={async () => {
+				await session.refresh();
+				await navigate({ to: "/", replace: true });
+			}}
+		/>
+	);
+}
+
+const legacySetupRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/setup",
+	beforeLoad: ({ context }) => {
+		requireUser({ context });
+		throw redirect({ to: "/settings" });
+	},
+});
+
+const onboardingRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/onboarding",
+	beforeLoad: requireUser,
+	component: OnboardingRoute,
+});
+
+function OnboardingRoute() {
+	const session = onboardingRoute.useRouteContext().session;
+	const onboarding = useOnboarding();
+	const workspace = useWorkspace();
+
+	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-sunken" />;
+	if (onboarding.error || workspace.error) {
+		return (
+			<RouteLoadFailure
+				title="Could not start setup"
+				onRetry={() => Promise.all([onboarding.refetch(), workspace.refetch()])}
+			/>
+		);
+	}
+	if (onboarding.data?.completed && workspace.workspace) {
+		return <Navigate to="/agents" replace />;
+	}
+	return <Onboarding session={session} />;
+}
+
+/** The frame. Pathless: it wraps, it does not add a segment. */
+const shellRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	id: "shell",
+	beforeLoad: requireUser,
+	component: ShellRoute,
+});
+
+function ShellRoute() {
+	const session = shellRoute.useRouteContext().session;
+	const onboarding = useOnboarding();
+	const workspace = useWorkspace();
+
+	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-sunken" />;
+	if (onboarding.error || workspace.error) {
+		return (
+			<RouteLoadFailure
+				title="Could not load your workspace"
+				onRetry={() => Promise.all([onboarding.refetch(), workspace.refetch()])}
+			/>
+		);
+	}
+	if (!workspace.workspace || !onboarding.data?.completed) {
+		return <Navigate to="/onboarding" replace />;
+	}
+	return <Shell session={session} />;
+}
+
+function RouteLoadFailure({ title, onRetry }: { title: string; onRetry: () => Promise<unknown> }) {
+	return (
+		<div className="grid h-full place-items-center bg-sunken p-6">
+			<EmptyState title={title}>
+				<button type="button" className="text-primary underline" onClick={() => void onRetry()}>
+					Try again
+				</button>
+			</EmptyState>
+		</div>
+	);
+}
+
+const settingsRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings",
+	component: () => (
+		<SettingsDialog>
+			<WorkspaceSettings section="general" />
+		</SettingsDialog>
+	),
+});
+
+const settingsSectionRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/$section",
+	component: SettingsSectionRoute,
+});
+
+const settingsAgentRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/agents/$agent",
+	component: SettingsAgentRoute,
+});
+
+const settingsPodAgentRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/pods/$pod/agents/$agent",
+	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
+		search.tab === "routines" ? { tab: "routines" } : {},
+	component: SettingsPodAgentRoute,
+});
+
+const settingsPodRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/pods/$pod",
+	component: SettingsPodRoute,
+});
+
+/**
+ * A built-in agent is addressed by its key, not by an id: there is exactly one
+ * Scribe and one Facilitator per workspace, so the key is the address, and a
+ * screen that links here needs no data to build the link.
+ */
+const settingsBuiltInAgentRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/built-in-agents/$key",
+	component: SettingsBuiltInAgentRoute,
+});
+
+function SettingsBuiltInAgentRoute() {
+	const { key } = settingsBuiltInAgentRoute.useParams();
+	if (!isBuiltInAgentKey(key)) {
+		return <Navigate to="/settings/$section" params={{ section: "built-in-agents" }} replace />;
+	}
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings section="built-in-agents" selectedBuiltInKey={key} />
+		</SettingsDialog>
+	);
+}
+
+function SettingsPodRoute() {
+	const { pod: podId } = settingsPodRoute.useParams();
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings section="pods" selectedPodId={podId} />
+		</SettingsDialog>
+	);
+}
+
+function SettingsAgentRoute() {
+	const { agent: agentId } = settingsAgentRoute.useParams();
+	const { agent, isPending } = useAgent(agentId);
+	if (isPending) return <Panes>{null}</Panes>;
+	return agent ? (
+		<Navigate
+			to="/settings/pods/$pod/agents/$agent"
+			params={{ pod: agent.podId, agent: agent.id }}
+			replace
+		/>
+	) : (
+		<Panes>
+			<EmptyState title="No such agent here" />
+		</Panes>
+	);
+}
+
+function SettingsPodAgentRoute() {
+	const { pod, agent } = settingsPodAgentRoute.useParams();
+	const { tab } = settingsPodAgentRoute.useSearch();
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings
+				section="pods"
+				selectedPodId={pod}
+				selectedAgentId={agent}
+				selectedAgentTab={tab}
+			/>
+		</SettingsDialog>
+	);
+}
+
+function SettingsSectionRoute() {
+	const { section } = settingsSectionRoute.useParams();
+	const setting = workspaceSettingSection(section);
+	if (!setting || setting.id === "general") {
+		return <Navigate to="/settings" replace />;
+	}
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings section={setting.id} />
+		</SettingsDialog>
+	);
+}
+
+/** Picks the first crew agent the caller can see. `/` sends everybody here. */
+const agentsRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/agents",
+	component: AgentsRoute,
+});
+
+function AgentsRoute() {
+	const { data: pods, isPending: podsPending, error: podsError } = usePods();
+	const { agents, isPending, error } = useAgents();
+	// The roster is crew only, and this states why it has to stay that way:
+	// nobody talks to a built-in agent, so none may be landed on.
+	const first = agents?.find((agent) => agent.systemAgentKey === null);
+	const firstPod = pods?.find((pod) => pod.id === first?.podId);
+
+	if (podsPending || isPending) {
+		return <Panes>{null}</Panes>;
+	}
+
+	if (first) {
+		return (
+			<Navigate
+				to="/agents/$agent"
+				params={{ agent: first.id }}
+				search={{ pod: firstPod?.id }}
+				replace
+			/>
+		);
+	}
+
+	return (
+		<Panes>
+			<EmptyState title={podsError || error ? "Could not load your agents" : "No agents yet"}>
+				{podsError || error
+					? "The API did not answer. Reload, or check that it is running."
+					: pods?.length === 0
+						? "You are not in a pod yet. An admin can add you to one."
+						: "An admin can make the first one."}
+			</EmptyState>
+		</Panes>
+	);
+}
+
+interface AgentSearch {
+	pod?: string;
+	thread?: string;
+	history?: "open";
+}
+
+const agentRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/agents/$agent",
+	validateSearch: (search: Record<string, unknown>): AgentSearch => ({
+		...(typeof search.pod === "string" ? { pod: search.pod } : {}),
+		...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+		...(search.history === "open" ? { history: "open" as const } : {}),
+	}),
+	component: AgentRoute,
+});
+
+function AgentRoute() {
+	const { agent: agentId } = agentRoute.useParams();
+	const search = agentRoute.useSearch();
+	const { user } = agentRoute.useRouteContext().session;
+	const { agent, isPending, error } = useAgent(agentId);
+
+	if (isPending) {
+		return <Panes>{null}</Panes>;
+	}
+	if (!agent) {
+		return (
+			<Panes>
+				<EmptyState title={error ? "Could not load this agent" : "No such agent here"}>
+					{error
+						? "The API did not answer. Reload, or check that it is running."
+						: "It may have been removed, or renamed — or you may not be a member of any pod it is in."}
+				</EmptyState>
+			</Panes>
+		);
+	}
+
+	if (!user) return null;
+	return (
+		<Panes>
+			<AgentPage
+				agent={agent}
+				requestedPodId={search.pod}
+				user={user}
+				threadId={search.thread}
+				historyOpen={search.history === "open"}
+			/>
+		</Panes>
+	);
+}
+
+const threadRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/threads/$thread",
+	validateSearch: (search: Record<string, unknown>) => ({
+		summary: search.summary === "closed" ? ("closed" as const) : undefined,
+	}),
+	component: ThreadRoute,
+});
+
+function ThreadRoute() {
+	const { thread } = threadRoute.useParams();
+	const { user } = threadRoute.useRouteContext().session;
+	if (!user) {
+		return null;
+	}
+	return (
+		<Panes>
+			<ThreadPage key={thread} threadId={thread} user={user} />
+		</Panes>
+	);
+}
+
+/**
+ * Signed out means the login page. `undefined` cannot reach here: `main.tsx`
+ * waits for `/me` to answer before it mounts the router at all.
+ */
+function requireUser({ context }: { context: RouterContext }): void {
+	if (context.session.user === null) {
+		throw redirect({ to: "/login" });
+	}
+}
+
+const routeTree = rootRoute.addChildren([
+	indexRoute,
+	loginRoute,
+	inviteRoute,
+	legacySetupRoute,
+	onboardingRoute,
+	shellRoute.addChildren([
+		settingsRoute,
+		settingsSectionRoute,
+		settingsAgentRoute,
+		settingsPodAgentRoute,
+		settingsPodRoute,
+		settingsBuiltInAgentRoute,
+		agentsRoute,
+		agentRoute,
+		threadRoute,
+	]),
+]);
+
+export function createAppRouter(options?: { history?: RouterHistory }) {
+	return createRouter({
+		routeTree,
+		// Supplied by `RouterProvider` once the session is known.
+		context: undefined as unknown as RouterContext,
+		defaultPreload: "intent",
+		// Tests mount the real tree over a memory history, so a route's guards
+		// and search params are exercised rather than mocked around.
+		...options,
+	});
+}
+
+declare module "@tanstack/react-router" {
+	interface Register {
+		router: ReturnType<typeof createAppRouter>;
+	}
+}

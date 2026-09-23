@@ -1,0 +1,43 @@
+# Local Postgres for development. Nothing else runs in here: the API and the
+# web app run on the host, where they reload.
+#
+#   docker compose up -d      Postgres on 5436, ready to migrate.
+#   bun run db:migrate        Apply packages/core/drizzle migrations to it.
+#   docker compose down -v    Throw the data away.
+#
+# CI uses a service container with the same image and the same DATABASE_URL
+# shape, so a migration that applies here applies there.
+
+name: sugabots
+
+services:
+  postgres:
+    container_name: sugabots_postgres
+    # Pinned to a major so local, CI and production agree on behaviour. The
+    # schema leans on 18: `uuidv7()` is built in from this release.
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sugabots}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sugabots}
+      POSTGRES_DB: ${POSTGRES_DB:-sugabots}
+    ports:
+      # 5436 to stay clear of a default Postgres and of sweet's 5435.
+      - "127.0.0.1:${POSTGRES_PORT:-5436}:5432"
+    restart: unless-stopped
+    volumes:
+      # Postgres 18 images store data in a major-version subdirectory so
+      # `pg_upgrade --link` works without crossing a mount boundary, so the
+      # mount goes at /var/lib/postgresql, NOT the /data path 17 and earlier
+      # used. An 18 image refuses to start against the old layout.
+      - sugabots_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-sugabots} -d ${POSTGRES_DB:-sugabots}
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  sugabots_postgres_data:

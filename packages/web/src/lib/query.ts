@@ -1,0 +1,31 @@
+import { ApiError } from "@sugabots/sdk";
+import { QueryClient } from "@tanstack/react-query";
+
+/**
+ * The query cache.
+ *
+ * One client for the process, created outside React so it survives re-renders
+ * and so tests can hand a fresh one to each case.
+ *
+ * Two defaults worth explaining:
+ *
+ * - **No retry on a failure the API meant.** A 404 or a 403 is an answer, not a
+ *   network blip; retrying it three times only delays showing the person what
+ *   happened. Anything else — a dropped connection, a 500 — is retried once.
+ * - **`staleTime` of thirty seconds.** Lists like the sidebar's pods change
+ *   rarely and are read on every navigation. Once the workspace stream carries
+ *   `pod.changed` (NIT-1792 adds the first of these), invalidation replaces
+ *   the guess and this can go to `Infinity`.
+ */
+export function createQueryClient(): QueryClient {
+	return new QueryClient({
+		defaultOptions: {
+			queries: {
+				staleTime: 30_000,
+				retry: (attempt, failure) =>
+					attempt < 1 && !(failure instanceof ApiError && failure.code !== "internal"),
+			},
+			mutations: { retry: false },
+		},
+	});
+}

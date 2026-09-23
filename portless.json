@@ -1,0 +1,6 @@
+{
+	"apps": {
+		"packages/web": { "name": "sugabots" },
+		"packages/server": { "name": "api.sugabots" }
+	}
+}

@@ -1,0 +1,33 @@
+{
+	"$schema": "./node_modules/@effect/tsgo/schema.json",
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"lib": ["ESNext"],
+		"types": [],
+		"skipLibCheck": true,
+
+		/* Source is consumed directly; nothing here emits. */
+		"noEmit": true,
+		"isolatedModules": true,
+		"moduleDetection": "force",
+		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
+
+		/* Strictness */
+		"strict": true,
+		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"ignoreEffectWarningsInTscExitCode": true
+			}
+		]
+	}
+}

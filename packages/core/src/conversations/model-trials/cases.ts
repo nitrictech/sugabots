@@ -1,0 +1,205 @@
+import { Effect, Exit } from "effect";
+import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
+import { parseGenerated } from "../summaries/worker.ts";
+import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../turns/facilitator.ts";
+import type { TurnModelInput } from "../turns/model.ts";
+
+/**
+ * What a model has to get right to do a system agent's job.
+ *
+ * Every case builds its prompt with the same function the product uses and
+ * judges the answer with the same parser, so a pass here means the answer
+ * would have been accepted in a real thread. A trial that used its own prompt
+ * would be measuring something nobody ships.
+ *
+ * The cases are the situations that have actually gone wrong, not a spread of
+ * everything a model could be asked. A facilitator that hands the floor back and
+ * forth between two agents, and a summariser that answers prose where JSON was
+ * asked for, are the two failures that reached people.
+ */
+
+export interface TrialCase {
+	/** What this checks, in the words a person choosing a model would use. */
+	readonly name: string;
+	readonly prompt: (model: string, workspaceId: string, signal: AbortSignal) => TurnModelInput;
+	/** Whether the answer is one the product could have used. */
+	readonly accepts: (answer: string) => boolean;
+}
+
+const crew = [
+	{
+		id: "host",
+		name: "Personal Assistant",
+		handle: "assistant",
+		description: "General help and coordination.",
+		inThread: true,
+	},
+	{
+		id: "expert",
+		name: "Ledger",
+		handle: "ledger",
+		description: "Answers questions about invoices, billing and payments.",
+		inThread: true,
+	},
+];
+
+const routing = (recent: FacilitatorScope["recent"], available = crew): FacilitatorScope => ({
+	threadId: "trial",
+	threadType: "routine",
+	workspaceId: "trial",
+	model: "trial",
+	hostHandle: "assistant",
+	routerEnabled: true,
+	crew: available,
+	people: [{ name: "Sam", handle: "sam" }],
+	recent,
+});
+
+/** Reads the answer the way the facilitator does, then asks whether it is the one wanted. */
+const routerCase = (
+	name: string,
+	scope: FacilitatorScope,
+	wanted: "nobody" | (string & {}),
+): TrialCase => ({
+	name,
+	prompt: (model, workspaceId, signal) =>
+		facilitatorPrompt({ ...scope, model, workspaceId }, signal),
+	accepts: (answer) => {
+		const decision = parseDecision(answer, scope);
+		if (!decision) {
+			return false;
+		}
+		return wanted === "nobody"
+			? decision.kind === "nobody"
+			: decision.kind === "agent" &&
+					scope.crew.find((member) => member.id === decision.agentId)?.handle === wanted;
+	},
+});
+
+export const FACILITATE_CASES: readonly TrialCase[] = [
+	routerCase(
+		"Sends a question to the agent who knows the subject",
+		routing([{ speaker: "@sam", kind: "person", content: "Why was invoice 4021 rejected?" }]),
+		"ledger",
+	),
+	routerCase(
+		"Falls back to the host when no one is the obvious expert",
+		routing([{ speaker: "@sam", kind: "person", content: "Morning, anything I should know?" }]),
+		"assistant",
+	),
+	routerCase(
+		// The loop: two agents agreeing with each other forever.
+		"Ends the exchange when an agent is only reflecting on another agent",
+		routing(
+			[
+				{ speaker: "@sam", kind: "person", content: "Why was invoice 4021 rejected?" },
+				{
+					speaker: "@ledger",
+					kind: "agent",
+					content: "It was rejected because the purchase order had already been closed.",
+				},
+				{
+					speaker: "@assistant",
+					kind: "agent",
+					content:
+						"That is a helpful clarification, Ledger. It shows how much the order lifecycle matters here.",
+				},
+			],
+			// The speaker is off the list, as the facilitator loads it.
+			[crew[1] as (typeof crew)[number]],
+		),
+		"nobody",
+	),
+	routerCase(
+		"Stays quiet when the last message is aimed at a person",
+		routing([
+			{ speaker: "@sam", kind: "person", content: "Why was invoice 4021 rejected?" },
+			{
+				speaker: "@ledger",
+				kind: "agent",
+				content: "The purchase order was closed. @sam, do you want me to reopen it?",
+			},
+		]),
+		"nobody",
+	),
+	routerCase(
+		// The host having the last word on an answer nobody asked it for.
+		"Stays quiet after an agent answers the person who named it",
+		routing(
+			[
+				{ speaker: "@sam", kind: "person", content: "@ledger who should we ask about refunds?" },
+				{
+					speaker: "@ledger",
+					kind: "agent",
+					content:
+						"Ops would know best; they handle the policy exceptions. Finance could help with the numbers.",
+				},
+			],
+			[crew[0] as (typeof crew)[number]],
+		),
+		"nobody",
+	),
+	routerCase(
+		"Answers with a handle and nothing else",
+		routing([{ speaker: "@sam", kind: "person", content: "Who can help with billing?" }]),
+		"ledger",
+	),
+];
+
+const transcript: SummaryPromptInput["transcript"] = [
+	{ author: "Sam", kind: "person", content: "Did the September invoices go out?" },
+	{
+		author: "Ledger",
+		kind: "agent",
+		content:
+			"All but two. Acme and Orbit are on hold until their purchase orders are reopened. I have asked their account managers and expect an answer tomorrow.",
+	},
+];
+
+const summary = (previousContent?: string): SummaryPromptInput => ({
+	workspaceId: "trial",
+	model: "trial",
+	threadTitle: "September invoices",
+	...(previousContent === undefined ? {} : { previousContent }),
+	transcript,
+});
+
+export const SUMMARISE_CASES: readonly TrialCase[] = [
+	{
+		// The failure people saw: prose where strict JSON was asked for.
+		name: "Returns a title and summary as strict JSON the first time",
+		prompt: (model, workspaceId, signal) =>
+			threadSummaryPrompt({ ...summary(), model, workspaceId }, signal),
+		accepts: (answer) => accepted(answer, true),
+	},
+	{
+		name: "Returns plain prose once a summary already exists",
+		prompt: (model, workspaceId, signal) =>
+			threadSummaryPrompt(
+				{ ...summary("Invoices are going out; two are on hold."), model, workspaceId },
+				signal,
+			),
+		accepts: (answer) => accepted(answer, false),
+	},
+	{
+		name: "Keeps a summary within the length a thread panel can show",
+		prompt: (model, workspaceId, signal) =>
+			threadSummaryPrompt(
+				{ ...summary("Invoices are going out; two are on hold."), model, workspaceId },
+				signal,
+			),
+		accepts: (answer) => accepted(answer, false) && answer.trim().split(/\s+/).length <= 160,
+	},
+];
+
+/** Exactly what the worker would do with this text. */
+function accepted(answer: string, first: boolean): boolean {
+	return Exit.isSuccess(Effect.runSyncExit(parseGenerated(answer, first)));
+}
+
+export const CASES = {
+	facilitate: FACILITATE_CASES,
+	summarise: SUMMARISE_CASES,
+} as const;
+
+export type TrialSystemAgent = keyof typeof CASES;

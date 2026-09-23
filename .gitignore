@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+dist/
+storybook-static/
+coverage/
+*.tsbuildinfo
+.env*
+!.env.example
+.temp/
+.claude/worktrees/

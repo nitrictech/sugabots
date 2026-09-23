@@ -1,0 +1,352 @@
+import type { AgentFace, PodRouting, SystemAgentKey } from "@sugabots/contracts";
+import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
+import { sql } from "drizzle-orm";
+import {
+	boolean,
+	check,
+	foreignKey,
+	index,
+	integer,
+	jsonb,
+	pgTable,
+	text,
+	timestamp,
+	uniqueIndex,
+	uuid,
+} from "drizzle-orm/pg-core";
+import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
+
+/** A person. One row per human, across every workspace they belong to. */
+export const user = pgTable(
+	"user",
+	{
+		id: primaryKey(),
+		name: text("name").notNull(),
+		email: text("email").notNull(),
+		emailVerified: boolean("email_verified").notNull().default(false),
+		image: text("image"),
+		onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [uniqueIndex("user_email_idx").on(table.email)],
+);
+
+/**
+ * A signed-in client. `token` is the bearer token: the browser, Electron and
+ * React Native all hold one of these and send it on every request.
+ */
+export const session = pgTable(
+	"session",
+	{
+		id: primaryKey(),
+		token: text("token").notNull(),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// Which workspace this client is looking at. better-auth keeps it here
+		// so it survives a page reload without the client having to say.
+		activeOrganizationId: uuid("active_workspace_id").references(() => workspace.id, {
+			onDelete: "set null",
+		}),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		ipAddress: text("ip_address"),
+		userAgent: text("user_agent"),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [
+		uniqueIndex("session_token_idx").on(table.token),
+		index("session_user_id_idx").on(table.userId),
+	],
+);
+
+/**
+ * How a user proves who they are. One row per credential: `password` for email
+ * and password, or the tokens from an OAuth provider when we add one.
+ */
+export const account = pgTable(
+	"account",
+	{
+		id: primaryKey(),
+		accountId: text("account_id").notNull(),
+		providerId: text("provider_id").notNull(),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		password: text("password"),
+		accessToken: text("access_token"),
+		refreshToken: text("refresh_token"),
+		idToken: text("id_token"),
+		accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+		refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+		scope: text("scope"),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [index("account_user_id_idx").on(table.userId)],
+);
+
+/** Short-lived tokens: email verification, password reset. */
+export const verification = pgTable(
+	"verification",
+	{
+		id: primaryKey(),
+		identifier: text("identifier").notNull(),
+		value: text("value").notNull(),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
+/**
+ * The tenant. Every other table carries a `workspace_id`, directly or through
+ * its parent, and every query is scoped by it.
+ *
+ * This is better-auth's `organization` model under our name; `logo` and
+ * `metadata` are its columns, unused so far.
+ */
+export const workspace = pgTable(
+	"workspace",
+	{
+		id: primaryKey(),
+		name: text("name").notNull(),
+		// URL-facing identifier: `/w/acme`. Unique across the installation.
+		slug: text("slug").notNull(),
+		logo: text("logo"),
+		metadata: text("metadata"),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [uniqueIndex("workspace_slug_idx").on(table.slug)],
+);
+
+/** Who belongs to a workspace, and whether they may administer it. */
+export const workspaceMember = pgTable(
+	"workspace_member",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id")
+			.notNull()
+			.references(() => workspace.id, { onDelete: "cascade" }),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// One of `WORKSPACE_ROLES`, and nothing else: `auth.ts` refuses any other
+		// value on every path that writes one. Text rather than an enum because
+		// better-auth writes it, and a role added later should not need a
+		// migration to a Postgres type. Anything unrecognised grants nothing.
+		role: text("role").notNull().default("member"),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		uniqueIndex("workspace_member_idx").on(table.workspaceId, table.userId),
+		index("workspace_member_user_id_idx").on(table.userId),
+	],
+);
+
+/** An outstanding invitation to join a workspace, addressed to an email. */
+export const workspaceInvite = pgTable(
+	"workspace_invite",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id")
+			.notNull()
+			.references(() => workspace.id, { onDelete: "cascade" }),
+		email: text("email").notNull(),
+		role: text("role"),
+		// pending, accepted, rejected or canceled.
+		status: text("status").notNull().default("pending"),
+		inviterId: uuid("inviter_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		index("workspace_invite_workspace_id_idx").on(table.workspaceId),
+		index("workspace_invite_email_idx").on(table.email),
+	],
+);
+
+export const pod = pgTable(
+	"pod",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id")
+			.notNull()
+			.references(() => workspace.id, { onDelete: "cascade" }),
+		// Whose Personal pod this is. Null on a shared pod: a shared pod is
+		// administered by the workspace's admins, so it has no special person.
+		ownerId: uuid("owner_id"),
+		kind: text("kind").$type<"personal" | "shared">().notNull(),
+		name: text("name").notNull(),
+		slug: text("slug").notNull(),
+		// Whether non-chat threads use the Facilitator to choose speakers (ADR 004).
+		routing: jsonb("routing").$type<PodRouting>().notNull().default(DEFAULT_POD_ROUTING),
+		// Who made it. Kept when they leave, so the record survives the person.
+		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	// The unique index is on `(workspace_id, slug)`, so a btree prefix scan
+	// already answers "every pod in this workspace". A second index on
+	// `workspace_id` alone would only cost writes.
+	(table) => [
+		check("pod_kind_check", sql`${table.kind} in ('personal', 'shared')`),
+		check(
+			"pod_personal_owner_check",
+			sql`${table.kind} = 'shared' or ${table.ownerId} is not null`,
+		),
+		// Composite foreign keys are not enforced when a column is null, so this
+		// binds a Personal pod to its owner's membership and leaves shared pods
+		// alone. The cascade is what makes a departure clean up the private pod
+		// on every path: better-auth runs its remove-member hooks when an
+		// administrator removes somebody, but not when somebody leaves of their
+		// own accord, and a Personal pod left behind would hold the membership
+		// row and fail the departure.
+		foreignKey({
+			columns: [table.workspaceId, table.ownerId],
+			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
+			name: "pod_owner_workspace_member_fkey",
+		}).onDelete("cascade"),
+		uniqueIndex("pod_slug_idx").on(table.workspaceId, table.slug),
+		uniqueIndex("personal_pod_owner_idx")
+			.on(table.workspaceId, table.ownerId)
+			.where(sql`${table.kind} = 'personal'`),
+		uniqueIndex("pod_id_workspace_id_idx").on(table.id, table.workspaceId),
+	],
+);
+
+/**
+ * Who has been added to a pod.
+ *
+ * These rows are explicit membership, and only that: a workspace admin reaches
+ * every shared pod without one, and adding no row is what makes demoting them
+ * take that reach away again. `docs/permissions.md` is the specification.
+ *
+ * There is no role here. What somebody may configure is their workspace role,
+ * which lives on `workspace_member`. Adding a column here later is cheaper
+ * than pretending to a distinction the product does not yet make.
+ *
+ * A Personal pod admits its owner and nobody else, and the database enforces
+ * that: the `personal_pod_owner_membership` trigger rejects any other row.
+ * Drizzle has no way to declare a trigger, so it lives in the migration that
+ * added it (`20260922010506_productive_dreadnoughts`) and is named here
+ * because this is where somebody checking what constrains these rows looks.
+ */
+export const podMember = pgTable(
+	"pod_member",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id").notNull(),
+		podId: uuid("pod_id").notNull(),
+		userId: uuid("user_id").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.podId, table.workspaceId],
+			foreignColumns: [pod.id, pod.workspaceId],
+			name: "pod_member_pod_workspace_fkey",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.workspaceId, table.userId],
+			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
+			name: "pod_member_workspace_member_fkey",
+		}).onDelete("cascade"),
+		uniqueIndex("pod_member_idx").on(table.podId, table.userId),
+		// "Which pods can this person see", which is every sidebar load.
+		index("pod_member_user_id_idx").on(table.userId),
+	],
+);
+
+/**
+ * A configured model: a name, a face, a prompt and the tools it may reach for.
+ *
+ * A row is one of two things, and `agent_placement_check` is what keeps it to
+ * one of them: a crew agent, which belongs to exactly one pod, or a system
+ * agent, which belongs to the workspace and sits in no pod. A crew agent with
+ * no pod would be reachable by id and invisible to every pod authorisation
+ * path, so the constraint is load-bearing rather than tidiness.
+ *
+ * Either may have no `model`, which means nobody has chosen one. That is a
+ * state the product allows rather than a broken row: a system agent does not
+ * run, and a crew agent's turns refuse with a reason naming it.
+ *
+ * `name` is unique per workspace because a name is how a person addresses an
+ * agent: `@Linear Handler` in a message has to mean one of them.
+ *
+ * `hue` and `face` are the whole avatar. Two small columns rather than an
+ * image, which is what lets an agent created at run time have a face at all.
+ */
+export const agent = pgTable(
+	"agent",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id")
+			.notNull()
+			.references(() => workspace.id, { onDelete: "cascade" }),
+		// Null for a system agent, which serves every pod rather than sitting in one.
+		podId: uuid("pod_id"),
+		name: text("name").notNull(),
+		// How the agent is addressed in a message: `@personal-assistant`.
+		// Derived from the name unless an admin sets one; unique per workspace.
+		handle: text("handle").notNull(),
+		systemAgentKey: text("system_agent_key").$type<SystemAgentKey>(),
+		provisionedKey: text("provisioned_key").$type<"personal-assistant">(),
+		description: text("description"),
+		// 0-359. Not a Postgres domain: the range is the contract's to state,
+		// and a check constraint here would be a second place to change it.
+		hue: integer("hue").notNull(),
+		face: text("face").$type<AgentFace>().notNull(),
+		// Null when nobody has chosen one, or somebody has cleared it. A system
+		// agent with no model does not run; a crew agent's turns refuse.
+		model: text("model"),
+		prompt: text("prompt").notNull().default(""),
+		// The built-in tools switched off for this agent, by key. What is off
+		// rather than what is on, so a new tool reaches every existing agent.
+		disabledTools: jsonb("disabled_tools").$type<string[]>().notNull().default([]),
+		// Who made it. Kept when they leave, so the record survives the person.
+		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [
+		// A composite foreign key is MATCH SIMPLE, so a system agent's null
+		// `pod_id` is neither checked nor cascaded: deleting a pod leaves the
+		// workspace's system agents alone. Deleting the workspace still takes
+		// them, through the plain `workspace_id` reference above.
+		foreignKey({
+			columns: [table.podId, table.workspaceId],
+			foreignColumns: [pod.id, pod.workspaceId],
+			name: "agent_pod_workspace_fkey",
+		}).onDelete("cascade"),
+		// A row is a crew agent in a pod, or a system agent in none. Without
+		// this, a nullable `pod_id` would also admit a pod-less crew agent,
+		// which no pod permission reaches and no pod listing shows.
+		check(
+			"agent_placement_check",
+			sql`(${table.systemAgentKey} is null) = (${table.podId} is not null)`,
+		),
+		// Scoped by pod, so they cover crew only; a system agent's null `pod_id`
+		// makes every row distinct in them. What keeps there being one Scribe and
+		// one Facilitator is `agent_system_agent_key_idx` below, and what keeps a
+		// pod-less row from being crew is `agent_placement_check` above.
+		uniqueIndex("agent_name_idx").on(table.podId, table.name),
+		uniqueIndex("agent_handle_idx").on(table.podId, table.handle),
+		uniqueIndex("agent_provisioned_key_idx").on(table.podId, table.provisionedKey),
+		// One of each system agent per workspace. Crew never collide here: their
+		// `system_agent_key` is null, and nulls are distinct in a btree index.
+		// It is also the workspace-prefixed index "every agent in this workspace"
+		// scans, so a second index on `workspace_id` alone would only cost writes.
+		uniqueIndex("agent_system_agent_key_idx").on(table.workspaceId, table.systemAgentKey),
+		uniqueIndex("agent_id_workspace_id_idx").on(table.id, table.workspaceId),
+		index("agent_pod_id_idx").on(table.podId),
+	],
+);
+
+export type PodRow = typeof pod.$inferSelect;
+export type AgentRow = typeof agent.$inferSelect;

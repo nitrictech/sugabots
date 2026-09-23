@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Sugabots</title>
+		<script>
+			/*
+			 * The theme, before the first paint. Without this, somebody who has
+			 * chosen dark while their system is light sees a white flash on every
+			 * load. Choosing nothing is the common case and needs no script: the
+			 * stylesheet follows the system on its own.
+			 */
+			try {
+				const chosen = localStorage.getItem("sugabots-theme");
+				if (chosen === "light" || chosen === "dark") {
+					document.documentElement.dataset.theme = chosen;
+				}
+			} catch {
+				/* Private mode, or storage turned off. The system theme is a fine answer. */
+			}
+		</script>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

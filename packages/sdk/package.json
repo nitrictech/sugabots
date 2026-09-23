@@ -1,0 +1,22 @@
+{
+	"name": "@sugabots/sdk",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@sugabots/contracts": "workspace:*",
+		"better-auth": "catalog:",
+		"effect": "catalog:",
+		"eventsource-parser": "^4.1.0",
+		"hono": "catalog:"
+	},
+	"devDependencies": {
+		"@sugabots/server": "workspace:*"
+	}
+}

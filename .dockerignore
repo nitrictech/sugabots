@@ -1,0 +1,16 @@
+# Excluded from the Docker build context.
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/*.test.ts
+**/*.test.tsx
+.git
+.github
+.vscode
+.temp
+apps
+docs
+**/.env
+**/.env.*
+!**/.env.example

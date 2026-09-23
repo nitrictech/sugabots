@@ -1,0 +1,15 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		/* Isomorphic: runs in the browser, in Node and in React Native. */
+		"lib": ["ESNext", "DOM"],
+
+		/*
+		 * `node` is here for the development-only Hono route type imported from the
+		 * server. That source uses Node globals, but the type-only import is erased
+		 * and does not enter the SDK's runtime graph.
+		 */
+		"types": ["node"]
+	},
+	"include": ["src"]
+}

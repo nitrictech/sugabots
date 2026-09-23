@@ -1,0 +1,61 @@
+import addonA11y from "@storybook/addon-a11y";
+import addonDocs from "@storybook/addon-docs";
+import { definePreview } from "@storybook/react-vite";
+import { setupWorker } from "msw/browser";
+import addonMsw from "msw-storybook-addon";
+import { useEffect } from "react";
+import { INITIAL_VIEWPORTS } from "storybook/viewport";
+import { TooltipProvider } from "@/ui/tooltip.tsx";
+import "../src/app.css";
+
+export default definePreview({
+	addons: [
+		addonDocs(),
+		addonA11y(),
+		addonMsw(async () => {
+			const worker = setupWorker();
+			await worker.start({
+				quiet: true,
+				onUnhandledRequest(request, print) {
+					if (new URL(request.url).origin === "https://api.storybook.test") print.error();
+				},
+			});
+			return worker;
+		}),
+	],
+	tags: ["autodocs"],
+	globalTypes: {
+		theme: {
+			description: "Application colour scheme",
+			toolbar: {
+				icon: "circlehollow",
+				items: ["light", "dark", "system"],
+				dynamicTitle: true,
+			},
+		},
+	},
+	initialGlobals: { theme: "light" },
+	parameters: {
+		layout: "padded",
+		backgrounds: { disable: true },
+		viewport: { options: INITIAL_VIEWPORTS },
+		a11y: { test: "error" },
+		options: { storySort: { order: ["Controls", "Patterns", "Product", "Views"] } },
+	},
+	decorators: [
+		function AppTheme(Story, context) {
+			useEffect(() => {
+				if (context.globals.theme === "system") {
+					delete document.documentElement.dataset.theme;
+				} else {
+					document.documentElement.dataset.theme = context.globals.theme;
+				}
+			}, [context.globals.theme]);
+			return (
+				<TooltipProvider>
+					<Story />
+				</TooltipProvider>
+			);
+		},
+	],
+});

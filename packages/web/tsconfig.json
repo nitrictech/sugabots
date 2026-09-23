@@ -1,0 +1,25 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+
+		/*
+		 * `node` is here because the typed SDK is inferred from `packages/server`'s
+		 * source, which TypeScript checks as part of this program. Nothing from
+		 * it is imported as a value, so nothing from it is bundled - see the
+		 * note in `packages/sdk/tsconfig.json`.
+		 */
+		"types": ["vite/client", "node"],
+		"jsx": "react-jsx",
+
+		/* `@/` as shadcn/ui writes it. Kept in step with vite.config.ts. */
+		"paths": { "@/*": ["./src/*"] }
+	},
+	"include": [
+		"src",
+		"vite.config.ts",
+		"vitest.config.ts",
+		".storybook/**/*.ts",
+		".storybook/**/*.tsx"
+	]
+}

@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+#
+# The API and the built web app in one image, listening on $PORT. Needs
+# DATABASE_URL; applies pending migrations on start unless
+# SUGABOTS_SKIP_MIGRATIONS=true. Sign-up is closed unless ALLOW_OPEN_SIGNUP=true:
+# the first account claims the installation and the rest arrive by invitation.
+# REQUIRE_EMAIL_VERIFICATION=true additionally withholds a session until the
+# address is proven, and then EMAIL_WEBHOOK_URL must be set.
+# Build from the repository root:
+#
+#   docker build -t sugabots .
+
+# Bun installs, Node runs, as in CI.
+FROM node:26-slim AS base
+COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/core/package.json packages/core/
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/server/package.json packages/server/
+COPY packages/web/package.json packages/web/
+
+# --ignore-scripts: the root `prepare` script is editor tooling.
+FROM base AS web
+RUN bun install --frozen-lockfile --ignore-scripts
+# Vite reads the web package's tsconfig, which extends the root one.
+COPY tsconfig.json tsconfig.base.json ./
+COPY packages packages
+RUN bun run --cwd packages/web build
+
+# Only the server's dependency tree. Bun 1.3 keeps the root devDependencies
+# under --production, so the toolchain is present regardless.
+FROM base AS server
+RUN bun install --frozen-lockfile --production --ignore-scripts --filter @sugabots/server
+
+FROM node:26-slim AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000
+
+COPY --from=server /app ./
+COPY packages/contracts packages/contracts
+COPY packages/core packages/core
+COPY packages/server packages/server
+COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh
+COPY --from=web /app/packages/web/dist packages/web/dist
+
+USER node
+EXPOSE 3000
+
+ENTRYPOINT ["packages/server/docker-entrypoint.sh"]
+CMD ["node", "packages/server/src/index.ts"]
