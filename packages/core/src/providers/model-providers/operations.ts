@@ -115,10 +115,14 @@ export function modelProviderOperations({
 			catch: () => new ModelProviderUrlNotAllowed(),
 		});
 
-	const discoverModelsQuietly = (workspaceId: string, providerId: string) =>
-		fetchProviderModels(providers, workspaceId, providerId, httpClients).pipe(
-			Effect.catchCause(() => Effect.void),
-		);
+	const discoverModelsQuietly = (
+		workspaceId: string,
+		providerId: string,
+		activateOnSuccess: boolean,
+	) =>
+		fetchProviderModels(providers, workspaceId, providerId, httpClients, {
+			activateOnSuccess,
+		}).pipe(Effect.catchCause(() => Effect.void));
 
 	const tryAnEnabledModel = (
 		workspaceId: string,
@@ -130,6 +134,7 @@ export function modelProviderOperations({
 			const enabled = provider.models.find((candidate) => candidate.enabled);
 			if (!provider.active || !enabled) return listed;
 
+			const connection = yield* providers.connection(workspaceId, providerId);
 			const started = Date.now();
 			const answered = yield* probeModel(model, workspaceId, enabled.modelId).pipe(Effect.result);
 			if (answered._tag === "Success") {
@@ -137,14 +142,10 @@ export function modelProviderOperations({
 			}
 
 			const error = `${enabled.modelId}: ${answered.failure.message}`;
-			const connection = yield* providers.connection(workspaceId, providerId);
 			if (connection) {
-				yield* providers.recordTest(
-					workspaceId,
-					providerId,
-					connection.configurationUpdatedAt,
+				yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
 					error,
-				);
+				});
 			}
 			return { reachable: false, latencyMs: listed.latencyMs + (Date.now() - started), error };
 		});
@@ -161,7 +162,7 @@ export function modelProviderOperations({
 				);
 				const provider = yield* providers.create(workspaceId, userId, input);
 				if (provider.hasApiKey) {
-					yield* discoverModelsQuietly(workspaceId, provider.id);
+					yield* discoverModelsQuietly(workspaceId, provider.id, true);
 				}
 				return yield* requireProvider(workspaceId, provider.id);
 			}),
@@ -180,13 +181,20 @@ export function modelProviderOperations({
 				) {
 					return yield* new ProviderActivationRequiresApiKey();
 				}
-				const updated = yield* providers.update(workspaceId, providerId, input);
+				const updated = yield* providers.update(workspaceId, providerId, {
+					...input,
+					active: input.active === true ? false : input.active,
+				});
 				if (!updated) {
 					return yield* new ModelProviderNotFound();
 				}
-				if (!input.apiKey) return updated;
-
-				yield* discoverModelsQuietly(workspaceId, providerId);
+				if (input.apiKey) {
+					yield* discoverModelsQuietly(workspaceId, providerId, input.active !== false);
+				} else if (input.active === true) {
+					yield* testProvider(providers, workspaceId, providerId, httpClients);
+				} else {
+					return updated;
+				}
 				return yield* requireProvider(workspaceId, providerId);
 			}),
 
@@ -202,6 +210,7 @@ export function modelProviderOperations({
 			providerId: string,
 		): Effect.Effect<ProviderTestOutcome, ModelProviderNotFound, Database> =>
 			Effect.gen(function* () {
+				yield* requireProvider(workspaceId, providerId);
 				const listed = yield* testProvider(providers, workspaceId, providerId, httpClients);
 				if (!listed.reachable) return listed;
 				return yield* tryAnEnabledModel(workspaceId, providerId, listed);

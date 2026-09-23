@@ -63,7 +63,7 @@ function discover(
 	return {
 		roots,
 		result: run(
-			fetchProviderModels(models, "workspace-id", found.providerId, httpClients, registry),
+			fetchProviderModels(models, "workspace-id", found.providerId, httpClients, { registry }),
 		),
 	};
 }

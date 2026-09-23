@@ -69,11 +69,12 @@ export interface ModelProviderStore {
 		workspaceId: string,
 		modelId: string,
 	): Effect.Effect<ProviderConnection | undefined, never, Database>;
+	/** recordTest applies a result only to the tested configuration, disabling it on failure. */
 	recordTest(
 		workspaceId: string,
 		providerId: string,
 		configurationUpdatedAt: Date,
-		error?: string,
+		outcome: { error: string } | { activateOnSuccess: boolean },
 	): Effect.Effect<void, never, Database>;
 	addModels(
 		workspaceId: string,
@@ -257,7 +258,7 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 				db
 					.update(modelProvider)
 					.set({
-						active: input.active,
+						active: input.apiKey !== undefined ? false : input.active,
 						baseUrl: input.baseUrl,
 						apiFormat: input.apiFormat,
 						apiKeyEncrypted: storedApiKey(input.apiKey, cipher),
@@ -366,12 +367,16 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
 				);
 				return row ? yield* connection(workspaceId, row.providerId) : undefined;
 			}),
-		recordTest: (workspaceId, providerId, configurationUpdatedAt, error) =>
+		recordTest: (workspaceId, providerId, configurationUpdatedAt, outcome) =>
 			Effect.asVoid(
 				query((db) =>
 					db
 						.update(modelProvider)
-						.set({ lastTestedAt: new Date(), lastTestError: error ?? null })
+						.set({
+							lastTestedAt: new Date(),
+							lastTestError: "error" in outcome ? outcome.error : null,
+							active: "error" in outcome ? false : outcome.activateOnSuccess ? true : undefined,
+						})
 						.where(
 							and(
 								eq(modelProvider.id, providerId),

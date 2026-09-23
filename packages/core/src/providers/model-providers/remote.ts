@@ -73,7 +73,12 @@ export function testProvider(
 		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
 
 		// A test is recorded either way: its result is the point.
-		yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, error);
+		yield* store.recordTest(
+			workspaceId,
+			providerId,
+			connection.configurationUpdatedAt,
+			error === undefined ? { activateOnSuccess: true } : { error },
+		);
 		return { reachable: error === undefined, latencyMs: Date.now() - started, error };
 	});
 
@@ -90,7 +95,10 @@ export function fetchProviderModels(
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
-	registry: ModelRegistry = modelsDev,
+	{
+		registry = modelsDev,
+		activateOnSuccess = false,
+	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
 ): Effect.Effect<{ added: number; updated: number; unchanged: number }, Error, Database> {
 	const discover = Effect.gen(function* () {
 		const connection = yield* requireConnection(store, workspaceId, providerId);
@@ -100,12 +108,9 @@ export function fetchProviderModels(
 		);
 
 		if (outcome._tag === "Failure") {
-			yield* store.recordTest(
-				workspaceId,
-				providerId,
-				connection.configurationUpdatedAt,
-				describe(outcome.failure),
-			);
+			yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+				error: describe(outcome.failure),
+			});
 			return yield* outcome.failure;
 		}
 
@@ -114,7 +119,9 @@ export function fetchProviderModels(
 			providerId,
 			outcome.success,
 		);
-		yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt);
+		yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+			activateOnSuccess,
+		});
 		return { added, updated, unchanged: outcome.success.length - added - updated };
 	});
 
