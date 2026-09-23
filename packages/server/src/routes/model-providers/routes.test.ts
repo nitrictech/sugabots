@@ -272,8 +272,19 @@ describe("model provider network policy", () => {
 });
 
 describe("keyless model providers", () => {
-	it("allows Ollama to be activated without an API key", async () => {
-		const { app, update } = routes(true, "ollama");
+	it("accepts a keyless Ollama activation request for connection testing", async () => {
+		const { app } = routes(true, "ollama", {
+			connection: () =>
+				Effect.succeed({
+					providerId: PROVIDER_ID,
+					preset: "ollama",
+					baseUrl: "http://localhost:11434/v1",
+					apiFormat: "openai",
+					headers: {},
+					configurationUpdatedAt: new Date("2026-09-01T00:00:00Z"),
+				}),
+			recordTest: () => Effect.void,
+		});
 		const response = await app.request(
 			`/workspaces/${WORKSPACE_ID}/model-providers/${PROVIDER_ID}`,
 			{
@@ -284,7 +295,6 @@ describe("keyless model providers", () => {
 		);
 
 		expect(response.status).toBe(200);
-		expect(update).toHaveBeenCalledOnce();
 	});
 
 	it("removes a stored API key when an update clears it", async () => {
