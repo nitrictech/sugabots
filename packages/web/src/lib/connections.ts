@@ -1,20 +1,21 @@
 import type { ConnectionUpdate, NewConnection } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 
 export function useConnections(podId: string) {
 	return useQuery({
 		queryKey: ["connections", podId],
-		queryFn: () => unwrap(client.api.pods[":podId"].connections.$get({ param: { podId } })),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal }),
 	});
 }
 
 export function useToolApprovalRules(podId: string) {
 	return useQuery({
 		queryKey: ["tool-approval-rules", podId],
-		queryFn: () =>
-			unwrap(client.api.pods[":podId"]["tool-approval-rules"].$get({ param: { podId } })),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.toolApprovals.listRules({ params: { podId } }), { signal }),
 	});
 }
 
@@ -22,11 +23,7 @@ export function useRevokeToolApprovalRule(podId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: (ruleId: string) =>
-			unwrapEmpty(
-				client.api.pods[":podId"]["tool-approval-rules"][":ruleId"].$delete({
-					param: { podId, ruleId },
-				}),
-			),
+			Effect.runPromise(client.api.toolApprovals.revokeRule({ params: { podId, ruleId } })),
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tool-approval-rules", podId] }),
 	});
 }
@@ -34,45 +31,35 @@ export function useRevokeToolApprovalRule(podId: string) {
 export function useConnectionActions(podId: string) {
 	const queryClient = useQueryClient();
 	const refresh = () => queryClient.invalidateQueries({ queryKey: ["connections", podId] });
-	const route = () => client.api.pods[":podId"].connections;
+	const { connections } = client.api;
 
 	return {
 		create: useMutation({
-			mutationFn: (json: NewConnection) => unwrap(route().$post({ param: { podId }, json })),
+			mutationFn: (json: NewConnection) =>
+				Effect.runPromise(connections.create({ params: { podId }, payload: json })),
 			onSuccess: refresh,
 		}),
 		update: useMutation({
 			mutationFn: ({ connectionId, json }: { connectionId: string; json: ConnectionUpdate }) =>
-				unwrap(
-					route()[":connectionId"].$patch({
-						param: { podId, connectionId },
-						json,
-					}),
-				),
+				Effect.runPromise(connections.update({ params: { podId, connectionId }, payload: json })),
 			onSuccess: refresh,
 		}),
 		remove: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
-				unwrapEmpty(
-					route()[":connectionId"].$delete({
-						param: { podId, connectionId },
-					}),
-				),
+				Effect.runPromise(connections.remove({ params: { podId, connectionId } })),
 			onSuccess: refresh,
 		}),
 		test: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
-				unwrap(
-					route()[":connectionId"].test.$post({
-						param: { podId, connectionId },
-					}),
-				),
+				Effect.runPromise(connections.test({ params: { podId, connectionId } })),
 			onSettled: refresh,
 		}),
 		/** From the catalog: makes the connection and leaves for its sign-in, as one step. */
 		connect: useMutation({
 			mutationFn: async (json: { name: string; url: string }) => {
-				const result = await unwrap(route().connect.$post({ param: { podId }, json }));
+				const result = await Effect.runPromise(
+					connections.connectFromCatalog({ params: { podId }, payload: json }),
+				);
 				browser.go(result.authorizationUrl);
 				return result;
 			},
@@ -84,10 +71,8 @@ export function useConnectionActions(podId: string) {
 		 */
 		signIn: useMutation({
 			mutationFn: async ({ connectionId }: { connectionId: string }) => {
-				const result = await unwrap(
-					route()[":connectionId"].oauth.start.$post({
-						param: { podId, connectionId },
-					}),
+				const result = await Effect.runPromise(
+					connections.startOAuth({ params: { podId, connectionId } }),
 				);
 				// Left here rather than in `onSuccess`, which is skipped once the
 				// card that asked has gone from the page.

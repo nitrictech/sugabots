@@ -7,7 +7,9 @@ import {
 	streamEvent,
 	type ThreadDetails,
 } from "@sugabots/contracts";
+import { InternalServerError } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	agents,
@@ -15,6 +17,7 @@ import {
 	controlledEventStream,
 	linear,
 	mount,
+	pendingAnswer,
 	sam,
 	triager,
 } from "@/test-api.tsx";
@@ -246,9 +249,9 @@ function details(
 }
 
 function chatAnswers() {
-	client.api.workspaces[":workspaceId"].chats.$post.mockResolvedValue(Response.json(chat));
-	client.api.chats[":chatId"].messages.$get.mockResolvedValue(
-		Response.json({
+	client.api.chats.getOrCreate.mockReturnValue(Effect.succeed(chat));
+	client.api.chats.messages.mockReturnValue(
+		Effect.succeed({
 			items: [
 				{ kind: "message", message: mainMessage },
 				{ kind: "message", message: agentMessage },
@@ -256,63 +259,61 @@ function chatAnswers() {
 			nextCursor: null,
 		}),
 	);
-	client.api.chats[":chatId"].history.$get.mockResolvedValue(
-		Response.json({
+	client.api.chats.history.mockReturnValue(
+		Effect.succeed({
 			items: [collaborationEntry, routineEntry, routineCollaborationEntry],
 			nextCursor: null,
 		}),
 	);
-	client.api.threads[":threadId"].$get.mockImplementation(
-		async ({ param }: { param: { threadId: string } }) => {
-			switch (param.threadId) {
-				case collaborationId:
-					return Response.json(
-						details(collaborationId, collaborationEntry.title, "collaboration", [
-							collaborationRequest,
-							collaborationAnswer,
-						]),
-					);
-				case routineId:
-					return Response.json(
-						details(routineId, routineEntry.title, "routine", [
-							routineTriggerMessage,
-							routineMessage,
-						]),
-					);
-				case routineCollaborationId: {
-					const nested = details(
-						routineCollaborationId,
-						routineCollaborationEntry.title,
-						"collaboration",
-						[
-							{
-								...collaborationRequest,
-								id: "0199a3a0-0000-7000-8000-0000000000f9",
-								threadId: routineCollaborationId,
-								content: "Verify the overnight alerts",
-								parts: [{ type: "text", text: "Verify the overnight alerts" }],
-							},
-							{
-								...collaborationAnswer,
-								id: "0199a3a0-0000-7000-8000-0000000000fa",
-								threadId: routineCollaborationId,
-								content: "The alerts were verified.",
-								parts: [{ type: "text", text: "The alerts were verified." }],
-							},
-						],
-					);
-					return Response.json({
-						...nested,
-						thread: { ...nested.thread, parentThreadId: routineId },
-					});
-				}
-				default:
-					return Response.json(
-						details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]),
-					);
+	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
+		switch (params.threadId) {
+			case collaborationId:
+				return Effect.succeed(
+					details(collaborationId, collaborationEntry.title, "collaboration", [
+						collaborationRequest,
+						collaborationAnswer,
+					]),
+				);
+			case routineId:
+				return Effect.succeed(
+					details(routineId, routineEntry.title, "routine", [
+						routineTriggerMessage,
+						routineMessage,
+					]),
+				);
+			case routineCollaborationId: {
+				const nested = details(
+					routineCollaborationId,
+					routineCollaborationEntry.title,
+					"collaboration",
+					[
+						{
+							...collaborationRequest,
+							id: "0199a3a0-0000-7000-8000-0000000000f9",
+							threadId: routineCollaborationId,
+							content: "Verify the overnight alerts",
+							parts: [{ type: "text", text: "Verify the overnight alerts" }],
+						},
+						{
+							...collaborationAnswer,
+							id: "0199a3a0-0000-7000-8000-0000000000fa",
+							threadId: routineCollaborationId,
+							content: "The alerts were verified.",
+							parts: [{ type: "text", text: "The alerts were verified." }],
+						},
+					],
+				);
+				return Effect.succeed({
+					...nested,
+					thread: { ...nested.thread, parentThreadId: routineId },
+				});
 			}
-		},
-	);
+			default:
+				return Effect.succeed(
+					details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]),
+				);
+		}
+	});
 }
 
 beforeEach(() => {
@@ -337,15 +338,15 @@ describe("ongoing agent Chat", () => {
 			name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
 		});
 		expect(collaboration.querySelectorAll(".agent-tint")).toHaveLength(2);
-		expect(client.api.workspaces[":workspaceId"].chats.$post).toHaveBeenCalledWith({
-			param: { workspaceId: linear.workspaceId },
-			json: { podId: linear.podId, hostAgentId: linear.id },
+		expect(client.api.chats.getOrCreate).toHaveBeenCalledWith({
+			params: { workspaceId: linear.workspaceId },
+			payload: { podId: linear.podId, hostAgentId: linear.id },
 		});
 	});
 
 	it("shows Routine runs in the main Chat log", async () => {
-		client.api.chats[":chatId"].messages.$get.mockResolvedValue(
-			Response.json({
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({
 				items: [
 					{
 						kind: "routine",
@@ -369,8 +370,8 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("sends a main-chat message", async () => {
-		client.api.chats[":chatId"].messages.$post.mockResolvedValue(
-			Response.json({ message: mainMessage, routing: { status: "routed" } }, { status: 201 }),
+		client.api.chats.send.mockReturnValue(
+			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
 		mount(`/agents/${linear.id}`);
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
@@ -381,17 +382,17 @@ describe("ongoing agent Chat", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await waitFor(() =>
-			expect(client.api.chats[":chatId"].messages.$post).toHaveBeenCalledWith({
-				param: { chatId: chat.id },
-				json: { id: expect.any(String), message: "Send the update" },
+			expect(client.api.chats.send).toHaveBeenCalledWith({
+				params: { chatId: chat.id },
+				payload: { id: expect.any(String), message: "Send the update" },
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {
-		client.api.workspaces[":workspaceId"].agents.$get.mockResolvedValue(
-			Response.json(agents.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed(agents.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),
 		);
 		mount(`/agents/${linear.id}`);
 
@@ -403,8 +404,8 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("clears the composer while the message is still in flight", async () => {
-		const posting = Promise.withResolvers<Response>();
-		client.api.chats[":chatId"].messages.$post.mockReturnValue(posting.promise);
+		const posting = pendingAnswer();
+		client.api.chats.send.mockReturnValue(posting.effect);
 		mount(`/agents/${linear.id}`);
 		const composer = (await screen.findByLabelText(
 			`Message ${linear.name}`,
@@ -413,20 +414,18 @@ describe("ongoing agent Chat", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await waitFor(() => expect(composer.value).toBe(""));
-		posting.resolve(
-			Response.json({ message: mainMessage, routing: { status: "routed" } }, { status: 201 }),
-		);
+		posting.answer(Effect.succeed({ message: mainMessage, routing: { status: "routed" } }));
 	});
 
 	it("puts the draft back when the message could not be sent", async () => {
-		client.api.chats[":chatId"].messages.$get.mockImplementation(async () =>
-			Response.json({ items: [{ kind: "message", message: mainMessage }], nextCursor: null }),
+		client.api.chats.messages.mockImplementation(() =>
+			Effect.succeed({ items: [{ kind: "message", message: mainMessage }], nextCursor: null }),
 		);
-		client.api.chats[":chatId"].history.$get.mockImplementation(async () =>
-			Response.json({ items: [], nextCursor: null }),
+		client.api.chats.history.mockImplementation(() =>
+			Effect.succeed({ items: [], nextCursor: null }),
 		);
-		client.api.chats[":chatId"].messages.$post.mockResolvedValue(
-			Response.json({ error: { code: "internal", message: "Nope" } }, { status: 503 }),
+		client.api.chats.send.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: "Nope" })),
 		);
 		mount(`/agents/${linear.id}`);
 		const composer = (await screen.findByLabelText(
@@ -530,8 +529,8 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("shows an inbound collaboration and opens its thread from the recipient Chat", async () => {
-		client.api.chats[":chatId"].messages.$get.mockResolvedValue(
-			Response.json({
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({
 				items: [
 					{
 						kind: "collaboration",
@@ -544,21 +543,19 @@ describe("ongoing agent Chat", () => {
 				nextCursor: null,
 			}),
 		);
-		client.api.threads[":threadId"].$get.mockImplementation(
-			async ({ param }: { param: { threadId: string } }) => {
-				if (param.threadId === collaborationId) {
-					const inbound = details(collaborationId, collaborationEntry.title, "collaboration", [
-						collaborationRequest,
-						collaborationAnswer,
-					]);
-					return Response.json({
-						...inbound,
-						thread: { ...inbound.thread, chatId: "0199a3a0-0000-7000-8000-000000000099" },
-					});
-				}
-				return Response.json(details(chat.mainThreadId, "Chat", "chat", []));
-			},
-		);
+		client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
+			if (params.threadId === collaborationId) {
+				const inbound = details(collaborationId, collaborationEntry.title, "collaboration", [
+					collaborationRequest,
+					collaborationAnswer,
+				]);
+				return Effect.succeed({
+					...inbound,
+					thread: { ...inbound.thread, chatId: "0199a3a0-0000-7000-8000-000000000099" },
+				});
+			}
+			return Effect.succeed(details(chat.mainThreadId, "Chat", "chat", []));
+		});
 
 		mount(`/agents/${linear.id}`);
 		fireEvent.click(
@@ -633,9 +630,9 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("paginates collaboration and routine history", async () => {
-		client.api.chats[":chatId"].history.$get
-			.mockResolvedValueOnce(Response.json({ items: [collaborationEntry], nextCursor: "older" }))
-			.mockResolvedValueOnce(Response.json({ items: [routineEntry], nextCursor: null }));
+		client.api.chats.history
+			.mockReturnValueOnce(Effect.succeed({ items: [collaborationEntry], nextCursor: "older" }))
+			.mockReturnValueOnce(Effect.succeed({ items: [routineEntry], nextCursor: null }));
 		mount(`/agents/${linear.id}?history=open`);
 		const history = await screen.findByRole("complementary", { name: "Chat history" });
 		fireEvent.click(within(history).getByRole("button", { name: "Load older threads" }));
@@ -644,11 +641,9 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("uses message-focused copy when the Chat is empty", async () => {
-		client.api.chats[":chatId"].messages.$get.mockResolvedValue(
-			Response.json({ items: [], nextCursor: null }),
-		);
-		client.api.threads[":threadId"].$get.mockResolvedValue(
-			Response.json(details(chat.mainThreadId, "Chat", "chat", [])),
+		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [])),
 		);
 		mount(`/agents/${linear.id}`);
 

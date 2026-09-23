@@ -1,19 +1,15 @@
-import { createMiddleware } from "hono/factory";
+import { CurrentUser, Forbidden, Session, Unauthorized } from "@sugabots/contracts/http";
+import { Effect, Layer } from "effect";
+import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
 import { API_BASE_PATH } from "../config.ts";
-import { HttpError } from "../http/errors.ts";
-import type { Session, SessionResolver } from "./session.ts";
+import { failureResponse } from "../http/errors.ts";
+import type { SessionResolver } from "./session.ts";
 
 /**
  * Bearer authentication for native and script clients, or a Better Auth cookie
  * session for browsers. An explicit Authorization header never falls back to a
  * cookie if malformed or expired.
  */
-
-export interface AuthEnv {
-	Variables: {
-		session: Session;
-	};
-}
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -25,46 +21,57 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export function requireCookieOrigin(trustedOrigins: string[]) {
 	const trusted = new Set(trustedOrigins);
 	const exempt = [`${API_BASE_PATH}/auth/`, `${API_BASE_PATH}/hooks/`];
-	return createMiddleware(async (c, next) => {
-		if (
-			SAFE_METHODS.has(c.req.method) ||
-			exempt.some((prefix) => c.req.path.startsWith(prefix)) ||
-			!c.req.header("cookie") ||
-			bearerToken(c.req.header("authorization"))
-		) {
-			await next();
-			return;
-		}
-
-		const origin = c.req.header("origin");
-		if (!origin || !trusted.has(origin)) {
-			throw new HttpError("forbidden", "Untrusted request origin");
-		}
-		await next();
-	});
+	return <E, R>(
+		effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+	): Effect.Effect<
+		HttpServerResponse.HttpServerResponse,
+		E,
+		R | HttpServerRequest.HttpServerRequest
+	> =>
+		Effect.gen(function* () {
+			const request = yield* HttpServerRequest.HttpServerRequest;
+			const { headers } = request;
+			if (
+				SAFE_METHODS.has(request.method) ||
+				exempt.some((prefix) => request.url.startsWith(prefix)) ||
+				!headers.cookie ||
+				bearerToken(headers.authorization)
+			) {
+				return yield* effect;
+			}
+			if (!headers.origin || !trusted.has(headers.origin)) {
+				return failureResponse(
+					Forbidden,
+					new Forbidden({ message: "Untrusted request origin" }),
+					403,
+				);
+			}
+			return yield* effect;
+		});
 }
 
-/** Rejects the request unless its bearer token or cookie resolves to a session. */
-export function requireSession(resolve: SessionResolver) {
-	return createMiddleware<AuthEnv>(async (c, next) => {
-		const authorization = c.req.header("authorization");
-		let headers = c.req.raw.headers;
-		if (authorization !== undefined) {
-			const token = bearerToken(authorization);
-			if (!token) {
-				throw new HttpError("unauthorized", "Invalid Authorization header");
+/** The `Session` middleware, resolving the request's credentials with `resolve`. */
+export function sessionLayer(resolve: SessionResolver) {
+	return Layer.succeed(Session, (httpEffect) =>
+		Effect.gen(function* () {
+			const request = yield* HttpServerRequest.HttpServerRequest;
+			const authorization = request.headers.authorization;
+			let headers = new Headers(request.headers);
+			if (authorization !== undefined) {
+				const token = bearerToken(authorization);
+				if (!token) {
+					return yield* new Unauthorized({ message: "Invalid Authorization header" });
+				}
+				headers = new Headers({ authorization: `Bearer ${token}` });
 			}
-			headers = new Headers({ authorization: `Bearer ${token}` });
-		}
 
-		const session = await resolve(headers);
-		if (!session) {
-			throw new HttpError("unauthorized", "Invalid or expired session");
-		}
-
-		c.set("session", session);
-		await next();
-	});
+			const session = yield* Effect.promise(() => resolve(headers));
+			if (!session) {
+				return yield* new Unauthorized({ message: "Invalid or expired session" });
+			}
+			return yield* Effect.provideService(httpEffect, CurrentUser, session.user);
+		}),
+	);
 }
 
 export function bearerToken(header: string | undefined): string | undefined {

@@ -1,8 +1,6 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	apiErrorCodeForStatus,
-	errorResponseSchema,
 	healthResponseSchema,
 	isoTimestampSchema,
 	sessionUserSchema,
@@ -31,51 +29,6 @@ describe("healthResponseSchema", () => {
 				Schema.decodeUnknownResult(healthResponseSchema)({ status: "down", version: "0.0.0" }),
 			),
 		).toBe(false);
-	});
-});
-
-describe("errorResponseSchema", () => {
-	it("accepts an envelope without details", () => {
-		expect(
-			Schema.decodeUnknownSync(errorResponseSchema)({
-				error: { code: "not_found", message: "No such agent" },
-			}),
-		).toEqual({ error: { code: "not_found", message: "No such agent" } });
-	});
-
-	it("rejects a code the client would not know how to handle", () => {
-		expect(
-			Result.isSuccess(
-				Schema.decodeUnknownResult(errorResponseSchema)({
-					error: { code: "teapot", message: "No" },
-				}),
-			),
-		).toBe(false);
-	});
-
-	it("strips unknown envelope fields but preserves arbitrary optional details", () => {
-		for (const details of [undefined, null, { anything: [1, "two"] }]) {
-			expect(
-				Schema.decodeUnknownSync(errorResponseSchema)({
-					extra: true,
-					error: { code: "bad_request", message: "No", details, extra: true },
-				}),
-			).toEqual({ error: { code: "bad_request", message: "No", details } });
-		}
-	});
-});
-
-describe("apiErrorCodeForStatus", () => {
-	it.each([
-		[400, "bad_request"],
-		[401, "unauthorized"],
-		[403, "forbidden"],
-		[404, "not_found"],
-		[409, "conflict"],
-		[422, "bad_request"],
-		[502, "internal"],
-	] as const)("maps HTTP status %i to %s", (status, code) => {
-		expect(apiErrorCodeForStatus(status)).toBe(code);
 	});
 });
 

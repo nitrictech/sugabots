@@ -1,6 +1,6 @@
 import { streamEvent } from "@sugabots/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "./errors.ts";
+import { isApiFailure } from "./errors.ts";
 import { createEventsApi } from "./events.ts";
 import { memoryTokenStore } from "./tokens.ts";
 
@@ -64,7 +64,7 @@ function scripted(...responses: (string | number)[]) {
 			if (scene === 204) {
 				return new Response(null, { status: 204 });
 			}
-			return new Response(JSON.stringify({ error: { code: "unauthorized", message: "no" } }), {
+			return new Response(JSON.stringify({ message: "no" }), {
 				status: scene,
 			});
 		}
@@ -173,7 +173,9 @@ describe("parsing", () => {
 	it("bounds an unfinished frame", async () => {
 		const { fetch } = scripted(`data: ${"x".repeat(64 * 1024)}\n`);
 
-		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({ status: 200 });
+		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({
+			_tag: "InternalServerError",
+		});
 	});
 
 	it("ignores the server's keep-alive comments", async () => {
@@ -193,7 +195,7 @@ describe("resume", () => {
 			fetch,
 			retryMs: 100,
 		}).workspace("w1");
-		const finished = expect(take(stream, 1)).rejects.toMatchObject({ status: 401 });
+		const finished = expect(take(stream, 1)).rejects.toMatchObject({ _tag: "Unauthorized" });
 
 		try {
 			await vi.advanceTimersByTimeAsync(0);
@@ -289,7 +291,9 @@ describe("failure", () => {
 	it("rejects a successful response that is not an event stream", async () => {
 		const fetch = vi.fn(async () => Response.json({ status: "ok" })) as typeof globalThis.fetch;
 
-		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({ status: 200 });
+		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({
+			_tag: "InternalServerError",
+		});
 	});
 
 	it("retries a server error", async () => {
@@ -303,14 +307,15 @@ describe("failure", () => {
 	it("gives up when the token is refused, rather than retrying forever", async () => {
 		const { fetch, calls } = scripted(401);
 
-		await expect(take(events(fetch).thread("c1"), 1)).rejects.toThrow(ApiError);
+		const failure = await take(events(fetch).thread("c1"), 1).catch((error: unknown) => error);
+		expect(isApiFailure(failure)).toBe(true);
 		expect(calls).toHaveLength(1);
 	});
 
 	it("gives up on a resource that is not there", async () => {
 		const { fetch } = scripted(404);
 
-		await expect(take(events(fetch).thread("gone"), 1)).rejects.toMatchObject({ status: 404 });
+		await expect(take(events(fetch).thread("gone"), 1)).rejects.toMatchObject({ _tag: "NotFound" });
 	});
 
 	it("waits out a rate limit instead of giving up on it", async () => {

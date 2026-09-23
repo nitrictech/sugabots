@@ -9,17 +9,28 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import { closeDatabase, noDatabase, onDatabase, onPostgres } from "@sugabots/core/database/testing";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { and, eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Session } from "../../auth/session.ts";
-import { channelAccess, closedChannelAccess } from "./access.ts";
+import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access.ts";
 
 /**
  * Who may listen to what. The workspace half is a membership query, so it needs
  * a migrated database and skips without one, as `db/schema.test.ts` does.
  */
+
+/** The access with its answers run against a database nothing may reach. */
+function onNoDatabase(access: ChannelAccess) {
+	return {
+		workspace: (session: Session, id: string) =>
+			Effect.runPromise(access.workspace(session, id).pipe(Effect.provide(noDatabase))),
+		thread: (session: Session, id: string) =>
+			Effect.runPromise(access.thread(session, id).pipe(Effect.provide(noDatabase))),
+	};
+}
 
 const session = (id: string): Session => ({
 	user: { id, email: `${id}@example.com`, name: "Sam", image: null },
@@ -29,8 +40,10 @@ it("denies event access when no access dependency is configured", async () => {
 	const access = closedChannelAccess();
 	const who = session(crypto.randomUUID());
 
-	expect(await access.workspace(who, "w1")).toBeUndefined();
-	expect(await access.thread(who, "c1")).toBeUndefined();
+	const { workspace, thread } = onNoDatabase(access);
+
+	expect(await workspace(who, "w1")).toBeUndefined();
+	expect(await thread(who, "c1")).toBeUndefined();
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
@@ -130,13 +143,9 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		}
 
 		return {
-			access: channelAccess(
-				authorization,
-				threadStore(),
-				// The real store, over the real database, since that is what the
-				// visibility joins are being checked against.
-				runOnPostgres,
-			),
+			// The real store, over the real database, since that is what the
+			// visibility joins are being checked against.
+			access: onPostgres(channelAccess(authorization, threadStore())),
 			member,
 			administrator,
 			outsider,

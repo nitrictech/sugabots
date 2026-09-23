@@ -1,5 +1,7 @@
-import type { AppType } from "@sugabots/server";
-import { hc } from "hono/client";
+import { Api as ApiDefinition } from "@sugabots/contracts/http";
+import { Effect, Layer } from "effect";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { type AuthApi, createAuthApi } from "./auth.ts";
 import { createEventsApi, type EventsApi } from "./events.ts";
 import { defaultTokenStore, type TokenStore } from "./tokens.ts";
@@ -8,16 +10,17 @@ import { defaultTokenStore, type TokenStore } from "./tokens.ts";
  * The typed API client. Web, Electron and React Native all reach the API
  * through this and nothing else.
  *
- * `AppType` is a development-only type dependency. `verbatimModuleSyntax`
- * erases the import, so no server module, database driver, secret, or Node
- * built-in is bundled into a client. What crosses the boundary is the shape of
- * the routes: add a route to the Hono chain in `packages/server/src/http/app.ts`
- * and it appears here without a second route declaration to keep in step.
+ * `api` is derived from the API's definition in `@sugabots/contracts/http`,
+ * which the server implements, so an endpoint added there appears here with
+ * no second declaration to keep in step. Each call is an `Effect` that
+ * succeeds with the decoded response, or fails with one of the errors that
+ * endpoint declares — or with the transport or decoding failure of a request
+ * that never got an answer.
  */
 
 export type { AuthApi } from "./auth.ts";
 export { isEmailUnverified } from "./auth.ts";
-export { ApiError, unwrap, unwrapEmpty } from "./errors.ts";
+export { failureForStatus, isApiFailure } from "./errors.ts";
 export type { EventStream, EventStreamOptions, EventsApi } from "./events.ts";
 export {
 	defaultTokenStore,
@@ -26,7 +29,7 @@ export {
 	type TokenStore,
 } from "./tokens.ts";
 
-export type Api = ReturnType<typeof hc<AppType>>;
+export type Api = HttpApiClient.ForApi<typeof ApiDefinition>;
 
 interface ClientBaseOptions {
 	/** Where the API is, path included, e.g. `https://example.com/api`. */
@@ -81,21 +84,46 @@ export function createClient(options: ClientOptions): Client {
 	const root = baseUrl.replace(/\/+$/, "");
 	const bearerTokens = authMode === "bearer" ? (options.tokens ?? defaultTokenStore()) : undefined;
 
-	const api = hc<AppType>(root, {
-		fetch,
-		init: { credentials: bearerTokens ? "omit" : "include" },
-		headers: (): Record<string, string> => {
-			const token = bearerTokens?.get();
-			return token ? { authorization: `Bearer ${token}` } : {};
-		},
-	});
-
 	return {
 		baseUrl: root,
 		authMode,
-		api,
+		api: createApi({ baseUrl: root, fetch, tokens: bearerTokens }),
 		auth: createAuthApi({ baseUrl: root, tokens: bearerTokens, fetch, origin }),
 		events: createEventsApi({ baseUrl: root, tokens: bearerTokens, fetch }),
 		tokens: bearerTokens,
 	};
+}
+
+function createApi({
+	baseUrl,
+	fetch,
+	tokens,
+}: {
+	baseUrl: string;
+	fetch: typeof globalThis.fetch | undefined;
+	tokens: TokenStore | undefined;
+}): Api {
+	const fetchClient = FetchHttpClient.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				Layer.succeed(FetchHttpClient.RequestInit, { credentials: tokens ? "omit" : "include" }),
+				fetch ? Layer.succeed(FetchHttpClient.Fetch, fetch) : Layer.empty,
+			),
+		),
+	);
+	const httpClient = Effect.runSync(
+		Effect.provide(Effect.service(HttpClient.HttpClient), fetchClient),
+	).pipe(
+		// Read at each request, so a sign-in or sign-out takes effect on the next call.
+		HttpClient.mapRequest((request) => {
+			const token = tokens?.get();
+			return token ? HttpClientRequest.bearerToken(request, token) : request;
+		}),
+		// The client's spans are never exported, so a `traceparent` naming one
+		// would leave every server trace pointing at a parent that never arrives.
+		HttpClient.transform((response) =>
+			Effect.provideService(response, HttpClient.TracerPropagationEnabled, false),
+		),
+	);
+	return Effect.runSync(HttpApiClient.makeWith(ApiDefinition, { httpClient, baseUrl }));
 }

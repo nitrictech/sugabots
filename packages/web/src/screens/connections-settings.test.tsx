@@ -1,5 +1,6 @@
 import type { Connection } from "@sugabots/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browser } from "@/lib/connections.ts";
 import { apiAnswers, linear, mount, pods } from "@/test-api.tsx";
@@ -9,7 +10,7 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const pod = pods[0] as (typeof pods)[number];
 const page = `/settings/pods/${pod.id}`;
-const route = client.api.pods[":podId"].connections;
+const route = client.api.connections;
 
 const wiki: Connection = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
@@ -53,15 +54,12 @@ async function showConnections() {
 describe("the Connections settings", () => {
 	it("connects a catalog service by signing in, with no key to paste", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.$get.mockImplementation(async () => Response.json([]));
-		route.connect.$post.mockResolvedValue(
-			Response.json(
-				{
-					connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
-					authorizationUrl: "https://notion.example/authorize?state=s-1",
-				},
-				{ status: 201 },
-			),
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.succeed({
+				connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
+				authorizationUrl: "https://notion.example/authorize?state=s-1",
+			}),
 		);
 		mount(page);
 		await showConnections();
@@ -71,19 +69,19 @@ describe("the Connections settings", () => {
 		await waitFor(() =>
 			expect(go).toHaveBeenCalledWith("https://notion.example/authorize?state=s-1"),
 		);
-		expect(route.connect.$post.mock.calls[0]?.[0]).toMatchObject({
-			json: { name: "Notion", url: "https://mcp.notion.com/mcp" },
+		expect(route.connectFromCatalog.mock.calls[0]?.[0]).toMatchObject({
+			payload: { name: "Notion", url: "https://mcp.notion.com/mcp" },
 		});
-		expect(route.$post).not.toHaveBeenCalled();
+		expect(route.create).not.toHaveBeenCalled();
 	});
 
 	it("offers to sign in a connection whose sign-in never finished", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.$get.mockResolvedValue(
-			Response.json([{ ...wiki, auth: "oauth", signedIn: false, secretHeader: null }]),
+		route.list.mockReturnValue(
+			Effect.succeed([{ ...wiki, auth: "oauth", signedIn: false, secretHeader: null }]),
 		);
-		route[":connectionId"].oauth.start.$post.mockResolvedValue(
-			Response.json({ authorizationUrl: "https://wiki.example/authorize" }),
+		route.startOAuth.mockReturnValue(
+			Effect.succeed({ authorizationUrl: "https://wiki.example/authorize" }),
 		);
 		mount(page);
 		await showConnections();
@@ -94,10 +92,10 @@ describe("the Connections settings", () => {
 	});
 
 	it("adds any other server by name and URL", async () => {
-		route.$get.mockResolvedValue(Response.json([]));
-		route.$post.mockImplementation(async () => {
-			route.$get.mockResolvedValue(Response.json([wiki]));
-			return Response.json(wiki, { status: 201 });
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.create.mockImplementation(() => {
+			route.list.mockReturnValue(Effect.succeed([wiki]));
+			return Effect.succeed(wiki);
 		});
 		mount(page);
 		await showConnections();
@@ -109,15 +107,15 @@ describe("the Connections settings", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-		await waitFor(() => expect(route.$post).toHaveBeenCalledOnce());
-		expect(route.$post.mock.calls[0]?.[0]).toMatchObject({
-			json: { name: "Wiki", url: "https://wiki.example.com/mcp", secretHeader: "Authorization" },
+		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
+		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
+			payload: { name: "Wiki", url: "https://wiki.example.com/mcp", secretHeader: "Authorization" },
 		});
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
 	});
 
 	it("explains the actions agents gain from a connection", async () => {
-		route.$get.mockResolvedValue(Response.json([wiki]));
+		route.list.mockReturnValue(Effect.succeed([wiki]));
 		mount(page);
 		await showConnections();
 
@@ -129,10 +127,10 @@ describe("the Connections settings", () => {
 	});
 
 	it("turns a connection on for the pod", async () => {
-		route.$get.mockResolvedValue(Response.json([wiki]));
-		route[":connectionId"].$patch.mockImplementation(async () => {
-			route.$get.mockResolvedValue(Response.json([{ ...wiki, enabled: true }]));
-			return Response.json({ ...wiki, enabled: true });
+		route.list.mockReturnValue(Effect.succeed([wiki]));
+		route.update.mockImplementation(() => {
+			route.list.mockReturnValue(Effect.succeed([{ ...wiki, enabled: true }]));
+			return Effect.succeed({ ...wiki, enabled: true });
 		});
 		mount(page);
 		await showConnections();
@@ -140,38 +138,38 @@ describe("the Connections settings", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
 
-		await waitFor(() => expect(route[":connectionId"].$patch).toHaveBeenCalledOnce());
-		expect(route[":connectionId"].$patch.mock.calls[0]?.[0]).toMatchObject({
-			param: { podId: pod.id, connectionId: wiki.id },
-			json: { enabled: true },
+		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			params: { podId: pod.id, connectionId: wiki.id },
+			payload: { enabled: true },
 		});
 		expect(await screen.findByRole("button", { name: "Turn off" })).toBeDefined();
 	});
 
 	it("lets the pod owner allow the tools that change things, off by default", async () => {
-		route.$get.mockResolvedValue(Response.json([wiki]));
-		route[":connectionId"].$patch.mockImplementation(async () => {
-			route.$get.mockResolvedValue(Response.json([{ ...wiki, allowMutating: true }]));
-			return Response.json({ ...wiki, allowMutating: true });
+		route.list.mockReturnValue(Effect.succeed([wiki]));
+		route.update.mockImplementation(() => {
+			route.list.mockReturnValue(Effect.succeed([{ ...wiki, allowMutating: true }]));
+			return Effect.succeed({ ...wiki, allowMutating: true });
 		});
 		mount(page);
 		await showConnections();
 
 		fireEvent.click(await screen.findByRole("button", { name: "Allow changes" }));
 
-		await waitFor(() => expect(route[":connectionId"].$patch).toHaveBeenCalledOnce());
-		expect(route[":connectionId"].$patch.mock.calls[0]?.[0]).toMatchObject({
-			param: { podId: pod.id, connectionId: wiki.id },
-			json: { allowMutating: true },
+		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			params: { podId: pod.id, connectionId: wiki.id },
+			payload: { allowMutating: true },
 		});
 		expect(await screen.findByRole("button", { name: "Make read only" })).toBeDefined();
 	});
 
 	it("shows and revokes an agent's Always allow rule", async () => {
-		route.$get.mockResolvedValue(Response.json([wiki]));
-		const rules = client.api.pods[":podId"]["tool-approval-rules"];
-		rules.$get.mockResolvedValue(
-			Response.json([
+		route.list.mockReturnValue(Effect.succeed([wiki]));
+		const rules = client.api.toolApprovals;
+		rules.listRules.mockReturnValue(
+			Effect.succeed([
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
 					agentId: linear.id,
@@ -183,7 +181,7 @@ describe("the Connections settings", () => {
 				},
 			]),
 		);
-		rules[":ruleId"].$delete.mockResolvedValue(new Response(null, { status: 204 }));
+		rules.revokeRule.mockReturnValue(Effect.void);
 		mount(page);
 		await showConnections();
 		fireEvent.click(await screen.findByRole("button", { name: "View tools" }));
@@ -191,32 +189,29 @@ describe("the Connections settings", () => {
 		expect(await screen.findByText(`Always allowed for ${linear.name}`)).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Return to ask first" }));
 
-		await waitFor(() => expect(rules[":ruleId"].$delete).toHaveBeenCalledOnce());
-		expect(rules[":ruleId"].$delete).toHaveBeenCalledWith({
-			param: { podId: pod.id, ruleId: "0199a3a0-0000-7000-8000-0000000000f2" },
+		await waitFor(() => expect(rules.revokeRule).toHaveBeenCalledOnce());
+		expect(rules.revokeRule).toHaveBeenCalledWith({
+			params: { podId: pod.id, ruleId: "0199a3a0-0000-7000-8000-0000000000f2" },
 		});
 	});
 
 	it("offers to reconnect a server whose last test failed", async () => {
-		// A response body reads once, and the test's success refetches the list.
-		route.$get.mockImplementation(async () =>
-			Response.json([{ ...wiki, enabled: true, status: "error", lastTestError: "HTTP 401" }]),
+		route.list.mockReturnValue(
+			Effect.succeed([{ ...wiki, enabled: true, status: "error", lastTestError: "HTTP 401" }]),
 		);
-		route[":connectionId"].test.$post.mockResolvedValue(
-			Response.json({ reachable: true, latencyMs: 40, tools: 2 }),
-		);
+		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 2 }));
 		mount(page);
 		await showConnections();
 
 		fireEvent.click(await screen.findByRole("button", { name: "Reconnect" }));
 
-		await waitFor(() => expect(route[":connectionId"].test.$post).toHaveBeenCalledOnce());
+		await waitFor(() => expect(route.test).toHaveBeenCalledOnce());
 		expect(await screen.findByText(/Found 2 actions/)).toBeDefined();
 	});
 
 	it("lets a pod member view connections without mutation controls", async () => {
 		apiAnswers({ role: "member" });
-		route.$get.mockResolvedValue(Response.json([wiki]));
+		route.list.mockReturnValue(Effect.succeed([wiki]));
 		mount(page);
 		await showConnections();
 

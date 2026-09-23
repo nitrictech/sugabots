@@ -1,16 +1,23 @@
+import { Unauthorized } from "@sugabots/contracts/http";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ApiError,
-	type ClientOptions,
-	createClient,
-	memoryTokenStore,
-	unwrap,
-	unwrapEmpty,
-} from "./index.ts";
+import { type ClientOptions, createClient, isApiFailure, memoryTokenStore } from "./index.ts";
 
 type FetchMock = ReturnType<typeof respondWith>;
 
 afterEach(() => vi.unstubAllGlobals());
+
+const ME = {
+	id: "0199a3a0-0000-7000-8000-000000000001",
+	email: "sam@example.com",
+	name: "Sam",
+	image: null,
+};
+
+/** Runs a call, settling either way, so a test about the request need not care about the answer. */
+function settle<A, E>(call: Effect.Effect<A, E>) {
+	return Effect.runPromise(Effect.result(call));
+}
 
 function respondWith(body: unknown, status = 200) {
 	return vi.fn(async (..._args: Parameters<typeof fetch>) => Response.json(body, { status }));
@@ -42,9 +49,9 @@ describe("createClient", () => {
 		const tokens = memoryTokenStore();
 		const client = createClient({ baseUrl: "http://api.test", tokens, fetch });
 
-		await client.api.me.$get();
+		await settle(client.api.me());
 		tokens.set("second-token");
-		await client.api.me.$get();
+		await settle(client.api.me());
 
 		const headers = fetch.mock.calls.map((call) =>
 			new Request(...(call as [string, RequestInit])).headers.get("authorization"),
@@ -57,7 +64,7 @@ describe("createClient", () => {
 		const fetch = respondWith({});
 		const client = createClient({ baseUrl: "http://api.test", authMode: "cookie", fetch });
 
-		await client.api.me.$get();
+		await settle(client.api.me());
 
 		expect(requests(fetch)[0]?.credentials).toBe("include");
 		expect(requests(fetch)[0]?.headers.get("authorization")).toBeNull();
@@ -70,7 +77,7 @@ describe("createClient", () => {
 		const client = createClient({ baseUrl: "http://api.test", fetch });
 		client.tokens?.set("renderer-token");
 
-		await client.api.me.$get();
+		await settle(client.api.me());
 
 		expect(client.authMode).toBe("bearer");
 		expect(requests(fetch)[0]?.credentials).toBe("omit");
@@ -97,79 +104,58 @@ describe("createClient", () => {
 	});
 });
 
-describe("unwrap", () => {
-	it("returns the body of a successful response", async () => {
+describe("api", () => {
+	it("decodes a successful response", async () => {
 		const client = createClient({
 			baseUrl: "http://api.test",
 			fetch: respondWith({ status: "ok", version: "1.2.3" }),
 		});
 
-		expect(await unwrap(client.api.health.$get())).toEqual({ status: "ok", version: "1.2.3" });
+		expect(await Effect.runPromise(client.api.health())).toEqual({
+			status: "ok",
+			version: "1.2.3",
+		});
 	});
 
-	it("throws the error envelope as an ApiError", async () => {
+	it("reaches the endpoint's path under the base url", async () => {
+		const fetch = respondWith(ME);
+		const client = createClient({ baseUrl: "http://api.test/api", fetch });
+
+		await settle(client.api.me());
+
+		expect(requests(fetch)[0]?.url).toBe("http://api.test/api/me");
+	});
+
+	it("fails with the declared error class the API answered with", async () => {
 		const client = createClient({
 			baseUrl: "http://api.test",
-			fetch: respondWith(
-				{ error: { code: "unauthorized", message: "Bearer token required" } },
-				401,
-			),
+			fetch: respondWith({ _tag: "Unauthorized", message: "Bearer token required" }, 401),
 		});
 
-		const failure = await unwrap(client.api.me.$get()).catch((error: unknown) => error);
+		const failure = await Effect.runPromise(Effect.flip(client.api.me()));
 
-		expect(failure).toBeInstanceOf(ApiError);
-		expect(failure).toMatchObject({
-			code: "unauthorized",
-			status: 401,
-			message: "Bearer token required",
-		});
+		expect(failure).toBeInstanceOf(Unauthorized);
+		expect(failure).toMatchObject({ message: "Bearer token required" });
+		expect(isApiFailure(failure)).toBe(true);
 	});
 
-	it("does not mistake a proxy's error page for an envelope", async () => {
+	it("does not mistake a proxy's error page for the API answering", async () => {
 		const client = createClient({
 			baseUrl: "http://api.test",
 			fetch: vi.fn(async () => new Response("<html>502</html>", { status: 502 })),
 		});
 
-		const failure = await unwrap(client.api.me.$get()).catch((error: unknown) => error);
+		const failure = await Effect.runPromise(Effect.flip(client.api.me()));
 
-		expect(failure).toMatchObject({ code: "internal", status: 502 });
+		expect(isApiFailure(failure)).toBe(false);
 	});
 
-	it("throws when a successful JSON response is malformed", async () => {
-		const response = new Response("not json", { status: 200 });
+	it("fails when a successful response does not match the endpoint's schema", async () => {
+		const client = createClient({ baseUrl: "http://api.test", fetch: respondWith({ id: 1 }) });
 
-		await expect(unwrap(Promise.resolve(response))).rejects.toMatchObject({
-			code: "internal",
-			status: 200,
-		});
-	});
+		const failure = await Effect.runPromise(Effect.flip(client.api.me()));
 
-	it("does not accept an empty success as a JSON response", async () => {
-		await expect(
-			unwrap(Promise.resolve(new Response(null, { status: 204 }))),
-		).rejects.toBeInstanceOf(ApiError);
-	});
-});
-
-describe("unwrapEmpty", () => {
-	it("accepts a successful response without decoding it", async () => {
-		await expect(
-			unwrapEmpty(Promise.resolve(new Response(null, { status: 204 }))),
-		).resolves.toBeUndefined();
-	});
-
-	it("still decodes an error envelope", async () => {
-		const response = Response.json(
-			{ error: { code: "conflict", message: "Already complete" } },
-			{ status: 409 },
-		);
-
-		await expect(unwrapEmpty(Promise.resolve(response))).rejects.toMatchObject({
-			code: "conflict",
-			status: 409,
-		});
+		expect(isApiFailure(failure)).toBe(false);
 	});
 });
 
@@ -195,7 +181,7 @@ describe("auth", () => {
 		expect(client.tokens?.get()).toBe("issued");
 		expect(seen[0]?.credentials).toBe("omit");
 
-		await client.api.me.$get();
+		await settle(client.api.me());
 		expect(seen.at(-1)?.headers.get("authorization")).toBe("Bearer issued");
 	});
 

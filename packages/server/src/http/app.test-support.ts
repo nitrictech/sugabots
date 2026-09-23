@@ -3,7 +3,6 @@ import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import { noToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { effectRunner } from "@sugabots/core/database/database";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
@@ -19,12 +18,14 @@ import { type AgentStore, crewAgentRow, toAgent } from "@sugabots/core/workspace
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
 import type { Auth } from "../auth/auth.ts";
 import type { SessionResolver } from "../auth/session.ts";
+import { API_BASE_PATH } from "../config.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
-import { createApp, type Stores } from "./app.ts";
+import { apiLayer, type Stores } from "./app.ts";
 
 type TestIdentity =
 	| { auth: Auth; resolveSession?: never }
@@ -46,18 +47,24 @@ export const BASE_URL = "http://localhost:3000";
 /** A browser origin the test app trusts besides its own. */
 export const WEB_ORIGIN = "http://localhost:5173";
 
+export interface TestApp {
+	/** A request to `path` under `API_BASE_PATH`, e.g. `/agents/…`. */
+	request(path: string, init?: RequestInit): Promise<Response>;
+	/** A request as the server receives it, at any path. */
+	fetch(request: Request): Promise<Response>;
+}
+
 /**
  * The complete route table over fakes that grant nothing, reach nothing and
  * store nothing, so a case supplies only what it is about.
  */
-export function createTestApp(options: TestAppOptions) {
+export function createTestApp(options: TestAppOptions): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
-	return createApp({
+	const routes = apiLayer({
 		auth: options.auth ?? authForSessionResolver(options.resolveSession),
 		webOrigins: options.webOrigins ?? [WEB_ORIGIN],
 		baseUrl: BASE_URL,
 		authorization: options.authorization ?? closedAuthorization(),
-		run: effectRunner(ManagedRuntime.make(noDatabase)),
 		stores: { ...emptyStores, ...options.stores },
 		events: {
 			bus,
@@ -72,7 +79,13 @@ export function createTestApp(options: TestAppOptions) {
 		},
 		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
 		oauthFetch: async () => new Response(null, { status: 503 }),
-	});
+	}).pipe(Layer.provide([noDatabase, HttpServer.layerServices]));
+	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+	return {
+		request: (path, init) =>
+			handler(new Request(new URL(`${API_BASE_PATH}${path}`, BASE_URL), init)),
+		fetch: (request) => handler(request),
+	};
 }
 
 function authForSessionResolver(resolveSession: SessionResolver): Auth {

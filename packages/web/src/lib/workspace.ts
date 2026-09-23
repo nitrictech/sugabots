@@ -1,6 +1,6 @@
 import type { WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
-import { unwrap } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
 
@@ -222,7 +222,8 @@ function useWorkspaceStanding() {
 	return useQuery({
 		queryKey: ["workspace-standing", workspaceId],
 		queryFn: workspaceId
-			? () => unwrap(client.api.workspaces[":workspaceId"].me.$get({ param: { workspaceId } }))
+			? ({ signal }) =>
+					Effect.runPromise(client.api.workspaceAccess({ params: { workspaceId } }), { signal })
 			: skipToken,
 	});
 }

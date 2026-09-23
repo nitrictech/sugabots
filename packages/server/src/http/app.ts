@@ -1,9 +1,11 @@
+import { InternalServerError, NotFound } from "@sugabots/contracts/http";
 import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import type { ToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
+import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
@@ -17,46 +19,53 @@ import type { Authorization } from "@sugabots/core/workspaces/access";
 import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
-import { workspacePermissions } from "@sugabots/core/workspaces/permissions";
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
+import { Clock, Effect, Layer, type Types } from "effect";
+import {
+	HttpMethod,
+	HttpMiddleware,
+	HttpRouter,
+	HttpServerError,
+	HttpServerRequest,
+	HttpServerResponse,
+} from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import type { Auth } from "../auth/auth.ts";
-import type { AuthEnv } from "../auth/middleware.ts";
-import { requireCookieOrigin, requireSession } from "../auth/middleware.ts";
+import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { betterAuthSessionResolver } from "../auth/session.ts";
 import { API_BASE_PATH, trustedOrigins, webUrl } from "../config.ts";
-import { createAgentRoutes } from "../routes/agents/routes.ts";
-import { createChatRoutes } from "../routes/chats/routes.ts";
-import { createConnectionRoutes } from "../routes/connections/routes.ts";
+import { agentRoutes } from "../routes/agents/routes.ts";
+import { chatRoutes } from "../routes/chats/routes.ts";
+import { connectionRoutes } from "../routes/connections/routes.ts";
 import type { ChannelAccess } from "../routes/events/access.ts";
-import { createEventRoutes, type StreamOptions } from "../routes/events/routes.ts";
-import { createModelProviderRoutes } from "../routes/model-providers/routes.ts";
-import { createModelTrialRoutes } from "../routes/model-trials/routes.ts";
-import { createOnboardingRoutes } from "../routes/onboarding/routes.ts";
-import { createPodRoutes } from "../routes/pods/routes.ts";
-import { createRoutineRoutes } from "../routes/routines/routes.ts";
-import { createSearchProviderRoutes } from "../routes/search-providers/routes.ts";
-import { createSystemAgentRoutes } from "../routes/system-agents/routes.ts";
-import { createThreadRoutes } from "../routes/threads/routes.ts";
-import { createToolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
-import { health } from "../version.ts";
-import { requireWorkspace } from "./authorisation.ts";
-import { limitJsonBody } from "./body.ts";
-import { onError, onNotFound } from "./errors.ts";
-import type { RunHandler } from "./handler.ts";
-import { requestTracing } from "./tracing.ts";
+import { eventRoutes, type StreamOptions } from "../routes/events/routes.ts";
+import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
+import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
+import { onboardingRoutes } from "../routes/onboarding/routes.ts";
+import { podRoutes } from "../routes/pods/routes.ts";
+import { routineRoutes } from "../routes/routines/routes.ts";
+import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
+import { systemRoutes } from "../routes/system/routes.ts";
+import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
+import { threadRoutes } from "../routes/threads/routes.ts";
+import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
+import { ServerApi } from "./api.ts";
+import { authoriseLayer } from "./authorisation.ts";
+import { failureResponse } from "./errors.ts";
+import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
 /**
- * The API, as one chained Hono app.
+ * The API, as routes on an `HttpRouter`.
  *
- * The chain is what `packages/sdk` compiles against: `AppType` below is
- * inferred from it, so a route registered on its own statement would be
- * invisible to every client. better-auth's wildcard is deliberately off the
- * chain, because the client reaches it through better-auth's own SDK.
+ * What the endpoints are is `Api` in `@sugabots/contracts/http`, which
+ * `packages/sdk` derives its client from; this is where each group gets its
+ * handlers and each middleware its implementation. A group left out, or a
+ * handler missing from one, does not compile. better-auth's wildcard is beside
+ * the API rather than in it, because the client reaches it through
+ * better-auth's own SDK.
  *
- * `createApp` takes every dependency explicitly. `createTestApp` in
- * `app.test-support.ts` drives the same route table with fakes.
+ * `apiLayer` takes every dependency explicitly. `createTestApp` in
+ * `app.test-support.ts` drives the same routes with fakes.
  */
 
 /** What the route table reads and writes. */
@@ -84,8 +93,6 @@ export interface AppOptions {
 	baseUrl: string;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
-	/** Runs a handler's Effect against the process's database. */
-	run: RunHandler;
 	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
@@ -98,173 +105,173 @@ export interface AppOptions {
 	model: TurnModel;
 }
 
-export function createApp({
-	oauthFetch,
-	baseUrl,
+export function apiLayer({
 	auth,
+	baseUrl,
 	webOrigins,
 	authorization,
-	run: runUntraced,
 	stores,
 	events,
 	httpClients,
 	validateProviderUrl,
+	oauthFetch,
 	model,
 }: AppOptions) {
-	const tracing = requestTracing(runUntraced);
-	const { run } = tracing;
-	const resolveSession = betterAuthSessionResolver(auth);
 	const origins = trustedOrigins({ baseUrl, webOrigins });
 	const apiUrl = `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}`;
 
-	const app = new Hono<AuthEnv>();
-
-	app.use("*", tracing.middleware);
-
-	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
-	// send Authorization, but the token issuance header is not exposed to pages.
-	app.use(
-		"*",
-		cors({
-			origin: origins,
-			allowHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
-			credentials: true,
+	const groups = Layer.mergeAll(
+		systemRoutes,
+		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
+		onboardingRoutes({ onboarding: stores.onboarding }),
+		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),
+		systemAgentRoutes({
+			systemAgents: stores.systemAgents,
+			modelProviders: stores.modelProviders,
 		}),
+		modelTrialRoutes({ model }),
+		modelProviderRoutes({
+			modelProviders: stores.modelProviders,
+			httpClients,
+			validateProviderUrl,
+			model,
+		}),
+		searchProviderRoutes({
+			searchProviders: stores.searchProviders,
+			httpClients,
+			validateProviderUrl,
+		}),
+		connectionRoutes({
+			authorization,
+			connections: stores.connections,
+			httpClients,
+			validateProviderUrl,
+			oauth: {
+				redirectUrl: `${apiUrl}/connections/oauth/callback`,
+				returnTo: `${webUrl({ baseUrl, webOrigins })}/settings/pods`,
+				fetch: oauthFetch,
+			},
+		}),
+		agentRoutes({ agents: stores.agents, modelProviders: stores.modelProviders }),
+		chatRoutes({ chats: stores.chats }),
+		routineRoutes({ routines: stores.routines }),
+		toolApprovalRoutes({ approvals: stores.approvals }),
+		threadRoutes({ threads: stores.threads, turns: stores.turns }),
 	);
-	app.use("*", limitJsonBody);
-	app.use("*", requireCookieOrigin(origins));
-	app.onError(onError);
-	app.notFound(onNotFound);
+	const middleware = Layer.mergeAll(
+		sessionLayer(betterAuthSessionResolver(auth)),
+		authoriseLayer(authorization),
+		validateRequestLayer,
+	);
+	const api = HttpApiBuilder.layer(ServerApi).pipe(
+		Layer.provide(groups.pipe(Layer.provide(middleware))),
+	);
 
 	// Sign-up, sign-in, workspaces and invitations.
-	app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
+	const betterAuth = HttpRouter.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
+		toWebRequest(request).pipe(
+			Effect.flatMap((web) => Effect.promise(() => auth.handler(web))),
+			Effect.map(HttpServerResponse.fromWeb),
+		),
+	);
 
-	return (
-		app
-			.get("/health", (c) => c.json(health()))
-			.get("/me", requireSession(resolveSession), (c) => c.json(c.get("session").user))
-			// What the caller may do in one workspace, so the web app can decide
-			// whether to draw a control at all rather than let it fail. The role is
-			// here too, because a settings screen says which one somebody holds.
-			.get(
-				"/workspaces/:workspaceId/me",
-				requireSession(resolveSession),
-				requireWorkspace(authorization, run, "workspace.read"),
-				(c) => {
-					const { actor } = c.get("workspace");
-					return c.json({
-						role: actor.workspaceRole,
-						permissions: workspacePermissions(actor),
-					});
-				},
-			)
-			.route(
-				"/",
-				createEventRoutes({
-					resolveSession,
-					bus: events.bus,
-					access: events.access,
-					run,
-					stream: events.stream,
-				}),
-			)
-			.route("/", createOnboardingRoutes({ resolveSession, run, onboarding: stores.onboarding }))
-			.route(
-				"/",
-				createPodRoutes({
-					resolveSession,
-					authorization,
-					run,
-					pods: stores.pods,
-					modelProviders: stores.modelProviders,
-				}),
-			)
-			.route(
-				"/",
-				createSystemAgentRoutes({
-					resolveSession,
-					authorization,
-					run,
-					systemAgents: stores.systemAgents,
-					modelProviders: stores.modelProviders,
-				}),
-			)
-			.route("/", createModelTrialRoutes({ resolveSession, authorization, run, model }))
-			.route(
-				"/",
-				createModelProviderRoutes({
-					resolveSession,
-					authorization,
-					run,
-					modelProviders: stores.modelProviders,
-					httpClients,
-					validateProviderUrl,
-					model,
-				}),
-			)
-			.route(
-				"/",
-				createSearchProviderRoutes({
-					resolveSession,
-					authorization,
-					run,
-					searchProviders: stores.searchProviders,
-					httpClients,
-					validateProviderUrl,
-				}),
-			)
-			.route(
-				"/",
-				createConnectionRoutes({
-					resolveSession,
-					authorization,
-					run,
-					connections: stores.connections,
-					httpClients,
-					validateProviderUrl,
-					oauth: {
-						redirectUrl: `${apiUrl}/connections/oauth/callback`,
-						returnTo: `${webUrl({ baseUrl, webOrigins })}/settings/pods`,
-						fetch: oauthFetch,
-					},
-				}),
-			)
-			.route(
-				"/",
-				createAgentRoutes({
-					resolveSession,
-					authorization,
-					run,
-					agents: stores.agents,
-					modelProviders: stores.modelProviders,
-				}),
-			)
-			.route("/", createChatRoutes({ resolveSession, authorization, run, chats: stores.chats }))
-			.route(
-				"/",
-				createRoutineRoutes({ resolveSession, authorization, run, routines: stores.routines }),
-			)
-			.route(
-				"/",
-				createToolApprovalRoutes({
-					resolveSession,
-					authorization,
-					run,
-					approvals: stores.approvals,
-				}),
-			)
-			.route(
-				"/",
-				createThreadRoutes({
-					resolveSession,
-					authorization,
-					run,
-					threads: stores.threads,
-					turns: stores.turns,
-				}),
-			)
+	return Layer.mergeAll(api, betterAuth).pipe(
+		// Each handler's Effect runs against the process's database, which the
+		// router hands to it per request rather than capturing it once.
+		HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
+		Layer.provide(HttpRouter.middleware(everyRequest(origins), { global: true })),
 	);
 }
 
-/** What `packages/sdk` imports, as a type, to type every call it makes. */
-export type AppType = ReturnType<typeof createApp>;
+/**
+ * The request as a web `Request`, for better-auth.
+ *
+ * Built from the body `limitJsonBody` already read and cached, because the
+ * original stream has been consumed by then.
+ */
+function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effect<Request> {
+	return Effect.gen(function* () {
+		const url = HttpServerRequest.toURL(request);
+		if (url._tag === "None") {
+			return yield* Effect.die(new Error(`Unparseable request URL ${request.url}`));
+		}
+		const body = HttpMethod.hasBody(request.method) ? yield* request.text : undefined;
+		return new Request(url.value, { method: request.method, headers: request.headers, body });
+	}).pipe(Effect.orDie);
+}
+
+/** What happens to every request, the outermost first. */
+function everyRequest(origins: string[]) {
+	const cors = HttpMiddleware.cors({
+		allowedOrigins: origins,
+		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
+		credentials: true,
+	});
+	const cookieOrigin = requireCookieOrigin(origins);
+	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
+	// send Authorization, but the token issuance header is not exposed to pages.
+	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
+		cors(
+			serverTiming(defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect))))),
+		);
+}
+
+/**
+ * A defect is logged and answers `InternalServerError`. Its message may name a
+ * table, a query or a file path, so it goes to the log and not to the caller.
+ */
+function defectsAsInternal<E, R>(
+	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> {
+	return Effect.catchDefect(effect, (defect) =>
+		Effect.logError("Request failed", defect).pipe(
+			Effect.as(
+				failureResponse(
+					InternalServerError,
+					new InternalServerError({ message: "Internal server error" }),
+					500,
+				),
+			),
+		),
+	);
+}
+
+/** A path no route matches answers `NotFound` in the API's error shape, like any other. */
+function unknownRouteAsNotFound<E, R>(
+	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+): Effect.Effect<
+	HttpServerResponse.HttpServerResponse,
+	E,
+	R | HttpServerRequest.HttpServerRequest
+> {
+	return Effect.catchIf(
+		effect,
+		(error) => HttpServerError.isHttpServerError(error) && error.reason._tag === "RouteNotFound",
+		() =>
+			Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
+				failureResponse(
+					NotFound,
+					new NotFound({ message: `No route for ${request.method} ${request.url}` }),
+					404,
+				),
+			),
+	);
+}
+
+/**
+ * How long the request took and which trace it is, in the `Server-Timing`
+ * header: visible in the browser's network panel with no trace backend at
+ * all, and the trace id finds the full trace when there is one.
+ */
+function serverTiming<E, R>(
+	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> {
+	return Effect.gen(function* () {
+		const started = yield* Clock.currentTimeMillis;
+		const response = yield* effect;
+		const duration = (yield* Clock.currentTimeMillis) - started;
+		const span = yield* Effect.option(Effect.currentParentSpan);
+		const trace = span._tag === "Some" ? `, trace;desc="${span.value.traceId}"` : "";
+		return HttpServerResponse.setHeader(response, "server-timing", `app;dur=${duration}${trace}`);
+	});
+}

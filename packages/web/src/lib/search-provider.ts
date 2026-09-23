@@ -1,6 +1,6 @@
 import type { NewSearchProvider, SearchProviderUpdate } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -11,14 +11,13 @@ export function useSearchProvider() {
 	return useQuery({
 		queryKey: ["search-provider", workspaceId],
 		queryFn: workspaceId
-			? async () =>
-					(
-						await unwrap(
-							client.api.workspaces[":workspaceId"]["search-provider"].$get({
-								param: { workspaceId },
-							}),
-						)
-					).provider
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.searchProviders
+							.get({ params: { workspaceId } })
+							.pipe(Effect.map(({ provider }) => provider)),
+						{ signal },
+					)
 			: skipToken,
 	});
 }
@@ -32,26 +31,40 @@ export function useSearchProviderActions() {
 		if (!workspaceId) throw new NotReadyError();
 		return workspaceId;
 	}
-	const route = () => client.api.workspaces[":workspaceId"]["search-provider"];
 
 	return {
 		replace: useMutation({
 			mutationFn: (json: NewSearchProvider) =>
-				unwrap(route().$put({ param: { workspaceId: requiredWorkspace() }, json })),
+				Effect.runPromise(
+					client.api.searchProviders.replace({
+						params: { workspaceId: requiredWorkspace() },
+						payload: json,
+					}),
+				),
 			onSuccess: refresh,
 		}),
 		update: useMutation({
 			mutationFn: (json: SearchProviderUpdate) =>
-				unwrap(route().$patch({ param: { workspaceId: requiredWorkspace() }, json })),
+				Effect.runPromise(
+					client.api.searchProviders.update({
+						params: { workspaceId: requiredWorkspace() },
+						payload: json,
+					}),
+				),
 			onSuccess: refresh,
 		}),
 		remove: useMutation({
 			mutationFn: () =>
-				unwrapEmpty(route().$delete({ param: { workspaceId: requiredWorkspace() } })),
+				Effect.runPromise(
+					client.api.searchProviders.remove({ params: { workspaceId: requiredWorkspace() } }),
+				),
 			onSuccess: refresh,
 		}),
 		test: useMutation({
-			mutationFn: () => unwrap(route().test.$post({ param: { workspaceId: requiredWorkspace() } })),
+			mutationFn: () =>
+				Effect.runPromise(
+					client.api.searchProviders.test({ params: { workspaceId: requiredWorkspace() } }),
+				),
 			onSettled: refresh,
 		}),
 	};

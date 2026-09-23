@@ -12,6 +12,7 @@ export * from "./events.ts";
 export * from "./model-providers.ts";
 export * from "./model-trials.ts";
 export * from "./onboarding.ts";
+export * from "./permissions.ts";
 export * from "./pods.ts";
 export * from "./provider-catalog.ts";
 export * from "./routines.ts";

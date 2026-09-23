@@ -1,15 +1,12 @@
 import type { NewSearchProvider, SearchProvider, SearchProviderUpdate } from "@sugabots/contracts";
 import { searchProviderPreset } from "@sugabots/contracts";
-import { effectRunner } from "@sugabots/core/database/database";
-import { noDatabase } from "@sugabots/core/database/testing";
 import { createEgressUrlValidator } from "@sugabots/core/providers/network/egress";
 import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionResolver } from "../../auth/session.ts";
-import { onError } from "../../http/errors.ts";
-import { createSearchProviderRoutes } from "./routes.ts";
+import { createTestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
@@ -25,8 +22,6 @@ const authorization = testAuthorization({
 	id: WORKSPACE_ID,
 	roles: { [USER_ID]: "admin" },
 });
-
-const run = effectRunner(ManagedRuntime.make(noDatabase));
 
 function stored(input: NewSearchProvider, extra: Partial<SearchProvider> = {}): SearchProvider {
 	const preset = searchProviderPreset(input.preset);
@@ -92,15 +87,13 @@ function routes(
 		resolve: () => Effect.die(new Error("routes do not resolve")),
 		recordTest,
 	};
-	const app = createSearchProviderRoutes({
+	const app = createTestApp({
 		resolveSession,
 		authorization,
-		run,
-		searchProviders: store,
+		stores: { searchProviders: store },
 		httpClients: { for: () => search as unknown as typeof fetch },
 		validateProviderUrl: createEgressUrlValidator({ allowPrivateNetwork }),
 	});
-	app.onError(onError);
 	return { app, replace, update, recordTest, search };
 }
 

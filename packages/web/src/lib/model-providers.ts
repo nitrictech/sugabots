@@ -3,8 +3,8 @@ import type {
 	NewModelProvider,
 	ProviderModelUpdate,
 } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -14,12 +14,10 @@ export function useModelProviders() {
 	return useQuery({
 		queryKey: ["model-providers", workspaceId],
 		queryFn: workspaceId
-			? () =>
-					unwrap(
-						client.api.workspaces[":workspaceId"]["model-providers"].$get({
-							param: { workspaceId },
-						}),
-					)
+			? ({ signal }) =>
+					Effect.runPromise(client.api.modelProviders.list({ params: { workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 }
@@ -41,11 +39,11 @@ export function useProviderActions() {
 		create: useMutation({
 			mutationFn: (json: NewModelProvider) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"].$post({
-						param: { workspaceId },
-						json,
-					}),
+				const { create } = client.api.modelProviders;
+				return Effect.runPromise(
+					// The generated client splits a union payload into one request type
+					// per member, which a request holding the whole union does not satisfy.
+					create({ params: { workspaceId }, payload: json } as Parameters<typeof create>[0]),
 				);
 			},
 			onSuccess: refresh,
@@ -53,11 +51,8 @@ export function useProviderActions() {
 		update: useMutation({
 			mutationFn: ({ providerId, json }: { providerId: string; json: ModelProviderUpdate }) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].$patch({
-						param: { workspaceId, providerId },
-						json,
-					}),
+				return Effect.runPromise(
+					client.api.modelProviders.update({ params: { workspaceId, providerId }, payload: json }),
 				);
 			},
 			onSuccess: refresh,
@@ -65,10 +60,8 @@ export function useProviderActions() {
 		remove: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
-				return unwrapEmpty(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].$delete({
-						param: { workspaceId, providerId },
-					}),
+				return Effect.runPromise(
+					client.api.modelProviders.remove({ params: { workspaceId, providerId } }),
 				);
 			},
 			onSuccess: refresh,
@@ -76,10 +69,8 @@ export function useProviderActions() {
 		test: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].test.$post({
-						param: { workspaceId, providerId },
-					}),
+				return Effect.runPromise(
+					client.api.modelProviders.test({ params: { workspaceId, providerId } }),
 				);
 			},
 			onSuccess: refresh,
@@ -87,10 +78,8 @@ export function useProviderActions() {
 		fetchModels: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"][
-						"fetch-models"
-					].$post({ param: { workspaceId, providerId } }),
+				return Effect.runPromise(
+					client.api.modelProviders.fetchModels({ params: { workspaceId, providerId } }),
 				);
 			},
 			onSettled: refresh,
@@ -98,10 +87,10 @@ export function useProviderActions() {
 		addModel: useMutation({
 			mutationFn: ({ providerId, modelId }: { providerId: string; modelId: string }) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].models.$post({
-						param: { workspaceId, providerId },
-						json: { modelId, capabilities: [] },
+				return Effect.runPromise(
+					client.api.modelProviders.addModel({
+						params: { workspaceId, providerId },
+						payload: { modelId, capabilities: [] },
 					}),
 				);
 			},
@@ -118,10 +107,11 @@ export function useProviderActions() {
 				enabled: boolean;
 			}) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].models[
-						":modelId"
-					].$patch({ param: { workspaceId, providerId, modelId }, json: { enabled } }),
+				return Effect.runPromise(
+					client.api.modelProviders.updateModel({
+						params: { workspaceId, providerId, modelId },
+						payload: { enabled },
+					}),
 				);
 			},
 			onSuccess: refresh,
@@ -137,10 +127,11 @@ export function useProviderActions() {
 				json: ProviderModelUpdate;
 			}) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].models[
-						":modelId"
-					].$patch({ param: { workspaceId, providerId, modelId }, json }),
+				return Effect.runPromise(
+					client.api.modelProviders.updateModel({
+						params: { workspaceId, providerId, modelId },
+						payload: json,
+					}),
 				);
 			},
 			onSuccess: refresh,
@@ -156,10 +147,10 @@ export function useProviderActions() {
 				enabled: boolean;
 			}) => {
 				const workspaceId = requiredWorkspace();
-				return unwrap(
-					client.api.workspaces[":workspaceId"]["model-providers"][":providerId"].models.$patch({
-						param: { workspaceId, providerId },
-						json: { modelIds, enabled },
+				return Effect.runPromise(
+					client.api.modelProviders.setModelsEnabled({
+						params: { workspaceId, providerId },
+						payload: { modelIds, enabled },
 					}),
 				);
 			},

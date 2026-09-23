@@ -1,6 +1,6 @@
 import type { NewPod, PodUpdate } from "@sugabots/contracts";
-import { unwrap, unwrapEmpty } from "@sugabots/sdk";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -21,7 +21,8 @@ export function usePods() {
 	const query = useQuery({
 		queryKey: ["pods", workspaceId],
 		queryFn: workspaceId
-			? () => unwrap(client.api.workspaces[":workspaceId"].pods.$get({ param: { workspaceId } }))
+			? ({ signal }) =>
+					Effect.runPromise(client.api.pods.list({ params: { workspaceId } }), { signal })
 			: skipToken,
 	});
 
@@ -48,12 +49,7 @@ export function useCreatePod() {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			return unwrap(
-				client.api.workspaces[":workspaceId"].pods.$post({
-					param: { workspaceId },
-					json: input,
-				}),
-			);
+			return Effect.runPromise(client.api.pods.create({ params: { workspaceId }, payload: input }));
 		},
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
 	});
@@ -65,11 +61,8 @@ export function useEnsurePersonalPod() {
 	return useMutation({
 		mutationFn: (model: string) => {
 			if (!workspaceId) throw new NotReadyError();
-			return unwrap(
-				client.api.workspaces[":workspaceId"]["personal-pod"].$post({
-					param: { workspaceId },
-					json: { model },
-				}),
+			return Effect.runPromise(
+				client.api.pods.ensurePersonal({ params: { workspaceId }, payload: { model } }),
 			);
 		},
 		onSuccess: () =>
@@ -86,7 +79,7 @@ export function useUpdatePod(podId: string) {
 
 	return useMutation({
 		mutationFn: (input: PodUpdate) =>
-			unwrap(client.api.pods[":podId"].$patch({ param: { podId }, json: input })),
+			Effect.runPromise(client.api.pods.update({ params: { podId }, payload: input })),
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
 	});
 }
@@ -96,8 +89,7 @@ export function useDeletePod() {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
-		mutationFn: (podId: string) =>
-			unwrapEmpty(client.api.pods[":podId"].$delete({ param: { podId } })),
+		mutationFn: (podId: string) => Effect.runPromise(client.api.pods.remove({ params: { podId } })),
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
 	});
 }
@@ -105,7 +97,8 @@ export function useDeletePod() {
 export function usePodMembers(podId: string) {
 	return useQuery({
 		queryKey: ["pod-members", podId],
-		queryFn: () => unwrap(client.api.pods[":podId"].members.$get({ param: { podId } })),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.pods.listMembers({ params: { podId } }), { signal }),
 	});
 }
 
@@ -117,14 +110,12 @@ export function usePlacePodMember(podId: string) {
 	const queries = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ userId, member }: { userId: string; member: boolean }) => {
-			const route = client.api.pods[":podId"].members;
-			return unwrapEmpty(
+		mutationFn: ({ userId, member }: { userId: string; member: boolean }) =>
+			Effect.runPromise(
 				member
-					? route.$post({ param: { podId }, json: { userId } })
-					: route[":userId"].$delete({ param: { podId, userId } }),
-			);
-		},
+					? client.api.pods.addMember({ params: { podId }, payload: { userId } })
+					: client.api.pods.removeMember({ params: { podId, userId } }),
+			),
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
 	});
 }

@@ -68,7 +68,7 @@ export const modelTrialSchema = Schema.Struct({
 	accuracy: trialAccuracySchema,
 	speed: trialSpeedSchema,
 	/** What is wrong and what would be good enough, in sentences. */
-	verdict: Schema.mutable(Schema.Array(Schema.String)),
-	cases: Schema.mutable(Schema.Array(trialCaseResultSchema)),
+	verdict: Schema.Array(Schema.String),
+	cases: Schema.Array(trialCaseResultSchema),
 });
 export type ModelTrial = typeof modelTrialSchema.Type;
