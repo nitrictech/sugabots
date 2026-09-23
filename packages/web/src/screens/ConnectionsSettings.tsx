@@ -460,7 +460,7 @@ function ToolsList({
 	);
 }
 
-function readableToolName(name: string): string {
+export function readableToolName(name: string): string {
 	return name.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
