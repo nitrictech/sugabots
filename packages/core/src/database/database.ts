@@ -1,6 +1,7 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Cause, Context, Effect, Exit, Layer, type ManagedRuntime } from "effect";
 import type { Pool } from "pg";
+import { statementTracing, tracedPool } from "./statement-spans.ts";
 
 /**
  * The database, as a service.
@@ -190,7 +191,7 @@ export const layer = (pool: Pool): Layer.Layer<Database> =>
 		Database,
 		Effect.gen(function* () {
 			yield* Effect.addFinalizer(() => Effect.promise(() => pool.end()));
-			const root = drizzle({ client: pool });
+			const root = drizzle({ client: tracedPool(pool) });
 			return {
 				executor: Effect.map(CurrentTransaction, (open) => open ?? root),
 				transaction: transactionalise(root),
@@ -203,7 +204,11 @@ export const query = <A>(
 	run: (executor: Executor) => Promise<A>,
 ): Effect.Effect<A, never, Database> =>
 	Effect.flatMap(Database, ({ executor }) =>
-		Effect.flatMap(executor, (against) => Effect.promise(() => run(against))),
+		Effect.flatMap(executor, (against) =>
+			Effect.flatMap(statementTracing, (traced) =>
+				Effect.promise(() => traced(() => run(against))),
+			),
+		),
 	);
 
 /** Runs `use` in one transaction. Rolls back on failure and on interruption. */
@@ -236,7 +241,9 @@ export const queryCatching = <A, Failure>(
 	transaction(
 		Effect.flatMap(Database, ({ executor }) =>
 			Effect.flatMap(executor, (against) =>
-				Effect.tryPromise({ try: () => run(against), catch: (cause) => cause }).pipe(
+				Effect.flatMap(statementTracing, (traced) =>
+					Effect.tryPromise({ try: () => traced(() => run(against)), catch: (cause) => cause }),
+				).pipe(
 					Effect.catch((cause) => {
 						const meant = recognise(cause);
 						return meant === undefined ? Effect.die(cause) : Effect.fail(meant);

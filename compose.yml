@@ -1,7 +1,8 @@
-# Local Postgres for development. Nothing else runs in here: the API and the
-# web app run on the host, where they reload.
+# Local Postgres and a trace viewer for development. The API and the web app
+# run on the host, where they reload.
 #
-#   docker compose up -d      Postgres on 5436, ready to migrate.
+#   docker compose up -d      Postgres on 5436, ready to migrate; Jaeger on
+#                             16686, taking OTLP on 4318 (see .env.example).
 #   bun run db:migrate        Apply packages/core/drizzle migrations to it.
 #   docker compose down -v    Throw the data away.
 #
@@ -38,6 +39,16 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+
+  jaeger:
+    container_name: sugabots_jaeger
+    # Keeps traces in memory, so a restart clears them. Enough to look at one
+    # slow request; production sends OTLP to whatever backend it has.
+    image: jaegertracing/jaeger:2.10.0
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
+    restart: unless-stopped
 
 volumes:
   sugabots_postgres_data:

@@ -77,19 +77,23 @@ export function threadStore(): ThreadStore {
 		visibleThreadId: (threadId, userId) =>
 			query(async (db) => (await visibleThread(db, threadId, userId))?.id),
 
-		getVisible: (threadId, userId, history = { limit: DEFAULT_THREAD_HISTORY_LIMIT }) =>
-			Effect.gen(function* () {
-				const visible = yield* query((db) => visibleThread(db, threadId, userId));
-				if (!visible) {
-					return undefined;
-				}
-				// Decoded after the visibility check, so a bad cursor cannot be used
-				// to tell a hidden thread from a missing one.
-				const before = history.cursor ? yield* decodeHistoryCursor(history.cursor) : undefined;
-				return yield* query((db) =>
-					loadDetails(db, visible, userId, { limit: history.limit, before }),
-				);
-			}),
+		getVisible: Effect.fn("ThreadStore.getVisible")(function* (
+			threadId: string,
+			userId: string,
+			history: ThreadHistoryQuery = { limit: DEFAULT_THREAD_HISTORY_LIMIT },
+		) {
+			yield* Effect.annotateCurrentSpan("thread.id", threadId);
+			const visible = yield* query((db) => visibleThread(db, threadId, userId));
+			if (!visible) {
+				return undefined;
+			}
+			// Decoded after the visibility check, so a bad cursor cannot be used
+			// to tell a hidden thread from a missing one.
+			const before = history.cursor ? yield* decodeHistoryCursor(history.cursor) : undefined;
+			return yield* query((db) =>
+				loadDetails(db, visible, userId, { limit: history.limit, before }),
+			);
+		}),
 	};
 }
 

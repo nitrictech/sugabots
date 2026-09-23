@@ -22,6 +22,7 @@ import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
 import { Layer, ManagedRuntime } from "effect";
 import type { Pool } from "pg";
+import { observabilityLayer } from "./observability.ts";
 
 /**
  * Everything in the process that has a lifetime: the database pool, and the
@@ -53,6 +54,8 @@ export interface RuntimeOptions {
 	connectionTools: ConnectionTools;
 	/** For the facilitator to announce who it invited. */
 	publishEvents: PublishEvents;
+	/** The `OTEL_*` variables saying where traces and logs are exported. Unset, nowhere. */
+	openTelemetryEnv?: Record<string, string>;
 }
 
 export function makeRuntime({
@@ -69,6 +72,7 @@ export function makeRuntime({
 	builtInTools,
 	connectionTools,
 	publishEvents,
+	openTelemetryEnv = {},
 }: RuntimeOptions) {
 	const database = databaseLayer(pool);
 	const background = Layer.mergeAll(
@@ -91,7 +95,13 @@ export function makeRuntime({
 		facilitatorWorkerLayer({ model, publishEvents, routines }),
 	).pipe(Layer.provide(database));
 
-	return ManagedRuntime.make(Layer.merge(database, background));
+	// Merged rather than provided, so the tracer is in the runtime's own
+	// context: every effect it runs is traced, not only the layers it builds.
+	return ManagedRuntime.make(
+		Layer.merge(database, background).pipe(
+			Layer.provideMerge(observabilityLayer(openTelemetryEnv)),
+		),
+	);
 }
 
 export type AppRuntime = ManagedRuntime.ManagedRuntime<Database, never>;
