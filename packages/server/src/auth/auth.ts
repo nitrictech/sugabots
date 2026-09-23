@@ -248,8 +248,7 @@ export function createAuth({
 				},
 
 				sendInvitationEmail: async ({ id, email, organization: workspace, inviter }) => {
-					// The web app's invite route. It also redirects the older
-					// `/?invite=<id>` shape, so links already sent keep working.
+					// The web app's invite route.
 					const link = `${links}/invite/${encodeURIComponent(id)}`;
 					await mailer({
 						to: email,

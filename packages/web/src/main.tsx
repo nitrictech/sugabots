@@ -63,7 +63,7 @@ function SessionRouter({ session }: { session: Session }) {
 	return (
 		<QueryClientProvider client={queries}>
 			<TooltipProvider>
-				<RouterProvider router={router} context={{ session }} />
+				<RouterProvider router={router} context={{ session, queryClient: queries }} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);

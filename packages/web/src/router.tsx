@@ -1,20 +1,37 @@
+import type { QueryClient } from "@tanstack/react-query";
 import type { RouterHistory } from "@tanstack/react-router";
 import {
 	createRootRouteWithContext,
 	createRoute,
 	createRouter,
+	Link,
 	lazyRouteComponent,
 	Navigate,
+	notFound,
 	redirect,
 	useNavigate,
+	useRouter,
 } from "@tanstack/react-router";
-import { useAgent, useAgents } from "@/lib/agents.ts";
+import { type ReactNode, useEffect, useState } from "react";
+import { agentsQuery, findPodAgent, firstCrewAgent, useAgents, usePodAgent } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
-import { usePods } from "@/lib/pods.ts";
+import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
+import { findWithCachedQueries } from "@/lib/query.ts";
 import type { Session } from "@/lib/session.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
-import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import {
+	chooseWorkspace,
+	rememberedWorkspace,
+	useWorkspace,
+	WorkspaceSlugContext,
+	workspacesQuery,
+} from "@/lib/workspace.ts";
+import {
+	isPodSettingsTab,
+	type PodSettingsTab,
+	workspaceSettingSection,
+} from "@/lib/workspace-settings.ts";
 import { SettingsDialog } from "@/screens/SettingsDialog.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -42,84 +59,128 @@ const WorkspaceSettings = lazyRouteComponent(
  * regenerate or for Biome to be told to skip. The tree is small and the paths
  * are the product's vocabulary, so it is worth reading:
  *
- *   /                        redirects to /agents
+ *   /                        opens the workspace last visited
  *   /login
  *   /invite/$id
- *   /settings                workspace settings
- *   /agents                  picks the first agent you can see
- *   /agents/$agent           one agent's thread history and new-thread composer
- *   /settings/agents/$agent  workspace-owned agent configuration
- *   /settings/pods/$pod      workspace pod detail
- *   /settings/built-in-agents/$key   the Scribe or the Facilitator
- *   /threads/$thread         one thread
+ *   /$workspace/agents       picks the first visible agent
+ *   /$workspace/pods/$pod/agents/$agent  chat, using the pod slug and agent handle
+ *   /$workspace/settings     workspace settings
+ *   /$workspace/settings/pods/$pod/agents/$agent  agent configuration
+ *   /$workspace/settings/pods/$pod               pod configuration
+ *   /$workspace/settings/built-in-agents/$key    the Scribe or Facilitator
+ *   /$workspace/threads/$thread                 one thread
  *
- * A pod is a property of a thread and not a segment of its address: an agent
- * may be in several pods, and a thread is already in exactly one, so putting
- * the pod in the path would only give the same thread two addresses.
- *
- * An agent is addressed by its id rather than a slug, because it has no slug:
- * a person renames an agent the way they rename a colleague's nickname, and
- * every link to it would break.
- *
+ * Slugs are resolved to records before a page renders: `/$workspace` in its
+ * `beforeLoad`, pods and agents in the loaders under it. Each fills the query
+ * cache the page's hooks then read, and preloads the page's code alongside, so
+ * hovering a link fetches both and a missing record is a `notFound` rather than
+ * a branch in every page.
  */
 
 export interface RouterContext {
 	session: Session;
+	/** The cache the hooks read, so a loader can fill it before its page renders. */
+	queryClient: QueryClient;
 }
 
-const rootRoute = createRootRouteWithContext<RouterContext>()({
-	notFoundComponent: () => (
+/** What a route under `/$workspace` knows once the workspace in the address resolved. */
+interface WorkspaceContext {
+	queryClient: QueryClient;
+	workspaceId: string;
+}
+
+function NothingHere() {
+	return (
 		<div className="grid h-full place-items-center bg-sunken">
 			<EmptyState title="There is nothing at this address">
 				The link may be old, or the workspace may have moved on.
 			</EmptyState>
 		</div>
-	),
-});
-
-/** `?invite=` from the invitations NIT-1758 sent before there was a route. */
-interface RootSearch {
-	invite?: string;
+	);
 }
 
-const validateInviteSearch = (search: Record<string, unknown>): RootSearch => ({
-	invite: typeof search.invite === "string" ? search.invite : undefined,
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+	notFoundComponent: NothingHere,
+});
+
+interface LandingSearch {
+	/** A connection sign-in that failed before the API knew which pod it was for. */
+	oauth_error?: string;
+}
+
+const validateLandingSearch = (search: Record<string, unknown>): LandingSearch => ({
+	oauth_error: typeof search.oauth_error === "string" ? search.oauth_error : undefined,
 });
 
 const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
-	validateSearch: validateInviteSearch,
-	beforeLoad: ({ search }) => {
-		// Invitation links already in inboxes and docker logs point at `/?invite=`.
-		// They keep working: the route is the new shape, this is the old one.
-		if (search.invite !== undefined) {
-			throw redirect({ to: "/invite/$id", params: { id: search.invite } });
-		}
-		// Which agent to land on depends on the pods this person is in, which
-		// is a request. `/agents` makes it from inside the shell, so the frame is
-		// on screen while it resolves rather than after.
-		throw redirect({ to: "/agents" });
+	validateSearch: validateLandingSearch,
+	beforeLoad: async ({ search, context, location }) => {
+		requireUser({ context, location });
+		if (search.oauth_error !== undefined) return;
+		const workspace = await findWithCachedQueries(context.queryClient, async (readQuery) =>
+			rememberedWorkspace(await readQuery(workspacesQuery)),
+		);
+		if (!workspace) throw redirect({ to: "/onboarding" });
+		throw redirect({ to: "/$workspace/agents", params: { workspace: workspace.slug } });
 	},
+	errorComponent: () => <RetryLoad title="Could not load your workspace" />,
+	component: OAuthFailureRoute,
 });
+
+function OAuthFailureRoute() {
+	const { oauth_error: oauthError } = indexRoute.useSearch();
+	return (
+		<div className="grid h-full place-items-center bg-sunken p-6">
+			<EmptyState title="Connection sign-in failed">
+				<p>{oauthError}</p>
+				<Link to="/" search={{}} className="text-primary underline">
+					Return to workspace
+				</Link>
+			</EmptyState>
+		</div>
+	);
+}
+
+interface LoginSearch {
+	invite?: string;
+	/** Where signing in interrupted, as a path in this app; anything else is dropped. */
+	returnTo?: string;
+}
+
+const validateLoginSearch = (search: Record<string, unknown>): LoginSearch => ({
+	invite: typeof search.invite === "string" ? search.invite : undefined,
+	returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
+});
+
+/** A path in this app: not protocol-relative or backslashed, which a browser would take elsewhere. */
+function isAppPath(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		value.startsWith("/") &&
+		!value.startsWith("//") &&
+		!value.includes("\\")
+	);
+}
 
 const loginRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/login",
-	validateSearch: validateInviteSearch,
+	validateSearch: validateLoginSearch,
 	component: LoginRoute,
 });
 
 function LoginRoute() {
 	const { session } = loginRoute.useRouteContext();
-	const { invite } = loginRoute.useSearch();
+	const { invite, returnTo } = loginRoute.useSearch();
 	const navigate = useNavigate();
 
 	if (session.user) {
 		return invite !== undefined ? (
 			<Navigate to="/invite/$id" params={{ id: invite }} replace />
 		) : (
-			<Navigate to="/" replace />
+			<Navigate to={returnTo ?? "/"} replace />
 		);
 	}
 
@@ -129,7 +190,7 @@ function LoginRoute() {
 			onSignedIn={async () => {
 				await session.refresh();
 				await navigate({
-					to: invite !== undefined ? "/invite/$id" : "/",
+					to: invite !== undefined ? "/invite/$id" : (returnTo ?? "/"),
 					params: invite !== undefined ? { id: invite } : undefined,
 					replace: true,
 				});
@@ -167,15 +228,6 @@ function InviteRoute() {
 	);
 }
 
-const legacySetupRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/setup",
-	beforeLoad: ({ context }) => {
-		requireUser({ context });
-		throw redirect({ to: "/settings" });
-	},
-});
-
 const onboardingRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/onboarding",
@@ -198,34 +250,65 @@ function OnboardingRoute() {
 		);
 	}
 	if (onboarding.data?.completed && workspace.workspace) {
-		return <Navigate to="/agents" replace />;
+		return (
+			<Navigate to="/$workspace/agents" params={{ workspace: workspace.workspace.slug }} replace />
+		);
 	}
 	return <Onboarding session={session} />;
 }
 
-/** The frame. Pathless: it wraps, it does not add a segment. */
+/**
+ * The frame, for the workspace the address names.
+ *
+ * An unknown slug is not found, never another workspace: the pods and agents
+ * under it would otherwise open in a workspace the link did not name.
+ */
 const shellRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	id: "shell",
-	beforeLoad: requireUser,
-	component: ShellRoute,
+	path: "/$workspace",
+	beforeLoad: async ({ context, params, location }) => {
+		requireUser({ context, location });
+		const workspace = await findWithCachedQueries(context.queryClient, async (readQuery) =>
+			(await readQuery(workspacesQuery)).find((one) => one.slug === params.workspace),
+		);
+		if (!workspace) throw notFound();
+		return { workspaceId: workspace.id };
+	},
+	notFoundComponent: NothingHere,
+	errorComponent: () => <RetryLoad title="Could not load your workspace" />,
+	component: WorkspaceRoute,
+});
+
+function WorkspaceRoute() {
+	const { workspace } = shellRoute.useParams();
+	return (
+		<WorkspaceSlugContext value={workspace}>
+			<ShellRoute />
+		</WorkspaceSlugContext>
+	);
+}
+
+const workspaceIndexRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/",
+	beforeLoad: ({ params }) => {
+		throw redirect({ to: "/$workspace/agents", params });
+	},
 });
 
 function ShellRoute() {
-	const session = shellRoute.useRouteContext().session;
+	const { session, workspaceId } = shellRoute.useRouteContext();
 	const onboarding = useOnboarding();
-	const workspace = useWorkspace();
 
-	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-sunken" />;
-	if (onboarding.error || workspace.error) {
-		return (
-			<RouteLoadFailure
-				title="Could not load your workspace"
-				onRetry={() => Promise.all([onboarding.refetch(), workspace.refetch()])}
-			/>
-		);
+	// Whichever workspace was opened last, by a link or by switching, is the
+	// one the landing page goes back to.
+	useEffect(() => chooseWorkspace(workspaceId), [workspaceId]);
+
+	if (onboarding.isPending) return <div className="h-full bg-sunken" />;
+	if (onboarding.error) {
+		return <RouteLoadFailure title="Could not load your workspace" onRetry={onboarding.refetch} />;
 	}
-	if (!workspace.workspace || !onboarding.data?.completed) {
+	if (!onboarding.data.completed) {
 		return <Navigate to="/onboarding" replace />;
 	}
 	return <Shell session={session} />;
@@ -243,9 +326,52 @@ function RouteLoadFailure({ title, onRetry }: { title: string; onRetry: () => Pr
 	);
 }
 
+/** For a `beforeLoad` or loader that failed: trying again runs them again. */
+function RetryLoad({ title }: { title: string }) {
+	const router = useRouter();
+	return <RouteLoadFailure title={title} onRetry={() => router.invalidate()} />;
+}
+
+/** What a page in the frame shows while its loader has not answered. */
+function EmptyPanes() {
+	return <Panes>{null}</Panes>;
+}
+
+function PanesMessage({ title, children }: { title: string; children?: ReactNode }) {
+	return (
+		<Panes>
+			<EmptyState title={title}>{children}</EmptyState>
+		</Panes>
+	);
+}
+
+const API_DID_NOT_ANSWER = "The API did not answer. Reload, or check that it is running.";
+
+/** loadRosters reads pods and agents concurrently. */
+async function loadRosters(readQuery: QueryClient["fetchQuery"], workspaceId: string) {
+	const [pods, agents] = await Promise.all([
+		readQuery(podsQuery(workspaceId)),
+		readQuery(agentsQuery(workspaceId)),
+	]);
+	return { pods, agents };
+}
+
+/** Fills the rosters, or is not found when the pod and handle name no agent. */
+async function requirePodAgent(context: WorkspaceContext, params: { pod: string; agent: string }) {
+	const found = await findWithCachedQueries(context.queryClient, async (readQuery) => {
+		const { pods, agents } = await loadRosters(readQuery, context.workspaceId);
+		return findPodAgent(pods, agents, params.pod, params.agent);
+	});
+	if (!found) throw notFound();
+}
+
 const settingsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings",
+	loader: () => {
+		// The dialog opens while its Suspense waits for the settings module.
+		void WorkspaceSettings.preload?.();
+	},
 	component: () => (
 		<SettingsDialog>
 			<WorkspaceSettings section="general" />
@@ -256,28 +382,118 @@ const settingsRoute = createRoute({
 const settingsSectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/$section",
+	beforeLoad: ({ params }) => {
+		const setting = workspaceSettingSection(params.section);
+		if (!setting || setting.id === "general") {
+			throw redirect({ to: "/$workspace/settings", params: { workspace: params.workspace } });
+		}
+		return { settingSection: setting.id };
+	},
+	loader: () => {
+		void WorkspaceSettings.preload?.();
+	},
 	component: SettingsSectionRoute,
 });
 
-const settingsAgentRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/agents/$agent",
-	component: SettingsAgentRoute,
-});
+function SettingsSectionRoute() {
+	const section = settingsSectionRoute.useRouteContext({
+		select: (context) => context.settingSection,
+	});
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings section={section} />
+		</SettingsDialog>
+	);
+}
 
 const settingsPodAgentRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod/agents/$agent",
 	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
 		search.tab === "routines" ? { tab: "routines" } : {},
+	loader: ({ context, params }) => {
+		void WorkspaceSettings.preload?.();
+		return requirePodAgent(context, params);
+	},
+	pendingComponent: EmptyPanes,
+	notFoundComponent: () => <PanesMessage title="No such agent in this pod" />,
+	errorComponent: () => <PanesMessage title="Could not load this agent" />,
 	component: SettingsPodAgentRoute,
 });
+
+function SettingsPodAgentRoute() {
+	const { pod: podSlug, agent: handle } = settingsPodAgentRoute.useParams();
+	const { tab } = settingsPodAgentRoute.useSearch();
+	const found = usePodAgent(podSlug, handle);
+	// The loader found both, but either can be removed while the page is open.
+	if (!found) return <PanesMessage title="No such agent in this pod" />;
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings
+				section="pods"
+				selectedPodId={found.pod.id}
+				selectedAgentId={found.agent.id}
+				selectedAgentTab={tab}
+			/>
+		</SettingsDialog>
+	);
+}
+
+interface PodSettingsSearch {
+	tab?: PodSettingsTab;
+	oauth_error?: string;
+}
 
 const settingsPodRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod",
+	validateSearch: (search: Record<string, unknown>): PodSettingsSearch => ({
+		tab: isPodSettingsTab(search.tab) ? search.tab : undefined,
+		oauth_error: typeof search.oauth_error === "string" ? search.oauth_error : undefined,
+	}),
+	remountDeps: ({ params }) => [params.workspace, params.pod],
+	loader: async ({ context, params }) => {
+		void WorkspaceSettings.preload?.();
+		const pod = await findWithCachedQueries(context.queryClient, async (readQuery) =>
+			findPod(await readQuery(podsQuery(context.workspaceId)), params.pod),
+		);
+		if (!pod) throw notFound();
+	},
+	pendingComponent: EmptyPanes,
+	notFoundComponent: () => <PanesMessage title="No such pod here" />,
+	errorComponent: () => <PanesMessage title="Could not load this pod" />,
 	component: SettingsPodRoute,
 });
+
+function SettingsPodRoute() {
+	const { pod: podSlug } = settingsPodRoute.useParams();
+	const { tab, oauth_error: oauthError } = settingsPodRoute.useSearch();
+	const navigate = settingsPodRoute.useNavigate();
+	const [connectionSignInError, setConnectionSignInError] = useState(oauthError);
+	const { data: pods } = usePods();
+	const pod = findPod(pods, podSlug);
+	useEffect(() => {
+		if (oauthError === undefined) return;
+		// Keep the result visible after removing the one-shot callback parameters.
+		setConnectionSignInError(oauthError);
+		void navigate({
+			search: (previous) => ({ ...previous, oauth_error: undefined }),
+			replace: true,
+		});
+	}, [oauthError, navigate]);
+	// The loader found it, but it can be removed while the page is open.
+	if (!pod) return <PanesMessage title="No such pod here" />;
+	return (
+		<SettingsDialog>
+			<WorkspaceSettings
+				section="pods"
+				selectedPodId={pod.id}
+				selectedPodTab={tab}
+				connectionSignInError={connectionSignInError}
+			/>
+		</SettingsDialog>
+	);
+}
 
 /**
  * A built-in agent is addressed by its key, not by an id: there is exactly one
@@ -287,14 +503,26 @@ const settingsPodRoute = createRoute({
 const settingsBuiltInAgentRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/built-in-agents/$key",
+	beforeLoad: ({ params }) => {
+		const { workspace, key } = params;
+		if (!isBuiltInAgentKey(key)) {
+			throw redirect({
+				to: "/$workspace/settings/$section",
+				params: { workspace, section: "built-in-agents" },
+			});
+		}
+		return { builtInKey: key };
+	},
+	loader: () => {
+		void WorkspaceSettings.preload?.();
+	},
 	component: SettingsBuiltInAgentRoute,
 });
 
 function SettingsBuiltInAgentRoute() {
-	const { key } = settingsBuiltInAgentRoute.useParams();
-	if (!isBuiltInAgentKey(key)) {
-		return <Navigate to="/settings/$section" params={{ section: "built-in-agents" }} replace />;
-	}
+	const key = settingsBuiltInAgentRoute.useRouteContext({
+		select: (context) => context.builtInKey,
+	});
 	return (
 		<SettingsDialog>
 			<WorkspaceSettings section="built-in-agents" selectedBuiltInKey={key} />
@@ -302,147 +530,84 @@ function SettingsBuiltInAgentRoute() {
 	);
 }
 
-function SettingsPodRoute() {
-	const { pod: podId } = settingsPodRoute.useParams();
-	return (
-		<SettingsDialog>
-			<WorkspaceSettings section="pods" selectedPodId={podId} />
-		</SettingsDialog>
-	);
-}
-
-function SettingsAgentRoute() {
-	const { agent: agentId } = settingsAgentRoute.useParams();
-	const { agent, isPending } = useAgent(agentId);
-	if (isPending) return <Panes>{null}</Panes>;
-	return agent ? (
-		<Navigate
-			to="/settings/pods/$pod/agents/$agent"
-			params={{ pod: agent.podId, agent: agent.id }}
-			replace
-		/>
-	) : (
-		<Panes>
-			<EmptyState title="No such agent here" />
-		</Panes>
-	);
-}
-
-function SettingsPodAgentRoute() {
-	const { pod, agent } = settingsPodAgentRoute.useParams();
-	const { tab } = settingsPodAgentRoute.useSearch();
-	return (
-		<SettingsDialog>
-			<WorkspaceSettings
-				section="pods"
-				selectedPodId={pod}
-				selectedAgentId={agent}
-				selectedAgentTab={tab}
-			/>
-		</SettingsDialog>
-	);
-}
-
-function SettingsSectionRoute() {
-	const { section } = settingsSectionRoute.useParams();
-	const setting = workspaceSettingSection(section);
-	if (!setting || setting.id === "general") {
-		return <Navigate to="/settings" replace />;
-	}
-	return (
-		<SettingsDialog>
-			<WorkspaceSettings section={setting.id} />
-		</SettingsDialog>
-	);
-}
-
-/** Picks the first crew agent the caller can see. `/` sends everybody here. */
+/** Opens the first visible crew agent in the workspace, or says why there is none. */
 const agentsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/agents",
-	component: AgentsRoute,
+	loader: async ({ context }) => {
+		const { pods, agents } = await findWithCachedQueries(context.queryClient, (readQuery) =>
+			loadRosters(readQuery, context.workspaceId),
+		);
+		const first = firstCrewAgent(pods, agents);
+		if (first) throw redirect(agentChatLink(first));
+	},
+	pendingComponent: EmptyPanes,
+	errorComponent: () => (
+		<PanesMessage title="Could not load your agents">{API_DID_NOT_ANSWER}</PanesMessage>
+	),
+	component: NoAgentsRoute,
 });
 
-function AgentsRoute() {
-	const { data: pods, isPending: podsPending, error: podsError } = usePods();
-	const { agents, isPending, error } = useAgents();
-	// The roster is crew only, and this states why it has to stay that way:
-	// nobody talks to a built-in agent, so none may be landed on.
-	const first = agents?.find((agent) => agent.systemAgentKey === null);
-	const firstPod = pods?.find((pod) => pod.id === first?.podId);
-
-	if (podsPending || isPending) {
-		return <Panes>{null}</Panes>;
-	}
-
+function NoAgentsRoute() {
+	const { data: pods } = usePods();
+	const { agents } = useAgents();
+	const first = firstCrewAgent(pods, agents);
 	if (first) {
-		return (
-			<Navigate
-				to="/agents/$agent"
-				params={{ agent: first.id }}
-				search={{ pod: firstPod?.id }}
-				replace
-			/>
-		);
+		return <Navigate {...agentChatLink(first)} replace />;
 	}
-
 	return (
-		<Panes>
-			<EmptyState title={podsError || error ? "Could not load your agents" : "No agents yet"}>
-				{podsError || error
-					? "The API did not answer. Reload, or check that it is running."
-					: pods?.length === 0
-						? "You are not in a pod yet. An admin can add you to one."
-						: "An admin can make the first one."}
-			</EmptyState>
-		</Panes>
+		<PanesMessage title="No agents yet">
+			{pods?.length === 0
+				? "You are not in a pod yet. An admin can add you to one."
+				: "An admin can make the first one."}
+		</PanesMessage>
 	);
 }
 
 interface AgentSearch {
-	pod?: string;
 	thread?: string;
 	history?: "open";
 }
 
 const agentRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/agents/$agent",
+	path: "/pods/$pod/agents/$agent",
 	validateSearch: (search: Record<string, unknown>): AgentSearch => ({
-		...(typeof search.pod === "string" ? { pod: search.pod } : {}),
 		...(typeof search.thread === "string" ? { thread: search.thread } : {}),
 		...(search.history === "open" ? { history: "open" as const } : {}),
 	}),
+	loader: ({ context, params }) =>
+		Promise.all([requirePodAgent(context, params), AgentPage.preload?.()]),
+	pendingComponent: EmptyPanes,
+	notFoundComponent: NoSuchAgent,
+	errorComponent: () => (
+		<PanesMessage title="Could not load this agent">{API_DID_NOT_ANSWER}</PanesMessage>
+	),
 	component: AgentRoute,
 });
 
+function NoSuchAgent() {
+	return (
+		<PanesMessage title="No such agent here">
+			It may have been removed, or renamed — or you may not be a member of any pod it is in.
+		</PanesMessage>
+	);
+}
+
 function AgentRoute() {
-	const { agent: agentId } = agentRoute.useParams();
+	const { pod: podSlug, agent: handle } = agentRoute.useParams();
 	const search = agentRoute.useSearch();
 	const { user } = agentRoute.useRouteContext().session;
-	const { agent, isPending, error } = useAgent(agentId);
+	const found = usePodAgent(podSlug, handle);
 
-	if (isPending) {
-		return <Panes>{null}</Panes>;
-	}
-	if (!agent) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this agent" : "No such agent here"}>
-					{error
-						? "The API did not answer. Reload, or check that it is running."
-						: "It may have been removed, or renamed — or you may not be a member of any pod it is in."}
-				</EmptyState>
-			</Panes>
-		);
-	}
-
+	// The loader found both, but either can be removed while the page is open.
+	if (!found) return <NoSuchAgent />;
 	if (!user) return null;
 	return (
 		<Panes>
 			<AgentPage
-				agent={agent}
-				requestedPodId={search.pod}
+				agent={found.agent}
+				pod={found.pod}
 				user={user}
 				threadId={search.thread}
 				historyOpen={search.history === "open"}
@@ -457,6 +622,7 @@ const threadRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>) => ({
 		summary: search.summary === "closed" ? ("closed" as const) : undefined,
 	}),
+	loader: () => ThreadPage.preload?.(),
 	component: ThreadRoute,
 });
 
@@ -474,12 +640,19 @@ function ThreadRoute() {
 }
 
 /**
- * Signed out means the login page. `undefined` cannot reach here: `main.tsx`
- * waits for `/me` to answer before it mounts the router at all.
+ * Signed out means the login page, which comes back here once signed in.
+ * `undefined` cannot reach here: `main.tsx` waits for `/me` to answer before
+ * it mounts the router at all.
  */
-function requireUser({ context }: { context: RouterContext }): void {
+function requireUser({
+	context,
+	location,
+}: {
+	context: RouterContext;
+	location: { href: string };
+}): void {
 	if (context.session.user === null) {
-		throw redirect({ to: "/login" });
+		throw redirect({ to: "/login", search: { returnTo: location.href } });
 	}
 }
 
@@ -487,12 +660,11 @@ const routeTree = rootRoute.addChildren([
 	indexRoute,
 	loginRoute,
 	inviteRoute,
-	legacySetupRoute,
 	onboardingRoute,
 	shellRoute.addChildren([
+		workspaceIndexRoute,
 		settingsRoute,
 		settingsSectionRoute,
-		settingsAgentRoute,
 		settingsPodAgentRoute,
 		settingsPodRoute,
 		settingsBuiltInAgentRoute,
@@ -508,6 +680,9 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
+		// The query cache decides when data is stale, which it can only do if
+		// the router asks the loaders every time rather than reusing their last answer.
+		defaultPreloadStaleTime: 0,
 		// Tests mount the real tree over a memory history, so a route's guards
 		// and search params are exercised rather than mocked around.
 		...options,

@@ -128,6 +128,17 @@ afterEach(() => {
 });
 
 describe("thread navigation", () => {
+	it("does not show a thread under another workspace's address", async () => {
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
+				...threadDetails,
+				thread: { ...threadDetails.thread, workspaceId: "0199a3a0-0000-7000-8000-000000000099" },
+			}),
+		);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
+		expect(await screen.findByText("No such thread here")).toBeDefined();
+		expect(screen.queryByText("The release notes are ready.")).toBeNull();
+	});
 	it("says why a reply failed, in the provider's words", async () => {
 		const failed = {
 			...threadDetails,
@@ -143,7 +154,7 @@ describe("thread navigation", () => {
 			],
 		};
 		client.api.threads.get.mockReturnValue(Effect.succeed(failed));
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findByText("Reply failed")).toBeDefined();
 		expect(screen.getByText(/18\+ age confirmation/)).toBeDefined();
@@ -155,7 +166,7 @@ describe("thread navigation", () => {
 		);
 		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
 
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findByText("The release notes are ready.")).toBeDefined();
 		expect(screen.getAllByText(linear.name).length).toBeGreaterThan(0);
@@ -164,7 +175,7 @@ describe("thread navigation", () => {
 	it("distinguishes a failed thread request from a missing thread", async () => {
 		client.api.threads.get.mockReturnValue(Effect.fail(new Forbidden({ message: "Unavailable" })));
 
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findByText("Could not load this thread")).toBeDefined();
 		expect(screen.queryByText("No such thread here")).toBeNull();
@@ -172,7 +183,7 @@ describe("thread navigation", () => {
 
 	it("collapses and restores the wide thread summary", async () => {
 		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
-		const router = mount(`/threads/${threadDetails.thread.id}`);
+		const router = mount(`/suga/threads/${threadDetails.thread.id}`);
 		await screen.findByRole("complementary", { name: "Chat summary" });
 
 		fireEvent.click(screen.getAllByRole("button", { name: "Hide chat summary" })[0] as Element);
@@ -188,12 +199,12 @@ describe("thread navigation", () => {
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed({ ...threadDetails, summary: null, summaryEnabled: false }),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findAllByText(/The Scribe writes these/)).not.toHaveLength(0);
 		expect(
 			screen.getAllByRole("link", { name: "Set up the Scribe" })[0]?.getAttribute("href"),
-		).toBe("/settings/built-in-agents/summarise");
+		).toBe("/suga/settings/built-in-agents/summarise");
 	});
 
 	it("tells a member why there is no summary without a link they cannot follow", async () => {
@@ -201,7 +212,7 @@ describe("thread navigation", () => {
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed({ ...threadDetails, summary: null, summaryEnabled: false }),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findAllByText(/The Scribe writes these/)).not.toHaveLength(0);
 		expect(screen.queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
@@ -216,7 +227,7 @@ describe("thread navigation", () => {
 			summaryEnabled: undefined,
 		};
 		client.api.threads.get.mockReturnValue(Effect.succeed(withoutTheField));
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(
 			await screen.findAllByText(/A summary will appear after the first agent reply/),
@@ -229,7 +240,7 @@ describe("thread navigation", () => {
 		client.events.thread.mockReturnValue(threadUpdates.stream);
 		let current: ThreadDetails = { ...threadDetails, summary: null };
 		client.api.threads.get.mockImplementation(() => Effect.succeed(current));
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 		expect(
 			await screen.findAllByText("A summary will appear after the first agent reply."),
 		).not.toHaveLength(0);
@@ -253,7 +264,7 @@ describe("thread navigation", () => {
 				},
 			}),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect((await screen.findAllByText("capacity unavailable")).length).toBeGreaterThan(0);
 		expect(screen.queryByRole("progressbar", { name: "Latest turn context used" })).toBeNull();
@@ -264,7 +275,7 @@ describe("thread navigation", () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
 		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 		await screen.findByText("The release notes are ready.");
 
 		const messageId = "0199a3a0-0000-7000-8000-0000000000c4";
@@ -338,7 +349,7 @@ describe("thread navigation", () => {
 					: { ...threadDetails, olderMessagesCursor: cursor },
 			),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
 
@@ -376,7 +387,7 @@ describe("thread navigation", () => {
 				? olderPage.effect
 				: Effect.succeed({ ...threadDetails, olderMessagesCursor: "older-page" }),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 		fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
 
 		updates.emit(
@@ -410,7 +421,7 @@ describe("thread navigation", () => {
 				? Effect.fail(new InternalServerError({ message: "History unavailable" }))
 				: Effect.succeed({ ...threadDetails, olderMessagesCursor: "older-page" }),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
 
@@ -444,7 +455,7 @@ describe("thread navigation", () => {
 			.mockImplementation(() =>
 				Effect.succeed({ ...threadDetails, messages: [...threadDetails.messages, incoming] }),
 			);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 		await waitFor(() => expect(client.events.thread).toHaveBeenCalled());
 
 		updates.emit(
@@ -469,7 +480,7 @@ describe("thread navigation", () => {
 				],
 			}),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect((await screen.findByText(`@${triager.handle}`)).tagName).toBe("SPAN");
 	});
@@ -494,7 +505,7 @@ describe("thread navigation", () => {
 				],
 			}),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect(await screen.findByText("@linear-handler", { selector: "span" })).toBeDefined();
 		expect(screen.getAllByText(/@linear-handler/, { selector: "span" })).toHaveLength(1);
@@ -516,7 +527,7 @@ describe("thread navigation", () => {
 				],
 			}),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 
 		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
@@ -537,7 +548,7 @@ describe("thread navigation", () => {
 				messages: [personMessage],
 			}),
 		);
-		mount(`/threads/${threadDetails.thread.id}`);
+		mount(`/suga/threads/${threadDetails.thread.id}`);
 		expect(await screen.findByRole("status", { name: `${linear.name}, typing` })).toBeDefined();
 
 		updates.emit(
@@ -577,13 +588,12 @@ describe("thread navigation", () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
 		client.api.threads.get.mockReturnValue(Effect.succeed(threadDetails));
-		const router = mount(`/threads/${threadDetails.thread.id}`);
+		const router = mount(`/suga/threads/${threadDetails.thread.id}`);
 		await screen.findByText("The release notes are ready.");
 
 		await router.navigate({
-			to: "/agents/$agent",
-			params: { agent: linear.id },
-			search: { pod: undefined },
+			to: "/$workspace/pods/$pod/agents/$agent",
+			params: { workspace: "suga", pod: "suga-team", agent: linear.handle },
 		});
 
 		await waitFor(() => expect(updates.close).toHaveBeenCalledOnce());

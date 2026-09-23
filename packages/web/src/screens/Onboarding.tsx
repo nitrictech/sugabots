@@ -91,7 +91,7 @@ export function Onboarding({ session }: { session: Session }) {
 					}}
 				/>
 			) : workspace && personalAssistant ? (
-				<PodStep workspaceId={workspace.id} agent={personalAssistant} existingPod={personalPod} />
+				<PodStep workspace={workspace} agent={personalAssistant} existingPod={personalPod} />
 			) : null}
 		</OnboardingFrame>
 	);
@@ -269,23 +269,22 @@ function ProviderStep({ ready, onContinue }: { ready: boolean; onContinue: () =>
 }
 
 function PodStep({
-	workspaceId,
+	workspace,
 	agent,
 	existingPod,
 }: {
-	workspaceId: string;
-	agent: { id: string; name: string };
-	existingPod?: { id: string; name: string };
+	workspace: { id: string; slug: string };
+	agent: { id: string; name: string; handle: string };
+	existingPod?: { id: string; name: string; slug: string };
 }) {
 	const navigate = useNavigate();
 	const complete = useCompleteOnboarding();
 
-	async function finish(podId: string) {
-		await complete.mutateAsync({ workspaceId, podId, agentId: agent.id });
+	async function finish(pod: NonNullable<typeof existingPod>) {
+		await complete.mutateAsync({ workspaceId: workspace.id, podId: pod.id, agentId: agent.id });
 		await navigate({
-			to: "/agents/$agent",
-			params: { agent: agent.id },
-			search: { pod: podId },
+			to: "/$workspace/pods/$pod/agents/$agent",
+			params: { workspace: workspace.slug, pod: pod.slug, agent: agent.handle },
 			replace: true,
 		});
 	}
@@ -294,7 +293,7 @@ function PodStep({
 		<>
 			<StepHeading title="Your Personal pod is ready.">Your assistant lives here.</StepHeading>
 			{existingPod ? (
-				<Button onClick={() => void finish(existingPod.id)} disabled={complete.isPending}>
+				<Button onClick={() => void finish(existingPod)} disabled={complete.isPending}>
 					Enter {existingPod.name} <ArrowRight size={16} />
 				</Button>
 			) : (

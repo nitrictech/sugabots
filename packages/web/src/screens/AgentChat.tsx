@@ -17,6 +17,7 @@ import {
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -246,7 +247,7 @@ export function AgentChat({
 				</div>
 				<div className="shrink-0 bg-card px-4 pb-5 pt-3 md:px-[22px]">
 					{agent.model === null ? (
-						<AgentNotSetUp agent={agent} canEdit={pod.permissions.updateAgents} />
+						<AgentNotSetUp agent={agent} pod={pod} />
 					) : (
 						<ChatComposer
 							label={`Message ${agent.name}`}
@@ -531,21 +532,16 @@ function chatItemRevision(item: ChatMessageItem | undefined): string {
  * message anyway, so offering a box to type into would only lose the draft.
  * Only somebody who may edit the agent is offered the way to fix it.
  */
-function AgentNotSetUp({ agent, canEdit }: { agent: Agent; canEdit: boolean }) {
+function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 	return (
 		<p className="mx-auto m-0 w-full max-w-[760px] rounded-2xl border border-control-border px-4 py-3.5 text-base text-muted-foreground leading-relaxed">
 			{agent.name} has no model yet, so it cannot answer.{" "}
-			{canEdit ? (
+			{pod.permissions.updateAgents ? (
 				<>
 					<Button
 						size="bare"
 						variant="link"
-						render={
-							<Link
-								to="/settings/pods/$pod/agents/$agent"
-								params={{ pod: agent.podId, agent: agent.id }}
-							/>
-						}
+						render={<Link {...agentSettingsLink({ pod, agent })} />}
 					>
 						Choose a model
 					</Button>{" "}

@@ -3,6 +3,7 @@ import { ChevronRight, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useThreads } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -116,12 +117,12 @@ export function WorkspaceAgentsSettings({
 							</div>
 							{shown?.map((agent) => {
 								const pod = podById.get(agent.podId);
+								if (!pod) return null;
 								const model = agent.model === null ? undefined : modelById.get(agent.model);
 								return (
 									<Link
 										key={agent.id}
-										to="/settings/pods/$pod/agents/$agent"
-										params={{ pod: agent.podId, agent: agent.id }}
+										{...agentSettingsLink({ pod, agent })}
 										className="focus-ring grid grid-cols-[minmax(220px,1fr)_112px_160px_96px_13px] items-center gap-3 border-border-subtle border-b px-4 py-3 last:border-b-0 hover:bg-muted"
 									>
 										<span className="flex min-w-0 items-center gap-2.5">

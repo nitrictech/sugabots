@@ -9,7 +9,7 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const pod = pods[0] as (typeof pods)[number];
-const page = `/settings/pods/${pod.id}`;
+const page = `/suga/settings/pods/${pod.slug}`;
 const route = client.api.connections;
 
 const wiki: Connection = {
@@ -52,6 +52,48 @@ async function showConnections() {
 }
 
 describe("the Connections settings", () => {
+	it.each([
+		{ outcome: "success", query: "" },
+		{ outcome: "failure", query: "&oauth_error=No+thanks" },
+	])("opens Connections after OAuth $outcome", async ({ outcome, query }) => {
+		const callbackPath = `${page}?tab=connections${query}`;
+		const router = mount(callbackPath);
+		await screen.findByRole("dialog", { name: "Workspace settings" });
+		expect(await screen.findByRole("tab", { name: "Connections", selected: true })).toBeDefined();
+		if (outcome === "failure") {
+			expect(await screen.findByText("Signing in did not finish: No thanks")).toBeDefined();
+		} else {
+			expect(await screen.findByRole("heading", { name: "Connections" })).toBeDefined();
+		}
+		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
+	});
+
+	it("keeps pod tabs in the URL across navigation and reload", async () => {
+		const router = mount(`${page}?tab=connections`);
+		await screen.findByRole("tab", { name: "Connections", selected: true });
+		fireEvent.click(screen.getByRole("tab", { name: "Routing" }));
+		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=routing`));
+		expect(await screen.findByRole("tab", { name: "Routing", selected: true })).toBeDefined();
+		fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+		await waitFor(() => expect(router.state.location.href).toBe(page));
+		cleanup();
+		mount(router.state.location.href);
+		expect(await screen.findByRole("tab", { name: "Team", selected: true })).toBeDefined();
+	});
+
+	it("consumes an OAuth failure once and does not carry it into another pod", async () => {
+		const router = mount(`${page}?tab=connections&oauth_error=No+thanks`);
+		expect(await screen.findByText("Signing in did not finish: No thanks")).toBeDefined();
+		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
+		await router.navigate({
+			to: "/$workspace/settings/pods/$pod",
+			params: { workspace: "suga", pod: "sales" },
+			search: { tab: "connections" },
+		});
+		await screen.findByRole("heading", { name: "Connections" });
+		expect(screen.queryByText("Signing in did not finish: No thanks")).toBeNull();
+	});
+
 	it("connects a catalog service by signing in, with no key to paste", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		route.list.mockReturnValue(Effect.succeed([]));

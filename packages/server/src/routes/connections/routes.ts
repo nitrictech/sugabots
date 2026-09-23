@@ -7,7 +7,10 @@ import {
 	type OAuthProviders,
 	oauthProviders,
 } from "@sugabots/core/providers/connections/oauth";
-import { connectionOperations } from "@sugabots/core/providers/connections/operations";
+import {
+	type ConnectionPodAddress,
+	connectionOperations,
+} from "@sugabots/core/providers/connections/operations";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type {
 	EgressHttpClient,
@@ -32,7 +35,8 @@ export interface ConnectionRoutesOptions {
 	oauth: {
 		redirectUrl: string;
 		fetch: EgressHttpClient;
-		returnTo: string;
+		/** The web app's origin, which a finished sign-in sends the browser back to. */
+		webUrl: string;
 		begin?: typeof beginAuthorization;
 		finish?: typeof finishAuthorization;
 		providers?: OAuthProviders;
@@ -141,18 +145,26 @@ export function connectionRoutes({
 								errorDescription: query.error_description,
 							})
 							.pipe(asHttpError(connectionErrors));
-						const back = new URL(oauth.returnTo);
+						const back = outcome.pod
+							? podConnectionsUrl(oauth.webUrl, outcome.pod)
+							: new URL(oauth.webUrl);
 						if ("failed" in outcome) {
 							back.searchParams.set("oauth_error", outcome.failed);
-						} else {
-							back.pathname = `${back.pathname.replace(/\/$/, "")}/${outcome.connected.podId}`;
-							back.searchParams.set("connected", outcome.connected.connectionId);
 						}
 						return HttpServerResponse.redirect(back.toString(), { status: 302 });
 					}),
 				);
 		}),
 	);
+}
+
+/** podConnectionsUrl returns the web URL for a pod's Connections tab. */
+function podConnectionsUrl(webUrl: string, { workspaceSlug, podSlug }: ConnectionPodAddress) {
+	const url = new URL(webUrl);
+	const base = url.pathname.replace(/\/$/, "");
+	url.pathname = `${base}/${encodeURIComponent(workspaceSlug)}/settings/pods/${encodeURIComponent(podSlug)}`;
+	url.searchParams.set("tab", "connections");
+	return url;
 }
 
 const connectionErrors = {

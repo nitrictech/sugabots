@@ -1,11 +1,12 @@
 import type { Agent, Pod } from "@sugabots/contracts";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Ellipsis, Plus, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { findPodAgent, useAgents } from "@/lib/agents.ts";
+import { agentChatLink, agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import { useFoldedPods } from "@/lib/pod-folding.ts";
-import { usePods } from "@/lib/pods.ts";
+import { findPod, usePods } from "@/lib/pods.ts";
 import { useWorkspace, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -42,10 +43,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
  */
 function AgentRoster({ onNavigate }: { onNavigate?: () => void }) {
 	const selected = useParams({ strict: false });
-	const selectedPod = useLocation({
-		select: (location) =>
-			typeof location.search.pod === "string" ? location.search.pod : undefined,
-	});
 	const { data: pods, isPending: podsPending, error: podsError } = usePods();
 	const { agents, isPending: agentsPending, error: agentsError } = useAgents();
 	const may = useWorkspacePermissions();
@@ -55,8 +52,12 @@ function AgentRoster({ onNavigate }: { onNavigate?: () => void }) {
 	const isPending = podsPending || agentsPending;
 	const error = podsError ?? agentsError;
 	const visibleAgents = agents?.filter((agent) => agent.systemAgentKey === null) ?? [];
-	const selectedAgent = agents?.find((agent) => agent.id === selected.agent);
-	const selectedAgentPod = selectedPod ?? selectedAgent?.podId;
+	// The pod in the address, which a settings page names without an agent.
+	const selectedPodId = selected.pod === undefined ? undefined : findPod(pods, selected.pod)?.id;
+	const selectedAgentId =
+		selected.pod === undefined || selected.agent === undefined
+			? undefined
+			: findPodAgent(pods, agents, selected.pod, selected.agent)?.agent.id;
 	const personalPod = pods?.find((pod) => pod.kind === "personal");
 	const sharedPods = pods?.filter((pod) => pod.kind === "shared") ?? [];
 
@@ -66,18 +67,17 @@ function AgentRoster({ onNavigate }: { onNavigate?: () => void }) {
 	// fired on every render would undo it as fast as they asked for it.
 	const opened = useRef<string>(undefined);
 	useEffect(() => {
-		if (selectedAgentPod === undefined || selectedAgentPod === opened.current) return;
-		opened.current = selectedAgentPod;
-		unfold(selectedAgentPod);
-	}, [selectedAgentPod, unfold]);
+		if (selectedPodId === undefined || selectedPodId === opened.current) return;
+		opened.current = selectedPodId;
+		unfold(selectedPodId);
+	}, [selectedPodId, unfold]);
 
 	const renderPod = (pod: Pod, { capped = false } = {}) => (
 		<PodSection
 			key={pod.id}
 			pod={pod}
 			agents={visibleAgents.filter((agent) => agent.podId === pod.id)}
-			selectedAgentId={selected.agent}
-			selectedPodId={selectedAgentPod}
+			selectedAgentId={selectedAgentId}
 			open={!isFolded(pod.id)}
 			onToggle={() => toggle(pod.id)}
 			capped={capped}
@@ -122,7 +122,6 @@ function PodSection({
 	pod,
 	agents,
 	selectedAgentId,
-	selectedPodId,
 	open,
 	onToggle,
 	capped = false,
@@ -131,7 +130,6 @@ function PodSection({
 	pod: Pod;
 	agents: Agent[];
 	selectedAgentId: string | undefined;
-	selectedPodId: string | undefined;
 	open: boolean;
 	onToggle: () => void;
 	/** The pinned Personal pod, which may not take the whole rail. */
@@ -152,8 +150,8 @@ function PodSection({
 			<AgentRow
 				key={`${pod.id}:${agent.id}`}
 				agent={agent}
-				podId={pod.id}
-				selected={agent.id === selectedAgentId && selectedPodId === pod.id}
+				pod={pod}
+				selected={agent.id === selectedAgentId}
 				onNavigate={onNavigate}
 			/>
 		));
@@ -177,13 +175,10 @@ function PodSection({
 			<Dialog open={creating} onOpenChange={setCreating}>
 				<NewAgentDialog
 					podId={pod.id}
-					onCreated={async (agentId) => {
+					onCreated={async (agent) => {
 						setCreating(false);
 						onNavigate?.();
-						await navigate({
-							to: "/settings/pods/$pod/agents/$agent",
-							params: { pod: pod.id, agent: agentId },
-						});
+						await navigate(agentSettingsLink({ pod, agent }));
 					}}
 				/>
 			</Dialog>
@@ -265,10 +260,7 @@ function PodActions({
 							)}
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
-						<DropdownMenuLinkItem
-							render={<Link to="/settings/pods/$pod" params={{ pod: pod.id }} />}
-							onClick={onNavigate}
-						>
+						<DropdownMenuLinkItem render={<Link {...podSettingsLink(pod)} />} onClick={onNavigate}>
 							<Settings />
 							Pod settings
 						</DropdownMenuLinkItem>
@@ -281,12 +273,12 @@ function PodActions({
 
 function AgentRow({
 	agent,
-	podId,
+	pod,
 	selected,
 	onNavigate,
 }: {
 	agent: Agent;
-	podId: string | undefined;
+	pod: Pod;
 	selected: boolean;
 	onNavigate?: () => void;
 }) {
@@ -307,9 +299,7 @@ function AgentRow({
 	return (
 		<SidebarRow
 			as={Link}
-			to="/agents/$agent"
-			params={{ agent: agent.id }}
-			search={{ pod: podId }}
+			{...agentChatLink({ pod, agent })}
 			selected={selected}
 			aria-current={selected ? "page" : undefined}
 			onClick={onNavigate}

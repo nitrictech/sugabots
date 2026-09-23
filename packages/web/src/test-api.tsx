@@ -429,13 +429,14 @@ export function mount(
 		history: createMemoryHistory({ initialEntries: [path] }),
 	});
 
+	// A fresh cache per case, so one test's pods cannot answer another's.
+	const queryClient = createQueryClient();
 	render(
-		// A fresh cache per case, so one test's pods cannot answer another's.
-		<QueryClientProvider client={createQueryClient()}>
+		<QueryClientProvider client={queryClient}>
 			<TooltipProvider>
 				<RouterProvider
 					router={router}
-					context={{ session: { user, error: undefined, refresh } }}
+					context={{ session: { user, error: undefined, refresh }, queryClient }}
 				/>
 			</TooltipProvider>
 		</QueryClientProvider>,

@@ -8,6 +8,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	const cipher = aesCredentialCipher(Buffer.alloc(32, 9).toString("base64"));
 	const connections: Promised<ConnectionStore> = onPostgres(connectionStore(cipher));
 	let workspaceId: string;
+	let workspaceSlug: string;
 	let userId: string;
 	let podId: string;
 	let otherPodId: string;
@@ -32,6 +33,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		);
 		if (!space || !person) throw new Error("fixture");
 		workspaceId = space.id;
+		workspaceSlug = space.slug;
 		userId = person.id;
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
@@ -134,6 +136,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		});
 		expect(await connections.byOauthState("state-1")).toEqual({
 			workspaceId,
+			workspaceSlug,
 			podId,
 			connectionId: made.id,
 		});

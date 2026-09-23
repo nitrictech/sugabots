@@ -1,6 +1,8 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Ellipsis, Octagon, PanelRightClose, PanelRightOpen, SquarePen } from "lucide-react";
+import { useAgentWithPod } from "@/lib/agents.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useThreadPanel } from "@/lib/thread-panel.tsx";
 import { useCancelTurn } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -28,7 +30,8 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 			<div className="flex w-full items-center justify-end gap-5 border-border-subtle border-t pt-3 md:w-auto md:border-0 md:pt-0">
 				{details.thread.parentThreadId && (
 					<Link
-						to="/threads/$thread"
+						from="/$workspace"
+						to="./threads/$thread"
 						params={{ thread: details.thread.parentThreadId }}
 						search={{ summary: undefined }}
 						className="font-semibold text-muted-foreground text-xs underline-offset-2 hover:underline"
@@ -40,7 +43,7 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 				<span aria-hidden className="h-6 w-px bg-border-subtle" />
 				<ParticipantStack label="People" participants={people} />
 				<span aria-hidden className="h-6 w-px bg-border-subtle" />
-				<NewChatButton agentId={host.id} podId={details.thread.podId} />
+				<NewChatButton agentId={host.id} />
 				<ThreadPicker
 					agent={host}
 					podId={details.thread.podId}
@@ -58,13 +61,15 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 /**
  * Returns to the agent's main Chat from a work-artifact thread.
  */
-function NewChatButton({ agentId, podId }: { agentId: string; podId: string }) {
+function NewChatButton({ agentId }: { agentId: string }) {
+	const placed = useAgentWithPod(agentId);
+	if (!placed) return null;
 	return (
 		<IconButton
 			label="New chat"
 			variant="pane"
 			size="lg"
-			render={<Link to="/agents/$agent" params={{ agent: agentId }} search={{ pod: podId }} />}
+			render={<Link {...agentChatLink(placed)} />}
 		>
 			<SquarePen size={17} />
 		</IconButton>

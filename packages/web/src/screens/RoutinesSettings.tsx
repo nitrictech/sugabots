@@ -24,8 +24,10 @@ import {
 	Webhook,
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { useAgentWithPod } from "@/lib/agents.ts";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useRoutineActions, useRoutineExecutions, useRoutines } from "@/lib/routines.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -332,6 +334,7 @@ function LastRun({
 	execution?: RoutineExecution;
 	optimistic: boolean;
 }) {
+	const placed = useAgentWithPod(agent.id);
 	if (!execution && !optimistic) {
 		return <span className="text-subtle-foreground text-sm">Not run yet</span>;
 	}
@@ -352,12 +355,11 @@ function LastRun({
 			)}
 		</>
 	);
-	if (!execution) return <div>{content}</div>;
+	if (!execution || !placed) return <div>{content}</div>;
 	return (
 		<Link
-			to="/agents/$agent"
-			params={{ agent: agent.id }}
-			search={{ pod: agent.podId, thread: execution.threadId, history: "open" }}
+			{...agentChatLink(placed)}
+			search={{ thread: execution.threadId, history: "open" }}
 			className="block rounded-sm focus-ring"
 		>
 			{content}

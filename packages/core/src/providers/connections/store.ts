@@ -9,7 +9,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { type ConnectionRow, connection } from "../../database/schema.ts";
+import { type ConnectionRow, connection, workspace } from "../../database/schema.ts";
 import type { CredentialCipher } from "../model-providers/credentials.ts";
 import type { OAuthRecord } from "./oauth.ts";
 
@@ -99,7 +99,7 @@ export interface ConnectionStore {
 	byOauthState(
 		state: string,
 	): Effect.Effect<
-		{ workspaceId: string; podId: string; connectionId: string } | undefined,
+		{ workspaceId: string; workspaceSlug: string; podId: string; connectionId: string } | undefined,
 		never,
 		Database
 	>;
@@ -283,10 +283,12 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 				db
 					.select({
 						workspaceId: connection.workspaceId,
+						workspaceSlug: workspace.slug,
 						podId: connection.podId,
 						connectionId: connection.id,
 					})
 					.from(connection)
+					.innerJoin(workspace, eq(workspace.id, connection.workspaceId))
 					.where(eq(connection.oauthState, state))
 					.limit(1),
 			).pipe(Effect.map(([row]) => row)),

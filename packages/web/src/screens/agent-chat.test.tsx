@@ -328,7 +328,7 @@ afterEach(() => {
 
 describe("ongoing agent Chat", () => {
 	it("renders main messages and inline collaborations", async () => {
-		mount(`/agents/${linear.id}?pod=${linear.podId}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		const personMessage = (await screen.findByText(mainMessage.content)).closest("article");
 		expect(personMessage?.classList.contains("justify-end")).toBe(true);
@@ -360,7 +360,7 @@ describe("ongoing agent Chat", () => {
 				nextCursor: null,
 			}),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		const activity = await screen.findByRole("button", {
 			name: `Open Routine run: ${routineExecution.routineName}`,
@@ -373,7 +373,7 @@ describe("ongoing agent Chat", () => {
 		client.api.chats.send.mockReturnValue(
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
 		Object.defineProperty(messages, "scrollHeight", { configurable: true, value: 1_200 });
 		messages.scrollTop = 100;
@@ -394,11 +394,11 @@ describe("ongoing agent Chat", () => {
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		expect(await screen.findByText(/has no model yet, so it cannot answer/)).toBeDefined();
 		expect(screen.getByRole("link", { name: "Choose a model" }).getAttribute("href")).toBe(
-			`/settings/pods/${linear.podId}/agents/${linear.id}`,
+			`/suga/settings/pods/suga-team/agents/${linear.handle}`,
 		);
 		expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull();
 	});
@@ -406,7 +406,7 @@ describe("ongoing agent Chat", () => {
 	it("clears the composer while the message is still in flight", async () => {
 		const posting = pendingAnswer();
 		client.api.chats.send.mockReturnValue(posting.effect);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = (await screen.findByLabelText(
 			`Message ${linear.name}`,
 		)) as HTMLTextAreaElement;
@@ -427,7 +427,7 @@ describe("ongoing agent Chat", () => {
 		client.api.chats.send.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: "Nope" })),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = (await screen.findByLabelText(
 			`Message ${linear.name}`,
 		)) as HTMLTextAreaElement;
@@ -441,7 +441,7 @@ describe("ongoing agent Chat", () => {
 	it("keeps following the latest message while the agent works, and when it answers", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
 		let scrollHeight = 1_200;
 		Object.defineProperties(messages, {
@@ -481,7 +481,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("opens a read-only collaboration panel from an inline part", async () => {
-		const router = mount(`/agents/${linear.id}`);
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
 			await screen.findByRole("button", {
 				name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
@@ -510,7 +510,7 @@ describe("ongoing agent Chat", () => {
 			get: () => 1_200,
 		});
 		try {
-			mount(`/agents/${linear.id}`);
+			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 			fireEvent.click(
 				await screen.findByRole("button", {
 					name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
@@ -557,7 +557,7 @@ describe("ongoing agent Chat", () => {
 			return Effect.succeed(details(chat.mainThreadId, "Chat", "chat", []));
 		});
 
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
 			await screen.findByRole("button", {
 				name: `Open Collaboration: ${triager.name} contacted me`,
@@ -569,7 +569,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("lists only collaborations and routine runs in compact day groups", async () => {
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
 			(await screen.findAllByRole("button", { name: "Open Chat history" }))[0] as Element,
 		);
@@ -586,7 +586,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("opens collaboration and routine panels from history through the thread query", async () => {
-		const router = mount(`/agents/${linear.id}?history=open`);
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
 		const history = await screen.findByRole("complementary", { name: "Chat history" });
 		fireEvent.click(within(history).getByRole("button", { name: collaborationEntry.title }));
 
@@ -602,7 +602,7 @@ describe("ongoing agent Chat", () => {
 			within(routinePanel)
 				.getByRole("link", { name: "View routine definition" })
 				.getAttribute("href"),
-		).toBe(`/settings/pods/${linear.podId}/agents/${linear.id}?tab=routines`);
+		).toBe(`/suga/settings/pods/suga-team/agents/${linear.handle}?tab=routines`);
 		expect(within(routinePanel).getByLabelText("View webhook payload")).toBeDefined();
 		expect(within(routinePanel).queryByText(/Routine instructions:/)).toBeNull();
 		expect(within(routinePanel).queryByText(/Trigger data \(untrusted\):/)).toBeNull();
@@ -611,7 +611,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("returns from a Routine collaboration to its parent Routine", async () => {
-		mount(`/agents/${linear.id}?history=open`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
 		const history = await screen.findByRole("complementary", { name: "Chat history" });
 		fireEvent.click(within(history).getByRole("button", { name: routineEntry.title }));
 		const routinePanel = await screen.findByRole("complementary", { name: routineEntry.title });
@@ -633,7 +633,7 @@ describe("ongoing agent Chat", () => {
 		client.api.chats.history
 			.mockReturnValueOnce(Effect.succeed({ items: [collaborationEntry], nextCursor: "older" }))
 			.mockReturnValueOnce(Effect.succeed({ items: [routineEntry], nextCursor: null }));
-		mount(`/agents/${linear.id}?history=open`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
 		const history = await screen.findByRole("complementary", { name: "Chat history" });
 		fireEvent.click(within(history).getByRole("button", { name: "Load older threads" }));
 
@@ -645,20 +645,20 @@ describe("ongoing agent Chat", () => {
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [])),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		expect(await screen.findByText(`Start a conversation with ${linear.name}`)).toBeDefined();
 		expect(screen.getByText("Send a message to start working together.")).toBeDefined();
 	});
 
 	it("closes a direct-linked collaboration without leaving Chat", async () => {
-		const router = mount(`/agents/${linear.id}?thread=${collaborationId}`);
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${collaborationId}`);
 		expect(await screen.findByRole("heading", { name: collaborationEntry.title })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Close thread (Escape)" }));
 
 		await waitFor(() =>
 			expect(screen.queryByRole("heading", { name: collaborationEntry.title })).toBeNull(),
 		);
-		expect(router.state.location.pathname).toBe(`/agents/${linear.id}`);
+		expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${linear.handle}`);
 	});
 });

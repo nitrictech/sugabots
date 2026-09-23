@@ -1,6 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { hueFromText } from "@sugabots/contracts";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useMatch, useNavigate } from "@tanstack/react-router";
 import { Settings, X } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
@@ -12,16 +12,13 @@ import { DialogOverlay } from "@/ui/dialog.tsx";
 import { SettingsRailItem } from "@/ui/settings-rail.tsx";
 import { SurfaceGlow } from "@/ui/surface.tsx";
 
-/** Where closing settings lands. */
-const AFTER_SETTINGS = "/agents";
-
 /**
  * Workspace settings, as a window over the app rather than a screen in it.
  *
  * Settings is somewhere you visit and leave again, so it covers the app
  * instead of replacing it: the roster stays behind the scrim, and the way out
  * is the cross in the corner rather than a link to find at the top of a list.
- * Closing lands on {@link AFTER_SETTINGS}, which is where leaving settings has
+ * Closing lands on the workspace's agents, which is where leaving settings has
  * always landed.
  *
  * The dialog owns the section rail, because the rail belongs to the surface
@@ -49,7 +46,7 @@ export function SettingsDialog({ children }: { children: ReactNode }) {
 			<Dialog.Root
 				open
 				onOpenChange={(open) => {
-					if (!open) void navigate({ to: AFTER_SETTINGS });
+					if (!open) void navigate({ from: "/$workspace", to: "./agents" });
 				}}
 			>
 				<Dialog.Portal>
@@ -113,7 +110,12 @@ const unrestrictedSections = workspaceSettingSections.filter((section) => !("nee
  * away on a phone rather than behind a level of navigation.
  */
 function SettingsSections() {
-	const pathname = useLocation({ select: (location) => location.pathname });
+	// Section paths are written from inside the workspace, so the address is
+	// read from there too: whatever follows the `/$workspace` match.
+	const workspacePath = useMatch({ from: "/$workspace", select: (match) => match.pathname });
+	const pathname = useLocation({
+		select: (location) => location.pathname.slice(workspacePath.length),
+	});
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
@@ -181,9 +183,9 @@ function SectionLink({
 			// section, all of which sit under its address.
 			render={
 				id === "general" ? (
-					<Link to="/settings" activeOptions={{ exact: true }} />
+					<Link from="/$workspace" to="./settings" activeOptions={{ exact: true }} />
 				) : (
-					<Link to="/settings/$section" params={{ section: id }} />
+					<Link from="/$workspace" to="./settings/$section" params={{ section: id }} />
 				)
 			}
 			// Nothing separates the label from the count on screen but a gap, which

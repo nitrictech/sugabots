@@ -1,6 +1,8 @@
 import type { Agent, Thread } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, Clock3, History, SquarePen } from "lucide-react";
+import { useAgentWithPod } from "@/lib/agents.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { threadsForAgent, useThreads } from "@/lib/threads.ts";
 import {
 	DropdownMenu,
@@ -22,6 +24,7 @@ export function ThreadPicker({
 	currentThreadId: string;
 }) {
 	const query = useThreads();
+	const placed = useAgentWithPod(agent.id);
 	const threads = threadsForAgent(query.data, agent.id, podId);
 	const groupedThreads = groupThreadsByDay(threads);
 
@@ -39,15 +42,15 @@ export function ThreadPicker({
 				className="w-[min(340px,calc(100vw-24px))] overflow-hidden rounded-xl p-0"
 			>
 				<div className="max-h-[min(520px,var(--available-height))] overflow-y-auto px-3 pb-4 pt-2">
-					<DropdownMenuLinkItem
-						className="min-h-9 gap-2.5 rounded-lg px-2.5 py-2 font-medium text-heading text-md"
-						render={
-							<Link to="/agents/$agent" params={{ agent: agent.id }} search={{ pod: podId }} />
-						}
-					>
-						<SquarePen size={15} />
-						New thread
-					</DropdownMenuLinkItem>
+					{placed && (
+						<DropdownMenuLinkItem
+							className="min-h-9 gap-2.5 rounded-lg px-2.5 py-2 font-medium text-heading text-md"
+							render={<Link {...agentChatLink(placed)} />}
+						>
+							<SquarePen size={15} />
+							New thread
+						</DropdownMenuLinkItem>
+					)}
 					<DropdownMenuSeparator />
 					{query.error ? (
 						<p className="px-2 py-4 text-muted-foreground text-sm">Threads could not be loaded.</p>
@@ -69,7 +72,8 @@ export function ThreadPicker({
 										}`}
 										render={
 											<Link
-												to="/threads/$thread"
+												from="/$workspace"
+												to="./threads/$thread"
 												params={{ thread: thread.id }}
 												search={{ summary: undefined }}
 											/>

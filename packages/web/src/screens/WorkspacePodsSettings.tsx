@@ -15,6 +15,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useAgents, useDeleteAgent } from "@/lib/agents.ts";
 import { isSetUp, useBuiltInAgent } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
 	useDeletePod,
 	usePlacePodMember,
@@ -23,6 +24,7 @@ import {
 	useUpdatePod,
 } from "@/lib/pods.ts";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
+import { isPodSettingsTab, type PodSettingsTab } from "@/lib/workspace-settings.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentButton } from "@/shell/NewAgent.tsx";
 import { NewPodButton } from "@/shell/NewPod.tsx";
@@ -53,11 +55,15 @@ import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 
 export function WorkspacePodsSettings({
 	selectedPodId,
+	selectedPodTab,
+	connectionSignInError,
 	selectedAgentId,
 	selectedAgentTab,
 	canCreatePods,
 }: {
 	selectedPodId?: string;
+	selectedPodTab?: PodSettingsTab;
+	connectionSignInError?: string;
 	selectedAgentId?: string;
 	selectedAgentTab?: "routines";
 	canCreatePods: boolean;
@@ -79,7 +85,7 @@ export function WorkspacePodsSettings({
 		<SettingsRailItem
 			key={pod.id}
 			selected={pod.id === selected?.id}
-			render={<Link to="/settings/pods/$pod" params={{ pod: pod.id }} />}
+			render={<Link {...podSettingsLink(pod)} />}
 		>
 			<PodMark pod={pod} />
 			<span className="flex min-w-0 flex-1 flex-col">
@@ -99,16 +105,11 @@ export function WorkspacePodsSettings({
 			</span>
 		</SettingsRailItem>
 	);
-	const agentRailItem = (agent: Agent) => (
+	const agentRailItem = (agent: Agent, pod: Pod) => (
 		<SettingsRailItem
 			key={agent.id}
 			selected={agent.id === selectedAgentId}
-			render={
-				<Link
-					to="/settings/pods/$pod/agents/$agent"
-					params={{ pod: agent.podId, agent: agent.id }}
-				/>
-			}
+			render={<Link {...agentSettingsLink({ pod, agent })} />}
 		>
 			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
 			<span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
@@ -132,7 +133,7 @@ export function WorkspacePodsSettings({
 						footer={
 							selected.permissions.createAgents ? (
 								<NewAgentButton
-									podId={selected.id}
+									pod={selected}
 									variant="secondary"
 									className="h-11 w-full justify-center border-dashed text-base"
 								/>
@@ -140,14 +141,15 @@ export function WorkspacePodsSettings({
 						}
 					>
 						<Link
-							to="/settings/$section"
+							from="/$workspace"
+							to="./settings/$section"
 							params={{ section: "pods" }}
 							className="focus-ring mx-2 mb-3 flex items-center gap-2 rounded-lg px-2 py-2 font-medium text-muted-foreground text-sm hover:bg-sidebar-accent hover:text-foreground"
 						>
 							<ArrowLeft aria-hidden size={16} />
 							<span>Back to pods</span>
 						</Link>
-						{selectedPodAgents.map(agentRailItem)}
+						{selectedPodAgents.map((agent) => agentRailItem(agent, selected))}
 					</SettingsRail>
 				) : (
 					<SettingsRail
@@ -188,7 +190,12 @@ export function WorkspacePodsSettings({
 				) : selectedAgentId ? (
 					<EmptyState title="No such agent in this pod" />
 				) : selected ? (
-					<PodDetails key={selected.id} pod={selected} />
+					<PodDetails
+						key={selected.id}
+						pod={selected}
+						tab={selectedPodTab ?? "members"}
+						connectionSignInError={connectionSignInError}
+					/>
 				) : missing ? (
 					<EmptyState title="No such pod here">
 						It may have been removed, or you may no longer have access to it.
@@ -245,7 +252,15 @@ function PodCounts({ pod, agents }: { pod: Pod; agents: number }) {
 	);
 }
 
-function PodDetails({ pod }: { pod: Pod }) {
+function PodDetails({
+	pod,
+	tab,
+	connectionSignInError,
+}: {
+	pod: Pod;
+	tab: PodSettingsTab;
+	connectionSignInError?: string;
+}) {
 	const may = pod.permissions;
 	const update = useUpdatePod(pod.id);
 	const [renaming, setRenaming] = useState(false);
@@ -259,7 +274,7 @@ function PodDetails({ pod }: { pod: Pod }) {
 		} catch {
 			return;
 		}
-		await navigate({ to: "/settings/$section", params: { section: "pods" } });
+		await navigate({ from: "/$workspace", to: "./settings/$section", params: { section: "pods" } });
 	}
 
 	return (
@@ -269,7 +284,9 @@ function PodDetails({ pod }: { pod: Pod }) {
 					<IconButton
 						label="Back to pods"
 						className="lg:hidden"
-						render={<Link to="/settings/$section" params={{ section: "pods" }} />}
+						render={
+							<Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />
+						}
 					>
 						<ArrowLeft />
 					</IconButton>
@@ -326,7 +343,18 @@ function PodDetails({ pod }: { pod: Pod }) {
 				{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			</header>
 
-			<Tabs defaultValue="members" className="pt-7">
+			<Tabs
+				value={tab}
+				onValueChange={(value) => {
+					if (!isPodSettingsTab(value)) return;
+					void navigate({
+						...podSettingsLink(pod),
+						search: { tab: value === "members" ? undefined : value },
+						replace: true,
+					});
+				}}
+				className="pt-7"
+			>
 				<TabsList>
 					<Tab value="members">{pod.kind === "personal" ? "Personal" : "Team"}</Tab>
 					<Tab value="connections">Connections</Tab>
@@ -344,7 +372,11 @@ function PodDetails({ pod }: { pod: Pod }) {
 					<PodAgents pod={pod} may={may} />
 				</TabPanel>
 				<TabPanel value="connections">
-					<ConnectionsSettings podId={pod.id} canManage={may.manageConnections} />
+					<ConnectionsSettings
+						podId={pod.id}
+						canManage={may.manageConnections}
+						signInError={connectionSignInError}
+					/>
 				</TabPanel>
 				<TabPanel value="routing">
 					<Routing
@@ -558,8 +590,7 @@ function PodAgents({ pod, may }: { pod: Pod; may: PodPermissions }) {
 		<li key={agent.id} className="flex min-h-12 items-center gap-3 px-3.5 py-2">
 			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
 			<Link
-				to="/settings/pods/$pod/agents/$agent"
-				params={{ pod: pod.id, agent: agent.id }}
+				{...agentSettingsLink({ pod, agent })}
 				className="focus-ring min-w-0 flex-1 truncate rounded-sm font-medium text-base text-heading hover:underline"
 			>
 				{agent.name}
@@ -579,10 +610,7 @@ function PodAgents({ pod, may }: { pod: Pod; may: PodPermissions }) {
 
 	return (
 		<>
-			<Section
-				label="Agents"
-				action={may.createAgents && <NewAgentButton podId={pod.id} iconOnly />}
-			>
+			<Section label="Agents" action={may.createAgents && <NewAgentButton pod={pod} iconOnly />}>
 				{inPod.length === 0 ? (
 					<p className="m-0 text-base text-subtle-foreground">No agents in this pod yet.</p>
 				) : (

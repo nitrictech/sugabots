@@ -1,5 +1,11 @@
-import type { NewPod, PodUpdate } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { NewPod, Pod, PodUpdate } from "@sugabots/contracts";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
@@ -16,21 +22,29 @@ import { useWorkspace } from "@/lib/workspace.ts";
  */
 export function usePods() {
 	const workspace = useWorkspace();
-	const workspaceId = workspace.workspace?.id;
-
-	const query = useQuery({
-		queryKey: ["pods", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.pods.list({ params: { workspaceId } }), { signal })
-			: skipToken,
-	});
+	const query = useQuery(podsQuery(workspace.workspace?.id));
 
 	return {
 		...query,
 		/** Still resolving if we do not even know the workspace yet. */
 		isPending: workspace.isPending || query.isPending,
 	};
+}
+
+/** The pods query, for a route loader to fill before its page renders. */
+export function podsQuery(workspaceId: string | undefined) {
+	return queryOptions({
+		queryKey: ["pods", workspaceId],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.pods.list({ params: { workspaceId } }), { signal })
+			: skipToken,
+	});
+}
+
+/** The pod an address names by its slug, which is unique within the workspace. */
+export function findPod(pods: readonly Pod[] | undefined, slug: string): Pod | undefined {
+	return pods?.find((pod) => pod.slug === slug);
 }
 
 /**

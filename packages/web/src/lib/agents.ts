@@ -1,15 +1,22 @@
-import type { Agent, AgentUpdate, NewAgentInPod } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
+import { findPod, usePods } from "@/lib/pods.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
  * The agents in the workspace being looked at.
  *
  * One query for the whole roster, which the rail lists and every agent route
- * resolves its `:agent` id out of — the same arrangement pods have, and the
+ * resolves its agent handle out of — the same arrangement pods have, and the
  * reason there is no by-id fetch on the way into a page.
  *
  * The API scopes it: an agent is visible through the pods you are in, and
@@ -22,15 +29,7 @@ export function useAgents(): {
 	refetch: () => Promise<unknown>;
 } {
 	const workspace = useWorkspace();
-	const workspaceId = workspace.workspace?.id;
-
-	const query = useQuery({
-		queryKey: ["agents", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.agents.list({ params: { workspaceId } }), { signal })
-			: skipToken,
-	});
+	const query = useQuery(agentsQuery(workspace.workspace?.id));
 
 	return {
 		agents: query.data,
@@ -40,17 +39,60 @@ export function useAgents(): {
 	};
 }
 
-export function useAgent(agentId: string | undefined): {
-	agent: Agent | undefined;
-	isPending: boolean;
-	error: unknown;
-} {
-	const { agents, isPending, error } = useAgents();
-	return {
-		agent: agentId === undefined ? undefined : agents?.find((one) => one.id === agentId),
-		isPending,
-		error,
-	};
+/** The agents query, for a route loader to fill before its page renders. */
+export function agentsQuery(workspaceId: string | undefined) {
+	return queryOptions({
+		queryKey: ["agents", workspaceId],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.agents.list({ params: { workspaceId } }), { signal })
+			: skipToken,
+	});
+}
+
+/**
+ * The pod and agent an address names. A handle is unique only within its pod,
+ * so the agent is looked for in that pod alone: the same handle in another pod
+ * is a different agent, not a fallback.
+ */
+export function findPodAgent(
+	pods: readonly Pod[] | undefined,
+	agents: readonly Agent[] | undefined,
+	podSlug: string,
+	handle: string,
+): { pod: Pod; agent: Agent } | undefined {
+	const pod = findPod(pods, podSlug);
+	const agent = pod && agents?.find((one) => one.podId === pod.id && one.handle === handle);
+	return pod && agent ? { pod, agent } : undefined;
+}
+
+/**
+ * The agent a workspace opens on, with its pod. Crew only, and it has to stay
+ * that way: nobody talks to a built-in agent, so none may be landed on.
+ */
+export function firstCrewAgent(
+	pods: readonly Pod[] | undefined,
+	agents: readonly Agent[] | undefined,
+): { pod: Pod; agent: Agent } | undefined {
+	const agent = agents?.find((agent) => agent.systemAgentKey === null);
+	const pod = pods?.find((pod) => pod.id === agent?.podId);
+	return pod && agent ? { pod, agent } : undefined;
+}
+
+/** `findPodAgent` over the cached rosters, so a page sees renames and removals as they land. */
+export function usePodAgent(podSlug: string, handle: string) {
+	const { data: pods } = usePods();
+	const { agents } = useAgents();
+	return findPodAgent(pods, agents, podSlug, handle);
+}
+
+/** An agent and its pod, by the agent's id, or `undefined` until both rosters have them. */
+export function useAgentWithPod(agentId: string): { pod: Pod; agent: Agent } | undefined {
+	const { agents } = useAgents();
+	const { data: pods } = usePods();
+	const agent = agents?.find((agent) => agent.id === agentId);
+	const pod = pods?.find((pod) => pod.id === agent?.podId);
+	return agent && pod ? { pod, agent } : undefined;
 }
 
 export function useModels(enabled = true) {

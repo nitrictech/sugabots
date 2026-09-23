@@ -1,35 +1,46 @@
 import type { WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
 
-/**
+/*
  * Which workspace is being looked at, and what the caller may do in it.
  *
- * The choice is a module-level store rather than a provider or per-component
- * state, because four different places ask for it — the top bar's switcher, the
- * sidebar's roster, the pod list and the role check — and they have to agree
- * within one render. `useSyncExternalStore` is what makes that one value rather
- * than four copies of it.
+ * Under `/$workspace` the address decides, and an unknown slug resolves to no
+ * workspace at all rather than a fallback, so a shared link can never show one
+ * workspace's pods under another's name. The routes outside it — the landing
+ * page and onboarding — have no slug, and use the one last visited.
  *
- * It is the client's choice and not the server's. better-auth keeps an
- * `activeOrganizationId` on the session row, but nothing in our API reads it —
- * every scoped route names its workspace in the path — so writing it would be
- * state with no reader. localStorage is enough to survive a reload, which is
- * all "which one was I in" needs to do.
+ * "Last visited" is a module-level store rather than component state because
+ * the landing route reads it before anything renders, and every
+ * `useWorkspace` has to agree on it within one render. It is the client's
+ * memory and not the server's: better-auth keeps an `activeOrganizationId` on
+ * the session, but nothing in our API reads it — every scoped route names its
+ * workspace in the path — so localStorage is enough.
  */
 
 type Workspace = Awaited<ReturnType<typeof client.auth.workspaces.list>>[number];
 
 const KEY = "sugabots-workspace";
 
+// Routes supply the slug so workspace-aware views also work without a RouterProvider.
+export const WorkspaceSlugContext = createContext<string | undefined>(undefined);
+
 /** Every workspace this person belongs to, in the order the API lists them. */
+export const workspacesQuery = queryOptions({
+	queryKey: ["workspaces"],
+	queryFn: () => client.auth.workspaces.list(),
+});
+
 export function useWorkspaces() {
-	return useQuery({
-		queryKey: ["workspaces"],
-		queryFn: () => client.auth.workspaces.list(),
-	});
+	return useQuery(workspacesQuery);
 }
 
 /** The people in a workspace. Asks for nobody's roster until there is a workspace. */
@@ -149,10 +160,7 @@ export function useRemoveWorkspaceMember(workspaceId: string) {
 	);
 }
 
-/**
- * The one being looked at: whatever was last chosen, and the first otherwise —
- * including when the chosen one has gone, which is what a stale id means.
- */
+/** The workspace in the address, or outside `/$workspace` the one last visited. */
 export function useWorkspace(): {
 	workspace: Workspace | undefined;
 	isPending: boolean;
@@ -161,16 +169,29 @@ export function useWorkspace(): {
 } {
 	const { data, isPending, error, refetch } = useWorkspaces();
 	const chosen = useSyncExternalStore(subscribe, read, read);
+	const slug = useContext(WorkspaceSlugContext);
 
 	return {
-		workspace: data?.find((one) => one.id === chosen) ?? data?.[0],
+		workspace:
+			slug === undefined
+				? data && lastVisited(data, chosen)
+				: data?.find((one) => one.slug === slug),
 		isPending,
 		error,
 		refetch,
 	};
 }
 
-/** Switches workspace. Every `useWorkspace` in the tree re-renders. */
+/** The workspace the landing page opens: the last one visited, else the first. */
+export function rememberedWorkspace(workspaces: readonly Workspace[]): Workspace | undefined {
+	return lastVisited(workspaces, read());
+}
+
+function lastVisited(workspaces: readonly Workspace[], chosen: string | null) {
+	return workspaces.find((one) => one.id === chosen) ?? workspaces[0];
+}
+
+/** Remembers a workspace as the last visited. Every `useWorkspace` outside `/$workspace` re-renders. */
 export function chooseWorkspace(workspaceId: string): void {
 	selectedWorkspaceId = workspaceId;
 	try {

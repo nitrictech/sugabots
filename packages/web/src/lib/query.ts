@@ -29,3 +29,18 @@ export function createQueryClient(): QueryClient {
 		},
 	});
 }
+
+/**
+ * findWithCachedQueries returns a cached match while stale queries refresh in
+ * the background. If find returns undefined, it retries once with fresh queries.
+ */
+export async function findWithCachedQueries<Result>(
+	queryClient: QueryClient,
+	find: (readQuery: QueryClient["fetchQuery"]) => Promise<Result>,
+): Promise<Result> {
+	const cached = await find((options) =>
+		queryClient.ensureQueryData({ ...options, revalidateIfStale: true }),
+	);
+	if (cached !== undefined) return cached;
+	return find((options) => queryClient.fetchQuery({ ...options, staleTime: 0 }));
+}
