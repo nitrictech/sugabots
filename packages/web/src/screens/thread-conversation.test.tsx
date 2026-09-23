@@ -7,7 +7,7 @@ import type {
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
@@ -121,6 +121,7 @@ beforeEach(() => {
 			connection("linear", "Linear", "https://mcp.linear.app/mcp"),
 		]),
 	);
+	client.api.toolApprovals.decide.mockReturnValue(Effect.succeed(undefined));
 });
 
 afterEach(() => {
@@ -137,6 +138,14 @@ describe("a finished reply that used tools", () => {
 		{ type: "text", text: "Yes — 41 events, all on checkout." },
 	]);
 
+	it("leaves nothing in the thread but the answer", () => {
+		show([answered]);
+
+		expect(screen.getByText("Yes — 41 events, all on checkout.")).toBeDefined();
+		expect(screen.queryByText(/search_issues/)).toBeNull();
+		expect(screen.queryByText(/list_issues/)).toBeNull();
+	});
+
 	it("opens the steps behind the message, counted, from its action bar", async () => {
 		show([answered]);
 
@@ -149,23 +158,112 @@ describe("a finished reply that used tools", () => {
 	});
 });
 
+describe("a reply that wrote a line before each tool call", () => {
+	const narrated = reply([
+		{ type: "text", text: "Let me find the current cycle:" },
+		toolCall("linear__get_cycle"),
+		{ type: "text", text: "Now the issues in it:" },
+		toolCall("linear__list_issues"),
+		{ type: "text", text: "Here are the 2 issues in Cycle 33." },
+	]);
+
+	it("shows the answer in the thread, and what it said on the way in the log", async () => {
+		show([narrated]);
+
+		const bubble = screen.getByRole("article");
+		expect(bubble.textContent).toContain("Here are the 2 issues in Cycle 33.");
+		expect(bubble.textContent).not.toContain("Let me find the current cycle:");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Show activity · 2 steps" }));
+		const log = await screen.findByRole("dialog");
+		expect(within(log).getByText("Let me find the current cycle:")).toBeDefined();
+		expect(within(log).getByText("Now the issues in it:")).toBeDefined();
+	});
+});
+
+describe("a reply that wrote nothing but used tools", () => {
+	// A turn that called a tool and produced no text has no text part at all —
+	// `messagePartsFor` adds none when the content is empty. The bubble is where
+	// the author, the time, a failure and the way into the log all live, so
+	// without one the whole message would be invisible.
+	const wordless = reply([toolCall("sentry__search_issues")], { content: "" });
+
+	it("still shows who replied, and the way into what it did", async () => {
+		show([wordless]);
+
+		expect(await screen.findByRole("button", { name: "Show activity · 1 step" })).toBeDefined();
+		expect(screen.getByLabelText(/Linear Handler/)).toBeDefined();
+	});
+
+	it("still says a reply failed when it failed without words", async () => {
+		show([
+			reply([toolCall("sentry__search_issues")], {
+				content: "",
+				status: "failed",
+				error: "Ran out of context",
+			}),
+		]);
+
+		expect(await screen.findByText("Reply failed")).toBeDefined();
+		expect(screen.getByText(/Ran out of context/)).toBeDefined();
+	});
+});
+
+describe("a reply still using its tools", () => {
+	it("says what is happening on one line, and draws no cards", () => {
+		show([
+			reply(
+				[
+					{ type: "text", text: "" },
+					toolCall("sentry__search_issues", {
+						status: "running",
+						output: null,
+						finishedAt: null,
+					}),
+				],
+				{ status: "streaming" },
+			),
+		]);
+
+		// The service is shown as its mark, so its name is only in the accessible text.
+		expect(screen.getByText(/Search issues/)).toBeDefined();
+		expect(screen.getByText("Sentry:", { selector: ".sr-only" })).toBeDefined();
+		expect(screen.getByText("is using")).toBeDefined();
+		expect(screen.queryByRole("button", { name: /Show activity/ })).toBeNull();
+	});
+});
+
 describe("a reply still being written", () => {
 	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
 
 	it("shows none of it until it is finished, only that the agent is typing", () => {
+		const search = toolCall("sentry__search_issues", {
+			status: "running",
+			output: null,
+			finishedAt: null,
+		});
 		const { update } = show([
 			reply([{ type: "text", text: "Let me look" }], { status: "streaming" }),
 		]);
-		expect(screen.queryByRole("article", { name: /Linear Handler/ })).toBeNull();
+		expect(screen.queryByRole("article")).toBeNull();
 		expect(screen.getByRole("status", { name: "Linear Handler, typing" })).toBeDefined();
 		expect(screen.getByText("is typing")).toBeDefined();
 
-		update([reply([answer])]);
+		update([reply([search], { status: "streaming" })]);
+		expect(screen.getByText(/Search issues/)).toBeDefined();
+
+		update([reply([{ ...search, status: "completed", finishedAt: search.startedAt }, answer])]);
 		expect(screen.queryByRole("status")).toBeNull();
 		expect(screen.getByRole("article").textContent).toContain("Here are the 2 issues in Cycle 33.");
 	});
 
-	it("gives way to a write waiting on approval, which says so itself", () => {
+	it("says the agent is typing between one call and the next", () => {
+		show([reply([toolCall("sentry__search_issues")], { status: "streaming" })]);
+
+		expect(screen.getByText("is typing")).toBeDefined();
+	});
+
+	it("gives way to a write waiting on approval, which says so itself", async () => {
 		show([
 			reply(
 				[
@@ -181,6 +279,86 @@ describe("a reply still being written", () => {
 			),
 		]);
 
+		expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
 		expect(screen.queryByRole("status")).toBeNull();
+	});
+});
+
+describe("a write that needs approving", () => {
+	const pending = toolCall("linear__create_issue", {
+		status: "awaiting_approval",
+		output: null,
+		finishedAt: null,
+		mutating: true,
+		input: { team: "Platform", title: "Checkout requests time out" },
+		approval: { status: "pending", decidedByName: null, decidedAt: null },
+	});
+	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
+
+	it("stops the thread and shows what it would send, as fields", async () => {
+		show([asking]);
+
+		expect(
+			await screen.findByRole("region", { name: "Approval needed: Create issue in Linear" }),
+		).toBeDefined();
+		expect(screen.getByText("wants to make a change")).toBeDefined();
+		expect(screen.getByText("Team")).toBeDefined();
+		expect(screen.getByText("Platform")).toBeDefined();
+	});
+
+	it("allows it once by default, and always when that is ticked", async () => {
+		const approval = client.api.toolApprovals.decide;
+		show([asking], { canAlwaysAllow: true });
+
+		fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+
+		cleanup();
+		approval.mockClear();
+		show([asking], { canAlwaysAllow: true });
+		fireEvent.click(await screen.findByRole("checkbox"));
+		fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "always_allow" });
+	});
+
+	it("sends a refusal when denied", async () => {
+		const approval = client.api.toolApprovals.decide;
+		show([asking]);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
+	});
+
+	it("says so when the viewer is not the one who can answer", async () => {
+		show([asking], { canApprove: false });
+
+		expect(
+			await screen.findByText("Waiting for someone with permission to answer this."),
+		).toBeDefined();
+		expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+	});
+
+	it("leaves a line behind when it was refused, unlike everything else", async () => {
+		show([
+			reply([
+				{ type: "text", text: "Left it untracked." },
+				toolCall("linear__create_issue", {
+					status: "awaiting_approval",
+					output: null,
+					finishedAt: null,
+					mutating: true,
+					approval: { status: "denied", decidedByName: "Ryan Eyes", decidedAt: null },
+				}),
+			]),
+		]);
+
+		expect(await screen.findByText(/Ryan Eyes denied/)).toBeDefined();
+		// The service is its mark, so its name is only in the accessible text.
+		expect(screen.getByText("Create issue")).toBeDefined();
+		expect(screen.getByText("in Linear", { selector: ".sr-only" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Review" })).toBeDefined();
 	});
 });
