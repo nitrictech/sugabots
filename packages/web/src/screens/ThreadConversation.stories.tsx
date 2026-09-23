@@ -1,4 +1,12 @@
-import type { Message, SessionUser, ThreadParticipant } from "@sugabots/contracts";
+import type {
+	Message,
+	MessagePart,
+	SessionUser,
+	ThreadParticipant,
+	ToolCallPart,
+} from "@sugabots/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -40,6 +48,29 @@ function message(id: string, author: Message["author"], content: string): Messag
 	};
 }
 
+const POD = "0199a3a0-0000-7000-8000-00000000000b";
+
+function toolCall(id: string, tool: string): ToolCallPart {
+	return {
+		type: "tool_call",
+		id,
+		tool,
+		input: {},
+		output: { ok: true },
+		status: "completed",
+		error: null,
+		mutating: false,
+		atOffset: 0,
+		startedAt: "2026-09-22T04:30:00.000Z",
+		finishedAt: "2026-09-22T04:30:01.200Z",
+	};
+}
+
+function reply(id: string, parts: MessagePart[]): Message {
+	const content = parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+	return { ...message(id, host, content), parts };
+}
+
 const meta = preview.meta({
 	title: "Product/ThreadConversation",
 	component: ThreadConversation,
@@ -48,14 +79,25 @@ const meta = preview.meta({
 		isRunning: false,
 		mentionable: [host, person],
 		user,
-		podId: "0199a3a0-0000-7000-8000-00000000000b",
+		podId: POD,
 	},
 	decorators: [
-		(Story) => (
-			<div className="mx-auto max-w-home py-4">
-				<Story />
-			</div>
-		),
+		function WithQueries(Story) {
+			// The pod has no connections, so its tools are named without a mark.
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connections", POD], []);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<div className="mx-auto max-w-home py-4">
+						<Story />
+					</div>
+				</QueryClientProvider>
+			);
+		},
 	],
 });
 
@@ -134,6 +176,37 @@ export const UnbreakableWords = meta.story({
 				person,
 				"Thanks — https://storage.example.com/traces/sugabots/2026-09-22/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/trace.json is the one I was missing.",
 			),
+		],
+	},
+});
+
+/**
+ * An agent that wrote a line before each tool call: the thread shows only its
+ * answer, and what it said on the way is in the activity log.
+ */
+export const NarratedBetweenToolCalls = meta.story({
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByRole("article")).toHaveLength(2);
+	},
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000106",
+				person,
+				"What's in the current cycle for Internal Agents?",
+			),
+			reply("0199a3a0-0000-7000-8000-000000000107", [
+				{ type: "text", text: "Let me start by finding the current cycle for the Suga Eng team:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000201", "linear__get_team"),
+				{ type: "text", text: "Now let me get the current cycle with the team ID:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000202", "linear__list_cycles"),
+				{ type: "text", text: "The current cycle is Cycle 33. Now the issues in it:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000203", "linear__list_issues"),
+				{
+					type: "text",
+					text: "There are two high-priority issues in Cycle 33: NIT-1846, on slow chat history loading, and NIT-1819, a layout shift when enabling a provider.",
+				},
+			]),
 		],
 	},
 });

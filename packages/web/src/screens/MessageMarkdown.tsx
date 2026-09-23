@@ -7,21 +7,18 @@ import { visit } from "unist-util-visit";
 import { MENTION_TAG, Mention, remarkMentions } from "./mentions.tsx";
 
 /*
- * An agent's words as markdown. Streamdown is the AI SDK's renderer for text
- * that is still arriving: an unclosed `**` or code fence is drawn as though
- * closed rather than as raw punctuation until the rest streams in, and the
- * output is sanitised, which model text needs. Its caret sits after the last
- * word while the reply is being written.
+ * An agent's words as markdown. Streamdown is the AI SDK's renderer: it
+ * forgives the unclosed `**` or code fence a model sometimes leaves behind, and
+ * its output is sanitised, which model text needs. A reply is only drawn once
+ * it is finished, so none of its streaming behaviour is used.
  */
 
 export function MessageMarkdown({
 	text,
 	mentionable,
-	streaming,
 }: {
 	text: string;
 	mentionable: ThreadParticipant[];
-	streaming: boolean;
 }) {
 	const remarkPlugins = useMemo(
 		(): PluggableList => [[remarkMentions, mentionable]],
@@ -36,8 +33,7 @@ export function MessageMarkdown({
 			allowedTags={ALLOWED_TAGS}
 			components={components}
 			controls={CONTROLS}
-			isAnimating={streaming}
-			caret={text ? "block" : undefined}
+			isAnimating={false}
 		>
 			{text}
 		</Streamdown>

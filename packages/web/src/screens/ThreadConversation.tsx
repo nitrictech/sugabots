@@ -6,23 +6,40 @@ import type {
 	ThreadParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
-import { Fragment } from "react";
+import { Fragment, type ReactNode, useMemo } from "react";
+import { useConnectionLooks } from "@/lib/connections.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { ChatActivityRow } from "./ChatActivityRow.tsx";
 import { CollaborationThread } from "./CollaborationThread.tsx";
+import { MessageActions } from "./MessageActions.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
-import { ToolCallRow } from "./ToolCallRow.tsx";
+import { DeniedToolLine, ToolApprovalCard } from "./ToolApprovalCard.tsx";
+import { TypingIndicator } from "./TypingIndicator.tsx";
+import { isNarration, splitToolKey, toolActivityOf } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
 /*
- * A message is drawn as its parts, in order: each run of text is a bubble,
- * each collaboration is the child thread it opened, at full width, and each tool
- * call is a compact row. So an agent that writes, asks another agent, and
- * writes again shows as a bubble, a child thread, and a bubble, in the order
- * it happened.
+ * A message is drawn as its parts, in order: text is a bubble and each
+ * collaboration is the child thread it opened, at full width. So an agent that
+ * writes, asks another agent, and writes again shows as a bubble, a child
+ * thread, and a bubble, in the order it happened.
+ *
+ * A reply is drawn once it is finished, never as it streams. What the agent
+ * writes on the way is often the lead-in to a tool call ("Let me find the
+ * cycle:"), and that cannot be told until the call arrives, so a reply drawn
+ * live would show words and then take them back. While the turn runs, one line
+ * says the agent is typing, or which step it is on.
+ *
+ * Tool calls are not drawn as parts at all. They belong to the turn rather than
+ * to the transcript, so once the reply lands they leave nothing behind — the
+ * step count on the message's own action bar is the way to what they did. What
+ * the agent said just before a call is narration and goes with them: the thread
+ * shows the answer, and the activity log how it got there. The exception is a
+ * write waiting to be approved, and one that was refused: those stopped or
+ * changed the reply, so they stay in the thread, mid-turn included.
  */
 
 export function ThreadConversation({
@@ -56,15 +73,29 @@ export function ThreadConversation({
 	canAlwaysAllowToolCalls?: boolean;
 }) {
 	const lastMessage = messages.at(-1);
-	const showThinking = isRunning && lastMessage?.author.kind === "person";
+	// The turn has started but its reply has not been created yet.
+	const replyPending = isRunning && lastMessage?.author.kind === "person";
+	const looks = useConnectionLooks(podId);
+	const names = useMemo(
+		() => new Map([...looks].map(([handle, look]) => [handle, look.name])),
+		[looks],
+	);
 	return (
 		<div className="flex flex-col gap-[17px]">
 			{messages.map((message, index) => {
 				const divider = dividers ? dividerBefore(messages[index - 1], message) : undefined;
+				const activity = toolActivityOf(message, names);
+				const outgoing =
+					(message.author.kind === "person" && message.author.id === user.id) ||
+					(hostAgentOnRight && message.author.kind === "agent" && message.author.id === host.id);
+				const segments = segmentsOf(message);
+				// Tool calls draw nothing, so the message's state and its action bar
+				// belong to the last bubble rather than to the last part.
+				const lastBubble = segments.findLastIndex((segment) => segment.type === "text");
 				return (
 					<Fragment key={message.id}>
 						{divider && <ActivityDivider>{divider}</ActivityDivider>}
-						{segmentsOf(message).map((segment, position, all) => {
+						{segments.map((segment, position) => {
 							if (segment.type === "collaboration") {
 								if (onOpenCollaboration) {
 									const recipient = mentionable.find(
@@ -98,113 +129,146 @@ export function ThreadConversation({
 								);
 							}
 							if (segment.type === "tool_call") {
-								return (
-									<ToolCallRow
-										key={segment.key}
-										call={segment.toolCall}
-										threadId={message.threadId}
-										podId={podId}
-										canApprove={canApproveToolCalls}
-										canAlwaysAllow={canAlwaysAllowToolCalls}
-									/>
-								);
+								const call = segment.toolCall;
+								if (call.status === "awaiting_approval" && call.approval?.status === "pending") {
+									return (
+										<ToolApprovalCard
+											key={segment.key}
+											call={call}
+											threadId={message.threadId}
+											podId={podId}
+											canApprove={canApproveToolCalls}
+											canAlwaysAllow={canAlwaysAllowToolCalls}
+											look={looks.get(splitToolKey(call.tool).handle)}
+										/>
+									);
+								}
+								if (call.approval?.status === "denied") {
+									return (
+										<DeniedToolLine
+											key={segment.key}
+											call={call}
+											activity={activity}
+											looks={looks}
+											at={message.createdAt}
+										/>
+									);
+								}
+								// Every other call is the turn's own business: the log holds it.
+								return null;
 							}
+							const isLast = position === lastBubble;
 							return (
 								<MessageBubble
 									key={segment.key}
 									message={message}
 									text={segment.text}
-									outgoing={
-										(message.author.kind === "person" && message.author.id === user.id) ||
-										(hostAgentOnRight &&
-											message.author.kind === "agent" &&
-											message.author.id === host.id)
-									}
+									outgoing={outgoing}
 									mentionable={mentionable}
-									isLast={position === all.length - 1}
-									waitingOn={segment.waitingOn}
+									isLast={isLast}
+									actions={
+										isLast && message.author.kind === "agent" ? (
+											<MessageActions
+												text={textOf(message)}
+												activity={activity}
+												looks={looks}
+												at={message.createdAt}
+											/>
+										) : undefined
+									}
 								/>
 							);
 						})}
+						{message.author.kind === "agent" && isTyping(message) && (
+							<TypingIndicator
+								key={`${message.id}-typing`}
+								agent={message.author}
+								activity={activity}
+								waitingOn={waitingOn(message)}
+								looks={looks}
+								outgoing={outgoing}
+							/>
+						)}
 					</Fragment>
 				);
 			})}
-			{showThinking && <ThinkingBubble agent={host} outgoing={hostAgentOnRight} />}
+			{replyPending && <TypingIndicator agent={host} outgoing={hostAgentOnRight} />}
 		</div>
 	);
 }
 
+/**
+ * Whether a reply's turn is still going, so the typing line stands in for it.
+ * A call waiting to be approved has its own card saying the turn is stopped on
+ * it, and the line would say the same thing twice.
+ */
+function isTyping(message: Message): boolean {
+	const awaitingApproval = message.parts.some(
+		(part) => part.type === "tool_call" && part.status === "awaiting_approval",
+	);
+	return message.status === "streaming" && !awaitingApproval;
+}
+
+/** The collaborator a running reply has asked and not yet heard back from. */
+function waitingOn(message: Message): string | undefined {
+	const last = message.parts.at(-1);
+	return last?.type === "collaboration" ? last.agentName : undefined;
+}
+
+/** A pending approval or a refusal: the only tool calls the thread draws. */
+function drawsInThread(call: ToolCallPart): boolean {
+	const pending = call.status === "awaiting_approval" && call.approval?.status === "pending";
+	return pending || call.approval?.status === "denied";
+}
+
+/** What the message's bubbles say, narration left out, for the copy action. */
+function textOf(message: Message): string {
+	return message.parts
+		.filter((_, index) => !isNarration(message.parts, index))
+		.map((part) => (part.type === "text" ? part.text : ""))
+		.join("");
+}
+
 type Segment =
-	| { type: "text"; key: string; text: string; waitingOn?: string }
+	| { type: "text"; key: string; text: string }
 	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
 
 /**
- * The message's parts as things to draw. A streaming reply whose last part is
- * a collaboration or a tool call gets a trailing bubble that says what it is
- * waiting for, which is where its next words will land.
+ * The message's parts as things to draw, leaving out narration and every tool
+ * call but a pending approval or a refusal. A reply still being written shows
+ * only those and its collaborations: its text waits until it is finished.
  */
 function segmentsOf(message: Message): Segment[] {
-	// A text run is keyed by where in the message it starts, which is stable as
-	// the run grows; a collaboration or tool call by its id.
+	const finished = message.status !== "streaming";
+	// A text run is keyed by where in the message it starts; a collaboration or
+	// tool call by its id.
 	let written = 0;
-	const segments: Segment[] = message.parts.map((part) => {
-		if (part.type === "text") {
-			const segment: Segment = { type: "text", key: `text@${written}`, text: part.text };
-			written += part.text.length;
-			return segment;
-		}
+	const segments: Segment[] = [];
+	message.parts.forEach((part, index) => {
 		if (part.type === "collaboration") {
-			return { type: "collaboration", key: part.id, collaboration: part };
+			segments.push({ type: "collaboration", key: part.id, collaboration: part });
+			return;
 		}
-		return { type: "tool_call", key: part.id, toolCall: part };
+		if (part.type === "tool_call") {
+			if (drawsInThread(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
+			return;
+		}
+		if (finished && !isNarration(message.parts, index)) {
+			segments.push({ type: "text", key: `text@${written}`, text: part.text });
+		}
+		written += part.text.length;
 	});
-	const last = segments.at(-1);
-	if (
-		message.status === "streaming" &&
-		(last?.type === "collaboration" || last?.type === "tool_call")
-	) {
-		segments.push({
-			type: "text",
-			key: `text@${written}`,
-			text: "",
-			waitingOn: last.type === "collaboration" ? last.collaboration.agentName : last.toolCall.tool,
-		});
-	}
-	if (segments.length === 0) {
-		segments.push({ type: "text", key: "text@0", text: "" });
+	/*
+	 * A reply that called a tool and wrote nothing has no text part at all —
+	 * `messagePartsFor` adds none to empty content. It still needs a bubble: that
+	 * is where its author, its time, a failure and the way into its activity all
+	 * hang.
+	 */
+	if (finished && !segments.some((segment) => segment.type === "text")) {
+		segments.push({ type: "text", key: `text@${written}`, text: "" });
 	}
 	return segments;
-}
-
-function ThinkingBubble({ agent, outgoing }: { agent: AgentParticipant; outgoing: boolean }) {
-	return (
-		<article
-			aria-label={`${agent.name}, thinking`}
-			className={`agent-tint flex animate-rise motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
-			style={{ ["--agent-hue" as string]: agent.hue }}
-		>
-			<div className="relative max-w-[min(100%,480px)]">
-				<AgentAvatar
-					hue={agent.hue}
-					face={agent.face}
-					size={38}
-					ringed
-					className={`absolute -top-[11px] z-10 ${outgoing ? "-right-[15px]" : "-left-[15px]"}`}
-				/>
-				<div className="rounded-4xl bg-agent-wash px-5 py-3.5">
-					<div
-						className={`flex items-baseline gap-x-1.5 pb-1 font-semibold text-agent-name text-md ${outgoing ? "justify-end pr-5" : "pl-5"}`}
-					>
-						<span>{agent.name}</span>
-						<span aria-hidden>·</span>
-						<span>thinking…</span>
-					</div>
-					<ThinkingDots />
-				</div>
-			</div>
-		</article>
-	);
 }
 
 function MessageBubble({
@@ -213,31 +277,37 @@ function MessageBubble({
 	outgoing,
 	mentionable,
 	isLast,
-	waitingOn,
+	actions,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
 	text: string;
 	outgoing: boolean;
 	mentionable: ThreadParticipant[];
-	/** Whether this is the message's last bubble, where its streaming state shows. */
+	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
-	/** The collaborator this bubble is waiting on before its words arrive. */
-	waitingOn?: string;
+	/** Copy and activity, shown beside the bubble's top on hover and on focus. */
+	actions?: ReactNode;
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
 	}
 	const agent = message.author.kind === "agent" ? message.author : undefined;
 	const fromAgent = agent !== undefined;
-	const streaming = isLast && message.status === "streaming";
 	const status = messageStatus(message);
+	/*
+	 * Level with the name line, and sticky: on a reply taller than the screen the
+	 * bar stays in view while any of it is, and leaves with it, since sticky
+	 * never takes an element outside its parent.
+	 */
+	const pinnedActions = actions && <div className="sticky top-3 shrink-0 pt-2">{actions}</div>;
 	return (
 		<article
 			aria-label={`${message.author.name}, ${status}`}
-			className={`agent-tint flex animate-rise motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
+			className={`group/message agent-tint flex animate-rise items-start gap-1.5 motion-reduce:animate-none ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
 			style={agent ? { ["--agent-hue" as string]: agent.hue } : undefined}
 		>
+			{outgoing && pinnedActions}
 			<div className="relative max-w-[min(100%,480px)]">
 				{message.author.kind === "agent" ? (
 					<AgentAvatar
@@ -265,20 +335,15 @@ function MessageBubble({
 					>
 						<span>{message.author.name}</span>
 						<span aria-hidden>·</span>
-						{streaming ? (
-							<span>{waitingOn ? `waiting on ${waitingOn}…` : "writing…"}</span>
-						) : (
-							<time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
-						)}
+						<time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
 					</div>
 					{fromAgent ? (
-						<MessageMarkdown text={text} mentionable={mentionable} streaming={streaming} />
+						<MessageMarkdown text={text} mentionable={mentionable} />
 					) : (
 						<p className="m-0 whitespace-pre-wrap break-words text-foreground text-xl leading-relaxed">
 							{textWithMentions(text, mentionable)}
 						</p>
 					)}
-					{streaming && !text && <ThinkingDots />}
 					{isLast && message.status === "failed" && (
 						<p className="m-0 pt-2 text-destructive text-xs">
 							<span className="font-semibold">Reply failed</span>
@@ -290,6 +355,7 @@ function MessageBubble({
 					)}
 				</div>
 			</div>
+			{!outgoing && pinnedActions}
 		</article>
 	);
 }
@@ -320,16 +386,6 @@ function authorName(message: Message): string {
 	return message.author.kind === "routine_trigger"
 		? message.author.routineName
 		: message.author.name;
-}
-
-function ThinkingDots() {
-	return (
-		<span className="flex h-7 items-center gap-1.5 px-1" aria-hidden>
-			<span className="size-2 animate-bounce rounded-full bg-agent-name motion-reduce:animate-none" />
-			<span className="size-2 animate-bounce rounded-full bg-agent-name [animation-delay:150ms] motion-reduce:animate-none" />
-			<span className="size-2 animate-bounce rounded-full bg-agent-name [animation-delay:300ms] motion-reduce:animate-none" />
-		</span>
-	);
 }
 
 function ActivityDivider({ children }: { children: string }) {
@@ -396,9 +452,6 @@ function formatTime(createdAt: string): string {
 }
 
 function messageStatus(message: Message): string {
-	if (message.status === "streaming") {
-		return "writing";
-	}
 	if (message.status === "failed") {
 		return "failed";
 	}
