@@ -19,7 +19,8 @@ const names = Schema.Array(Schema.String).pipe(
  */
 export const openrouter: ProviderDialect = {
 	name: "OpenRouter",
-	listingUrl: (root) => `${root}/models`,
+	// The public /models endpoint accepts invalid keys; /models/user requires authentication.
+	listingUrl: (root) => `${root}/models/user`,
 	authorization: openaiCompatible.authorization,
 	listing: dataListing,
 	model: Schema.Struct({
