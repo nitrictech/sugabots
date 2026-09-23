@@ -133,7 +133,7 @@ function foldInto(step: ActivityStep, call: ToolCallPart) {
  */
 export function connectionLabel(handle: string, name?: string): string {
 	if (handle === BUILT_IN_HANDLE) return "Built-in tools";
-	return name ?? sentence(handle);
+	return name ?? wordsFromKey(handle);
 }
 
 /**
@@ -161,11 +161,14 @@ export function splitToolKey(tool: string): { handle: string; name: string } {
  */
 export function stepLabel(tool: string, name = splitToolKey(tool).name): string {
 	const builtIn = builtInToolCatalog.find((entry) => entry.key === tool);
-	return builtIn ? builtIn.name : sentence(name);
+	return builtIn ? builtIn.name : wordsFromKey(name);
 }
 
-/** `search_issues` as `Search issues`; `sentry` as `Sentry`. */
-function sentence(key: string): string {
+/**
+ * A machine key written out as words: `search_issues` as `Search issues`,
+ * `sentry` as `Sentry`, a tool argument's `due_date` or `dueDate` as `Due date`.
+ */
+export function wordsFromKey(key: string): string {
 	const words = key
 		.replace(
 			/([a-z0-9])([A-Z])/g,
