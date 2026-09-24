@@ -7,6 +7,7 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import type { Email } from "@sugabots/core/email/email";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -14,7 +15,6 @@ import { Schema } from "effect";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { API_BASE_PATH } from "../config.ts";
-import type { Email } from "../email/mailer.ts";
 import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
 import { createAuth } from "./auth.ts";
 

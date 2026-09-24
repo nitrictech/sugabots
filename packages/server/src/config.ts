@@ -5,7 +5,7 @@
  * testable.
  */
 
-import { consoleMailer, type Mailer, webhookMailer } from "./email/mailer.ts";
+import type { EmailConfig } from "@sugabots/core/email/layer";
 
 export type Environment = "development" | "production";
 
@@ -47,15 +47,11 @@ export interface Config {
 	 * Whether a new account must prove its address before it gets a session.
 	 * Off unless the installation says otherwise, so a self-hoster is not made
 	 * to stand up a mail service before they can sign in. Requires a real
-	 * mailer: there is nowhere for the link to go otherwise.
+	 * email provider: there is nowhere for the link to go otherwise.
 	 */
 	requireEmailVerification: boolean;
-	/** Delivery for verification and invitation emails. */
-	mailer: Mailer;
-}
-
-export interface ConfigDependencies {
-	productionMailer?: Mailer;
+	/** The provider that sends verification and invitation emails. */
+	email: EmailConfig;
 }
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
@@ -67,10 +63,7 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"your-secret-key",
 ]);
 
-export function configFromEnv(
-	env: NodeJS.ProcessEnv = process.env,
-	{ productionMailer }: ConfigDependencies = {},
-): Config {
+export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	const port = Number(env.PORT ?? 3000);
 	const environment = env.NODE_ENV === "production" ? "production" : "development";
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -119,13 +112,13 @@ export function configFromEnv(
 		env.REQUIRE_EMAIL_VERIFICATION === undefined
 			? false
 			: booleanFromEnv(env.REQUIRE_EMAIL_VERIFICATION, "REQUIRE_EMAIL_VERIFICATION");
-	const configuredMailer = productionMailer ?? mailerFromEnv(env, environment);
-	if (environment === "production" && (!configuredMailer || configuredMailer === consoleMailer)) {
-		throw new Error("Production requires an explicitly configured non-console email mailer.");
+	const email = emailFromEnv(env, environment);
+	if (environment === "production" && email.provider === "console") {
+		throw new Error("Production requires an email provider other than the console.");
 	}
-	if (requireEmailVerification && (!configuredMailer || configuredMailer === consoleMailer)) {
+	if (requireEmailVerification && email.provider === "console") {
 		throw new Error(
-			"REQUIRE_EMAIL_VERIFICATION needs an email mailer. Set EMAIL_WEBHOOK_URL, or turn it off.",
+			"REQUIRE_EMAIL_VERIFICATION needs an email provider. Set EMAIL_WEBHOOK_URL, or turn it off.",
 		);
 	}
 
@@ -141,7 +134,7 @@ export function configFromEnv(
 		allowPrivateWebFetchNetwork,
 		allowOpenSignUp,
 		requireEmailVerification,
-		mailer: configuredMailer ?? consoleMailer,
+		email,
 	};
 }
 
@@ -151,9 +144,9 @@ function booleanFromEnv(value: string, name: string): boolean {
 	throw new Error(`${name} must be true or false`);
 }
 
-function mailerFromEnv(env: NodeJS.ProcessEnv, environment: Environment): Mailer | undefined {
+function emailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailConfig {
 	const url = env.EMAIL_WEBHOOK_URL;
-	if (!url) return undefined;
+	if (!url) return { provider: "console" };
 	const parsed = new URL(url);
 	if (environment === "production" && parsed.protocol !== "https:") {
 		throw new Error("EMAIL_WEBHOOK_URL must use HTTPS in production");
@@ -161,7 +154,7 @@ function mailerFromEnv(env: NodeJS.ProcessEnv, environment: Environment): Mailer
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 		throw new Error("EMAIL_WEBHOOK_URL must use HTTP or HTTPS");
 	}
-	return webhookMailer(parsed.href, env.EMAIL_WEBHOOK_TOKEN);
+	return { provider: "webhook", url: parsed.href, token: env.EMAIL_WEBHOOK_TOKEN };
 }
 
 /** The path under `baseUrl` the API answers at, better-auth's routes included. */
