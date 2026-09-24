@@ -9,7 +9,7 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const pod = pods[0] as (typeof pods)[number];
-const page = `/suga/settings/pods/${pod.id}`;
+const page = `/suga/settings/pods/${pod.slug}`;
 const route = client.api.connections;
 
 const wiki: Connection = {

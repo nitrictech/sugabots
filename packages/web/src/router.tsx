@@ -12,11 +12,11 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { useAgent, useAgents } from "@/lib/agents.ts";
+import { useAgents, usePodAgent } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
 import { agentChatLink } from "@/lib/links.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
-import { podsQuery, usePods } from "@/lib/pods.ts";
+import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
@@ -53,18 +53,15 @@ const WorkspaceSettings = lazyRouteComponent(
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
  *   /$workspace/agents       picks the first agent you can see
- *   /$workspace/agents/$agent        one agent's thread history and new-thread composer
+ *   /$workspace/pods/$pod/agents/$agent       one agent's chat, by pod slug and agent handle
  *   /$workspace/settings/pods/$pod   workspace pod detail
+ *   /$workspace/settings/pods/$pod/agents/$agent   agent configuration
  *   /$workspace/settings/built-in-agents/$key   the Scribe or the Facilitator
  *   /$workspace/threads/$thread      one thread
  *
- * A pod is a property of a thread and not a segment of its address: an agent
- * may be in several pods, and a thread is already in exactly one, so putting
- * the pod in the path would only give the same thread two addresses.
- *
- * An agent is addressed by its id rather than a slug, because it has no slug:
- * a person renames an agent the way they rename a colleague's nickname, and
- * every link to it would break.
+ * An agent's address names its pod, because a handle is unique only within
+ * one, and uses the handle rather than the name, so renaming an agent keeps
+ * its links. A thread's has no pod: it is already in exactly one.
  *
  */
 
@@ -190,7 +187,7 @@ function SignInReturnRoute() {
 		// Outside any workspace, so this names one; the link helpers are for pages inside.
 		void navigate({
 			to: "/$workspace/settings/pods/$pod",
-			params: { workspace: slug, pod: pod.id },
+			params: { workspace: slug, pod: pod.slug },
 			search: { connected, oauth_error: oauthError },
 			replace: true,
 		});
@@ -348,6 +345,8 @@ const settingsPodAgentRoute = createRoute({
 	path: "/settings/pods/$pod/agents/$agent",
 	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
 		search.tab === "routines" ? { tab: "routines" } : {},
+	// The dialog waits for the rosters, so its code downloads alongside rather than after.
+	loader: () => void WorkspaceSettings.preload?.(),
 	component: SettingsPodAgentRoute,
 });
 
@@ -361,6 +360,7 @@ const settingsPodRoute = createRoute({
 		connected: optionalString(search.connected),
 		oauth_error: optionalString(search.oauth_error),
 	}),
+	loader: () => void WorkspaceSettings.preload?.(),
 	component: SettingsPodRoute,
 });
 
@@ -395,23 +395,42 @@ function SettingsBuiltInAgentRoute() {
 }
 
 function SettingsPodRoute() {
-	const { pod: podId } = settingsPodRoute.useParams();
+	const { pod: podSlug } = settingsPodRoute.useParams();
+	const { data: pods, isPending, error } = usePods();
+	const pod = findPod(pods, podSlug);
+	if (isPending) return <SettingsDialog>{null}</SettingsDialog>;
+	if (!pod) {
+		return (
+			<Panes>
+				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
+			</Panes>
+		);
+	}
 	return (
 		<SettingsDialog>
-			<WorkspaceSettings section="pods" selectedPodId={podId} />
+			<WorkspaceSettings section="pods" selectedPodId={pod.id} />
 		</SettingsDialog>
 	);
 }
 
 function SettingsPodAgentRoute() {
-	const { pod, agent } = settingsPodAgentRoute.useParams();
+	const { pod: podSlug, agent: handle } = settingsPodAgentRoute.useParams();
 	const { tab } = settingsPodAgentRoute.useSearch();
+	const { found, isPending, error } = usePodAgent(podSlug, handle);
+	if (isPending) return <SettingsDialog>{null}</SettingsDialog>;
+	if (!found) {
+		return (
+			<Panes>
+				<EmptyState title={error ? "Could not load this agent" : "No such agent in this pod"} />
+			</Panes>
+		);
+	}
 	return (
 		<SettingsDialog>
 			<WorkspaceSettings
 				section="pods"
-				selectedPodId={pod}
-				selectedAgentId={agent}
+				selectedPodId={found.pod.id}
+				selectedAgentId={found.agent.id}
 				selectedAgentTab={tab}
 			/>
 		</SettingsDialog>
@@ -468,16 +487,14 @@ function AgentsRoute() {
 }
 
 interface AgentSearch {
-	pod?: string;
 	thread?: string;
 	history?: "open";
 }
 
 const agentRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/agents/$agent",
+	path: "/pods/$pod/agents/$agent",
 	validateSearch: (search: Record<string, unknown>): AgentSearch => ({
-		...(typeof search.pod === "string" ? { pod: search.pod } : {}),
 		...(typeof search.thread === "string" ? { thread: search.thread } : {}),
 		...(search.history === "open" ? { history: "open" as const } : {}),
 	}),
@@ -485,15 +502,15 @@ const agentRoute = createRoute({
 });
 
 function AgentRoute() {
-	const { agent: agentId } = agentRoute.useParams();
+	const { pod: podSlug, agent: handle } = agentRoute.useParams();
 	const search = agentRoute.useSearch();
 	const { user } = agentRoute.useRouteContext().session;
-	const { agent, isPending, error } = useAgent(agentId);
+	const { found, isPending, error } = usePodAgent(podSlug, handle);
 
 	if (isPending) {
 		return <Panes>{null}</Panes>;
 	}
-	if (!agent) {
+	if (!found) {
 		return (
 			<Panes>
 				<EmptyState title={error ? "Could not load this agent" : "No such agent here"}>
@@ -509,8 +526,8 @@ function AgentRoute() {
 	return (
 		<Panes>
 			<AgentPage
-				agent={agent}
-				requestedPodId={search.pod}
+				agent={found.agent}
+				pod={found.pod}
 				user={user}
 				threadId={search.thread}
 				historyOpen={search.history === "open"}

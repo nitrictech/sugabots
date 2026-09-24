@@ -3,14 +3,14 @@ import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/reac
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
-import { usePods } from "@/lib/pods.ts";
+import { findPod, usePods } from "@/lib/pods.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
  * The agents in the workspace being looked at.
  *
  * One query for the whole roster, which the rail lists and every agent route
- * resolves its `:agent` id out of — the same arrangement pods have, and the
+ * resolves its agent handle out of — the same arrangement pods have, and the
  * reason there is no by-id fetch on the way into a page.
  *
  * The API scopes it: an agent is visible through the pods you are in, and
@@ -43,16 +43,31 @@ export function useAgents(): {
 	};
 }
 
-export function useAgent(agentId: string | undefined): {
-	agent: Agent | undefined;
-	isPending: boolean;
-	error: unknown;
-} {
+/**
+ * The pod and agent an address names. A handle is unique only within its pod,
+ * so the same handle in another pod is a different agent, not a fallback.
+ */
+export function findPodAgent(
+	pods: readonly Pod[] | undefined,
+	agents: readonly Agent[] | undefined,
+	podSlug: string,
+	handle: string,
+): { pod: Pod; agent: Agent } | undefined {
+	const pod = findPod(pods, podSlug);
+	const agent = pod && agents?.find((one) => one.podId === pod.id && one.handle === handle);
+	return pod && agent ? { pod, agent } : undefined;
+}
+
+export function usePodAgent(
+	podSlug: string,
+	handle: string,
+): { found: { pod: Pod; agent: Agent } | undefined; isPending: boolean; error: unknown } {
+	const pods = usePods();
 	const { agents, isPending, error } = useAgents();
 	return {
-		agent: agentId === undefined ? undefined : agents?.find((one) => one.id === agentId),
-		isPending,
-		error,
+		found: findPodAgent(pods.data, agents, podSlug, handle),
+		isPending: pods.isPending || isPending,
+		error: pods.error ?? error,
 	};
 }
 

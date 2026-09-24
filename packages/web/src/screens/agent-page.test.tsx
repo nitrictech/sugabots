@@ -21,7 +21,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const page = `/suga/settings/pods/${linear.podId}/agents/${linear.id}`;
+const page = `/suga/settings/pods/suga-team/agents/${linear.handle}`;
 const suga = pods[0] as (typeof pods)[number];
 const webhookRoutine = {
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
@@ -407,7 +407,7 @@ describe("an admin", () => {
 
 		await router.navigate({
 			to: "/$workspace/settings/pods/$pod/agents/$agent",
-			params: { workspace: "suga", pod: triager.podId, agent: triager.id },
+			params: { workspace: "suga", pod: suga.slug, agent: triager.handle },
 		});
 
 		await waitFor(() => expect(screen.queryByLabelText("System prompt")).toBeNull());
@@ -665,7 +665,7 @@ describe("an admin", () => {
 			}),
 		);
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.id}`),
+			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.slug}`),
 		);
 	});
 });

@@ -284,9 +284,8 @@ function PodStep({
 		await complete.mutateAsync({ workspaceId: workspace.id, podId: pod.id, agentId: agent.id });
 		// Onboarding is outside any workspace, so this names one; the link helpers are for pages inside.
 		await navigate({
-			to: "/$workspace/agents/$agent",
-			params: { workspace: workspace.slug, agent: agent.id },
-			search: { pod: pod.id },
+			to: "/$workspace/pods/$pod/agents/$agent",
+			params: { workspace: workspace.slug, pod: pod.slug, agent: agent.handle },
 			replace: true,
 		});
 	}

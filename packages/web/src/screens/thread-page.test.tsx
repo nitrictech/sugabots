@@ -594,9 +594,8 @@ describe("thread navigation", () => {
 		await screen.findByText("The release notes are ready.");
 
 		await router.navigate({
-			to: "/$workspace/agents/$agent",
-			params: { workspace: "suga", agent: linear.id },
-			search: { pod: undefined },
+			to: "/$workspace/pods/$pod/agents/$agent",
+			params: { workspace: "suga", pod: "suga-team", agent: linear.handle },
 		});
 
 		await waitFor(() => expect(updates.close).toHaveBeenCalledOnce());
