@@ -194,9 +194,7 @@ function Roster({
 									onChange={(next) => updateRole.mutate({ memberId: member.id, role: next })}
 								/>
 							) : (
-								<span className="shrink-0 px-1 font-medium text-muted-foreground text-sm">
-									{workspaceRoleLabel(role)}
-								</span>
+								<RoleLabel role={role} />
 							)}
 							<RowMenu label={`${member.user.name} options`}>
 								{isYou ? (
@@ -230,9 +228,7 @@ function Roster({
 								{copied === invitation.id ? "Invitation link copied." : "Invited, not yet accepted"}
 							</p>
 						</div>
-						<span className="shrink-0 px-1 font-medium text-muted-foreground text-sm">
-							{workspaceRoleLabel(workspaceRoleOf(invitation.role))}
-						</span>
+						<RoleLabel role={workspaceRoleOf(invitation.role)} />
 						<RowMenu label={`Invitation for ${invitation.email} options`}>
 							{canManage ? (
 								<>
@@ -362,10 +358,19 @@ function RolePicker({
 	);
 }
 
+/** A role you cannot change here, sized and padded like `RolePicker` so the column lines up. */
+function RoleLabel({ role }: { role: WorkspaceRole | undefined }) {
+	return (
+		<span className="w-36 shrink-0 px-3 font-medium text-muted-foreground text-sm">
+			{workspaceRoleLabel(role)}
+		</span>
+	);
+}
+
 /** The row's overflow menu, or a gap the width of one when it would be empty. */
 function RowMenu({ label, children }: { label: string; children: ReactNode }) {
 	if (!children) {
-		return <span className="size-9 shrink-0" aria-hidden />;
+		return <span className="size-6 shrink-0" aria-hidden />;
 	}
 	return (
 		<DropdownMenu>
