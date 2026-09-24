@@ -15,6 +15,7 @@ import {
 	agents,
 	apiAnswers,
 	controlledEventStream,
+	jye,
 	linear,
 	mount,
 	pendingAnswer,
@@ -389,6 +390,32 @@ describe("ongoing agent Chat", () => {
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
+	});
+
+	it("offers to mention the Chat's agent and its other people, not the rest of the pod", async () => {
+		// Another agent is reached by the Chat's agent collaborating, never by joining the Chat.
+		const other = {
+			kind: "person" as const,
+			id: jye.id,
+			name: jye.name,
+			handle: handleFromName(jye.name),
+			image: null,
+		};
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed({
+				...details(chat.mainThreadId, "Chat", "chat", []),
+				participants: [person, host, other],
+			}),
+		);
+		mount(`/agents/${linear.id}`);
+		await screen.findByLabelText(`Message ${linear.name}`);
+		fireEvent.click(screen.getByRole("button", { name: "Mention someone" }));
+
+		const options = await screen.findAllByRole("option");
+		expect(options.map((option) => option.textContent)).toEqual([
+			expect.stringContaining(linear.name),
+			expect.stringContaining(jye.name),
+		]);
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {
