@@ -1,4 +1,4 @@
-import { podSlugSchema, slugify } from "@sugabots/contracts";
+import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import {
@@ -8,7 +8,7 @@ import {
 	podSeenBy,
 	type SlugTaken,
 } from "@sugabots/core/workspaces/pods/store";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedPod, grantedWorkspace } from "../../http/authorisation.ts";
@@ -27,6 +27,8 @@ export interface PodRoutesOptions {
 	modelProviders: Pick<ModelProviderStore, "isEnabled">;
 }
 
+const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+
 export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 		handlers
@@ -39,10 +41,18 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* grantedWorkspace;
 					// Derived here rather than in the store, so an unsluggable name such
-					// as "!!!" is a bad request about the name, not a slug conflict.
-					const slug = Schema.decodeResult(podSlugSchema)(payload.slug ?? slugify(payload.name));
+					// as "!!!", or one only a Personal pod may have, is a bad request about
+					// the name rather than a slug conflict.
+					const proposedSlug = payload.slug ?? slugify(payload.name);
+					const slug = Schema.decodeResult(sharedPodSlugSchema)(proposedSlug);
 					if (Result.isFailure(slug)) {
-						return yield* new BadRequest({ message: "A pod name needs letters or numbers" });
+						return yield* new BadRequest({
+							message:
+								proposedSlug === PERSONAL_POD_SLUG
+									? `"${PERSONAL_POD_SLUG}" is reserved for your Personal pod. Choose another name.`
+									: "That name cannot be a pod's address",
+							details: slugIssues(slug.failure.issue).issues,
+						});
 					}
 					return yield* pods
 						.create(workspaceId, actor, { name: payload.name, slug: slug.success })

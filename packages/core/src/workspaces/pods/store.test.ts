@@ -1,4 +1,4 @@
-import type { WorkspaceRole } from "@sugabots/contracts";
+import { PERSONAL_POD_SLUG, type WorkspaceRole } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
@@ -540,7 +540,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 						workspaceId,
 						kind: "personal",
 						name: "Personal",
-						slug: `orphan-${Date.now()}`,
+						// The slug a Personal pod must have, so the missing owner is the
+						// only thing wrong with this row.
+						slug: PERSONAL_POD_SLUG,
 					}),
 				),
 			).rejects.toThrow();

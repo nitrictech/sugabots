@@ -191,14 +191,18 @@ export const pod = pgTable(
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	// The unique index is on `(workspace_id, slug)`, so a btree prefix scan
-	// already answers "every pod in this workspace". A second index on
-	// `workspace_id` alone would only cost writes.
+	// Slugs are unique among a workspace's shared pods. Every Personal pod is
+	// `personal`, which only its owner ever sees, so within one person's view
+	// the slug still names one pod.
 	(table) => [
 		check("pod_kind_check", sql`${table.kind} in ('personal', 'shared')`),
 		check(
 			"pod_personal_owner_check",
 			sql`${table.kind} = 'shared' or ${table.ownerId} is not null`,
+		),
+		check(
+			"pod_personal_slug_check",
+			sql`(${table.kind} = 'personal') = (${table.slug} = 'personal')`,
 		),
 		// Composite foreign keys are not enforced when a column is null, so this
 		// binds a Personal pod to its owner's membership and leaves shared pods
@@ -212,11 +216,16 @@ export const pod = pgTable(
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
 			name: "pod_owner_workspace_member_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("pod_slug_idx").on(table.workspaceId, table.slug),
+		uniqueIndex("pod_slug_idx")
+			.on(table.workspaceId, table.slug)
+			.where(sql`${table.kind} = 'shared'`),
 		uniqueIndex("personal_pod_owner_idx")
 			.on(table.workspaceId, table.ownerId)
 			.where(sql`${table.kind} = 'personal'`),
 		uniqueIndex("pod_id_workspace_id_idx").on(table.id, table.workspaceId),
+		// Listing a workspace's pods names no kind, so neither partial index above
+		// can answer it.
+		index("pod_workspace_id_idx").on(table.workspaceId),
 	],
 );
 

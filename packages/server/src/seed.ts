@@ -1,4 +1,4 @@
-import { handleFromName } from "@sugabots/contracts";
+import { handleFromName, PERSONAL_POD_SLUG } from "@sugabots/contracts";
 import { layer as databaseLayer, effectRunner, query } from "@sugabots/core/database/database";
 import {
 	agent,
@@ -91,7 +91,7 @@ const seed = query((db) =>
 
 		const pods = new Map<string, string>();
 		for (const [name, slug, kind] of [
-			["Personal", `personal-${person.id}`, "personal"],
+			["Personal", PERSONAL_POD_SLUG, "personal"],
 			["Support", "support", "shared"],
 		] as const) {
 			const [made] = yield* db
@@ -105,7 +105,8 @@ const seed = query((db) =>
 					slug,
 					createdById: person.id,
 				})
-				.onConflictDoNothing({ target: [pod.workspaceId, pod.slug] })
+				// A shared pod conflicts on its slug, a Personal one on its owner.
+				.onConflictDoNothing()
 				.returning();
 
 			const [row] = made
@@ -113,7 +114,14 @@ const seed = query((db) =>
 				: yield* db
 						.select()
 						.from(pod)
-						.where(and(eq(pod.workspaceId, existing.id), eq(pod.slug, slug)));
+						.where(
+							and(
+								eq(pod.workspaceId, existing.id),
+								eq(pod.slug, slug),
+								// Every Personal pod is `personal`; this person's is the one they own.
+								kind === "personal" ? eq(pod.ownerId, person.id) : undefined,
+							),
+						);
 			if (!row) {
 				throw new Error(`could not create #${slug}`);
 			}
@@ -139,14 +147,14 @@ const seed = query((db) =>
 				hue: 158,
 				face: "bar" as const,
 				description: "Reads and writes Linear on the team's behalf.",
-				pod: `personal-${person.id}`,
+				pod: PERSONAL_POD_SLUG,
 			},
 			{
 				name: "Issue Triager",
 				hue: 272,
 				face: "dots" as const,
 				description: "Sorts incoming issues every weekday morning.",
-				pod: `personal-${person.id}`,
+				pod: PERSONAL_POD_SLUG,
 			},
 			{
 				name: "Customer Research",

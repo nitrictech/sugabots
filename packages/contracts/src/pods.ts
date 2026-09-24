@@ -15,15 +15,28 @@ import { uuidSchema } from "./uuid.ts";
 /**
  * The stable address for a pod, as it appears in a URL.
  *
- * Unique within a workspace rather than across the installation: two
- * workspaces may both have a `general`, and neither should have to know about
- * the other.
+ * A shared pod's is unique within a workspace rather than across the
+ * installation: two workspaces may both have a `general`, and neither should
+ * have to know about the other.
  */
 export const podSlugSchema = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(48),
 	Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
 		message: "Lower case letters, numbers and single hyphens",
+	}),
+);
+
+/**
+ * Every Personal pod's slug. Nobody reaches a Personal pod but its owner, so
+ * within what one person can see it names exactly one pod: their own.
+ */
+export const PERSONAL_POD_SLUG = "personal";
+
+/** A slug a shared pod may take: any but the one every Personal pod answers to. */
+export const sharedPodSlugSchema = podSlugSchema.check(
+	Schema.makeFilter((slug) => slug !== PERSONAL_POD_SLUG, {
+		message: `"${PERSONAL_POD_SLUG}" is reserved for Personal pods`,
 	}),
 );
 
@@ -83,7 +96,7 @@ export type Pod = typeof podSchema.Type;
 export const newPodSchema = Schema.Struct({
 	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 	/** Derived from the name when it is left out. */
-	slug: Schema.optional(podSlugSchema),
+	slug: Schema.optional(sharedPodSlugSchema),
 });
 
 export type NewPod = typeof newPodSchema.Type;

@@ -234,7 +234,7 @@ describe("the roster", () => {
 			id: "0199a3a0-0000-7000-8000-0000000000af",
 			kind: "personal" as const,
 			name: "Personal",
-			slug: "personal-test",
+			slug: "personal",
 			permissions: OWN_PERSONAL_POD,
 		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
@@ -552,7 +552,7 @@ describe("routes", () => {
 			ownerId: sam.id,
 			kind: "personal" as const,
 			name: "Personal",
-			slug: "personal-test",
+			slug: "personal",
 		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(
@@ -580,9 +580,7 @@ describe("routes", () => {
 		fireEvent.click(screen.getByRole("button", { name: /Enter Personal/ }));
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(
-				"/suga/pods/personal-test/agents/personal-assistant",
-			),
+			expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/personal-assistant"),
 		);
 	});
 
@@ -873,7 +871,7 @@ describe("Personal pod settings", () => {
 			id: "0199a3a0-0000-7000-8000-0000000000af",
 			kind: "personal" as const,
 			name: "Personal",
-			slug: "personal-test",
+			slug: "personal",
 			permissions: OWN_PERSONAL_POD,
 		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
