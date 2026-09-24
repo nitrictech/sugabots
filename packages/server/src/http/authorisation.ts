@@ -78,7 +78,7 @@ export function authoriseLayer(authorization: Authorization) {
 					const { params } = yield* HttpRouter.RouteContext;
 					if ("workspace" in rule) {
 						const standing = yield* decide(
-							authorization.workspace(userId, params.workspaceId ?? "", rule.workspace),
+							authorization.workspace(userId, params.workspace ?? "", rule.workspace),
 						);
 						return yield* Effect.provideService(httpEffect, GrantedWorkspace, standing);
 					}

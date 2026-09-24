@@ -48,7 +48,9 @@ export function useBuiltInAgents() {
 		queryKey: ["built-in-agents", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.systemAgents.list({ params: { workspaceId } }), { signal })
+					Effect.runPromise(client.api.systemAgents.list({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 }
@@ -73,7 +75,10 @@ export function useChooseBuiltInAgentModel(key: SystemAgentKey) {
 				throw new NotReadyError();
 			}
 			return await Effect.runPromise(
-				client.api.systemAgents.update({ params: { workspaceId, key }, payload: { model } }),
+				client.api.systemAgents.update({
+					params: { workspace: workspaceId, key },
+					payload: { model },
+				}),
 			);
 		},
 		onSuccess: async () => {

@@ -223,7 +223,9 @@ function useWorkspaceStanding() {
 		queryKey: ["workspace-standing", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.workspaceAccess({ params: { workspaceId } }), { signal })
+					Effect.runPromise(client.api.workspaceAccess({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 }

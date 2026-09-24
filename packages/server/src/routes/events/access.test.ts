@@ -160,10 +160,17 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access.workspace(session(member.id), space.id)).toBe(`workspace:${space.id}`);
 	});
 
+	it("gives a member the same channel when the workspace is named by its slug", async () => {
+		const { access, member, space } = await fixture();
+
+		expect(await access.workspace(session(member.id), space.slug)).toBe(`workspace:${space.id}`);
+	});
+
 	it("gives someone who is not a member nothing", async () => {
 		const { access, outsider, space } = await fixture();
 
 		expect(await access.workspace(session(outsider.id), space.id)).toBeUndefined();
+		expect(await access.workspace(session(outsider.id), space.slug)).toBeUndefined();
 	});
 
 	it("gives nothing for a workspace that does not exist", async () => {
@@ -172,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access.workspace(session(member.id), crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("answers a malformed id rather than letting Postgres raise on it", async () => {
+	it("gives nothing for a slug that names no workspace, rather than raising on it", async () => {
 		const { access, member } = await fixture();
 
 		expect(await access.workspace(session(member.id), "not-a-uuid")).toBeUndefined();

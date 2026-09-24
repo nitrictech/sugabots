@@ -21,9 +21,10 @@ import type { Session } from "../../auth/session.ts";
  * It is an interface so stream routes can be tested without a database.
  */
 export interface ChannelAccess {
+	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
 	workspace(
 		session: Session,
-		workspaceId: string,
+		workspaceRef: string,
 	): Effect.Effect<Channel | undefined, never, Database>;
 	thread(session: Session, threadId: string): Effect.Effect<Channel | undefined, never, Database>;
 }
@@ -33,10 +34,10 @@ export function channelAccess(
 	threads: Pick<ThreadStore, "visibleThreadId">,
 ): ChannelAccess {
 	return {
-		workspace: (session, workspaceId) =>
-			authorization.workspace(session.user.id, workspaceId, "workspace.read").pipe(
+		workspace: (session, workspaceRef) =>
+			authorization.workspace(session.user.id, workspaceRef, "workspace.read").pipe(
 				Effect.match({
-					onSuccess: () => workspaceChannel(workspaceId),
+					onSuccess: ({ workspaceId }) => workspaceChannel(workspaceId),
 					onFailure: () => undefined,
 				}),
 			),

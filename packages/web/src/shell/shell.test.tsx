@@ -811,7 +811,7 @@ describe("creating a pod", () => {
 
 		await waitFor(() => {
 			expect(client.api.pods.create).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id },
+				params: { workspace: workspace.id },
 				payload: { name: "Platform" },
 			});
 		});
@@ -1044,7 +1044,7 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id, providerId: ollama.id },
+				params: { workspace: workspace.id, providerId: ollama.id },
 				payload: { baseUrl: "http://studio.local:9000/v1" },
 			});
 		});
@@ -1072,7 +1072,7 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id, providerId: ollama.id },
+				params: { workspace: workspace.id, providerId: ollama.id },
 				payload: { baseUrl: "http://127.0.0.1:11434/v1" },
 			});
 		});
@@ -1087,7 +1087,7 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id, providerId: ollama.id },
+				params: { workspace: workspace.id, providerId: ollama.id },
 				payload: { baseUrl: ollama.baseUrl, apiKey: null },
 			});
 		});
@@ -1122,7 +1122,7 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id },
+				params: { workspace: workspace.id },
 				payload: {
 					name: provider.name,
 					baseUrl: provider.baseUrl,
@@ -1161,7 +1161,7 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id },
+				params: { workspace: workspace.id },
 				payload: { preset: "groq", apiKey: "gsk-test" },
 			});
 		});

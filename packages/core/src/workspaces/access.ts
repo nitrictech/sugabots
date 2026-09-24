@@ -5,7 +5,7 @@ import type { Database, Executor } from "../database/database.ts";
 import { query } from "../database/database.ts";
 import { isUuid } from "../database/ids.ts";
 import type * as schema from "../database/schema.ts";
-import { agent, pod, podMember, workspaceMember } from "../database/schema.ts";
+import { agent, pod, podMember, workspace, workspaceMember } from "../database/schema.ts";
 import {
 	type Actor,
 	mayInPod,
@@ -87,12 +87,13 @@ export type AuthorizationDenied = ResourceHidden | ActionForbidden;
 
 export interface Authorization {
 	/**
-	 * `workspaceId` must name a workspace the caller belongs to, and the action
-	 * must be one their role grants there.
+	 * `workspaceRef` must name a workspace the caller belongs to, by its id or
+	 * its slug, and the action must be one their role grants there. The
+	 * standing carries the resolved id, which is what everything after uses.
 	 */
 	workspace(
 		userId: string,
-		workspaceId: string,
+		workspaceRef: string,
 		permission: WorkspacePermission,
 	): Effect.Effect<WorkspaceStanding, AuthorizationDenied, Database>;
 	/**
@@ -113,30 +114,30 @@ export interface Authorization {
 }
 
 export const authorization: Authorization = {
-	workspace: (userId, workspaceId, permission) =>
+	workspace: (userId, workspaceRef, permission) =>
 		Effect.gen(function* () {
-			if (!isUuid(workspaceId)) {
-				return yield* new ResourceHidden({ resource: "workspace" });
-			}
-
+			// A uuid is compared as an id, and anything else as a slug, so a
+			// malformed id is never handed to Postgres as a uuid.
+			const named = isUuid(workspaceRef)
+				? eq(workspace.id, workspaceRef)
+				: eq(workspace.slug, workspaceRef);
 			const [row] = yield* query((db) =>
 				db
-					.select({ role: workspaceMember.role })
+					.select({ workspaceId: workspace.id, role: workspaceMember.role })
 					.from(workspaceMember)
-					.where(
-						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)),
-					)
+					.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
+					.where(and(named, eq(workspaceMember.userId, userId)))
 					.limit(1),
 			);
 
 			const actor: Actor = { userId, workspaceRole: workspaceRoleOf(row?.role) };
-			if (!actor.workspaceRole) {
+			if (!row || !actor.workspaceRole) {
 				return yield* new ResourceHidden({ resource: "workspace" });
 			}
 			if (!mayInWorkspace(actor, permission)) {
 				return yield* new ActionForbidden({ permission });
 			}
-			return { workspaceId, actor };
+			return { workspaceId: row.workspaceId, actor };
 		}),
 
 	pod: (userId, podId, permission) =>

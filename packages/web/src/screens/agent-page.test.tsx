@@ -702,7 +702,7 @@ describe("a built-in agent", () => {
 
 		await waitFor(() =>
 			expect(client.api.systemAgents.update).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id, key: "facilitate" },
+				params: { workspace: workspace.id, key: "facilitate" },
 				payload: { model: MODELS[1] },
 			}),
 		);
@@ -716,7 +716,7 @@ describe("a built-in agent", () => {
 
 		await waitFor(() =>
 			expect(client.api.systemAgents.update).toHaveBeenCalledWith({
-				params: { workspaceId: workspace.id, key: "facilitate" },
+				params: { workspace: workspace.id, key: "facilitate" },
 				payload: { model: null },
 			}),
 		);
@@ -760,7 +760,7 @@ describe("a built-in agent", () => {
 		expect(screen.getByText(/Too often wrong/)).toBeDefined();
 		expect(screen.getByText("1/3")).toBeDefined();
 		expect(client.api.modelTrials.run).toHaveBeenCalledWith({
-			params: { workspaceId: workspace.id },
+			params: { workspace: workspace.id },
 			payload: { systemAgentKey: "facilitate", model: facilitator.model },
 		});
 	});

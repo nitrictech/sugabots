@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { systemAgentSchema, systemAgentUpdateSchema } from "../../system-agents.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 /**
@@ -20,15 +20,15 @@ import { Authorise, Session } from "../middleware.ts";
  */
 export class SystemAgentsApi extends HttpApiGroup.make("systemAgents")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspaceId/system-agents", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.get("list", "/workspaces/:workspace/system-agents", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: Schema.Array(systemAgentSchema),
 		}),
 		// The key is a string here rather than `systemAgentKeySchema`, so a key
 		// that names no system agent is `NotFound` like any other missing thing,
 		// not a malformed request.
-		HttpApiEndpoint.patch("update", "/workspaces/:workspaceId/system-agents/:key", {
-			params: { workspaceId: uuidSchema, key: Schema.String },
+		HttpApiEndpoint.patch("update", "/workspaces/:workspace/system-agents/:key", {
+			params: { workspace: workspaceIdOrSlugSchema, key: Schema.String },
 			payload: systemAgentUpdateSchema,
 			success: systemAgentSchema,
 		}),

@@ -7,7 +7,7 @@ import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
  * request is decoded.
  *
  * `workspace`, `pod` and `agent` name the permission to check against the
- * `:workspaceId`, `:podId` or `:agentId` in the path. `reach` is for an
+ * `:workspace`, `:podId` or `:agentId` in the path. `reach` is for an
  * endpoint addressed at something narrower — a thread, a chat, a turn — whose
  * store scopes the query to the pods the caller reaches; the string says
  * where, because that claim has to stay true.

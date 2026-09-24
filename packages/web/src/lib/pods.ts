@@ -22,7 +22,9 @@ export function usePods() {
 		queryKey: ["pods", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.pods.list({ params: { workspaceId } }), { signal })
+					Effect.runPromise(client.api.pods.list({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 
@@ -49,7 +51,9 @@ export function useCreatePod() {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			return Effect.runPromise(client.api.pods.create({ params: { workspaceId }, payload: input }));
+			return Effect.runPromise(
+				client.api.pods.create({ params: { workspace: workspaceId }, payload: input }),
+			);
 		},
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
 	});
@@ -62,7 +66,7 @@ export function useEnsurePersonalPod() {
 		mutationFn: (model: string) => {
 			if (!workspaceId) throw new NotReadyError();
 			return Effect.runPromise(
-				client.api.pods.ensurePersonal({ params: { workspaceId }, payload: { model } }),
+				client.api.pods.ensurePersonal({ params: { workspace: workspaceId }, payload: { model } }),
 			);
 		},
 		onSuccess: () =>

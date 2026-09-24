@@ -81,7 +81,7 @@ export function eventRoutes({ bus, access, stream }: EventRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 		handlers
 			.handle("workspace", ({ params, request }) =>
-				streamFor(request, (user) => access.workspace({ user }, params.workspaceId)),
+				streamFor(request, (user) => access.workspace({ user }, params.workspace)),
 			)
 			.handle("thread", ({ params, request }) =>
 				streamFor(request, (user) => access.thread({ user }, params.threadId)),

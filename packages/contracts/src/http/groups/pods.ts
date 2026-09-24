@@ -9,6 +9,7 @@ import {
 	podUpdateSchema,
 } from "../../pods.ts";
 import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Conflict } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
@@ -21,18 +22,18 @@ import { Authorise, Session } from "../middleware.ts";
  */
 export class PodsApi extends HttpApiGroup.make("pods")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspaceId/pods", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.get("list", "/workspaces/:workspace/pods", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: Schema.Array(podSchema),
 		}),
-		HttpApiEndpoint.post("create", "/workspaces/:workspaceId/pods", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.post("create", "/workspaces/:workspace/pods", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			payload: newPodSchema,
 			success: podSchema.pipe(HttpApiSchema.status(201)),
 			error: Conflict,
 		}),
-		HttpApiEndpoint.post("ensurePersonal", "/workspaces/:workspaceId/personal-pod", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.post("ensurePersonal", "/workspaces/:workspace/personal-pod", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			payload: Schema.Struct({ model: modelIdSchema }),
 			success: podSchema.pipe(HttpApiSchema.status(201)),
 		}),

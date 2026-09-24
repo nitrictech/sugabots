@@ -23,7 +23,7 @@ export function useChat(podId: string | undefined, hostAgentId: string) {
 				? ({ signal }) =>
 						Effect.runPromise(
 							client.api.chats.getOrCreate({
-								params: { workspaceId },
+								params: { workspace: workspaceId },
 								payload: { podId, hostAgentId },
 							}),
 							{ signal },
