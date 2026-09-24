@@ -72,7 +72,8 @@ export function ThreadPicker({
 										}`}
 										render={
 											<Link
-												to="/threads/$thread"
+												from="/$workspace"
+												to="./threads/$thread"
 												params={{ thread: thread.id }}
 												search={{ summary: undefined }}
 											/>

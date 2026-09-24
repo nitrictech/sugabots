@@ -1,9 +1,15 @@
 import addonA11y from "@storybook/addon-a11y";
 import addonDocs from "@storybook/addon-docs";
 import { definePreview } from "@storybook/react-vite";
+import {
+	createMemoryHistory,
+	createRootRoute,
+	createRouter,
+	RouterProvider,
+} from "@tanstack/react-router";
 import { setupWorker } from "msw/browser";
 import addonMsw from "msw-storybook-addon";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { INITIAL_VIEWPORTS } from "storybook/viewport";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 import "../src/app.css";
@@ -43,6 +49,16 @@ export default definePreview({
 		options: { storySort: { order: ["Controls", "Patterns", "Product", "Views"] } },
 	},
 	decorators: [
+		// A router for every story, so views that read the address or render links render as in the app.
+		function Router(Story) {
+			const [router] = useState(() =>
+				createRouter({
+					routeTree: createRootRoute({ component: () => <Story /> }),
+					history: createMemoryHistory({ initialEntries: ["/"] }),
+				}),
+			);
+			return <RouterProvider router={router} />;
+		},
 		function AppTheme(Story, context) {
 			useEffect(() => {
 				if (context.globals.theme === "system") {

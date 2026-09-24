@@ -4,7 +4,6 @@ import { ArrowLeft, ArrowRight, Check, Circle } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentChatLink } from "@/lib/links.ts";
 import { useCompleteOnboarding } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
@@ -92,7 +91,7 @@ export function Onboarding({ session }: { session: Session }) {
 					}}
 				/>
 			) : workspace && personalAssistant ? (
-				<PodStep workspaceId={workspace.id} agent={personalAssistant} existingPod={personalPod} />
+				<PodStep workspace={workspace} agent={personalAssistant} existingPod={personalPod} />
 			) : null}
 		</OnboardingFrame>
 	);
@@ -270,11 +269,11 @@ function ProviderStep({ ready, onContinue }: { ready: boolean; onContinue: () =>
 }
 
 function PodStep({
-	workspaceId,
+	workspace,
 	agent,
 	existingPod,
 }: {
-	workspaceId: string;
+	workspace: { id: string; slug: string };
 	agent: Agent;
 	existingPod?: Pod;
 }) {
@@ -282,8 +281,14 @@ function PodStep({
 	const complete = useCompleteOnboarding();
 
 	async function finish(pod: Pod) {
-		await complete.mutateAsync({ workspaceId, podId: pod.id, agentId: agent.id });
-		await navigate({ ...agentChatLink({ pod, agent }), replace: true });
+		await complete.mutateAsync({ workspaceId: workspace.id, podId: pod.id, agentId: agent.id });
+		// Onboarding is outside any workspace, so this names one; the link helpers are for pages inside.
+		await navigate({
+			to: "/$workspace/agents/$agent",
+			params: { workspace: workspace.slug, agent: agent.id },
+			search: { pod: pod.id },
+			replace: true,
+		});
 	}
 
 	return (

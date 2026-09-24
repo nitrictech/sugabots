@@ -55,7 +55,11 @@ function WorkspaceMenu() {
 								chooseWorkspace(one.id);
 								// The pods and agents in the address belong to the
 								// workspace being left, so landing goes back to picking.
-								void navigate({ to: "/agents", replace: true });
+								void navigate({
+									to: "/$workspace/agents",
+									params: { workspace: one.slug },
+									replace: true,
+								});
 							}}
 						>
 							<WorkspaceMark name={one.name} size={18} />
@@ -65,7 +69,10 @@ function WorkspaceMenu() {
 					))}
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
-				<DropdownMenuLinkItem render={<Link to="/settings" />} onClick={() => setOpen(false)}>
+				<DropdownMenuLinkItem
+					render={<Link from="/$workspace" to="./settings" />}
+					onClick={() => setOpen(false)}
+				>
 					<Settings />
 					Workspace settings
 				</DropdownMenuLinkItem>

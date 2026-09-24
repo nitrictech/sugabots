@@ -60,7 +60,8 @@ export function CollaborationThread({
 					participants={participants.filter((one) => one.kind === "agent")}
 				/>
 				<Link
-					to="/threads/$thread"
+					from="/$workspace"
+					to="./threads/$thread"
 					params={{ thread: collaboration.threadId }}
 					search={{ summary: undefined }}
 					aria-label="Open thread"

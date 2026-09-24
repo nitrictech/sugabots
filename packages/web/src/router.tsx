@@ -14,11 +14,11 @@ import {
 import { useEffect } from "react";
 import { useAgent, useAgents } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
-import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
-import { chooseWorkspace, useWorkspace } from "@/lib/workspace.ts";
+import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsDialog } from "@/screens/SettingsDialog.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
@@ -47,17 +47,16 @@ const WorkspaceSettings = lazyRouteComponent(
  * regenerate or for Biome to be told to skip. The tree is small and the paths
  * are the product's vocabulary, so it is worth reading:
  *
- *   /                        redirects to /agents
+ *   /                        opens the workspace last chosen
  *   /login
  *   /invite/$id
  *   /connections/oauth/return        where a connection's sign-in comes back
- *   /settings                workspace settings
- *   /agents                  picks the first agent you can see
- *   /agents/$agent           one agent's thread history and new-thread composer
- *   /settings/agents/$agent  workspace-owned agent configuration
- *   /settings/pods/$pod      workspace pod detail
- *   /settings/built-in-agents/$key   the Scribe or the Facilitator
- *   /threads/$thread         one thread
+ *   /$workspace/settings     workspace settings
+ *   /$workspace/agents       picks the first agent you can see
+ *   /$workspace/agents/$agent        one agent's thread history and new-thread composer
+ *   /$workspace/settings/pods/$pod   workspace pod detail
+ *   /$workspace/settings/built-in-agents/$key   the Scribe or the Facilitator
+ *   /$workspace/threads/$thread      one thread
  *
  * A pod is a property of a thread and not a segment of its address: an agent
  * may be in several pods, and a thread is already in exactly one, so putting
@@ -96,18 +95,24 @@ const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
 	validateSearch: validateInviteSearch,
-	beforeLoad: ({ search }) => {
+	beforeLoad: ({ search, context }) => {
 		// Invitation links already in inboxes and docker logs point at `/?invite=`.
 		// They keep working: the route is the new shape, this is the old one.
 		if (search.invite !== undefined) {
 			throw redirect({ to: "/invite/$id", params: { id: search.invite } });
 		}
-		// Which agent to land on depends on the pods this person is in, which
-		// is a request. `/agents` makes it from inside the shell, so the frame is
-		// on screen while it resolves rather than after.
-		throw redirect({ to: "/agents" });
+		requireUser({ context });
 	},
+	component: LandingRoute,
 });
+
+function LandingRoute() {
+	const { workspace, isPending, error, refetch } = useWorkspace();
+	if (isPending) return <div className="h-full bg-sunken" />;
+	if (error) return <RouteLoadFailure title="Could not load your workspace" onRetry={refetch} />;
+	if (!workspace) return <Navigate to="/onboarding" replace />;
+	return <Navigate to="/$workspace/agents" params={{ workspace: workspace.slug }} replace />;
+}
 
 const loginRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -174,22 +179,25 @@ function SignInReturnRoute() {
 		connected,
 		oauth_error: oauthError,
 	} = signInReturnRoute.useSearch();
+	const workspaces = useWorkspaces();
+	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
 	const pods = useQuery(podsQuery(workspace));
 	const pod = pods.data?.find((one) => one.id === podId);
 	const navigate = useNavigate();
 
 	useEffect(() => {
-		if (!pod) return;
-		// The pod's page looks in the current workspace, which may not be this one.
-		chooseWorkspace(pod.workspaceId);
+		if (!pod || !slug) return;
+		// Outside any workspace, so this names one; the link helpers are for pages inside.
 		void navigate({
-			...podSettingsLink(pod),
+			to: "/$workspace/settings/pods/$pod",
+			params: { workspace: slug, pod: pod.id },
 			search: { connected, oauth_error: oauthError },
 			replace: true,
 		});
-	}, [pod, connected, oauthError, navigate]);
+	}, [pod, slug, connected, oauthError, navigate]);
 
-	if (pod || (workspace !== undefined && pods.isPending)) {
+	const resolving = workspace !== undefined && (pods.isPending || workspaces.isPending);
+	if ((pod && slug) || resolving) {
 		return <div className="h-full bg-sunken" />;
 	}
 	return (
@@ -233,15 +241,6 @@ function InviteRoute() {
 	);
 }
 
-const legacySetupRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/setup",
-	beforeLoad: ({ context }) => {
-		requireUser({ context });
-		throw redirect({ to: "/settings" });
-	},
-});
-
 const onboardingRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/onboarding",
@@ -264,23 +263,34 @@ function OnboardingRoute() {
 		);
 	}
 	if (onboarding.data?.completed && workspace.workspace) {
-		return <Navigate to="/agents" replace />;
+		return (
+			<Navigate to="/$workspace/agents" params={{ workspace: workspace.workspace.slug }} replace />
+		);
 	}
 	return <Onboarding session={session} />;
 }
 
-/** The frame. Pathless: it wraps, it does not add a segment. */
+/** The frame, for the workspace the address names. */
 const shellRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	id: "shell",
+	path: "/$workspace",
 	beforeLoad: requireUser,
 	component: ShellRoute,
+});
+
+const workspaceIndexRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/",
+	beforeLoad: ({ params }) => {
+		throw redirect({ to: "/$workspace/agents", params });
+	},
 });
 
 function ShellRoute() {
 	const session = shellRoute.useRouteContext().session;
 	const onboarding = useOnboarding();
 	const workspace = useWorkspace();
+	const workspaces = useWorkspaces();
 
 	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-sunken" />;
 	if (onboarding.error || workspace.error) {
@@ -291,7 +301,15 @@ function ShellRoute() {
 			/>
 		);
 	}
-	if (!workspace.workspace || !onboarding.data?.completed) {
+	if (!workspace.workspace) {
+		// Somebody in no workspace at all has one to make, not a wrong address.
+		return workspaces.data?.length === 0 ? (
+			<Navigate to="/onboarding" replace />
+		) : (
+			<EmptyState title="No such workspace here" />
+		);
+	}
+	if (!onboarding.data?.completed) {
 		return <Navigate to="/onboarding" replace />;
 	}
 	return <Shell session={session} />;
@@ -323,12 +341,6 @@ const settingsSectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/$section",
 	component: SettingsSectionRoute,
-});
-
-const settingsAgentRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/agents/$agent",
-	component: SettingsAgentRoute,
 });
 
 const settingsPodAgentRoute = createRoute({
@@ -366,7 +378,14 @@ const settingsBuiltInAgentRoute = createRoute({
 function SettingsBuiltInAgentRoute() {
 	const { key } = settingsBuiltInAgentRoute.useParams();
 	if (!isBuiltInAgentKey(key)) {
-		return <Navigate to="/settings/$section" params={{ section: "built-in-agents" }} replace />;
+		return (
+			<Navigate
+				from="/$workspace"
+				to="./settings/$section"
+				params={{ section: "built-in-agents" }}
+				replace
+			/>
+		);
 	}
 	return (
 		<SettingsDialog>
@@ -381,23 +400,6 @@ function SettingsPodRoute() {
 		<SettingsDialog>
 			<WorkspaceSettings section="pods" selectedPodId={podId} />
 		</SettingsDialog>
-	);
-}
-
-function SettingsAgentRoute() {
-	const { agent: agentId } = settingsAgentRoute.useParams();
-	const { agent, isPending } = useAgent(agentId);
-	if (isPending) return <Panes>{null}</Panes>;
-	return agent ? (
-		<Navigate
-			to="/settings/pods/$pod/agents/$agent"
-			params={{ pod: agent.podId, agent: agent.id }}
-			replace
-		/>
-	) : (
-		<Panes>
-			<EmptyState title="No such agent here" />
-		</Panes>
 	);
 }
 
@@ -420,7 +422,7 @@ function SettingsSectionRoute() {
 	const { section } = settingsSectionRoute.useParams();
 	const setting = workspaceSettingSection(section);
 	if (!setting || setting.id === "general") {
-		return <Navigate to="/settings" replace />;
+		return <Navigate from="/$workspace" to="./settings" replace />;
 	}
 	return (
 		<SettingsDialog>
@@ -554,12 +556,11 @@ const routeTree = rootRoute.addChildren([
 	loginRoute,
 	inviteRoute,
 	signInReturnRoute,
-	legacySetupRoute,
 	onboardingRoute,
 	shellRoute.addChildren([
+		workspaceIndexRoute,
 		settingsRoute,
 		settingsSectionRoute,
-		settingsAgentRoute,
 		settingsPodAgentRoute,
 		settingsPodRoute,
 		settingsBuiltInAgentRoute,

@@ -37,7 +37,9 @@ export function BuiltInAgentLink({
 		<Button
 			size="bare"
 			variant="link"
-			render={<Link to="/settings/built-in-agents/$key" params={{ key: agentKey }} />}
+			render={
+				<Link from="/$workspace" to="./settings/built-in-agents/$key" params={{ key: agentKey }} />
+			}
 		>
 			{children}
 		</Button>

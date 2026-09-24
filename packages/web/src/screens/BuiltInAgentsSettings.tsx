@@ -50,7 +50,9 @@ export function BuiltInAgentsSettings({ selectedKey }: { selectedKey?: SystemAge
 							<SettingsRailItem
 								key={key}
 								selected={key === selectedKey}
-								render={<Link to="/settings/built-in-agents/$key" params={{ key }} />}
+								render={
+									<Link from="/$workspace" to="./settings/built-in-agents/$key" params={{ key }} />
+								}
 							>
 								<BuiltInAgentMark agent={agent} />
 								<span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
@@ -77,7 +79,11 @@ export function BuiltInAgentsSettings({ selectedKey }: { selectedKey?: SystemAge
 						agent={selected}
 						canEdit={may.configureBuiltInAgents}
 						onBack={() => {
-							void navigate({ to: "/settings/$section", params: { section: "built-in-agents" } });
+							void navigate({
+								from: "/$workspace",
+								to: "./settings/$section",
+								params: { section: "built-in-agents" },
+							});
 						}}
 					/>
 				) : selectedKey !== undefined && !isPending ? (

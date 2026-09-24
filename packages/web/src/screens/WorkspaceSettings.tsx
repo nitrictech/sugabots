@@ -61,7 +61,8 @@ export function WorkspaceSettings({
 						title={
 							<nav aria-label="Breadcrumb" className="flex items-center gap-2.5">
 								<Link
-									to="/settings/$section"
+									from="/$workspace"
+									to="./settings/$section"
 									params={{ section: "pods" }}
 									className="font-normal text-muted-foreground hover:text-heading"
 								>
@@ -197,7 +198,17 @@ function WorkspaceList() {
 								<Check size={14} /> Current
 							</span>
 						) : (
-							<Button variant="link" size="bare" onClick={() => chooseWorkspace(one.id)}>
+							<Button
+								variant="link"
+								size="bare"
+								render={
+									<Link
+										to="/$workspace/settings"
+										params={{ workspace: one.slug }}
+										onClick={() => chooseWorkspace(one.id)}
+									/>
+								}
+							>
 								Switch
 							</Button>
 						)}

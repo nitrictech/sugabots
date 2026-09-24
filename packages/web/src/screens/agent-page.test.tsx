@@ -21,7 +21,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const page = `/settings/pods/${linear.podId}/agents/${linear.id}`;
+const page = `/suga/settings/pods/${linear.podId}/agents/${linear.id}`;
 const suga = pods[0] as (typeof pods)[number];
 const webhookRoutine = {
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
@@ -75,7 +75,7 @@ describe("what everybody sees", () => {
 
 		expect(await within(breadcrumb).findByRole("heading", { name: suga.name })).toBeDefined();
 		fireEvent.click(within(breadcrumb).getByRole("link", { name: "Pods" }));
-		await waitFor(() => expect(router.state.location.pathname).toBe("/settings/pods"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/pods"));
 	});
 
 	it("keeps thread creation out of workspace settings", async () => {
@@ -92,7 +92,7 @@ describe("what everybody sees", () => {
 		mount(page);
 		const rail = await screen.findByRole("navigation", { name: "Suga-Team agents" });
 		expect(within(rail).getByRole("link", { name: "Back to pods" }).getAttribute("href")).toBe(
-			"/settings/pods",
+			"/suga/settings/pods",
 		);
 		await within(rail).findByText(triager.name);
 		expect(within(rail).getByText(linear.name)).toBeDefined();
@@ -406,8 +406,8 @@ describe("an admin", () => {
 		});
 
 		await router.navigate({
-			to: "/settings/pods/$pod/agents/$agent",
-			params: { pod: triager.podId, agent: triager.id },
+			to: "/$workspace/settings/pods/$pod/agents/$agent",
+			params: { workspace: "suga", pod: triager.podId, agent: triager.id },
 		});
 
 		await waitFor(() => expect(screen.queryByLabelText("System prompt")).toBeNull());
@@ -664,12 +664,14 @@ describe("an admin", () => {
 				params: { agentId: linear.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(`/settings/pods/${suga.id}`));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.id}`),
+		);
 	});
 });
 
 describe("a built-in agent", () => {
-	const page = "/settings/built-in-agents/facilitate";
+	const page = "/suga/settings/built-in-agents/facilitate";
 
 	it("has no tabs, no menu, and nothing to edit but the model", async () => {
 		mount(page);

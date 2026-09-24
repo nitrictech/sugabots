@@ -1,5 +1,6 @@
 import type { WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
@@ -7,11 +8,9 @@ import { client } from "@/api.ts";
 /**
  * Which workspace is being looked at, and what the caller may do in it.
  *
- * The choice is a module-level store rather than a provider or per-component
- * state, because four different places ask for it — the top bar's switcher, the
- * sidebar's roster, the pod list and the role check — and they have to agree
- * within one render. `useSyncExternalStore` is what makes that one value rather
- * than four copies of it.
+ * Under `/$workspace` the address decides. Elsewhere — the landing page and
+ * onboarding — it is the one last chosen, kept in a module-level store because
+ * every `useWorkspace` has to agree on it within one render.
  *
  * It is the client's choice and not the server's. better-auth keeps an
  * `activeOrganizationId` on the session row, but nothing in our API reads it —
@@ -150,8 +149,9 @@ export function useRemoveWorkspaceMember(workspaceId: string) {
 }
 
 /**
- * The one being looked at: whatever was last chosen, and the first otherwise —
- * including when the chosen one has gone, which is what a stale id means.
+ * The one being looked at: the address's, with no fallback, so a link never
+ * opens under another workspace's name. Outside `/$workspace`, whatever was
+ * last chosen, and the first otherwise.
  */
 export function useWorkspace(): {
 	workspace: Workspace | undefined;
@@ -161,9 +161,13 @@ export function useWorkspace(): {
 } {
 	const { data, isPending, error, refetch } = useWorkspaces();
 	const chosen = useSyncExternalStore(subscribe, read, read);
+	const slug = useParams({ strict: false, select: (params) => params.workspace });
 
 	return {
-		workspace: data?.find((one) => one.id === chosen) ?? data?.[0],
+		workspace:
+			slug === undefined
+				? (data?.find((one) => one.id === chosen) ?? data?.[0])
+				: data?.find((one) => one.slug === slug),
 		isPending,
 		error,
 		refetch,
