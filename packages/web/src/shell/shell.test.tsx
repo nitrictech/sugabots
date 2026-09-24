@@ -505,13 +505,29 @@ describe("routes", () => {
 		});
 	});
 
-	it("sends somebody signed out to the login page", async () => {
-		const router = mount(linearPage, null);
+	it("sends somebody signed out to the login page, remembering where they were going", async () => {
+		const destination = `${linearPage}?thread=0199a3a0-0000-7000-8000-0000000000aa`;
+		const router = mount(destination, null);
 
 		expect(await screen.findByRole("button", { name: "Log in" })).toBeDefined();
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe("/login");
 		});
+		expect(router.state.location.search).toEqual({ returnTo: destination });
+	});
+
+	it("returns a signed-in visit to the login page to where it was going, search and all", async () => {
+		const destination = "/suga/settings/pods/suga-team?tab=routing";
+		const router = mount(`/login?returnTo=${encodeURIComponent(destination)}`);
+
+		expect(await screen.findByRole("tab", { name: "Routing", selected: true })).toBeDefined();
+		expect(router.state.location.href).toBe(destination);
+	});
+
+	it("will not return from the login page to another site", async () => {
+		const router = mount(`/login?returnTo=${encodeURIComponent("//evil.example/steal")}`);
+
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
 	});
 
 	it("keeps a signed-in user without a workspace out of the shell", async () => {
