@@ -375,6 +375,112 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 			expect.objectContaining({ threadId: child.id, type: "collaboration" }),
 		]);
 	});
+
+	it("reports each history thread's own status, participants, and Routine run", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		const routines = onPostgres(routineStore(() => Effect.void));
+		const created = await routines.create(workspaceId, agentId, userId, {
+			name: "Overnight review",
+			instructions: "Review overnight changes.",
+			trigger: { kind: "webhook" },
+		});
+		const requestId = crypto.randomUUID();
+		const requestedAt = new Date().toISOString();
+		const accepted = await routines.acceptTrigger({
+			workspaceId,
+			agentId,
+			routineId: created.routine.id,
+			triggerIdentity: requestId,
+			trigger: { kind: "manual", requestId, requestedAt, requestedByUserId: userId },
+		});
+		const [failed, running] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values(
+					["Failed collaboration", "Running collaboration"].map((title) => ({
+						workspaceId,
+						podId,
+						hostAgentId: agentId,
+						chatId: current.id,
+						type: "collaboration" as const,
+						title,
+						parentThreadId: current.mainThreadId,
+						initiatorUserId: userId,
+					})),
+				)
+				.returning(),
+		);
+		if (!failed || !running) throw new Error("Could not create collaboration threads");
+		await onDatabase((db) =>
+			db.insert(threadParticipant).values([
+				{ threadId: failed.id, agentId },
+				{ threadId: running.id, userId },
+				{ threadId: running.id, agentId: recipientAgentId },
+			]),
+		);
+		const [failedTrigger] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: failed.id,
+					authorUserId: userId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Try this" }],
+					content: "Try this",
+				})
+				.returning(),
+		);
+		if (!failedTrigger) throw new Error("Could not create failed turn trigger");
+		await onDatabase((db) =>
+			db.insert(turn).values({
+				threadId: failed.id,
+				agentId,
+				triggerMessageId: failedTrigger.id,
+				status: "failed",
+				model: "test/model",
+				startedAt: new Date(),
+				finishedAt: new Date(),
+				reason: "default",
+			}),
+		);
+		await onDatabase((db) =>
+			db.insert(job).values({
+				kind: "facilitate",
+				threadId: running.id,
+				payload: { triggerMessageId: crypto.randomUUID() },
+				dedupeKey: `facilitate:${running.id}`,
+			}),
+		);
+
+		const items = (await store.history(current.id, userId))?.items ?? [];
+		const entry = (threadId: string) => items.find((item) => item.threadId === threadId);
+		expect(items).toHaveLength(3);
+		expect(entry(failed.id)).toMatchObject({
+			status: "failed",
+			participants: [expect.objectContaining({ id: agentId })],
+			routineExecution: null,
+		});
+		expect(entry(running.id)).toMatchObject({
+			status: "running",
+			participants: [
+				expect.objectContaining({ id: userId }),
+				expect.objectContaining({ id: recipientAgentId }),
+			],
+			routineExecution: null,
+		});
+		expect(entry(accepted.threadId)).toMatchObject({
+			type: "routine",
+			status: "queued",
+			routineExecution: {
+				executionId: accepted.executionId,
+				routineId: created.routine.id,
+				routineName: "Overnight review",
+				triggerKind: "manual",
+				triggeredAt: requestedAt,
+			},
+		});
+	});
 });
 
 function timelineItemId(item: ChatMessageItem) {

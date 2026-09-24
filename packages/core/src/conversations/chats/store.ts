@@ -29,7 +29,7 @@ import {
 import { reachesPod } from "../../workspaces/access.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
 import {
-	loadParticipants,
+	loadParticipantsByThread,
 	participantColumns,
 	personAuthor,
 	toMessage,
@@ -466,8 +466,29 @@ const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 	before?: CursorPoint,
 ) {
 	const rows = yield* db
-		.select()
+		.select({
+			thread,
+			running: hasPendingResponseJob(sql`${thread.id}`),
+			latestTurnStatus: sql<schema.TurnRow["status"] | null>`(
+				select ${turn.status} from ${turn}
+				where ${turn.threadId} = ${thread.id}
+				order by ${turn.startedAt} desc, ${turn.id} desc
+				limit 1
+			)`,
+			// At most one execution per thread (`routine_execution_thread_idx`).
+			execution: {
+				id: routineExecution.id,
+				routineId: routineExecution.routineId,
+				routineName: routineExecution.routineName,
+				trigger: routineExecution.trigger,
+				state: routineExecution.state,
+			},
+		})
 		.from(thread)
+		.leftJoin(
+			routineExecution,
+			and(eq(routineExecution.threadId, thread.id), eq(thread.type, "routine")),
+		)
 		.where(
 			and(
 				or(
@@ -485,65 +506,45 @@ const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 		.orderBy(desc(thread.updatedAt), desc(thread.id))
 		.limit(limit + 1);
 	const page = rows.slice(0, limit);
-	const items: ChatHistoryEntry[] = [];
-	for (const row of page) {
-		if (row.type !== "collaboration" && row.type !== "routine") continue;
-		const [pending] = yield* db
-			.select({ running: hasPendingResponseJob(sql`${thread.id}`) })
-			.from(thread)
-			.where(eq(thread.id, row.id))
-			.limit(1);
-		const [latestTurn] = yield* db
-			.select({ status: turn.status })
-			.from(turn)
-			.where(eq(turn.threadId, row.id))
-			.orderBy(desc(turn.startedAt), desc(turn.id))
-			.limit(1);
-		const [execution] =
-			row.type === "routine"
-				? yield* db
-						.select({
-							id: routineExecution.id,
-							routineId: routineExecution.routineId,
-							routineName: routineExecution.routineName,
-							trigger: routineExecution.trigger,
-							state: routineExecution.state,
-						})
-						.from(routineExecution)
-						.where(eq(routineExecution.threadId, row.id))
-						.limit(1)
-				: [];
-		items.push({
-			threadId: row.id,
-			parentThreadId: row.parentThreadId,
-			type: row.type,
-			title: row.title,
-			participants: yield* loadParticipants(db, row.id),
-			status: execution
-				? execution.state
-				: (pending?.running ?? false)
-					? "running"
-					: latestTurn?.status === "failed"
-						? "failed"
-						: "completed",
-			routineExecution: execution
-				? {
-						executionId: execution.id,
-						routineId: execution.routineId,
-						routineName: execution.routineName,
-						triggerKind: execution.trigger.kind,
-						triggeredAt:
-							execution.trigger.kind === "cron"
-								? execution.trigger.scheduledAt
-								: execution.trigger.kind === "webhook"
-									? execution.trigger.receivedAt
-									: execution.trigger.requestedAt,
-					}
-				: null,
-			latestActivityAt: row.updatedAt.toISOString(),
-		});
-	}
-	const oldest = page.at(-1);
+	const participants = yield* loadParticipantsByThread(
+		db,
+		page.map((row) => row.thread.id),
+	);
+	const items = page.flatMap(({ thread: row, running, latestTurnStatus, execution }) => {
+		if (row.type !== "collaboration" && row.type !== "routine") return [];
+		return [
+			{
+				threadId: row.id,
+				parentThreadId: row.parentThreadId,
+				type: row.type,
+				title: row.title,
+				participants: participants.get(row.id) ?? [],
+				status: execution
+					? execution.state
+					: running
+						? "running"
+						: latestTurnStatus === "failed"
+							? "failed"
+							: "completed",
+				routineExecution: execution
+					? {
+							executionId: execution.id,
+							routineId: execution.routineId,
+							routineName: execution.routineName,
+							triggerKind: execution.trigger.kind,
+							triggeredAt:
+								execution.trigger.kind === "cron"
+									? execution.trigger.scheduledAt
+									: execution.trigger.kind === "webhook"
+										? execution.trigger.receivedAt
+										: execution.trigger.requestedAt,
+						}
+					: null,
+				latestActivityAt: row.updatedAt.toISOString(),
+			} satisfies ChatHistoryEntry,
+		];
+	});
+	const oldest = page.at(-1)?.thread;
 	return {
 		items,
 		nextCursor:
