@@ -1,7 +1,7 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
 import { isUuid } from "@sugabots/core/database/ids";
-import type { Email, EmailAddress } from "@sugabots/core/email/email";
+import type { Email } from "@sugabots/core/email/email";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -63,8 +63,8 @@ export interface AuthOptions {
 	/** Browser origins besides `baseUrl`'s allowed to sign in. The first is where invite links point. */
 	webOrigins: string[];
 	/** Sends verification and invitation emails. */
-	mailer: (email: Email) => Promise<void>;
-	emailFrom: EmailAddress;
+	mailer: (message: Email.Message) => Promise<void>;
+	emailFrom: Email.Address;
 	/** Whether anybody may create an account, or only the first person and invitees. */
 	allowOpenSignUp: boolean;
 	/** Whether a new account must prove its address before it gets a session. */

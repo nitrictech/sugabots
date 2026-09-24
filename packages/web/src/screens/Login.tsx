@@ -13,7 +13,7 @@ import { Input } from "@/ui/input.tsx";
  *
  * The design leads with a magic link and keeps a password as the fallback. It
  * is the other way round here, and will be until there is somewhere to send
- * mail: by default `EmailService` (`packages/core/src/email/email.ts`) logs
+ * mail: by default `Email.layer` (`packages/core/src/email/email.ts`) logs
  * invitations rather than sending them, and a sign-in link nobody receives
  * is worse than no link at all. When email is really sent this becomes the
  * secondary action, which is a change to this file and not to the flow.

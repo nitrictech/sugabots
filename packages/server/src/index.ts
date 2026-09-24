@@ -21,7 +21,7 @@ import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
-import { EmailService } from "@sugabots/core/email/email";
+import { Email } from "@sugabots/core/email/email";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
@@ -79,7 +79,7 @@ const SHUTDOWN_GRACE = Duration.seconds(3);
 const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
 	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
-	const emailService = yield* EmailService;
+	const email = yield* Email.Service;
 
 	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
 	// of its own until it can be ported onto the database's.
@@ -93,7 +93,7 @@ const main = Effect.gen(function* () {
 		secret,
 		baseUrl,
 		webOrigins,
-		mailer: (email) => Effect.runPromiseWith(database)(emailService.send(email)),
+		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
 		emailFrom: config.transactionalEmailFrom,
 		allowOpenSignUp,
 		requireEmailVerification,
@@ -214,7 +214,7 @@ main.pipe(
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
-		Layer.merge(databaseLayer(config.databaseUrl), EmailService.layer).pipe(
+		Layer.merge(databaseLayer(config.databaseUrl), Email.layer).pipe(
 			Layer.provideMerge(observabilityLayer),
 		),
 	),

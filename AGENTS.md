@@ -29,10 +29,10 @@ Write only what the current task needs. Keep behavior, preconditions, and side e
 
 Follow `packages/core/src/email/email.ts`:
 
-- Declare a `…Service` class with `Context.Service`, its interface written inline, at the top of the file; supporting types and errors go below it.
-- Build the service in the class's `make` option, reading its settings through Effect's `Config`. Expose `layerNoDeps = Layer.effect(this, this.make)` and `layer = this.layerNoDeps.pipe(Layer.provide(...))` with its standard dependencies, so the entry point composes layers without passing config or wiring dependencies. Layers are memoized by reference, so keep `layer` a constant, not a function.
-- With several implementations, `make` picks one from an explicit setting with a default (`EMAIL_PROVIDER`, defaulting to `console`), reading only the chosen one's settings. Put each implementation in `implementations/`. Type implementations through the service's own types (`Email`), not `XService["Service"]`: `make` returns them, so that annotation is circular, and the class still checks their shape. A single implementation stays in the service file.
-- Tests supply doubles with `Effect.provideService`, not as statics.
+- The module is the service's namespace: it starts with `export * as Email from "./email.ts"`, and callers import `{ Email }` and write `Email.Service`, `Email.layer`, `Email.Message`. Name exports for their role inside the namespace (`Message`, `Address`, `DeliveryFailed`), not with the namespace's name again.
+- Export, in this order at the top: `Interface`; `Service`, a `Context.Service<Service, Interface>` class; `make`, the effect that builds an `Interface`, reading settings through Effect's `Config`; `layerNoDeps = Layer.effect(Service, make)`; and `layer = layerNoDeps.pipe(Layer.provide(...))` with its standard dependencies, so the entry point composes layers without passing config or wiring dependencies. Layers are memoized by reference, so keep `layer` a constant, not a function. Supporting types, errors, and helpers go below.
+- With several implementations, `make` picks one from an explicit setting with a default (`EMAIL_PROVIDER`, defaulting to `console`), reading only the chosen one's settings. Put each implementation in `implementations/`, typed as the namespace's `Interface`. A single implementation stays in the service file.
+- Tests supply doubles with `Effect.provideService(Email.Service, ...)`.
 - Implementation files are imported by the service file, so they use its values only inside functions, never at module top level, to keep the import cycle safe.
 
 ### Testing
