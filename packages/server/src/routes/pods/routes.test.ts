@@ -239,8 +239,40 @@ describe("POST /workspaces/:workspace/pods", () => {
 		);
 
 		expect(response.status).toBe(400);
+		expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).message).toBe(
+			"That name cannot be a pod's address",
+		);
 		expect(created).toBeUndefined();
 	});
+
+	it.each(["Personal", "PERSONAL!!!"])(
+		"explains the reserved address with a public message for %s",
+		async (name) => {
+			const response = await app().request(
+				`/workspaces/${WORKSPACE}/pods`,
+				as("admin-token", json({ name })),
+			);
+
+			expect(response.status).toBe(400);
+			expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).message).toBe(
+				'"personal" is reserved for your Personal pod. Choose another name.',
+			);
+			expect(created).toBeUndefined();
+		},
+	);
+
+	it.each([{ name: "Personal" }, { name: "Mine", slug: "personal" }])(
+		"keeps the Personal pods' slug from a shared pod: %o",
+		async (body) => {
+			const response = await app().request(
+				`/workspaces/${WORKSPACE}/pods`,
+				as("admin-token", json(body)),
+			);
+
+			expect(response.status).toBe(400);
+			expect(created).toBeUndefined();
+		},
+	);
 
 	it("rejects a body that is not a pod, with the field issues", async () => {
 		const response = await app().request(

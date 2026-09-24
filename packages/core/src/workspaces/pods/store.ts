@@ -1,4 +1,10 @@
-import type { Pod, PodMember, PodPermissions, PodUpdate } from "@sugabots/contracts";
+import {
+	PERSONAL_POD_SLUG,
+	type Pod,
+	type PodMember,
+	type PodPermissions,
+	type PodUpdate,
+} from "@sugabots/contracts";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import {
@@ -143,7 +149,10 @@ const create: PodStore["create"] = (workspaceId, creator, { name, slug }) =>
 				db
 					.insert(pod)
 					.values({ workspaceId, kind: "shared", name, slug, createdById: creator.userId })
-					.onConflictDoNothing({ target: [pod.workspaceId, pod.slug] })
+					.onConflictDoNothing({
+						target: [pod.workspaceId, pod.slug],
+						where: sql`${pod.kind} = 'shared'`,
+					})
 					.returning(),
 			);
 
@@ -180,7 +189,7 @@ export const provisionPersonalPod = Effect.fn("PodStore.provisionPersonalPod")(f
 			ownerId: userId,
 			kind: "personal",
 			name: "Personal",
-			slug: `personal-${crypto.randomUUID()}`,
+			slug: PERSONAL_POD_SLUG,
 			createdById: userId,
 		})
 		.onConflictDoNothing()
