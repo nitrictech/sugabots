@@ -3,7 +3,7 @@ import { EmailDeliveryFailed, EmailService } from "../email.ts";
 
 export interface WebhookEmailConfig {
 	provider: "webhook";
-	/** Receives each email as a JSON `POST` of `{ to, subject, text }`. */
+	/** Receives each email as a JSON `POST` of its `Email`. */
 	url: string;
 	/** Sent as a bearer token when present. */
 	token?: string;

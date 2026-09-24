@@ -5,6 +5,7 @@
  * testable.
  */
 
+import type { EmailAddress } from "@sugabots/core/email/email";
 import type { EmailConfig } from "@sugabots/core/email/layer";
 
 export type Environment = "development" | "production";
@@ -52,9 +53,12 @@ export interface Config {
 	requireEmailVerification: boolean;
 	/** The provider that sends verification and invitation emails. */
 	email: EmailConfig;
+	/** The sender of those emails. */
+	emailFrom: EmailAddress;
 }
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
+const DEVELOPMENT_EMAIL_FROM = "sugabots@localhost";
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"development-secret-not-for-production",
 	"change-me",
@@ -121,6 +125,10 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 			"REQUIRE_EMAIL_VERIFICATION needs an email provider. Set EMAIL_WEBHOOK_URL, or turn it off.",
 		);
 	}
+	// The console sends nothing, so it has no sender for a provider to verify.
+	if (email.provider !== "console" && !env.EMAIL_FROM) {
+		throw new Error("EMAIL_FROM is required with an email provider.");
+	}
 
 	return {
 		environment,
@@ -135,6 +143,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		allowOpenSignUp,
 		requireEmailVerification,
 		email,
+		emailFrom: { email: env.EMAIL_FROM ?? DEVELOPMENT_EMAIL_FROM, name: "Sugabots" },
 	};
 }
 

@@ -1,7 +1,7 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
 import { isUuid } from "@sugabots/core/database/ids";
-import type { Email } from "@sugabots/core/email/email";
+import type { Email, EmailAddress } from "@sugabots/core/email/email";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -64,6 +64,8 @@ export interface AuthOptions {
 	webOrigins: string[];
 	/** Sends verification and invitation emails. */
 	mailer: (email: Email) => Promise<void>;
+	/** The sender of those emails. */
+	emailFrom: EmailAddress;
 	/** Whether anybody may create an account, or only the first person and invitees. */
 	allowOpenSignUp: boolean;
 	/** Whether a new account must prove its address before it gets a session. */
@@ -126,6 +128,7 @@ export function createAuth({
 	baseUrl,
 	webOrigins,
 	mailer,
+	emailFrom,
 	allowOpenSignUp,
 	requireEmailVerification,
 }: AuthOptions) {
@@ -174,7 +177,8 @@ export function createAuth({
 			autoSignInAfterVerification: true,
 			sendVerificationEmail: async ({ user, url }) => {
 				await mailer({
-					to: user.email,
+					from: emailFrom,
+					to: [{ email: user.email, name: user.name }],
 					subject: "Verify your email for Sugabots",
 					text: `Verify your email address to finish setting up Sugabots.\n\nVerify: ${url}`,
 				});
@@ -272,7 +276,9 @@ export function createAuth({
 					// `/?invite=<id>` shape, so links already sent keep working.
 					const link = `${links}/invite/${encodeURIComponent(id)}`;
 					await mailer({
-						to: email,
+						from: emailFrom,
+						to: [{ email }],
+						replyTo: { email: inviter.user.email, name: inviter.user.name },
 						subject: `${inviter.user.name} invited you to ${workspace.name} on Sugabots`,
 						text: `${inviter.user.name} (${inviter.user.email}) invited you to join the ${workspace.name} workspace.\n\nAccept: ${link}`,
 					});

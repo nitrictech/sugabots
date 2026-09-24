@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { EmailService } from "../email.ts";
+import { type EmailAddress, EmailService } from "../email.ts";
 
 export interface ConsoleEmailConfig {
 	provider: "console";
@@ -9,7 +9,15 @@ export interface ConsoleEmailConfig {
 export const consoleEmailLayer = Layer.succeed(
 	EmailService,
 	EmailService.of({
-		send: ({ to, subject, text }) =>
-			Effect.sync(() => console.log(`email to ${to}: ${subject}\n${text}`)),
+		send: (email) =>
+			Effect.sync(() =>
+				console.log(
+					`email from ${formatAddress(email.from)} to ${email.to.map(formatAddress).join(", ")}: ${email.subject}\n${email.text ?? email.html}`,
+				),
+			),
 	}),
 );
+
+function formatAddress(address: EmailAddress) {
+	return address.name ? `${address.name} <${address.email}>` : address.email;
+}

@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { type Email, EmailService } from "../email.ts";
 import { webhookEmailLayer } from "./webhook.ts";
 
-const email: Email = { to: "person@example.com", subject: "Invitation", text: "Open this link" };
+const email: Email = {
+	from: { email: "sugabots@example.com", name: "Sugabots" },
+	to: [{ email: "person@example.com" }],
+	subject: "Invitation",
+	text: "Open this link",
+};
 
 function send(fetch: typeof globalThis.fetch, token?: string) {
 	return Effect.runPromiseExit(

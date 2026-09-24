@@ -58,6 +58,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		mailer: async (email) => {
 			sent.push(email);
 		},
+		emailFrom: { email: "sugabots@example.com" },
 		allowOpenSignUp: true,
 		requireEmailVerification: false,
 	});
@@ -97,9 +98,10 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 
 	async function verifyEmail(email: string): Promise<void> {
 		const verification = sent.findLast(
-			(message) => message.to === email && message.subject === "Verify your email for Sugabots",
+			(message) =>
+				message.to[0].email === email && message.subject === "Verify your email for Sugabots",
 		);
-		const link = verification?.text.match(/https?:\/\/\S+/)?.[0];
+		const link = verification?.text?.match(/https?:\/\/\S+/)?.[0];
 		expect(link, `sign-up should send verification to ${email}`).toBeTruthy();
 
 		const url = new URL(link as string);
@@ -151,7 +153,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		const invitation = (await invited.json()) as { id: string };
 		expect(invitation.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-/);
 
-		expect(sent.at(-1)?.to).toBe(bobEmail);
+		expect(sent.at(-1)?.to).toEqual([{ email: bobEmail }]);
 		expect(sent.at(-1)?.text).toContain(`${ORIGIN}/invite/${invitation.id}`);
 
 		// 4. The invited person signs up and accepts.
@@ -684,6 +686,7 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		baseUrl: "http://localhost:3000",
 		webOrigins: [ORIGIN],
 		mailer,
+		emailFrom: { email: "sugabots@example.com" },
 		requireEmailVerification: false,
 	};
 	// The same database seen under both policies: a member invites from the
@@ -779,6 +782,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			mailer: async (email) => {
 				sent.push(email);
 			},
+			emailFrom: { email: "sugabots@example.com" },
 			allowOpenSignUp: true,
 			requireEmailVerification: true,
 		});
@@ -804,8 +808,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(tooEarly.status).toBe(403);
 
 			const link = sent
-				.findLast((message) => message.to === email)
-				?.text.match(/https?:\/\/\S+/)?.[0];
+				.findLast((message) => message.to[0].email === email)
+				?.text?.match(/https?:\/\/\S+/)?.[0];
 			expect(link, "a verification link should have been sent").toBeTruthy();
 			const url = new URL(link as string);
 			url.searchParams.delete("callbackURL");

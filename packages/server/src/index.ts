@@ -95,6 +95,7 @@ const main = Effect.gen(function* () {
 		baseUrl,
 		webOrigins,
 		mailer: (email) => Effect.runPromiseWith(database)(emailService.send(email)),
+		emailFrom: config.emailFrom,
 		allowOpenSignUp,
 		requireEmailVerification,
 	});
