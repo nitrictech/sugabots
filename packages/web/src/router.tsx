@@ -1,6 +1,6 @@
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { useQuery } from "@tanstack/react-query";
-import type { RouterHistory } from "@tanstack/react-router";
+import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
 import {
 	createRootRouteWithContext,
 	createRoute,
@@ -96,13 +96,13 @@ const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
 	validateSearch: validateInviteSearch,
-	beforeLoad: ({ search, context }) => {
+	beforeLoad: (options) => {
 		// Invitation links already in inboxes and docker logs point at `/?invite=`.
 		// They keep working: the route is the new shape, this is the old one.
-		if (search.invite !== undefined) {
-			throw redirect({ to: "/invite/$id", params: { id: search.invite } });
+		if (options.search.invite !== undefined) {
+			throw redirect({ to: "/invite/$id", params: { id: options.search.invite } });
 		}
-		requireUser({ context });
+		requireUser(options);
 	},
 	component: LandingRoute,
 });
@@ -115,23 +115,42 @@ function LandingRoute() {
 	return <Navigate to="/$workspace/agents" params={{ workspace: workspace.slug }} replace />;
 }
 
+interface LoginSearch {
+	invite?: string;
+	/** Where signing in interrupted, as a path in this app; anything else is dropped. */
+	returnTo?: string;
+}
+
 const loginRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/login",
-	validateSearch: validateInviteSearch,
+	validateSearch: (search: Record<string, unknown>): LoginSearch => ({
+		...validateInviteSearch(search),
+		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
+	}),
 	component: LoginRoute,
 });
 
+/** A path in this app: not protocol-relative or backslashed, which a browser would take elsewhere. */
+function isAppPath(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		value.startsWith("/") &&
+		!value.startsWith("//") &&
+		!value.includes("\\")
+	);
+}
+
 function LoginRoute() {
 	const { session } = loginRoute.useRouteContext();
-	const { invite } = loginRoute.useSearch();
+	const { invite, returnTo = "/" } = loginRoute.useSearch();
 	const navigate = useNavigate();
 
 	if (session.user) {
 		return invite !== undefined ? (
 			<Navigate to="/invite/$id" params={{ id: invite }} replace />
 		) : (
-			<Navigate to="/" replace />
+			<Navigate to={returnTo} replace />
 		);
 	}
 
@@ -141,7 +160,7 @@ function LoginRoute() {
 			onSignedIn={async () => {
 				await session.refresh();
 				await navigate({
-					to: invite !== undefined ? "/invite/$id" : "/",
+					to: invite !== undefined ? "/invite/$id" : returnTo,
 					params: invite !== undefined ? { id: invite } : undefined,
 					replace: true,
 				});
@@ -577,9 +596,18 @@ function ThreadRoute() {
  * Signed out means the login page. `undefined` cannot reach here: `main.tsx`
  * waits for `/me` to answer before it mounts the router at all.
  */
-function requireUser({ context }: { context: RouterContext }): void {
+function requireUser({
+	context,
+	location,
+}: {
+	context: RouterContext;
+	location: ParsedLocation;
+}): void {
 	if (context.session.user === null) {
-		throw redirect({ to: "/login" });
+		throw redirect({
+			to: "/login",
+			search: location.href === "/" ? {} : { returnTo: location.href },
+		});
 	}
 }
 
