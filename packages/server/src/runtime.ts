@@ -20,22 +20,15 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
-import { type Context, Layer, ManagedRuntime } from "effect";
+import { Layer } from "effect";
 
 /**
  * The background loops that run for as long as the process does.
  *
- * Each is a layer, so disposing the runtime stops them in the reverse of the
- * order they started, and nothing needs a `stop()` that somebody has to call
- * in the right order. The database is not theirs: it is built before them,
- * because the event bus they are handed needs it first, and it outlives them,
- * so whoever built it closes it after disposing this. The stores are not here
- * either: they are plain objects with no state of their own, built in
- * `index.ts` and handed to whoever needs them.
+ * The stores are not here: they are plain objects with no state of their own,
+ * built in `index.ts` and handed to whoever needs them.
  */
-export interface RuntimeOptions {
-	/** The process's database, already open. */
-	database: Context.Context<Database>;
+export interface BackgroundOptions {
 	/** Where durable events live, for the nightly prune. */
 	eventStore: EventStore;
 	/** Where the turn worker publishes token deltas and watches for collaborators' answers. */
@@ -56,8 +49,7 @@ export interface RuntimeOptions {
 	publishEvents: PublishEvents;
 }
 
-export function makeRuntime({
-	database: databaseContext,
+export function backgroundLayer({
 	eventStore,
 	bus,
 	model,
@@ -70,9 +62,8 @@ export function makeRuntime({
 	builtInTools,
 	connectionTools,
 	publishEvents,
-}: RuntimeOptions) {
-	const database = Layer.succeedContext(databaseContext);
-	const background = Layer.mergeAll(
+}: BackgroundOptions): Layer.Layer<never, never, Database> {
+	return Layer.mergeAll(
 		eventPruningLayer(eventStore),
 		...(routines
 			? [routineDispatcherLayer({ store: routines }), routineSchedulerLayer({ store: routines })]
@@ -90,9 +81,5 @@ export function makeRuntime({
 		}),
 		summaryWorkerLayer({ store: summaries, model }),
 		facilitatorWorkerLayer({ model, publishEvents, routines }),
-	).pipe(Layer.provide(database));
-
-	return ManagedRuntime.make(Layer.merge(database, background));
+	);
 }
-
-export type AppRuntime = ManagedRuntime.ManagedRuntime<Database, never>;

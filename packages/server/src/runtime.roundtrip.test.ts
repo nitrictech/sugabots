@@ -23,9 +23,9 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
 import { and, eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeRuntime } from "./runtime.ts";
+import { backgroundLayer } from "./runtime.ts";
 
 /**
  * The whole round trip through the real workers: the host's model calls the
@@ -63,8 +63,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			})),
 	};
 
-	const runtime = makeRuntime({
-		database,
+	const background = backgroundLayer({
 		eventStore,
 		bus,
 		model,
@@ -76,6 +75,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		connectionTools: noConnectionTools,
 		publishEvents,
 	});
+	const runtime = ManagedRuntime.make(
+		background.pipe(Layer.provideMerge(Layer.succeedContext(database))),
+	);
 
 	afterAll(async () => {
 		await runtime.dispose();
