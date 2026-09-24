@@ -8,7 +8,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { EmailService } from "@sugabots/core/email/email-service";
+import { EmailService } from "@sugabots/core/email/email";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";

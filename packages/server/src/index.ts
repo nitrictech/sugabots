@@ -21,7 +21,7 @@ import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
-import { EmailService } from "@sugabots/core/email/email-service";
+import { EmailService } from "@sugabots/core/email/email";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";

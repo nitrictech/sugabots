@@ -1,7 +1,6 @@
 import { Effect } from "effect";
-import type { EmailAddress } from "../email.ts";
-// Type-only: email-service.ts imports this module, so a runtime import back would be a cycle.
-import type { EmailService } from "../email-service.ts";
+// Type-only: email.ts imports this module, so a runtime import back would be a cycle.
+import type { EmailAddress, EmailService } from "../email.ts";
 
 export interface ConsoleEmailConfig {
 	provider: "console";

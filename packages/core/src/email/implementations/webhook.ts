@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { EmailDeliveryFailed } from "../email.ts";
-// Type-only: email-service.ts imports this module, so a runtime import back would be a cycle.
-import type { EmailService } from "../email-service.ts";
+// email.ts imports this module, so its values are only used inside `send`, after
+// both modules have loaded.
+import { EmailDeliveryFailed, type EmailService } from "../email.ts";
 
 export interface WebhookEmailConfig {
 	provider: "webhook";

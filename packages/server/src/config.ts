@@ -5,8 +5,7 @@
  * testable.
  */
 
-import type { EmailAddress } from "@sugabots/core/email/email";
-import type { EmailServiceConfig } from "@sugabots/core/email/email-service";
+import type { EmailAddress, EmailServiceConfig } from "@sugabots/core/email/email";
 
 export type Environment = "development" | "production";
 

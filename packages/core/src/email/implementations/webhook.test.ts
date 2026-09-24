@@ -1,7 +1,6 @@
 import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { Email } from "../email.ts";
-import { EmailService } from "../email-service.ts";
+import { type Email, EmailService } from "../email.ts";
 
 const email: Email = {
 	from: { email: "sugabots@example.com", name: "Sugabots" },
