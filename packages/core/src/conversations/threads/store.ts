@@ -28,7 +28,13 @@ import {
 import type { PodPermission } from "../../workspaces/permissions.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
 import { findRoutineExecutionId, toRoutineExecution } from "../routines/execution.ts";
-import { loadCrew, loadParticipants, participantColumns, toMessage } from "./participants.ts";
+import {
+	loadCrew,
+	loadParticipants,
+	loadRecentParticipants,
+	participantColumns,
+	toMessage,
+} from "./participants.ts";
 import { loadPlacedParts } from "./placed-parts.ts";
 import { visibleThread } from "./visibility.ts";
 
@@ -190,6 +196,7 @@ const loadDetails = Effect.fn("ThreadStore.loadDetails")(function* (
 		activeTurnId: activeTurn?.id ?? null,
 		routineExecution: execution ? toRoutineExecution(execution) : null,
 		participants,
+		recentParticipants: yield* loadRecentParticipants(db, threadRow.id),
 		crew,
 		messages: messages.map(({ message: row, failure, ...author }) =>
 			toMessage(row, author, placed(row.id), failure),

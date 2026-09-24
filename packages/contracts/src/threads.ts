@@ -329,6 +329,11 @@ export const threadDetailsSchema = Schema.Struct({
 	routineExecution: Schema.NullOr(routineExecutionSchema),
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	/**
+	 * Who has written in the thread in the last week, or in its last 100
+	 * messages when that reaches further back, most recently active first.
+	 */
+	recentParticipants: Schema.mutable(Schema.Array(threadParticipantSchema)),
+	/**
 	 * The pod's agents, whether or not they have spoken. Who a mention can name,
 	 * which is wider than who has joined.
 	 */

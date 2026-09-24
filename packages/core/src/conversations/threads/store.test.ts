@@ -657,6 +657,45 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		);
 	});
 
+	it("counts a quiet thread's latest messages as recent, and a busy thread's last week", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Latest",
+		});
+		const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+		const written = (author: { authorUserId: string } | { authorAgentId: string }, at: Date) => ({
+			threadId: details.thread.id,
+			...author,
+			kind: "text" as const,
+			status: "complete" as const,
+			parts: [{ type: "text" as const, text: "Earlier" }],
+			content: "Earlier",
+			createdAt: at,
+		});
+		await onDatabase((db) =>
+			db
+				.insert(message)
+				.values([
+					written({ authorUserId: outsiderId }, daysAgo(30)),
+					written({ authorAgentId: agentId }, daysAgo(3)),
+				]),
+		);
+		const recentIds = async () =>
+			(await store.getVisible(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
+
+		expect(await recentIds()).toEqual([memberId, agentId, outsiderId]);
+
+		await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(Array.from({ length: 100 }, () => written({ authorUserId: memberId }, daysAgo(1)))),
+		);
+		expect(await recentIds()).toEqual([memberId, agentId]);
+	});
+
 	it("aggregates measured turn usage without inventing unavailable values", async () => {
 		const details = await createThread({
 			workspaceId,
