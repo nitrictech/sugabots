@@ -7,6 +7,8 @@ import type {
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
+import { useAgentWithPod } from "@/lib/agents.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { Button } from "@/ui/button.tsx";
@@ -151,7 +153,7 @@ export function ChatThreadPanel({
 									{details.thread.title}
 								</h2>
 								{type === "routine" && routineExecution && (
-									<RoutineHeaderActions execution={routineExecution} podId={details.thread.podId} />
+									<RoutineHeaderActions execution={routineExecution} />
 								)}
 								<button
 									type="button"
@@ -222,13 +224,8 @@ export function ChatThreadPanel({
 	);
 }
 
-function RoutineHeaderActions({
-	execution,
-	podId,
-}: {
-	execution: RoutineExecution;
-	podId: string;
-}) {
+function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
+	const placed = useAgentWithPod(execution.agentId);
 	return (
 		<div className="flex items-center gap-1">
 			{execution.trigger.kind === "webhook" && (
@@ -252,15 +249,16 @@ function RoutineHeaderActions({
 					</div>
 				</details>
 			)}
-			<Link
-				to="/settings/pods/$pod/agents/$agent"
-				params={{ pod: podId, agent: execution.agentId }}
-				search={{ tab: "routines" }}
-				aria-label="View routine definition"
-				className="focus-ring grid size-[30px] place-items-center rounded-lg text-muted-foreground hover:bg-sunken hover:text-primary"
-			>
-				<ArrowUpRight aria-hidden size={15} />
-			</Link>
+			{placed && (
+				<Link
+					{...agentSettingsLink(placed)}
+					search={{ tab: "routines" }}
+					aria-label="View routine definition"
+					className="focus-ring grid size-[30px] place-items-center rounded-lg text-muted-foreground hover:bg-sunken hover:text-primary"
+				>
+					<ArrowUpRight aria-hidden size={15} />
+				</Link>
+			)}
 		</div>
 	);
 }

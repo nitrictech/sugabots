@@ -1,8 +1,9 @@
-import type { Agent, AgentUpdate, NewAgentInPod } from "@sugabots/contracts";
+import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
+import { usePods } from "@/lib/pods.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
@@ -53,6 +54,15 @@ export function useAgent(agentId: string | undefined): {
 		isPending,
 		error,
 	};
+}
+
+/** An agent and its pod, by the agent's id, or `undefined` until both rosters have them. */
+export function useAgentWithPod(agentId: string): { pod: Pod; agent: Agent } | undefined {
+	const { agents } = useAgents();
+	const { data: pods } = usePods();
+	const agent = agents?.find((one) => one.id === agentId);
+	const pod = pods?.find((one) => one.id === agent?.podId);
+	return agent && pod ? { pod, agent } : undefined;
 }
 
 export function useModels(enabled = true) {

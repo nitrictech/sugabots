@@ -1,9 +1,10 @@
-import { slugify } from "@sugabots/contracts";
+import { type Agent, type Pod, slugify } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight, Check, Circle } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useAgents, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useCompleteOnboarding } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
@@ -274,27 +275,22 @@ function PodStep({
 	existingPod,
 }: {
 	workspaceId: string;
-	agent: { id: string; name: string };
-	existingPod?: { id: string; name: string };
+	agent: Agent;
+	existingPod?: Pod;
 }) {
 	const navigate = useNavigate();
 	const complete = useCompleteOnboarding();
 
-	async function finish(podId: string) {
-		await complete.mutateAsync({ workspaceId, podId, agentId: agent.id });
-		await navigate({
-			to: "/agents/$agent",
-			params: { agent: agent.id },
-			search: { pod: podId },
-			replace: true,
-		});
+	async function finish(pod: Pod) {
+		await complete.mutateAsync({ workspaceId, podId: pod.id, agentId: agent.id });
+		await navigate({ ...agentChatLink({ pod, agent }), replace: true });
 	}
 
 	return (
 		<>
 			<StepHeading title="Your Personal pod is ready.">Your assistant lives here.</StepHeading>
 			{existingPod ? (
-				<Button onClick={() => void finish(existingPod.id)} disabled={complete.isPending}>
+				<Button onClick={() => void finish(existingPod)} disabled={complete.isPending}>
 					Enter {existingPod.name} <ArrowRight size={16} />
 				</Button>
 			) : (

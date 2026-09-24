@@ -1,8 +1,9 @@
-import { slugify } from "@sugabots/contracts";
+import { type Pod, slugify } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { podSettingsLink } from "@/lib/links.ts";
 import { useCreatePod } from "@/lib/pods.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, type ButtonProps } from "@/ui/button.tsx";
@@ -28,9 +29,9 @@ export function NewPodButton({
 
 			<Dialog open={open} onOpenChange={setOpen}>
 				<NewPodDialog
-					onCreated={async (podId) => {
+					onCreated={async (pod) => {
 						setOpen(false);
-						await navigate({ to: "/settings/pods/$pod", params: { pod: podId } });
+						await navigate(podSettingsLink(pod));
 					}}
 				/>
 			</Dialog>
@@ -38,7 +39,7 @@ export function NewPodButton({
 	);
 }
 
-function NewPodDialog({ onCreated }: { onCreated: (podId: string) => Promise<void> }) {
+function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<void> }) {
 	const [name, setName] = useState("");
 	const create = useCreatePod();
 	const slug = slugify(name);
@@ -48,7 +49,7 @@ function NewPodDialog({ onCreated }: { onCreated: (podId: string) => Promise<voi
 		try {
 			const pod = await create.mutateAsync({ name });
 			if (!pod) throw new Error("pod creation returned no pod");
-			await onCreated(pod.id);
+			await onCreated(pod);
 		} catch {
 			return;
 		}

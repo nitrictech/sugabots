@@ -2,10 +2,12 @@ import type { Agent } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { useAgentWithPod } from "@/lib/agents.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { SurfaceHeader } from "@/ui/surface.tsx";
 
-type AgentIdentity = Pick<Agent, "id" | "name" | "hue" | "face"> & { podId?: string };
+type AgentIdentity = Pick<Agent, "id" | "name" | "hue" | "face">;
 
 export function AgentPaneHeader({
 	agent,
@@ -53,21 +55,12 @@ export function AgentHeaderIdentity({
 	context?: ReactNode;
 }) {
 	const avatar = <AgentAvatar hue={agent.hue} face={agent.face} size={titleOnly ? 40 : 34} />;
+	const placed = useAgentWithPod(agent.id);
 	return (
 		<div className={`flex min-w-0 flex-1 items-center ${titleOnly ? "gap-4" : "gap-3"}`}>
-			{linkToSettings && agent.podId ? (
+			{linkToSettings && placed ? (
 				<Link
-					to="/settings/pods/$pod/agents/$agent"
-					params={{ pod: agent.podId, agent: agent.id }}
-					aria-label={`Configure ${agent.name}`}
-					className="focus-ring shrink-0 rounded-full"
-				>
-					{avatar}
-				</Link>
-			) : linkToSettings ? (
-				<Link
-					to="/settings/agents/$agent"
-					params={{ agent: agent.id }}
+					{...agentSettingsLink(placed)}
 					aria-label={`Configure ${agent.name}`}
 					className="focus-ring shrink-0 rounded-full"
 				>

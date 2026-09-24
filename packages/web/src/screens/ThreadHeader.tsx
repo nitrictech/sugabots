@@ -1,6 +1,8 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Ellipsis, Octagon, PanelRightClose, PanelRightOpen, SquarePen } from "lucide-react";
+import { useAgentWithPod } from "@/lib/agents.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useThreadPanel } from "@/lib/thread-panel.tsx";
 import { useCancelTurn } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -40,7 +42,7 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 				<span aria-hidden className="h-6 w-px bg-border-subtle" />
 				<ParticipantStack label="People" participants={people} />
 				<span aria-hidden className="h-6 w-px bg-border-subtle" />
-				<NewChatButton agentId={host.id} podId={details.thread.podId} />
+				<NewChatButton agentId={host.id} />
 				<ThreadPicker
 					agent={host}
 					podId={details.thread.podId}
@@ -58,13 +60,15 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 /**
  * Returns to the agent's main Chat from a work-artifact thread.
  */
-function NewChatButton({ agentId, podId }: { agentId: string; podId: string }) {
+function NewChatButton({ agentId }: { agentId: string }) {
+	const placed = useAgentWithPod(agentId);
+	if (!placed) return null;
 	return (
 		<IconButton
 			label="New chat"
 			variant="pane"
 			size="lg"
-			render={<Link to="/agents/$agent" params={{ agent: agentId }} search={{ pod: podId }} />}
+			render={<Link {...agentChatLink(placed)} />}
 		>
 			<SquarePen size={17} />
 		</IconButton>

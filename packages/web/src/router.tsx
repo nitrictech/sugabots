@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { useAgent, useAgents } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
+import { agentChatLink } from "@/lib/links.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
@@ -375,15 +376,8 @@ function AgentsRoute() {
 		return <Panes>{null}</Panes>;
 	}
 
-	if (first) {
-		return (
-			<Navigate
-				to="/agents/$agent"
-				params={{ agent: first.id }}
-				search={{ pod: firstPod?.id }}
-				replace
-			/>
-		);
+	if (first && firstPod) {
+		return <Navigate {...agentChatLink({ pod: firstPod, agent: first })} replace />;
 	}
 
 	return (
