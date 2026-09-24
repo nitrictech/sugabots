@@ -148,7 +148,7 @@ export function apiLayer({
 			validateProviderUrl,
 			oauth: {
 				redirectUrl: `${apiUrl}/connections/oauth/callback`,
-				returnTo: `${webUrl({ baseUrl, webOrigins })}/settings/pods`,
+				webUrl: webUrl({ baseUrl, webOrigins }),
 				fetch: oauthFetch,
 			},
 		}),

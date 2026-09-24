@@ -38,6 +38,9 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
 export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
 
+/** The web page a connection's OAuth sign-in returns to, with ids only. */
+export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
+
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,

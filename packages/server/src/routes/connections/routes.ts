@@ -1,3 +1,4 @@
+import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { BadRequest, Conflict, CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { Database } from "@sugabots/core/database/database";
 import type { listServerTools } from "@sugabots/core/providers/connections/mcp";
@@ -32,7 +33,8 @@ export interface ConnectionRoutesOptions {
 	oauth: {
 		redirectUrl: string;
 		fetch: EgressHttpClient;
-		returnTo: string;
+		/** The web app's origin. */
+		webUrl: string;
 		begin?: typeof beginAuthorization;
 		finish?: typeof finishAuthorization;
 		providers?: OAuthProviders;
@@ -141,11 +143,13 @@ export function connectionRoutes({
 								errorDescription: query.error_description,
 							})
 							.pipe(asHttpError(connectionErrors));
-						const back = new URL(oauth.returnTo);
+						const back = new URL(oauth.webUrl);
+						back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
 						if ("failed" in outcome) {
 							back.searchParams.set("oauth_error", outcome.failed);
 						} else {
-							back.pathname = `${back.pathname.replace(/\/$/, "")}/${outcome.connected.podId}`;
+							back.searchParams.set("workspace", outcome.connected.workspaceId);
+							back.searchParams.set("pod", outcome.connected.podId);
 							back.searchParams.set("connected", outcome.connected.connectionId);
 						}
 						return HttpServerResponse.redirect(back.toString(), { status: 302 });

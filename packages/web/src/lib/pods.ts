@@ -1,5 +1,11 @@
 import type { NewPod, PodUpdate } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
@@ -16,9 +22,18 @@ import { useWorkspace } from "@/lib/workspace.ts";
  */
 export function usePods() {
 	const workspace = useWorkspace();
-	const workspaceId = workspace.workspace?.id;
+	const query = useQuery(podsQuery(workspace.workspace?.id));
 
-	const query = useQuery({
+	return {
+		...query,
+		/** Still resolving if we do not even know the workspace yet. */
+		isPending: workspace.isPending || query.isPending,
+	};
+}
+
+/** The pods of one workspace, which need not be the one being looked at. */
+export function podsQuery(workspaceId: string | undefined) {
+	return queryOptions({
 		queryKey: ["pods", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
@@ -27,12 +42,6 @@ export function usePods() {
 					})
 			: skipToken,
 	});
-
-	return {
-		...query,
-		/** Still resolving if we do not even know the workspace yet. */
-		isPending: workspace.isPending || query.isPending,
-	};
 }
 
 /**

@@ -54,7 +54,7 @@ class ConnectionOAuthCompletionFailed extends Data.TaggedError("ConnectionOAuthC
 
 export type ConnectionOAuthOutcome =
 	| { failed: string }
-	| { connected: { connectionId: string; podId: string } };
+	| { connected: { connectionId: string; workspaceId: string; podId: string } };
 
 export function connectionOperations({
 	connections,
@@ -259,7 +259,7 @@ export function connectionOperations({
 					.update(owner.workspaceId, owner.podId, owner.connectionId, { enabled: true })
 					.pipe(Effect.catch(() => Effect.void));
 				yield* discoverQuietly(owner.workspaceId, owner.podId, owner.connectionId);
-				return connected(owner.connectionId, owner.podId);
+				return connected(owner);
 			}),
 	};
 }
@@ -269,6 +269,12 @@ function reason(cause: unknown): string {
 }
 
 const failed = (message: string): ConnectionOAuthOutcome => ({ failed: message });
-const connected = (connectionId: string, podId: string): ConnectionOAuthOutcome => ({
-	connected: { connectionId, podId },
-});
+const connected = ({
+	connectionId,
+	workspaceId,
+	podId,
+}: {
+	connectionId: string;
+	workspaceId: string;
+	podId: string;
+}): ConnectionOAuthOutcome => ({ connected: { connectionId, workspaceId, podId } });

@@ -1,20 +1,24 @@
+import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
+import { useQuery } from "@tanstack/react-query";
 import type { RouterHistory } from "@tanstack/react-router";
 import {
 	createRootRouteWithContext,
 	createRoute,
 	createRouter,
+	Link,
 	lazyRouteComponent,
 	Navigate,
 	redirect,
 	useNavigate,
 } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { useAgent, useAgents } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
-import { agentChatLink } from "@/lib/links.ts";
+import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
-import { usePods } from "@/lib/pods.ts";
+import { podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import { chooseWorkspace, useWorkspace } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsDialog } from "@/screens/SettingsDialog.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
@@ -46,6 +50,7 @@ const WorkspaceSettings = lazyRouteComponent(
  *   /                        redirects to /agents
  *   /login
  *   /invite/$id
+ *   /connections/oauth/return        where a connection's sign-in comes back
  *   /settings                workspace settings
  *   /agents                  picks the first agent you can see
  *   /agents/$agent           one agent's thread history and new-thread composer
@@ -136,6 +141,66 @@ function LoginRoute() {
 				});
 			}}
 		/>
+	);
+}
+
+interface SignInReturnSearch {
+	workspace?: string;
+	pod?: string;
+	connected?: string;
+	oauth_error?: string;
+}
+
+const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+/** Where a connection's OAuth sign-in returns. The API sends ids; this picks the page. */
+const signInReturnRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: CONNECTION_SIGN_IN_RETURN_PATH,
+	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
+		workspace: optionalString(search.workspace),
+		pod: optionalString(search.pod),
+		connected: optionalString(search.connected),
+		oauth_error: optionalString(search.oauth_error),
+	}),
+	beforeLoad: requireUser,
+	component: SignInReturnRoute,
+});
+
+function SignInReturnRoute() {
+	const {
+		workspace,
+		pod: podId,
+		connected,
+		oauth_error: oauthError,
+	} = signInReturnRoute.useSearch();
+	const pods = useQuery(podsQuery(workspace));
+	const pod = pods.data?.find((one) => one.id === podId);
+	const navigate = useNavigate();
+
+	useEffect(() => {
+		if (!pod) return;
+		// The pod's page looks in the current workspace, which may not be this one.
+		chooseWorkspace(pod.workspaceId);
+		void navigate({
+			...podSettingsLink(pod),
+			search: { connected, oauth_error: oauthError },
+			replace: true,
+		});
+	}, [pod, connected, oauthError, navigate]);
+
+	if (pod || (workspace !== undefined && pods.isPending)) {
+		return <div className="h-full bg-sunken" />;
+	}
+	return (
+		<div className="grid h-full place-items-center bg-sunken p-6">
+			<EmptyState title="Connection sign-in failed">
+				<p>{oauthError ?? "The pod it was for is no longer available to you."}</p>
+				<Link to="/" className="text-primary underline">
+					Return to workspace
+				</Link>
+			</EmptyState>
+		</div>
 	);
 }
 
@@ -277,6 +342,13 @@ const settingsPodAgentRoute = createRoute({
 const settingsPodRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod",
+	// Kept in the address until the Connections panel reads and clears them.
+	validateSearch: (
+		search: Record<string, unknown>,
+	): { connected?: string; oauth_error?: string } => ({
+		connected: optionalString(search.connected),
+		oauth_error: optionalString(search.oauth_error),
+	}),
 	component: SettingsPodRoute,
 });
 
@@ -481,6 +553,7 @@ const routeTree = rootRoute.addChildren([
 	indexRoute,
 	loginRoute,
 	inviteRoute,
+	signInReturnRoute,
 	legacySetupRoute,
 	onboardingRoute,
 	shellRoute.addChildren([
