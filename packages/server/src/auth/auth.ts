@@ -64,7 +64,6 @@ export interface AuthOptions {
 	webOrigins: string[];
 	/** Sends verification and invitation emails. */
 	mailer: (email: Email) => Promise<void>;
-	/** The sender of those emails. */
 	emailFrom: EmailAddress;
 	/** Whether anybody may create an account, or only the first person and invitees. */
 	allowOpenSignUp: boolean;

@@ -15,10 +15,6 @@ const webhook = {
 	EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
 };
 
-/**
- * Sends `email` through `EmailService.layerNoDeps` as `env` configures it, over
- * an HTTP client that records each request and answers `status`.
- */
 async function sendWith(env: Record<string, string>, status = 204) {
 	const requests: HttpClientRequest.HttpClientRequest[] = [];
 	const http = HttpClient.make((request) =>

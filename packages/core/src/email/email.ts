@@ -3,7 +3,6 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { fromConsole } from "./implementations/console.ts";
 import { fromWebhook, type WebhookEmailConfig } from "./implementations/webhook.ts";
 
-/** Sends email through the implementation the installation is configured with. */
 export class EmailService extends Context.Service<
 	EmailService,
 	{
@@ -27,18 +26,15 @@ export class EmailService extends Context.Service<
 	static readonly layer = this.layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
 }
 
-/** The environment asks for email that cannot be sent as configured. */
 export class InvalidEmailConfig extends Data.TaggedError("InvalidEmailConfig")<{
 	message: string;
 }> {}
 
 export interface EmailAddress {
 	email: string;
-	/** Shown instead of `email` by mail clients that support it. */
 	name?: string;
 }
 
-/** An email's body: plain text, HTML, or both for clients to choose between. */
 export type EmailBody = { text: string; html?: string } | { html: string; text?: string };
 
 export type Email = EmailBody & {
@@ -50,7 +46,6 @@ export type Email = EmailBody & {
 	subject: string;
 };
 
-/** The configured provider did not accept an email. */
 export class EmailDeliveryFailed extends Data.TaggedError("EmailDeliveryFailed")<{
 	provider: string;
 	cause: unknown;
