@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configFromEnv, parseOrigins, trustedOrigins, webUrl } from "./config.ts";
+import { configFromEnv, parseOrigins, trustedOrigins, webAppUrl } from "./config.ts";
 import { consoleMailer, type Mailer } from "./email/mailer.ts";
 
 describe("configFromEnv", () => {
@@ -251,7 +251,7 @@ describe("origins", () => {
 	});
 
 	it("points links at the first web origin, else at the API's own address", () => {
-		expect(webUrl(installation)).toBe("https://sugabots.example.com");
-		expect(webUrl(split)).toBe("https://app.example.com");
+		expect(webAppUrl(installation)).toBe("https://sugabots.example.com");
+		expect(webAppUrl(split)).toBe("https://app.example.com");
 	});
 });

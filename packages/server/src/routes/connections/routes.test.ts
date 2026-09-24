@@ -195,7 +195,7 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 		listTools,
 		oauth: {
 			redirectUrl: "http://localhost:3000/connections/oauth/callback",
-			webUrl: "http://localhost:5173",
+			webAppUrl: "http://localhost:5173",
 			fetch: async () => new Response(null, { status: 503 }),
 			begin,
 			finish,

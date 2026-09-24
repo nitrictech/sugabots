@@ -33,7 +33,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi";
 import type { Auth } from "../auth/auth.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { betterAuthSessionResolver } from "../auth/session.ts";
-import { API_BASE_PATH, trustedOrigins, webUrl } from "../config.ts";
+import { API_BASE_PATH, trustedOrigins, webAppUrl } from "../config.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
@@ -148,7 +148,7 @@ export function apiLayer({
 			validateProviderUrl,
 			oauth: {
 				redirectUrl: `${apiUrl}/connections/oauth/callback`,
-				webUrl: webUrl({ baseUrl, webOrigins }),
+				webAppUrl: webAppUrl({ baseUrl, webOrigins }),
 				fetch: oauthFetch,
 			},
 		}),

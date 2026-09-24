@@ -179,7 +179,13 @@ export function trustedOrigins({ baseUrl, webOrigins }: Pick<Config, "baseUrl" |
 	return [new URL(baseUrl).origin, ...webOrigins];
 }
 
-/** Where the web app is: the first of `webOrigins`, else `baseUrl`. No trailing slash. */
-export function webUrl({ baseUrl, webOrigins }: Pick<Config, "baseUrl" | "webOrigins">) {
+/**
+ * Where the web app is served, for links that must open in it rather than at
+ * the API: invitation emails and the return from a connection sign-in. It is
+ * the first of `webOrigins`, else `baseUrl`, because an installation that
+ * names no web origin serves the web app from the API's own address. No
+ * trailing slash.
+ */
+export function webAppUrl({ baseUrl, webOrigins }: Pick<Config, "baseUrl" | "webOrigins">) {
 	return (webOrigins[0] ?? baseUrl).replace(/\/$/, "");
 }

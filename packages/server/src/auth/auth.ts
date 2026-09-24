@@ -13,7 +13,7 @@ import { organization } from "better-auth/plugins/organization";
 import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Effect } from "effect";
-import { API_BASE_PATH, trustedOrigins, webUrl } from "../config.ts";
+import { API_BASE_PATH, trustedOrigins, webAppUrl } from "../config.ts";
 import type { Mailer } from "../email/mailer.ts";
 import { admitSignUp } from "./sign-up.ts";
 
@@ -129,7 +129,7 @@ export function createAuth({
 	allowOpenSignUp,
 	requireEmailVerification,
 }: AuthOptions) {
-	const links = webUrl({ baseUrl, webOrigins });
+	const links = webAppUrl({ baseUrl, webOrigins });
 
 	return betterAuth({
 		appName: "Sugabots",

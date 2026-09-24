@@ -33,8 +33,12 @@ export interface ConnectionRoutesOptions {
 	oauth: {
 		redirectUrl: string;
 		fetch: EgressHttpClient;
-		/** The web app's origin. */
-		webUrl: string;
+		/**
+		 * Where the web app is served. A finished sign-in redirects to
+		 * `CONNECTION_SIGN_IN_RETURN_PATH` under it with ids, and the web app
+		 * turns those into its own URL, because only it knows its routes.
+		 */
+		webAppUrl: string;
 		begin?: typeof beginAuthorization;
 		finish?: typeof finishAuthorization;
 		providers?: OAuthProviders;
@@ -143,7 +147,7 @@ export function connectionRoutes({
 								errorDescription: query.error_description,
 							})
 							.pipe(asHttpError(connectionErrors));
-						const back = new URL(oauth.webUrl);
+						const back = new URL(oauth.webAppUrl);
 						back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
 						if (outcome.pod) {
 							back.searchParams.set("workspace", outcome.pod.workspaceId);
