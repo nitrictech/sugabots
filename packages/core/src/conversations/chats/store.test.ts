@@ -134,6 +134,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		]);
 	});
 
+	it("keeps a mentioned agent out of the chat, and has the chat's agent answer", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		const [recipient] = await onDatabase((db) =>
+			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, recipientAgentId)),
+		);
+		await store.sendMain({
+			chatId: current.id,
+			userId,
+			messageId: crypto.randomUUID(),
+			content: `@${recipient?.handle} what do you think?`,
+		});
+
+		const participants = await onDatabase((db) =>
+			db
+				.select({ agentId: threadParticipant.agentId })
+				.from(threadParticipant)
+				.where(eq(threadParticipant.threadId, current.mainThreadId)),
+		);
+		expect(participants.flatMap((row) => (row.agentId ? [row.agentId] : []))).toEqual([agentId]);
+		const queued = await onDatabase((db) =>
+			db.select().from(job).where(eq(job.threadId, current.mainThreadId)),
+		);
+		expect(queued.map((row) => "agentId" in row.payload && row.payload.agentId)).toEqual([agentId]);
+	});
+
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });

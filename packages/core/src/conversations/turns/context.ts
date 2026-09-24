@@ -107,6 +107,9 @@ export function turnInstruction(context: TurnContext, options: PromptOptions = {
 					...crew,
 					"Use the collaborate tool when you need another agent's answer to finish your reply: they work in a child thread and you get the answer back.",
 					'Do this without being told to; a person should not have to say "ask them". Do not collaborate on what you can answer yourself, and never reach for yourself.',
+					context.thread.type === "chat"
+						? "This is a chat with you alone: only you reply here. When the person mentions another agent, they want that agent's input, so collaborate with it and answer with what it tells you."
+						: undefined,
 					"Call these tools. Never write a tool call out in your reply: text describing a tool does nothing and is shown to everyone as part of your message.",
 					"A collaboration brief must stand alone: the collaborator sees only the brief, so include the question and any facts from this thread it needs.",
 				]

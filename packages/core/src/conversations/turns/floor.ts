@@ -33,11 +33,14 @@ import { queueTurn } from "./queue.ts";
  * read and tested on its own; `giveFloor` loads what it needs, applies it, and
  * queues the turns. Precedence, top wins:
  *
- * 1. A person mentioning agents by handle: those agents, and nobody else.
- * 2. An agent that a person named, having answered: nobody. The mention chose
+ * 1. A person writing in a chat: the chat's agent, whoever they mention. A
+ *    chat is a conversation with one agent, so another agent the person names
+ *    is reached by that agent collaborating, not by joining the chat.
+ * 2. A person mentioning agents by handle: those agents, and nobody else.
+ * 3. An agent that a person named, having answered: nobody. The mention chose
  *    who speaks, so the reply goes back to the person who asked.
- * 3. The Facilitator in non-chat threads, when the pod has it on.
- * 4. Default: the agent that spoke last, else the host.
+ * 4. The Facilitator in non-chat threads, when the pod has it on.
+ * 5. Default: the agent that spoke last, else the host.
  *
  * An agent's message that calls nobody out ends the exchange, the way a model
  * turn with no tool call ends an agentic loop. A run of agent-only turns longer
@@ -81,6 +84,9 @@ export type FloorDecision =
 
 export function decideFloor(input: FloorInput): FloorDecision {
 	if (input.author.kind === "person") {
+		if (input.threadType === "chat") {
+			return { kind: "turns", agents: [{ agentId: input.hostAgentId, reason: "default" }] };
+		}
 		const mentioned = mentionedHandles(input.content);
 		if (mentioned.length > 0) {
 			const agents = input.crew
@@ -90,11 +96,7 @@ export function decideFloor(input: FloorInput): FloorDecision {
 				? { kind: "turns", agents }
 				: { kind: "nobody", why: "people-addressed" };
 		}
-		if (
-			input.threadType !== "chat" &&
-			input.routing.facilitator &&
-			input.agentParticipantIds.size > 1
-		) {
+		if (input.routing.facilitator && input.agentParticipantIds.size > 1) {
 			return { kind: "facilitate" };
 		}
 		const fallback =
