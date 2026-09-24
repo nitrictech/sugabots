@@ -481,6 +481,43 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
 	});
 
+	it("shows what the agent said before a collaboration while it waits on the answer", async () => {
+		// The lead-in used to wait for the whole reply, then land above the
+		// collaboration row and the typing line that had already been drawn.
+		const waiting = {
+			...agentMessage,
+			status: "streaming" as const,
+			parts: [
+				{ type: "text" as const, text: "Checking ownership." },
+				{ ...collaborationPart, status: "waiting" as const, answer: null },
+			],
+		};
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{ kind: "message", message: mainMessage },
+					{ kind: "message", message: waiting },
+				],
+				nextCursor: null,
+			}),
+		);
+		client.api.threads.get.mockReturnValue(
+			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [mainMessage, waiting])),
+		);
+		mount(`/agents/${linear.id}`);
+
+		const leadIn = await screen.findByText("Checking ownership.");
+		const collaboration = screen.getByRole("button", {
+			name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+		});
+		const typing = screen.getByRole("status", { name: `${linear.name}, waiting` });
+		const follows = (first: Node, second: Node) =>
+			Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(follows(leadIn, collaboration)).toBe(true);
+		expect(follows(collaboration, typing)).toBe(true);
+		expect(screen.queryByRole("button", { name: /Show activity/ })).toBeNull();
+	});
+
 	it("opens a read-only collaboration panel from an inline part", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
