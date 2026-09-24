@@ -91,7 +91,7 @@ function formatCost(cost: number | null): string {
 	}).format(cost);
 }
 
-function formatTokens(tokens: number | null): string {
+export function formatTokens(tokens: number | null): string {
 	if (tokens === null) {
 		return "—";
 	}
@@ -110,14 +110,14 @@ function formatCompactNumber(value: number): string {
 	return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
 }
 
-function formatModelCalls(modelCalls: number | null): string {
+export function formatModelCalls(modelCalls: number | null): string {
 	if (modelCalls === null) {
 		return "calls unavailable";
 	}
 	return `${modelCalls} model ${modelCalls === 1 ? "call" : "calls"}`;
 }
 
-function tokenBreakdown(usage: ThreadUsage): string {
+export function tokenBreakdown(usage: ThreadUsage): string {
 	if (usage.inputTokens === null || usage.outputTokens === null) {
 		return "breakdown unavailable";
 	}

@@ -31,6 +31,7 @@ import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatHistory } from "./ChatHistory.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
+import { formatModelCalls, formatTokens, tokenBreakdown } from "./ThreadUsage.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -380,6 +381,7 @@ function ChatSummaryRail({
 							</div>
 						)}
 					</section>
+					<Usage details={details} />
 					<Context details={details} />
 				</>
 			)}
@@ -480,6 +482,23 @@ function formatDateTime(value: string) {
 		hour: "numeric",
 		minute: "2-digit",
 	}).format(new Date(value));
+}
+
+/** What the chat has used, across its own replies and every thread opened from it. */
+function Usage({ details }: { details: NonNullable<ReturnType<typeof useThread>["data"]> }) {
+	const { usage } = details;
+	return (
+		<section className="mt-3 rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
+			<CardHeading>Usage</CardHeading>
+			<div className="pt-2 font-semibold text-heading text-2xl tabular-nums">
+				{formatTokens(usage.totalTokens)}
+				<span className="pl-1.5 font-normal text-muted-foreground text-xs">tokens</span>
+			</div>
+			<div className="pt-0.5 text-muted-foreground text-xs tabular-nums">
+				{tokenBreakdown(usage)} · {formatModelCalls(usage.modelCalls)}
+			</div>
+		</section>
+	);
 }
 
 function Context({ details }: { details: NonNullable<ReturnType<typeof useThread>["data"]> }) {

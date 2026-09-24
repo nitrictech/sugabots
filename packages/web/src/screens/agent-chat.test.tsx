@@ -666,6 +666,16 @@ describe("ongoing agent Chat", () => {
 		expect(rest).toEqual([]);
 	});
 
+	it("shows what the Chat has used in its summary", async () => {
+		mount(`/agents/${linear.id}`);
+
+		const rail = await screen.findByRole("complementary", { name: "Chat summary" });
+		const usage = within(rail).getByRole("heading", { name: "Usage" }).closest("section");
+		if (!usage) throw new Error("Usage has no section");
+		expect(usage.textContent).toContain("150tokens");
+		expect(usage.textContent).toContain("100 in · 50 out · 2 model calls");
+	});
+
 	it("keeps the Chat's participants out of a collaboration's summary while it loads", async () => {
 		const loading = pendingAnswer();
 		const answerThread = client.api.threads.get.getMockImplementation();
