@@ -1662,8 +1662,6 @@ describe("pod settings", () => {
 		expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
 		expect(screen.queryByRole("button", { name: `${suga.name} options` })).toBeNull();
 		await openRouting();
-		expect((screen.getByRole("radio", { name: "Nobody" }) as HTMLInputElement).disabled).toBe(true);
-		fireEvent.click(screen.getByRole("tab", { name: "Routing" }));
 		expect(
 			(
 				(await screen.findByRole("radio", {

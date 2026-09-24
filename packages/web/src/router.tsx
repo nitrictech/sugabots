@@ -11,7 +11,7 @@ import {
 	redirect,
 	useNavigate,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAgents, usePodAgent } from "@/lib/agents.ts";
 import { isBuiltInAgentKey } from "@/lib/built-in-agents.ts";
 import { agentChatLink } from "@/lib/links.ts";
@@ -19,7 +19,11 @@ import { useOnboarding } from "@/lib/onboarding.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
-import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import {
+	isPodSettingsTab,
+	type PodSettingsTab,
+	workspaceSettingSection,
+} from "@/lib/workspace-settings.ts";
 import { SettingsDialog } from "@/screens/SettingsDialog.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -149,7 +153,6 @@ function LoginRoute() {
 interface SignInReturnSearch {
 	workspace?: string;
 	pod?: string;
-	connected?: string;
 	oauth_error?: string;
 }
 
@@ -162,7 +165,6 @@ const signInReturnRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
 		workspace: optionalString(search.workspace),
 		pod: optionalString(search.pod),
-		connected: optionalString(search.connected),
 		oauth_error: optionalString(search.oauth_error),
 	}),
 	beforeLoad: requireUser,
@@ -170,12 +172,7 @@ const signInReturnRoute = createRoute({
 });
 
 function SignInReturnRoute() {
-	const {
-		workspace,
-		pod: podId,
-		connected,
-		oauth_error: oauthError,
-	} = signInReturnRoute.useSearch();
+	const { workspace, pod: podId, oauth_error: oauthError } = signInReturnRoute.useSearch();
 	const workspaces = useWorkspaces();
 	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
 	const pods = useQuery(podsQuery(workspace));
@@ -188,10 +185,10 @@ function SignInReturnRoute() {
 		void navigate({
 			to: "/$workspace/settings/pods/$pod",
 			params: { workspace: slug, pod: pod.slug },
-			search: { connected, oauth_error: oauthError },
+			search: { tab: "connections", oauth_error: oauthError },
 			replace: true,
 		});
-	}, [pod, slug, connected, oauthError, navigate]);
+	}, [pod, slug, oauthError, navigate]);
 
 	const resolving = workspace !== undefined && (pods.isPending || workspaces.isPending);
 	if ((pod && slug) || resolving) {
@@ -353,13 +350,14 @@ const settingsPodAgentRoute = createRoute({
 const settingsPodRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod",
-	// Kept in the address until the Connections panel reads and clears them.
 	validateSearch: (
 		search: Record<string, unknown>,
-	): { connected?: string; oauth_error?: string } => ({
-		connected: optionalString(search.connected),
+	): { tab?: PodSettingsTab; oauth_error?: string } => ({
+		tab: isPodSettingsTab(search.tab) ? search.tab : undefined,
 		oauth_error: optionalString(search.oauth_error),
 	}),
+	// A sign-in error shown for one pod must not follow you to the next.
+	remountDeps: ({ params }) => [params.workspace, params.pod],
 	loader: () => void WorkspaceSettings.preload?.(),
 	component: SettingsPodRoute,
 });
@@ -396,6 +394,18 @@ function SettingsBuiltInAgentRoute() {
 
 function SettingsPodRoute() {
 	const { pod: podSlug } = settingsPodRoute.useParams();
+	const { tab, oauth_error: oauthError } = settingsPodRoute.useSearch();
+	const navigate = settingsPodRoute.useNavigate();
+	// Kept after the error leaves the address, so a reload does not show it twice.
+	const [signInError, setSignInError] = useState(oauthError);
+	useEffect(() => {
+		if (oauthError === undefined) return;
+		setSignInError(oauthError);
+		void navigate({
+			search: (previous) => ({ ...previous, oauth_error: undefined }),
+			replace: true,
+		});
+	}, [oauthError, navigate]);
 	const { data: pods, isPending, error } = usePods();
 	const pod = findPod(pods, podSlug);
 	if (isPending) return <SettingsDialog>{null}</SettingsDialog>;
@@ -408,7 +418,12 @@ function SettingsPodRoute() {
 	}
 	return (
 		<SettingsDialog>
-			<WorkspaceSettings section="pods" selectedPodId={pod.id} />
+			<WorkspaceSettings
+				section="pods"
+				selectedPodId={pod.id}
+				selectedPodTab={tab}
+				connectionSignInError={signInError}
+			/>
 		</SettingsDialog>
 	);
 }

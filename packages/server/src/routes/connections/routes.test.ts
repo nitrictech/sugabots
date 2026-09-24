@@ -379,7 +379,7 @@ describe("signing a connection in", () => {
 
 		expect(back.status).toBe(302);
 		expect(back.headers.get("location")).toBe(
-			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}&connected=${made.id}`,
+			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}`,
 		);
 		expect(harness.finish).toHaveBeenCalledWith(
 			expect.anything(),
@@ -433,7 +433,7 @@ describe("signing a connection in", () => {
 			{ headers },
 		);
 		expect(refused.headers.get("location")).toBe(
-			"http://localhost:5173/connections/oauth/return?oauth_error=No+thanks",
+			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}&oauth_error=No+thanks`,
 		);
 
 		const unknown = await harness.app.request("/connections/oauth/callback?code=x&state=nope", {

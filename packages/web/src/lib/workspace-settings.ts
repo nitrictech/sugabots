@@ -43,6 +43,13 @@ export const workspaceSettingSections = [
 
 export type WorkspaceSettingSection = (typeof workspaceSettingSections)[number]["id"];
 
+const podSettingsTabs = ["members", "connections", "routing"] as const;
+export type PodSettingsTab = (typeof podSettingsTabs)[number];
+
+export function isPodSettingsTab(value: unknown): value is PodSettingsTab {
+	return podSettingsTabs.some((tab) => tab === value);
+}
+
 export function workspaceSettingSection(
 	section: string,
 ): (typeof workspaceSettingSections)[number] | undefined {

@@ -145,12 +145,12 @@ export function connectionRoutes({
 							.pipe(asHttpError(connectionErrors));
 						const back = new URL(oauth.webUrl);
 						back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
+						if (outcome.pod) {
+							back.searchParams.set("workspace", outcome.pod.workspaceId);
+							back.searchParams.set("pod", outcome.pod.podId);
+						}
 						if ("failed" in outcome) {
 							back.searchParams.set("oauth_error", outcome.failed);
-						} else {
-							back.searchParams.set("workspace", outcome.connected.workspaceId);
-							back.searchParams.set("pod", outcome.connected.podId);
-							back.searchParams.set("connected", outcome.connected.connectionId);
 						}
 						return HttpServerResponse.redirect(back.toString(), { status: 302 });
 					}),

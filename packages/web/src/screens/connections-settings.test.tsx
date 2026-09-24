@@ -221,14 +221,45 @@ describe("the Connections settings", () => {
 	});
 });
 
+describe("the pod settings tabs", () => {
+	it("keeps the open tab in the address, so a reload opens it again", async () => {
+		route.list.mockReturnValue(Effect.succeed([wiki]));
+		const router = mount(page);
+		await showConnections();
+
+		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
+		cleanup();
+		mount(`${page}?tab=connections`);
+		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+	});
+});
+
 describe("coming back from a connection sign-in", () => {
-	it("opens the pod the sign-in was for, keeping what it reported", async () => {
+	it("opens the Connections tab of the pod the sign-in was for", async () => {
+		route.list.mockReturnValue(Effect.succeed([wiki]));
+		const router = mount(`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}`);
+
+		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+		expect(router.state.location.href).toBe(`${page}?tab=connections`);
+	});
+
+	it("says once why a sign-in for a pod did not finish", async () => {
+		route.list.mockReturnValue(Effect.succeed([wiki]));
 		const router = mount(
-			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&connected=${wiki.id}`,
+			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&oauth_error=No+thanks`,
 		);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(page));
-		expect(router.state.location.search).toMatchObject({ connected: wiki.id });
+		expect(await screen.findByText("Signing in did not finish: No thanks")).toBeDefined();
+		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
+
+		const other = pods[1] as (typeof pods)[number];
+		await router.navigate({
+			to: "/$workspace/settings/pods/$pod",
+			params: { workspace: "suga", pod: other.slug },
+			search: { tab: "connections" },
+		});
+		expect(await screen.findByRole("heading", { name: other.name })).toBeDefined();
+		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();
 	});
 
 	it("says what went wrong when the sign-in never reached a pod", async () => {

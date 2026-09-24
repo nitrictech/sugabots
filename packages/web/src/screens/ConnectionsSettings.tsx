@@ -8,7 +8,7 @@ import {
 	type ToolApprovalRule,
 } from "@sugabots/contracts";
 import { Ellipsis, Eye, EyeOff, Plus, Search } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import {
 	useConnectionActions,
 	useConnections,
@@ -37,11 +37,19 @@ import { Field } from "@/ui/field.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Input } from "@/ui/input.tsx";
 
-export function ConnectionsSettings({ podId, canManage }: { podId: string; canManage: boolean }) {
+export function ConnectionsSettings({
+	podId,
+	canManage,
+	signInError,
+}: {
+	podId: string;
+	canManage: boolean;
+	/** Why the OAuth sign-in that just returned here did not finish. */
+	signInError?: string;
+}) {
 	const connections = useConnections(podId);
 	const rules = useToolApprovalRules(podId);
 	const [custom, setCustom] = useState(false);
-	const returned = useSignInOutcome();
 	if (connections.isPending || rules.isPending) return null;
 	if (connections.isError || rules.isError)
 		return <Alert>{failureMessage(connections.error ?? rules.error)}</Alert>;
@@ -57,7 +65,7 @@ export function ConnectionsSettings({ podId, canManage }: { podId: string; canMa
 					Every agent in this pod can use the actions enabled here.
 				</p>
 			</header>
-			{returned && <Alert>{returned}</Alert>}
+			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 
 			{listed.length > 0 && (
 				<div className="flex flex-col gap-4">
@@ -502,26 +510,6 @@ function CatalogCard({ preset, podId }: { preset: ConnectionPreset; podId: strin
 			</IconButton>
 		</li>
 	);
-}
-
-/**
- * What the sign-in callback said, read from the address it sent the browser
- * back to and then cleared from it, so a reload does not say it again.
- */
-function useSignInOutcome(): string | undefined {
-	const [outcome, setOutcome] = useState<string>();
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		const failed = params.get("oauth_error");
-		if (failed) setOutcome(`Signing in did not finish: ${failed}`);
-		if (failed || params.has("connected")) {
-			params.delete("oauth_error");
-			params.delete("connected");
-			const rest = params.toString();
-			window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
-		}
-	}, []);
-	return outcome;
 }
 
 /** Any other MCP server, by its address. */
