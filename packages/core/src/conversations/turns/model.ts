@@ -16,6 +16,7 @@ import { type ModelActivity, modelCallLedger } from "../../accounting/model-call
 import type { ModelAttemptStore } from "../../accounting/store.ts";
 import type { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
+import type { ModelRegistry } from "../../providers/model-providers/dialects/index.ts";
 import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
 import type { EgressHttpClients } from "../../providers/network/egress.ts";
 
@@ -79,12 +80,15 @@ export interface TurnModelOptions {
 	httpClients: EgressHttpClients;
 	/** Where every request the model makes is recorded, whatever becomes of the response. */
 	attempts: ModelAttemptStore;
+	/** What each request is priced against. */
+	prices: Pick<ModelRegistry, "price">;
 }
 
 export function workspaceTurnModel({
 	modelProviders,
 	httpClients,
 	attempts,
+	prices,
 }: TurnModelOptions): TurnModel {
 	return {
 		stream: (input) =>
@@ -122,6 +126,7 @@ export function workspaceTurnModel({
 					activity: input.activity,
 					connection,
 					model: input.model,
+					prices,
 				});
 				let providerFailure: unknown;
 				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];

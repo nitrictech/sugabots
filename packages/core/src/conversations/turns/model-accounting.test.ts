@@ -7,6 +7,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { modelAttempt, modelAttemptObservation } from "../../accounting/sql.ts";
 import { modelAttemptStore } from "../../accounting/store.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { registryFrom } from "../../providers/model-providers/dialects/registry.ts";
 
 const provider = vi.hoisted(() => ({ model: undefined as unknown }));
 vi.mock("@ai-sdk/openai", () => ({ createOpenAI: () => ({ chat: () => provider.model }) }));
@@ -39,6 +40,10 @@ describe.skipIf(!process.env.DATABASE_URL)("recording model requests, against Po
 		},
 		httpClients: { for: () => fetch },
 		attempts: modelAttemptStore,
+		prices: registryFrom(
+			{ openai: { models: { "gpt-test": { cost: { input: 2, output: 8 } } } } },
+			"2026-09-01T00:00:00.000Z",
+		),
 	});
 	let threadId: string;
 
@@ -94,6 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("recording model requests, against Po
 
 	it("records each request of a multi-step response on its own, with its own usage", async () => {
 		provider.model = new MockLanguageModelV4({
+			modelId: "gpt-test",
 			doStream: [
 				{ stream: streamOf(toolCall(), finish("tool-calls", 100, 10)) },
 				{ stream: streamOf(...text("Done"), finish("stop", 150, 20)) },
@@ -119,11 +125,21 @@ describe.skipIf(!process.env.DATABASE_URL)("recording model requests, against Po
 			activityPurpose: "facilitation",
 			threadId,
 		});
+		// 100 in at $2 and 10 out at $8 per million, then 150 in and 20 out.
+		const priced = await onDatabase((db) =>
+			db
+				.select({ cost: modelAttempt.estimatedCost })
+				.from(modelAttempt)
+				.where(eq(modelAttempt.threadId, threadId))
+				.orderBy(asc(modelAttempt.startedAt)),
+		);
+		expect(priced.map((row) => Number(row.cost))).toEqual([0.00028, 0.00046]);
 	});
 
 	it("keeps a finished request's usage when the response is stopped during the next", async () => {
 		let hung: ReadableStreamDefaultController<LanguageModelV4StreamPart> | undefined;
 		provider.model = new MockLanguageModelV4({
+			modelId: "gpt-test",
 			doStream: [
 				{ stream: streamOf(toolCall(), finish("tool-calls", 100, 10)) },
 				{
@@ -159,6 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)("recording model requests, against Po
 
 	it("records a request the provider refused as failed", async () => {
 		provider.model = new MockLanguageModelV4({
+			modelId: "gpt-test",
 			doStream: async () => {
 				throw new APICallError({
 					message: "Unauthorized",

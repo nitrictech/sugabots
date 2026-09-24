@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { modelAttemptStore } from "../../accounting/store.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { emptyRegistry } from "../../providers/model-providers/dialects/index.ts";
 
 const sdk = vi.hoisted(() => ({
 	createAnthropic: vi.fn(),
@@ -63,6 +64,7 @@ describe("workspace turn model", () => {
 				},
 				httpClients: { for: () => httpClient },
 				attempts: modelAttemptStore,
+				prices: emptyRegistry,
 			});
 
 			await run(

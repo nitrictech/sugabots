@@ -3,11 +3,16 @@ import {
 	type AttemptObservationWriter,
 	type AttributionSnapshot,
 	collectAttempt,
+	estimateCost,
+	normalizeUsage,
+	type UsageEvidence,
 } from "@sugabots/accounting";
 import { evidenceFromAiSdkUsage } from "@sugabots/accounting/ai-sdk";
+import { snapshotFromModelsDev } from "@sugabots/accounting/models-dev";
 import type { LanguageModelUsage } from "ai";
 import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect";
 import type { Database } from "../database/database.ts";
+import type { ModelRegistry } from "../providers/model-providers/dialects/index.ts";
 import type { ProviderConnection } from "../providers/model-providers/store.ts";
 import type { ModelAttemptStore } from "./store.ts";
 
@@ -57,8 +62,10 @@ export interface ModelCallLedgerOptions {
 	store: ModelAttemptStore;
 	workspaceId: string;
 	activity: ModelActivity;
-	connection: Pick<ProviderConnection, "providerId" | "preset" | "apiFormat">;
+	connection: Pick<ProviderConnection, "providerId" | "preset" | "baseUrl" | "apiFormat">;
 	model: string;
+	/** Where a request's price is looked up. A model it has no price for stays unpriced. */
+	prices: Pick<ModelRegistry, "price">;
 }
 
 interface OpenCall {
@@ -146,27 +153,45 @@ export const modelCallLedger = (
 
 		const end = (call: ModelCallEnd) =>
 			Effect.gen(function* () {
-				if (!open) return;
-				const { writer } = open;
-				const observedAt = new Date().toISOString();
-				yield* writer.recordResponseMetadata({
-					metadataKey: "response",
-					observedAt,
-					returnedModel: call.modelId,
-					providerRequestId: call.responseId,
+				const current = open;
+				if (!current) return;
+				const evidence = yield* evidenceFromAiSdkUsage(options.connection.apiFormat, call.usage);
+				yield* recordResponse(current.writer, call, evidence);
+				yield* close((outcome) => Deferred.succeed(outcome, undefined));
+				yield* estimate(current.intent, call, evidence);
+			});
+
+		/** Prices the request against models.dev's rate for the model that answered. */
+		const estimate = (intent: AttemptIntent, call: ModelCallEnd, evidence: UsageEvidence) =>
+			Effect.gen(function* () {
+				const price = options.prices.price(call.modelId, options.connection);
+				if (!price) return;
+				const answered = { ...intent.provider, returnedModel: call.modelId };
+				// The rate as read when the request was made; the catalog carries no
+				// history of its own.
+				const snapshot = yield* snapshotFromModelsDev({
+					snapshotId: `models.dev:${price.catalogGeneratedAt}:${answered.provider}:${call.modelId}`,
+					provider: answered.provider,
+					model: call.modelId,
+					cost: price.cost,
+					catalogGeneratedAt: price.catalogGeneratedAt,
+					retrievedAt: intent.startedAt,
+					effectiveFrom: intent.startedAt,
 				});
-				yield* writer.recordUsage({
-					usageKey: "response",
-					observedAt,
-					evidence: yield* evidenceFromAiSdkUsage(options.connection.apiFormat, call.usage),
-				});
+				const cost = yield* estimateCost(
+					yield* normalizeUsage(evidence),
+					answered,
+					snapshot,
+					intent.startedAt,
+					new Date().toISOString(),
+				);
+				yield* options.store.recordEstimate(intent.attemptId, snapshot, cost);
 			}).pipe(
-				Effect.catch((invalid) =>
-					Effect.logWarning("Could not record a model request's usage").pipe(
-						Effect.annotateLogs({ cause: invalid.message }),
+				Effect.catch((failure) =>
+					Effect.logWarning("Could not price a model request").pipe(
+						Effect.annotateLogs({ attemptId: intent.attemptId, cause: String(failure) }),
 					),
 				),
-				Effect.andThen(close((outcome) => Deferred.succeed(outcome, undefined))),
 			);
 
 		return {
@@ -176,6 +201,30 @@ export const modelCallLedger = (
 			cancelled: () => run(close(Deferred.interrupt)),
 		};
 	});
+
+/** What the provider said about the request: which model answered, and what it used. */
+const recordResponse = (
+	writer: AttemptObservationWriter<Database>,
+	call: ModelCallEnd,
+	evidence: UsageEvidence,
+) => {
+	const observedAt = new Date().toISOString();
+	return writer
+		.recordResponseMetadata({
+			metadataKey: "response",
+			observedAt,
+			returnedModel: call.modelId,
+			providerRequestId: call.responseId,
+		})
+		.pipe(
+			Effect.andThen(writer.recordUsage({ usageKey: "response", observedAt, evidence })),
+			Effect.catch((invalid) =>
+				Effect.logWarning("Could not record a model request's usage").pipe(
+					Effect.annotateLogs({ cause: invalid.message }),
+				),
+			),
+		);
+};
 
 function attributionOf(workspaceId: string, activity: ModelActivity): AttributionSnapshot {
 	const { kind, ...subject } = activity;

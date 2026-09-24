@@ -6,7 +6,7 @@ import { openaiCompatible } from "./openai-compatible.ts";
 import { openrouter } from "./openrouter.ts";
 
 export type { DiscoveredModel, ProviderDialect, ProviderIdentity } from "./dialect.ts";
-export { emptyRegistry, type ModelRegistry, modelsDev } from "./registry.ts";
+export { emptyRegistry, type ModelPrice, type ModelRegistry, modelsDev } from "./registry.ts";
 export { anthropic, ollama, openaiCompatible, openrouter };
 
 /** The code behind each name a preset may give. */

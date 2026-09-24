@@ -25,6 +25,7 @@ import { postgresEventStore } from "@sugabots/core/database/events/store";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
+import { modelsDev } from "@sugabots/core/providers/model-providers/dialects/index";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import {
 	createEgressHttpClient,
@@ -124,7 +125,12 @@ const main = Effect.gen(function* () {
 	const credentialCipher = aesCredentialCipher(config.modelProviderEncryptionKey);
 	const modelProviders = modelProviderStore(credentialCipher);
 	// One model client for turns, system agents, trials, and chat routing.
-	const model = workspaceTurnModel({ modelProviders, httpClients, attempts: modelAttemptStore });
+	const model = workspaceTurnModel({
+		modelProviders,
+		httpClients,
+		attempts: modelAttemptStore,
+		prices: modelsDev,
+	});
 	const stores = {
 		pods: podStore,
 		agents: agentStore,

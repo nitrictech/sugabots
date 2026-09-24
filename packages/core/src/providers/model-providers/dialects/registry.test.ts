@@ -13,6 +13,7 @@ const source: RegistrySource = {
 				tool_call: true,
 				modalities: { input: ["text", "image"], output: ["text"] },
 				limit: { context: 128_000 },
+				cost: { input: 2.5, output: 10, cache_read: 1.25 },
 			}),
 			"text-embedding-3-small": entry({
 				name: "text-embedding-3-small",
@@ -60,7 +61,15 @@ const custom = (baseUrl: string): ProviderIdentity => ({
 });
 
 describe("registryFrom", () => {
-	const registry: ModelRegistry = registryFrom(source);
+	const registry: ModelRegistry = registryFrom(source, "2026-09-01T00:00:00.000Z");
+
+	it("prices a model from the catalog, and says when the catalog was compiled", () => {
+		expect(registry.price("gpt-4o", openai)).toEqual({
+			cost: { input: 2.5, output: 10, cache_read: 1.25 },
+			catalogGeneratedAt: "2026-09-01T00:00:00.000Z",
+		});
+		expect(registry.price("gpt-image-1", openai)).toBeUndefined();
+	});
 
 	it("fills a preset's model from that provider's entry", () => {
 		expect(registry.complete(blank("gpt-4o"), openai)).toEqual({
