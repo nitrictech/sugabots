@@ -9,21 +9,29 @@ export class EmailService extends Context.Service<
 	{
 		readonly send: (email: Email) => Effect.Effect<void, EmailDeliveryFailed>;
 	}
->()("@sugabots/core/EmailService") {
-	/** Prints each email instead of sending it. For development only. */
+>()("@sugabots/core/EmailService", {
+	make: Effect.gen(function* () {
+		const provider = yield* Config.Literals(EMAIL_PROVIDERS, "EMAIL_PROVIDER").pipe(
+			Config.withDefault("console"),
+		);
+		switch (provider) {
+			case "console":
+				return fromConsole;
+			case "webhook":
+				return yield* fromWebhook(yield* webhookConfigFromEnv());
+		}
+	}),
+}) {
+	static readonly layerNoDeps = Layer.effect(this, this.make);
+
+	static readonly layer = this.layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
+
+	/** Prints each email to the server's log instead of sending it. */
 	static readonly fromConsole = Layer.succeed(this, fromConsole);
 
 	/** Posts each email as JSON to `config.url`, for a relay the installation runs itself. */
 	static readonly fromWebhook = (config: WebhookEmailConfig) =>
 		Layer.effect(this, fromWebhook(config));
-
-	/**
-	 * The implementation `EMAIL_PROVIDER` names, configured from its own settings.
-	 * Defaults to the console. Needs an `HttpClient`.
-	 */
-	static readonly layerNoDeps = Layer.unwrap(configuredImplementation());
-
-	static readonly layer = this.layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
 }
 
 /** The environment asks for email that cannot be sent as configured. */
@@ -68,21 +76,7 @@ export function parseEmailAddress(value: string): EmailAddress | undefined {
 
 const EMAIL_PROVIDERS = ["console", "webhook"] as const;
 
-function configuredImplementation() {
-	return Effect.gen(function* () {
-		const provider = yield* Config.Literals(EMAIL_PROVIDERS, "EMAIL_PROVIDER").pipe(
-			Config.withDefault("console"),
-		);
-		switch (provider) {
-			case "console":
-				return EmailService.fromConsole;
-			case "webhook":
-				return yield* webhookFromEnv();
-		}
-	});
-}
-
-function webhookFromEnv() {
+function webhookConfigFromEnv() {
 	return Effect.gen(function* () {
 		const production =
 			(yield* Config.String("NODE_ENV").pipe(Config.withDefault(""))) === "production";
@@ -96,6 +90,6 @@ function webhookFromEnv() {
 				message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
 			});
 		}
-		return EmailService.fromWebhook({ url: url.href, token: Option.getOrUndefined(token) });
+		return { url: url.href, token: Option.getOrUndefined(token) } satisfies WebhookEmailConfig;
 	});
 }
