@@ -25,8 +25,8 @@ export function AgentPage({
 		pods?.find((candidate) => candidate.id === agent.podId);
 	const updateSearch = (change: { thread?: string; history?: "open" }) =>
 		navigate({
-			to: "/agents/$agent",
-			params: { agent: agent.id },
+			from: "/$workspace/agents/$agent",
+			to: ".",
 			search: (previous) => ({ ...previous, ...change, pod: pod?.id }),
 		});
 

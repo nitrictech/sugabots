@@ -30,7 +30,8 @@ export function ThreadHeader({ details }: { details: ThreadDetails }) {
 			<div className="flex w-full items-center justify-end gap-5 border-border-subtle border-t pt-3 md:w-auto md:border-0 md:pt-0">
 				{details.thread.parentThreadId && (
 					<Link
-						to="/threads/$thread"
+						from="/$workspace"
+						to="./threads/$thread"
 						params={{ thread: details.thread.parentThreadId }}
 						search={{ summary: undefined }}
 						className="font-semibold text-muted-foreground text-xs underline-offset-2 hover:underline"

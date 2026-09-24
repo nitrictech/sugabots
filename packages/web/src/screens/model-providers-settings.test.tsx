@@ -15,7 +15,7 @@ afterEach(cleanup);
 
 describe("a provider's API key", () => {
 	it("can be shown while it is being pasted, and never once saved", async () => {
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
 		const field = screen.getByLabelText("OpenAI API key") as HTMLInputElement;
@@ -44,7 +44,7 @@ describe("a model's capabilities", () => {
 			);
 			return Effect.succeed({ updated: 1 });
 		});
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Edit gpt-5 capabilities" }));
 		const dialog = await screen.findByRole("dialog", { name: "Capabilities" });

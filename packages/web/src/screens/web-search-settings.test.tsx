@@ -48,7 +48,7 @@ describe("the Web search settings", () => {
 			route.get.mockReturnValue(Effect.succeed({ provider: next }));
 			return Effect.succeed(next);
 		});
-		mount("/settings/search");
+		mount("/suga/settings/search");
 
 		const power = await screen.findByRole("switch", { name: "Turn web search on" });
 		expect(power).toHaveProperty("disabled", false);
@@ -79,7 +79,7 @@ describe("the Web search settings", () => {
 			route.get.mockReturnValue(Effect.succeed({ provider: next }));
 			return Effect.succeed(next);
 		});
-		mount("/settings/search");
+		mount("/suga/settings/search");
 
 		fireEvent.change(await screen.findByLabelText("Brave Search API key"), {
 			target: { value: "brave-key" },
@@ -100,7 +100,7 @@ describe("the Web search settings", () => {
 
 	it("tells a member the pane is for administrators", async () => {
 		apiAnswers({ role: "member" });
-		mount("/settings/search");
+		mount("/suga/settings/search");
 
 		expect(
 			await screen.findByText("Only workspace administrators can manage web search."),

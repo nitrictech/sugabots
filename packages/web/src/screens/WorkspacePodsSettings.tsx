@@ -136,7 +136,8 @@ export function WorkspacePodsSettings({
 						}
 					>
 						<Link
-							to="/settings/$section"
+							from="/$workspace"
+							to="./settings/$section"
 							params={{ section: "pods" }}
 							className="focus-ring mx-2 mb-3 flex items-center gap-2 rounded-lg px-2 py-2 font-medium text-muted-foreground text-sm hover:bg-sidebar-accent hover:text-foreground"
 						>
@@ -255,7 +256,7 @@ function PodDetails({ pod }: { pod: Pod }) {
 		} catch {
 			return;
 		}
-		await navigate({ to: "/settings/$section", params: { section: "pods" } });
+		await navigate({ from: "/$workspace", to: "./settings/$section", params: { section: "pods" } });
 	}
 
 	return (
@@ -265,7 +266,9 @@ function PodDetails({ pod }: { pod: Pod }) {
 					<IconButton
 						label="Back to pods"
 						className="lg:hidden"
-						render={<Link to="/settings/$section" params={{ section: "pods" }} />}
+						render={
+							<Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />
+						}
 					>
 						<ArrowLeft />
 					</IconButton>

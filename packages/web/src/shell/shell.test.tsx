@@ -28,7 +28,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const linearPage = `/agents/${linear.id}`;
+const linearPage = `/suga/agents/${linear.id}`;
 const writeClipboardText = vi.fn();
 
 beforeEach(() => {
@@ -77,7 +77,7 @@ describe("the top bar", () => {
 		expect(within(menu).getByRole("menuitem", { name: /Nitric/ })).toBeDefined();
 		expect(
 			within(menu).getByRole("menuitem", { name: "Workspace settings" }).getAttribute("href"),
-		).toBe("/settings");
+		).toBe("/suga/settings");
 	});
 
 	// Settings opens over the app and covers this menu, so "already open" is no
@@ -103,12 +103,13 @@ describe("the top bar", () => {
 		const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
 			throw new Error("Storage disabled");
 		});
-		mount(linearPage);
+		const router = mount(linearPage);
 		await screen.findByRole("button", { name: /Suga Workspace/ });
 
 		chooseWorkspace(other.id);
+		await router.navigate({ to: "/" });
 
-		expect(await screen.findByRole("button", { name: /Nitric/ })).toBeDefined();
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 		setItem.mockRestore();
 	});
 
@@ -119,7 +120,7 @@ describe("the top bar", () => {
 			slug: "nitric",
 		};
 		client.auth.workspaces.list.mockResolvedValue([workspace, other]);
-		mount(linearPage);
+		const router = mount(linearPage);
 		await screen.findByRole("button", { name: /Suga Workspace/ });
 		localStorage.setItem("sugabots-workspace", other.id);
 
@@ -129,8 +130,9 @@ describe("the top bar", () => {
 				newValue: other.id,
 			}),
 		);
+		await router.navigate({ to: "/" });
 
-		expect(await screen.findByRole("button", { name: /Nitric/ })).toBeDefined();
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 	});
 
 	it("signs out from the user menu, and re-asks who you are", async () => {
@@ -181,7 +183,7 @@ describe("pod-first navigation", () => {
 				name: new RegExp(triager.name),
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(`/agents/${triager.id}`));
+		await waitFor(() => expect(router.state.location.pathname).toBe(`/suga/agents/${triager.id}`));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 	it("closes the drawer with Escape and returns focus to its trigger", async () => {
@@ -293,9 +295,12 @@ describe("the roster", () => {
 
 		// Settings replaces the roster, so coming back builds it again from
 		// whatever the last visit left behind.
-		await router.navigate({ to: "/settings" });
+		await router.navigate({ to: "/$workspace/settings", params: { workspace: "suga" } });
 		await screen.findByRole("navigation", { name: "Workspace settings" });
-		await router.navigate({ to: "/agents/$agent", params: { agent: linear.id } });
+		await router.navigate({
+			to: "/$workspace/agents/$agent",
+			params: { workspace: "suga", agent: linear.id },
+		});
 
 		const roster = await screen.findByRole("navigation", { name: "Workspace" });
 		await within(roster).findByRole("heading", { name: "Sales" });
@@ -395,7 +400,7 @@ describe("the settings navigation", () => {
 	 */
 
 	it("lists every section for an administrator, and the way back out", async () => {
-		const router = mount("/settings");
+		const router = mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
 
@@ -408,11 +413,13 @@ describe("the settings navigation", () => {
 		// closes it rather than a link among the sections.
 		fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
 
-		await waitFor(() => expect(router.state.location.pathname.startsWith("/agents")).toBe(true));
+		await waitFor(() =>
+			expect(router.state.location.pathname.startsWith("/suga/agents")).toBe(true),
+		);
 	});
 
 	it("counts what each section holds, beside its name", async () => {
-		mount("/settings");
+		mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
 
@@ -437,7 +444,7 @@ describe("the settings navigation", () => {
 				user: sam,
 			},
 		]);
-		mount("/settings");
+		mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
 		await within(rail).findByRole("link", { name: "Pods, 2" });
@@ -448,7 +455,7 @@ describe("the settings navigation", () => {
 
 	it("withholds the administrative sections from a member", async () => {
 		apiAnswers({ role: "member" });
-		mount("/settings");
+		mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
 		// Waiting on a count waits on the answers the rail is drawn from, the
@@ -462,7 +469,7 @@ describe("the settings navigation", () => {
 
 	it("tells a member who reaches the built-in agents by address that it is not theirs", async () => {
 		apiAnswers({ role: "member" });
-		mount("/settings/built-in-agents");
+		mount("/suga/settings/built-in-agents");
 
 		expect(
 			await screen.findByText("Only workspace administrators can configure the built-in agents."),
@@ -472,33 +479,27 @@ describe("the settings navigation", () => {
 });
 
 describe("routes", () => {
-	it("keeps old setup links working through workspace settings", async () => {
-		const router = mount("/setup");
-
-		await waitFor(() => expect(router.state.location.pathname).toBe("/settings"));
-	});
-
 	it("lands on a crew agent, never on a built-in one nobody talks to", async () => {
 		const router = mount("/");
 
 		await waitFor(() => {
-			expect(router.state.location.pathname).toBe(`/agents/${agents[0]?.id}`);
+			expect(router.state.location.pathname).toBe(`/suga/agents/${agents[0]?.id}`);
 		});
 	});
 
 	it("reaches a built-in agent's settings by its key, not by an id", async () => {
-		const router = mount("/settings/built-in-agents/facilitate");
+		const router = mount("/suga/settings/built-in-agents/facilitate");
 
 		expect(await screen.findByRole("heading", { name: facilitator.name })).toBeDefined();
-		expect(router.state.location.pathname).toBe("/settings/built-in-agents/facilitate");
+		expect(router.state.location.pathname).toBe("/suga/settings/built-in-agents/facilitate");
 		expect(screen.queryByPlaceholderText(/^Message /)).toBeNull();
 	});
 
 	it("sends an unknown built-in agent key back to the section", async () => {
-		const router = mount("/settings/built-in-agents/invent");
+		const router = mount("/suga/settings/built-in-agents/invent");
 
 		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/settings/built-in-agents");
+			expect(router.state.location.pathname).toBe("/suga/settings/built-in-agents");
 		});
 	});
 
@@ -555,6 +556,16 @@ describe("routes", () => {
 			}),
 		).toBeDefined();
 		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
+
+		client.api.onboarding.complete.mockReturnValue(Effect.void);
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
+		fireEvent.click(screen.getByRole("button", { name: /Enter Personal/ }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				"/suga/agents/0199a3a0-0000-7000-8000-0000000000bf",
+			),
+		);
 	});
 
 	it("still honours the older ?invite= link shape", async () => {
@@ -688,7 +699,7 @@ describe("routes", () => {
 		expect(client.auth.workspaces.acceptInvite).toHaveBeenCalledOnce();
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/agents"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
 		expect(client.auth.workspaces.acceptInvite).toHaveBeenCalledOnce();
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
@@ -700,7 +711,7 @@ describe("routes", () => {
 		const refresh = vi.fn().mockResolvedValue(undefined);
 		const router = mount("/invite/an-invitation", sam, refresh);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/agents"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
 		expect(client.auth.workspaces.acceptInvite).not.toHaveBeenCalled();
 		expect(refresh).toHaveBeenCalledOnce();
 	});
@@ -723,7 +734,7 @@ describe("routes", () => {
 	});
 
 	it("says so when the agent in the address is not there", async () => {
-		mount("/agents/0199a3a0-0000-7000-8000-00000000dead");
+		mount("/suga/agents/0199a3a0-0000-7000-8000-00000000dead");
 
 		expect(await screen.findByText("No such agent here")).toBeDefined();
 	});
@@ -737,7 +748,7 @@ describe("routes", () => {
 	});
 
 	it("says a thread is not there, and when threads arrive", async () => {
-		mount("/threads/anything");
+		mount("/suga/threads/anything");
 
 		expect(await screen.findByText("No such thread here")).toBeDefined();
 		expect(await screen.findByText(/This thread is unavailable/)).toBeDefined();
@@ -745,7 +756,7 @@ describe("routes", () => {
 
 	it("says so when the workspace has no agents in it yet", async () => {
 		client.api.agents.list.mockReturnValue(Effect.succeed([]));
-		mount("/agents");
+		mount("/suga/agents");
 
 		expect(await screen.findByText("No agents yet")).toBeDefined();
 	});
@@ -754,7 +765,7 @@ describe("routes", () => {
 		const podList = pendingAnswer();
 		client.api.pods.list.mockReturnValue(podList.effect);
 		client.api.agents.list.mockReturnValue(Effect.succeed([]));
-		mount("/agents");
+		mount("/suga/agents");
 
 		await waitFor(() => expect(client.api.pods.list).toHaveBeenCalled());
 		expect(screen.queryByText("No agents yet")).toBeNull();
@@ -773,7 +784,7 @@ describe("creating a pod", () => {
 
 	it("offers a member nothing", async () => {
 		apiAnswers({ role: "member" });
-		mount("/settings/pods");
+		mount("/suga/settings/pods");
 
 		// The rail is the section's own heading now, and waiting on it waits on
 		// the answers the controls under it are drawn from.
@@ -783,7 +794,7 @@ describe("creating a pod", () => {
 	});
 
 	it("shows the address it will get, derived from the name", async () => {
-		mount("/settings/pods");
+		mount("/suga/settings/pods");
 		(await screen.findByRole("button", { name: "New pod" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
@@ -798,7 +809,7 @@ describe("creating a pod", () => {
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
-		mount("/settings/pods");
+		mount("/suga/settings/pods");
 		(await screen.findByRole("button", { name: "New pod" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
@@ -823,7 +834,7 @@ describe("creating a pod", () => {
 			Effect.fail(new Conflict({ message: "already exists" })),
 		);
 
-		mount("/settings/pods");
+		mount("/suga/settings/pods");
 		(await screen.findByRole("button", { name: "New pod" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
@@ -849,7 +860,7 @@ describe("Personal pod settings", () => {
 		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 
-		mount(`/settings/pods/${personalPod.id}`);
+		mount(`/suga/settings/pods/${personalPod.id}`);
 
 		const rail = await screen.findByRole("navigation", {
 			name: "Workspace pods",
@@ -862,21 +873,21 @@ describe("Personal pod settings", () => {
 
 describe("creating an agent", () => {
 	it("offers a member of the pod the same New agent action as an admin", async () => {
-		mount(`/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.id}`);
 
 		expect(await screen.findByRole("button", { name: "New agent" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
 		apiAnswers({ role: "member" });
-		mount(`/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.id}`);
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
 		expect(screen.getByRole("button", { name: "New agent" })).toBeDefined();
 	});
 
 	it("keeps deleting agents, and making pods, to those allowed them", async () => {
-		mount(`/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.id}`);
 
 		expect(await screen.findByRole("button", { name: "New pod" })).toBeDefined();
 		expect(screen.getAllByRole("button", { name: "Delete" }).length).toBeGreaterThan(0);
@@ -884,7 +895,7 @@ describe("creating an agent", () => {
 		vi.clearAllMocks();
 
 		apiAnswers({ role: "member" });
-		mount(`/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.id}`);
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
 		expect(screen.queryByRole("button", { name: "New pod" })).toBeNull();
@@ -900,7 +911,7 @@ describe("creating an agent", () => {
 			podId: pods[0]?.id as string,
 		};
 		client.api.agents.create.mockReturnValue(Effect.succeed(made));
-		const router = mount(`/settings/pods/${pods[0]?.id}`);
+		const router = mount(`/suga/settings/pods/${pods[0]?.id}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New agent" });
@@ -920,7 +931,9 @@ describe("creating an agent", () => {
 			});
 		});
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/settings/pods/${made.podId}/agents/${made.id}`),
+			expect(router.state.location.pathname).toBe(
+				`/suga/settings/pods/${made.podId}/agents/${made.id}`,
+			),
 		);
 		expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
 		expect((await screen.findAllByText(made.name)).length).toBeGreaterThan(0);
@@ -930,7 +943,7 @@ describe("creating an agent", () => {
 		client.api.agents.create.mockReturnValue(
 			Effect.fail(new Conflict({ message: "already exists" })),
 		);
-		mount(`/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.id}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New agent" });
@@ -948,7 +961,7 @@ describe("creating an agent", () => {
 
 describe("workspace settings", () => {
 	it("shows the selected pod name in the agent filter", async () => {
-		mount("/settings/agents");
+		mount("/suga/settings/agents");
 
 		const filter = await screen.findByRole("combobox", {
 			name: "Filter by pod",
@@ -964,7 +977,7 @@ describe("workspace settings", () => {
 	});
 
 	it("keeps the built-in agents out of the agent table, since they are in no pod", async () => {
-		mount("/settings/agents");
+		mount("/suga/settings/agents");
 
 		// The roster is still behind the settings window, and it names agents
 		// too, so the table is asked rather than the page.
@@ -975,7 +988,7 @@ describe("workspace settings", () => {
 
 	it("selects a pod from its settings rail", async () => {
 		const pod = pods[0] as (typeof pods)[number];
-		mount(`/settings/pods/${pod.id}`);
+		mount(`/suga/settings/pods/${pod.id}`);
 
 		const rail = await screen.findByRole("navigation", {
 			name: "Workspace pods",
@@ -987,7 +1000,7 @@ describe("workspace settings", () => {
 	});
 
 	it("selects a provider from the provider rail and searches its models", async () => {
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		const providers = await screen.findByRole("navigation", {
 			name: "Model providers",
@@ -1019,7 +1032,7 @@ describe("workspace settings", () => {
 	function mountOllama(provider: typeof ollama = ollama) {
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([provider]));
 		client.api.modelProviders.update.mockReturnValue(Effect.succeed(provider));
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 	}
 
 	const patched = () => client.api.modelProviders.update;
@@ -1108,7 +1121,7 @@ describe("workspace settings", () => {
 			enabledModelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(provider));
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
 		fireEvent.click(screen.getByRole("button", { name: /Custom endpoint/ }));
@@ -1146,7 +1159,7 @@ describe("workspace settings", () => {
 			enabledModelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(groq));
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
 		const hosted = screen.getByRole("region", { name: "Hosted services" });
@@ -1171,7 +1184,7 @@ describe("workspace settings", () => {
 		client.api.modelProviders.test.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: "Provider unavailable" })),
 		);
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
 		expect(screen.getByLabelText("OpenAI API key")).toBeDefined();
@@ -1199,7 +1212,7 @@ describe("workspace settings", () => {
 		client.api.modelProviders.addModel.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: "Could not add model" })),
 		);
-		mount("/settings/providers");
+		mount("/suga/settings/providers");
 		fireEvent.click(await screen.findByRole("button", { name: "Add model" }));
 		fireEvent.change(screen.getByLabelText("Model ID"), {
 			target: { value: "local-model" },
@@ -1220,7 +1233,7 @@ describe("workspace settings", () => {
 		// The navigation drawer is a dialog too. While it wrapped the screens,
 		// Base UI read every dialog they opened as nested and dropped its
 		// backdrop, leaving the page behind undimmed and unblurred.
-		mount("/settings/members");
+		mount("/suga/settings/members");
 		const dialog = await openInvitePanel();
 
 		expect(dialog.ownerDocument.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
@@ -1228,7 +1241,7 @@ describe("workspace settings", () => {
 
 	it("copies an invitation link for the selected workspace", async () => {
 		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
-		mount("/settings/members");
+		mount("/suga/settings/members");
 		await openInvitePanel();
 
 		fireEvent.change(await screen.findByLabelText("Email address"), {
@@ -1251,7 +1264,7 @@ describe("workspace settings", () => {
 
 	it("invites somebody as a viewer, with each role described where it is chosen", async () => {
 		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
-		mount("/settings/members");
+		mount("/suga/settings/members");
 		const panel = await openInvitePanel();
 
 		fireEvent.change(await screen.findByLabelText("Email address"), {
@@ -1271,7 +1284,7 @@ describe("workspace settings", () => {
 	});
 
 	it("changes what somebody may do", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		open(await screen.findByRole("combobox", { name: `Access for ${jye.name}` }));
 		(await screen.findByRole("option", { name: /Viewer/ })).click();
@@ -1286,7 +1299,7 @@ describe("workspace settings", () => {
 	});
 
 	it("asks before removing somebody, and says what goes with them", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		open(await screen.findByRole("button", { name: `${jye.name} options` }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from workspace" }));
@@ -1306,7 +1319,7 @@ describe("workspace settings", () => {
 	});
 
 	it("offers leaving on your own row, and no way to change your own access", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		// Somebody else's row can be re-roled; your own cannot, because demoting
 		// yourself takes away the means to undo it. Leaving is still yours.
@@ -1319,7 +1332,7 @@ describe("workspace settings", () => {
 	});
 
 	it("warns what leaving costs before doing it", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		open(await screen.findByRole("button", { name: `${sam.name} options` }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Leave workspace" }));
@@ -1335,7 +1348,7 @@ describe("workspace settings", () => {
 	});
 
 	it("lists an invitation as somebody who has not arrived, and can withdraw it", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		expect(await screen.findByText("dana@example.com")).toBeDefined();
 		expect(screen.getByText("Invited, not yet accepted")).toBeDefined();
@@ -1355,7 +1368,7 @@ describe("workspace settings", () => {
 	});
 
 	it("sends an invitation again without retyping it", async () => {
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		open(
 			await screen.findByRole("button", {
@@ -1376,7 +1389,7 @@ describe("workspace settings", () => {
 
 	it("shows a member who holds what, and no way to change it", async () => {
 		apiAnswers({ role: "member" });
-		mount("/settings/members");
+		mount("/suga/settings/members");
 
 		expect(await screen.findByText("Administrator")).toBeDefined();
 		expect(screen.getByText("Member")).toBeDefined();
@@ -1386,7 +1399,7 @@ describe("workspace settings", () => {
 
 	it("keeps a rejected invitation address available for retry", async () => {
 		client.auth.workspaces.invite.mockRejectedValue(new Error("Offline"));
-		mount("/settings/members");
+		mount("/suga/settings/members");
 		await openInvitePanel();
 		const email = await screen.findByLabelText("Email address");
 		fireEvent.change(email, { target: { value: "jye@example.com" } });
@@ -1405,7 +1418,7 @@ describe("workspace settings", () => {
 			name: "Nitric",
 			slug: "nitric",
 		});
-		const router = mount("/settings");
+		const router = mount("/suga/settings");
 
 		fireEvent.change(await screen.findByLabelText("Workspace name"), {
 			target: { value: "Nitric" },
@@ -1425,7 +1438,7 @@ describe("workspace settings", () => {
 		client.auth.workspaces.list.mockResolvedValue([]);
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.auth.workspaces.create.mockRejectedValue(new Error("Offline"));
-		mount("/settings");
+		mount("/suga/settings");
 		const name = await screen.findByLabelText("Workspace name");
 		fireEvent.change(name, { target: { value: "Nitric" } });
 
@@ -1475,7 +1488,7 @@ describe("the theme", () => {
 describe("pod settings", () => {
 	const [suga] = pods;
 	if (!suga) throw new Error("fixture");
-	const podPage = `/settings/pods/${suga.id}`;
+	const podPage = `/suga/settings/pods/${suga.id}`;
 	const samInPod = {
 		userId: sam.id,
 		name: sam.name,
@@ -1544,7 +1557,7 @@ describe("pod settings", () => {
 
 		expect(await screen.findByText(facilitator.model as string)).toBeDefined();
 		expect(screen.getByRole("link", { name: "change" }).getAttribute("href")).toBe(
-			"/settings/built-in-agents/facilitate",
+			"/suga/settings/built-in-agents/facilitate",
 		);
 	});
 
@@ -1570,7 +1583,7 @@ describe("pod settings", () => {
 		const option = await screen.findByRole("radio", { name: "The Facilitator decides" });
 		expect(option.hasAttribute("disabled")).toBe(true);
 		expect(screen.getByRole("link", { name: "set it up" }).getAttribute("href")).toBe(
-			"/settings/built-in-agents/facilitate",
+			"/suga/settings/built-in-agents/facilitate",
 		);
 		fireEvent.click(option);
 		expect(client.api.pods.update).not.toHaveBeenCalled();
@@ -1671,7 +1684,7 @@ describe("pod settings", () => {
 				params: { podId: suga.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe("/settings/pods"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/pods"));
 	});
 
 	it("says so when a pod with threads cannot be deleted", async () => {

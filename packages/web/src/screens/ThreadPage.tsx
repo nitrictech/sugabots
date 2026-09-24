@@ -5,6 +5,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -46,6 +47,7 @@ export function ThreadPage({
 	embedded?: boolean;
 }) {
 	const query = useThread(threadId);
+	const { workspace } = useWorkspace();
 	useThreadEvents(threadId);
 	const details = query.data;
 	const host = details?.participants.find(
@@ -91,6 +93,9 @@ export function ThreadPage({
 
 	if (query.isPending) {
 		return null;
+	}
+	if (details && details.thread.workspaceId !== workspace?.id) {
+		return <EmptyState title="No such thread here" />;
 	}
 	if (!details) {
 		const notFound = isApiFailure(query.error) && query.error._tag === "NotFound";
