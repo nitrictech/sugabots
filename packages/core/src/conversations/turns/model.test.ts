@@ -1,5 +1,6 @@
 import { Effect, ManagedRuntime } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { modelAttemptStore } from "../../accounting/store.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 
@@ -61,11 +62,13 @@ describe("workspace turn model", () => {
 						}),
 				},
 				httpClients: { for: () => httpClient },
+				attempts: modelAttemptStore,
 			});
 
 			await run(
 				model.stream({
 					workspaceId: "workspace-id",
+					activity: { kind: "model-probe" },
 					model: "model-id",
 					system: "",
 					messages: [],

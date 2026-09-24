@@ -12,6 +12,8 @@ import {
 	type ToolSet,
 } from "ai";
 import { Effect } from "effect";
+import { type ModelActivity, modelCallLedger } from "../../accounting/model-calls.ts";
+import type { ModelAttemptStore } from "../../accounting/store.ts";
 import type { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
 import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
@@ -26,6 +28,8 @@ export interface ModelAccounting {
 
 export interface TurnModelInput {
 	workspaceId: string;
+	/** What the response is for, which is whose spend it is in the ledger. */
+	activity: ModelActivity;
 	model: string;
 	system: string;
 	messages: TurnPromptMessage[];
@@ -37,6 +41,9 @@ export interface TurnModelInput {
 	maxSteps?: number;
 	signal: AbortSignal;
 }
+
+/** A request's content, before the caller says what it is for. */
+export type TurnModelPrompt = Omit<TurnModelInput, "activity">;
 
 export interface TurnPromptMessage {
 	role: "user" | "assistant";
@@ -70,9 +77,15 @@ export interface TurnModel {
 export interface TurnModelOptions {
 	modelProviders: Pick<ModelProviderStore, "resolve">;
 	httpClients: EgressHttpClients;
+	/** Where every request the model makes is recorded, whatever becomes of the response. */
+	attempts: ModelAttemptStore;
 }
 
-export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOptions): TurnModel {
+export function workspaceTurnModel({
+	modelProviders,
+	httpClients,
+	attempts,
+}: TurnModelOptions): TurnModel {
 	return {
 		stream: (input) =>
 			Effect.gen(function* () {
@@ -103,6 +116,13 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				// reports it here and ends the stream, and whatever is asked of the
 				// result afterwards fails with "No output generated". Keeping the
 				// first error is what lets the turn say what the provider said.
+				const ledger = yield* modelCallLedger({
+					store: attempts,
+					workspaceId: input.workspaceId,
+					activity: input.activity,
+					connection,
+					model: input.model,
+				});
 				let providerFailure: unknown;
 				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 				const result = streamText({
@@ -119,7 +139,12 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 					},
 					onError: ({ error }) => {
 						providerFailure ??= error;
+						return ledger.failed(error);
 					},
+					onAbort: () => ledger.cancelled(),
+					onLanguageModelCallStart: () => ledger.started(),
+					onLanguageModelCallEnd: ({ modelId, responseId, usage }) =>
+						ledger.ended({ modelId, responseId, usage }),
 					stopWhen: stepCountIs(input.maxSteps ?? 8),
 					maxRetries: 0,
 				});
@@ -177,6 +202,7 @@ export function probeModel(
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
 			const generated = yield* model.stream({
 				workspaceId,
+				activity: { kind: "model-probe" },
 				model: modelId,
 				system: "Answer with the single word OK.",
 				messages: [{ role: "user", content: "OK?" }],

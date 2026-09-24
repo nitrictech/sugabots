@@ -24,7 +24,7 @@ import {
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import { retryUnusable, UnusableAnswer } from "./answer.ts";
-import { forEachDelta, type TurnModel, type TurnModelInput } from "./model.ts";
+import { forEachDelta, type TurnModel, type TurnModelPrompt } from "./model.ts";
 import { queueTurn } from "./queue.ts";
 
 /**
@@ -204,7 +204,10 @@ const decide = (
 		Effect.gen(function* () {
 			const stop = new AbortController();
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* model.stream(facilitatorPrompt(scope, stop.signal));
+			const generated = yield* model.stream({
+				...facilitatorPrompt(scope, stop.signal),
+				activity: { kind: "facilitation", threadId: scope.threadId },
+			});
 			const collected = yield* Ref.make("");
 			yield* forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
@@ -277,7 +280,7 @@ export function parseDecision(
  * agent just spoke) has its own rule, and the message being decided about is
  * named instead of left at the end of a transcript.
  */
-export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal): TurnModelInput {
+export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal): TurnModelPrompt {
 	const agents = scope.crew.map(
 		(member) =>
 			`- @${member.handle}: ${member.name}, agent${member.inThread ? "" : " (not in the thread yet)"}${member.description ? `. ${member.description}` : ""}`,

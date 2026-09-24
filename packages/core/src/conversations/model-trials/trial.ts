@@ -282,7 +282,10 @@ const ask = (
 		Effect.gen(function* () {
 			const stop = new AbortController();
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* turnModel.stream(trialCase.prompt(model, workspaceId, stop.signal));
+			const generated = yield* turnModel.stream({
+				...trialCase.prompt(model, workspaceId, stop.signal),
+				activity: { kind: "model-trial" },
+			});
 			const collected = yield* Ref.make("");
 			yield* forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(

@@ -386,6 +386,14 @@ const streamReply = (
 				: priorMessages;
 			const generated = yield* model.stream({
 				workspaceId: prepared.context.thread.workspaceId,
+				activity: {
+					kind: "agent-turn",
+					threadId: prepared.context.thread.id,
+					agentId: prepared.context.agent.id,
+					agentName: prepared.context.agent.name,
+					podId: prepared.context.agent.podId,
+					podName: prepared.context.podName,
+				},
 				model: modelInput.model,
 				system: modelInput.system,
 				messages: modelInput.messages,

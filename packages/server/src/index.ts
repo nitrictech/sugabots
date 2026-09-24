@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { modelAttemptStore } from "@sugabots/core/accounting/store";
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { routineStore } from "@sugabots/core/conversations/routines/store";
 import { summaryStore } from "@sugabots/core/conversations/summaries/store";
@@ -123,7 +124,7 @@ const main = Effect.gen(function* () {
 	const credentialCipher = aesCredentialCipher(config.modelProviderEncryptionKey);
 	const modelProviders = modelProviderStore(credentialCipher);
 	// One model client for turns, system agents, trials, and chat routing.
-	const model = workspaceTurnModel({ modelProviders, httpClients });
+	const model = workspaceTurnModel({ modelProviders, httpClients, attempts: modelAttemptStore });
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
