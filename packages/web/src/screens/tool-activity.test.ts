@@ -1,13 +1,7 @@
 import type { MessagePart, ToolCallPart } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import type { ActivityStep, ToolActivity } from "./tool-activity.ts";
-import {
-	formatDuration,
-	formatTotal,
-	stepErrors,
-	stepLabel,
-	toolActivityOf,
-} from "./tool-activity.ts";
+import { formatDuration, formatTotal, stepLabel, toolActivityOf } from "./tool-activity.ts";
 
 let nextId = 0;
 
@@ -176,27 +170,6 @@ describe("how activity is worded", () => {
 		expect(formatTotal(32_000)).toBe("32s");
 		expect(formatTotal(31_960)).toBe("32s");
 		expect(formatTotal(473)).toBe("473ms");
-	});
-
-	it("gathers a failed row's reasons, once each", () => {
-		const activity = toolActivityOf(
-			message(
-				call("sentry__read", { status: "failed", output: null, error: "Timed out" }),
-				call("sentry__read", { status: "failed", output: null, error: "Timed out" }),
-				call("sentry__read", { status: "failed", output: null, error: "Host is down" }),
-			),
-		);
-
-		expect(onlyStep(activity)?.count).toBe(3);
-		expect(stepErrors(onlyStep(activity) as ActivityStep)).toEqual(["Timed out", "Host is down"]);
-	});
-
-	it("has no reasons to show when a failure recorded none", () => {
-		const activity = toolActivityOf(
-			message(call("sentry__read", { status: "failed", output: null, error: null })),
-		);
-
-		expect(stepErrors(onlyStep(activity) as ActivityStep)).toEqual([]);
 	});
 
 	it("turns a tool key into a phrase", () => {

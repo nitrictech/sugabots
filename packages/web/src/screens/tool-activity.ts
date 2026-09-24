@@ -211,15 +211,3 @@ export function formatTotal(ms: number): string {
 	if (ms < 1_000) return `${Math.round(ms)}ms`;
 	return `${Math.round(ms / 1_000)}s`;
 }
-
-/**
- * Why a failed step failed, once per distinct reason — a row folded from
- * several calls that all timed out has one thing to say, not four.
- */
-export function stepErrors(step: ActivityStep): string[] {
-	const reasons = step.calls
-		.filter((call) => call.status === "failed")
-		.map((call) => call.error)
-		.filter((reason): reason is string => reason !== null && reason.trim() !== "");
-	return [...new Set(reasons)];
-}

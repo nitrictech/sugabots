@@ -74,15 +74,62 @@ describe("the activity log", () => {
 		expect(screen.queryByText(/The answer/)).toBeNull();
 	});
 
-	it("states what a step did without opening into anything", () => {
-		show(toolCall("sentry__search_issues"), toolCall("sentry__search_issues"));
+	it("opens a step to what it was given and what it gave back", () => {
+		show(toolCall("sentry__search_issues", { output: { found: 3, top: "TimeoutError" } }));
 
-		// The row is read, not operated: the `×2` says how many there were, and
-		// what a call was given has no presentation here yet.
-		expect(screen.getByText("×2")).toBeDefined();
-		expect(screen.queryByRole("button", { expanded: false })).toBeNull();
-		expect(screen.queryByText("query: timeout")).toBeNull();
-		expect(screen.queryByRole("button", { name: "Raw" })).toBeNull();
+		expect(screen.queryByText("Output")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /Search issues/, expanded: false }));
+
+		expect(screen.getByRole("button", { name: /Search issues/, expanded: true })).toBeDefined();
+		expect(screen.getByText("Input")).toBeDefined();
+		expect(screen.getByText("Query")).toBeDefined();
+		expect(screen.getByText("timeout")).toBeDefined();
+		expect(screen.getByText("Output")).toBeDefined();
+		expect(screen.getByText("TimeoutError")).toBeDefined();
+		expect(screen.getByRole("button", { name: "Copy JSON" })).toBeDefined();
+	});
+
+	it("opens a folded row to each of its calls, told apart by what they were given", () => {
+		show(
+			toolCall("sentry__search_issues", { input: { query: "timeout" }, output: { found: 3 } }),
+			toolCall("sentry__search_issues", { input: { query: "billing" }, output: { found: 7 } }),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /Search issues/ }));
+		expect(screen.queryByText("Output")).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /Query billing/ }));
+		expect(screen.getByText("Output")).toBeDefined();
+		expect(screen.getByText("7")).toBeDefined();
+		expect(screen.queryByText("3")).toBeNull();
+	});
+
+	it("writes each folded call as what it was given", () => {
+		show(
+			toolCall("web_search", { input: { count: 5, query: "tardigrade survival" } }),
+			toolCall("web_search", { input: { count: 5, query: "Dsup protein" } }),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /Search the web/ }));
+		expect(screen.getByText("Count 5 · Query tardigrade survival")).toBeDefined();
+		expect(screen.getByText("Count 5 · Query Dsup protein")).toBeDefined();
+	});
+
+	it("marks a step that changed something at the other end", () => {
+		show(toolCall("linear__create_issue", { mutating: true }), toolCall("linear__list_issues"));
+
+		const [create, list] = screen.getAllByRole("listitem");
+		expect(within(create as HTMLElement).getByText("changed")).toBeDefined();
+		expect(within(list as HTMLElement).queryByText("changed")).toBeNull();
+	});
+
+	it("cuts a long output short until asked for the rest", () => {
+		const page = "word ".repeat(400);
+		show(toolCall("web_fetch", { output: { text: page } }));
+
+		fireEvent.click(screen.getByRole("button", { name: /Read web pages/ }));
+		fireEvent.click(screen.getByRole("button", { name: "Show all 2,000 characters" }));
+		expect(screen.getByRole("button", { name: "Show less" })).toBeDefined();
 	});
 
 	it("opens a failed step to its reason, and says nothing about failing on the row", () => {
@@ -143,7 +190,9 @@ describe("the activity log", () => {
 
 		expect(screen.getByText("List projects")).toBeDefined();
 		expect(screen.queryByText(/no data returned/)).toBeNull();
-		expect(screen.queryByRole("button")).toBeNull();
+		expect(screen.getByRole("button", { name: /List projects/ }).className).not.toMatch(
+			/destructive/,
+		);
 	});
 
 	it("says a refused write never ran, which nothing else on its row shows", () => {
@@ -157,6 +206,9 @@ describe("the activity log", () => {
 		);
 
 		expect(screen.getByText(/not run/)).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: /Create issue/ }));
+		expect(screen.getByText("Denied by Ryan Eyes, so it never ran.")).toBeDefined();
+		expect(screen.queryByText("Output")).toBeNull();
 	});
 
 	it("says which connection each step went to, and the product's own tools as its own", () => {

@@ -158,7 +158,7 @@ export const ALongFailure = meta.story({
 	},
 });
 
-/** The one thing a step opens for: why it failed. */
+/** A failed step opens to why it failed, beside what it was given. */
 export const AFailureOpened = meta.story({
 	args: {
 		activity: log(
@@ -172,6 +172,89 @@ export const AFailureOpened = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: /Read release health/ }));
 		await expect(canvas.getByText("The server did not answer in time")).toBeVisible();
+	},
+});
+
+/** A step opened to what it was given and what it returned, laid out as fields and a table. */
+export const AStepOpened = meta.story({
+	args: {
+		activity: log(
+			call("sentry__search_issues", 4_700, {
+				input: { query: "is:unresolved timeout", project: "suga-prod", limit: 3 },
+				output: {
+					issues: [
+						{ id: "SUGA-1F2", title: "TimeoutError: upstream /billing", events: 212 },
+						{ id: "SUGA-1C9", title: "Gateway timeout on /invoices", events: 88 },
+						{ id: "SUGA-19A", title: "Slow query in usage rollup", events: 14 },
+					],
+					hasMore: true,
+				},
+			}),
+			call("linear__list_issues", 1_400),
+		),
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /Search issues/ }));
+		await expect(canvas.getByText("TimeoutError: upstream /billing")).toBeVisible();
+	},
+});
+
+/** A `×3` row opened to its calls, each named by what set it apart, with one of them open. */
+export const AFoldedStepOpened = meta.story({
+	args: {
+		activity: log(
+			call("sentry__search_issues", 4_100, { input: { query: "timeout" } }),
+			call("sentry__search_issues", 3_900, {
+				input: { query: "billing" },
+				output: { issues: 7, top: "Invoice total mismatch" },
+			}),
+			call("sentry__search_issues", 5_200, {
+				input: { query: "gateway" },
+				status: "failed",
+				output: null,
+				error: "The server did not answer in time",
+			}),
+		),
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /Search issues/ }));
+		await userEvent.click(canvas.getByRole("button", { name: /billing/ }));
+		await expect(canvas.getByText("Invoice total mismatch")).toBeVisible();
+	},
+});
+
+/** A write that went through carries a mark saying it changed something. */
+export const AWriteThatChanged = meta.story({
+	args: {
+		activity: log(
+			call("linear__list_issues", 1_400),
+			call("linear__create_issue", 900, {
+				mutating: true,
+				input: { team: "Suga Eng", title: "Billing timeouts", priority: 2 },
+				output: { id: "ENG-412", url: "https://linear.app/suga/issue/ENG-412" },
+			}),
+		),
+	},
+});
+
+/** A fetched page: the text is cut short until asked for, so it cannot bury the log. */
+export const ALongOutput = meta.story({
+	args: {
+		activity: log(
+			call("web_fetch", 2_300, {
+				input: { url: "https://docs.example.com/billing/retries" },
+				output: {
+					title: "Retrying failed invoices",
+					text: "When an invoice fails to settle, the billing service retries it on a fixed schedule. ".repeat(
+						40,
+					),
+				},
+			}),
+		),
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /Read web pages/ }));
+		await expect(canvas.getByRole("button", { name: /Show all .* characters/ })).toBeVisible();
 	},
 });
 
