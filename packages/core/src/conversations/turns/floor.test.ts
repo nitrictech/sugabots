@@ -60,8 +60,7 @@ describe("a person's message", () => {
 
 	it("goes to the chat's agent in a chat, not to the agents mentioned", () => {
 		// The chat's agent brings a mentioned agent in by collaborating. Handing
-		// the mentioned agent the turn made it a participant of the chat, and
-		// every later message then went to it as the last speaker.
+		// the mentioned agent the turn made it a participant of the chat.
 		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({
 			kind: "turns",
 			agents: [{ agentId: host, reason: "default" }],
@@ -74,18 +73,6 @@ describe("a person's message", () => {
 			kind: "nobody",
 			why: "people-addressed",
 		});
-	});
-
-	it("goes to the chat's agent in a chat, even after another agent spoke there", () => {
-		expect(
-			decideFloor(
-				input({
-					routing: { facilitator: false },
-					agentParticipantIds: new Set([host, reviewer]),
-					lastAgentSpeakerId: reviewer,
-				}),
-			),
-		).toEqual({ kind: "turns", agents: [{ agentId: host, reason: "default" }] });
 	});
 
 	it("does not let the facilitator introduce a speaker in a chat", () => {

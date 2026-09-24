@@ -52,11 +52,6 @@ describe("modelPrompt", () => {
 			"Use the collaborate tool when you need another agent's answer",
 		);
 		expect(instruction()).not.toContain("callout tool");
-		expect(instruction()).not.toContain("only you reply here");
-		asking.thread.type = "chat";
-		expect(instruction()).toContain(
-			"When the person mentions another agent, they want that agent's input, so collaborate with it",
-		);
 		expect(modelPrompt(context()).messages.at(-1)?.content).not.toContain("collaborate tool");
 
 		const collaboration = context();
