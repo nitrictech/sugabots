@@ -1,11 +1,10 @@
 /**
- * Everything the process reads from the environment, read once, in one place.
- * Nothing below this file touches `process.env`; the app and the auth
+ * The server's settings, read from the environment once. The app and the auth
  * configuration take what they need as arguments, which is what makes them
- * testable.
+ * testable. Core services read their own settings through Effect's `Config`.
  */
 
-import type { EmailAddress, EmailServiceConfig } from "@sugabots/core/email/email";
+import { type EmailAddress, parseEmailAddress } from "@sugabots/core/email/email";
 
 export type Environment = "development" | "production";
 
@@ -50,14 +49,12 @@ export interface Config {
 	 * email provider: there is nowhere for the link to go otherwise.
 	 */
 	requireEmailVerification: boolean;
-	/** The provider that sends verification and invitation emails. */
-	email: EmailServiceConfig;
-	/** The sender of those emails. */
-	emailFrom: EmailAddress;
+	/** The sender of emails a user's own action triggers, such as verification and invitations. */
+	transactionalEmailFrom: EmailAddress;
 }
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
-const DEVELOPMENT_EMAIL_FROM = "sugabots@localhost";
+const DEVELOPMENT_TRANSACTIONAL_EMAIL_FROM = { email: "sugabots@localhost", name: "Sugabots" };
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"development-secret-not-for-production",
 	"change-me",
@@ -115,19 +112,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		env.REQUIRE_EMAIL_VERIFICATION === undefined
 			? false
 			: booleanFromEnv(env.REQUIRE_EMAIL_VERIFICATION, "REQUIRE_EMAIL_VERIFICATION");
-	const email = emailFromEnv(env, environment);
-	if (environment === "production" && email.provider === "console") {
-		throw new Error("Production requires an email provider other than the console.");
-	}
-	if (requireEmailVerification && email.provider === "console") {
-		throw new Error(
-			"REQUIRE_EMAIL_VERIFICATION needs an email provider. Set EMAIL_WEBHOOK_URL, or turn it off.",
-		);
-	}
-	// The console sends nothing, so it has no sender for a provider to verify.
-	if (email.provider !== "console" && !env.EMAIL_FROM) {
-		throw new Error("EMAIL_FROM is required with an email provider.");
-	}
+	const transactionalEmailFrom = transactionalEmailFromEnv(env, environment);
 
 	return {
 		environment,
@@ -141,8 +126,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		allowPrivateWebFetchNetwork,
 		allowOpenSignUp,
 		requireEmailVerification,
-		email,
-		emailFrom: { email: env.EMAIL_FROM ?? DEVELOPMENT_EMAIL_FROM, name: "Sugabots" },
+		transactionalEmailFrom,
 	};
 }
 
@@ -152,17 +136,21 @@ function booleanFromEnv(value: string, name: string): boolean {
 	throw new Error(`${name} must be true or false`);
 }
 
-function emailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailServiceConfig {
-	const url = env.EMAIL_WEBHOOK_URL;
-	if (!url) return { provider: "console" };
-	const parsed = new URL(url);
-	if (environment === "production" && parsed.protocol !== "https:") {
-		throw new Error("EMAIL_WEBHOOK_URL must use HTTPS in production");
+function transactionalEmailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailAddress {
+	const value = env.EMAIL_TRANSACTIONAL_FROM;
+	if (!value) {
+		// A provider sends only from addresses it has verified, so production must name one.
+		if (environment === "production")
+			throw new Error("EMAIL_TRANSACTIONAL_FROM is required in production.");
+		return DEVELOPMENT_TRANSACTIONAL_EMAIL_FROM;
 	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error("EMAIL_WEBHOOK_URL must use HTTP or HTTPS");
+	const address = parseEmailAddress(value);
+	if (!address) {
+		throw new Error(
+			"EMAIL_TRANSACTIONAL_FROM must be an address, like `Sugabots <no-reply@example.com>`.",
+		);
 	}
-	return { provider: "webhook", url: parsed.href, token: env.EMAIL_WEBHOOK_TOKEN };
+	return address;
 }
 
 /** The path under `baseUrl` the API answers at, better-auth's routes included. */

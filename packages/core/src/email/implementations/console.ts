@@ -2,10 +2,6 @@ import { Effect } from "effect";
 // Type-only: email.ts imports this module, so a runtime import back would be a cycle.
 import type { EmailAddress, EmailService } from "../email.ts";
 
-export interface ConsoleEmailConfig {
-	provider: "console";
-}
-
 export const fromConsole: EmailService["Service"] = {
 	send: (email) =>
 		Effect.sync(() =>

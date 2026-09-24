@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { HttpClient, type HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { describe, expect, it } from "vitest";
 import { type Email, EmailService } from "../email.ts";
@@ -23,9 +23,8 @@ async function sendOver(status: number, token?: string) {
 		Effect.flatMap(EmailService, (service) => service.send(email)).pipe(
 			Effect.provide(
 				EmailService.fromWebhook({
-					provider: "webhook",
 					url: "https://mailer.example.com/sugabots",
-					token,
+					token: token === undefined ? undefined : Redacted.make(token),
 				}).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http))),
 			),
 		),

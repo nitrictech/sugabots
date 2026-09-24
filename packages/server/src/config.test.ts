@@ -70,13 +70,12 @@ describe("configFromEnv", () => {
 				BETTER_AUTH_SECRET: "x".repeat(32),
 				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				NODE_ENV: "production",
-				EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
-				EMAIL_FROM: "sugabots@example.com",
+				EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
 			}).secret,
 		).toHaveLength(32);
 	});
 
-	it("uses console email only for development", () => {
+	it("sends transactional email from a local sender in development", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
@@ -84,7 +83,10 @@ describe("configFromEnv", () => {
 		});
 
 		expect(config.environment).toBe("development");
-		expect(config.email).toEqual({ provider: "console" });
+		expect(config.transactionalEmailFrom).toEqual({
+			email: "sugabots@localhost",
+			name: "Sugabots",
+		});
 		// The model server is usually this machine in development.
 		expect(config.allowPrivateModelProviderNetwork).toBe(true);
 	});
@@ -95,8 +97,7 @@ describe("configFromEnv", () => {
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "x".repeat(32),
 			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-			EMAIL_WEBHOOK_URL: "https://mailer.example/send",
-			EMAIL_FROM: "sugabots@example.com",
+			EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
 		};
 		expect(configFromEnv(productionEnv).allowPrivateModelProviderNetwork).toBe(false);
 		expect(
@@ -136,15 +137,40 @@ describe("configFromEnv", () => {
 		);
 	});
 
-	it("refuses to use console email in production", () => {
-		const productionEnv = {
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "x".repeat(32),
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-			NODE_ENV: "production",
-		};
+	it("requires a transactional sender in production", () => {
+		expect(() =>
+			configFromEnv({
+				DATABASE_URL,
+				BETTER_AUTH_SECRET: "x".repeat(32),
+				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
+				NODE_ENV: "production",
+			}),
+		).toThrow(/EMAIL_TRANSACTIONAL_FROM is required in production/);
+	});
 
-		expect(() => configFromEnv(productionEnv)).toThrow(/other than the console/);
+	it("reads a named transactional sender", () => {
+		const config = configFromEnv({
+			DATABASE_URL,
+			BETTER_AUTH_SECRET: "s",
+			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
+			EMAIL_TRANSACTIONAL_FROM: "Sugabots <no-reply@example.com>",
+		});
+
+		expect(config.transactionalEmailFrom).toEqual({
+			email: "no-reply@example.com",
+			name: "Sugabots",
+		});
+	});
+
+	it("rejects a transactional sender that is not an address", () => {
+		expect(() =>
+			configFromEnv({
+				DATABASE_URL,
+				BETTER_AUTH_SECRET: "s",
+				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
+				EMAIL_TRANSACTIONAL_FROM: "Sugabots",
+			}),
+		).toThrow(/EMAIL_TRANSACTIONAL_FROM must be an address/);
 	});
 
 	it("leaves email verification off unless the installation asks for it", () => {
@@ -157,70 +183,15 @@ describe("configFromEnv", () => {
 		expect(config.requireEmailVerification).toBe(false);
 	});
 
-	it("refuses to require email verification with nowhere to send the link", () => {
-		expect(() =>
-			configFromEnv({
-				DATABASE_URL,
-				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-				REQUIRE_EMAIL_VERIFICATION: "true",
-			}),
-		).toThrow(/REQUIRE_EMAIL_VERIFICATION needs an email provider/);
-	});
-
-	it("requires email verification when an email provider can deliver the link", () => {
+	it("requires email verification when the installation asks for it", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
 			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 			REQUIRE_EMAIL_VERIFICATION: "true",
-			EMAIL_WEBHOOK_URL: "https://mailer.example.com/hook",
-			EMAIL_FROM: "sugabots@example.com",
 		});
 
 		expect(config.requireEmailVerification).toBe(true);
-	});
-
-	it("requires a sender with an email provider", () => {
-		expect(() =>
-			configFromEnv({
-				DATABASE_URL,
-				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-				EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
-			}),
-		).toThrow(/EMAIL_FROM is required/);
-	});
-
-	it("configures an HTTPS email webhook in production", () => {
-		const config = configFromEnv({
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "x".repeat(32),
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-			NODE_ENV: "production",
-			EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
-			EMAIL_FROM: "sugabots@example.com",
-			EMAIL_WEBHOOK_TOKEN: "secret",
-		});
-
-		expect(config.email).toEqual({
-			provider: "webhook",
-			url: "https://mailer.example.com/sugabots",
-			token: "secret",
-		});
-		expect(config.emailFrom).toEqual({ email: "sugabots@example.com", name: "Sugabots" });
-	});
-
-	it("rejects an insecure production email webhook", () => {
-		expect(() =>
-			configFromEnv({
-				DATABASE_URL,
-				BETTER_AUTH_SECRET: "x".repeat(32),
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
-				NODE_ENV: "production",
-				EMAIL_WEBHOOK_URL: "http://mailer.example.com/sugabots",
-			}),
-		).toThrow(/must use HTTPS/);
 	});
 });
 
