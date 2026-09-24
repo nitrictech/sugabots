@@ -1,13 +1,13 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { threadDetailsSchema, threadHistoryQuerySchema, threadSchema } from "../../threads.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 export class ThreadsApi extends HttpApiGroup.make("threads")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspaceId/threads", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.get("list", "/workspaces/:workspace/threads", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: Schema.Array(threadSchema),
 		}),
 		// HEAD answers the same with a one-message page, for asking whether the

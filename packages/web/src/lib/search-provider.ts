@@ -14,7 +14,7 @@ export function useSearchProvider() {
 			? ({ signal }) =>
 					Effect.runPromise(
 						client.api.searchProviders
-							.get({ params: { workspaceId } })
+							.get({ params: { workspace: workspaceId } })
 							.pipe(Effect.map(({ provider }) => provider)),
 						{ signal },
 					)
@@ -37,7 +37,7 @@ export function useSearchProviderActions() {
 			mutationFn: (json: NewSearchProvider) =>
 				Effect.runPromise(
 					client.api.searchProviders.replace({
-						params: { workspaceId: requiredWorkspace() },
+						params: { workspace: requiredWorkspace() },
 						payload: json,
 					}),
 				),
@@ -47,7 +47,7 @@ export function useSearchProviderActions() {
 			mutationFn: (json: SearchProviderUpdate) =>
 				Effect.runPromise(
 					client.api.searchProviders.update({
-						params: { workspaceId: requiredWorkspace() },
+						params: { workspace: requiredWorkspace() },
 						payload: json,
 					}),
 				),
@@ -56,14 +56,14 @@ export function useSearchProviderActions() {
 		remove: useMutation({
 			mutationFn: () =>
 				Effect.runPromise(
-					client.api.searchProviders.remove({ params: { workspaceId: requiredWorkspace() } }),
+					client.api.searchProviders.remove({ params: { workspace: requiredWorkspace() } }),
 				),
 			onSuccess: refresh,
 		}),
 		test: useMutation({
 			mutationFn: () =>
 				Effect.runPromise(
-					client.api.searchProviders.test({ params: { workspaceId: requiredWorkspace() } }),
+					client.api.searchProviders.test({ params: { workspace: requiredWorkspace() } }),
 				),
 			onSettled: refresh,
 		}),

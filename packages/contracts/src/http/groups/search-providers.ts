@@ -6,13 +6,13 @@ import {
 	searchProviderTestResultSchema,
 	searchProviderUpdateSchema,
 } from "../../search-providers.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 /** A workspace has at most one search provider, so it is addressed by the workspace alone. */
-const root = "/workspaces/:workspaceId/search-provider";
-const params = { workspaceId: uuidSchema };
+const root = "/workspaces/:workspace/search-provider";
+const params = { workspace: workspaceIdOrSlugSchema };
 
 export class SearchProvidersApi extends HttpApiGroup.make("searchProviders")
 	.add(

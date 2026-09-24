@@ -12,12 +12,13 @@ import {
 	workspaceModelsResponseSchema,
 } from "../../model-providers.ts";
 import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
-const root = "/workspaces/:workspaceId/model-providers";
-const workspace = { workspaceId: uuidSchema };
-const provider = { workspaceId: uuidSchema, providerId: uuidSchema };
+const root = "/workspaces/:workspace/model-providers";
+const workspace = { workspace: workspaceIdOrSlugSchema };
+const provider = { workspace: workspaceIdOrSlugSchema, providerId: uuidSchema };
 const model = { ...provider, modelId: Schema.String };
 
 /** How many models a change reached. */

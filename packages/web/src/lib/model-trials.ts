@@ -21,7 +21,7 @@ export function useModelTrial() {
 				throw new NotReadyError();
 			}
 			return Effect.runPromise(
-				client.api.modelTrials.run({ params: { workspaceId }, payload: input }),
+				client.api.modelTrials.run({ params: { workspace: workspaceId }, payload: input }),
 			);
 		},
 	});

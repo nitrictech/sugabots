@@ -21,7 +21,9 @@ export function useThreads() {
 		queryKey: ["threads", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.threads.list({ params: { workspaceId } }), { signal })
+					Effect.runPromise(client.api.threads.list({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 

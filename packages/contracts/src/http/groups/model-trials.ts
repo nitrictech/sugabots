@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { modelTrialSchema, newModelTrialSchema } from "../../model-trials.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 /**
@@ -11,8 +11,8 @@ import { Authorise, Session } from "../middleware.ts";
  */
 export class ModelTrialsApi extends HttpApiGroup.make("modelTrials")
 	.add(
-		HttpApiEndpoint.post("run", "/workspaces/:workspaceId/model-trials", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.post("run", "/workspaces/:workspace/model-trials", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			payload: newModelTrialSchema,
 			success: modelTrialSchema,
 		}),

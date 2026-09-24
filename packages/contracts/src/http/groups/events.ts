@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 /**
@@ -13,8 +14,8 @@ const eventStream = Schema.String.pipe(HttpApiSchema.asText({ contentType: "text
 
 export class EventsApi extends HttpApiGroup.make("events")
 	.add(
-		HttpApiEndpoint.get("workspace", "/workspaces/:workspaceId/events", {
-			params: { workspaceId: Schema.String },
+		HttpApiEndpoint.get("workspace", "/workspaces/:workspace/events", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: eventStream,
 		}),
 		HttpApiEndpoint.get("thread", "/threads/:threadId/events", {

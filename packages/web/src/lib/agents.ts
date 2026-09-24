@@ -28,7 +28,9 @@ export function useAgents(): {
 		queryKey: ["agents", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.agents.list({ params: { workspaceId } }), { signal })
+					Effect.runPromise(client.api.agents.list({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 
@@ -61,7 +63,7 @@ export function useModels(enabled = true) {
 			workspaceId && enabled
 				? ({ signal }) =>
 						Effect.runPromise(
-							client.api.modelProviders.listEnabledModels({ params: { workspaceId } }),
+							client.api.modelProviders.listEnabledModels({ params: { workspace: workspaceId } }),
 							{ signal },
 						)
 				: skipToken,

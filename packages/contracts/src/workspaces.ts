@@ -23,6 +23,8 @@ export const WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;
 
 export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
 
+export const workspaceIdOrSlugSchema = Schema.String.check(Schema.isMinLength(1));
+
 export type WorkspaceRole = typeof workspaceRoleSchema.Type;
 
 /** Whether a value written by better-auth names a role this product supports. */

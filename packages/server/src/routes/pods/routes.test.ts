@@ -189,7 +189,7 @@ const failure = Schema.Union([BadRequest, Conflict, Forbidden, NotFound]);
 const errorTag = async (response: Response) =>
 	Schema.decodeUnknownSync(failure)(await response.json())._tag;
 
-describe("GET /workspaces/:workspaceId/pods", () => {
+describe("GET /workspaces/:workspace/pods", () => {
 	it("lists the pods a member can see", async () => {
 		const response = await app().request(`/workspaces/${WORKSPACE}/pods`, as("member-token"));
 
@@ -211,7 +211,7 @@ describe("GET /workspaces/:workspaceId/pods", () => {
 	});
 });
 
-describe("POST /workspaces/:workspaceId/pods", () => {
+describe("POST /workspaces/:workspace/pods", () => {
 	it("creates one for an admin, and derives the slug from the name", async () => {
 		const response = await app().request(
 			`/workspaces/${WORKSPACE}/pods`,

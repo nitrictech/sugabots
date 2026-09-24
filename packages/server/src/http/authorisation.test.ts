@@ -20,7 +20,7 @@ const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"
 const STRANGER = "0199a3a0-0000-7000-8000-0000000000ee";
 
 const PLACEHOLDERS: Record<string, string> = {
-	workspaceId: "0199a3a0-0000-7000-8000-000000000001",
+	workspace: "0199a3a0-0000-7000-8000-000000000001",
 	podId: "0199a3a0-0000-7000-8000-000000000002",
 	agentId: "0199a3a0-0000-7000-8000-000000000003",
 	providerId: "0199a3a0-0000-7000-8000-000000000004",

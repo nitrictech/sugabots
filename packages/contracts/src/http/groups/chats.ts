@@ -8,14 +8,14 @@ import {
 	getOrCreateChatSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Conflict } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
 	.add(
-		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspaceId/chats", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			payload: getOrCreateChatSchema,
 			success: chatSchema,
 		}),

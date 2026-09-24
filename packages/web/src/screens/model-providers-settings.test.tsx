@@ -58,7 +58,7 @@ describe("a model's capabilities", () => {
 
 		await waitFor(() =>
 			expect(providers.updateModel).toHaveBeenCalledWith({
-				params: { workspaceId: expect.any(String), providerId: openai.id, modelId: gpt.id },
+				params: { workspace: expect.any(String), providerId: openai.id, modelId: gpt.id },
 				payload: { disabledCapabilities: ["vision"] },
 			}),
 		);

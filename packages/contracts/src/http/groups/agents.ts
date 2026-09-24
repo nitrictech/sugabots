@@ -2,13 +2,14 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { agentSchema, agentUpdateSchema, newAgentInPodSchema } from "../../agents.ts";
 import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
 export class AgentsApi extends HttpApiGroup.make("agents")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspaceId/agents", {
-			params: { workspaceId: uuidSchema },
+		HttpApiEndpoint.get("list", "/workspaces/:workspace/agents", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: Schema.Array(agentSchema),
 		}),
 		HttpApiEndpoint.post("create", "/pods/:podId/agents", {

@@ -340,7 +340,7 @@ describe("ongoing agent Chat", () => {
 		});
 		expect(collaboration.querySelectorAll(".agent-tint")).toHaveLength(2);
 		expect(client.api.chats.getOrCreate).toHaveBeenCalledWith({
-			params: { workspaceId: linear.workspaceId },
+			params: { workspace: linear.workspaceId },
 			payload: { podId: linear.podId, hostAgentId: linear.id },
 		});
 	});
