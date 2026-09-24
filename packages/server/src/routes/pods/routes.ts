@@ -70,7 +70,6 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 					return yield* pods.ensurePersonal(workspaceId, actor, payload.model);
 				}),
 			)
-			.handle("get", () => Effect.map(grantedPod, podSeenBy))
 			.handle("update", ({ payload }) =>
 				Effect.gen(function* () {
 					if (

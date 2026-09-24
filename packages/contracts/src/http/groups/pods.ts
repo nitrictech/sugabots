@@ -37,10 +37,6 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			payload: Schema.Struct({ model: modelIdSchema }),
 			success: podSchema.pipe(HttpApiSchema.status(201)),
 		}),
-		HttpApiEndpoint.get("get", "/pods/:podId", {
-			params: { podId: uuidSchema },
-			success: podSchema,
-		}),
 		HttpApiEndpoint.patch("update", "/pods/:podId", {
 			params: { podId: uuidSchema },
 			payload: podUpdateSchema,
