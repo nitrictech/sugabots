@@ -1,6 +1,7 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { modelAttemptStore } from "../../accounting/store.ts";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
 import { eventPublisher } from "../../database/events/publish.ts";
@@ -26,6 +27,36 @@ import { queueSummary, summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurn, turnStore } from "../turns/store.ts";
 import { threadStore } from "./store.ts";
+
+/** One answered model request made for `threadId`, as the ledger records it. */
+async function recordRequest(threadId: string, inputTokens: number, outputTokens: number) {
+	const attemptId = crypto.randomUUID();
+	const at = new Date().toISOString();
+	await runOnPostgres(
+		modelAttemptStore.putIntent({
+			attemptId,
+			executionId: crypto.randomUUID(),
+			startedAt: at,
+			attribution: { workspaceId: crypto.randomUUID(), activityPurpose: "agent-turn", threadId },
+			provider: { connectionId: "connection", provider: "anthropic", requestedModel: "m" },
+		}),
+	);
+	await runOnPostgres(
+		modelAttemptStore.putObservation({
+			observationId: `${attemptId}:usage:response`,
+			attemptId,
+			observedAt: at,
+			payload: {
+				type: "usage",
+				evidence: {
+					normalizationVersion: 1,
+					source: { kind: "ai-sdk", name: "anthropic" },
+					counters: { inputTokens, outputTokens },
+				},
+			},
+		}),
+	);
+}
 
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
@@ -826,6 +857,17 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			},
 		);
 
+		// Completing a turn no longer records its usage on the row; the ledger
+		// holds each request. A turn from before the ledger kept its own.
+		await recordRequest(details.thread.id, 30, 5);
+		await recordRequest(summaryTurn?.threadId as string, 40, 6);
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ usage: { modelCalls: 1, inputTokens: 100, outputTokens: 10, totalTokens: 110 } })
+				.where(eq(turn.id, preparedTurn.turnId)),
+		);
+
 		const refreshed = await store.getVisible(details.thread.id, memberId);
 		expect(refreshed?.thread.title).toBe("Verify the release");
 		// The thread holding the summaries is named after its parent, and the
@@ -845,10 +887,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
 		expect(refreshed?.usage).toMatchObject({
-			modelCalls: 2,
-			inputTokens: 70,
-			outputTokens: 11,
-			totalTokens: 81,
+			modelCalls: 3,
+			inputTokens: 170,
+			outputTokens: 21,
+			totalTokens: 191,
 			latestContext: { usedTokens: 30, capacityTokens: 200_000 },
 		});
 

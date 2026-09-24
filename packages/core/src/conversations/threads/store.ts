@@ -6,8 +6,9 @@ import type {
 	ThreadUsage,
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import { modelAttempt, modelAttemptObservation } from "../../accounting/sql.ts";
 import { type Database, type Executor, query } from "../../database/database.ts";
 import { isUuid } from "../../database/ids.ts";
 import type * as schema from "../../database/schema.ts";
@@ -220,10 +221,15 @@ const scribeIsSetUp = Effect.fn("ThreadStore.scribeIsSetUp")(function* (
 });
 
 /**
- * What the thread has cost, summed over its own turns and its system agents' turns
- * in child threads, since those tokens were spent because of this conversation.
+ * What the thread has cost, summed over its own model requests and those made
+ * in its child threads, since those tokens were spent because of this
+ * conversation.
  *
- * A total is reported only when every accounted turn measured it. A partial
+ * Requests are read from the ledger. Turns from before it existed kept their
+ * usage on the turn row instead, and a turn written since never does, so the
+ * two sources cannot count the same request twice.
+ *
+ * A total is reported only when every accounted request measured it. A partial
  * sum would look like a smaller number rather than an unknown one, and the
  * product rule is that an unknown cost is shown as unavailable, never invented.
  */
@@ -231,36 +237,9 @@ const loadUsage = Effect.fn("ThreadStore.loadUsage")(function* (
 	db: Executor,
 	threadRow: schema.ThreadRow,
 ) {
-	const measured = (field: string) =>
-		sql<number>`count(${turn.usage} ->> ${field}) filter (where ${turn.usage} is not null)`.mapWith(
-			Number,
-		);
-	const summed = (field: string) => sql<string | null>`sum((${turn.usage} ->> ${field})::numeric)`;
-
-	const [totals] = yield* db
-		.select({
-			accountedTurns: sql<number>`count(*) filter (where ${turn.usage} is not null)`.mapWith(
-				Number,
-			),
-			modelCallsMeasured: measured("modelCalls"),
-			modelCalls: summed("modelCalls"),
-			inputTokensMeasured: measured("inputTokens"),
-			inputTokens: summed("inputTokens"),
-			outputTokensMeasured: measured("outputTokens"),
-			outputTokens: summed("outputTokens"),
-			totalTokensMeasured: measured("totalTokens"),
-			totalTokens: summed("totalTokens"),
-			reportedCostMeasured:
-				sql<number>`count(${turn.reportedCost}) filter (where ${turn.usage} is not null)`.mapWith(
-					Number,
-				),
-			reportedCost: sql<
-				string | null
-			>`sum(${turn.reportedCost}) filter (where ${turn.usage} is not null)`,
-		})
-		.from(turn)
-		.innerJoin(thread, eq(thread.id, turn.threadId))
-		.where(or(eq(thread.id, threadRow.id), eq(thread.parentThreadId, threadRow.id)));
+	const inConversation = or(eq(thread.id, threadRow.id), eq(thread.parentThreadId, threadRow.id));
+	const legacy = yield* loadTurnRowUsage(db, inConversation);
+	const ledger = yield* loadLedgerUsage(db, inConversation);
 
 	const [latest] = yield* db
 		.select({ usedTokens: turn.contextTokens, capacityTokens: turn.contextCapacity })
@@ -269,23 +248,123 @@ const loadUsage = Effect.fn("ThreadStore.loadUsage")(function* (
 		.orderBy(desc(turn.startedAt), desc(turn.id))
 		.limit(1);
 
-	const accounted = totals?.accountedTurns ?? 0;
-	const whenAllMeasured = (total: string | null | undefined, measuredCount: number | undefined) =>
-		accounted === 0 || measuredCount !== accounted || total == null ? null : Number(total);
+	const accounted = legacy.accounted + ledger.accounted;
+	const whenAllMeasured = (measure: keyof Omit<UsageTotals, "accounted">) => {
+		const measured = legacy[measure].measured + ledger[measure].measured;
+		const sums = [legacy[measure].sum, ledger[measure].sum].filter((sum) => sum !== null);
+		return accounted === 0 || measured !== accounted || sums.length === 0
+			? null
+			: sums.reduce((total, sum) => total + Number(sum), 0);
+	};
 
 	return {
-		modelCalls:
-			whenAllMeasured(totals?.modelCalls, totals?.modelCallsMeasured) ??
-			(accounted === 0 ? 0 : null),
-		inputTokens: whenAllMeasured(totals?.inputTokens, totals?.inputTokensMeasured),
-		outputTokens: whenAllMeasured(totals?.outputTokens, totals?.outputTokensMeasured),
-		totalTokens: whenAllMeasured(totals?.totalTokens, totals?.totalTokensMeasured),
-		reportedCost: whenAllMeasured(totals?.reportedCost, totals?.reportedCostMeasured),
+		modelCalls: whenAllMeasured("modelCalls") ?? (accounted === 0 ? 0 : null),
+		inputTokens: whenAllMeasured("inputTokens"),
+		outputTokens: whenAllMeasured("outputTokens"),
+		totalTokens: whenAllMeasured("totalTokens"),
+		reportedCost: whenAllMeasured("reportedCost"),
 		latestContext:
 			latest?.usedTokens != null
 				? { usedTokens: latest.usedTokens, capacityTokens: latest.capacityTokens }
 				: null,
 	} satisfies ThreadUsage;
+});
+
+/** How many accounted things measured a quantity, and their sum. */
+interface Measure {
+	measured: number;
+	sum: string | null;
+}
+
+interface UsageTotals {
+	accounted: number;
+	modelCalls: Measure;
+	inputTokens: Measure;
+	outputTokens: Measure;
+	totalTokens: Measure;
+	reportedCost: Measure;
+}
+
+const noUsage: UsageTotals = {
+	accounted: 0,
+	modelCalls: { measured: 0, sum: null },
+	inputTokens: { measured: 0, sum: null },
+	outputTokens: { measured: 0, sum: null },
+	totalTokens: { measured: 0, sum: null },
+	reportedCost: { measured: 0, sum: null },
+};
+
+const measure = (measured: SQL<unknown>, sum: SQL<unknown>) => ({
+	measured: sql<number>`${measured}`.mapWith(Number),
+	sum: sql<string | null>`${sum}`,
+});
+
+/** Usage turns recorded on their own row, before the ledger. Each turn counts once. */
+const loadTurnRowUsage = Effect.fn("ThreadStore.loadTurnRowUsage")(function* (
+	db: Executor,
+	inConversation: SQL | undefined,
+) {
+	const counted = sql`${turn.usage} is not null`;
+	const field = (name: string) =>
+		measure(
+			sql`count(${turn.usage} ->> ${name}) filter (where ${counted})`,
+			sql`sum((${turn.usage} ->> ${name})::numeric)`,
+		);
+	const [totals] = yield* db
+		.select({
+			accounted: sql<number>`count(*) filter (where ${counted})`.mapWith(Number),
+			modelCalls: field("modelCalls"),
+			inputTokens: field("inputTokens"),
+			outputTokens: field("outputTokens"),
+			totalTokens: field("totalTokens"),
+			reportedCost: measure(
+				sql`count(${turn.reportedCost}) filter (where ${counted})`,
+				sql`sum(${turn.reportedCost}) filter (where ${counted})`,
+			),
+		})
+		.from(turn)
+		.innerJoin(thread, eq(thread.id, turn.threadId))
+		.where(inConversation);
+	return totals ?? noUsage;
+});
+
+/**
+ * Usage from the ledger, one request per attempt that measured it. A request
+ * that ended before its usage arrived is left out, as a failed turn was before.
+ * The ledger has no provider-reported charges, so it adds no reported cost.
+ */
+const loadLedgerUsage = Effect.fn("ThreadStore.loadLedgerUsage")(function* (
+	db: Executor,
+	inConversation: SQL | undefined,
+) {
+	const counter = (name: string) =>
+		sql`(${modelAttemptObservation.observation} -> 'payload' -> 'evidence' -> 'counters' ->> ${name})::numeric`;
+	const input = counter("inputTokens");
+	const output = counter("outputTokens");
+	const conversationThreads = db.select({ id: thread.id }).from(thread).where(inConversation);
+	const [totals] = yield* db
+		.select({
+			accounted: sql<number>`count(*)`.mapWith(Number),
+			modelCalls: measure(sql`count(*)`, sql`count(*)`),
+			inputTokens: measure(sql`count(${input})`, sql`sum(${input})`),
+			outputTokens: measure(sql`count(${output})`, sql`sum(${output})`),
+			totalTokens: measure(sql`count(${input} + ${output})`, sql`sum(${input} + ${output})`),
+			reportedCost: measure(sql`0`, sql`null`),
+		})
+		.from(modelAttempt)
+		.innerJoin(
+			modelAttemptObservation,
+			and(
+				eq(modelAttemptObservation.attemptId, modelAttempt.attemptId),
+				eq(modelAttemptObservation.type, "usage"),
+				sql`not exists (
+					select 1 from ${modelAttemptObservation} as correction
+					where correction.supersedes_observation_id = ${modelAttemptObservation.observationId}
+				)`,
+			),
+		)
+		.where(inArray(modelAttempt.threadId, conversationThreads));
+	return totals ?? noUsage;
 });
 
 function toThreadSummary(row: schema.ThreadSummaryRow): ThreadSummary {

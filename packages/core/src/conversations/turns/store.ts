@@ -376,9 +376,8 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 							.update(turn)
 							.set({
 								status: "done",
-								usage: accounting.usage,
-								reportedCost:
-									accounting.reportedCost === undefined ? null : String(accounting.reportedCost),
+								// What the requests used is in the ledger; the row keeps only the
+								// context size, which is the last request's rather than a sum.
 								contextTokens: accounting.contextTokens ?? null,
 								contextCapacity: accounting.contextCapacity ?? null,
 								checkpoint: null,
