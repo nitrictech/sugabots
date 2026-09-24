@@ -14,6 +14,7 @@ import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agen
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
 import { configFromEnv } from "./config.ts";
@@ -39,7 +40,10 @@ if (config.environment !== "development") {
 }
 
 const database = ManagedRuntime.make(
-	Layer.merge(databaseLayer(config.databaseUrl), EmailService.fromConfig(config.email)),
+	Layer.merge(
+		databaseLayer(config.databaseUrl),
+		EmailService.fromConfig(config.email).pipe(Layer.provide(FetchHttpClient.layer)),
+	),
 );
 // better-auth's adapter only speaks node-postgres.
 const authPool = new Pool({ connectionString: config.databaseUrl });

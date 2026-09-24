@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { Duration, Effect, identity } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 // email.ts imports this module, so its values are only used inside `send`, after
 // both modules have loaded.
 import { EmailDeliveryFailed, type EmailService } from "../email.ts";
@@ -11,28 +12,20 @@ export interface WebhookEmailConfig {
 	token?: string;
 }
 
-const TIMEOUT_MS = 15_000;
+const TIMEOUT = Duration.seconds(15);
 
-export const fromWebhook = (
-	config: WebhookEmailConfig,
-	fetch = globalThis.fetch,
-): EmailService["Service"] => ({
-	send: (email) =>
-		Effect.tryPromise({
-			try: async () => {
-				const response = await fetch(config.url, {
-					method: "POST",
-					headers: {
-						"content-type": "application/json",
-						...(config.token ? { authorization: `Bearer ${config.token}` } : {}),
-					},
-					body: JSON.stringify(email),
-					signal: AbortSignal.timeout(TIMEOUT_MS),
-				});
-				if (!response.ok) {
-					throw new Error(`Email webhook returned ${response.status} ${response.statusText}`);
-				}
-			},
-			catch: (cause) => new EmailDeliveryFailed({ provider: "webhook", cause }),
-		}),
-});
+export const fromWebhook = (config: WebhookEmailConfig) =>
+	Effect.map(HttpClient.HttpClient, (client): EmailService["Service"] => {
+		const http = HttpClient.filterStatusOk(client);
+		return {
+			send: (email) =>
+				HttpClientRequest.post(config.url).pipe(
+					config.token ? HttpClientRequest.bearerToken(config.token) : identity,
+					HttpClientRequest.bodyJsonUnsafe(email),
+					http.execute,
+					Effect.timeout(TIMEOUT),
+					Effect.asVoid,
+					Effect.mapError((cause) => new EmailDeliveryFailed({ provider: "webhook", cause })),
+				),
+		};
+	});

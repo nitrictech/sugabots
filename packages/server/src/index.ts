@@ -39,7 +39,7 @@ import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Duration, Effect, Layer } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
 import { API_BASE_PATH, configFromEnv } from "./config.ts";
@@ -214,9 +214,10 @@ main.pipe(
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
-		Layer.merge(databaseLayer(config.databaseUrl), EmailService.fromConfig(config.email)).pipe(
-			Layer.provideMerge(observabilityLayer),
-		),
+		Layer.merge(
+			databaseLayer(config.databaseUrl),
+			EmailService.fromConfig(config.email).pipe(Layer.provide(FetchHttpClient.layer)),
+		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,
 );

@@ -16,8 +16,8 @@ export class EmailService extends Context.Service<
 	static readonly fromConsole = Layer.succeed(this, fromConsole);
 
 	/** Posts each email as JSON to `config.url`, for a relay the installation runs itself. */
-	static readonly fromWebhook = (config: WebhookEmailConfig, fetch?: typeof globalThis.fetch) =>
-		Layer.succeed(this, fromWebhook(config, fetch));
+	static readonly fromWebhook = (config: WebhookEmailConfig) =>
+		Layer.effect(this, fromWebhook(config));
 
 	/** The implementation `config.provider` names. */
 	static readonly fromConfig = (config: EmailServiceConfig) => {
