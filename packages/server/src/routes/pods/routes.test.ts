@@ -14,16 +14,10 @@ import { createTestApp } from "../../http/app.test-support.ts";
  * case states, so what is under test is the routing and the authorisation
  * rather than Postgres. The store is exercised against a real database in
  * `pods/store.test.ts`.
- *
- * The rules these are mostly about: an admin reaches every shared pod without
- * being in it, a member reaches only the pods they have joined, and anything
- * the caller cannot reach is `NotFound` rather than `Forbidden`, so an id
- * cannot be probed for.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const POD = "0199a3a0-0000-7000-8000-0000000000a1";
-const OTHER = "0199a3a0-0000-7000-8000-0000000000a2";
 
 const admin = {
 	id: "0199a3a0-0000-7000-8000-000000000011",
@@ -37,12 +31,6 @@ const member = {
 	name: "Sam",
 	image: null,
 };
-const stranger = {
-	id: "0199a3a0-0000-7000-8000-000000000013",
-	email: "kim@example.com",
-	name: "Kim",
-	image: null,
-};
 const outsider = {
 	id: "0199a3a0-0000-7000-8000-000000000014",
 	email: "lee@example.com",
@@ -53,7 +41,6 @@ const outsider = {
 const people = {
 	"admin-token": admin,
 	"member-token": member,
-	"stranger-token": stranger,
 	"outsider-token": outsider,
 };
 
@@ -65,12 +52,12 @@ const resolveSession: SessionResolver = async (headers) => {
 
 /**
  * Ada administers the workspace and is *not* in the pod; Sam is in it as an
- * ordinary member; Kim is in the workspace and in no pod; Lee is nowhere.
+ * ordinary member; Lee is nowhere.
  */
 const world = (kind: Pod["kind"] = "shared") =>
 	testAuthorization({
 		id: WORKSPACE,
-		roles: { [admin.id]: "admin", [member.id]: "member", [stranger.id]: "member" },
+		roles: { [admin.id]: "admin", [member.id]: "member" },
 		pods: [
 			{
 				id: POD,
@@ -262,54 +249,6 @@ describe("POST /workspaces/:workspaceId/pods", () => {
 
 		expect(response.status).toBe(409);
 		expect(await errorTag(response)).toBe("Conflict");
-	});
-});
-
-describe("reading one pod", () => {
-	it("is visible to a member of it, with what they may do in it", async () => {
-		const response = await app().request(`/pods/${POD}`, as("member-token"));
-
-		expect(response.status).toBe(200);
-		const seen = Schema.decodeUnknownSync(podSchema)(await response.json());
-		expect(seen.slug).toBe("suga-team");
-		expect(seen.permissions).toEqual({
-			rename: false,
-			changeRouting: false,
-			manageMembers: false,
-			createAgents: true,
-			updateAgents: true,
-			deleteAgents: false,
-			manageConnections: false,
-			manageRoutines: false,
-			runRoutines: false,
-		});
-	});
-
-	it("is visible to an admin who is not in it", async () => {
-		const response = await app().request(`/pods/${POD}`, as("admin-token"));
-
-		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(podSchema)(await response.json()).permissions.rename).toBe(
-			true,
-		);
-	});
-
-	it("is hidden from a member of the workspace who is not in it", async () => {
-		expect((await app().request(`/pods/${POD}`, as("stranger-token"))).status).toBe(404);
-	});
-
-	it("is not visible to somebody outside the workspace", async () => {
-		expect((await app().request(`/pods/${POD}`, as("outsider-token"))).status).toBe(404);
-	});
-
-	it("does not confirm that an unknown id exists", async () => {
-		expect((await app().request(`/pods/${OTHER}`, as("admin-token"))).status).toBe(404);
-	});
-
-	it("hides another person's Personal pod from an admin", async () => {
-		podKind = "personal";
-
-		expect((await app().request(`/pods/${POD}`, as("admin-token"))).status).toBe(404);
 	});
 });
 

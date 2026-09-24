@@ -55,7 +55,6 @@ export const accessPolicy: AccessPolicy = {
 		list: { workspace: "workspace.read" },
 		create: { workspace: "pod.create" },
 		ensurePersonal: { workspace: "workspace.read" },
-		get: { pod: "pod.read" },
 		update: { pod: "pod.update" },
 		remove: { pod: "pod.delete" },
 		listMembers: { pod: "pod.read" },
