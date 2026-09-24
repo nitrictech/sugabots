@@ -1650,6 +1650,48 @@ describe("pod settings", () => {
 		);
 	});
 
+	it("asks before removing somebody from the pod", async () => {
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.removeMember.mockReturnValue(Effect.void);
+		mount(podPage);
+
+		fireEvent.click(await screen.findByRole("button", { name: `Remove ${jye.name}` }));
+
+		expect(
+			await screen.findByRole("dialog", { name: `Remove ${jye.name} from ${suga.name}?` }),
+		).toBeDefined();
+		expect(client.api.pods.removeMember).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: "Yes, remove" }));
+
+		await waitFor(() =>
+			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
+				params: { podId: suga.id, userId: jye.id },
+			}),
+		);
+	});
+
+	// Sam is the signed-in administrator, so Sam's own row is the leaving case.
+	it("offers leaving on your own row, and says an administrator keeps the pod", async () => {
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.removeMember.mockReturnValue(Effect.void);
+		mount(podPage);
+
+		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
+		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
+
+		expect(await screen.findByRole("dialog", { name: `Leave ${suga.name}?` })).toBeDefined();
+		expect(screen.getByText(/As an administrator you still reach the pod/)).toBeDefined();
+
+		fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
+
+		await waitFor(() =>
+			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
+				params: { podId: suga.id, userId: sam.id },
+			}),
+		);
+	});
+
 	it("says when everyone in the workspace is already in", async () => {
 		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
 		mount(podPage);

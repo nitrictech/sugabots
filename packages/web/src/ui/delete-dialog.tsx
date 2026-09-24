@@ -17,6 +17,7 @@ export function DeleteDialog({
 	description,
 	pending,
 	error,
+	confirmLabel = "Yes, delete",
 	onDelete,
 }: {
 	open: boolean;
@@ -25,6 +26,8 @@ export function DeleteDialog({
 	description: ReactNode;
 	pending: boolean;
 	error?: string;
+	/** Say what the button does when it isn't a deletion, e.g. "Yes, remove". */
+	confirmLabel?: string;
 	onDelete: () => void | Promise<void>;
 }) {
 	return (
@@ -57,7 +60,7 @@ export function DeleteDialog({
 							Keep
 						</Button>
 						<Button type="submit" variant="destructive" disabled={pending}>
-							Yes, delete
+							{confirmLabel}
 						</Button>
 					</DialogFooter>
 				</form>

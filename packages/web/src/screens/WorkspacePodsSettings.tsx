@@ -6,10 +6,11 @@ import {
 	type PodPermissions,
 	type PodRouting,
 	type PodUpdate,
+	type WorkspaceRole,
 	workspaceRoleLabel,
 	workspaceRoleOf,
 } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { ArrowLeft, Bot, Ellipsis, LockKeyhole, Plus, User } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useAgents, useDeleteAgent } from "@/lib/agents.ts";
@@ -479,25 +480,20 @@ function Card({ children }: { children: ReactNode }) {
 	);
 }
 
-function RemoveButton({
-	label,
-	...props
-}: {
-	label: string;
-	disabled: boolean;
-	onClick: () => void;
-}) {
-	return (
-		<Button
-			variant="ghost"
-			size="sm"
-			aria-label={label}
-			className="text-muted-foreground hover:text-destructive"
-			{...props}
-		>
-			Remove
-		</Button>
-	);
+/**
+ * What coming off the roster costs, which is the role's answer rather than the
+ * pod's: an administrator reaches every shared pod without a membership row,
+ * so the roster is all they lose. Administering is also what lets somebody
+ * manage members at all, which is why leaving never costs the person leaving.
+ * The grants are in `packages/core/src/workspaces/permissions.ts`.
+ */
+function removalCost(role: WorkspaceRole | undefined, isYou: boolean): string {
+	if (role !== "admin") {
+		return "They lose this pod, its agents, and its conversations. You can invite them back at any time.";
+	}
+	return isYou
+		? "You come off this pod's member list. As an administrator you still reach the pod and everything in it."
+		: "They come off this pod's member list. As an administrator they still reach the pod and everything in it.";
 }
 
 /*
@@ -508,11 +504,16 @@ function RemoveButton({
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
 	const workspaceMembers = useWorkspaceMembers(pod.workspaceId);
-	const place = usePlacePodMember(pod.id);
+	const invite = usePlacePodMember(pod.id);
+	const remove = usePlacePodMember(pod.id);
+	const [removing, setRemoving] = useState<PodMember>();
+	const { session } = useRouteContext({ from: "__root__" });
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
-		workspaceMembers.data?.find((member) => member.userId === userId)?.role;
-	const roleLabel = (userId: string) => workspaceRoleLabel(workspaceRoleOf(roleOf(userId)));
+		workspaceRoleOf(workspaceMembers.data?.find((member) => member.userId === userId)?.role);
+	const roleLabel = (userId: string) => workspaceRoleLabel(roleOf(userId));
+	const isYou = (userId: string) => userId === session.user?.id;
+	const leaving = removing !== undefined && isYou(removing.userId);
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.userId)) ?? [];
 
 	return (
@@ -523,7 +524,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							render={
-								<IconButton label="Invite" size="lg" disabled={place.isPending}>
+								<IconButton label="Invite" size="lg" disabled={invite.isPending}>
 									<Plus />
 								</IconButton>
 							}
@@ -537,7 +538,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								invitable.map((member) => (
 									<DropdownMenuItem
 										key={member.userId}
-										onClick={() => place.mutate({ userId: member.userId, member: true })}
+										onClick={() => invite.mutate({ userId: member.userId, member: true })}
 									>
 										{/* Hidden from the name, or the initials would read as part of it. */}
 										<span aria-hidden>
@@ -566,17 +567,46 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 							</span>
 							<span className="text-muted-foreground text-sm">{roleLabel(member.userId)}</span>
 							{canManageMembers && (
-								<RemoveButton
-									label={`Remove ${member.name}`}
-									disabled={place.isPending}
-									onClick={() => place.mutate({ userId: member.userId, member: false })}
-								/>
+								<Button
+									variant="ghost"
+									size="sm"
+									aria-label={isYou(member.userId) ? `Leave ${pod.name}` : `Remove ${member.name}`}
+									className="text-muted-foreground hover:text-destructive"
+									disabled={remove.isPending}
+									onClick={() => setRemoving(member)}
+								>
+									{isYou(member.userId) ? "Leave" : "Remove"}
+								</Button>
 							)}
 						</li>
 					))}
 				</Card>
 			)}
-			{place.error && <Alert>{failureMessage(place.error)}</Alert>}
+			{invite.error && <Alert>{failureMessage(invite.error)}</Alert>}
+			<DeleteDialog
+				open={removing !== undefined}
+				onOpenChange={(open) => {
+					if (!open) setRemoving(undefined);
+				}}
+				title={
+					leaving
+						? `Leave ${pod.name}?`
+						: `Remove ${removing?.name ?? "this person"} from ${pod.name}?`
+				}
+				description={removalCost(removing && roleOf(removing.userId), leaving)}
+				confirmLabel={leaving ? "Yes, leave" : "Yes, remove"}
+				pending={remove.isPending}
+				error={remove.error ? failureMessage(remove.error) : undefined}
+				onDelete={async () => {
+					if (!removing) return;
+					try {
+						await remove.mutateAsync({ userId: removing.userId, member: false });
+					} catch {
+						return;
+					}
+					setRemoving(undefined);
+				}}
+			/>
 		</Section>
 	);
 }
