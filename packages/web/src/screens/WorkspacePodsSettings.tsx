@@ -15,6 +15,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useAgents, useDeleteAgent } from "@/lib/agents.ts";
 import { isSetUp, useBuiltInAgent } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
 	useDeletePod,
 	usePlacePodMember,
@@ -79,7 +80,7 @@ export function WorkspacePodsSettings({
 		<SettingsRailItem
 			key={pod.id}
 			selected={pod.id === selected?.id}
-			render={<Link to="/settings/pods/$pod" params={{ pod: pod.id }} />}
+			render={<Link {...podSettingsLink(pod)} />}
 		>
 			<PodMark pod={pod} />
 			<span className="flex min-w-0 flex-1 flex-col">
@@ -99,16 +100,11 @@ export function WorkspacePodsSettings({
 			</span>
 		</SettingsRailItem>
 	);
-	const agentRailItem = (agent: Agent) => (
+	const agentRailItem = (agent: Agent, pod: Pod) => (
 		<SettingsRailItem
 			key={agent.id}
 			selected={agent.id === selectedAgentId}
-			render={
-				<Link
-					to="/settings/pods/$pod/agents/$agent"
-					params={{ pod: agent.podId, agent: agent.id }}
-				/>
-			}
+			render={<Link {...agentSettingsLink({ pod, agent })} />}
 		>
 			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
 			<span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
@@ -132,7 +128,7 @@ export function WorkspacePodsSettings({
 						footer={
 							selected.permissions.createAgents ? (
 								<NewAgentButton
-									podId={selected.id}
+									pod={selected}
 									variant="secondary"
 									className="h-11 w-full justify-center border-dashed text-base"
 								/>
@@ -147,7 +143,7 @@ export function WorkspacePodsSettings({
 							<ArrowLeft aria-hidden size={16} />
 							<span>Back to pods</span>
 						</Link>
-						{selectedPodAgents.map(agentRailItem)}
+						{selectedPodAgents.map((agent) => agentRailItem(agent, selected))}
 					</SettingsRail>
 				) : (
 					<SettingsRail
@@ -558,8 +554,7 @@ function PodAgents({ pod, may }: { pod: Pod; may: PodPermissions }) {
 		<li key={agent.id} className="flex min-h-12 items-center gap-3 px-3.5 py-2">
 			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
 			<Link
-				to="/settings/pods/$pod/agents/$agent"
-				params={{ pod: pod.id, agent: agent.id }}
+				{...agentSettingsLink({ pod, agent })}
 				className="focus-ring min-w-0 flex-1 truncate rounded-sm font-medium text-base text-heading hover:underline"
 			>
 				{agent.name}
@@ -579,10 +574,7 @@ function PodAgents({ pod, may }: { pod: Pod; may: PodPermissions }) {
 
 	return (
 		<>
-			<Section
-				label="Agents"
-				action={may.createAgents && <NewAgentButton podId={pod.id} iconOnly />}
-			>
+			<Section label="Agents" action={may.createAgents && <NewAgentButton pod={pod} iconOnly />}>
 				{inPod.length === 0 ? (
 					<p className="m-0 text-base text-subtle-foreground">No agents in this pod yet.</p>
 				) : (

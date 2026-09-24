@@ -12,6 +12,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useDeleteAgent, useUpdateAgent } from "@/lib/agents.ts";
 import { useConnections, useToolApprovalRules } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { podSettingsLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -152,7 +153,7 @@ function AgentHeader({
 		} catch {
 			return;
 		}
-		await navigate({ to: "/settings/pods/$pod", params: { pod: pod.id } });
+		await navigate(podSettingsLink(pod));
 	}
 
 	return (
@@ -161,7 +162,7 @@ function AgentHeader({
 				<IconButton
 					label="Back to pod"
 					className="mt-2 lg:hidden"
-					render={<Link to="/settings/pods/$pod" params={{ pod: pod.id }} />}
+					render={<Link {...podSettingsLink(pod)} />}
 				>
 					<ArrowLeft />
 				</IconButton>
@@ -537,7 +538,7 @@ function InheritedConnections({ agent, pod }: { agent: Agent; pod: Pod }) {
 				size="bare"
 				variant="link"
 				className="mt-2"
-				render={<Link to="/settings/pods/$pod" params={{ pod: pod.id }} />}
+				render={<Link {...podSettingsLink(pod)} />}
 			>
 				View pod connections
 			</Button>

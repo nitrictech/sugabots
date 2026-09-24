@@ -1,9 +1,10 @@
-import { hueFromText } from "@sugabots/contracts";
+import { type Agent, hueFromText, type Pod } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { agentSettingsLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, type ButtonProps } from "@/ui/button.tsx";
@@ -16,11 +17,11 @@ import { ModelPicker } from "@/ui/model-picker.tsx";
 import { SurfaceHeader, SurfaceTitle } from "@/ui/surface.tsx";
 
 export function NewAgentButton({
-	podId,
+	pod,
 	iconOnly = false,
 	variant,
 	className,
-}: Pick<ButtonProps, "variant" | "className"> & { podId: string; iconOnly?: boolean }) {
+}: Pick<ButtonProps, "variant" | "className"> & { pod: Pod; iconOnly?: boolean }) {
 	const [open, setOpen] = useState(false);
 	const navigate = useNavigate();
 
@@ -39,13 +40,10 @@ export function NewAgentButton({
 
 			<Dialog open={open} onOpenChange={setOpen}>
 				<NewAgentDialog
-					podId={podId}
-					onCreated={async (agentId) => {
+					podId={pod.id}
+					onCreated={async (agent) => {
 						setOpen(false);
-						await navigate({
-							to: "/settings/pods/$pod/agents/$agent",
-							params: { pod: podId, agent: agentId },
-						});
+						await navigate(agentSettingsLink({ pod, agent }));
 					}}
 				/>
 			</Dialog>
@@ -62,7 +60,7 @@ export function NewAgentDialog({
 	onCreated,
 }: {
 	podId: string;
-	onCreated: (agentId: string) => Promise<void>;
+	onCreated: (agent: Agent) => Promise<void>;
 }) {
 	const [name, setName] = useState("");
 	const [selectedModel, setSelectedModel] = useState<string>();
@@ -75,7 +73,7 @@ export function NewAgentDialog({
 		event.preventDefault();
 		try {
 			const agent = await create.mutateAsync({ name: trimmedName, model });
-			await onCreated(agent.id);
+			await onCreated(agent);
 		} catch {
 			return;
 		}
