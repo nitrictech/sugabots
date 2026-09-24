@@ -25,13 +25,6 @@ export class EmailService extends Context.Service<
 	static readonly layerNoDeps = Layer.effect(this, this.make);
 
 	static readonly layer = this.layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
-
-	/** Prints each email to the server's log instead of sending it. */
-	static readonly fromConsole = Layer.succeed(this, fromConsole);
-
-	/** Posts each email as JSON to `config.url`, for a relay the installation runs itself. */
-	static readonly fromWebhook = (config: WebhookEmailConfig) =>
-		Layer.effect(this, fromWebhook(config));
 }
 
 /** The environment asks for email that cannot be sent as configured. */

@@ -4,19 +4,27 @@ import { describe, expect, it } from "vitest";
 import { type Email, EmailService, parseEmailAddress } from "./email.ts";
 
 const email: Email = {
-	from: { email: "sugabots@example.com" },
+	from: { email: "sugabots@example.com", name: "Sugabots" },
 	to: [{ email: "person@example.com" }],
 	subject: "Invitation",
 	text: "Open this link",
 };
 
-/** Sends `email` through `EmailService.layerNoDeps` as configured by `env`, recording HTTP requests. */
-async function sendWith(env: Record<string, string>) {
+const webhook = {
+	EMAIL_PROVIDER: "webhook",
+	EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
+};
+
+/**
+ * Sends `email` through `EmailService.layerNoDeps` as `env` configures it, over
+ * an HTTP client that records each request and answers `status`.
+ */
+async function sendWith(env: Record<string, string>, status = 204) {
 	const requests: HttpClientRequest.HttpClientRequest[] = [];
 	const http = HttpClient.make((request) =>
 		Effect.sync(() => {
 			requests.push(request);
-			return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
+			return HttpClientResponse.fromWeb(request, new Response(null, { status }));
 		}),
 	);
 	const exit = await Effect.runPromiseExit(
@@ -29,114 +37,83 @@ async function sendWith(env: Record<string, string>) {
 			),
 		),
 	);
-	return { exit, requests };
+	return { exit, requests, failure: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : undefined };
 }
 
-function failureMessage(exit: Exit.Exit<unknown, unknown>) {
-	if (Exit.isSuccess(exit)) return undefined;
-	const error = Cause.findErrorOption(exit.cause);
-	return error._tag === "Some" ? (error.value as { message?: string }).message : undefined;
+function jsonBody(request: HttpClientRequest.HttpClientRequest | undefined) {
+	if (request?.body._tag !== "Uint8Array") throw new Error("expected a JSON body");
+	return JSON.parse(new TextDecoder().decode(request.body.body));
 }
 
 describe("EmailService.layerNoDeps", () => {
-	it("prints to the console in development when no provider is set", async () => {
-		const { exit, requests } = await sendWith({});
+	it.each([
+		["with nothing set", {}],
+		["in production", { NODE_ENV: "production" }],
+		["when only webhook settings are set", { EMAIL_WEBHOOK_URL: webhook.EMAIL_WEBHOOK_URL }],
+	])("prints to the console %s", async (_, env) => {
+		const { exit, requests } = await sendWith(env);
 
 		expect(Exit.isSuccess(exit)).toBe(true);
 		expect(requests).toHaveLength(0);
 	});
 
-	it("uses the console in production when no provider is set", async () => {
-		const { exit, requests } = await sendWith({ NODE_ENV: "production" });
+	it("posts the email as JSON to the webhook with bearer authentication", async () => {
+		const { exit, requests } = await sendWith({ ...webhook, EMAIL_WEBHOOK_TOKEN: "secret" });
 
 		expect(Exit.isSuccess(exit)).toBe(true);
-		expect(requests).toHaveLength(0);
-	});
-
-	it("sends through the webhook when EMAIL_PROVIDER is webhook", async () => {
-		const { exit, requests } = await sendWith({
-			NODE_ENV: "production",
-			EMAIL_PROVIDER: "webhook",
-			EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
-			EMAIL_WEBHOOK_TOKEN: "secret",
-		});
-
-		expect(Exit.isSuccess(exit)).toBe(true);
-		expect(requests[0]?.url).toBe("https://mailer.example.com/sugabots");
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.method).toBe("POST");
+		expect(requests[0]?.url).toBe(webhook.EMAIL_WEBHOOK_URL);
 		expect(requests[0]?.headers.authorization).toBe("Bearer secret");
+		expect(jsonBody(requests[0])).toEqual(email);
 	});
 
-	it("refuses an insecure webhook in production", async () => {
-		const { exit } = await sendWith({
-			NODE_ENV: "production",
-			EMAIL_PROVIDER: "webhook",
-			EMAIL_WEBHOOK_URL: "http://mailer.example.com/sugabots",
-		});
+	it("sends no authorization header without a token", async () => {
+		const { requests } = await sendWith(webhook);
 
-		expect(failureMessage(exit)).toMatch(/must use HTTPS in production/);
+		expect(requests[0]?.headers.authorization).toBeUndefined();
 	});
 
-	it("refuses a webhook that is not HTTP", async () => {
-		const { exit } = await sendWith({
-			EMAIL_PROVIDER: "webhook",
-			EMAIL_WEBHOOK_URL: "ftp://mailer.example.com/sugabots",
-		});
+	it("fails with EmailDeliveryFailed when the webhook rejects the email", async () => {
+		const { exit } = await sendWith(webhook, 503);
 
-		expect(failureMessage(exit)).toMatch(/must use HTTP or HTTPS/);
+		expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toMatchObject({
+			_tag: "Some",
+			value: { _tag: "EmailDeliveryFailed", provider: "webhook" },
+		});
+	});
+
+	it.each([
+		[
+			"an insecure webhook in production",
+			{ ...webhook, NODE_ENV: "production", EMAIL_WEBHOOK_URL: "http://mailer.example.com" },
+			/must use HTTPS in production/,
+		],
+		[
+			"a webhook that is not HTTP",
+			{ ...webhook, EMAIL_WEBHOOK_URL: "ftp://mailer.example.com" },
+			/must use HTTP or HTTPS/,
+		],
+		["the webhook without EMAIL_WEBHOOK_URL", { EMAIL_PROVIDER: "webhook" }, /EMAIL_WEBHOOK_URL/],
+		["a provider it does not know", { EMAIL_PROVIDER: "carrier-pigeon" }, /EMAIL_PROVIDER/],
+	])("refuses %s", async (_, env, message) => {
+		const { failure } = await sendWith(env);
+
+		expect(failure).toMatch(message);
 	});
 });
-
-describe("EmailService.layerNoDeps provider selection", () => {
-	it("uses the console when EMAIL_PROVIDER is unset, even with webhook settings", async () => {
-		const { exit, requests } = await sendWith({
-			EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
-		});
-
-		expect(Exit.isSuccess(exit)).toBe(true);
-		expect(requests).toHaveLength(0);
-	});
-
-	it("requires EMAIL_WEBHOOK_URL for the webhook", async () => {
-		const { exit } = await sendWith({ EMAIL_PROVIDER: "webhook" });
-
-		expect(Exit.isFailure(exit)).toBe(true);
-		expect(failureDescription(exit)).toMatch(/EMAIL_WEBHOOK_URL/);
-	});
-
-	it("refuses a provider it does not know", async () => {
-		const { exit } = await sendWith({ EMAIL_PROVIDER: "carrier-pigeon" });
-
-		expect(Exit.isFailure(exit)).toBe(true);
-		expect(failureDescription(exit)).toMatch(/EMAIL_PROVIDER/);
-	});
-});
-
-/** The failure's full description, for settings errors Effect reports itself. */
-function failureDescription(exit: Exit.Exit<unknown, unknown>) {
-	return Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "";
-}
 
 describe("parseEmailAddress", () => {
-	it("reads a named address", () => {
-		expect(parseEmailAddress("Sugabots <no-reply@example.com>")).toEqual({
-			email: "no-reply@example.com",
-			name: "Sugabots",
-		});
-	});
-
-	it("reads a quoted name", () => {
-		expect(parseEmailAddress('"Sugabots, Inc" <no-reply@example.com>')).toEqual({
-			email: "no-reply@example.com",
-			name: "Sugabots, Inc",
-		});
-	});
-
-	it("reads a bare address", () => {
-		expect(parseEmailAddress(" no-reply@example.com ")).toEqual({ email: "no-reply@example.com" });
-	});
-
-	it("rejects anything else", () => {
-		expect(parseEmailAddress("Sugabots")).toBeUndefined();
-		expect(parseEmailAddress("Sugabots <not-an-address>")).toBeUndefined();
+	it.each([
+		["Sugabots <no-reply@example.com>", { email: "no-reply@example.com", name: "Sugabots" }],
+		[
+			'"Sugabots, Inc" <no-reply@example.com>',
+			{ email: "no-reply@example.com", name: "Sugabots, Inc" },
+		],
+		[" no-reply@example.com ", { email: "no-reply@example.com" }],
+		["Sugabots", undefined],
+		["Sugabots <not-an-address>", undefined],
+	])("parses %j", (value, expected) => {
+		expect(parseEmailAddress(value)).toEqual(expected);
 	});
 });
