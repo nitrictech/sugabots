@@ -1,4 +1,4 @@
-import type { NewPod, PodUpdate } from "@sugabots/contracts";
+import type { NewPod, Pod, PodUpdate } from "@sugabots/contracts";
 import {
 	queryOptions,
 	skipToken,
@@ -42,6 +42,10 @@ export function podsQuery(workspaceId: string | undefined) {
 					})
 			: skipToken,
 	});
+}
+
+export function findPod(pods: readonly Pod[] | undefined, slug: string): Pod | undefined {
+	return pods?.find((pod) => pod.slug === slug);
 }
 
 /**

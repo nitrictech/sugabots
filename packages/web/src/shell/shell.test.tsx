@@ -28,7 +28,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const linearPage = `/suga/agents/${linear.id}`;
+const linearPage = `/suga/pods/suga-team/agents/${linear.handle}`;
 const writeClipboardText = vi.fn();
 
 beforeEach(() => {
@@ -183,7 +183,9 @@ describe("pod-first navigation", () => {
 				name: new RegExp(triager.name),
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(`/suga/agents/${triager.id}`));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${triager.handle}`),
+		);
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 	it("closes the drawer with Escape and returns focus to its trigger", async () => {
@@ -213,7 +215,7 @@ describe("the roster", () => {
 			within(rail)
 				.getByRole("link", { name: /Linear Handler/ })
 				.getAttribute("href"),
-		).toBe(`${linearPage}?pod=${pods[0]?.id}`);
+		).toBe(linearPage);
 		expect(within(rail).getByRole("heading", { name: "Sales" })).toBeDefined();
 		expect(within(rail).getByRole("link", { name: /Customer Research/ })).toBeDefined();
 	});
@@ -298,8 +300,8 @@ describe("the roster", () => {
 		await router.navigate({ to: "/$workspace/settings", params: { workspace: "suga" } });
 		await screen.findByRole("navigation", { name: "Workspace settings" });
 		await router.navigate({
-			to: "/$workspace/agents/$agent",
-			params: { workspace: "suga", agent: linear.id },
+			to: "/$workspace/pods/$pod/agents/$agent",
+			params: { workspace: "suga", pod: "suga-team", agent: linear.handle },
 		});
 
 		const roster = await screen.findByRole("navigation", { name: "Workspace" });
@@ -483,7 +485,7 @@ describe("routes", () => {
 		const router = mount("/");
 
 		await waitFor(() => {
-			expect(router.state.location.pathname).toBe(`/suga/agents/${agents[0]?.id}`);
+			expect(router.state.location.pathname).toBe("/suga/pods/sales/agents/customer-research");
 		});
 	});
 
@@ -563,7 +565,7 @@ describe("routes", () => {
 
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(
-				"/suga/agents/0199a3a0-0000-7000-8000-0000000000bf",
+				"/suga/pods/personal-test/agents/personal-assistant",
 			),
 		);
 	});
@@ -734,7 +736,7 @@ describe("routes", () => {
 	});
 
 	it("says so when the agent in the address is not there", async () => {
-		mount("/suga/agents/0199a3a0-0000-7000-8000-00000000dead");
+		mount("/suga/pods/suga-team/agents/missing");
 
 		expect(await screen.findByText("No such agent here")).toBeDefined();
 	});
@@ -860,7 +862,7 @@ describe("Personal pod settings", () => {
 		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 
-		mount(`/suga/settings/pods/${personalPod.id}`);
+		mount(`/suga/settings/pods/${personalPod.slug}`);
 
 		const rail = await screen.findByRole("navigation", {
 			name: "Workspace pods",
@@ -873,21 +875,21 @@ describe("Personal pod settings", () => {
 
 describe("creating an agent", () => {
 	it("offers a member of the pod the same New agent action as an admin", async () => {
-		mount(`/suga/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 
 		expect(await screen.findByRole("button", { name: "New agent" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
 		apiAnswers({ role: "member" });
-		mount(`/suga/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
 		expect(screen.getByRole("button", { name: "New agent" })).toBeDefined();
 	});
 
 	it("keeps deleting agents, and making pods, to those allowed them", async () => {
-		mount(`/suga/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 
 		expect(await screen.findByRole("button", { name: "New pod" })).toBeDefined();
 		expect(screen.getAllByRole("button", { name: "Delete" }).length).toBeGreaterThan(0);
@@ -895,7 +897,7 @@ describe("creating an agent", () => {
 		vi.clearAllMocks();
 
 		apiAnswers({ role: "member" });
-		mount(`/suga/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
 		expect(screen.queryByRole("button", { name: "New pod" })).toBeNull();
@@ -907,11 +909,12 @@ describe("creating an agent", () => {
 			...linear,
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
 			name: "Release Coordinator",
+			handle: "release-coordinator",
 			model: MODELS[0] as string,
 			podId: pods[0]?.id as string,
 		};
 		client.api.agents.create.mockReturnValue(Effect.succeed(made));
-		const router = mount(`/suga/settings/pods/${pods[0]?.id}`);
+		const router = mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New agent" });
@@ -932,7 +935,7 @@ describe("creating an agent", () => {
 		});
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(
-				`/suga/settings/pods/${made.podId}/agents/${made.id}`,
+				`/suga/settings/pods/${pods[0]?.slug}/agents/${made.handle}`,
 			),
 		);
 		expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
@@ -943,7 +946,7 @@ describe("creating an agent", () => {
 		client.api.agents.create.mockReturnValue(
 			Effect.fail(new Conflict({ message: "already exists" })),
 		);
-		mount(`/suga/settings/pods/${pods[0]?.id}`);
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		(await screen.findByRole("button", { name: "New agent" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New agent" });
@@ -988,7 +991,7 @@ describe("workspace settings", () => {
 
 	it("selects a pod from its settings rail", async () => {
 		const pod = pods[0] as (typeof pods)[number];
-		mount(`/suga/settings/pods/${pod.id}`);
+		mount(`/suga/settings/pods/${pod.slug}`);
 
 		const rail = await screen.findByRole("navigation", {
 			name: "Workspace pods",
@@ -1488,7 +1491,7 @@ describe("the theme", () => {
 describe("pod settings", () => {
 	const [suga] = pods;
 	if (!suga) throw new Error("fixture");
-	const podPage = `/suga/settings/pods/${suga.id}`;
+	const podPage = `/suga/settings/pods/${suga.slug}`;
 	const samInPod = {
 		userId: sam.id,
 		name: sam.name,
