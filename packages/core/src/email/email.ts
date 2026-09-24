@@ -18,9 +18,8 @@ export class EmailService extends Context.Service<
 		Layer.effect(this, fromWebhook(config));
 
 	/**
-	 * The implementation the environment configures: the webhook when
-	 * `EMAIL_WEBHOOK_URL` is set, otherwise the console, which production refuses.
-	 * Needs an `HttpClient`.
+	 * The implementation `EMAIL_PROVIDER` names, configured from its own settings.
+	 * Defaults to the console. Needs an `HttpClient`.
 	 */
 	static readonly layerNoDeps = Layer.unwrap(configuredImplementation());
 
@@ -67,28 +66,36 @@ export function parseEmailAddress(value: string): EmailAddress | undefined {
 	return /^[^<>\s@]+@[^<>\s@]+$/.test(bare) ? { email: bare } : undefined;
 }
 
+const EMAIL_PROVIDERS = ["console", "webhook"] as const;
+
 function configuredImplementation() {
+	return Effect.gen(function* () {
+		const provider = yield* Config.Literals(EMAIL_PROVIDERS, "EMAIL_PROVIDER").pipe(
+			Config.withDefault("console"),
+		);
+		switch (provider) {
+			case "console":
+				return EmailService.fromConsole;
+			case "webhook":
+				return yield* webhookFromEnv();
+		}
+	});
+}
+
+function webhookFromEnv() {
 	return Effect.gen(function* () {
 		const production =
 			(yield* Config.String("NODE_ENV").pipe(Config.withDefault(""))) === "production";
-		const url = yield* Config.option(Config.URL("EMAIL_WEBHOOK_URL"));
+		const url = yield* Config.URL("EMAIL_WEBHOOK_URL");
 		const token = yield* Config.option(Config.Redacted("EMAIL_WEBHOOK_TOKEN"));
-		if (Option.isNone(url)) {
-			if (production) {
-				return yield* new InvalidEmailConfig({
-					message: "Production requires an email provider. Set EMAIL_WEBHOOK_URL.",
-				});
-			}
-			return EmailService.fromConsole;
-		}
-		if (url.value.protocol !== "http:" && url.value.protocol !== "https:") {
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
 			return yield* new InvalidEmailConfig({ message: "EMAIL_WEBHOOK_URL must use HTTP or HTTPS" });
 		}
-		if (production && url.value.protocol !== "https:") {
+		if (production && url.protocol !== "https:") {
 			return yield* new InvalidEmailConfig({
 				message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
 			});
 		}
-		return EmailService.fromWebhook({ url: url.value.href, token: Option.getOrUndefined(token) });
+		return EmailService.fromWebhook({ url: url.href, token: Option.getOrUndefined(token) });
 	});
 }
