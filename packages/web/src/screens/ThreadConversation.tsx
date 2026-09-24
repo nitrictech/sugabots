@@ -28,11 +28,14 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  * writes, asks another agent, and writes again shows as a bubble, a child
  * thread, and a bubble, in the order it happened.
  *
- * A reply is drawn once it is finished, never as it streams. What the agent
- * writes on the way is often the lead-in to a tool call ("Let me find the
- * cycle:"), and that cannot be told until the call arrives, so a reply drawn
- * live would show words and then take them back. While the turn runs, one line
- * says the agent is typing, or which step it is on.
+ * A reply's text is drawn once it is settled, never as it streams. What the
+ * agent writes on the way is often the lead-in to a tool call ("Let me find
+ * the cycle:"), and that cannot be told until the call arrives, so text drawn
+ * live would show words and then take them back. Text is settled when the
+ * reply finishes or when something follows it: text before a collaboration is
+ * shown while the collaboration runs, so the thread reads in the order it
+ * happened. While the turn runs, one line says the agent is typing, or which
+ * step it is on.
  *
  * Tool calls are not drawn as parts at all. They belong to the turn rather than
  * to the transcript, so once the reply lands they leave nothing behind — the
@@ -171,9 +174,9 @@ export function ThreadConversation({
 									outgoing={outgoing}
 									mentionable={mentionable}
 									isLast={isLast}
-									arrivedLive={message.status !== "streaming" && watchedWritten.has(message.id)}
+									arrivedLive={watchedWritten.has(message.id)}
 									actions={
-										isLast && message.author.kind === "agent" ? (
+										isLast && message.author.kind === "agent" && message.status !== "streaming" ? (
 											<MessageActions
 												text={textOf(message)}
 												activity={activity}
@@ -265,7 +268,8 @@ type Segment =
 /**
  * The message's parts as things to draw, leaving out narration and every tool
  * call but a pending approval or a refusal. A reply still being written shows
- * only those and its collaborations: its text waits until it is finished.
+ * only those, its collaborations, and text that something has followed: the
+ * run it is still writing waits until it is finished.
  */
 function segmentsOf(message: Message): Segment[] {
 	const finished = message.status !== "streaming";
@@ -282,7 +286,9 @@ function segmentsOf(message: Message): Segment[] {
 			if (drawsInThread(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
 			return;
 		}
-		if (finished && !isNarration(message.parts, index)) {
+		const followed = index < message.parts.length - 1 && part.text.trim() !== "";
+		const settled = finished || followed;
+		if (settled && !isNarration(message.parts, index)) {
 			segments.push({ type: "text", key: `text@${written}`, text: part.text });
 		}
 		written += part.text.length;
