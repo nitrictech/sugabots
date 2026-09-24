@@ -34,13 +34,10 @@ export function ChatHistory({
 	return (
 		<aside
 			aria-label="Chat history"
-			className="chat-history-panel flex w-[296px] shrink-0 flex-col border-border-subtle border-l bg-background"
+			className="chat-history-panel flex w-[300px] shrink-0 flex-col border-border-subtle border-l bg-background"
 		>
 			<header className="shrink-0 px-4 pb-2 pt-4">
-				<div className="flex items-center gap-2">
-					<h2 className="m-0 min-w-0 flex-1 font-semibold text-subtle-foreground text-xs uppercase tracking-[0.06em]">
-						Chat history
-					</h2>
+				<div className="flex items-center justify-end">
 					<button
 						type="button"
 						aria-label="Close Chat history"

@@ -361,9 +361,6 @@ function ChatSummaryRail({
 				selectedDetails && <ThreadSummary details={selectedDetails} entry={selectedEntry} />
 			) : (
 				<>
-					<h2 className="m-0 px-1.5 pb-3 font-semibold text-subtle-foreground text-xs uppercase tracking-[0.06em]">
-						{title}
-					</h2>
 					<SummaryCard details={details} />
 					<section className="mt-3 rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
 						<CardHeading>Threads in this chat</CardHeading>
