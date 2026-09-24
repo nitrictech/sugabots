@@ -6,7 +6,7 @@ export interface ConsoleEmailConfig {
 	provider: "console";
 }
 
-export const toConsole: EmailService["Service"] = {
+export const fromConsole: EmailService["Service"] = {
 	send: (email) =>
 		Effect.sync(() =>
 			console.log(

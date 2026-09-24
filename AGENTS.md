@@ -30,8 +30,9 @@ Write only what the current task needs. Keep behavior, preconditions, and side e
 Follow `packages/core/src/email/email.ts`:
 
 - Declare a `…Service` class with `Context.Service`, its interface written inline, at the top of the file; supporting types and errors go below it.
-- Expose implementations as static layers named for what they are (`EmailService.webhook(config)`, `EmailService.toConsole`), never `layer`/`live`. With several implementations, add `fromConfig(config)` switching on a union of their configs.
-- A service with one implementation defines it in the same file. With several, put each in `implementations/`, returning `XService["Service"]` for the class to wrap in `Layer.succeed`/`Layer.effect`.
+- Every service has a static `fromConfig(config)` layer, which is what process wiring uses. With one implementation it builds it; with several it switches on a union of their configs.
+- With several implementations, also expose each as `from<Backend>` (`EmailService.fromWebhook(config)`, `EmailService.fromConsole`) and put each in `implementations/`, returning `XService["Service"]` for the class to wrap in `Layer.succeed`/`Layer.effect`. A single implementation stays in the service file. Never name a static `layer`, `live`, or `make`.
+- Tests supply doubles with `Effect.provideService`, not as statics.
 - Implementation files are imported by the service file, so they use its values only inside functions, never at module top level, to keep the import cycle safe.
 
 ### Testing

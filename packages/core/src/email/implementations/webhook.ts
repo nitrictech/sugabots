@@ -13,7 +13,7 @@ export interface WebhookEmailConfig {
 
 const TIMEOUT_MS = 15_000;
 
-export const webhook = (
+export const fromWebhook = (
 	config: WebhookEmailConfig,
 	fetch = globalThis.fetch,
 ): EmailService["Service"] => ({

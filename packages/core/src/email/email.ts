@@ -1,10 +1,10 @@
 import { Context, Data, type Effect, Layer } from "effect";
-import { type ConsoleEmailConfig, toConsole } from "./implementations/console.ts";
-import { type WebhookEmailConfig, webhook } from "./implementations/webhook.ts";
+import { type ConsoleEmailConfig, fromConsole } from "./implementations/console.ts";
+import { fromWebhook, type WebhookEmailConfig } from "./implementations/webhook.ts";
 
 /**
  * Sends email through the implementation the installation is configured with.
- * The statics are those implementations; `fromConfig` picks one.
+ * Each `from…` static is one implementation; `fromConfig` picks the one configured.
  */
 export class EmailService extends Context.Service<
 	EmailService,
@@ -13,19 +13,19 @@ export class EmailService extends Context.Service<
 	}
 >()("@sugabots/core/EmailService") {
 	/** Prints each email instead of sending it. For development only. */
-	static readonly toConsole = Layer.succeed(this, toConsole);
+	static readonly fromConsole = Layer.succeed(this, fromConsole);
 
 	/** Posts each email as JSON to `config.url`, for a relay the installation runs itself. */
-	static readonly webhook = (config: WebhookEmailConfig, fetch?: typeof globalThis.fetch) =>
-		Layer.succeed(this, webhook(config, fetch));
+	static readonly fromWebhook = (config: WebhookEmailConfig, fetch?: typeof globalThis.fetch) =>
+		Layer.succeed(this, fromWebhook(config, fetch));
 
 	/** The implementation `config.provider` names. */
 	static readonly fromConfig = (config: EmailServiceConfig) => {
 		switch (config.provider) {
 			case "console":
-				return EmailService.toConsole;
+				return EmailService.fromConsole;
 			case "webhook":
-				return EmailService.webhook(config);
+				return EmailService.fromWebhook(config);
 		}
 	};
 }

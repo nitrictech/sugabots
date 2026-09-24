@@ -13,7 +13,7 @@ function send(fetch: typeof globalThis.fetch, token?: string) {
 	return Effect.runPromiseExit(
 		Effect.flatMap(EmailService, (service) => service.send(email)).pipe(
 			Effect.provide(
-				EmailService.webhook(
+				EmailService.fromWebhook(
 					{ provider: "webhook", url: "https://mailer.example.com/sugabots", token },
 					fetch,
 				),
@@ -22,7 +22,7 @@ function send(fetch: typeof globalThis.fetch, token?: string) {
 	);
 }
 
-describe("EmailService.webhook", () => {
+describe("EmailService.fromWebhook", () => {
 	it("posts the email with bearer authentication", async () => {
 		const fetch = vi
 			.fn<typeof globalThis.fetch>()
