@@ -68,6 +68,14 @@ describe("a person's message", () => {
 		});
 	});
 
+	it("goes to nobody in a chat when only people are mentioned", () => {
+		// The chat's agent used to answer anyway, only to say the message was not for it.
+		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({
+			kind: "nobody",
+			why: "people-addressed",
+		});
+	});
+
 	it("goes to the chat's agent in a chat, even after another agent spoke there", () => {
 		expect(
 			decideFloor(
