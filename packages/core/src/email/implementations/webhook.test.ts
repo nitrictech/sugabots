@@ -1,7 +1,7 @@
 import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { type Email, EmailService } from "../email.ts";
-import { webhookEmailLayer } from "./webhook.ts";
+import type { Email } from "../email.ts";
+import { EmailService } from "../email-service.ts";
 
 const email: Email = {
 	from: { email: "sugabots@example.com", name: "Sugabots" },
@@ -14,7 +14,7 @@ function send(fetch: typeof globalThis.fetch, token?: string) {
 	return Effect.runPromiseExit(
 		Effect.flatMap(EmailService, (service) => service.send(email)).pipe(
 			Effect.provide(
-				webhookEmailLayer(
+				EmailService.webhook(
 					{ provider: "webhook", url: "https://mailer.example.com/sugabots", token },
 					fetch,
 				),
@@ -23,7 +23,7 @@ function send(fetch: typeof globalThis.fetch, token?: string) {
 	);
 }
 
-describe("webhookEmailLayer", () => {
+describe("EmailService.webhook", () => {
 	it("posts the email with bearer authentication", async () => {
 		const fetch = vi
 			.fn<typeof globalThis.fetch>()

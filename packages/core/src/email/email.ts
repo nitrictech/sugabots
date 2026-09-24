@@ -1,4 +1,4 @@
-import { Context, Data, type Effect } from "effect";
+import { Data } from "effect";
 
 export interface EmailAddress {
 	email: string;
@@ -23,15 +23,3 @@ export class EmailDeliveryFailed extends Data.TaggedError("EmailDeliveryFailed")
 	provider: string;
 	cause: unknown;
 }> {}
-
-/**
- * Sends email through the provider the installation is configured with. Each
- * provider in `providers/` is a layer for this service, and `emailLayer` picks
- * one from an `EmailConfig`.
- */
-export class EmailService extends Context.Service<
-	EmailService,
-	{
-		readonly send: (email: Email) => Effect.Effect<void, EmailDeliveryFailed>;
-	}
->()("EmailService") {}

@@ -21,8 +21,7 @@ import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
-import { EmailService } from "@sugabots/core/email/email";
-import { emailLayer } from "@sugabots/core/email/layer";
+import { EmailService } from "@sugabots/core/email/email-service";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
@@ -215,7 +214,7 @@ main.pipe(
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
-		Layer.merge(databaseLayer(config.databaseUrl), emailLayer(config.email)).pipe(
+		Layer.merge(databaseLayer(config.databaseUrl), EmailService.fromConfig(config.email)).pipe(
 			Layer.provideMerge(observabilityLayer),
 		),
 	),

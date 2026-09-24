@@ -8,8 +8,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { EmailService } from "@sugabots/core/email/email";
-import { emailLayer } from "@sugabots/core/email/layer";
+import { EmailService } from "@sugabots/core/email/email-service";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
@@ -40,7 +39,7 @@ if (config.environment !== "development") {
 }
 
 const database = ManagedRuntime.make(
-	Layer.merge(databaseLayer(config.databaseUrl), emailLayer(config.email)),
+	Layer.merge(databaseLayer(config.databaseUrl), EmailService.fromConfig(config.email)),
 );
 // better-auth's adapter only speaks node-postgres.
 const authPool = new Pool({ connectionString: config.databaseUrl });

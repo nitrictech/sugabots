@@ -6,7 +6,7 @@
  */
 
 import type { EmailAddress } from "@sugabots/core/email/email";
-import type { EmailConfig } from "@sugabots/core/email/layer";
+import type { EmailServiceConfig } from "@sugabots/core/email/email-service";
 
 export type Environment = "development" | "production";
 
@@ -52,7 +52,7 @@ export interface Config {
 	 */
 	requireEmailVerification: boolean;
 	/** The provider that sends verification and invitation emails. */
-	email: EmailConfig;
+	email: EmailServiceConfig;
 	/** The sender of those emails. */
 	emailFrom: EmailAddress;
 }
@@ -153,7 +153,7 @@ function booleanFromEnv(value: string, name: string): boolean {
 	throw new Error(`${name} must be true or false`);
 }
 
-function emailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailConfig {
+function emailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailServiceConfig {
 	const url = env.EMAIL_WEBHOOK_URL;
 	if (!url) return { provider: "console" };
 	const parsed = new URL(url);
