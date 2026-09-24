@@ -63,6 +63,7 @@ const threadDetails: ThreadDetails = {
 			face: linear.face,
 		},
 	],
+	recentParticipants: [],
 	// Triager is in the pod but has not spoken: what a first mention names.
 	crew: [
 		{

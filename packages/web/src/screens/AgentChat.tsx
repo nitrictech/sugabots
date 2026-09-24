@@ -294,9 +294,10 @@ export function AgentChat({
 			)}
 			{!historyOpen && summaryOpen && (
 				<ChatSummaryRail
-					details={selectedThread.data ?? details}
+					details={details}
 					history={entries}
 					selectedEntry={selectedEntry}
+					selectedDetails={selectedThread.data}
 				/>
 			)}
 			<div className="absolute right-3 top-[-55px] z-10 hidden items-center gap-2 md:flex">
@@ -336,10 +337,13 @@ function ChatSummaryRail({
 	details,
 	history,
 	selectedEntry,
+	selectedDetails,
 }: {
 	details: NonNullable<ReturnType<typeof useThread>["data"]>;
 	history: ChatHistoryEntry[];
 	selectedEntry?: ChatHistoryEntry;
+	/** The open thread, which is `undefined` until it has loaded. */
+	selectedDetails?: NonNullable<ReturnType<typeof useThread>["data"]>;
 }) {
 	const title = selectedEntry
 		? `${selectedEntry.type === "routine" ? "Run" : selectedEntry.type[0]?.toUpperCase()}${selectedEntry.type === "routine" ? "" : selectedEntry.type.slice(1)} summary`
@@ -352,19 +356,29 @@ function ChatSummaryRail({
 			className="hidden w-[300px] shrink-0 overflow-y-auto border-border-subtle border-l bg-background px-2.5 py-3 xl:block"
 		>
 			{selectedEntry ? (
-				<ThreadSummary details={details} entry={selectedEntry} />
+				// Nothing until the thread loads: the Chat's own details in its place
+				// would show the whole Chat's participants under this thread's heading.
+				selectedDetails && <ThreadSummary details={selectedDetails} entry={selectedEntry} />
 			) : (
 				<>
 					<h2 className="m-0 px-1.5 pb-3 font-semibold text-subtle-foreground text-xs uppercase tracking-[0.06em]">
 						{title}
 					</h2>
 					<SummaryCard details={details} />
-					<section className="mt-3 rounded-[14px] border border-border-subtle bg-card px-4 py-3.5">
-						<h3 className="m-0 pb-2 font-semibold text-2xs text-subtle-foreground uppercase tracking-[0.06em]">
-							Threads in this chat
-						</h3>
-						<Fact label="Collaborations" value={counts.collaboration} />
-						<Fact label="Routine runs" value={counts.routine} />
+					<section className="mt-3 rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
+						<CardHeading>Threads in this chat</CardHeading>
+						<dl className="m-0 grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2.5 pt-3 text-md">
+							<dt className="text-muted-foreground">Collaborations</dt>
+							<dd className="m-0 text-heading tabular-nums">{counts.collaboration}</dd>
+							<dt className="text-muted-foreground">Routine runs</dt>
+							<dd className="m-0 text-heading tabular-nums">{counts.routine}</dd>
+						</dl>
+						{details.recentParticipants.length > 0 && (
+							<div className="mt-3 border-border-subtle border-t pt-3">
+								<CardHeading>Recent participants</CardHeading>
+								<ParticipantList participants={details.recentParticipants} />
+							</div>
+						)}
 					</section>
 					<Context details={details} />
 				</>
@@ -394,34 +408,40 @@ function ThreadSummary({
 				</dl>
 				<div className="mt-3 border-border-subtle border-t pt-3">
 					<CardHeading>Participants</CardHeading>
-					<ul className="m-0 flex list-none flex-col gap-2.5 p-0 pt-3">
-						{details.participants.map((participant) => (
-							<li key={participant.id} className="flex min-w-0 items-center gap-2 text-md">
-								{participant.kind === "agent" ? (
-									<AgentAvatar hue={participant.hue} face={participant.face} size={21} />
-								) : (
-									<PersonAvatar name={participant.name} image={participant.image} size={21} />
-								)}
-								<span
-									className={
-										participant.kind === "agent"
-											? "agent-tint truncate font-semibold text-agent-name"
-											: "truncate font-medium text-heading"
-									}
-									style={
-										participant.kind === "agent"
-											? { ["--agent-hue" as string]: participant.hue }
-											: undefined
-									}
-								>
-									{participant.name}
-								</span>
-							</li>
-						))}
-					</ul>
+					<ParticipantList participants={details.participants} />
 				</div>
 			</section>
 		</div>
+	);
+}
+
+function ParticipantList({ participants }: { participants: ThreadParticipant[] }) {
+	return (
+		<ul className="m-0 flex list-none flex-col gap-2.5 p-0 pt-3">
+			{participants.map((participant) => (
+				<li key={participant.id} className="flex min-w-0 items-center gap-2 text-md">
+					{participant.kind === "agent" ? (
+						<AgentAvatar hue={participant.hue} face={participant.face} size={21} />
+					) : (
+						<PersonAvatar name={participant.name} image={participant.image} size={21} />
+					)}
+					<span
+						className={
+							participant.kind === "agent"
+								? "agent-tint truncate font-semibold text-agent-name"
+								: "truncate font-medium text-heading"
+						}
+						style={
+							participant.kind === "agent"
+								? { ["--agent-hue" as string]: participant.hue }
+								: undefined
+						}
+					>
+						{participant.name}
+					</span>
+				</li>
+			))}
+		</ul>
 	);
 }
 
@@ -462,14 +482,6 @@ function formatDateTime(value: string) {
 	}).format(new Date(value));
 }
 
-function Fact({ label, value }: { label: string; value: string | number }) {
-	return (
-		<div className="flex gap-3 py-1 text-md">
-			<span className="w-[88px] shrink-0 text-muted-foreground">{label}</span>
-			<span className="min-w-0 flex-1 text-heading">{value}</span>
-		</div>
-	);
-}
 function Context({ details }: { details: NonNullable<ReturnType<typeof useThread>["data"]> }) {
 	const context = details.usage.latestContext;
 	if (!context) return null;

@@ -229,6 +229,7 @@ function details(
 		activeTurnId: null,
 		routineExecution: type === "routine" ? routineExecution : null,
 		participants: type === "collaboration" ? [host, collaborator] : [person, host],
+		recentParticipants: type === "collaboration" ? [collaborator, host] : [host, person],
 		crew: [host, collaborator],
 		messages,
 		olderMessagesCursor: null,
@@ -649,6 +650,43 @@ describe("ongoing agent Chat", () => {
 
 		expect(await screen.findByText(`Start a conversation with ${linear.name}`)).toBeDefined();
 		expect(screen.getByText("Send a message to start working together.")).toBeDefined();
+	});
+
+	it("lists who has written in the Chat lately, most recent first", async () => {
+		mount(`/agents/${linear.id}`);
+
+		const rail = await screen.findByRole("complementary", { name: "Chat summary" });
+		const recent = within(rail)
+			.getByRole("heading", { name: "Recent participants" })
+			.closest("section");
+		if (!recent) throw new Error("Recent participants has no section");
+		const [first, second, ...rest] = within(recent).getAllByRole("listitem");
+		expect(first?.textContent).toContain(linear.name);
+		expect(second?.textContent).toContain(sam.name);
+		expect(rest).toEqual([]);
+	});
+
+	it("keeps the Chat's participants out of a collaboration's summary while it loads", async () => {
+		const loading = pendingAnswer();
+		const answerThread = client.api.threads.get.getMockImplementation();
+		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
+			request.params.threadId === collaborationId ? loading.effect : answerThread?.(request),
+		);
+		mount(`/agents/${linear.id}?thread=${collaborationId}`);
+
+		const rail = await screen.findByRole("complementary", { name: "Collaboration summary" });
+		expect(within(rail).queryByText(sam.name)).toBeNull();
+
+		loading.answer(
+			Effect.succeed(
+				details(collaborationId, collaborationEntry.title, "collaboration", [
+					collaborationRequest,
+					collaborationAnswer,
+				]),
+			),
+		);
+		expect(await within(rail).findByText(triager.name)).toBeDefined();
+		expect(within(rail).queryByText(sam.name)).toBeNull();
 	});
 
 	it("closes a direct-linked collaboration without leaving Chat", async () => {

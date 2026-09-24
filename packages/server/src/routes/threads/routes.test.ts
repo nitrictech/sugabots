@@ -65,6 +65,7 @@ const details: ThreadDetails = {
 			face: "bar",
 		},
 	],
+	recentParticipants: [],
 	olderMessagesCursor: null,
 	messages: [
 		{
