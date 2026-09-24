@@ -220,3 +220,21 @@ describe("the Connections settings", () => {
 		expect(screen.queryByRole("button", { name: "Connect Notion" })).toBeNull();
 	});
 });
+
+describe("coming back from a connection sign-in", () => {
+	it("opens the pod the sign-in was for, keeping what it reported", async () => {
+		const router = mount(
+			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&connected=${wiki.id}`,
+		);
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(page));
+		expect(router.state.location.search).toMatchObject({ connected: wiki.id });
+	});
+
+	it("says what went wrong when the sign-in never reached a pod", async () => {
+		mount("/connections/oauth/return?oauth_error=The+sign-in+does+not+match+any+connection");
+
+		expect(await screen.findByText("The sign-in does not match any connection")).toBeDefined();
+		expect(screen.getByRole("link", { name: "Return to workspace" })).toBeDefined();
+	});
+});

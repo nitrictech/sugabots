@@ -195,7 +195,7 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 		listTools,
 		oauth: {
 			redirectUrl: "http://localhost:3000/connections/oauth/callback",
-			returnTo: "http://localhost:5173/settings/pods",
+			webUrl: "http://localhost:5173",
 			fetch: async () => new Response(null, { status: 503 }),
 			begin,
 			finish,
@@ -379,7 +379,7 @@ describe("signing a connection in", () => {
 
 		expect(back.status).toBe(302);
 		expect(back.headers.get("location")).toBe(
-			`http://localhost:5173/settings/pods/${POD_ID}?connected=${made.id}`,
+			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}&connected=${made.id}`,
 		);
 		expect(harness.finish).toHaveBeenCalledWith(
 			expect.anything(),
@@ -433,7 +433,7 @@ describe("signing a connection in", () => {
 			{ headers },
 		);
 		expect(refused.headers.get("location")).toBe(
-			"http://localhost:5173/settings/pods?oauth_error=No+thanks",
+			"http://localhost:5173/connections/oauth/return?oauth_error=No+thanks",
 		);
 
 		const unknown = await harness.app.request("/connections/oauth/callback?code=x&state=nope", {
