@@ -1,5 +1,6 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
+import { isUuid } from "@sugabots/core/database/ids";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -105,6 +106,19 @@ function requireSupportedRole(role: string | undefined): void {
 	});
 }
 
+/**
+ * Refuses a workspace slug shaped like a UUID. The API reads a UUID-shaped
+ * workspace reference as an id, so a workspace with such a slug could never be
+ * reached by it.
+ */
+function requireSlugUnlikeUuid(slug: string | undefined): void {
+	if (slug === undefined || !isUuid(slug)) return;
+	throw new APIError("BAD_REQUEST", {
+		code: "WORKSPACE_SLUG_SHAPED_LIKE_UUID",
+		message: "A workspace slug cannot be shaped like a UUID",
+	});
+}
+
 export function createAuth({
 	db,
 	run,
@@ -188,6 +202,12 @@ export function createAuth({
 				// end.
 				requireEmailVerificationOnInvitation: requireEmailVerification,
 				organizationHooks: {
+					beforeCreateOrganization: async ({ organization }) => {
+						requireSlugUnlikeUuid(organization.slug);
+					},
+					beforeUpdateOrganization: async ({ organization }) => {
+						requireSlugUnlikeUuid(organization.slug);
+					},
 					afterCreateOrganization: async ({ organization, user }) => {
 						await run(
 							transaction(

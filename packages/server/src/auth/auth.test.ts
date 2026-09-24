@@ -214,6 +214,31 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		);
 	});
 
+	it("refuses a workspace slug shaped like a UUID", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		const ada = await signUp("Ada", `ada-${unique}@example.com`);
+
+		const createdAsUuid = await call(
+			"/auth/organization/create",
+			{ name: "Nitric", slug: crypto.randomUUID() },
+			ada,
+		);
+		expect(createdAsUuid.status).toBe(400);
+
+		const created = await call(
+			"/auth/organization/create",
+			{ name: "Nitric", slug: `nitric-${unique}` },
+			ada,
+		);
+		const workspace = (await created.json()) as { id: string };
+		const renamedToUuid = await call(
+			"/auth/organization/update",
+			{ organizationId: workspace.id, data: { slug: crypto.randomUUID() } },
+			ada,
+		);
+		expect(renamedToUuid.status).toBe(400);
+	});
+
 	it("refuses an invitation addressed to somebody else", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
 		const ada = await signUp("Ada", `ada-${unique}@example.com`);
