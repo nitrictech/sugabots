@@ -25,10 +25,8 @@ import { Layer } from "effect";
 /**
  * The background loops that run for as long as the process does.
  *
- * Each is a layer, so closing its scope stops them in the reverse of the
- * order they started. The database is not theirs: they require it, so it
- * outlives them. The stores are not here either: they are plain objects with
- * no state of their own, built in `index.ts` and handed to whoever needs them.
+ * The stores are not here: they are plain objects with no state of their own,
+ * built in `index.ts` and handed to whoever needs them.
  */
 export interface BackgroundOptions {
 	/** Where durable events live, for the nightly prune. */

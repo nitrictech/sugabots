@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { NodeHttpServer } from "@effect/platform-node";
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { routineStore } from "@sugabots/core/conversations/routines/store";
 import { summaryStore } from "@sugabots/core/conversations/summaries/store";
@@ -12,7 +12,11 @@ import { connectionTools as connectionToolsFor } from "@sugabots/core/conversati
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
-import { layer as databaseLayer, effectRunner } from "@sugabots/core/database/database";
+import {
+	type Database,
+	layer as databaseLayer,
+	effectRunner,
+} from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
@@ -33,7 +37,7 @@ import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Duration, Layer, ManagedRuntime } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
@@ -42,7 +46,7 @@ import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
 import { observabilityLayer } from "./observability.ts";
 import { channelAccess } from "./routes/events/access.ts";
-import { makeRuntime } from "./runtime.ts";
+import { backgroundLayer } from "./runtime.ts";
 import { VERSION } from "./version.ts";
 
 /**
@@ -63,130 +67,6 @@ const {
 	mailer,
 } = config;
 
-// The tracer goes in with the database so that everything run on either
-// runtime is traced: routes, better-auth's hooks, the background loops, and
-// the statements they all send.
-const database = ManagedRuntime.make(
-	databaseLayer(config.databaseUrl).pipe(Layer.provideMerge(observabilityLayer)),
-);
-// Opens the pool now, so a process that cannot reach its database dies here
-// rather than answering 500 to whoever arrives first.
-const databaseContext = await database.context();
-const run = effectRunner(database);
-
-// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
-// of its own until it can be ported onto the one above.
-const authPool = new Pool({ connectionString: config.databaseUrl });
-const auth = createAuth({
-	db: drizzle({ client: authPool }),
-	run,
-	secret,
-	baseUrl,
-	webOrigins,
-	mailer,
-	allowOpenSignUp,
-	requireEmailVerification,
-});
-
-const eventStore = await database.runPromise(postgresEventStore);
-// Every process runs a worker, so what one writes the others must hear about.
-const bus = createEventBus({
-	store: eventStore,
-	relay: await database.runPromise(postgresEventRelay(eventStore)),
-});
-const publishEvents = eventPublisher(bus);
-
-const httpClients = createEgressHttpClients({
-	allowPrivateNetwork: allowPrivateModelProviderNetwork,
-});
-const validateProviderUrl = createEgressUrlValidator({
-	allowPrivateNetwork: allowPrivateModelProviderNetwork,
-});
-// A sign-in goes where the server's authorization server says: its well-known
-// documents, then often another host. So that client is unbound, under the
-// same policy as the providers'.
-const oauthClient = createEgressHttpClient({
-	allowPrivateNetwork: allowPrivateModelProviderNetwork,
-});
-// Pages may be anywhere, so the tool's client is unbound, under its own policy.
-const webFetchClient = createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork });
-
-// One server key seals every stored credential, model and search alike.
-const credentialCipher = aesCredentialCipher(config.modelProviderEncryptionKey);
-const modelProviders = modelProviderStore(credentialCipher);
-// One model client for turns, system agents, trials, and chat routing.
-const model = workspaceTurnModel({ modelProviders, httpClients });
-const stores = {
-	pods: podStore,
-	agents: agentStore,
-	systemAgents: systemAgentStore,
-	onboarding: onboardingStore,
-	modelProviders,
-	searchProviders: searchProviderStore(credentialCipher),
-	connections: connectionStore(credentialCipher),
-	chats: chatStore(publishEvents),
-	routines: routineStore(publishEvents),
-	threads: threadStore(),
-	turns: turnStore(publishEvents),
-	summaries: summaryStore(publishEvents),
-	collaborations: collaborationStore(publishEvents),
-	calls: toolCallStore(publishEvents),
-	approvals: toolApprovalStore(publishEvents),
-};
-// A search goes to the workspace's own provider, so its client is bound to
-// that address like a model provider's.
-const builtInTools = builtInToolsFor({
-	fetchPage: pageFetcher({ fetch: webFetchClient }),
-	searchProviders: stores.searchProviders,
-	httpClients,
-});
-
-// A connection's session is bound to its own address the same way. One signed
-// in with OAuth carries the tokens its row holds.
-const connectionTools = connectionToolsFor({
-	connections: stores.connections,
-	httpClients,
-	oauth: {
-		providers: oauthProviders({
-			connections: stores.connections,
-			run: (effect) => database.runPromise(effect),
-			redirectUrl: `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}/connections/oauth/callback`,
-		}),
-		fetch: oauthClient,
-	},
-});
-
-const runtime = makeRuntime({
-	database: databaseContext,
-	eventStore,
-	bus,
-	model,
-	turns: stores.turns,
-	summaries: stores.summaries,
-	routines: stores.routines,
-	collaborations: stores.collaborations,
-	calls: stores.calls,
-	approvals: stores.approvals,
-	builtInTools,
-	connectionTools,
-	publishEvents,
-});
-const api = apiLayer({
-	auth,
-	webOrigins,
-	baseUrl,
-	oauthFetch: oauthClient,
-	authorization,
-	stores,
-	events: { bus, access: channelAccess(authorization, stores.threads) },
-	httpClients,
-	validateProviderUrl,
-	model,
-});
-
-// Starts the background loops, which nothing else would until first used.
-await runtime.context();
-
 /**
  * How long a client gets to finish what it was sent before its socket is cut.
  *
@@ -196,33 +76,147 @@ await runtime.context();
  */
 const SHUTDOWN_GRACE = Duration.seconds(3);
 
-const server = ManagedRuntime.make(
-	HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
-		Layer.provide(
-			NodeHttpServer.layer(createServer, { port, gracefulShutdownTimeout: SHUTDOWN_GRACE }),
+const main = Effect.gen(function* () {
+	const database = yield* Effect.context<Database>();
+	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
+
+	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
+	// of its own until it can be ported onto the database's.
+	const authPool = yield* Effect.acquireRelease(
+		Effect.sync(() => new Pool({ connectionString: config.databaseUrl })),
+		(pool) => Effect.promise(() => pool.end()),
+	);
+	const auth = createAuth({
+		db: drizzle({ client: authPool }),
+		run,
+		secret,
+		baseUrl,
+		webOrigins,
+		mailer,
+		allowOpenSignUp,
+		requireEmailVerification,
+	});
+
+	const eventStore = yield* postgresEventStore;
+	// Every process runs a worker, so what one writes the others must hear about.
+	const bus = createEventBus({ store: eventStore, relay: yield* postgresEventRelay(eventStore) });
+	const publishEvents = eventPublisher(bus);
+
+	const httpClients = yield* acquireClosable(() =>
+		createEgressHttpClients({ allowPrivateNetwork: allowPrivateModelProviderNetwork }),
+	);
+	const validateProviderUrl = createEgressUrlValidator({
+		allowPrivateNetwork: allowPrivateModelProviderNetwork,
+	});
+	// A sign-in goes where the server's authorization server says: its well-known
+	// documents, then often another host. So that client is unbound, under the
+	// same policy as the providers'.
+	const oauthClient = yield* acquireClosable(() =>
+		createEgressHttpClient({ allowPrivateNetwork: allowPrivateModelProviderNetwork }),
+	);
+	// Pages may be anywhere, so the tool's client is unbound, under its own policy.
+	const webFetchClient = yield* acquireClosable(() =>
+		createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork }),
+	);
+
+	// One server key seals every stored credential, model and search alike.
+	const credentialCipher = aesCredentialCipher(config.modelProviderEncryptionKey);
+	const modelProviders = modelProviderStore(credentialCipher);
+	// One model client for turns, system agents, trials, and chat routing.
+	const model = workspaceTurnModel({ modelProviders, httpClients });
+	const stores = {
+		pods: podStore,
+		agents: agentStore,
+		systemAgents: systemAgentStore,
+		onboarding: onboardingStore,
+		modelProviders,
+		searchProviders: searchProviderStore(credentialCipher),
+		connections: connectionStore(credentialCipher),
+		chats: chatStore(publishEvents),
+		routines: routineStore(publishEvents),
+		threads: threadStore(),
+		turns: turnStore(publishEvents),
+		summaries: summaryStore(publishEvents),
+		collaborations: collaborationStore(publishEvents),
+		calls: toolCallStore(publishEvents),
+		approvals: toolApprovalStore(publishEvents),
+	};
+	// A search goes to the workspace's own provider, so its client is bound to
+	// that address like a model provider's.
+	const builtInTools = builtInToolsFor({
+		fetchPage: pageFetcher({ fetch: webFetchClient }),
+		searchProviders: stores.searchProviders,
+		httpClients,
+	});
+
+	// A connection's session is bound to its own address the same way. One signed
+	// in with OAuth carries the tokens its row holds.
+	const connectionTools = connectionToolsFor({
+		connections: stores.connections,
+		httpClients,
+		oauth: {
+			providers: oauthProviders({
+				connections: stores.connections,
+				run: Effect.runPromiseWith(database),
+				redirectUrl: `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}/connections/oauth/callback`,
+			}),
+			fetch: oauthClient,
+		},
+	});
+
+	yield* Layer.build(
+		backgroundLayer({
+			eventStore,
+			bus,
+			model,
+			turns: stores.turns,
+			summaries: stores.summaries,
+			routines: stores.routines,
+			collaborations: stores.collaborations,
+			calls: stores.calls,
+			approvals: stores.approvals,
+			builtInTools,
+			connectionTools,
+			publishEvents,
+		}),
+	);
+	const api = apiLayer({
+		auth,
+		webOrigins,
+		baseUrl,
+		oauthFetch: oauthClient,
+		authorization,
+		stores,
+		events: { bus, access: channelAccess(authorization, stores.threads) },
+		httpClients,
+		validateProviderUrl,
+		model,
+	});
+	yield* Layer.build(
+		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
+			Layer.provide(
+				NodeHttpServer.layer(createServer, { port, gracefulShutdownTimeout: SHUTDOWN_GRACE }),
+			),
 		),
-		Layer.provide(Layer.succeedContext(databaseContext)),
-	),
+	);
+	// Added after the server so the event streams end before it closes. Each one
+	// holds a socket open for as long as its browser is there, and closing the
+	// server first would wait on clients that never hang up.
+	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
+	console.log(`sugabots ${VERSION} listening on http://localhost:${port}`);
+	return yield* Effect.never;
+});
+
+main.pipe(
+	Effect.scoped,
+	// The tracer goes in with the database so that everything is traced: routes,
+	// better-auth's hooks, the background loops, and the statements they all send.
+	Effect.provide(databaseLayer(config.databaseUrl).pipe(Layer.provideMerge(observabilityLayer))),
+	NodeRuntime.runMain,
 );
-await server.context();
-console.log(`sugabots ${VERSION} listening on http://localhost:${port}`);
 
-let stopping = false;
-async function stop() {
-	if (stopping) return;
-	stopping = true;
-	// Ends the event streams before closing the server, since each one holds a
-	// socket open for as long as its browser is there. Closing the server first
-	// would wait on clients that never hang up.
-	await bus.close();
-	await server.dispose();
-	await runtime.dispose();
-	await database.dispose();
-	await authPool.end();
-	await httpClients.close();
-	await webFetchClient.close();
-	await oauthClient.close();
+function acquireClosable<A extends { close(): Promise<void> }>(make: () => A) {
+	return Effect.acquireRelease(Effect.sync(make), (resource) =>
+		Effect.promise(() => resource.close()),
+	);
 }
-
-process.once("SIGINT", () => void stop());
-process.once("SIGTERM", () => void stop());
