@@ -25,6 +25,15 @@ Write only what the current task needs. Keep behavior, preconditions, and side e
 - Construct infrastructure where configuration and resource lifetime are owned, then supply ready-to-use dependencies through the project's existing mechanism.
 - Pass state explicitly instead of using distant mutable flags. Prefer clear transformation pipelines; separate domain calculations from database, network, and filesystem operations.
 
+### Effect services
+
+Follow `packages/core/src/email/email.ts`:
+
+- Declare a `…Service` class with `Context.Service`, its interface written inline, at the top of the file; supporting types and errors go below it.
+- Expose implementations as static layers named for what they are (`EmailService.webhook(config)`, `EmailService.toConsole`), never `layer`/`live`. With several implementations, add `fromConfig(config)` switching on a union of their configs.
+- A service with one implementation defines it in the same file. With several, put each in `implementations/`, returning `XService["Service"]` for the class to wrap in `Layer.succeed`/`Layer.effect`.
+- Implementation files are imported by the service file, so they use its values only inside functions, never at module top level, to keep the import cycle safe.
+
 ### Testing
 
 - Test observable behavior against requirements or reproduced defects, not private helpers or the implementation's algorithm.
