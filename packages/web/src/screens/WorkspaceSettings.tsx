@@ -10,7 +10,11 @@ import {
 	useWorkspaceRole,
 	useWorkspaces,
 } from "@/lib/workspace.ts";
-import { type WorkspaceSettingSection, workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import {
+	type PodSettingsTab,
+	type WorkspaceSettingSection,
+	workspaceSettingSection,
+} from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
@@ -26,12 +30,16 @@ export function WorkspaceSettings({
 	section,
 	selectedAgentId,
 	selectedPodId,
+	selectedPodTab,
+	connectionSignInError,
 	selectedAgentTab,
 	selectedBuiltInKey,
 }: {
 	section: WorkspaceSettingSection;
 	selectedAgentId?: string;
 	selectedPodId?: string;
+	selectedPodTab?: PodSettingsTab;
+	connectionSignInError?: string;
 	selectedAgentTab?: "routines";
 	selectedBuiltInKey?: SystemAgentKey;
 }) {
@@ -84,6 +92,8 @@ export function WorkspaceSettings({
 			) : section === "pods" ? (
 				<WorkspacePodsSettings
 					selectedPodId={selectedPodId}
+					selectedPodTab={selectedPodTab}
+					connectionSignInError={connectionSignInError}
 					selectedAgentId={selectedAgentId}
 					selectedAgentTab={selectedAgentTab}
 					canCreatePods={may.createPods}

@@ -52,9 +52,15 @@ class ConnectionOAuthCompletionFailed extends Data.TaggedError("ConnectionOAuthC
 	}
 }
 
+export interface ConnectionPod {
+	workspaceId: string;
+	podId: string;
+}
+
+/** How a sign-in ended, with its pod once the sign-in is known to be for one the caller manages. */
 export type ConnectionOAuthOutcome =
-	| { failed: string }
-	| { connected: { connectionId: string; workspaceId: string; podId: string } };
+	| { failed: string; pod?: ConnectionPod }
+	| { pod: ConnectionPod };
 
 export function connectionOperations({
 	connections,
@@ -239,7 +245,10 @@ export function connectionOperations({
 				if (stillAllowed._tag === "Failure") {
 					return failed("You are not allowed to connect a server in this pod");
 				}
-				if (error || !code) return failed(errorDescription || error || "The sign-in was refused");
+				const pod = { workspaceId: owner.workspaceId, podId: owner.podId };
+				if (error || !code) {
+					return failed(errorDescription || error || "The sign-in was refused", pod);
+				}
 
 				const found = yield* requireConnection(owner.workspaceId, owner.podId, owner.connectionId);
 				const finished = yield* Effect.tryPromise({
@@ -253,13 +262,13 @@ export function connectionOperations({
 						),
 					catch: (cause) => new ConnectionOAuthCompletionFailed({ reason: reason(cause) }),
 				}).pipe(Effect.result);
-				if (finished._tag === "Failure") return failed(finished.failure.reason);
+				if (finished._tag === "Failure") return failed(finished.failure.reason, pod);
 
 				yield* connections
 					.update(owner.workspaceId, owner.podId, owner.connectionId, { enabled: true })
 					.pipe(Effect.catch(() => Effect.void));
 				yield* discoverQuietly(owner.workspaceId, owner.podId, owner.connectionId);
-				return connected(owner);
+				return { pod };
 			}),
 	};
 }
@@ -268,13 +277,5 @@ function reason(cause: unknown): string {
 	return cause instanceof Error ? cause.message : String(cause);
 }
 
-const failed = (message: string): ConnectionOAuthOutcome => ({ failed: message });
-const connected = ({
-	connectionId,
-	workspaceId,
-	podId,
-}: {
-	connectionId: string;
-	workspaceId: string;
-	podId: string;
-}): ConnectionOAuthOutcome => ({ connected: { connectionId, workspaceId, podId } });
+const failed = (message: string, pod?: ConnectionPod): ConnectionOAuthOutcome =>
+	pod ? { failed: message, pod } : { failed: message };

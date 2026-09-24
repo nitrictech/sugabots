@@ -24,6 +24,7 @@ import {
 	useUpdatePod,
 } from "@/lib/pods.ts";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
+import { isPodSettingsTab, type PodSettingsTab } from "@/lib/workspace-settings.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentButton } from "@/shell/NewAgent.tsx";
 import { NewPodButton } from "@/shell/NewPod.tsx";
@@ -54,11 +55,15 @@ import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 
 export function WorkspacePodsSettings({
 	selectedPodId,
+	selectedPodTab = "members",
+	connectionSignInError,
 	selectedAgentId,
 	selectedAgentTab,
 	canCreatePods,
 }: {
 	selectedPodId?: string;
+	selectedPodTab?: PodSettingsTab;
+	connectionSignInError?: string;
 	selectedAgentId?: string;
 	selectedAgentTab?: "routines";
 	canCreatePods: boolean;
@@ -185,7 +190,12 @@ export function WorkspacePodsSettings({
 				) : selectedAgentId ? (
 					<EmptyState title="No such agent in this pod" />
 				) : selected ? (
-					<PodDetails key={selected.id} pod={selected} />
+					<PodDetails
+						key={selected.id}
+						pod={selected}
+						tab={selectedPodTab}
+						connectionSignInError={connectionSignInError}
+					/>
 				) : missing ? (
 					<EmptyState title="No such pod here">
 						It may have been removed, or you may no longer have access to it.
@@ -242,7 +252,15 @@ function PodCounts({ pod, agents }: { pod: Pod; agents: number }) {
 	);
 }
 
-function PodDetails({ pod }: { pod: Pod }) {
+function PodDetails({
+	pod,
+	tab,
+	connectionSignInError,
+}: {
+	pod: Pod;
+	tab: PodSettingsTab;
+	connectionSignInError?: string;
+}) {
 	const may = pod.permissions;
 	const update = useUpdatePod(pod.id);
 	const [renaming, setRenaming] = useState(false);
@@ -325,7 +343,18 @@ function PodDetails({ pod }: { pod: Pod }) {
 				{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			</header>
 
-			<Tabs defaultValue="members" className="pt-7">
+			<Tabs
+				value={tab}
+				onValueChange={(value) => {
+					if (!isPodSettingsTab(value)) return;
+					void navigate({
+						...podSettingsLink(pod),
+						search: { tab: value === "members" ? undefined : value },
+						replace: true,
+					});
+				}}
+				className="pt-7"
+			>
 				<TabsList>
 					<Tab value="members">{pod.kind === "personal" ? "Personal" : "Team"}</Tab>
 					<Tab value="connections">Connections</Tab>
@@ -343,7 +372,11 @@ function PodDetails({ pod }: { pod: Pod }) {
 					<PodAgents pod={pod} may={may} />
 				</TabPanel>
 				<TabPanel value="connections">
-					<ConnectionsSettings podId={pod.id} canManage={may.manageConnections} />
+					<ConnectionsSettings
+						podId={pod.id}
+						canManage={may.manageConnections}
+						signInError={connectionSignInError}
+					/>
 				</TabPanel>
 				<TabPanel value="routing">
 					<Routing
