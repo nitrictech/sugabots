@@ -504,7 +504,7 @@ describe("ongoing agent Chat", () => {
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [mainMessage, waiting])),
 		);
-		mount(`/agents/${linear.id}`);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		const leadIn = await screen.findByText("Checking ownership.");
 		const collaboration = screen.getByRole("button", {

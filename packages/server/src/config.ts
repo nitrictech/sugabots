@@ -1,11 +1,10 @@
 /**
- * Everything the process reads from the environment, read once, in one place.
- * Nothing below this file touches `process.env`; the app and the auth
+ * The server's settings, read from the environment once. The app and the auth
  * configuration take what they need as arguments, which is what makes them
- * testable.
+ * testable. Core services read their own settings through Effect's `Config`.
  */
 
-import { consoleMailer, type Mailer, webhookMailer } from "./email/mailer.ts";
+import { type EmailAddress, parseEmailAddress } from "@sugabots/core/email/email";
 
 export type Environment = "development" | "production";
 
@@ -47,18 +46,15 @@ export interface Config {
 	 * Whether a new account must prove its address before it gets a session.
 	 * Off unless the installation says otherwise, so a self-hoster is not made
 	 * to stand up a mail service before they can sign in. Requires a real
-	 * mailer: there is nowhere for the link to go otherwise.
+	 * email provider: there is nowhere for the link to go otherwise.
 	 */
 	requireEmailVerification: boolean;
-	/** Delivery for verification and invitation emails. */
-	mailer: Mailer;
-}
-
-export interface ConfigDependencies {
-	productionMailer?: Mailer;
+	/** The sender of emails a user's own action triggers, such as verification and invitations. */
+	transactionalEmailFrom: EmailAddress;
 }
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
+const DEVELOPMENT_TRANSACTIONAL_EMAIL_FROM = { email: "sugabots@localhost", name: "Sugabots" };
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"development-secret-not-for-production",
 	"change-me",
@@ -67,10 +63,7 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"your-secret-key",
 ]);
 
-export function configFromEnv(
-	env: NodeJS.ProcessEnv = process.env,
-	{ productionMailer }: ConfigDependencies = {},
-): Config {
+export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	const port = Number(env.PORT ?? 3000);
 	const environment = env.NODE_ENV === "production" ? "production" : "development";
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -119,15 +112,7 @@ export function configFromEnv(
 		env.REQUIRE_EMAIL_VERIFICATION === undefined
 			? false
 			: booleanFromEnv(env.REQUIRE_EMAIL_VERIFICATION, "REQUIRE_EMAIL_VERIFICATION");
-	const configuredMailer = productionMailer ?? mailerFromEnv(env, environment);
-	if (environment === "production" && (!configuredMailer || configuredMailer === consoleMailer)) {
-		throw new Error("Production requires an explicitly configured non-console email mailer.");
-	}
-	if (requireEmailVerification && (!configuredMailer || configuredMailer === consoleMailer)) {
-		throw new Error(
-			"REQUIRE_EMAIL_VERIFICATION needs an email mailer. Set EMAIL_WEBHOOK_URL, or turn it off.",
-		);
-	}
+	const transactionalEmailFrom = transactionalEmailFromEnv(env, environment);
 
 	return {
 		environment,
@@ -141,7 +126,7 @@ export function configFromEnv(
 		allowPrivateWebFetchNetwork,
 		allowOpenSignUp,
 		requireEmailVerification,
-		mailer: configuredMailer ?? consoleMailer,
+		transactionalEmailFrom,
 	};
 }
 
@@ -151,17 +136,21 @@ function booleanFromEnv(value: string, name: string): boolean {
 	throw new Error(`${name} must be true or false`);
 }
 
-function mailerFromEnv(env: NodeJS.ProcessEnv, environment: Environment): Mailer | undefined {
-	const url = env.EMAIL_WEBHOOK_URL;
-	if (!url) return undefined;
-	const parsed = new URL(url);
-	if (environment === "production" && parsed.protocol !== "https:") {
-		throw new Error("EMAIL_WEBHOOK_URL must use HTTPS in production");
+function transactionalEmailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailAddress {
+	const value = env.EMAIL_TRANSACTIONAL_FROM;
+	if (!value) {
+		// A provider sends only from addresses it has verified, so production must name one.
+		if (environment === "production")
+			throw new Error("EMAIL_TRANSACTIONAL_FROM is required in production.");
+		return DEVELOPMENT_TRANSACTIONAL_EMAIL_FROM;
 	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error("EMAIL_WEBHOOK_URL must use HTTP or HTTPS");
+	const address = parseEmailAddress(value);
+	if (!address) {
+		throw new Error(
+			"EMAIL_TRANSACTIONAL_FROM must be an address, like `Sugabots <no-reply@example.com>`.",
+		);
 	}
-	return webhookMailer(parsed.href, env.EMAIL_WEBHOOK_TOKEN);
+	return address;
 }
 
 /** The path under `baseUrl` the API answers at, better-auth's routes included. */

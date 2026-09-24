@@ -1,6 +1,7 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
 import { isUuid } from "@sugabots/core/database/ids";
+import type { Email, EmailAddress } from "@sugabots/core/email/email";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -14,7 +15,6 @@ import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Effect } from "effect";
 import { API_BASE_PATH, trustedOrigins, webAppUrl } from "../config.ts";
-import type { Mailer } from "../email/mailer.ts";
 import { admitSignUp } from "./sign-up.ts";
 
 /**
@@ -62,8 +62,9 @@ export interface AuthOptions {
 	baseUrl: string;
 	/** Browser origins besides `baseUrl`'s allowed to sign in. The first is where invite links point. */
 	webOrigins: string[];
-	/** How verification and invitation emails go out. */
-	mailer: Mailer;
+	/** Sends verification and invitation emails. */
+	mailer: (email: Email) => Promise<void>;
+	emailFrom: EmailAddress;
 	/** Whether anybody may create an account, or only the first person and invitees. */
 	allowOpenSignUp: boolean;
 	/** Whether a new account must prove its address before it gets a session. */
@@ -126,6 +127,7 @@ export function createAuth({
 	baseUrl,
 	webOrigins,
 	mailer,
+	emailFrom,
 	allowOpenSignUp,
 	requireEmailVerification,
 }: AuthOptions) {
@@ -174,7 +176,8 @@ export function createAuth({
 			autoSignInAfterVerification: true,
 			sendVerificationEmail: async ({ user, url }) => {
 				await mailer({
-					to: user.email,
+					from: emailFrom,
+					to: [{ email: user.email, name: user.name }],
 					subject: "Verify your email for Sugabots",
 					text: `Verify your email address to finish setting up Sugabots.\n\nVerify: ${url}`,
 				});
@@ -272,7 +275,9 @@ export function createAuth({
 					// `/?invite=<id>` shape, so links already sent keep working.
 					const link = `${links}/invite/${encodeURIComponent(id)}`;
 					await mailer({
-						to: email,
+						from: emailFrom,
+						to: [{ email }],
+						replyTo: { email: inviter.user.email, name: inviter.user.name },
 						subject: `${inviter.user.name} invited you to ${workspace.name} on Sugabots`,
 						text: `${inviter.user.name} (${inviter.user.email}) invited you to join the ${workspace.name} workspace.\n\nAccept: ${link}`,
 					});
