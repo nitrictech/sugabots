@@ -32,7 +32,9 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 
 describe("a person's message", () => {
 	it("goes to the agents mentioned, whether or not they are in the thread yet", () => {
-		expect(decideFloor(input({ content: "@reviewer and @scout, thoughts?" }))).toEqual({
+		expect(
+			decideFloor(input({ threadType: "routine", content: "@reviewer and @scout, thoughts?" })),
+		).toEqual({
 			kind: "turns",
 			agents: [
 				{ agentId: reviewer, reason: "mention" },
@@ -42,7 +44,7 @@ describe("a person's message", () => {
 	});
 
 	it("goes to nobody when only people are mentioned", () => {
-		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({
+		expect(decideFloor(input({ threadType: "routine", content: "@sam can you look?" }))).toEqual({
 			kind: "nobody",
 			why: "people-addressed",
 		});
@@ -53,6 +55,23 @@ describe("a person's message", () => {
 			decideFloor(input({ threadType: "routine", agentParticipantIds: new Set([host, reviewer]) })),
 		).toEqual({
 			kind: "facilitate",
+		});
+	});
+
+	it("goes to the chat's agent in a chat, not to the agents mentioned", () => {
+		// The chat's agent brings a mentioned agent in by collaborating. Handing
+		// the mentioned agent the turn made it a participant of the chat.
+		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({
+			kind: "turns",
+			agents: [{ agentId: host, reason: "default" }],
+		});
+	});
+
+	it("goes to nobody in a chat when only people are mentioned", () => {
+		// The chat's agent used to answer anyway, only to say the message was not for it.
+		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({
+			kind: "nobody",
+			why: "people-addressed",
 		});
 	});
 
@@ -74,6 +93,7 @@ describe("a person's message", () => {
 		expect(
 			decideFloor(
 				input({
+					threadType: "routine",
 					routing: { facilitator: false },
 					agentParticipantIds: new Set([host, reviewer]),
 					lastAgentSpeakerId: reviewer,
@@ -84,7 +104,13 @@ describe("a person's message", () => {
 
 	it("ignores a last speaker who has since left the thread", () => {
 		expect(
-			decideFloor(input({ routing: { facilitator: false }, lastAgentSpeakerId: scout })),
+			decideFloor(
+				input({
+					threadType: "routine",
+					routing: { facilitator: false },
+					lastAgentSpeakerId: scout,
+				}),
+			),
 		).toEqual({ kind: "turns", agents: [{ agentId: host, reason: "default" }] });
 	});
 });

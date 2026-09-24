@@ -699,7 +699,7 @@ function Routing({
 	return (
 		<Section
 			label="Automated threads"
-			description="Choose whether the Facilitator routes non-chat threads. Direct chats respond only through the selected agent or an explicit @mention."
+			description="Choose whether the Facilitator routes non-chat threads. Direct chats are answered by their agent alone, which consults any agent you @mention."
 		>
 			<div
 				className="flex flex-col gap-2.5"

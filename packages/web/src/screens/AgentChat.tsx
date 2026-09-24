@@ -258,7 +258,9 @@ export function AgentChat({
 							submitLabel="Send message"
 							submitDisabled={!draft.trim() || send.isPending}
 							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
-							mentionables={details.crew}
+							mentionables={details.participants.filter(
+								(participant) => participant.kind !== "person" || participant.id !== user.id,
+							)}
 							className="mx-auto w-full max-w-[760px]"
 						/>
 					)}
