@@ -1,5 +1,5 @@
 import { SiteLogo } from "@/components/site-logo";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
 
 export function SiteHeader() {
@@ -13,28 +13,24 @@ export function SiteHeader() {
 				<div className="flex flex-1 gap-5">
 					{launched && (
 						<>
-							<Button
-								variant="nav"
-								size="inline"
-								nativeButton={false}
-								render={<a href={siteLinks.docs} />}
+							<a
+								href={siteLinks.docs}
+								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								Docs
-							</Button>
-							<Button
-								variant="nav"
-								size="inline"
-								nativeButton={false}
-								render={<a href={siteLinks.github} />}
+							</a>
+							<a
+								href={siteLinks.github}
+								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								GitHub
-							</Button>
+							</a>
 						</>
 					)}
 				</div>
-				<Button nativeButton={false} render={<a href={siteLinks.getStarted} />}>
+				<a href={siteLinks.getStarted} className={buttonVariants()}>
 					Get started
-				</Button>
+				</a>
 			</nav>
 		</header>
 	);

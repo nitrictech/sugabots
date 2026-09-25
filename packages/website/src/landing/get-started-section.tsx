@@ -1,8 +1,8 @@
 import { motion } from "motion/react";
 import { BotAvatar } from "@/components/bot-avatar";
-import { EarlyAccessButton } from "@/components/early-access-button";
+import { EarlyAccessLink } from "@/components/early-access-link";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
 
 export function GetStartedSection() {
@@ -32,20 +32,18 @@ export function GetStartedSection() {
 				<RevealItem className="flex flex-wrap justify-center gap-3">
 					{launched ? (
 						<>
-							<Button size="lg" nativeButton={false} render={<a href={siteLinks.docs} />}>
+							<a href={siteLinks.docs} className={buttonVariants({ size: "lg" })}>
 								Read the docs
-							</Button>
-							<Button
-								size="lg"
-								variant="outline"
-								nativeButton={false}
-								render={<a href={siteLinks.github} />}
+							</a>
+							<a
+								href={siteLinks.github}
+								className={buttonVariants({ variant: "outline", size: "lg" })}
 							>
 								View on GitHub
-							</Button>
+							</a>
 						</>
 					) : (
-						<EarlyAccessButton size="lg" />
+						<EarlyAccessLink size="lg" />
 					)}
 				</RevealItem>
 			</Reveal>

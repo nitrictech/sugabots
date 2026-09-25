@@ -3,10 +3,10 @@ import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { accentText } from "@/components/accent";
 import { BotAvatar } from "@/components/bot-avatar";
-import { EarlyAccessButton } from "@/components/early-access-button";
+import { EarlyAccessLink } from "@/components/early-access-link";
 import { Emphasis } from "@/components/emphasis";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
 
 /** The bot crowd, drawn inline so each face can pop in. Poses assume a 40px face. */
@@ -37,27 +37,24 @@ export function Hero() {
 					variants={riseIn}
 					className="max-w-2xl text-muted-foreground text-pretty sm:text-lg"
 				>
-					Sugabots is an open-source harness where <Emphasis>people</Emphasis> and{" "}
-					<Emphasis>agents</Emphasis> work together. Give each group its own agents, on the models
-					you choose.
+					Sugabots is a place where <Emphasis>people</Emphasis> and <Emphasis>agents</Emphasis> can
+					work together. Give each group its own agents, on the models you choose. It's also <Emphasis>open-source</Emphasis>.
 				</motion.p>
 				<RevealItem className="flex flex-wrap items-center gap-3">
-					<Button size="lg" nativeButton={false} render={<a href={siteLinks.getStarted} />}>
+					<a href={siteLinks.getStarted} className={buttonVariants({ size: "lg" })}>
 						Start a pod
 						<ArrowRightIcon data-icon="inline-end" />
-					</Button>
+					</a>
 					{launched ? (
-						<Button
-							size="lg"
-							variant="outline"
-							nativeButton={false}
-							render={<a href={siteLinks.github} />}
+						<a
+							href={siteLinks.github}
+							className={buttonVariants({ variant: "outline", size: "lg" })}
 						>
 							View on GitHub
 							<ArrowUpRightIcon data-icon="inline-end" />
-						</Button>
+						</a>
 					) : (
-						<EarlyAccessButton size="lg" variant="outline" />
+						<EarlyAccessLink size="lg" variant="outline" />
 					)}
 				</RevealItem>
 			</Reveal>

@@ -1,5 +1,5 @@
 import { SiteLogo } from "@/components/site-logo";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
 
 export function SiteFooter() {
@@ -14,32 +14,26 @@ export function SiteFooter() {
 				<div className="flex gap-5">
 					{launched && (
 						<>
-							<Button
-								variant="nav"
-								size="inline"
-								nativeButton={false}
-								render={<a href={siteLinks.docs} />}
+							<a
+								href={siteLinks.docs}
+								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								Docs
-							</Button>
-							<Button
-								variant="nav"
-								size="inline"
-								nativeButton={false}
-								render={<a href={siteLinks.github} />}
+							</a>
+							<a
+								href={siteLinks.github}
+								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								GitHub
-							</Button>
+							</a>
 						</>
 					)}
-					<Button
-						variant="nav"
-						size="inline"
-						nativeButton={false}
-						render={<a href={siteLinks.discord} />}
+					<a
+						href={siteLinks.discord}
+						className={buttonVariants({ variant: "nav", size: "inline" })}
 					>
 						Discord
-					</Button>
+					</a>
 				</div>
 			</div>
 		</footer>
