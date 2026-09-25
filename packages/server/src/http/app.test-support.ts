@@ -7,6 +7,7 @@ import { createEventBus, type EventBus } from "@sugabots/core/database/events/bu
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
+import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import type {
 	EgressHttpClients,
@@ -41,6 +42,8 @@ type TestAppOptions = TestIdentity & {
 	validateProviderUrl?: EgressUrlValidator;
 	model?: TurnModel;
 };
+
+const TEST_CREDENTIAL_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /** The test API's address. */
 export const BASE_URL = "http://localhost:3000";
@@ -79,6 +82,7 @@ export function createTestApp(options: TestAppOptions): TestApp {
 		},
 		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
 		oauthFetch: async () => new Response(null, { status: 503 }),
+		credentialCipher: aesCredentialCipher(TEST_CREDENTIAL_KEY),
 	}).pipe(Layer.provide([noDatabase, HttpServer.layerServices]));
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 	return {
@@ -190,6 +194,8 @@ const emptyModelProviderStore: ModelProviderStore = {
 	create: () => notStubbed("modelProviders.create"),
 	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
+	saveChatgptSignIn: () => Effect.undefined,
+	renewChatgptTokens: () => Effect.undefined,
 	connection: () => Effect.undefined,
 	resolve: () => Effect.undefined,
 	recordTest: () => Effect.void,

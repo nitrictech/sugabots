@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import type { EgressHttpClients } from "../network/egress.ts";
+import { withChatgptAccess } from "./chatgpt.ts";
 import {
 	type DiscoveredModel,
 	dialectFor,
@@ -34,6 +35,8 @@ class ProviderRejected extends Data.TaggedError("ProviderRejected")<{
 class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{
 	readonly cause: unknown;
 }> {}
+/** The ChatGPT sign-in could not give a live token. */
+class SignInLapsed extends Data.TaggedError("SignInLapsed")<{ readonly message: string }> {}
 /** It answered with something that is not a model list. */
 class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
 	readonly reason: string;
@@ -47,6 +50,7 @@ type ProviderFailure =
 	| ConnectionMissing
 	| ProviderRejected
 	| ProviderUnreachable
+	| SignInLapsed
 	| InvalidModelList;
 
 /** What a person should be told. Each failure gets its own sentence. */
@@ -58,13 +62,15 @@ function describe(failure: ProviderFailure): string {
 			return `Provider returned ${failure.status} ${failure.statusText}`;
 		case "InvalidModelList":
 			return failure.reason;
+		case "SignInLapsed":
+			return failure.message;
 		case "ProviderUnreachable":
 			return failure.cause instanceof Error ? failure.cause.message : "Connection failed";
 	}
 }
 
 export function testProvider(
-	store: Pick<ModelProviderStore, "connection" | "recordTest">,
+	store: Pick<ModelProviderStore, "connection" | "recordTest" | "renewChatgptTokens">,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
@@ -73,7 +79,9 @@ export function testProvider(
 		const started = Date.now();
 		const connection = yield* requireConnection(store, workspaceId, providerId);
 
-		const outcome = yield* requestModels(connection, httpClients).pipe(Effect.result);
+		const outcome = yield* requestModels(store, workspaceId, connection, httpClients).pipe(
+			Effect.result,
+		);
 		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
 
 		// A test is recorded either way: its result is the point.
@@ -95,7 +103,10 @@ export function testProvider(
 }
 
 export function fetchProviderModels(
-	store: Pick<ModelProviderStore, "connection" | "recordTest" | "syncDiscovered">,
+	store: Pick<
+		ModelProviderStore,
+		"connection" | "recordTest" | "syncDiscovered" | "renewChatgptTokens"
+	>,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
@@ -110,7 +121,7 @@ export function fetchProviderModels(
 > {
 	const discover = Effect.gen(function* () {
 		const connection = yield* requireConnection(store, workspaceId, providerId);
-		const outcome = yield* requestModels(connection, httpClients).pipe(
+		const outcome = yield* requestModels(store, workspaceId, connection, httpClients).pipe(
 			Effect.map((models) => models.map((model) => registry.complete(model, connection))),
 			Effect.result,
 		);
@@ -152,14 +163,19 @@ function requireConnection(
 }
 
 function requestModels(
-	connection: ProviderConnection,
+	store: Pick<ModelProviderStore, "renewChatgptTokens">,
+	workspaceId: string,
+	stored: ProviderConnection,
 	httpClients: EgressHttpClients,
-): Effect.Effect<DiscoveredModel[], ProviderFailure> {
-	const dialect = dialectFor(connection);
-	const baseUrl = connection.baseUrl.replace(/\/$/, "");
+): Effect.Effect<DiscoveredModel[], ProviderFailure, Database> {
+	const dialect = dialectFor(stored);
+	const baseUrl = stored.baseUrl.replace(/\/$/, "");
 	const root = dialect.discoveryRoot?.(baseUrl) ?? baseUrl;
 	const http = httpClients.for({ baseUrl: root });
 	return Effect.gen(function* () {
+		const connection = yield* withChatgptAccess(store, httpClients, workspaceId, stored).pipe(
+			Effect.mapError((failure) => new SignInLapsed({ message: failure.message })),
+		);
 		const response = yield* Effect.tryPromise({
 			try: () =>
 				http(dialect.listingUrl(root), {

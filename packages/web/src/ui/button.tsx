@@ -22,10 +22,12 @@ import { cn } from "cn";
  *
  * To render something other than a `<button>` with this styling, pass the
  * element as `render` — Base UI's replacement for Radix's `asChild` — and
- * `nativeButton={false}` if it is not a button.
+ * `nativeButton={false}` if it is not a button. Base UI then gives it the
+ * button role, so a link is not rendered this way: give the `<a>`
+ * `buttonStyles(...)` instead, and it stays a link.
  */
 
-const button = cva(
+export const buttonStyles = cva(
 	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap font-sans font-semibold transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
 	{
 		variants: {
@@ -51,9 +53,9 @@ const button = cva(
 	},
 );
 
-export type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof button>;
+export type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonStyles>;
 
 /** Button styles labelled actions. Use IconButton for icon-only actions requiring a tooltip. */
 export function Button({ className, variant, size, ...props }: ButtonProps) {
-	return <ButtonPrimitive className={cn(button({ variant, size }), className)} {...props} />;
+	return <ButtonPrimitive className={cn(buttonStyles({ variant, size }), className)} {...props} />;
 }

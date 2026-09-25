@@ -49,6 +49,7 @@ export interface ModelRegistry {
 const MODELS_DEV_PROVIDER: Partial<Record<ProviderPresetId, string>> = {
 	anthropic: "anthropic",
 	openai: "openai",
+	chatgpt: "openai",
 	openrouter: "openrouter",
 	gemini: "google",
 	groq: "groq",

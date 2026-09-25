@@ -8,6 +8,7 @@ const sdk = vi.hoisted(() => ({
 	createOpenAI: vi.fn(),
 	anthropicModel: vi.fn(),
 	openAiChatModel: vi.fn(),
+	openAiResponsesModel: vi.fn(),
 	streamText: vi.fn(() => ({
 		textStream: [],
 		usage: Promise.resolve({
@@ -40,7 +41,10 @@ describe("workspace turn model", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		sdk.createAnthropic.mockReturnValue(sdk.anthropicModel);
-		sdk.createOpenAI.mockReturnValue({ chat: sdk.openAiChatModel });
+		sdk.createOpenAI.mockReturnValue({
+			chat: sdk.openAiChatModel,
+			responses: sdk.openAiResponsesModel,
+		});
 	});
 
 	it.each(["openai", "anthropic"] as const)(
@@ -49,6 +53,7 @@ describe("workspace turn model", () => {
 			const httpClient = vi.fn<typeof fetch>();
 			const model = workspaceTurnModel({
 				modelProviders: {
+					renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 					resolve: () =>
 						Effect.succeed({
 							providerId: "provider-id",
@@ -77,6 +82,54 @@ describe("workspace turn model", () => {
 			expect(createProvider).toHaveBeenCalledWith(expect.objectContaining({ fetch: httpClient }));
 		},
 	);
+
+	it("asks the Codex backend the way Codex does for a ChatGPT subscription", async () => {
+		const tokens = {
+			access: "access-token",
+			refresh: "refresh-token",
+			expiresAt: Date.now() + 60 * 60_000,
+			accountId: "account-1",
+		};
+		const model = workspaceTurnModel({
+			modelProviders: {
+				renewChatgptTokens: (_workspaceId, _providerId, renew) => renew(tokens),
+				resolve: () =>
+					Effect.succeed({
+						providerId: "provider-id",
+						preset: "chatgpt",
+						baseUrl: "https://chatgpt.com/backend-api/codex",
+						apiFormat: "openai",
+						headers: {},
+						chatgptTokens: tokens,
+						configurationUpdatedAt: new Date(),
+					}),
+			},
+			httpClients: { for: () => vi.fn<typeof fetch>() },
+		});
+
+		await run(
+			model.stream({
+				workspaceId: "workspace-id",
+				model: "gpt-5.5",
+				system: "You are Suga.",
+				messages: [{ role: "user", content: "Hello" }],
+				signal: new AbortController().signal,
+			}),
+		);
+
+		expect(sdk.createOpenAI).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiKey: "access-token",
+				headers: expect.objectContaining({ "ChatGPT-Account-Id": "account-1" }),
+			}),
+		);
+		expect(sdk.openAiResponsesModel).toHaveBeenCalledWith("gpt-5.5");
+		const request = (sdk.streamText.mock.calls[0] as unknown[])[0];
+		expect(request).toMatchObject({
+			providerOptions: { openai: { instructions: "You are Suga.", store: false } },
+		});
+		expect(request).not.toHaveProperty("system");
+	});
 });
 
 describe("describing a model failure", () => {

@@ -20,20 +20,22 @@ export function ProviderMark({
 			className={`grid shrink-0 place-items-center ${large ? "size-10 rounded-xl" : small ? "size-5 rounded-sm [&>svg]:size-3" : "size-7 rounded-md"} ${
 				preset === "openai"
 					? "bg-[#a9bcf0]"
-					: preset === "anthropic"
-						? "bg-[#f3b98e]"
-						: preset === "ollama"
-							? "bg-[#d5efc2]"
-							: preset === null
-								? "border border-dashed border-control-border bg-background"
-								: "bg-muted text-foreground"
+					: preset === "chatgpt"
+						? "bg-[#b4e4d2]"
+						: preset === "anthropic"
+							? "bg-[#f3b98e]"
+							: preset === "ollama"
+								? "bg-[#d5efc2]"
+								: preset === null
+									? "border border-dashed border-control-border bg-background"
+									: "bg-muted text-foreground"
 			}`}
 			aria-hidden
 		>
-			{preset === "openai" ? (
+			{preset === "openai" || preset === "chatgpt" ? (
 				<svg
 					viewBox="0 0 256 260"
-					className="size-4 text-[#27396f]"
+					className={`size-4 ${preset === "chatgpt" ? "text-[#0f4d3a]" : "text-[#27396f]"}`}
 					fill="currentColor"
 					aria-hidden
 				>

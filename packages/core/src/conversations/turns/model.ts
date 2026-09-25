@@ -14,7 +14,11 @@ import {
 import { Data, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
-import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
+import { withChatgptAccess } from "../../providers/model-providers/chatgpt.ts";
+import type {
+	ModelProviderStore,
+	ProviderConnection,
+} from "../../providers/model-providers/store.ts";
 import type { EgressHttpClients } from "../../providers/network/egress.ts";
 
 export interface ModelAccounting {
@@ -74,7 +78,7 @@ export class ModelRequestFailed extends Data.TaggedError("ModelRequestFailed")<{
 }> {}
 
 export interface TurnModelOptions {
-	modelProviders: Pick<ModelProviderStore, "resolve">;
+	modelProviders: Pick<ModelProviderStore, "resolve" | "renewChatgptTokens">;
 	httpClients: EgressHttpClients;
 }
 
@@ -82,29 +86,24 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 	return {
 		stream: (input) =>
 			Effect.gen(function* () {
-				const connection = yield* modelProviders.resolve(input.workspaceId, input.model);
-				if (!connection) {
+				const resolved = yield* modelProviders.resolve(input.workspaceId, input.model);
+				if (!resolved) {
 					return yield* new ModelRequestFailed({
 						message: `No active provider offers the model "${input.model}"`,
 					});
 				}
+				const connection = yield* withChatgptAccess(
+					modelProviders,
+					httpClients,
+					input.workspaceId,
+					resolved,
+				).pipe(
+					Effect.mapError(
+						(failure) => new ModelRequestFailed({ message: failure.message, cause: failure }),
+					),
+				);
 				const fetch = httpClients.for(connection);
-				const model =
-					connection.apiFormat === "anthropic"
-						? createAnthropic({
-								apiKey: connection.apiKey ?? "",
-								baseURL: connection.baseUrl.endsWith("/v1")
-									? connection.baseUrl
-									: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
-								headers: connection.headers,
-								fetch,
-							})(input.model)
-						: createOpenAI({
-								apiKey: connection.apiKey ?? "ollama",
-								baseURL: connection.baseUrl,
-								headers: connection.headers,
-								fetch,
-							}).chat(input.model);
+				const codex = connection.preset === "chatgpt";
 				// The SDK does not throw a provider's error into the text stream: it
 				// reports it here and ends the stream, and whatever is asked of the
 				// result afterwards fails with "No output generated". Keeping the
@@ -112,8 +111,20 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				let providerFailure: unknown;
 				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 				const result = streamText({
-					model,
-					system: input.system,
+					model: languageModel(connection, input.model, fetch),
+					// The Codex backend takes the system prompt only as `instructions`,
+					// and keeps nothing between requests, so reasoning has to travel with them.
+					...(codex
+						? {
+								providerOptions: {
+									openai: {
+										instructions: input.system,
+										store: false,
+										include: ["reasoning.encrypted_content"],
+									},
+								},
+							}
+						: { system: input.system }),
 					messages: [...input.messages, ...(input.continuationMessages ?? [])],
 					tools: input.tools,
 					toolApproval: input.toolApproval,
@@ -168,6 +179,31 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				};
 			}),
 	};
+}
+
+function languageModel(
+	connection: ProviderConnection,
+	modelId: string,
+	fetch: typeof globalThis.fetch,
+) {
+	if (connection.apiFormat === "anthropic") {
+		return createAnthropic({
+			apiKey: connection.apiKey ?? "",
+			baseURL: connection.baseUrl.endsWith("/v1")
+				? connection.baseUrl
+				: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
+			headers: connection.headers,
+			fetch,
+		})(modelId);
+	}
+	const openai = createOpenAI({
+		apiKey: connection.apiKey ?? "ollama",
+		baseURL: connection.baseUrl,
+		headers: connection.headers,
+		fetch,
+	});
+	// The Codex backend speaks only the Responses API.
+	return connection.preset === "chatgpt" ? openai.responses(modelId) : openai.chat(modelId);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { type ProviderDialectId, providerPreset } from "@sugabots/contracts";
 import { anthropic } from "./anthropic.ts";
+import { chatgpt } from "./chatgpt.ts";
 import type { ProviderDialect, ProviderIdentity } from "./dialect.ts";
 import { ollama } from "./ollama.ts";
 import { openaiCompatible } from "./openai-compatible.ts";
@@ -7,7 +8,7 @@ import { openrouter } from "./openrouter.ts";
 
 export type { DiscoveredModel, ProviderDialect, ProviderIdentity } from "./dialect.ts";
 export { emptyRegistry, type ModelRegistry, modelsDev } from "./registry.ts";
-export { anthropic, ollama, openaiCompatible, openrouter };
+export { anthropic, chatgpt, ollama, openaiCompatible, openrouter };
 
 /** The code behind each name a preset may give. */
 export const dialects: Record<ProviderDialectId, ProviderDialect> = {
@@ -15,6 +16,7 @@ export const dialects: Record<ProviderDialectId, ProviderDialect> = {
 	anthropic,
 	openrouter,
 	ollama,
+	chatgpt,
 };
 
 /**

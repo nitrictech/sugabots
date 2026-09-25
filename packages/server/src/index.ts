@@ -193,6 +193,7 @@ const main = Effect.gen(function* () {
 		httpClients,
 		validateProviderUrl,
 		model,
+		credentialCipher,
 	});
 	yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(

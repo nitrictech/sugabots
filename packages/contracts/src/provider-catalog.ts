@@ -7,6 +7,7 @@ export const OPENAI_COMPATIBLE_PATH = "/v1";
 export const providerPresetIdSchema = Schema.Literals([
 	"anthropic",
 	"openai",
+	"chatgpt",
 	"openrouter",
 	"gemini",
 	"groq",
@@ -34,6 +35,7 @@ export const providerDialectIdSchema = Schema.Literals([
 	"anthropic",
 	"openrouter",
 	"ollama",
+	"chatgpt",
 ]);
 export type ProviderDialectId = typeof providerDialectIdSchema.Type;
 
@@ -61,7 +63,11 @@ export interface ProviderPreset {
 	/** How the API reads this provider; see `ProviderDialectId`. */
 	dialect: ProviderDialectId;
 	hosting: "remote" | "local";
-	requiresApiKey: boolean;
+	/**
+	 * What the provider needs before it answers: an API key, nothing (a key
+	 * is optional), or a person signing in with their ChatGPT subscription.
+	 */
+	credential: "api-key" | "optional" | "chatgpt-sign-in";
 	/** One line for the picker: what this is, or where the key comes from. */
 	hint: string;
 	/** Models worth offering before discovery has run, if the API lists none. */
@@ -78,7 +84,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "anthropic",
 		dialect: "anthropic",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Claude models. Keys are issued at console.anthropic.com.",
 		models: [
 			{
@@ -108,7 +114,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "GPT models. Keys are issued at platform.openai.com.",
 		models: [
 			{
@@ -132,13 +138,24 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		],
 	},
 	{
+		id: "chatgpt",
+		name: "ChatGPT",
+		baseUrl: "https://chatgpt.com/backend-api/codex",
+		apiFormat: "openai",
+		dialect: "chatgpt",
+		hosting: "remote",
+		credential: "chatgpt-sign-in",
+		hint: "GPT models on your ChatGPT Plus or Pro plan, signed in the way Codex CLI does. Unofficial.",
+		models: [],
+	},
+	{
 		id: "openrouter",
 		name: "OpenRouter",
 		baseUrl: "https://openrouter.ai/api/v1",
 		apiFormat: "openai",
 		dialect: "openrouter",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Many providers' models behind one key, issued at openrouter.ai.",
 		models: [],
 	},
@@ -149,7 +166,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Gemini models over Google's OpenAI-compatible endpoint. Keys from AI Studio.",
 		models: [],
 	},
@@ -160,7 +177,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Fast open-weight models. Keys are issued at console.groq.com.",
 		models: [],
 	},
@@ -171,7 +188,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Grok models. Keys are issued at console.x.ai.",
 		models: [],
 	},
@@ -182,7 +199,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Mistral models. Keys are issued at console.mistral.ai.",
 		models: [],
 	},
@@ -193,7 +210,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "DeepSeek models. Keys are issued at platform.deepseek.com.",
 		models: [],
 	},
@@ -204,7 +221,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Hosted open-weight models. Keys are issued at api.together.ai.",
 		models: [],
 	},
@@ -215,7 +232,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Hosted open-weight models. Keys are issued at fireworks.ai.",
 		models: [],
 	},
@@ -226,7 +243,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "remote",
-		requiresApiKey: true,
+		credential: "api-key",
 		hint: "Fast open-weight models. Keys are issued at cloud.cerebras.ai.",
 		models: [],
 	},
@@ -237,7 +254,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "ollama",
 		hosting: "local",
-		requiresApiKey: false,
+		credential: "optional",
 		hint: "Models you run yourself with Ollama. No key; the stock install listens on port 11434.",
 		models: [],
 	},
@@ -248,7 +265,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "local",
-		requiresApiKey: false,
+		credential: "optional",
 		hint: "LM Studio's local server. No key; it listens on port 1234 once started.",
 		models: [],
 	},
@@ -259,7 +276,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "local",
-		requiresApiKey: false,
+		credential: "optional",
 		hint: "A llama-server you run yourself. No key unless you started it with one.",
 		models: [],
 	},
@@ -270,7 +287,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "openai-compatible",
 		hosting: "local",
-		requiresApiKey: false,
+		credential: "optional",
 		hint: "A vLLM server you run yourself. No key unless you started it with one.",
 		models: [],
 	},
@@ -288,11 +305,21 @@ export function providerPreset(id: ProviderPresetId): ProviderPreset {
  * The presets every workspace starts with. They are seeded rather than added
  * and cannot be removed; the rest of the catalog is added from the picker.
  */
-export const seededPresets: readonly ProviderPresetId[] = ["anthropic", "openai", "ollama"];
+export const seededPresets: readonly ProviderPresetId[] = [
+	"anthropic",
+	"openai",
+	"chatgpt",
+	"ollama",
+];
 
 /** A provider made from no preset is a custom endpoint, and those want a key. */
 export function presetRequiresApiKey(preset: ProviderPresetId | null): boolean {
-	return preset === null ? true : providerPreset(preset).requiresApiKey;
+	return preset === null ? true : providerPreset(preset).credential === "api-key";
+}
+
+/** Whether a provider made from this preset is signed in to rather than given a key. */
+export function presetSignsIn(preset: ProviderPresetId | null): boolean {
+	return preset !== null && providerPreset(preset).credential === "chatgpt-sign-in";
 }
 
 /** Where a stock Ollama install serves its OpenAI-compatible API. */

@@ -2,7 +2,7 @@ import type { ModelProvider } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { delay, HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect, within } from "storybook/test";
+import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { ModelProvidersSettings } from "./ModelProvidersSettings.tsx";
 
@@ -24,6 +24,7 @@ const provider: ModelProvider = {
 	status: "connected",
 	hasApiKey: true,
 	apiKeyHint: "1234",
+	signedIn: false,
 	customHeaders: [],
 	modelCount: 1,
 	enabledModelCount: 1,
@@ -180,5 +181,79 @@ export const SearchWithoutResults = meta.story({
 			"unavailable-model",
 		);
 		await expect(canvas.getByText("No models match your search.")).toBeVisible();
+	},
+});
+
+const chatgpt: ModelProvider = {
+	...provider,
+	id: "0199a3a0-0000-7000-8000-000000000005",
+	preset: "chatgpt",
+	name: "ChatGPT",
+	baseUrl: "https://chatgpt.com/backend-api/codex",
+	active: false,
+	status: "signed_out",
+	hasApiKey: false,
+	apiKeyHint: null,
+	modelCount: 0,
+	enabledModelCount: 0,
+	lastTestedAt: null,
+	models: [],
+};
+
+/** ChatgptSignIn shows the code to enter on OpenAI's site while the page waits for the sign-in. */
+export const ChatgptSignIn = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(providersUrl, () => HttpResponse.json([chatgpt])),
+			http.post(`${providersUrl}/${chatgpt.id}/chatgpt-sign-in`, () =>
+				HttpResponse.json({
+					verificationUrl: "https://auth.openai.com/codex/device",
+					userCode: "ABCD-1234",
+					attempt: "sealed-attempt",
+					pollIntervalMs: 60_000,
+					expiresAt: "2026-09-01T00:15:00.000Z",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "ChatGPT Off" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with ChatGPT" }));
+		const warning = within(await screen.findByRole("dialog"));
+		await expect(warning.getByText("For single-user installs only")).toBeVisible();
+		await userEvent.click(warning.getByRole("button", { name: "I understand, sign in" }));
+		await expect(await canvas.findByText("ABCD-1234")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Copy code" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Open sign-in page" })).toHaveAttribute(
+			"href",
+			"https://auth.openai.com/codex/device",
+		);
+	},
+});
+
+/** ChatgptSignedIn is a ChatGPT provider after sign-in, with the plan's models listed. */
+export const ChatgptSignedIn = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(providersUrl, () =>
+				HttpResponse.json([
+					{
+						...chatgpt,
+						active: true,
+						status: "connected",
+						signedIn: true,
+						modelCount: 1,
+						enabledModelCount: 1,
+						lastTestedAt: "2026-09-01T00:00:00.000Z",
+						models: [{ ...provider.models[0], modelId: "gpt-5.5", displayName: "GPT-5.5" }],
+					},
+				]),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "ChatGPT On" }));
+		await expect(await canvas.findByText("Signed in with ChatGPT")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeVisible();
 	},
 });

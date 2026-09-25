@@ -8,6 +8,7 @@ import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
+import type { CredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import type {
 	EgressHttpClient,
@@ -103,6 +104,8 @@ export interface AppOptions {
 	oauthFetch: EgressHttpClient;
 	/** Runs a model, for trying one out on a system agent before choosing it. */
 	model: TurnModel;
+	/** Seals what the server hands out and takes back, such as a ChatGPT sign-in in progress. */
+	credentialCipher: CredentialCipher;
 }
 
 export function apiLayer({
@@ -116,6 +119,7 @@ export function apiLayer({
 	validateProviderUrl,
 	oauthFetch,
 	model,
+	credentialCipher,
 }: AppOptions) {
 	const origins = trustedOrigins({ baseUrl, webOrigins });
 	const apiUrl = `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}`;
@@ -135,6 +139,7 @@ export function apiLayer({
 			httpClients,
 			validateProviderUrl,
 			model,
+			credentialCipher,
 		}),
 		searchProviderRoutes({
 			searchProviders: stores.searchProviders,

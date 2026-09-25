@@ -37,6 +37,7 @@ function store(found: ProviderConnection) {
 			}),
 		),
 		recordTest: vi.fn(() => Effect.void),
+		renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 	};
 }
 

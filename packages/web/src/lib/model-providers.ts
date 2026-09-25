@@ -83,6 +83,39 @@ export function useProviderActions() {
 			},
 			onSuccess: refresh,
 		}),
+		startChatgptSignIn: useMutation({
+			mutationFn: ({ providerId }: { providerId: string }) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.startChatgptSignIn({
+						params: { workspace: workspaceId, providerId },
+					}),
+				);
+			},
+		}),
+		completeChatgptSignIn: useMutation({
+			mutationFn: ({ providerId, attempt }: { providerId: string; attempt: string }) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.completeChatgptSignIn({
+						params: { workspace: workspaceId, providerId },
+						payload: { attempt },
+					}),
+				);
+			},
+			onSuccess: (outcome) => (outcome.status === "signed_in" ? refresh() : undefined),
+		}),
+		signOutChatgpt: useMutation({
+			mutationFn: ({ providerId }: { providerId: string }) => {
+				const workspaceId = requiredWorkspace();
+				return Effect.runPromise(
+					client.api.modelProviders.signOutChatgpt({
+						params: { workspace: workspaceId, providerId },
+					}),
+				);
+			},
+			onSuccess: refresh,
+		}),
 		fetchModels: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
