@@ -23,7 +23,7 @@ import {
 } from "../jobs/queue.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
-import { retryUnusable, UnusableAnswer } from "./answer.ts";
+import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import { forEachDelta, type TurnModel, type TurnModelInput } from "./model.ts";
 import { queueTurn } from "./queue.ts";
 
@@ -226,7 +226,7 @@ const decide = (
 	).pipe(
 		Effect.timeoutOrElse({
 			duration: FACILITATOR_TIMEOUT,
-			orElse: () => Effect.fail(new Error("Facilitator timed out")),
+			orElse: () => Effect.fail(new AnswerTimedOut({ message: "Facilitator timed out" })),
 		}),
 		// The timeout is inside, so each attempt gets its own budget and a slow
 		// model is not asked three times over.

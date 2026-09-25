@@ -5,6 +5,7 @@ import {
 	type NewModelProvider,
 	providerPreset,
 } from "@sugabots/contracts";
+import { ModelRequestFailed } from "@sugabots/core/conversations/turns/model";
 import {
 	ModelProviderNameConflict,
 	type ModelProviderStore,
@@ -124,7 +125,10 @@ function routes(
 		stores: { modelProviders: store },
 		httpClients: { for: () => unreachableProvider },
 		validateProviderUrl: createEgressUrlValidator({ allowPrivateNetwork }),
-		model: { stream: () => Effect.fail(new Error("This case does not ask a model")) },
+		model: {
+			stream: () =>
+				Effect.fail(new ModelRequestFailed({ message: "This case does not ask a model" })),
+		},
 	});
 	return {
 		create,

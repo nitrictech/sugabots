@@ -47,10 +47,10 @@ function granted<Standing>(
 	reference: Context.Reference<Standing | undefined>,
 	scope: string,
 ): Effect.Effect<Standing> {
-	return Effect.flatMap(Effect.service(reference), (standing) =>
-		standing === undefined
-			? Effect.die(new Error(`This endpoint's access rule grants no ${scope}`))
-			: Effect.succeed(standing),
+	return Effect.filterOrElse(
+		Effect.service(reference),
+		(standing) => standing !== undefined,
+		() => Effect.die(new Error(`This endpoint's access rule grants no ${scope}`)),
 	);
 }
 

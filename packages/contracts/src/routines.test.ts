@@ -36,7 +36,7 @@ describe("Routine contracts", () => {
 	});
 
 	it("keeps webhook JSON in trigger data", () => {
-		const trigger = Schema.decodeUnknownSync(routineExecutionTriggerSchema)({
+		const trigger = Schema.decodeSync(routineExecutionTriggerSchema)({
 			kind: "webhook",
 			receivedAt: "2026-09-18T00:00:00.000Z",
 			idempotencyKey: "delivery-1",
@@ -50,7 +50,7 @@ describe("Routine contracts", () => {
 
 	it("describes an automated trigger without a person author", () => {
 		expect(
-			Schema.decodeUnknownSync(routineTriggerAuthorSchema)({
+			Schema.decodeSync(routineTriggerAuthorSchema)({
 				kind: "routine_trigger",
 				executionId: ID,
 				routineName: "Morning review",

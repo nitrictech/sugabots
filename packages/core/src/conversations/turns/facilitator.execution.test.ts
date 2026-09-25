@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Database } from "../../database/database.ts";
+import { ModelRequestFailed } from "./model.ts";
 
 const mocks = vi.hoisted(() => ({
 	completeJob: vi.fn(),
@@ -105,7 +106,9 @@ describe("runClaimedFacilitation", () => {
 
 		await runWithoutDatabase(
 			runClaimedFacilitation(claimed, {
-				model: { stream: () => Effect.fail(new Error("provider unavailable")) },
+				model: {
+					stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+				},
 				publishEvents: () => Effect.void,
 				routines: { settleThread },
 			}),

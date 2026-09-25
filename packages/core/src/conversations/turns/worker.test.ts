@@ -5,9 +5,10 @@ import { effectRunner, type RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { JobNotRunnable } from "../jobs/queue.ts";
+import { ToolApprovalsIncomplete, ToolExecutionRefused } from "../tools/approvals/store.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
-import type { TurnModel, TurnModelInput } from "./model.ts";
+import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
 import type { ClaimedTurn, PreparedTurn, TurnStore } from "./store.ts";
 import { runClaimedTurn, type TurnWorkerOptions, turnWorkerLayer } from "./worker.ts";
 
@@ -238,7 +239,7 @@ describe("runClaimedTurn", () => {
 				},
 				approvals: {
 					allowedToolKeys: () => Effect.succeed(new Set(["wiki__wipe"])),
-					responsesForTurn: () => Effect.fail(new Error("unused")),
+					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
 					beginExecution: ({ atOffset }) =>
 						calls.open({
 							threadId: prepared.context.thread.id,
@@ -325,8 +326,9 @@ describe("runClaimedTurn", () => {
 				},
 				approvals: {
 					allowedToolKeys: () => Effect.succeed(new Set()),
-					responsesForTurn: () => Effect.fail(new Error("unused")),
-					beginExecution: () => Effect.fail(new Error("must not execute")),
+					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+					beginExecution: () =>
+						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
 					decide: () => Effect.die(new Error("unused")),
 					listRules: () => Effect.succeed([]),
 					revokeRule: () => Effect.succeed(false),
@@ -388,7 +390,7 @@ describe("runClaimedTurn", () => {
 				approvals: {
 					allowedToolKeys: () => Effect.succeed(new Set()),
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
-					beginExecution: () => Effect.fail(new Error("unused")),
+					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
 					decide: () => Effect.die(new Error("unused")),
 					listRules: () => Effect.succeed([]),
 					revokeRule: () => Effect.succeed(false),
@@ -566,7 +568,7 @@ describe("runClaimedTurn", () => {
 		const store = turnStore();
 		vi.mocked(store.fail).mockReturnValueOnce(Effect.succeed(true));
 		const model: TurnModel = {
-			stream: () => Effect.fail(new Error("provider unavailable")),
+			stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
 		};
 		const events = eventBus();
 
@@ -790,7 +792,7 @@ describe("the turn worker", () => {
 function turnStore(): TurnStore {
 	return {
 		requeueInterrupted: vi.fn(() => Effect.void),
-		claimNext: vi.fn(() => Effect.succeed(undefined)),
+		claimNext: vi.fn(() => Effect.undefined),
 		releaseFailedClaim: vi.fn(() => Effect.succeed(true)),
 		prepare: vi.fn(() => Effect.succeed(prepared)),
 		saveStreamingMessage: vi.fn(() => Effect.void),
@@ -827,7 +829,7 @@ function toolCalls(): ToolCallStore {
 		open: vi.fn(({ atOffset }) =>
 			Effect.succeed(part("0199a3a0-0000-7000-8000-0000000000aa", atOffset)),
 		),
-		close: vi.fn(() => Effect.succeed(undefined)),
+		close: vi.fn(() => Effect.undefined),
 	};
 }
 
@@ -874,6 +876,6 @@ async function* chunksUntilAborted(signal: AbortSignal): AsyncIterable<string> {
 
 function unusedModel(): TurnModel {
 	return {
-		stream: () => Effect.fail(new Error("unused model")),
+		stream: () => Effect.fail(new ModelRequestFailed({ message: "unused model" })),
 	};
 }

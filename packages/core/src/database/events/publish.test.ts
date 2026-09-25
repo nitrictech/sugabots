@@ -1,11 +1,13 @@
 import { type Channel, EVENT_VERSION } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
 import { closeDatabase, runOnPostgres } from "../testing.ts";
 import { type CommittedEvent, eventPublisher, type PendingEvent } from "./publish.ts";
+
+class Abandoned extends Data.TaggedError("Abandoned") {}
 
 /**
  * The two promises `eventPublisher` makes: a row and its delivery stand or
@@ -66,11 +68,11 @@ describe.skipIf(!process.env.DATABASE_URL)("eventPublisher", () => {
 				transaction(
 					Effect.gen(function* () {
 						yield* publish([marked(1)]);
-						return yield* Effect.fail(new Error("abandon this"));
+						return yield* new Abandoned();
 					}),
 				),
 			),
-		).rejects.toThrow("abandon this");
+		).rejects.toBeInstanceOf(Abandoned);
 
 		expect(bus.publishCommitted).not.toHaveBeenCalled();
 		expect(await storedRows()).toEqual([]);

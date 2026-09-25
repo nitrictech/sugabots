@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	dataListing,
 	discoveredModel,
@@ -21,22 +21,22 @@ export const openaiCompatible: ProviderDialect = {
 	model: Schema.Struct({
 		id: Schema.String,
 		display_name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 		name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 		architecture: Schema.Struct({
 			modality: Schema.String.pipe(
 				Schema.withDecodingDefault(Effect.succeed("")),
-				Schema.catchDecoding(() => Effect.succeed(Option.some(""))),
+				Schema.catchDecoding(() => Effect.succeedSome("")),
 			),
 		}).pipe(
 			Schema.withDecodingDefaultType(Effect.succeed({ modality: "" })),
-			Schema.catchDecoding(() => Effect.succeed(Option.some({ modality: "" }))),
+			Schema.catchDecoding(() => Effect.succeedSome({ modality: "" })),
 		),
 		context_length: Schema.optional(Schema.Finite).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {

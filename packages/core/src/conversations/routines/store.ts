@@ -709,7 +709,7 @@ export function routineStore(publishEvents: PublishEvents): RoutineStore {
 							triggerIdentity: trigger.idempotencyKey,
 							trigger,
 						})
-						.pipe(Effect.catchTag("RoutineNotFound", () => Effect.succeed(undefined)));
+						.pipe(Effect.catchTag("RoutineNotFound", () => Effect.undefined));
 				}),
 			),
 	};

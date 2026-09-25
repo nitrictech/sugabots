@@ -1,5 +1,6 @@
 import { Duration, Effect, Ref } from "effect";
 import type { Database } from "../../database/database.ts";
+import { UnusableAnswer } from "../turns/answer.ts";
 import { forEachDelta, type TurnModel } from "../turns/model.ts";
 import { CASES, type TrialCase, type TrialSystemAgent } from "./cases.ts";
 
@@ -288,7 +289,8 @@ const ask = (
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
 					Effect.filterOrFail(
 						(soFar) => soFar.length <= MAX_ANSWER_CHARACTERS,
-						() => new Error("The model kept going well past any usable answer"),
+						() =>
+							new UnusableAnswer({ reason: "The model kept going well past any usable answer" }),
 					),
 				),
 			);
@@ -297,8 +299,8 @@ const ask = (
 	).pipe(
 		Effect.timeoutOrElse({
 			duration: ANSWER_TIMEOUT,
-			orElse: () => Effect.succeed(undefined),
+			orElse: () => Effect.undefined,
 		}),
-		Effect.catch(() => Effect.succeed(undefined)),
-		Effect.catchDefect(() => Effect.succeed(undefined)),
+		Effect.orElseSucceed(() => undefined),
+		Effect.catchDefect(() => Effect.undefined),
 	);

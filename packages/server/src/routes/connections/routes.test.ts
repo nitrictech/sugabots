@@ -155,9 +155,9 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 			}),
 		),
 		targetsForPod: () => Effect.succeed([]),
-		oauthRecord: () => Effect.succeed(undefined),
+		oauthRecord: () => Effect.undefined,
 		saveOauthRecord: () => Effect.void,
-		byOauthState: () => Effect.succeed(undefined),
+		byOauthState: () => Effect.undefined,
 		target: (_workspaceId, podId, connectionId) =>
 			Effect.sync(() =>
 				held?.podId === podId && held.id === connectionId

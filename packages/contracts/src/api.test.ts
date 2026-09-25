@@ -41,19 +41,17 @@ describe("sessionUserSchema", () => {
 	};
 
 	it("accepts a user with no avatar", () => {
-		expect(Schema.decodeUnknownSync(sessionUserSchema)(sam)).toEqual(sam);
+		expect(Schema.decodeSync(sessionUserSchema)(sam)).toEqual(sam);
 	});
 
 	it("rejects a user without a usable id", () => {
-		expect(
-			Result.isSuccess(Schema.decodeUnknownResult(sessionUserSchema)({ ...sam, id: "1" })),
-		).toBe(false);
+		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, id: "1" }))).toBe(
+			false,
+		);
 	});
 
 	it.each(["sam+tag@example.com", "sam@sub.example.com"])("accepts email %s", (email) => {
-		expect(Result.isSuccess(Schema.decodeUnknownResult(sessionUserSchema)({ ...sam, email }))).toBe(
-			true,
-		);
+		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
 	});
 
 	it.each([
@@ -64,9 +62,7 @@ describe("sessionUserSchema", () => {
 		"sam@example.c",
 		" sam@example.com",
 	])("rejects email %s", (email) => {
-		expect(Result.isFailure(Schema.decodeUnknownResult(sessionUserSchema)({ ...sam, email }))).toBe(
-			true,
-		);
+		expect(Result.isFailure(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
 	});
 });
 
@@ -78,7 +74,7 @@ describe("timestamp format", () => {
 		"2026-09-15T12:00:00+05:30",
 		"2026-09-15T12:00:00-04:00",
 	])("preserves timestamp string %s", (timestamp) => {
-		expect(Schema.decodeUnknownSync(isoTimestampSchema)(timestamp)).toBe(timestamp);
+		expect(Schema.decodeSync(isoTimestampSchema)(timestamp)).toBe(timestamp);
 	});
 	it.each([
 		"2026-09-15T12:00Z",
@@ -95,7 +91,7 @@ describe("timestamp format", () => {
 		"2026-01-01T00:00:00",
 		"2026-01-01t00:00:00z",
 	])("rejects timestamp %s", (timestamp) => {
-		expect(Result.isFailure(Schema.decodeUnknownResult(isoTimestampSchema)(timestamp))).toBe(true);
+		expect(Result.isFailure(Schema.decodeResult(isoTimestampSchema)(timestamp))).toBe(true);
 	});
 });
 
@@ -106,7 +102,7 @@ describe("model trial numbers", () => {
 		expect(Schema.decodeUnknownSync(trialSpeedSchema)({ ...speed, extra: true })).toEqual(speed);
 		expect(Schema.decodeUnknownSync(trialAccuracySchema)(accuracy)).toEqual(accuracy);
 		expect(
-			Schema.decodeUnknownSync(trialCaseResultSchema)({
+			Schema.decodeSync(trialCaseResultSchema)({
 				name: "case",
 				passed: 0,
 				attempts: Number.MAX_SAFE_INTEGER,

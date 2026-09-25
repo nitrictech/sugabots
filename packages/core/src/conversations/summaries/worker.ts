@@ -2,7 +2,7 @@ import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sug
 import { Cause, Duration, Effect, Exit, type Layer, Ref, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
-import { retryUnusable, UnusableAnswer } from "../turns/answer.ts";
+import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "../turns/model.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
 import type { ClaimedSummary, PreparedSummary, SummaryStore } from "./store.ts";
@@ -116,7 +116,7 @@ const generate = (
 	).pipe(
 		Effect.timeoutOrElse({
 			duration: SUMMARY_TIMEOUT,
-			orElse: () => Effect.fail(new Error("Thread summary timed out")),
+			orElse: () => Effect.fail(new AnswerTimedOut({ message: "Thread summary timed out" })),
 		}),
 		// The timeout is inside, so each attempt gets its own two minutes rather
 		// than the three of them sharing one.

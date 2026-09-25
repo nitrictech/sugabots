@@ -2,7 +2,7 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import type { TurnModel } from "../turns/model.ts";
+import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
 import type { ClaimedSummary, PreparedSummary, SummaryStore } from "./store.ts";
 import { runClaimedSummary, type SummaryWorkerOptions, summaryWorkerLayer } from "./worker.ts";
 
@@ -159,7 +159,9 @@ describe("runClaimedSummary", () => {
 
 	it("does not re-ask a provider that is down, and leaves that to the job", async () => {
 		const store = summaryStore();
-		const stream = vi.fn(() => Effect.fail(new Error("provider unavailable")));
+		const stream = vi.fn(() =>
+			Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+		);
 
 		await runWithServices(runClaimedSummary(claimed, { store, model: { stream } }));
 
@@ -290,7 +292,7 @@ describe("the summary worker", () => {
 function summaryStore(): SummaryStore {
 	return {
 		requeueInterrupted: vi.fn(() => Effect.void),
-		claimNext: vi.fn(() => Effect.succeed(undefined)),
+		claimNext: vi.fn(() => Effect.undefined),
 		releaseFailedClaim: vi.fn(() => Effect.void),
 		prepare: vi.fn(() => Effect.succeed(prepared)),
 		complete: vi.fn(() => Effect.void),
@@ -301,7 +303,7 @@ function summaryStore(): SummaryStore {
 
 function unusedModel(): TurnModel {
 	return {
-		stream: () => Effect.fail(new Error("unused model")),
+		stream: () => Effect.fail(new ModelRequestFailed({ message: "unused model" })),
 	};
 }
 

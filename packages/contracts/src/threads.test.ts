@@ -37,7 +37,7 @@ describe("thread contracts", () => {
 			limit: MAX_THREAD_HISTORY_LIMIT,
 		});
 		expect(
-			Schema.decodeUnknownResult(threadHistoryQuerySchema)({
+			Schema.decodeResult(threadHistoryQuerySchema)({
 				limit: String(MAX_THREAD_HISTORY_LIMIT + 1),
 			})._tag,
 		).toBe("Failure");
@@ -67,7 +67,7 @@ describe("thread contracts", () => {
 
 	it("keeps person and agent participants distinct", () => {
 		expect(
-			Schema.decodeUnknownSync(threadParticipantSchema)({
+			Schema.decodeSync(threadParticipantSchema)({
 				kind: "person",
 				id: ID,
 				name: "Sam",
@@ -183,11 +183,9 @@ describe("thread contracts", () => {
 	});
 
 	it("trims message and summary content before validating", () => {
-		expect(Schema.decodeUnknownSync(newMessageSchema)({ id: ID, message: " hi " }).message).toBe(
-			"hi",
-		);
+		expect(Schema.decodeSync(newMessageSchema)({ id: ID, message: " hi " }).message).toBe("hi");
 		expect(
-			Schema.decodeUnknownSync(threadSummarySchema)({
+			Schema.decodeSync(threadSummarySchema)({
 				content: " ready ",
 				sourceMessageId: ID,
 				updatedAt: "2026-09-11T00:00:00Z",
@@ -197,11 +195,11 @@ describe("thread contracts", () => {
 
 	it("validates nested JSON", () => {
 		const nested = { values: [1, true, null, { text: "kept" }] };
-		expect(Schema.decodeUnknownSync(jsonValueSchema)([nested])).toEqual([nested]);
-		expect(Schema.decodeUnknownSync(jsonValueSchema)({ nested })).toEqual({ nested });
+		expect(Schema.decodeSync(jsonValueSchema)([nested])).toEqual([nested]);
+		expect(Schema.decodeSync(jsonValueSchema)({ nested })).toEqual({ nested });
 	});
 
 	it.each([undefined, { nested: [NaN] }, new Date(0)])("rejects non-JSON values: %s", (value) => {
-		expect(Schema.decodeUnknownResult(jsonValueSchema)(value)._tag).toBe("Failure");
+		expect(Schema.decodeResult(jsonValueSchema)(value)._tag).toBe("Failure");
 	});
 });

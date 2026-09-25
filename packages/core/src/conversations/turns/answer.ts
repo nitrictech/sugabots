@@ -25,6 +25,11 @@ export class UnusableAnswer extends Data.TaggedError("UnusableAnswer")<{
 	}
 }
 
+/** The model did not finish answering within the time allowed. */
+export class AnswerTimedOut extends Data.TaggedError("AnswerTimedOut")<{
+	readonly message: string;
+}> {}
+
 /**
  * Three attempts, a moment apart.
  *

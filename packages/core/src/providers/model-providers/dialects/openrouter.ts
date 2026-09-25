@@ -1,5 +1,5 @@
 import type { ProviderModelCapability } from "@sugabots/contracts";
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	dataListing,
 	discoveredModel,
@@ -10,7 +10,7 @@ import { openaiCompatible } from "./openai-compatible.ts";
 
 const names = Schema.Array(Schema.String).pipe(
 	Schema.withDecodingDefault(Effect.succeed([])),
-	Schema.catchDecoding(() => Effect.succeed(Option.some([]))),
+	Schema.catchDecoding(() => Effect.succeedSome([])),
 );
 
 /**
@@ -26,19 +26,19 @@ export const openrouter: ProviderDialect = {
 	model: Schema.Struct({
 		id: Schema.String,
 		name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 		architecture: Schema.Struct({ input_modalities: names, output_modalities: names }).pipe(
 			Schema.withDecodingDefaultType(
 				Effect.succeed({ input_modalities: [], output_modalities: [] }),
 			),
 			Schema.catchDecoding(() =>
-				Effect.succeed(Option.some({ input_modalities: [], output_modalities: [] })),
+				Effect.succeedSome({ input_modalities: [], output_modalities: [] }),
 			),
 		),
 		supported_parameters: names,
 		context_length: Schema.optional(Schema.Finite).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {

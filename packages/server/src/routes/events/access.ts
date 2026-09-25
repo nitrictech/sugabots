@@ -52,7 +52,7 @@ export function channelAccess(
 /** Grants nothing. The default, so a stream route is never open by omission. */
 export function closedChannelAccess(): ChannelAccess {
 	return {
-		workspace: () => Effect.succeed(undefined),
-		thread: () => Effect.succeed(undefined),
+		workspace: () => Effect.undefined,
+		thread: () => Effect.undefined,
 	};
 }

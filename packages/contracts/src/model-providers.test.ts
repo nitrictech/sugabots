@@ -51,12 +51,12 @@ describe("provider URL security", () => {
 	it.each(["http://localhost:11434/v1", "https://models.example/v1", "HTTP://127.0.0.1:8080"])(
 		"leaves the network policy to the API: %s",
 		(baseUrl) => {
-			expect(Schema.decodeUnknownSync(providerUrlSchema)(baseUrl)).toBe(baseUrl);
+			expect(Schema.decodeSync(providerUrlSchema)(baseUrl)).toBe(baseUrl);
 		},
 	);
 
 	it("trims URLs without normalizing their spelling or path", () => {
-		expect(Schema.decodeUnknownSync(providerUrlSchema)("  https://Models.example:443/v1  ")).toBe(
+		expect(Schema.decodeSync(providerUrlSchema)("  https://Models.example:443/v1  ")).toBe(
 			"https://Models.example:443/v1",
 		);
 	});
@@ -70,7 +70,7 @@ describe("provider URL security", () => {
 		"https://models.example/v1#fragment",
 		"https://models.example/v1#",
 	])("rejects an unsafe provider URL: %s", (baseUrl) => {
-		expect(() => Schema.decodeUnknownSync(providerUrlSchema)(baseUrl)).toThrow();
+		expect(() => Schema.decodeSync(providerUrlSchema)(baseUrl)).toThrow();
 	});
 });
 
@@ -87,9 +87,7 @@ describe("provider headers", () => {
 		"Sec-Custom",
 		" Origin ",
 	])("rejects reserved custom header %s", (name) => {
-		expect(() =>
-			Schema.decodeUnknownSync(providerHeaderSchema)({ name, value: "secret" }),
-		).toThrow();
+		expect(() => Schema.decodeSync(providerHeaderSchema)({ name, value: "secret" })).toThrow();
 	});
 
 	it("trims names but preserves values and strips unknown keys", () => {
@@ -110,11 +108,11 @@ describe("provider headers", () => {
 		{ name: "X-Test", value: "one\ntwo" },
 		{ name: "X-Test", value: "x".repeat(2049) },
 	])("rejects invalid headers: %j", (header) => {
-		expect(() => Schema.decodeUnknownSync(providerHeaderSchema)(header)).toThrow();
+		expect(() => Schema.decodeSync(providerHeaderSchema)(header)).toThrow();
 	});
 
 	it("reports every case-insensitive duplicate at its trimmed name's index", () => {
-		const result = Schema.decodeUnknownResult(modelProviderUpdateSchema)({
+		const result = Schema.decodeResult(modelProviderUpdateSchema)({
 			customHeaders: [
 				{ name: "X-Workspace", value: "one" },
 				{ name: " x-workspace ", value: "two" },
@@ -179,7 +177,7 @@ describe("partial updates", () => {
 		expect(() =>
 			decode({ name: "Server", url: customProvider.baseUrl, secretHeader: "Host" }),
 		).toThrow();
-		expect(Schema.decodeUnknownSync(connectionUpdateSchema)({ secretHeader: null })).toEqual({
+		expect(Schema.decodeSync(connectionUpdateSchema)({ secretHeader: null })).toEqual({
 			secretHeader: null,
 		});
 	});
@@ -217,7 +215,7 @@ describe("provider models", () => {
 		"rejects invalid context length %s",
 		(contextLength) => {
 			expect(() =>
-				Schema.decodeUnknownSync(newProviderModelSchema)({ modelId: "model", contextLength }),
+				Schema.decodeSync(newProviderModelSchema)({ modelId: "model", contextLength }),
 			).toThrow();
 		},
 	);

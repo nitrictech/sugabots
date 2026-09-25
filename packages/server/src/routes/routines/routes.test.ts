@@ -28,16 +28,16 @@ function webhookApp() {
 	);
 	const routines: RoutineStore = {
 		list: () => Effect.succeed([]),
-		get: () => Effect.succeed(undefined),
+		get: () => Effect.undefined,
 		create: () => Effect.die("not used"),
 		update: () => Effect.die("not used"),
 		remove: () => Effect.void,
 		acceptTrigger,
-		listExecutions: () => Effect.succeed(undefined),
-		claimNext: () => Effect.succeed(undefined),
+		listExecutions: () => Effect.undefined,
+		claimNext: () => Effect.undefined,
 		settleThread: () => Effect.succeed(false),
 		reconcileRunning: () => Effect.void,
-		processNextDue: () => Effect.succeed(undefined),
+		processNextDue: () => Effect.undefined,
 		rotateSecret: () => Effect.die("not used"),
 		acceptWebhook,
 	};

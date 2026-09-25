@@ -113,8 +113,8 @@ describe("authorisation", () => {
 	it("answers 404, not 403, for a resource the caller cannot see", async () => {
 		// Telling the caller a thread exists but is not theirs is itself a leak.
 		const { app } = server({
-			workspace: () => Effect.succeed(undefined),
-			thread: () => Effect.succeed(undefined),
+			workspace: () => Effect.undefined,
+			thread: () => Effect.undefined,
 		});
 
 		const response = await app.request(`/threads/${THREAD}/events`, {
@@ -128,7 +128,7 @@ describe("authorisation", () => {
 		// A thread's events publish on its root thread's channel, so the id in the
 		// path and the channel listened to are routinely different.
 		const { app, bus } = server({
-			workspace: () => Effect.succeed(undefined),
+			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),
 		});
 
@@ -244,7 +244,7 @@ describe("the stream", () => {
 	it.each(["revoked", "changed"])("ends when thread access is %s", async (change) => {
 		let channel: "thread:root" | "thread:other" | undefined = "thread:root";
 		const { app, bus } = server({
-			workspace: () => Effect.succeed(undefined),
+			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed(channel),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);

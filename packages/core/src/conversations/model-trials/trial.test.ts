@@ -1,16 +1,16 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
-import type { TurnModel, TurnModelInput } from "../turns/model.ts";
+import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "../turns/model.ts";
 import { CASES } from "./cases.ts";
 import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial } from "./trial.ts";
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
-function scripted(answer: (input: TurnModelInput) => string | Error): TurnModel {
+function scripted(answer: (input: TurnModelInput) => string | ModelRequestFailed): TurnModel {
 	return {
 		stream: (input) => {
 			const next = answer(input);
-			return next instanceof Error
+			return next instanceof ModelRequestFailed
 				? Effect.fail(next)
 				: Effect.succeed({
 						text: (async function* () {
@@ -77,7 +77,7 @@ describe("trying a model on the facilitator", () => {
 
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
-			scripted(() => new Error("provider unavailable")),
+			scripted(() => new ModelRequestFailed({ message: "provider unavailable" })),
 			"facilitate",
 		);
 

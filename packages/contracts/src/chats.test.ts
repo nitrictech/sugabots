@@ -12,9 +12,9 @@ const ID = "0199a3a0-0000-7000-8000-000000000001";
 
 describe("chat contracts", () => {
 	it("bounds pages", () => {
-		expect(Schema.decodeUnknownSync(chatPageQuerySchema)({})).toEqual({ limit: 50 });
+		expect(Schema.decodeSync(chatPageQuerySchema)({})).toEqual({ limit: 50 });
 		expect(
-			Schema.decodeUnknownResult(chatPageQuerySchema)({
+			Schema.decodeResult(chatPageQuerySchema)({
 				limit: String(MAX_CHAT_PAGE_LIMIT + 1),
 			})._tag,
 		).toBe("Failure");
@@ -44,7 +44,7 @@ describe("chat contracts", () => {
 
 	it("accepts an inbound collaboration in the Chat timeline", () => {
 		expect(
-			Schema.decodeUnknownSync(chatMessagesPageSchema)({
+			Schema.decodeSync(chatMessagesPageSchema)({
 				items: [
 					{
 						kind: "collaboration",
@@ -68,7 +68,7 @@ describe("chat contracts", () => {
 
 	it("accepts a Routine run in the Chat timeline", () => {
 		expect(
-			Schema.decodeUnknownSync(chatMessagesPageSchema)({
+			Schema.decodeSync(chatMessagesPageSchema)({
 				items: [
 					{
 						kind: "routine",

@@ -62,7 +62,7 @@ export function connectionRoutes({
 				oauth.providers ??
 				oauthProviders({
 					connections,
-					run: (effect) => Effect.runPromise(Effect.provideContext(effect, database)),
+					run: Effect.runPromiseWith(database),
 					redirectUrl: oauth.redirectUrl,
 				});
 			const operations = connectionOperations({

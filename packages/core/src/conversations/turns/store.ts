@@ -348,8 +348,9 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 					return prepared;
 				}),
 			).pipe(
-				Effect.flatMap((result) =>
-					result instanceof JobNotRunnable ? Effect.fail(result) : Effect.succeed(result),
+				Effect.filterOrElse(
+					(result): result is PreparedTurn => !(result instanceof JobNotRunnable),
+					Effect.fail,
 				),
 			),
 

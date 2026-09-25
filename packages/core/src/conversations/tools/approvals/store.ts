@@ -60,7 +60,7 @@ export interface ToolApprovalStore {
 	responsesForTurn(
 		turnId: string,
 		approvalIds: readonly string[],
-	): Effect.Effect<ToolModelMessage, Error, Database>;
+	): Effect.Effect<ToolModelMessage, ToolApprovalsIncomplete, Database>;
 	beginExecution(input: {
 		threadId: string;
 		messageId: string;
@@ -73,7 +73,7 @@ export interface ToolApprovalStore {
 		connectionRevision: number;
 		remoteToolName: string;
 		automaticallyAllowed: boolean;
-	}): Effect.Effect<ToolCallPart, Error, Database>;
+	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
 	decide(input: {
 		workspaceId: string;
 		podId: string;
@@ -96,6 +96,12 @@ export interface ToolApprovalStore {
 export class ToolApprovalNotFound extends Data.TaggedError("ToolApprovalNotFound") {}
 export class ToolApprovalConflict extends Data.TaggedError("ToolApprovalConflict") {}
 export class ToolApprovalForbidden extends Data.TaggedError("ToolApprovalForbidden") {}
+export class ToolApprovalsIncomplete extends Data.TaggedError("ToolApprovalsIncomplete")<{
+	readonly message: string;
+}> {}
+export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused")<{
+	readonly message: string;
+}> {}
 
 export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalStore {
 	return {
@@ -170,7 +176,9 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							(row) => !row.approvalId || !expected.has(row.approvalId) || row.status === "pending",
 						)
 					) {
-						return Effect.fail(new Error("Turn approval decisions are incomplete"));
+						return Effect.fail(
+							new ToolApprovalsIncomplete({ message: "Turn approval decisions are incomplete" }),
+						);
 					}
 					return Effect.succeed({
 						role: "tool" as const,
@@ -209,7 +217,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 								.limit(1),
 						);
 						if (execution?.state !== "running" || execution.pendingTerminalState) {
-							return yield* Effect.fail(new Error("Routine execution has ended"));
+							return yield* new ToolExecutionRefused({ message: "Routine execution has ended" });
 						}
 					}
 					const [scope] = yield* query((db) =>
@@ -233,7 +241,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							.limit(1)
 							.for("update"),
 					);
-					if (!scope) return yield* Effect.fail(new Error("Turn is not running"));
+					if (!scope) return yield* new ToolExecutionRefused({ message: "Turn is not running" });
 					const [currentConnection] = yield* query((db) =>
 						db
 							.select({ revision: connection.configurationRevision })
@@ -252,7 +260,9 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							.for("update"),
 					);
 					if (!currentConnection) {
-						return yield* Effect.fail(new Error("Connection configuration changed after approval"));
+						return yield* new ToolExecutionRefused({
+							message: "Connection configuration changed after approval",
+						});
 					}
 					const [existing] = yield* query((db) =>
 						db
@@ -269,7 +279,9 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					);
 					if (existing) {
 						if (existing.approvalStatus !== "allowed" || existing.status !== "awaiting_approval") {
-							return yield* Effect.fail(new Error("Tool call is not approved for execution"));
+							return yield* new ToolExecutionRefused({
+								message: "Tool call is not approved for execution",
+							});
 						}
 						const [running] = yield* query((db) =>
 							db
@@ -291,7 +303,9 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 								.returning(),
 						);
 						if (!running)
-							return yield* Effect.fail(new Error("Tool call execution was already claimed"));
+							return yield* new ToolExecutionRefused({
+								message: "Tool call execution was already claimed",
+							});
 						yield* markMutationStarted(running.turnId);
 						const part = toToolCallPart(running);
 						yield* publishEvents([
@@ -301,7 +315,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					}
 
 					if (!input.automaticallyAllowed) {
-						return yield* Effect.fail(new Error("Tool call has no approval record"));
+						return yield* new ToolExecutionRefused({ message: "Tool call has no approval record" });
 					}
 					// Locked and re-read inside the settling transaction, and its
 					// grantor's authority asked for again: a rule revoked, or a
@@ -325,15 +339,17 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							.for("update"),
 					);
 					if (!currentRule) {
-						return yield* Effect.fail(new Error("Tool call has no current approval rule"));
+						return yield* new ToolExecutionRefused({
+							message: "Tool call has no current approval rule",
+						});
 					}
 					const grantor = yield* query((db) =>
 						podStandingFor(db, scope.podId, currentRule.grantorId),
 					);
 					if (!grantor?.may("approval.alwaysAllow")) {
-						return yield* Effect.fail(
-							new Error("The standing approval's grantor is no longer allowed to give one"),
-						);
+						return yield* new ToolExecutionRefused({
+							message: "The standing approval's grantor is no longer allowed to give one",
+						});
 					}
 					const [created] = yield* query((db) =>
 						db
@@ -356,7 +372,8 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							})
 							.returning(),
 					);
-					if (!created) return yield* Effect.fail(new Error("Tool call insert returned no row"));
+					if (!created)
+						return yield* new ToolExecutionRefused({ message: "Tool call insert returned no row" });
 					yield* markMutationStarted(created.turnId);
 					const part = toToolCallPart(created);
 					yield* publishEvents([
@@ -595,8 +612,10 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 /** No connection approvals for workers that are not offered connection tools. */
 export const noToolApprovalStore: ToolApprovalStore = {
 	allowedToolKeys: () => Effect.succeed(new Set()),
-	responsesForTurn: () => Effect.fail(new Error("Tool approvals are not configured")),
-	beginExecution: () => Effect.fail(new Error("Tool approvals are not configured")),
+	responsesForTurn: () =>
+		Effect.fail(new ToolApprovalsIncomplete({ message: "Tool approvals are not configured" })),
+	beginExecution: () =>
+		Effect.fail(new ToolExecutionRefused({ message: "Tool approvals are not configured" })),
 	decide: () => Effect.fail(new ToolApprovalNotFound()),
 	listRules: () => Effect.succeed([]),
 	revokeRule: () => Effect.succeed(false),

@@ -1,12 +1,14 @@
 import { InternalServerError, Unauthorized } from "@sugabots/contracts/http";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useSession } from "@/lib/session.ts";
 import { sam } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
+
+class Unreachable extends Data.TaggedError("Unreachable") {}
 
 beforeEach(() => {
 	client.api.me.mockReturnValue(Effect.succeed(sam));
@@ -67,8 +69,8 @@ it("rides out the API restarting, without showing a dead end first", async () =>
 	// What a save in development looks like from the browser: the request never
 	// reaches the API, twice, and then it is back.
 	client.api.me
-		.mockReturnValueOnce(Effect.fail(new TypeError("Failed to fetch")))
-		.mockReturnValueOnce(Effect.fail(new TypeError("Failed to fetch")))
+		.mockReturnValueOnce(Effect.fail(new Unreachable()))
+		.mockReturnValueOnce(Effect.fail(new Unreachable()))
 		.mockReturnValue(Effect.succeed(sam));
 
 	const { result } = renderHook(useSession);
@@ -79,10 +81,12 @@ it("rides out the API restarting, without showing a dead end first", async () =>
 });
 
 it("says so once the API has stopped answering for good", async () => {
-	client.api.me.mockReturnValue(Effect.fail(new TypeError("Failed to fetch")));
+	client.api.me.mockReturnValue(Effect.fail(new Unreachable()));
 
 	const { result } = renderHook(useSession);
 
-	await waitFor(() => expect(result.current.error).toBeInstanceOf(TypeError), { timeout: 15_000 });
+	await waitFor(() => expect(result.current.error).toBeInstanceOf(Unreachable), {
+		timeout: 15_000,
+	});
 	expect(result.current.user).toBeUndefined();
 }, 20_000);
