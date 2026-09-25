@@ -84,6 +84,10 @@ export function ChatgptSignIn({ provider }: { provider: ModelProvider }) {
 	);
 }
 
+/** Where OpenAI's terms say an account may not be shared. */
+const OPENAI_ACCOUNT_SHARING_TERMS =
+	"https://openai.com/policies/terms-of-use/#registration-and-access";
+
 /**
  * Said before anyone signs in: a ChatGPT plan is one person's, and every agent
  * in the workspace would run on it.
@@ -118,7 +122,11 @@ function SingleUserWarning({
 				<DialogFormBody>
 					<DialogDescription className="m-0 text-base text-muted-foreground">
 						A ChatGPT plan is for one person. Only connect yours if nobody else uses this Sugabots
-						install.
+						install. See{" "}
+						<a href={OPENAI_ACCOUNT_SHARING_TERMS} target="_blank" rel="noreferrer">
+							OpenAI's terms
+						</a>
+						.
 					</DialogDescription>
 				</DialogFormBody>
 				<DialogFormFooter>

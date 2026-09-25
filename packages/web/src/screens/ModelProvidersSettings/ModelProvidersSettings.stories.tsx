@@ -221,6 +221,10 @@ export const ChatgptSignIn = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with ChatGPT" }));
 		const warning = within(await screen.findByRole("dialog"));
 		await expect(warning.getByText("For single-user installs only")).toBeVisible();
+		await expect(warning.getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
+			"href",
+			"https://openai.com/policies/terms-of-use/#registration-and-access",
+		);
 		await userEvent.click(warning.getByRole("button", { name: "I understand, sign in" }));
 		await expect(await canvas.findByText("ABCD-1234")).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Copy code" })).toBeVisible();
