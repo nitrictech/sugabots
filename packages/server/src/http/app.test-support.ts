@@ -246,6 +246,7 @@ const emptyStores: Stores = {
 	searchProviders: emptySearchProviderStore,
 	sandboxProviders: emptySandboxProviderStore,
 	podSandboxes: {
+		applyAllowedHosts: () => Effect.succeed({ applied: 0, notApplied: 0 }),
 		status: () =>
 			Effect.succeed({
 				state: "none",

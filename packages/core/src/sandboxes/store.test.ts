@@ -27,6 +27,7 @@ function fakeProvider() {
 	const sandboxes = new Set<string>();
 	const created: string[] = [];
 	const paused = new Set<string>();
+	const allowListsSet: Array<{ id: string; hosts: readonly string[] }> = [];
 	const handle = (id: string): Sandbox.Handle => ({
 		id,
 		exec: () =>
@@ -37,6 +38,10 @@ function fakeProvider() {
 			}),
 		readFile: () => Effect.succeed(new Uint8Array()),
 		writeFile: () => Effect.void,
+		setAllowedHosts: (hosts) =>
+			Effect.sync(() => {
+				allowListsSet.push({ id, hosts });
+			}),
 		disconnect: Effect.void,
 	});
 	const provider: Sandbox.Interface = {
@@ -69,7 +74,13 @@ function fakeProvider() {
 				? Effect.succeed(handle(id))
 				: Effect.fail(new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })),
 	};
-	return { provider, created, paused, lose: (id: string) => sandboxes.delete(id) };
+	return {
+		provider,
+		created,
+		paused,
+		allowListsSet,
+		lose: (id: string) => sandboxes.delete(id),
+	};
 }
 
 describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", () => {
@@ -307,6 +318,37 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 		await usedOnce();
 
 		expect((await lease()).resumedAfterPause).toBeUndefined();
+	});
+
+	it("gives running sandboxes a changed allow list", async () => {
+		const id = await usedOnce();
+		configured = { ...connection(), allowedHosts: { kind: "only", hosts: ["example.com"] } };
+
+		expect(await runOnPostgres(store.applyAllowedHosts(scope.workspaceId))).toEqual({
+			applied: 1,
+			notApplied: 0,
+		});
+		expect(fake.allowListsSet).toContainEqual({ id, hosts: ["example.com"] });
+	});
+
+	it("leaves a change to anywhere for new sandboxes", async () => {
+		await usedOnce();
+		configured = { ...connection(), allowedHosts: { kind: "any" } };
+
+		expect(await runOnPostgres(store.applyAllowedHosts(scope.workspaceId))).toEqual({
+			applied: 0,
+			notApplied: 1,
+		});
+		expect(fake.allowListsSet).toHaveLength(0);
+	});
+
+	it("gives a paused sandbox the current allow list when it wakes", async () => {
+		const id = await usedOnce();
+		await runOnPostgres(store.pauseIdle(0));
+		configured = { ...connection(), allowedHosts: { kind: "only", hosts: ["pypi.org"] } };
+
+		await lease();
+		expect(fake.allowListsSet).toContainEqual({ id, hosts: ["pypi.org"] });
 	});
 
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {

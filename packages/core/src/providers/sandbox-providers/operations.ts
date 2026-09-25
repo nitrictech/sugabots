@@ -8,6 +8,7 @@ import { sandboxProviderPreset } from "@sugabots/contracts";
 import { Data, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Sandbox } from "../../sandboxes/sandbox.ts";
+import type { PodSandboxStore } from "../../sandboxes/store.ts";
 import type { EgressUrlValidator } from "../network/egress.ts";
 import type { SandboxProviderStore } from "./store.ts";
 
@@ -43,12 +44,15 @@ export interface SandboxProviderOperationsOptions {
 	validateProviderUrl: EgressUrlValidator;
 	/** Whether this installation lets a workspace choose `container` isolation. */
 	allowsUnisolated: boolean;
+	/** So a change to the allowed hosts reaches sandboxes already running. */
+	podSandboxes?: Pick<PodSandboxStore, "applyAllowedHosts">;
 }
 
 export function sandboxProviderOperations({
 	providers,
 	validateProviderUrl,
 	allowsUnisolated,
+	podSandboxes,
 }: SandboxProviderOperationsOptions) {
 	const requireProvider = (workspaceId: string) =>
 		Effect.filterOrFail(
@@ -97,6 +101,9 @@ export function sandboxProviderOperations({
 					return yield* new SandboxProviderApiKeyRequired();
 				}
 				const updated = yield* providers.update(workspaceId, input);
+				if (input.allowedHosts && podSandboxes) {
+					yield* podSandboxes.applyAllowedHosts(workspaceId);
+				}
 				return updated ?? (yield* requireProvider(workspaceId));
 			}),
 
