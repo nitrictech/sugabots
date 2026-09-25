@@ -384,7 +384,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			}),
 			{ type: "text", text: " Everything is fine." },
 		]);
-		const promptMessages = modelPrompt(next.context).messages;
+		const promptMessages = modelPrompt(next.context, { now: new Date() }).messages;
 		expect(promptMessages).toContainEqual(
 			expect.objectContaining({
 				role: "user",

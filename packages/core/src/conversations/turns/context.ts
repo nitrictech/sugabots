@@ -1,4 +1,6 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
+import { WEB_FETCH_TOOL } from "../tools/web-fetch/tool.ts";
+import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnPromptMessage } from "./model.ts";
 import type { TurnContext } from "./store.ts";
 
@@ -17,13 +19,15 @@ export interface ModelPrompt {
  * trailing instruction after the history, where a change costs nothing.
  */
 export interface PromptOptions {
+	/** When the turn started, so the agent can tell what it remembers may be out of date. */
+	now: Date;
 	/** The built-in tools on offer this turn, by key, so the agent is told it has them. */
 	builtInTools?: readonly string[];
 	/** The connection tools on offer, keyed `handle__tool` (ADR 006). */
 	connectionTools?: readonly string[];
 }
 
-export function modelPrompt(context: TurnContext, options: PromptOptions = {}): ModelPrompt {
+export function modelPrompt(context: TurnContext, options: PromptOptions): ModelPrompt {
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
@@ -91,7 +95,7 @@ function authoredMessage(message: Message, currentAgentId: string): TurnPromptMe
 }
 
 /** The part of the prompt that changes from turn to turn, kept at the end. */
-export function turnInstruction(context: TurnContext, options: PromptOptions = {}): string {
+export function turnInstruction(context: TurnContext, options: PromptOptions): string {
 	const participants = context.participants
 		.map((participant) => `${participant.name} (@${participant.handle}, ${participant.kind})`)
 		.join(", ");
@@ -116,6 +120,7 @@ export function turnInstruction(context: TurnContext, options: PromptOptions = {
 					.filter(Boolean)
 					.join("\n")
 			: undefined,
+		groundingInstruction(options),
 		options.builtInTools?.length
 			? [
 					`Built-in tools you can call: ${options.builtInTools.join(", ")}.`,
@@ -132,6 +137,24 @@ export function turnInstruction(context: TurnContext, options: PromptOptions = {
 	]
 		.filter(Boolean)
 		.join("\n\n");
+}
+
+/**
+ * Keep the agent grounded in the present. Each turn lets the agent know the current date and what tools it can use to verify information.
+ */
+function groundingInstruction({ now, builtInTools = [] }: PromptOptions): string {
+	const canSearch = builtInTools.includes(WEB_SEARCH_TOOL);
+	const canFetch = builtInTools.includes(WEB_FETCH_TOOL);
+	return [
+		`Today is ${now.toISOString().slice(0, "YYYY-MM-DD".length)} (UTC).`,
+		"Treat what you remember about the world as a lead to check, not as an answer: what you learned in training goes out of date, most of all businesses and places, recommendations, opening hours, prices, people's roles, news, and software versions.",
+		canSearch
+			? "Before stating a fact that a source could confirm, look it up with web_search, read what matters with web_fetch, and name the URL each fact came from. If you are unsure whether to look something up, look it up. When what you find conflicts with what you remember, go with what you found; when you find nothing, say so rather than answering from memory as if it were checked. You need not look anything up when the task only works with what is already in the thread (writing, rewriting, translating, summarising, or reasoning about something shared) or asks for no facts."
+			: canFetch
+				? "You cannot search the web, only read a page whose address you have, so read any page that would confirm a fact before stating it. Say which facts you could not check and that they may be out of date, and suggest the person share a link or ask a workspace admin to enable web search."
+				: "You cannot look anything up, so say which facts in your answer you could not check and that they may be out of date.",
+		"Only give a URL that a person shared or a tool returned in this thread; never make one up, including map and search links.",
+	].join(" ");
 }
 
 function whyYou(context: TurnContext): string {

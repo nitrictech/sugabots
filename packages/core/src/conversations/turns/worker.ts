@@ -1,6 +1,6 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolSet } from "ai";
-import { Cause, Duration, Effect, Exit, type Layer, Ref, Schedule, Semaphore } from "effect";
+import { Cause, Clock, Duration, Effect, Exit, type Layer, Ref, Schedule, Semaphore } from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
@@ -364,6 +364,7 @@ const streamReply = (
 			});
 
 			const freshPrompt = modelPrompt(prepared.context, {
+				now: new Date(yield* Clock.currentTimeMillis),
 				builtInTools: Object.keys(builtIn),
 				connectionTools: Object.keys(connections.tools),
 			});
