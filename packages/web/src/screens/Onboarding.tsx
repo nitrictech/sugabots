@@ -8,7 +8,7 @@ import { useCompleteOnboarding } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
 import { useCreateWorkspace, useUpdateWorkspace, useWorkspace } from "@/lib/workspace.ts";
-import { ModelProvidersSettings } from "@/screens/ModelProvidersSettings.tsx";
+import { ModelProvidersSettings } from "@/screens/ModelProvidersSettings/index.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";

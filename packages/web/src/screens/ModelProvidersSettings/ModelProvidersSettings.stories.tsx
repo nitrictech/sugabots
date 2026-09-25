@@ -4,7 +4,7 @@ import { delay, HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { ModelProvidersSettings } from "./ModelProvidersSettings.tsx";
+import { ModelProvidersSettings } from "./index.tsx";
 
 const workspace = {
 	id: "0199a3a0-0000-7000-8000-000000000001",

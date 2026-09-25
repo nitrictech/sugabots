@@ -20,7 +20,7 @@ import { Button } from "@/ui/button.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { SurfaceColumn, SurfaceHeader, SurfaceTitle } from "@/ui/surface.tsx";
 import { BuiltInAgentsSettings } from "./BuiltInAgentsSettings.tsx";
-import { ModelProvidersSettings } from "./ModelProvidersSettings.tsx";
+import { ModelProvidersSettings } from "./ModelProvidersSettings/index.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
