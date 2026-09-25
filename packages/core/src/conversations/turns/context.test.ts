@@ -96,7 +96,7 @@ describe("modelPrompt", () => {
 		);
 
 		const searching = instruction(["web_fetch", "web_search"]);
-		expect(searching).toContain("Today's date is Friday, 25 September 2026 (UTC).");
+		expect(searching).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
 		expect(searching).toContain("You don't know the person's timezone");
 		expect(searching).not.toContain("You cannot search the web");
 
@@ -105,7 +105,7 @@ describe("modelPrompt", () => {
 		expect(fetchingOnly).toContain("a workspace admin can enable web search");
 
 		const noTools = instruction([]);
-		expect(noTools).toContain("Today's date is Friday, 25 September 2026 (UTC).");
+		expect(noTools).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
 		expect(noTools).toContain("You cannot search the web");
 	});
 

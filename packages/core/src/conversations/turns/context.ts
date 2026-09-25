@@ -141,10 +141,10 @@ function environmentInstruction(environment: TurnEnvironment): string[] {
 	].filter((section): section is string => section !== undefined);
 }
 
-/** Today's date, so the agent doesn't assume it's still its training cutoff. */
+/** The current date and time, so the agent doesn't assume it's still its training cutoff. */
 function todayInstruction(now: Date): string {
 	return [
-		`Today's date is ${currentDate.format(now)} (UTC).`,
+		`Current time: ${currentDate.format(now)}, ${now.toISOString().slice(11, 16)} UTC.`,
 		'You don\'t know the person\'s timezone, so their date may differ from this. If an answer depends on their local date or time ("today", "tonight", whether somewhere is open now), ask or say what you assumed.',
 	].join(" ");
 }
