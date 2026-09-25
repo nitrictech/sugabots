@@ -1,4 +1,8 @@
-import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
+import type {
+	ToolApprovalDecision,
+	ToolApprovalSummary,
+	ToolCallPart,
+} from "@sugabots/contracts";
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
@@ -22,6 +26,19 @@ import type { TurnSignals } from "../../turns/signals.ts";
 import type { ApprovalDecision } from "../../turns/turn.workflow.ts";
 import { boundedJson } from "../calls/store.ts";
 
+/**
+ * What an approval is for: a tool on one of the pod's connections, at the
+ * configuration it was approved under, or one of the product's own tools.
+ */
+export type ApprovalTarget =
+	| {
+			kind: "connection";
+			connectionId: string;
+			connectionRevision: number;
+			remoteToolName: string;
+	  }
+	| { kind: "built_in" };
+
 export interface PendingToolApproval {
 	id: string;
 	approvalId: string;
@@ -29,9 +46,9 @@ export interface PendingToolApproval {
 	tool: string;
 	input: unknown;
 	reason?: string;
-	connectionId: string;
-	connectionRevision: number;
-	remoteToolName: string;
+	target: ApprovalTarget;
+	/** What the server found the call would do, shown to whoever decides. The model doesn't write it. */
+	summary?: ToolApprovalSummary;
 	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
 	mutating: boolean;
 	atOffset: number;
@@ -50,10 +67,13 @@ export interface ToolApprovalStore {
 		tool: string;
 		input: unknown;
 		atOffset: number;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
+		target: ApprovalTarget;
 	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
+	/** What was shown to whoever approved the call, so the call does exactly that. */
+	approvedSummary(
+		turnId: string,
+		sdkToolCallId: string,
+	): Effect.Effect<ToolApprovalSummary | undefined, never, Database>;
 	/**
 	 * Checks a person may make the decision, then sends it to the turn's
 	 * workflow, which records it. A turn run as a job records it here.
@@ -176,6 +196,24 @@ export function toolApprovalStore(
 				},
 			),
 
+		approvedSummary: (turnId, sdkToolCallId) =>
+			Effect.map(
+				query((db) =>
+					db
+						.select({ summary: toolCall.approvalSummary })
+						.from(toolCall)
+						.where(
+							and(
+								eq(toolCall.turnId, turnId),
+								eq(toolCall.sdkToolCallId, sdkToolCallId),
+								eq(toolCall.approvalStatus, "allowed"),
+							),
+						)
+						.limit(1),
+				),
+				([row]) => row?.summary ?? undefined,
+			),
+
 		beginExecution: (input) =>
 			transaction(
 				Effect.gen(function* () {
@@ -220,26 +258,31 @@ export function toolApprovalStore(
 							.for("update"),
 					);
 					if (!scope) return yield* new ToolExecutionRefused({ message: "Turn is not running" });
-					const [currentConnection] = yield* query((db) =>
-						db
-							.select({ revision: connection.configurationRevision })
-							.from(connection)
-							.where(
-								and(
-									eq(connection.id, input.connectionId),
-									eq(connection.workspaceId, scope.workspaceId),
-									eq(connection.podId, scope.podId),
-									ne(connection.access, "off"),
-									eq(connection.configurationRevision, input.connectionRevision),
-								),
-							)
-							.limit(1)
-							.for("update"),
-					);
-					if (!currentConnection) {
-						return yield* new ToolExecutionRefused({
-							message: "Connection configuration changed after approval",
-						});
+					const target = input.target;
+					// A connection tool runs only under the configuration it was approved
+					// under; a built-in tool has no configuration to have changed.
+					if (target.kind === "connection") {
+						const [currentConnection] = yield* query((db) =>
+							db
+								.select({ revision: connection.configurationRevision })
+								.from(connection)
+								.where(
+									and(
+										eq(connection.id, target.connectionId),
+										eq(connection.workspaceId, scope.workspaceId),
+										eq(connection.podId, scope.podId),
+										ne(connection.access, "off"),
+										eq(connection.configurationRevision, target.connectionRevision),
+									),
+								)
+								.limit(1)
+								.for("update"),
+						);
+						if (!currentConnection) {
+							return yield* new ToolExecutionRefused({
+								message: "Connection configuration changed after approval",
+							});
+						}
 					}
 					const [existing] = yield* query((db) =>
 						db
@@ -254,7 +297,7 @@ export function toolApprovalStore(
 							.limit(1)
 							.for("update"),
 					);
-					// Every call to a connection's tool was parked for a person to allow first.
+					// Every call needing approval was parked for a person to allow first.
 					if (!existing) {
 						return yield* new ToolExecutionRefused({ message: "Tool call has no approval record" });
 					}
@@ -274,9 +317,13 @@ export function toolApprovalStore(
 									eq(toolCall.messageId, input.messageId),
 									eq(toolCall.status, "awaiting_approval"),
 									eq(toolCall.tool, input.tool),
-									eq(toolCall.connectionId, input.connectionId),
-									eq(toolCall.connectionRevision, input.connectionRevision),
-									eq(toolCall.remoteToolName, input.remoteToolName),
+									...(target.kind === "connection"
+										? [
+												eq(toolCall.connectionId, target.connectionId),
+												eq(toolCall.connectionRevision, target.connectionRevision),
+												eq(toolCall.remoteToolName, target.remoteToolName),
+											]
+										: [isNull(toolCall.connectionId)]),
 									sql`${toolCall.executionInput} = ${JSON.stringify(executionJson(input.input))}::jsonb`,
 								),
 							)
@@ -409,6 +456,7 @@ export const noToolApprovalStore: ToolApprovalStore = {
 		Effect.fail(new ToolApprovalsIncomplete({ message: "Tool approvals are not configured" })),
 	beginExecution: () =>
 		Effect.fail(new ToolExecutionRefused({ message: "Tool approvals are not configured" })),
+	approvedSummary: () => Effect.undefined,
 	decide: () => Effect.fail(new ToolApprovalNotFound()),
 	record: () => Effect.void,
 };

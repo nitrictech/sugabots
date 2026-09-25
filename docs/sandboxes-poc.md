@@ -403,6 +403,33 @@ token hasn't been tried yet.
 Not done: `.git/hooks` and `.git/config` aren't made read-only, and there are
 no leases on worktrees, so two agents in the same thread share one.
 
+## Phase 4 as built: proposing changes
+
+- **`repo_push(repository)`** and **`repo_open_pull_request(repository, title,
+  body)`**, offered when the pod has repositories. Both wait for a person
+  every time; there is no "Always allow" for them.
+- **Approvals for built-in tools.** An approval's target is either a
+  connection tool, at the configuration it was approved under, or a built-in
+  tool. Checkpoints from before read as connection approvals.
+- **What the approver sees** is worked out by the server, not the model: for a
+  push, the repository, the thread's branch, its head commit, the commit
+  subjects and changed files, with any `.github/workflows` changes called out;
+  for a pull request, head, base and title. It's kept on the call
+  (`tool_call.approval_summary`) and shown on the approval card.
+- **The push** is done by the server. The sandbox packs the branch into a git
+  bundle; the server fetches it into a clone of its own, refuses it if the
+  branch has moved since the approved head, and pushes it with the workspace's
+  token (given to git through its environment, never its arguments). Only
+  the thread's own `pod/<pod>/<thread>` branch, never a force push. The
+  server's image now has git for this.
+- **The pull request** is opened as a draft by the API, from the thread's
+  branch into the default branch, signed with the agent's handle.
+
+Tested: the push flow against a local git remote (pushes new commits, refuses
+an empty push, never overwrites the remote, spots workflow changes), and a
+built-in approval parking with its summary, refusing "Always allow", and
+running once allowed. Not yet tried against GitHub itself.
+
 ## Out of the PoC
 
 Kubernetes and microVM providers, snapshots, preview URLs for dev servers,

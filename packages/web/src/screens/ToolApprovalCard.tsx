@@ -1,10 +1,11 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
+import type { ThreadParticipant, ToolApprovalSummary, ToolCallPart } from "@sugabots/contracts";
 import { Check, Copy } from "lucide-react";
 import { Fragment, type ReactNode, useId, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
+import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog, DialogContent } from "@/ui/dialog.tsx";
@@ -56,6 +57,7 @@ export function ToolApprovalCard({
 	const title = where ? `${label} in ${where}` : label;
 	const wants = call.mutating ? "wants to make a change" : "wants to use a tool";
 	// One answer, drawn on the card and again in the full request.
+	const summary = call.approval?.summary ?? undefined;
 	const answer = canApprove ? (
 		<Answer
 			pending={sent}
@@ -89,6 +91,11 @@ export function ToolApprovalCard({
 						{where && <span className="font-normal text-muted-foreground"> in {where}</span>}
 					</button>
 				</span>
+				{summary && (
+					<div className="mt-1 ml-[34px]">
+						<ChangeSummary summary={summary} />
+					</div>
+				)}
 				<div className={`mt-1 mb-0.5 ml-[34px] ${answerPinned ? "max-md:hidden" : ""}`}>
 					{answer}
 				</div>
@@ -562,5 +569,63 @@ function CopyJson({ value }: { value: unknown }) {
 			{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
 			{copied ? "Copied" : "Copy JSON"}
 		</Button>
+	);
+}
+
+/*
+ * What a push or a pull request would do, as the server found it in the
+ * sandbox: the thing to judge, rather than the model's own account of it.
+ * Workflow changes are called out, since they run with the repository's
+ * secrets once pushed.
+ */
+function ChangeSummary({ summary }: { summary: ToolApprovalSummary }) {
+	if (summary.kind === "pull_request") {
+		return (
+			<div className="flex flex-col gap-1 text-sm">
+				<p className="m-0 text-foreground">
+					A draft pull request on <code className="text-xs">{summary.repository}</code>
+				</p>
+				<p className="m-0 font-medium text-heading">{summary.title}</p>
+				<p className="m-0 text-muted-foreground text-xs">
+					<code>{summary.head}</code> into <code>{summary.base}</code>
+				</p>
+			</div>
+		);
+	}
+	const shownCommits = summary.commits.slice(0, 5);
+	const shownFiles = summary.files.slice(0, 8);
+	return (
+		<div className="flex flex-col gap-2 text-sm">
+			<p className="m-0 text-foreground">
+				{summary.commits.length === 1 ? "1 commit" : `${summary.commits.length} commits`} to{" "}
+				<code className="text-xs">{summary.branch}</code> on{" "}
+				<code className="text-xs">{summary.repository}</code>
+			</p>
+			{shownCommits.length > 0 && (
+				<ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-muted-foreground text-xs">
+					{shownCommits.map((subject, index) => (
+						// biome-ignore lint/suspicious/noArrayIndexKey: subjects repeat, and the list never reorders
+						<li key={index} className="truncate">
+							{subject}
+						</li>
+					))}
+					{summary.commits.length > shownCommits.length && (
+						<li>and {summary.commits.length - shownCommits.length} more</li>
+					)}
+				</ul>
+			)}
+			<p className="m-0 text-muted-foreground text-xs">
+				{summary.files.length === 1 ? "1 file changed" : `${summary.files.length} files changed`}
+				{shownFiles.length > 0 && `: ${shownFiles.join(", ")}`}
+				{summary.files.length > shownFiles.length &&
+					`, and ${summary.files.length - shownFiles.length} more`}
+			</p>
+			{summary.workflowChanges.length > 0 && (
+				<Alert>
+					This changes GitHub Actions workflows ({summary.workflowChanges.join(", ")}), which run
+					with the repository's secrets once pushed.
+				</Alert>
+			)}
+		</div>
 	);
 }

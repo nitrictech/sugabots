@@ -265,6 +265,7 @@ describe("runClaimedTurn", () => {
 							mutating: true,
 						}),
 					decide: () => Effect.die(new Error("unused")),
+					approvedSummary: () => Effect.undefined,
 					record: () => Effect.void,
 				},
 			}),
@@ -345,6 +346,7 @@ describe("runClaimedTurn", () => {
 					beginExecution: () =>
 						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
 					decide: () => Effect.die(new Error("unused")),
+					approvedSummary: () => Effect.undefined,
 					record: () => Effect.void,
 				},
 			}),
@@ -407,6 +409,7 @@ describe("runClaimedTurn", () => {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
 					decide: () => Effect.die(new Error("unused")),
+					approvedSummary: () => Effect.undefined,
 					record: () => Effect.void,
 				},
 			}),

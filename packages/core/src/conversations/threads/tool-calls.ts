@@ -52,6 +52,8 @@ export function toToolCallPart(
 					status: row.approvalStatus,
 					decidedByName,
 					decidedAt: row.decidedAt?.toISOString() ?? null,
+					summary: row.approvalSummary ?? null,
+					offersAlwaysAllow: row.connectionId !== null,
 				}
 			: null,
 		error: row.error,

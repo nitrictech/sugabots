@@ -60,8 +60,19 @@ export function splitToolKey(tool: string): { handle: string; name: string } {
  */
 export function stepLabel(tool: string, name = splitToolKey(tool).name): string {
 	const builtIn = builtInToolCatalog.find((entry) => entry.key === tool);
-	return builtIn ? builtIn.name : wordsFromKey(name);
+	return builtIn ? builtIn.name : (SANDBOX_TOOL_NAMES[tool] ?? wordsFromKey(name));
 }
+
+/** The pod sandbox's tools, which aren't in the built-in catalog since agents opt into them. */
+const SANDBOX_TOOL_NAMES: Record<string, string> = {
+	run_command: "Run a command",
+	read_file: "Read a file",
+	write_file: "Write a file",
+	edit_file: "Edit a file",
+	repo_checkout: "Check out a repository",
+	repo_push: "Push a branch to GitHub",
+	repo_open_pull_request: "Open a pull request",
+};
 
 /**
  * A machine key written out as words: `search_issues` as `Search issues`,

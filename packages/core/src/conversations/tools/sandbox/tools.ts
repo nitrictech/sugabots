@@ -154,7 +154,7 @@ export function sandboxTools(
 			},
 		}),
 		[REPO_CHECKOUT_TOOL]: tool({
-			description: `Check out a git repository to work on, in a directory and branch of this thread's own, so work in other threads doesn't collide with it. The pod's repositories${checkout.repositories.length > 0 ? ` (${checkout.repositories.map((repository) => repository.fullName).join(", ")})` : ""} can be private; any other must be public. Calling it again in this thread fetches the latest and returns the same directory. Commit there as you work; pushing is not possible from the sandbox.`,
+			description: `Check out a git repository to work on, in a directory and branch of this thread's own, so work in other threads doesn't collide with it. The pod's repositories${checkout.repositories.length > 0 ? ` (${checkout.repositories.map((repository) => repository.fullName).join(", ")})` : ""} can be private; any other must be public. Calling it again in this thread fetches the latest and returns the same directory. Commit there as you work. git push doesn't work from the sandbox; for the pod's repositories, repo_push does it with a person's approval.`,
 			inputSchema: Schema.Struct({
 				repository: Schema.String.check(
 					Schema.isPattern(REPOSITORY_PATTERN, { message: "owner/repository" }),
@@ -222,7 +222,7 @@ export function sandboxTools(
 const REPOSITORY_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 const CHECKOUT_TIMEOUT_SECONDS = 300;
 
-interface CheckoutPlace {
+export interface CheckoutPlace {
 	repository: string;
 	/** One clone per sandbox, shared by every thread's worktree. */
 	clone: string;
@@ -236,7 +236,7 @@ interface CheckoutPlace {
  * and branch names; eight characters of a UUIDv7's random tail are plenty
  * within one pod.
  */
-function checkoutPlace(checkout: CheckoutContext, repository: string): CheckoutPlace {
+export function checkoutPlace(checkout: CheckoutContext, repository: string): CheckoutPlace {
 	const thread = shortId(checkout.threadId);
 	const name = repository.split("/")[1] ?? repository;
 	return {

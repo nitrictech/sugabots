@@ -38,6 +38,12 @@ export interface ToolDependencies {
 	 * They don't ask for approval, since the sandbox is what contains them.
 	 */
 	sandbox?: ToolSet;
+	/**
+	 * Built-in tools that change something outside Sugabots, such as pushing to
+	 * GitHub, and so wait for a person to approve every call. Nothing can
+	 * approve them in advance.
+	 */
+	needingApproval?: ToolSet;
 	/** The pod connections' tools, keyed `handle__tool`, each with whether it changes things. */
 	connections?: Record<string, OfferedTool>;
 	/** For a tool that watches for something else to happen. */
@@ -81,6 +87,16 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	for (const [key, tool] of Object.entries(deps.sandbox ?? {})) {
 		tools[key] = recorded(key, tool, { ...recording, mutating: true });
 	}
+	for (const [key, tool] of Object.entries(deps.needingApproval ?? {})) {
+		tools[key] = recorded(key, tool, {
+			...recording,
+			mutating: true,
+			approval: {
+				store: deps.approvals,
+				target: { kind: "built_in" },
+			},
+		});
+	}
 	for (const [key, offered] of Object.entries(deps.connections ?? {})) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
 		tools[key] = recorded(key, offered.tool, {
@@ -90,9 +106,12 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 				? {
 						approval: {
 							store: deps.approvals,
-							connectionId: offered.connectionId,
-							connectionRevision: offered.connectionRevision,
-							remoteToolName: offered.remoteToolName,
+							target: {
+								kind: "connection",
+								connectionId: offered.connectionId,
+								connectionRevision: offered.connectionRevision,
+								remoteToolName: offered.remoteToolName,
+							},
 						},
 					}
 				: {}),

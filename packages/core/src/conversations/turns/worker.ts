@@ -14,25 +14,31 @@ import {
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import type { GithubStore } from "../../github/store.ts";
+import type { GithubForTurns } from "../../github/work.ts";
 import type { PodSandboxStore } from "../../sandboxes/store.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
-import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";
+import {
+	noToolApprovalStore,
+	type PendingToolApproval,
+	type ToolApprovalStore,
+} from "../tools/approvals/store.ts";
 import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
-import { sandboxTools } from "../tools/sandbox/tools.ts";
+import { repositoryChangeTools } from "../tools/sandbox/repository-changes.ts";
+import { type CheckoutContext, sandboxTools } from "../tools/sandbox/tools.ts";
 import { turnSandbox } from "../tools/sandbox/turn-sandbox.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
 import { jobTurnOwner, segmentTurnOwner, type TurnOwner } from "./owner.ts";
 import {
+	approvalTargetOf,
 	type ClaimedTurn,
 	type PreparedTurn,
 	type ReplyDraft,
@@ -82,8 +88,8 @@ export interface TurnExecution {
 	connectionTools?: ConnectionTools;
 	/** Pods' sandboxes, for agents an admin let use theirs. */
 	sandboxes?: PodSandboxStore;
-	/** The pod's repositories, and where they are cloned from, for checking them out. */
-	github?: Pick<GithubStore, "get" | "listRepositories">;
+	/** The pod's repositories, and the workspace's token for pushing to them. */
+	github?: GithubForTurns;
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
@@ -471,18 +477,45 @@ const streamReply = (
 						)
 					: undefined;
 			const repositories =
-				sandbox && github ? yield* github.listRepositories(prepared.context.agent.podId) : [];
-			const gitHost =
-				(sandbox && github ? yield* github.get(prepared.context.thread.workspaceId) : undefined)
-					?.gitHost ?? GITHUB_DEFAULT_GIT_HOST;
+				sandbox && github ? yield* github.repositories(prepared.context.agent.podId) : [];
+			const checkout: CheckoutContext = {
+				threadId: prepared.context.thread.id,
+				podId: prepared.context.agent.podId,
+				agent: { name: prepared.context.agent.name, handle: prepared.context.agent.handle },
+				gitHost:
+					sandbox && github
+						? yield* github.gitHost(prepared.context.thread.workspaceId)
+						: GITHUB_DEFAULT_GIT_HOST,
+				repositories,
+			};
+			const repositoryChanges =
+				sandbox && github && repositories.length > 0
+					? repositoryChangeTools({
+							turn: sandbox,
+							run,
+							checkout,
+							workspaceId: prepared.context.thread.workspaceId,
+							turnId: prepared.turnId,
+							github,
+							approvals,
+						})
+					: undefined;
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
+				const target = approvalTargetOf(binding);
+				if (target.kind === "built_in") {
+					if (!repositoryChanges?.tools[binding.tool]) {
+						return yield* new ApprovedToolChanged({ tool: binding.tool });
+					}
+					approvalBoundTools.add(binding.tool);
+					continue;
+				}
 				const offered = connections.tools[binding.tool];
 				if (
 					!offered ||
-					offered.connectionId !== binding.connectionId ||
-					offered.connectionRevision !== binding.connectionRevision ||
-					offered.remoteToolName !== binding.remoteToolName
+					offered.connectionId !== target.connectionId ||
+					offered.connectionRevision !== target.connectionRevision ||
+					offered.remoteToolName !== target.remoteToolName
 				) {
 					return yield* new ApprovedToolChanged({ tool: binding.tool });
 				}
@@ -497,17 +530,8 @@ const streamReply = (
 				approvals,
 				approvalBoundTools,
 				builtIn,
-				...(sandbox
-					? {
-							sandbox: sandboxTools(sandbox, run, {
-								threadId: prepared.context.thread.id,
-								podId: prepared.context.agent.podId,
-								agent: { name: prepared.context.agent.name, handle: prepared.context.agent.handle },
-								gitHost,
-								repositories,
-							}),
-						}
-					: {}),
+				...(sandbox ? { sandbox: sandboxTools(sandbox, run, checkout) } : {}),
+				...(repositoryChanges ? { needingApproval: repositoryChanges.tools } : {}),
 				connections: connections.tools,
 				bus: events,
 				run,
@@ -565,7 +589,10 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
+				toolApproval: Object.fromEntries([
+					...toolsNeedingApproval.map((key) => [key, "user-approval"]),
+					...Object.keys(repositoryChanges?.tools ?? {}).map((key) => [key, "user-approval"]),
+				]),
 				maxSteps: Math.max(
 					1,
 					(sandbox ? MAX_MODEL_CALLS_WITH_SANDBOX : MAX_MODEL_CALLS) -
@@ -586,25 +613,48 @@ const streamReply = (
 					};
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
-				const pending = terminal.approvalRequests.map((request) => {
-					const offered = connections.tools[request.toolCall.toolName];
-					if (!offered?.requiresApproval) {
-						throw new ApprovalForUnknownTool({ tool: request.toolCall.toolName });
-					}
-					return {
-						id: crypto.randomUUID(),
-						approvalId: request.approvalId,
-						sdkToolCallId: request.toolCall.toolCallId,
-						tool: request.toolCall.toolName,
-						input: request.toolCall.input,
-						reason: request.reason,
-						connectionId: offered.connectionId,
-						connectionRevision: offered.connectionRevision,
-						remoteToolName: offered.remoteToolName,
-						mutating: offered.mutating,
-						atOffset,
-					};
-				});
+				const pending = yield* Effect.forEach(
+					terminal.approvalRequests,
+					(request): Effect.Effect<PendingToolApproval> =>
+						Effect.gen(function* () {
+							const toolName = request.toolCall.toolName;
+							const base = {
+								id: crypto.randomUUID(),
+								approvalId: request.approvalId,
+								sdkToolCallId: request.toolCall.toolCallId,
+								tool: toolName,
+								input: request.toolCall.input,
+								...(request.reason ? { reason: request.reason } : {}),
+								atOffset,
+							};
+							if (repositoryChanges?.tools[toolName]) {
+								const summary = yield* repositoryChanges.summarize(
+									toolName,
+									request.toolCall.input,
+								);
+								return {
+									...base,
+									target: { kind: "built_in" as const },
+									...(summary ? { summary } : {}),
+									mutating: true,
+								};
+							}
+							const offered = connections.tools[toolName];
+							if (!offered?.requiresApproval) {
+								return yield* Effect.die(new ApprovalForUnknownTool({ tool: toolName }));
+							}
+							return {
+								...base,
+								target: {
+									kind: "connection" as const,
+									connectionId: offered.connectionId,
+									connectionRevision: offered.connectionRevision,
+									remoteToolName: offered.remoteToolName,
+								},
+								mutating: offered.mutating,
+							};
+						}),
+				);
 				yield* Ref.update(reply, (draft) => ({
 					...draft,
 					toolCalls: [
@@ -621,9 +671,7 @@ const streamReply = (
 						approvals: pending.map((request) => ({
 							approvalId: request.approvalId,
 							tool: request.tool,
-							connectionId: request.connectionId,
-							connectionRevision: request.connectionRevision,
-							remoteToolName: request.remoteToolName,
+							target: request.target,
 						})),
 						modelInput,
 						reply: suspendedReply,

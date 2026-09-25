@@ -146,7 +146,7 @@ function environmentInstruction(environment: TurnEnvironment): string[] {
 		connectionToolsInstruction(environment.connectionTools),
 		environment.sandbox ? SANDBOX_INSTRUCTION : undefined,
 		environment.sandbox && environment.repositories && environment.repositories.length > 0
-			? `This pod's repositories: ${environment.repositories.join(", ")}. Use repo_checkout to work on one; it gives this thread its own directory and branch.`
+			? `This pod's repositories: ${environment.repositories.join(", ")}. Use repo_checkout to work on one; it gives this thread its own directory and branch. When the work is done and committed, repo_push puts the branch on GitHub and repo_open_pull_request opens a draft pull request; a person approves each, so say what you changed and why before you ask.`
 			: undefined,
 	].filter((section): section is string => section !== undefined);
 }

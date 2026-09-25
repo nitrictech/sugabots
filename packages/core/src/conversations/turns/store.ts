@@ -39,7 +39,7 @@ import { loadParticipants, participantColumns, toMessage } from "../threads/part
 import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
 import { visibleThread } from "../threads/visibility.ts";
-import type { PendingToolApproval } from "../tools/approvals/store.ts";
+import type { ApprovalTarget, PendingToolApproval } from "../tools/approvals/store.ts";
 import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
@@ -151,15 +151,35 @@ export interface PreparedTurn {
 	checkpoint?: TurnCheckpoint;
 }
 
+/**
+ * One call a parked turn is waiting on. Checkpoints written before built-in
+ * tools could ask carry the connection's fields directly rather than a
+ * `target`; `approvalTargetOf` reads either.
+ */
+export type CheckpointApproval =
+	| { approvalId: string; tool: string; target: ApprovalTarget }
+	| {
+			approvalId: string;
+			tool: string;
+			connectionId: string;
+			connectionRevision: number;
+			remoteToolName: string;
+	  };
+
+export function approvalTargetOf(approval: CheckpointApproval): ApprovalTarget {
+	return "target" in approval
+		? approval.target
+		: {
+				kind: "connection",
+				connectionId: approval.connectionId,
+				connectionRevision: approval.connectionRevision,
+				remoteToolName: approval.remoteToolName,
+			};
+}
+
 export interface TurnCheckpoint {
 	messages: ModelMessage[];
-	approvals: Array<{
-		approvalId: string;
-		tool: string;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
-	}>;
+	approvals: CheckpointApproval[];
 	modelInput: {
 		model: string;
 		system: string;
@@ -538,9 +558,14 @@ export function turnStore(
 										approvalId: approval.approvalId,
 										approvalStatus: "pending",
 										approvalReason: approval.reason ?? null,
-										connectionId: approval.connectionId,
-										connectionRevision: approval.connectionRevision,
-										remoteToolName: approval.remoteToolName,
+										...(approval.target.kind === "connection"
+											? {
+													connectionId: approval.target.connectionId,
+													connectionRevision: approval.target.connectionRevision,
+													remoteToolName: approval.target.remoteToolName,
+												}
+											: {}),
+										approvalSummary: approval.summary ?? null,
 										input: boundedJson(approval.input),
 										executionInput: executionJson(approval.input),
 										status: "awaiting_approval",

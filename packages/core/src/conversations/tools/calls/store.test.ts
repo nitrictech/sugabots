@@ -275,9 +275,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-create-1",
 			tool: "linear__create_issue",
 			input: { title: "Fix mobile navigation" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 			mutating: true,
 			atOffset: 7,
 		};
@@ -289,9 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					{
 						approvalId: pending.approvalId,
 						tool: pending.tool,
-						connectionId,
-						connectionRevision: 1,
-						remoteToolName: pending.remoteToolName,
+						target: pending.target,
 					},
 				],
 				modelInput: { model: "test", system: "test", messages: [] },
@@ -357,9 +358,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			tool: "linear__create_issue",
 			input: { title: "Fix mobile navigation" },
 			atOffset: 7,
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 		};
 		await expect(
 			approvals.beginExecution({ ...execution, input: { title: "A different issue" } }),
@@ -375,14 +379,50 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				tool: "linear__create_issue",
 				input: { title: "Fix mobile navigation" },
 				atOffset: 7,
-				connectionId,
-				connectionRevision: 1,
-				remoteToolName: "create_issue",
+				target: {
+					kind: "connection" as const,
+					connectionId,
+					connectionRevision: 1,
+					remoteToolName: "create_issue",
+				},
 			}),
 		).rejects.toThrow("not approved for execution");
 		await expect(
 			approvals.beginExecution({ ...execution, sdkToolCallId: "sdk-create-never-parked" }),
 		).rejects.toThrow("no approval record");
+	});
+
+	it("parks a built-in tool's approval with what it would do, and runs it once allowed", async () => {
+		const summary = {
+			kind: "push" as const,
+			repository: "acme/app",
+			branch: "pod/p/t",
+			base: "main",
+			head: "a".repeat(40),
+			commits: ["Fix the header"],
+			files: ["src/header.tsx"],
+			workflowChanges: [],
+		};
+		const pending = {
+			id: crypto.randomUUID(),
+			approvalId: `approval-${crypto.randomUUID()}`,
+			sdkToolCallId: "sdk-push-1",
+			tool: "repo_push",
+			input: { repository: "acme/app" },
+			target: { kind: "built_in" as const },
+			summary,
+			mutating: true,
+			atOffset: 0,
+		};
+		const execution = await allowAndResume(pending);
+
+		const [allowed] = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+		);
+		expect(allowed).toMatchObject({ approvalSummary: summary, connectionId: null });
+		expect(await approvals.approvedSummary(prepared.turnId, "sdk-push-1")).toEqual(summary);
+		const running = await approvals.beginExecution(execution);
+		expect(running.status).toBe("running");
 	});
 
 	/** Parks `pending` as the turn's one approval, allows it, and resumes the turn. */
@@ -394,9 +434,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					{
 						approvalId: pending.approvalId,
 						tool: pending.tool,
-						connectionId,
-						connectionRevision: 1,
-						remoteToolName: pending.remoteToolName,
+						target: pending.target,
 					},
 				],
 				reply: { content: "", collaborations: [], toolCalls: [{ id: pending.id, atOffset: 0 }] },
@@ -425,9 +463,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			tool: pending.tool,
 			input: pending.input,
 			atOffset: 0,
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: pending.remoteToolName,
+			target: pending.target,
 		};
 	}
 
@@ -481,9 +517,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 						{
 							approvalId: pending.approvalId,
 							tool: pending.tool,
-							connectionId,
-							connectionRevision: 1,
-							remoteToolName: pending.remoteToolName,
+							target: pending.target,
 						},
 					],
 				}),
@@ -499,9 +533,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-workflow",
 			tool: "linear__create_issue",
 			input: { title: "Workflow" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 			mutating: true,
 			atOffset: 0,
 		});
@@ -569,9 +606,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-turned-off",
 			tool: "linear__create_issue",
 			input: { title: "Switched off meanwhile" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 			mutating: true,
 			atOffset: 0,
 		});
@@ -592,9 +632,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-read",
 			tool: "linear__list_issues",
 			input: {},
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "list_issues",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "list_issues",
+			},
 			mutating: false,
 			atOffset: 0,
 		});
@@ -618,9 +661,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-stranger",
 			tool: "linear__create_issue",
 			input: { title: "Not yours" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 			mutating: true,
 			atOffset: 0,
 		};
@@ -631,9 +677,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					{
 						approvalId: pending.approvalId,
 						tool: pending.tool,
-						connectionId,
-						connectionRevision: 1,
-						remoteToolName: pending.remoteToolName,
+						target: pending.target,
 					},
 				],
 				reply: { content: "", collaborations: [], toolCalls: [{ id: pending.id, atOffset: 0 }] },
@@ -770,9 +814,12 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			sdkToolCallId: "sdk-revision",
 			tool: "linear__create_issue",
 			input: { title: "Reviewed target" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
+			target: {
+				kind: "connection" as const,
+				connectionId,
+				connectionRevision: 1,
+				remoteToolName: "create_issue",
+			},
 			mutating: true,
 			atOffset: 0,
 		};
@@ -783,9 +830,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					{
 						approvalId: pending.approvalId,
 						tool: pending.tool,
-						connectionId,
-						connectionRevision: 1,
-						remoteToolName: pending.remoteToolName,
+						target: pending.target,
 					},
 				],
 				reply: {
@@ -826,9 +871,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				tool: pending.tool,
 				input: pending.input,
 				atOffset: 0,
-				connectionId,
-				connectionRevision: 1,
-				remoteToolName: pending.remoteToolName,
+				target: pending.target,
 			}),
 		).rejects.toThrow("configuration changed");
 	});

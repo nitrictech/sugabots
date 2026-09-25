@@ -184,6 +184,36 @@ export type JsonValue = typeof jsonValueSchema.Type;
  * `input` and `output` are whatever the tool took and returned, truncated by
  * the server when large.
  */
+/**
+ * What the server found a call waiting for approval would do, for whoever
+ * decides. Written by the server from the sandbox's state, not by the model,
+ * so it can be trusted where the call's input can't.
+ */
+export const toolApprovalSummarySchema = Schema.Union([
+	Schema.Struct({
+		kind: Schema.Literal("push"),
+		repository: Schema.String,
+		branch: Schema.String,
+		base: Schema.String,
+		/** The commit being pushed. The push is refused if the branch has moved since. */
+		head: Schema.String,
+		/** Subjects of the commits being pushed, newest first. */
+		commits: Schema.mutable(Schema.Array(Schema.String)),
+		files: Schema.mutable(Schema.Array(Schema.String)),
+		/** Changed files under `.github/workflows`, which run with the repository's own secrets. */
+		workflowChanges: Schema.mutable(Schema.Array(Schema.String)),
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("pull_request"),
+		repository: Schema.String,
+		head: Schema.String,
+		base: Schema.String,
+		title: Schema.String,
+	}),
+]);
+
+export type ToolApprovalSummary = typeof toolApprovalSummarySchema.Type;
+
 export const toolCallPartSchema = Schema.Struct({
 	type: Schema.Literal("tool_call"),
 	id: uuidSchema,
@@ -200,6 +230,10 @@ export const toolCallPartSchema = Schema.Struct({
 				status: toolApprovalStatusSchema,
 				decidedByName: Schema.NullOr(Schema.String),
 				decidedAt: Schema.NullOr(isoTimestampSchema),
+				/** What the call would do, when the server worked it out. */
+				summary: Schema.optional(Schema.NullOr(toolApprovalSummarySchema)),
+				/** Whether a standing approval can cover this tool. Only connection tools can have one. */
+				offersAlwaysAllow: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),

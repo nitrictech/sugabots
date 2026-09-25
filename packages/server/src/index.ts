@@ -26,6 +26,7 @@ import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
 import { gitCredentialsForPod } from "@sugabots/core/github/credentials";
 import { githubStore } from "@sugabots/core/github/store";
+import { githubForTurns } from "@sugabots/core/github/work";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
@@ -108,6 +109,7 @@ const main = Effect.gen(function* () {
 	);
 	const sandboxProviders = sandboxProviderStore(credentials);
 	const github = githubStore(credentials);
+	const githubForTurn = githubForTurns({ github, httpClients });
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -172,6 +174,7 @@ const main = Effect.gen(function* () {
 					builtInTools,
 					connectionTools,
 					sandboxes: stores.podSandboxes,
+					github: githubForTurn,
 					routines: stores.routines,
 					queueSummary: (request) => queueSummary(lanes, request),
 				}),
@@ -195,7 +198,7 @@ const main = Effect.gen(function* () {
 			builtInTools,
 			connectionTools,
 			sandboxes: stores.podSandboxes,
-			github,
+			github: githubForTurn,
 			sandboxIdlePauseMinutes,
 			publishEvents,
 		}),

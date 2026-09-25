@@ -39,6 +39,13 @@ RUN bun install --frozen-lockfile --production --ignore-scripts --filter @sugabo
 FROM node:26-slim AS runtime
 WORKDIR /app
 
+# git, for pushing an agent's branch from its sandbox: the server fetches the
+# sandbox's bundle into a clone of its own and pushes from there, so the
+# repository token never enters the sandbox.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends git ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     PORT=3000
 

@@ -11,6 +11,7 @@ import type {
 	SystemAgentKey,
 	ThreadType,
 	ToolApprovalStatus,
+	ToolApprovalSummary,
 	ToolCallStatus,
 } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
@@ -541,6 +542,8 @@ export const toolCall = pgTable(
 		approvalId: text("approval_id"),
 		approvalStatus: text("approval_status").$type<ToolApprovalStatus>(),
 		approvalReason: text("approval_reason"),
+		/** What the server found the call would do, shown to whoever decides. */
+		approvalSummary: jsonb("approval_summary").$type<ToolApprovalSummary>(),
 		decidedById: uuid("decided_by_id").references(() => user.id, { onDelete: "set null" }),
 		decidedAt: timestamp("decided_at", { withTimezone: true }),
 		connectionId: uuid("connection_id"),

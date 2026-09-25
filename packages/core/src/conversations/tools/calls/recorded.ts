@@ -2,7 +2,7 @@ import type { Tool } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { describeFailure } from "../../jobs/worker.ts";
-import type { ToolApprovalStore } from "../approvals/store.ts";
+import type { ApprovalTarget, ToolApprovalStore } from "../approvals/store.ts";
 import type { ToolCallStore } from "./store.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
@@ -27,9 +27,7 @@ export interface RecordingOptions {
 	mutating?: boolean;
 	approval?: {
 		store: ToolApprovalStore;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
+		target: ApprovalTarget;
 	};
 }
 
@@ -75,9 +73,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 							tool: key,
 							input,
 							atOffset,
-							connectionId: approval.connectionId,
-							connectionRevision: approval.connectionRevision,
-							remoteToolName: approval.remoteToolName,
+							target: approval.target,
 						}),
 					)
 				: await run(calls.open({ ...from, tool: key, input, atOffset, mutating }));
