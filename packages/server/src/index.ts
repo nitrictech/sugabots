@@ -94,6 +94,12 @@ const main = Effect.gen(function* () {
 	const lanes = Context.get(engine, Lanes.Service);
 	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
 	const queueTurn = queueTurnInLane(lanes);
+	// A container sandbox shares this machine's kernel, so an escape from one is
+	// an escape to the host. Off unless the installation says otherwise.
+	const allowsUnisolatedSandboxes = yield* Config.Boolean("SANDBOX_ALLOW_UNISOLATED").pipe(
+		Config.withDefault(false),
+	);
+	const sandboxProviders = sandboxProviderStore(credentials);
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -101,7 +107,12 @@ const main = Effect.gen(function* () {
 		onboarding: onboardingStore,
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
-		sandboxProviders: sandboxProviderStore(credentials),
+		sandboxProviders,
+		podSandboxes: podSandboxStore({
+			providers: sandboxProviders,
+			allowsUnisolated: allowsUnisolatedSandboxes,
+			publishEvents,
+		}),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurn),
 		routines: routineStore(publishEvents, queueTurn, signals),
@@ -112,16 +123,6 @@ const main = Effect.gen(function* () {
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents, signals),
 	};
-	// A container sandbox shares this machine's kernel, so an escape from one is
-	// an escape to the host. Off unless the installation says otherwise.
-	const allowsUnisolatedSandboxes = yield* Config.Boolean("SANDBOX_ALLOW_UNISOLATED").pipe(
-		Config.withDefault(false),
-	);
-	const sandboxes = podSandboxStore({
-		providers: stores.sandboxProviders,
-		allowsUnisolated: allowsUnisolatedSandboxes,
-	});
-
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -160,7 +161,7 @@ const main = Effect.gen(function* () {
 					approvals: stores.approvals,
 					builtInTools,
 					connectionTools,
-					sandboxes,
+					sandboxes: stores.podSandboxes,
 					routines: stores.routines,
 					queueSummary: (request) => queueSummary(lanes, request),
 				}),
@@ -183,7 +184,7 @@ const main = Effect.gen(function* () {
 			approvals: stores.approvals,
 			builtInTools,
 			connectionTools,
-			sandboxes,
+			sandboxes: stores.podSandboxes,
 			publishEvents,
 		}),
 	);

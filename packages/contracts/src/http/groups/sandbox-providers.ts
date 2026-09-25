@@ -1,11 +1,13 @@
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	newSandboxProviderSchema,
+	podSandboxStatusSchema,
 	sandboxProviderResponseSchema,
 	sandboxProviderSchema,
 	sandboxProviderTestResultSchema,
 	sandboxProviderUpdateSchema,
 } from "../../sandbox-providers.ts";
+import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
@@ -33,6 +35,11 @@ export class SandboxProvidersApi extends HttpApiGroup.make("sandboxProviders")
 		HttpApiEndpoint.post("test", `${root}/test`, {
 			params,
 			success: sandboxProviderTestResultSchema,
+		}),
+		// Anyone in the pod may see whether its sandbox is up; configuring it is the admins'.
+		HttpApiEndpoint.get("podStatus", "/pods/:podId/sandbox", {
+			params: { podId: uuidSchema },
+			success: podSandboxStatusSchema,
 		}),
 	)
 	.middleware(Authorise)

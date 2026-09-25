@@ -2,7 +2,7 @@ import type { Agent, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Plus, Search } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, allAgentChatLink, podLink } from "@/lib/links.ts";
@@ -12,6 +12,7 @@ import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
+import { PodSandboxChip } from "@/shell/PodSandboxChip.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -79,6 +80,7 @@ export function ConversationList({
 		<>
 			<ConversationListView
 				title={scope.kind === "all" ? "All" : scope.pod.name}
+				titleStatus={pod && <PodSandboxChip podId={pod.id} />}
 				inAll={scope.kind === "all"}
 				rows={rows}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
@@ -137,6 +139,7 @@ export interface ConversationRowData extends ChatListItem {
 
 export function ConversationListView({
 	title,
+	titleStatus,
 	inAll,
 	rows,
 	status,
@@ -146,6 +149,8 @@ export function ConversationListView({
 	className,
 }: {
 	title: string;
+	/** A state shown beside the title, such as the pod's sandbox. */
+	titleStatus?: ReactNode;
 	inAll: boolean;
 	rows: readonly ConversationRowData[];
 	status: "loading" | "ready" | "failed";
@@ -172,6 +177,7 @@ export function ConversationListView({
 				<h1 className="m-0 min-w-0 flex-1 truncate font-extrabold text-[30px] text-foreground tracking-[-0.02em] md:text-xl">
 					{title}
 				</h1>
+				{titleStatus}
 				{onNewBot && !empty && (
 					<Tooltip label="New bot">
 						<button

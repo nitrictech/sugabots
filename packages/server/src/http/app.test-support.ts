@@ -245,6 +245,16 @@ const emptyStores: Stores = {
 	modelProviders: emptyModelProviderStore,
 	searchProviders: emptySearchProviderStore,
 	sandboxProviders: emptySandboxProviderStore,
+	podSandboxes: {
+		status: () =>
+			Effect.succeed({
+				state: "none",
+				usedBy: [],
+				isolation: null,
+				lastUsedAt: null,
+				createdAt: null,
+			}),
+	},
 	connections: emptyConnectionStore,
 	threads: emptyThreadStore,
 	chats: emptyChatStore,

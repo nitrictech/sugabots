@@ -2,14 +2,17 @@ import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import type { EgressUrlValidator } from "@sugabots/core/providers/network/egress";
 import { sandboxProviderOperations } from "@sugabots/core/providers/sandbox-providers/operations";
 import type { SandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
+import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
-import { grantedWorkspace } from "../../http/authorisation.ts";
+import { grantedPod, grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
 export interface SandboxProviderRoutesOptions {
 	sandboxProviders: SandboxProviderStore;
+	/** Pods' sandboxes, for whether one is up and in use. */
+	podSandboxes: Pick<PodSandboxStore, "status">;
 	validateProviderUrl: EgressUrlValidator;
 	/** Whether this installation lets a workspace choose `container` isolation. */
 	allowsUnisolated: boolean;
@@ -17,6 +20,7 @@ export interface SandboxProviderRoutesOptions {
 
 export function sandboxProviderRoutes({
 	sandboxProviders,
+	podSandboxes,
 	validateProviderUrl,
 	allowsUnisolated,
 }: SandboxProviderRoutesOptions) {
@@ -52,6 +56,9 @@ export function sandboxProviderRoutes({
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
 					operations.test(workspaceId).pipe(asHttpError(sandboxProviderErrors)),
 				),
+			)
+			.handle("podStatus", () =>
+				Effect.flatMap(grantedPod, ({ pod }) => podSandboxes.status(pod.id)),
 			),
 	);
 }
