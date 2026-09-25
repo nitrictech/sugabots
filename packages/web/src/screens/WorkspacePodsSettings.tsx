@@ -53,7 +53,6 @@ import {
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 import { PodRepositoriesSettings } from "./PodRepositoriesSettings.tsx";
-import { PodRepositoriesSettings } from "./PodRepositoriesSettings.tsx";
 
 /**
  * Every pod you reach, beside the open one: its bots, its people and the

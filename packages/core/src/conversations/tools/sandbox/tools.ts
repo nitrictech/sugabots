@@ -322,7 +322,9 @@ function explainFailure(failure: unknown): never {
 			);
 		default:
 			throw new Error(
-				"The sandbox could not be reached just now. Try again shortly, or tell the people here.",
+				failure.reason
+					? `The sandbox couldn't be made or reached: ${failure.reason} Tell the people here; if it names the image or the settings, a workspace admin can change them in the workspace's sandbox settings.`
+					: "The sandbox could not be reached just now. Try again shortly, or tell the people here.",
 				{ cause: failure },
 			);
 	}

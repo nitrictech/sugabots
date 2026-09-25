@@ -30,8 +30,14 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 			apiKey: connection.apiKey,
 			requestTimeoutSeconds: REQUEST_TIMEOUT_SECONDS,
 		});
-	const unavailable = (cause: unknown) =>
-		new Sandbox.Unavailable({ provider: "opensandbox", cause });
+	const unavailable = (cause: unknown) => {
+		const reason = serverReason(cause);
+		return new Sandbox.Unavailable({
+			provider: "opensandbox",
+			cause,
+			...(reason ? { reason } : {}),
+		});
+	};
 	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
 	const missingOr = (cause: unknown, id: string) =>
 		cause instanceof SandboxApiException && cause.statusCode === 404
@@ -260,6 +266,20 @@ function networkPolicy(hosts: readonly string[]): NetworkPolicy {
 		defaultAction: "deny",
 		egress: hosts.map((target) => ({ action: "allow", target })),
 	};
+}
+
+/**
+ * The server's own explanation of a failure, such as "manifest for debian:22
+ * not found", which says far more than a status code. Undefined for failures
+ * that never reached the server.
+ */
+function serverReason(cause: unknown): string | undefined {
+	if (!(cause instanceof SandboxApiException)) return undefined;
+	const body = cause.rawBody;
+	if (body && typeof body === "object" && "message" in body && typeof body.message === "string") {
+		return body.message;
+	}
+	return cause.error.message ?? cause.message;
 }
 
 /** A refusal about the file itself, which the agent can do something about. */

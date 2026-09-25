@@ -153,6 +153,8 @@ export function outputTail(limit: number) {
 export class Unavailable extends Data.TaggedError("SandboxUnavailable")<{
 	provider: Provider;
 	cause: unknown;
+	/** What the provider said went wrong, when it said, in words fit to pass on. */
+	reason?: string;
 }> {}
 
 /** The provider no longer has this sandbox, and whatever was in it is gone. */
