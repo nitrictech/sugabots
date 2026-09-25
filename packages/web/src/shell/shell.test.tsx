@@ -15,9 +15,10 @@ import {
 	MODELS,
 	modelProviders,
 	mount,
-	OWN_PERSONAL_POD,
 	open,
 	pendingAnswer,
+	personalAssistant,
+	personalPod,
 	pods,
 	sam,
 	triager,
@@ -229,27 +230,8 @@ describe("the roster", () => {
 	});
 
 	it("pins the private Personal space above the rest", async () => {
-		const personalPod = {
-			...pods[0],
-			id: "0199a3a0-0000-7000-8000-0000000000af",
-			kind: "personal" as const,
-			name: "Personal",
-			slug: "personal",
-			permissions: OWN_PERSONAL_POD,
-		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
-		client.api.agents.list.mockReturnValue(
-			Effect.succeed([
-				...agents,
-				{
-					...agents[0],
-					id: "0199a3a0-0000-7000-8000-0000000000bf",
-					podId: personalPod.id,
-					name: "Personal Assistant",
-					handle: "personal-assistant",
-				},
-			]),
-		);
+		client.api.agents.list.mockReturnValue(Effect.succeed([...agents, personalAssistant]));
 		mount(linearPage);
 
 		const rail = await screen.findByRole("navigation", { name: "Workspace" });
@@ -546,26 +528,8 @@ describe("routes", () => {
 
 	it("keeps an incomplete workspace in onboarding across direct links", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
-		const personalPod = {
-			...pods[0],
-			id: "0199a3a0-0000-7000-8000-0000000000af",
-			ownerId: sam.id,
-			kind: "personal" as const,
-			name: "Personal",
-			slug: "personal",
-		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
-		client.api.agents.list.mockReturnValue(
-			Effect.succeed([
-				{
-					...agents[0],
-					id: "0199a3a0-0000-7000-8000-0000000000bf",
-					podId: personalPod.id,
-					name: "Personal Assistant",
-					handle: "personal-assistant",
-				},
-			]),
-		);
+		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const router = mount(linearPage);
 
 		expect(
@@ -582,6 +546,18 @@ describe("routes", () => {
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/personal-assistant"),
 		);
+	});
+
+	it("keeps onboarding on the Provider step while the assistant's model is not enabled", async () => {
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([{ ...personalAssistant, model: "a-model-the-workspace-has-not-enabled" }]),
+		);
+		mount(linearPage);
+
+		expect(await screen.findByRole("heading", { name: "Bring your own model." })).toBeDefined();
+		expect(screen.queryByRole("heading", { name: "Your Personal pod is ready." })).toBeNull();
 	});
 
 	it("still honours the older ?invite= link shape", async () => {
@@ -866,14 +842,6 @@ describe("creating a pod", () => {
 
 describe("Personal pod settings", () => {
 	it("groups the private pod separately and offers no rename action", async () => {
-		const personalPod = {
-			...pods[0],
-			id: "0199a3a0-0000-7000-8000-0000000000af",
-			kind: "personal" as const,
-			name: "Personal",
-			slug: "personal",
-			permissions: OWN_PERSONAL_POD,
-		};
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 
 		mount(`/suga/settings/pods/${personalPod.slug}`);

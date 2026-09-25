@@ -128,6 +128,19 @@ export const pods: Pod[] = [
 	},
 ];
 
+/** Sam's Personal pod, which the default `pods` answer leaves out. */
+export const personalPod: Pod = {
+	ownerId: sam.id,
+	kind: "personal",
+	id: "0199a3a0-0000-7000-8000-0000000000af",
+	workspaceId: WORKSPACE,
+	name: "Personal",
+	slug: "personal",
+	routing: DEFAULT_POD_ROUTING,
+	permissions: OWN_PERSONAL_POD,
+	createdAt: "2026-09-09T00:00:00.000Z",
+};
+
 export const MODELS = ["claude-opus-4-1-20250805", "claude-sonnet-4-20250514"];
 
 export const modelProviders: ModelProvider[] = [
@@ -241,6 +254,23 @@ export const agents: Agent[] = [
 
 export const linear = agents[2] as Agent;
 export const triager = agents[1] as Agent;
+
+/** The assistant in `personalPod`, which the default `agents` answer leaves out. */
+export const personalAssistant: Agent = {
+	id: "0199a3a0-0000-7000-8000-0000000000bf",
+	workspaceId: WORKSPACE,
+	systemAgentKey: null,
+	name: "Personal Assistant",
+	handle: "personal-assistant",
+	description: "Your private assistant.",
+	hue: 151,
+	face: "bar",
+	model: MODELS[1] as string,
+	prompt: "",
+	disabledTools: [],
+	podId: personalPod.id,
+	createdAt: "2026-09-10T00:00:00.000Z",
+};
 
 /**
  * The two agents the product ships. They belong to the workspace rather than to

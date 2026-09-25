@@ -42,20 +42,19 @@ export function Onboarding({ session }: { session: Session }) {
 	const personalAssistant = agents?.find(
 		(agent) => agent.podId === personalPod?.id && agent.systemAgentKey === null,
 	);
-	const inferredStep: Step = !workspace
-		? "workspace"
-		: models.data?.models.length === 0
-			? "provider"
-			: "pod";
+	// The assistant starts on a placeholder model, and the server won't finish
+	// onboarding until it runs on an enabled one; the Provider step's Continue sets it.
+	const assistantModelEnabled = Boolean(
+		models.data?.models.some((model) => model.modelId === personalAssistant?.model),
+	);
+	const inferredStep: Step = !workspace ? "workspace" : assistantModelEnabled ? "pod" : "provider";
 	const step = chosenStep ?? inferredStep;
 	const stepIndex = steps.findIndex((item) => item.id === step);
 	const previousStep = stepIndex > 0 ? steps[stepIndex - 1]?.id : undefined;
 
 	const loading =
 		Boolean(workspace) &&
-		(pods.isPending ||
-			(Boolean(pods.data?.length) && models.isPending) ||
-			(step === "pod" && agentsPending));
+		(pods.isPending || (Boolean(pods.data?.length) && (models.isPending || agentsPending)));
 	const failure = pods.error ?? models.error ?? agentsError;
 
 	return (
