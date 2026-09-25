@@ -46,9 +46,13 @@ export function repositoryChangeTools(options: RepositoryChangeOptions) {
 		return known;
 	};
 
-	const credentials = async () => {
-		const found = await run(github.credentials(workspaceId));
-		if (!found) throw new Error("This workspace isn't connected to GitHub any more.");
+	const credentials = async (repository: string) => {
+		const found = await run(github.credentials(workspaceId, repository));
+		if (!found) {
+			throw new Error(
+				"There's no GitHub access for this repository: the workspace's GitHub connection is gone, or its app isn't installed where the repository is.",
+			);
+		}
 		return found;
 	};
 
@@ -75,7 +79,7 @@ export function repositoryChangeTools(options: RepositoryChangeOptions) {
 						branch: place.branch,
 						repository: known.fullName,
 						defaultBranch: known.defaultBranch,
-						credentials: await credentials(),
+						credentials: await credentials(known.fullName),
 						...(approved?.kind === "push" ? { head: approved.head } : {}),
 					}),
 				);
@@ -94,7 +98,7 @@ export function repositoryChangeTools(options: RepositoryChangeOptions) {
 				const known = podRepository(repository);
 				const place = checkoutPlace(checkout, known.fullName);
 				const opened = await run(
-					github.openPullRequest(await credentials(), known.fullName, {
+					github.openPullRequest(await credentials(known.fullName), known.fullName, {
 						title,
 						body: `${body}\n\n---\nOpened by @${checkout.agent.handle} in Sugabots.`,
 						head: place.branch,

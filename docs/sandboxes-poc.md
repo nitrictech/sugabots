@@ -430,6 +430,32 @@ an empty push, never overwrites the remote, spots workflow changes), and a
 built-in approval parking with its summary, refusing "Always allow", and
 running once allowed. Not yet tried against GitHub itself.
 
+## GitHub App
+
+Each workspace can register a GitHub App of its own, the recommended method
+for self-hosted installs, where no shared app could hold every install's key.
+
+1. Workspace settings → GitHub → **Create GitHub App** (optionally for an
+   organisation). The browser posts a manifest to GitHub: no webhooks, Contents
+   and Pull requests read and write, Metadata read, private to its owner.
+2. GitHub sends the browser back to `/api/github/app/created` with a code; the
+   server trades it for the app's id and private key and stores the key
+   sealed, then sends the browser on to install the app.
+3. After installing, GitHub sends the browser to `/api/github/app/installed`;
+   the server checks the installation belongs to this app and records it.
+
+Both returns carry state sealed with the credential key, naming the workspace
+and the person who started, valid for an hour; the person's right to manage
+the workspace's providers is asked again when they come back.
+
+Tokens are minted per job from the installation (`github/tokens.ts`), signed
+with a JWT from the app's key, cached until five minutes before they expire:
+
+- a sandbox's git fetches get a **read-only** token for the pod's repositories;
+- a push or pull request gets a **write** token for that one repository.
+
+A personal access token still works as the fallback, and is used as it is.
+
 ## Out of the PoC
 
 Kubernetes and microVM providers, snapshots, preview URLs for dev servers,

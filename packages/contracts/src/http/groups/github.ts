@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
+	githubAppManifestSchema,
+	githubAppStartSchema,
 	githubConnectionResponseSchema,
 	githubConnectionSchema,
 	githubConnectionTestResultSchema,
@@ -37,6 +39,26 @@ export class GithubApi extends HttpApiGroup.make("github")
 		HttpApiEndpoint.post("test", `${root}/test`, {
 			params,
 			success: githubConnectionTestResultSchema,
+		}),
+		HttpApiEndpoint.post("startApp", `${root}/app`, {
+			params,
+			payload: githubAppStartSchema,
+			success: githubAppManifestSchema,
+			error: BadRequest,
+		}),
+		// Where GitHub sends the browser once the app is registered, and then
+		// once it is installed. Both redirect to the web app's GitHub settings.
+		HttpApiEndpoint.get("appCreated", "/github/app/created", {
+			query: { code: Schema.optional(Schema.String), state: Schema.optional(Schema.String) },
+			success: HttpApiSchema.Empty(302),
+		}),
+		HttpApiEndpoint.get("appInstalled", "/github/app/installed", {
+			query: {
+				installation_id: Schema.optional(Schema.String),
+				setup_action: Schema.optional(Schema.String),
+				state: Schema.optional(Schema.String),
+			},
+			success: HttpApiSchema.Empty(302),
 		}),
 		HttpApiEndpoint.get("listPodRepositories", "/pods/:podId/repositories", {
 			params: { podId: uuidSchema },

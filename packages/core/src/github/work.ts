@@ -4,6 +4,7 @@ import type { Database } from "../database/database.ts";
 import type { EgressHttpClients } from "../providers/network/egress.ts";
 import { type GithubCredentials, type GithubRequestFailed, githubClient } from "./client.ts";
 import type { GithubStore } from "./store.ts";
+import type { GithubTokens } from "./tokens.ts";
 
 /**
  * What a turn needs from GitHub: the pod's repositories to check out, and,
@@ -13,7 +14,11 @@ import type { GithubStore } from "./store.ts";
 export interface GithubForTurns {
 	gitHost(workspaceId: string): Effect.Effect<string, never, Database>;
 	repositories(podId: string): Effect.Effect<PodRepository[], never, Database>;
-	credentials(workspaceId: string): Effect.Effect<GithubCredentials | undefined, never, Database>;
+	/** Write credentials for one repository, for a push or a pull request. */
+	credentials(
+		workspaceId: string,
+		repository: string,
+	): Effect.Effect<GithubCredentials | undefined, never, Database>;
 	openPullRequest(
 		credentials: GithubCredentials,
 		repository: string,
@@ -23,9 +28,11 @@ export interface GithubForTurns {
 
 export function githubForTurns({
 	github,
+	tokens,
 	httpClients,
 }: {
 	github: GithubStore;
+	tokens: GithubTokens;
 	httpClients: EgressHttpClients;
 }): GithubForTurns {
 	return {
@@ -35,7 +42,8 @@ export function githubForTurns({
 				(connection) => connection?.gitHost ?? GITHUB_DEFAULT_GIT_HOST,
 			),
 		repositories: (podId) => github.listRepositories(podId),
-		credentials: (workspaceId) => github.credentials(workspaceId),
+		credentials: (workspaceId, repository) =>
+			tokens.credentialsFor(workspaceId, { access: "write", repositories: [repository] }),
 		openPullRequest: (credentials, repository, pull) =>
 			githubClient(
 				httpClients.for({ baseUrl: credentials.apiBaseUrl }),

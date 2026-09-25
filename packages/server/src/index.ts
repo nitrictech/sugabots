@@ -26,6 +26,7 @@ import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
 import { gitCredentialsForPod } from "@sugabots/core/github/credentials";
 import { githubStore } from "@sugabots/core/github/store";
+import { githubTokens } from "@sugabots/core/github/tokens";
 import { githubForTurns } from "@sugabots/core/github/work";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
@@ -109,7 +110,8 @@ const main = Effect.gen(function* () {
 	);
 	const sandboxProviders = sandboxProviderStore(credentials);
 	const github = githubStore(credentials);
-	const githubForTurn = githubForTurns({ github, httpClients });
+	const tokens = githubTokens({ github, httpClients });
+	const githubForTurn = githubForTurns({ github, tokens, httpClients });
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -123,7 +125,7 @@ const main = Effect.gen(function* () {
 			providers: sandboxProviders,
 			allowsUnisolated: allowsUnisolatedSandboxes,
 			publishEvents,
-			gitCredentialsFor: gitCredentialsForPod(github),
+			gitCredentialsFor: gitCredentialsForPod({ github, tokens }),
 		}),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurn),
@@ -216,6 +218,7 @@ const main = Effect.gen(function* () {
 		model,
 		credentials,
 		allowsUnisolatedSandboxes,
+		githubTokens: tokens,
 	});
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(

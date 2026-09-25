@@ -15,7 +15,18 @@ import {
 	podRepository,
 } from "../database/schema.ts";
 import type { CredentialCipher } from "../providers/model-providers/credentials.ts";
-import type { GithubCredentials, GithubRepository } from "./client.ts";
+import type { GithubRepository } from "./client.ts";
+
+export type GithubSecrets = { apiBaseUrl: string; gitHost: string } & (
+	| { method: "token"; token: string }
+	| {
+			method: "app";
+			appId: string;
+			privateKey: string;
+			/** Null until the app is installed. */
+			installationId: string | null;
+	  }
+);
 
 /**
  * A workspace's GitHub connection, and the repositories its pods have.
@@ -36,7 +47,23 @@ export interface GithubStore {
 		input: GithubConnectionUpdate,
 	): Effect.Effect<GithubConnection | undefined, never, Database>;
 	remove(workspaceId: string): Effect.Effect<boolean, never, Database>;
-	credentials(workspaceId: string): Effect.Effect<GithubCredentials | undefined, never, Database>;
+	/**
+	 * The connection's secrets, unsealed: a token, or an app's identity and
+	 * installation. Only the token service reads these, to hand out tokens.
+	 */
+	secrets(workspaceId: string): Effect.Effect<GithubSecrets | undefined, never, Database>;
+	/** Records the app GitHub just registered, replacing any connection the workspace had. */
+	saveApp(
+		workspaceId: string,
+		userId: string,
+		app: { appId: string; slug: string; privateKey: string },
+	): Effect.Effect<void, never, Database>;
+	/** Records where the app was installed. Nothing if the workspace's connection isn't that app. */
+	saveInstallation(
+		workspaceId: string,
+		appId: string,
+		installation: { id: string; accountLogin: string | null },
+	): Effect.Effect<boolean, never, Database>;
 	recordTest(
 		workspaceId: string,
 		outcome: { login: string } | { error: string },
@@ -73,6 +100,10 @@ export function githubStore(cipher: CredentialCipher): GithubStore {
 					apiBaseUrl: input.apiBaseUrl ?? GITHUB_DEFAULT_API_URL,
 					gitHost: input.gitHost ?? GITHUB_DEFAULT_GIT_HOST,
 					tokenEncrypted: cipher.encrypt(input.token),
+					appId: null,
+					appSlug: null,
+					appPrivateKeyEncrypted: null,
+					appInstallationId: null,
 					accountLogin: null,
 					lastTestedAt: null,
 					lastTestError: null,
@@ -122,15 +153,49 @@ export function githubStore(cipher: CredentialCipher): GithubStore {
 				(rows) => rows.length > 0,
 			),
 
-		credentials: (workspaceId) =>
-			Effect.map(load(workspaceId), (row) =>
-				row
-					? {
-							apiBaseUrl: row.apiBaseUrl,
-							gitHost: row.gitHost,
-							token: cipher.decrypt(row.tokenEncrypted),
-						}
-					: undefined,
+		secrets: (workspaceId) => Effect.map(load(workspaceId), (row) => row && toSecrets(row, cipher)),
+
+		saveApp: (workspaceId, userId, app) =>
+			Effect.asVoid(
+				query((db) => {
+					const values = {
+						method: "app" as const,
+						apiBaseUrl: GITHUB_DEFAULT_API_URL,
+						gitHost: GITHUB_DEFAULT_GIT_HOST,
+						tokenEncrypted: null,
+						appId: app.appId,
+						appSlug: app.slug,
+						appPrivateKeyEncrypted: cipher.encrypt(app.privateKey),
+						appInstallationId: null,
+						accountLogin: null,
+						lastTestedAt: null,
+						lastTestError: null,
+						createdById: userId,
+					};
+					return db
+						.insert(githubConnection)
+						.values({ workspaceId, ...values })
+						.onConflictDoUpdate({ target: githubConnection.workspaceId, set: values });
+				}),
+			),
+
+		saveInstallation: (workspaceId, appId, installation) =>
+			Effect.map(
+				query((db) =>
+					db
+						.update(githubConnection)
+						.set({
+							appInstallationId: installation.id,
+							accountLogin: installation.accountLogin,
+							lastTestedAt: sql`now()`,
+							lastTestError: null,
+						})
+						.where(
+							and(eq(githubConnection.workspaceId, workspaceId), eq(githubConnection.appId, appId)),
+						)
+						.returning({ id: githubConnection.id }),
+				),
+				(rows) => rows.length > 0,
 			),
 
 		recordTest: (workspaceId, outcome) =>
@@ -191,6 +256,24 @@ export function githubStore(cipher: CredentialCipher): GithubStore {
 	};
 }
 
+/** The row's secrets, or nothing when it is an app whose key is somehow missing. */
+function toSecrets(row: GithubConnectionRow, cipher: CredentialCipher): GithubSecrets | undefined {
+	const where = { apiBaseUrl: row.apiBaseUrl, gitHost: row.gitHost };
+	if (row.method === "token") {
+		return row.tokenEncrypted
+			? { ...where, method: "token", token: cipher.decrypt(row.tokenEncrypted) }
+			: undefined;
+	}
+	if (!row.appId || !row.appPrivateKeyEncrypted) return undefined;
+	return {
+		...where,
+		method: "app",
+		appId: row.appId,
+		privateKey: cipher.decrypt(row.appPrivateKeyEncrypted),
+		installationId: row.appInstallationId,
+	};
+}
+
 function toConnection(row: GithubConnectionRow): GithubConnection {
 	return {
 		id: row.id,
@@ -198,7 +281,10 @@ function toConnection(row: GithubConnectionRow): GithubConnection {
 		method: row.method,
 		apiBaseUrl: row.apiBaseUrl,
 		gitHost: row.gitHost,
-		hasToken: true,
+		hasToken:
+			row.method === "token" ? row.tokenEncrypted !== null : row.appPrivateKeyEncrypted !== null,
+		appSlug: row.appSlug,
+		installed: row.method === "token" || row.appInstallationId !== null,
 		accountLogin: row.accountLogin,
 		status: row.lastTestedAt === null ? "untested" : row.lastTestError ? "error" : "connected",
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,

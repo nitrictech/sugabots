@@ -11,17 +11,20 @@ import { useWorkspace } from "@/lib/workspace.ts";
 
 /** The workspace's GitHub connection, or null when it has none. */
 export function useGithubConnection() {
+	const setup = useGithubSetup();
+	return { ...setup, data: setup.data === undefined ? undefined : setup.data.connection };
+}
+
+/** The connection, and for an app, where to install it. */
+export function useGithubSetup() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["github-connection", workspaceId],
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(
-						client.api.github
-							.get({ params: { workspace: workspaceId } })
-							.pipe(Effect.map(({ connection }) => connection)),
-						{ signal },
-					)
+					Effect.runPromise(client.api.github.get({ params: { workspace: workspaceId } }), {
+						signal,
+					})
 			: skipToken,
 	});
 }
@@ -54,6 +57,15 @@ export function useGithubConnectionActions() {
 			mutationFn: () =>
 				Effect.runPromise(client.api.github.remove({ params: { workspace: requiredWorkspace() } })),
 			onSuccess: refresh,
+		}),
+		startApp: useMutation({
+			mutationFn: (organization: string) =>
+				Effect.runPromise(
+					client.api.github.startApp({
+						params: { workspace: requiredWorkspace() },
+						payload: organization ? { organization } : {},
+					}),
+				),
 		}),
 		test: useMutation({
 			mutationFn: () =>

@@ -26,7 +26,14 @@ export const githubConnection = pgTable(
 		method: text("method").$type<GithubConnectionMethod>().notNull(),
 		apiBaseUrl: text("api_base_url").notNull(),
 		gitHost: text("git_host").notNull(),
-		tokenEncrypted: text("token_encrypted").notNull(),
+		/** A personal access token, sealed. Set only for the `token` method. */
+		tokenEncrypted: text("token_encrypted"),
+		/** The GitHub App's id, slug and private key, sealed. Set only for the `app` method. */
+		appId: text("app_id"),
+		appSlug: text("app_slug"),
+		appPrivateKeyEncrypted: text("app_private_key_encrypted"),
+		/** Where the app is installed. Null until the admin has installed it. */
+		appInstallationId: text("app_installation_id"),
 		/** Whose token it is, as GitHub said at the last successful test. */
 		accountLogin: text("account_login"),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),

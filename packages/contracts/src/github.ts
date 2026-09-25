@@ -6,14 +6,18 @@ import { uuidSchema } from "./uuid.ts";
 /**
  * GitHub: how a workspace's agents reach the repositories their pods work on.
  *
- * One connection per workspace. For now it is a token an admin pastes (a
- * fine-grained personal access token); a GitHub App each installation
- * registers for itself comes later, behind the same connection. The token is
- * never given to a sandbox: it is added to the sandbox's git requests on the
- * way out, and only for the repositories its pod has.
+ * One connection per workspace, by one of two methods:
+ * - `app`: a GitHub App the workspace registers for itself through GitHub's
+ *   manifest flow and installs on its account or organisation. Sugabots mints
+ *   short-lived installation tokens, each narrowed to the repositories and
+ *   access a job needs. The recommended method.
+ * - `token`: a fine-grained personal access token an admin pastes, for a quick
+ *   start or where registering an app isn't possible.
+ * Neither is ever given to a sandbox: credentials are added to the sandbox's
+ * git requests on the way out, and only for the repositories its pod has.
  */
 
-export const githubConnectionMethodSchema = Schema.Literals(["token"]);
+export const githubConnectionMethodSchema = Schema.Literals(["app", "token"]);
 export type GithubConnectionMethod = typeof githubConnectionMethodSchema.Type;
 
 /** github.com's addresses, until an admin points the connection at GitHub Enterprise Server. */
@@ -36,8 +40,15 @@ export const githubConnectionSchema = Schema.Struct({
 	/** Where repositories are cloned from, e.g. github.com. */
 	gitHost: Schema.String,
 	hasToken: Schema.Boolean,
-	/** Whose token it is, from the last successful test. */
+	/**
+	 * For a token, whose it is, from the last successful test. For an app, the
+	 * account or organisation it is installed on.
+	 */
 	accountLogin: Schema.NullOr(Schema.String),
+	/** The app's address on GitHub, e.g. `sugabots-acme`. Null for a token. */
+	appSlug: Schema.NullOr(Schema.String),
+	/** Whether the app is installed yet. Always true for a token. */
+	installed: Schema.Boolean,
 	status: providerStatusSchema,
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
@@ -46,8 +57,9 @@ export const githubConnectionSchema = Schema.Struct({
 
 export type GithubConnection = typeof githubConnectionSchema.Type;
 
+/** A connection by token. An app connection is made through the `startApp` endpoint instead. */
 export const newGithubConnectionSchema = Schema.Struct({
-	method: githubConnectionMethodSchema,
+	method: Schema.Literal("token"),
 	token: tokenSchema,
 	apiBaseUrl: Schema.optional(providerUrlSchema),
 	gitHost: Schema.optional(gitHostSchema),
@@ -67,6 +79,11 @@ export type GithubConnectionUpdate = typeof githubConnectionUpdateSchema.Type;
 
 export const githubConnectionResponseSchema = Schema.Struct({
 	connection: Schema.NullOr(githubConnectionSchema),
+	/**
+	 * For an app: where to install it, or change which repositories it has,
+	 * carrying state that brings the browser back here. Null for a token.
+	 */
+	installUrl: Schema.NullOr(Schema.String),
 });
 
 export const githubConnectionTestResultSchema = Schema.Struct({
@@ -99,3 +116,31 @@ export type PodRepository = typeof podRepositorySchema.Type;
 export const newPodRepositorySchema = Schema.Struct({ fullName: repositoryFullNameSchema });
 
 export type NewPodRepository = typeof newPodRepositorySchema.Type;
+
+/** Where GitHub should register the app: the admin's own account, or an organisation they own. */
+export const githubAppStartSchema = Schema.Struct({
+	organization: Schema.optional(
+		Schema.Trim.check(
+			Schema.isMaxLength(100),
+			Schema.isPattern(/^[A-Za-z0-9-]*$/, { message: "An organisation's login" }),
+		),
+	),
+});
+
+export type GithubAppStart = typeof githubAppStartSchema.Type;
+
+/**
+ * What the web app posts to GitHub to register the app: GitHub's manifest
+ * flow is a form post from the browser, not an API call.
+ */
+export const githubAppManifestSchema = Schema.Struct({
+	/** Where the form is posted. */
+	actionUrl: Schema.String,
+	/** The manifest, as the JSON string the form's `manifest` field carries. */
+	manifest: Schema.String,
+});
+
+export type GithubAppManifest = typeof githubAppManifestSchema.Type;
+
+/** Where in a workspace the browser lands once the app is made and installed: its GitHub settings. */
+export const GITHUB_APP_RETURN_PATH = "/settings/github";

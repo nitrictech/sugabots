@@ -93,6 +93,7 @@ export function createTestApp(options: TestAppOptions): TestApp {
 		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
 		oauthFetch: async () => new Response(null, { status: 503 }),
 		credentials: Credentials.fromKey(TEST_CREDENTIAL_KEY),
+		githubTokens: { credentialsFor: () => Effect.undefined },
 	}).pipe(Layer.provide([noDatabase, HttpServer.layerServices]));
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 	return {
@@ -202,7 +203,9 @@ const emptyGithubStore: GithubStore = {
 	replace: () => notStubbed("github.replace"),
 	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
-	credentials: () => Effect.undefined,
+	secrets: () => Effect.undefined,
+	saveApp: () => Effect.void,
+	saveInstallation: () => Effect.succeed(false),
 	recordTest: () => Effect.void,
 	listRepositories: () => Effect.succeed([]),
 	addRepository: () => Effect.undefined,

@@ -1,14 +1,20 @@
 import type {
+	GithubAppManifest,
 	GithubConnectionTestResult,
 	GithubConnectionUpdate,
 	NewGithubConnection,
 	NewPodRepository,
 } from "@sugabots/contracts";
-import { Data, Effect } from "effect";
-import type { Database } from "../database/database.ts";
+import { eq } from "drizzle-orm";
+import { Data, Effect, Schema } from "effect";
+import { type Database, query } from "../database/database.ts";
+import { workspace } from "../database/schema.ts";
+import type { CredentialCipher } from "../providers/model-providers/credentials.ts";
 import type { EgressHttpClients, EgressUrlValidator } from "../providers/network/egress.ts";
+import { appManifest, githubAppClient, installUrl, manifestActionUrl } from "./app.ts";
 import { githubClient } from "./client.ts";
 import type { GithubStore } from "./store.ts";
+import type { GithubTokens } from "./tokens.ts";
 
 export class GithubConnectionNotFound extends Data.TaggedError("GithubConnectionNotFound") {
 	override get message() {
@@ -33,29 +39,90 @@ export class RepositoryAlreadyAdded extends Data.TaggedError("RepositoryAlreadyA
 	}
 }
 
+/**
+ * Registering or installing the app didn't finish: GitHub sent back
+ * something unusable, the link expired or was someone else's, or GitHub
+ * refused to hand the app over.
+ */
+export class GithubAppSetupFailed extends Data.TaggedError("GithubAppSetupFailed")<{
+	message: string;
+}> {}
+
 export interface GithubOperationsOptions {
 	github: GithubStore;
+	tokens: GithubTokens;
 	httpClients: EgressHttpClients;
 	validateUrl: EgressUrlValidator;
+	/** Seals the state GitHub carries through registration, so only this server's links come back. */
+	cipher: CredentialCipher;
+	/** Addresses GitHub is given for the app, built from the installation's own. */
+	urls: { homepage: string; appCreated: string; appInstalled: string };
+	/** Whether the person may still manage this workspace's providers, asked again on the way back from GitHub. */
+	mayManage: (userId: string, workspaceId: string) => Effect.Effect<boolean, never, Database>;
 }
 
-export function githubOperations({ github, httpClients, validateUrl }: GithubOperationsOptions) {
+/** How long a registration link stays good: long enough to read GitHub's page and confirm. */
+const SETUP_WINDOW_MS = 60 * 60_000;
+
+const stateSchema = Schema.Struct({
+	workspaceId: Schema.String,
+	userId: Schema.String,
+	expiresAt: Schema.Number,
+});
+
+export function githubOperations({
+	github,
+	tokens,
+	httpClients,
+	validateUrl,
+	cipher,
+	urls,
+	mayManage,
+}: GithubOperationsOptions) {
 	const requireAllowedUrl = (url: string) =>
 		Effect.tryPromise({ try: () => validateUrl(url), catch: () => new GithubUrlNotAllowed() });
 
-	const requireCredentials = (workspaceId: string) =>
-		Effect.filterOrFail(
-			github.credentials(workspaceId),
-			(credentials) => credentials !== undefined,
-			() => new GithubConnectionNotFound(),
+	const sealState = (workspaceId: string, userId: string) =>
+		cipher.encrypt(
+			JSON.stringify({ workspaceId, userId, expiresAt: Date.now() + SETUP_WINDOW_MS }),
 		);
 
-	const clientFor = (credentials: { apiBaseUrl: string; gitHost: string; token: string }) =>
-		githubClient(httpClients.for({ baseUrl: credentials.apiBaseUrl }), credentials);
+	/** The workspace a returning link is for, if it is this server's, unexpired, and this person's. */
+	const openState = (userId: string, state: string | undefined) =>
+		Effect.gen(function* () {
+			const failed = new GithubAppSetupFailed({
+				message: "The link back from GitHub has expired or isn't yours. Start again from Sugabots.",
+			});
+			if (!state) return yield* failed;
+			const opened = yield* Effect.try({
+				try: () => Schema.decodeUnknownSync(stateSchema)(JSON.parse(cipher.decrypt(state))),
+				catch: () => failed,
+			});
+			if (opened.userId !== userId || opened.expiresAt < Date.now()) return yield* failed;
+			if (!(yield* mayManage(userId, opened.workspaceId))) return yield* failed;
+			return opened.workspaceId;
+		});
+
+	const appClient = (apiBaseUrl: string) =>
+		githubAppClient(httpClients.for({ baseUrl: apiBaseUrl }), apiBaseUrl);
+
+	const workspaceSlug = (workspaceId: string) =>
+		Effect.map(
+			query((db) =>
+				db.select({ slug: workspace.slug }).from(workspace).where(eq(workspace.id, workspaceId)),
+			),
+			([row]) => row?.slug ?? workspaceId,
+		);
 
 	return {
-		get: (workspaceId: string) =>
-			Effect.map(github.get(workspaceId), (connection) => ({ connection: connection ?? null })),
+		get: (workspaceId: string, userId: string) =>
+			Effect.map(github.get(workspaceId), (connection) => ({
+				connection: connection ?? null,
+				installUrl:
+					connection?.method === "app" && connection.appSlug
+						? installUrl(connection.appSlug, sealState(workspaceId, userId))
+						: null,
+			})),
 
 		replace: (workspaceId: string, userId: string, input: NewGithubConnection) =>
 			Effect.andThen(
@@ -82,18 +149,112 @@ export function githubOperations({ github, httpClients, validateUrl }: GithubOpe
 			workspaceId: string,
 		): Effect.Effect<GithubConnectionTestResult, GithubConnectionNotFound, Database> =>
 			Effect.gen(function* () {
-				const credentials = yield* requireCredentials(workspaceId);
-				const outcome = yield* clientFor(credentials).viewer.pipe(
-					Effect.map((login) => ({ login })),
-					Effect.catchTag("GithubRequestFailed", (failure) =>
-						Effect.succeed({ error: failure.message }),
-					),
-				);
+				const secrets = yield* github.secrets(workspaceId);
+				if (!secrets) return yield* new GithubConnectionNotFound();
+				const outcome =
+					secrets.method === "token"
+						? yield* githubClient(
+								httpClients.for({ baseUrl: secrets.apiBaseUrl }),
+								secrets,
+							).viewer.pipe(
+								Effect.map((login) => ({ login })),
+								Effect.catchTag("GithubRequestFailed", (failure) =>
+									Effect.succeed({ error: failure.message }),
+								),
+							)
+						: secrets.installationId
+							? yield* appClient(secrets.apiBaseUrl)
+									.installationAccount(secrets, secrets.installationId)
+									.pipe(
+										Effect.map((login) => ({ login: login ?? "the app's installation" })),
+										Effect.catchTag("GithubRequestFailed", (failure) =>
+											Effect.succeed({ error: failure.message }),
+										),
+									)
+							: { error: "The app isn't installed yet." };
 				yield* github.recordTest(workspaceId, outcome);
 				return "login" in outcome
 					? { reachable: true, login: outcome.login }
 					: { reachable: false, error: outcome.error };
 			}),
+
+		/** The manifest the browser posts to GitHub to register the workspace's own app. */
+		startApp: (
+			workspaceId: string,
+			userId: string,
+			organization: string | undefined,
+		): Effect.Effect<GithubAppManifest, never, Database> =>
+			Effect.gen(function* () {
+				const slug = yield* workspaceSlug(workspaceId);
+				const manifest = appManifest({
+					// GitHub app names are unique across GitHub and at most 34 characters.
+					name: `Sugabots ${slug}`.slice(0, 34),
+					homepageUrl: urls.homepage,
+					createdUrl: urls.appCreated,
+					installedUrl: urls.appInstalled,
+				});
+				return {
+					actionUrl: manifestActionUrl(sealState(workspaceId, userId), organization || undefined),
+					manifest: JSON.stringify(manifest),
+				};
+			}),
+
+		/**
+		 * GitHub has registered the app and sent back a code: trade it for the
+		 * app's key, keep that, and send the admin on to install it.
+		 */
+		appCreated: (userId: string, code: string | undefined, state: string | undefined) =>
+			Effect.gen(function* () {
+				const workspaceId = yield* openState(userId, state);
+				if (!code) {
+					return yield* new GithubAppSetupFailed({ message: "GitHub didn't register the app." });
+				}
+				const app = yield* appClient("https://api.github.com/")
+					.convertManifest(code)
+					.pipe(
+						Effect.mapError(
+							(failure) =>
+								new GithubAppSetupFailed({
+									message: `GitHub didn't hand over the app: ${failure.message}`,
+								}),
+						),
+					);
+				yield* github.saveApp(workspaceId, userId, app);
+				return { installUrl: installUrl(app.slug, sealState(workspaceId, userId)) };
+			}),
+
+		/** The admin installed the app: check the installation is this app's, and keep it. */
+		appInstalled: (userId: string, installationId: string | undefined, state: string | undefined) =>
+			Effect.gen(function* () {
+				const workspaceId = yield* openState(userId, state);
+				const secrets = yield* github.secrets(workspaceId);
+				if (!installationId || secrets?.method !== "app") {
+					return yield* new GithubAppSetupFailed({ message: "The app wasn't installed." });
+				}
+				const accountLogin = yield* appClient(secrets.apiBaseUrl)
+					.installationAccount(secrets, installationId)
+					.pipe(
+						Effect.mapError(
+							(failure) =>
+								new GithubAppSetupFailed({
+									message: `That installation isn't this workspace's app: ${failure.message}`,
+								}),
+						),
+					);
+				yield* github.saveInstallation(workspaceId, secrets.appId, {
+					id: installationId,
+					accountLogin,
+				});
+				return { workspaceSlug: yield* workspaceSlug(workspaceId) };
+			}),
+
+		/** Where to send the browser when a link back from GitHub can't be used. */
+		workspaceSlugForState: (userId: string, state: string | undefined) =>
+			openState(userId, state).pipe(
+				Effect.flatMap(workspaceSlug),
+				Effect.option,
+				Effect.map((slug) => (slug._tag === "Some" ? slug.value : undefined)),
+			),
 
 		listRepositories: (podId: string) => github.listRepositories(podId),
 
@@ -103,8 +264,12 @@ export function githubOperations({ github, httpClients, validateUrl }: GithubOpe
 			input: NewPodRepository,
 		) =>
 			Effect.gen(function* () {
-				const credentials = yield* requireCredentials(pod.workspaceId);
-				const repository = yield* clientFor(credentials)
+				const credentials = yield* tokens.credentialsFor(pod.workspaceId, { access: "read" });
+				if (!credentials) return yield* new GithubConnectionNotFound();
+				const repository = yield* githubClient(
+					httpClients.for({ baseUrl: credentials.apiBaseUrl }),
+					credentials,
+				)
 					.repository(input.fullName)
 					.pipe(
 						Effect.mapError((failure) => new RepositoryNotReadable({ message: failure.message })),

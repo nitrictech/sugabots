@@ -109,6 +109,15 @@ export const accessPolicy: AccessPolicy = {
 		update: { workspace: "workspace.providers.manage" },
 		remove: { workspace: "workspace.providers.manage" },
 		test: { workspace: "workspace.providers.manage" },
+		startApp: { workspace: "workspace.providers.manage" },
+		appCreated: {
+			reach:
+				"github/operations.ts opens the sealed state and asks again on the way back from GitHub",
+		},
+		appInstalled: {
+			reach:
+				"github/operations.ts opens the sealed state and asks again on the way back from GitHub",
+		},
 		listPodRepositories: { pod: "pod.read" },
 		addPodRepository: { pod: "sandbox.manage" },
 		removePodRepository: { pod: "sandbox.manage" },

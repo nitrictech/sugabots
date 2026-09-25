@@ -4,6 +4,7 @@ import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../databas
 import { aesCredentialCipher } from "../providers/model-providers/credentials.ts";
 import { gitCredentialsForPod } from "./credentials.ts";
 import { githubStore } from "./store.ts";
+import { githubTokens } from "./tokens.ts";
 
 /**
  * The GitHub store against Postgres: one connection per workspace with its
@@ -12,6 +13,12 @@ import { githubStore } from "./store.ts";
 describe.skipIf(!process.env.DATABASE_URL)("GitHub, against Postgres", () => {
 	const cipher = aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"));
 	const store = githubStore(cipher);
+	// A token connection never calls GitHub for its credentials.
+	const tokens = githubTokens({
+		github: store,
+		httpClients: { for: () => () => Promise.reject(new Error("no network in tests")) },
+	});
+	const forPod = gitCredentialsForPod({ github: store, tokens });
 	const github = onPostgres(store);
 	let workspaceId: string;
 	let podId: string;
@@ -69,7 +76,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub, against Postgres", () => {
 		expect(JSON.stringify(connection)).not.toContain("github_pat_secret");
 		const rows = await onDatabase((db) => db.select().from(githubConnection));
 		expect(JSON.stringify(rows)).not.toContain("github_pat_secret");
-		expect(await github.credentials(workspaceId)).toMatchObject({ token: "github_pat_secret" });
+		expect(await github.secrets(workspaceId)).toMatchObject({
+			method: "token",
+			token: "github_pat_secret",
+		});
 	});
 
 	it("adds a repository to a pod once", async () => {
@@ -92,7 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub, against Postgres", () => {
 			private: true,
 		});
 
-		expect(await runOnPostgres(gitCredentialsForPod(store)({ workspaceId, podId }))).toEqual({
+		expect(await runOnPostgres(forPod({ workspaceId, podId }))).toEqual({
 			host: "github.com",
 			username: "x-access-token",
 			token: "github_pat_secret",
@@ -101,8 +111,6 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub, against Postgres", () => {
 	});
 
 	it("gives nothing where the workspace has no GitHub connection", async () => {
-		expect(
-			await runOnPostgres(gitCredentialsForPod(store)({ workspaceId, podId })),
-		).toBeUndefined();
+		expect(await runOnPostgres(forPod({ workspaceId, podId }))).toBeUndefined();
 	});
 });

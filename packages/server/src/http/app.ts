@@ -9,6 +9,7 @@ import type { Credentials } from "@sugabots/core/credentials/credentials";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { GithubStore } from "@sugabots/core/github/store";
+import type { GithubTokens } from "@sugabots/core/github/tokens";
 import type { Installation } from "@sugabots/core/installation/installation";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
@@ -117,6 +118,8 @@ export interface AppOptions {
 	credentials: Credentials.Interface;
 	/** Whether a workspace may choose sandboxes that share this machine's kernel. */
 	allowsUnisolatedSandboxes?: boolean;
+	/** Where GitHub tokens come from, minted per job for an app. */
+	githubTokens: GithubTokens;
 }
 
 export function apiLayer({
@@ -132,6 +135,7 @@ export function apiLayer({
 	model,
 	credentials,
 	allowsUnisolatedSandboxes = false,
+	githubTokens,
 }: AppOptions) {
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 
@@ -162,7 +166,16 @@ export function apiLayer({
 			httpClients,
 			validateProviderUrl,
 		}),
-		githubRoutes({ github: stores.github, httpClients, validateProviderUrl }),
+		githubRoutes({
+			github: stores.github,
+			tokens: githubTokens,
+			httpClients,
+			validateProviderUrl,
+			cipher: credentialCipher,
+			authorization,
+			apiUrl,
+			webAppUrl: webAppUrl({ baseUrl, webOrigins }),
+		}),
 		sandboxProviderRoutes({
 			sandboxProviders: stores.sandboxProviders,
 			podSandboxes: stores.podSandboxes,
