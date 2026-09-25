@@ -55,7 +55,7 @@ describe("envelope", () => {
 	});
 
 	it("parses an event carrying fields this version has never seen", () => {
-		const parsed = Schema.decodeUnknownSync(streamEventSchema)({
+		const parsed = Schema.decodeSync(streamEventSchema)({
 			v: 1,
 			type: "thread.changed",
 			surprise: true,
@@ -71,7 +71,7 @@ describe("envelope", () => {
 	});
 
 	it("rejects an event with no type", () => {
-		expect(Schema.decodeUnknownResult(streamEventSchema)({ v: 1, type: "" })._tag).toBe("Failure");
+		expect(Schema.decodeResult(streamEventSchema)({ v: 1, type: "" })._tag).toBe("Failure");
 	});
 
 	it.each([
@@ -163,7 +163,7 @@ describe("envelope", () => {
 
 	it("keeps open empty payloads and workspace envelopes", () => {
 		const extras = { future: { value: 1 } };
-		expect(Schema.decodeUnknownSync(eventPayloadSchemas["agent.updated"])(extras)).toEqual(extras);
+		expect(Schema.decodeSync(eventPayloadSchemas["agent.updated"])(extras)).toEqual(extras);
 		for (const type of ["reset", "thread.changed"]) {
 			const event = { v: 1, type, ...extras };
 			expect(Schema.decodeUnknownSync(workspaceUpdateEventSchema)(event)).toEqual(event);

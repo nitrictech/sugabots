@@ -7,14 +7,14 @@ describe("capabilitiesNamed", () => {
 	const named = capabilitiesNamed({ tools: "tools", thinking: "reasoning" });
 
 	it("translates the words it knows and drops the rest", () => {
-		expect(Schema.decodeUnknownSync(named)(["completion", "tools", "thinking", "hot"])).toEqual([
+		expect(Schema.decodeSync(named)(["completion", "tools", "thinking", "hot"])).toEqual([
 			"tools",
 			"reasoning",
 		]);
 	});
 
 	it("reads a missing or malformed list as no capabilities", () => {
-		expect(Schema.decodeUnknownSync(named)(undefined)).toEqual([]);
+		expect(Schema.decodeSync(named)(undefined)).toEqual([]);
 		expect(Schema.decodeUnknownSync(named)("tools")).toEqual([]);
 		expect(Schema.decodeUnknownSync(named)([1, null])).toEqual([]);
 	});
@@ -57,7 +57,7 @@ describe("dialectFor", () => {
 describe("openaiCompatible", () => {
 	it("reads the vision hint and context length a richer listing carries", () => {
 		expect(
-			Schema.decodeUnknownSync(openaiCompatible.model)({
+			Schema.decodeSync(openaiCompatible.model)({
 				id: "local/vision-model",
 				name: "Vision",
 				architecture: { modality: "text+image->text" },
@@ -73,7 +73,7 @@ describe("openaiCompatible", () => {
 
 	it("does not mistake image output for image input", () => {
 		expect(
-			Schema.decodeUnknownSync(openaiCompatible.model)({
+			Schema.decodeSync(openaiCompatible.model)({
 				id: "painter",
 				architecture: { modality: "text->image" },
 			}).capabilities,
@@ -81,18 +81,16 @@ describe("openaiCompatible", () => {
 	});
 
 	it("skips an entry that is not a model", () => {
-		expect(Schema.decodeUnknownResult(openaiCompatible.model)({ object: "model" })._tag).toBe(
+		expect(Schema.decodeResult(openaiCompatible.model)({ object: "model" })._tag).toBe("Failure");
+		expect(Schema.decodeResult(openaiCompatible.model)({ id: "has spaces in it" })._tag).toBe(
 			"Failure",
 		);
-		expect(
-			Schema.decodeUnknownResult(openaiCompatible.model)({ id: "has spaces in it" })._tag,
-		).toBe("Failure");
-		expect(Schema.decodeUnknownResult(openaiCompatible.model)("gpt-4o")._tag).toBe("Failure");
+		expect(Schema.decodeResult(openaiCompatible.model)("gpt-4o")._tag).toBe("Failure");
 	});
 
 	it("keeps a model whose extra fields are not what the listing promised", () => {
 		expect(
-			Schema.decodeUnknownSync(openaiCompatible.model)({
+			Schema.decodeSync(openaiCompatible.model)({
 				id: "odd",
 				name: 7,
 				architecture: null,
@@ -109,7 +107,7 @@ describe("openaiCompatible", () => {
 describe("anthropic", () => {
 	it("defaults missing fields and ignores malformed display metadata", () => {
 		for (const display_name of [undefined, null, 7, {}]) {
-			expect(Schema.decodeUnknownSync(anthropic.model)({ id: "claude", display_name })).toEqual({
+			expect(Schema.decodeSync(anthropic.model)({ id: "claude", display_name })).toEqual({
 				modelId: "claude",
 				displayName: null,
 				capabilities: [],
@@ -129,7 +127,7 @@ describe("anthropic", () => {
 
 describe("ollama", () => {
 	it("normalizes missing and malformed inspection metadata", async () => {
-		const model = Schema.decodeUnknownSync(ollama.model)({ name: "model" });
+		const model = Schema.decodeSync(ollama.model)({ name: "model" });
 		const inspect = ollama.inspect;
 		if (!inspect) throw new Error("Ollama must support inspection");
 		for (const body of [
@@ -144,7 +142,7 @@ describe("ollama", () => {
 	});
 
 	it("keeps the listed model when inspection is malformed or violates the contract", async () => {
-		const model = Schema.decodeUnknownSync(ollama.model)({ name: "model" });
+		const model = Schema.decodeSync(ollama.model)({ name: "model" });
 		const inspect = ollama.inspect;
 		if (!inspect) throw new Error("Ollama must support inspection");
 		for (const body of [
@@ -164,12 +162,10 @@ describe("ollama", () => {
 	});
 
 	it("reads the native listing", () => {
-		expect(Schema.decodeUnknownSync(ollama.listing)({ models: [{ name: "a" }] })).toEqual([
-			{ name: "a" },
-		]);
-		expect(Schema.decodeUnknownResult(ollama.listing)({ data: [] })._tag).toBe("Failure");
+		expect(Schema.decodeSync(ollama.listing)({ models: [{ name: "a" }] })).toEqual([{ name: "a" }]);
+		expect(Schema.decodeResult(ollama.listing)({ data: [] })._tag).toBe("Failure");
 		expect(
-			Schema.decodeUnknownSync(ollama.model)({ name: "llama3.2:latest", model: "llama3.2:latest" })
+			Schema.decodeSync(ollama.model)({ name: "llama3.2:latest", model: "llama3.2:latest" })
 				.modelId,
 		).toBe("llama3.2:latest");
 	});
@@ -177,7 +173,7 @@ describe("ollama", () => {
 
 describe("discovery decoding parity", () => {
 	it("normalizes nulls, trims names, and deduplicates capabilities into mutable outputs", () => {
-		const model = Schema.decodeUnknownSync(discoveredModel)({
+		const model = Schema.decodeSync(discoveredModel)({
 			modelId: "model",
 			displayName: " Model ",
 			contextLength: null,
@@ -197,7 +193,7 @@ describe("discovery decoding parity", () => {
 	it("rejects numeric context lengths outside the contract", () => {
 		for (const context_length of [0, -1, 1.5, 10_000_001]) {
 			expect(
-				Schema.decodeUnknownResult(openaiCompatible.model)({ id: "model", context_length })._tag,
+				Schema.decodeResult(openaiCompatible.model)({ id: "model", context_length })._tag,
 			).toBe("Failure");
 		}
 	});
@@ -211,7 +207,7 @@ describe("discovery decoding parity", () => {
 			{ input_modalities: [1], output_modalities: "image" },
 		]) {
 			expect(
-				Schema.decodeUnknownSync(openrouter.model)({
+				Schema.decodeSync(openrouter.model)({
 					id: "model",
 					name: null,
 					architecture,
@@ -224,7 +220,7 @@ describe("discovery decoding parity", () => {
 
 	it("reads all OpenRouter capabilities", () => {
 		expect(
-			Schema.decodeUnknownSync(openrouter.model)({
+			Schema.decodeSync(openrouter.model)({
 				id: "model",
 				architecture: {
 					input_modalities: ["text", "image", "audio"],
@@ -238,7 +234,7 @@ describe("discovery decoding parity", () => {
 
 	it("does not discard valid architecture metadata beside malformed metadata", () => {
 		expect(
-			Schema.decodeUnknownSync(openrouter.model)({
+			Schema.decodeSync(openrouter.model)({
 				id: "model",
 				architecture: { input_modalities: ["image"], output_modalities: 7 },
 			}).capabilities,
@@ -247,10 +243,10 @@ describe("discovery decoding parity", () => {
 
 	it("validates listing envelopes without prematurely validating entries", () => {
 		expect(
-			Schema.decodeUnknownSync(openaiCompatible.listing)({ data: [null, 1, { id: "model" }] }),
+			Schema.decodeSync(openaiCompatible.listing)({ data: [null, 1, { id: "model" }] }),
 		).toEqual([null, 1, { id: "model" }]);
 		for (const body of [null, {}, { data: null }, { data: {} }]) {
-			expect(Schema.decodeUnknownResult(openaiCompatible.listing)(body)._tag).toBe("Failure");
+			expect(Schema.decodeResult(openaiCompatible.listing)(body)._tag).toBe("Failure");
 		}
 	});
 });

@@ -9,7 +9,7 @@ describe("agent request contracts", () => {
 	it("rejects duplicate request array values", () => {
 		expect(
 			Result.isSuccess(
-				Schema.decodeUnknownResult(newAgentSchema)({
+				Schema.decodeResult(newAgentSchema)({
 					...request,
 					disabledTools: ["web_search", "web_search"],
 				}),
@@ -19,18 +19,16 @@ describe("agent request contracts", () => {
 
 	it("bounds tool keys and request array lengths", () => {
 		expect(
+			Result.isSuccess(Schema.decodeResult(newAgentSchema)({ ...request, disabledTools: [""] })),
+		).toBe(false);
+		expect(
 			Result.isSuccess(
-				Schema.decodeUnknownResult(newAgentSchema)({ ...request, disabledTools: [""] }),
+				Schema.decodeResult(newAgentSchema)({ ...request, disabledTools: ["x".repeat(65)] }),
 			),
 		).toBe(false);
 		expect(
 			Result.isSuccess(
-				Schema.decodeUnknownResult(newAgentSchema)({ ...request, disabledTools: ["x".repeat(65)] }),
-			),
-		).toBe(false);
-		expect(
-			Result.isSuccess(
-				Schema.decodeUnknownResult(newAgentSchema)({
+				Schema.decodeResult(newAgentSchema)({
 					...request,
 					disabledTools: Array.from({ length: 33 }, (_, index) => `tool-${index}`),
 				}),
@@ -41,9 +39,9 @@ describe("agent request contracts", () => {
 	it.each(["anthropic/claude-sonnet", "openai:gpt-5", "local.model-v1"])(
 		"accepts provider-independent model id %s",
 		(model) => {
-			expect(
-				Result.isSuccess(Schema.decodeUnknownResult(newAgentSchema)({ ...request, model })),
-			).toBe(true);
+			expect(Result.isSuccess(Schema.decodeResult(newAgentSchema)({ ...request, model }))).toBe(
+				true,
+			);
 		},
 	);
 
@@ -61,20 +59,18 @@ describe("agent request contracts", () => {
 			{ disabledTools: ["  "] },
 			{ disabledTools: ["web_search", " web_search "] },
 		]) {
-			expect(
-				Result.isFailure(Schema.decodeUnknownResult(newAgentSchema)({ ...request, ...fields })),
-			).toBe(true);
+			expect(Result.isFailure(Schema.decodeResult(newAgentSchema)({ ...request, ...fields }))).toBe(
+				true,
+			);
 		}
 	});
 
 	it("makes updates shallow partials and strips pod placement", () => {
 		expect(Schema.decodeUnknownSync(agentUpdateSchema)({ podId: ID, extra: true })).toEqual({});
-		expect(Schema.decodeUnknownSync(agentUpdateSchema)({ name: "  Renamed  " })).toEqual({
+		expect(Schema.decodeSync(agentUpdateSchema)({ name: "  Renamed  " })).toEqual({
 			name: "Renamed",
 		});
-		expect(Result.isFailure(Schema.decodeUnknownResult(agentUpdateSchema)({ model: " " }))).toBe(
-			true,
-		);
+		expect(Result.isFailure(Schema.decodeResult(agentUpdateSchema)({ model: " " }))).toBe(true);
 	});
 
 	it.each([NaN, Infinity, -Infinity, -1, 360, 1.5, "120"])("rejects invalid hue %s", (hue) => {
@@ -82,6 +78,6 @@ describe("agent request contracts", () => {
 	});
 
 	it.each([0, 359])("accepts boundary hue %s", (hue) => {
-		expect(Schema.decodeUnknownSync(agentHueSchema)(hue)).toBe(hue);
+		expect(Schema.decodeSync(agentHueSchema)(hue)).toBe(hue);
 	});
 });

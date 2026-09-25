@@ -4,14 +4,12 @@ import { newPodSchema, podUpdateSchema, slugify } from "./pods.ts";
 
 describe("pod request contracts", () => {
 	it("trims names and rejects blank or oversized values", () => {
-		expect(Schema.decodeUnknownSync(newPodSchema)({ name: "  Sales  " }).name).toBe("Sales");
-		expect(Result.isSuccess(Schema.decodeUnknownResult(newPodSchema)({ name: "   " }))).toBe(false);
-		expect(
-			Result.isSuccess(Schema.decodeUnknownResult(newPodSchema)({ name: "x".repeat(65) })),
-		).toBe(false);
-		expect(
-			Schema.decodeUnknownSync(newPodSchema)({ name: ` ${"x".repeat(64)} ` }).name,
-		).toHaveLength(64);
+		expect(Schema.decodeSync(newPodSchema)({ name: "  Sales  " }).name).toBe("Sales");
+		expect(Result.isSuccess(Schema.decodeResult(newPodSchema)({ name: "   " }))).toBe(false);
+		expect(Result.isSuccess(Schema.decodeResult(newPodSchema)({ name: "x".repeat(65) }))).toBe(
+			false,
+		);
+		expect(Schema.decodeSync(newPodSchema)({ name: ` ${"x".repeat(64)} ` }).name).toHaveLength(64);
 	});
 
 	it("validates routing updates", () => {

@@ -21,5 +21,5 @@ export function parseProviderBaseUrl(typed: string): string | undefined {
 	}
 	if (url.pathname === "/") url.pathname = OPENAI_COMPATIBLE_PATH;
 	const baseUrl = url.toString().replace(/\/$/, "");
-	return Option.getOrUndefined(Schema.decodeUnknownOption(providerUrlSchema)(baseUrl));
+	return Option.getOrUndefined(Schema.decodeOption(providerUrlSchema)(baseUrl));
 }
