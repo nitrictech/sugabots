@@ -96,22 +96,25 @@ export function ModelsSection() {
 							key={name}
 							role="listitem"
 							render={<RevealItem />}
-							className="rounded-none px-0 py-4"
+							className="flex-nowrap items-start rounded-none px-0 py-4 sm:items-center"
 						>
 							<ItemMedia>
 								<BotAvatar size="lg" {...bot} />
 							</ItemMedia>
-							<ItemContent className="min-w-44 gap-0">
-								<ItemTitle className="text-base font-semibold">{name}</ItemTitle>
-								<ItemDescription>{job}</ItemDescription>
-							</ItemContent>
-							<ItemActions>
-								<Badge variant="outline" size="lg" className="bg-card pl-2.5">
-									<ProviderLogo preset={model.provider} className="size-5" />
-									{model.name}
-									<span className="text-muted-foreground">{model.host}</span>
-								</Badge>
-							</ItemActions>
+							{/* The model sits under the bot's details on small screens, beside them from sm up. */}
+							<div className="flex min-w-0 flex-1 flex-col items-start gap-2 sm:flex-row sm:items-center">
+								<ItemContent className="gap-0">
+									<ItemTitle className="text-base font-semibold">{name}</ItemTitle>
+									<ItemDescription>{job}</ItemDescription>
+								</ItemContent>
+								<ItemActions className="max-w-full">
+									<Badge variant="outline" size="lg" className="max-w-full bg-card pl-2.5">
+										<ProviderLogo preset={model.provider} className="size-5" />
+										{model.name}
+										<span className="truncate text-muted-foreground">{model.host}</span>
+									</Badge>
+								</ItemActions>
+							</div>
 						</Item>
 					))}
 				</ItemGroup>

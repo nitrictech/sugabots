@@ -18,7 +18,7 @@ export function PodsSection() {
 				</>
 			}
 		>
-			<Reveal className="grid gap-3 pt-3 sm:grid-cols-2 md:grid-cols-4">
+			<Reveal className="grid grid-cols-2 gap-3 pt-3 md:grid-cols-4">
 				{pods.map((pod) => (
 					<MotionCard key={pod.name} variants={riseIn} className="gap-4 rounded-3xl">
 						<CardHeader>

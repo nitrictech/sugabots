@@ -38,7 +38,8 @@ export function Hero() {
 					className="max-w-2xl text-muted-foreground text-pretty sm:text-lg"
 				>
 					Sugabots is a place where <Emphasis>people</Emphasis> and <Emphasis>agents</Emphasis> can
-					work together. Give each group its own agents, on the models you choose. It's also <Emphasis>open-source</Emphasis>.
+					work together. Give each group its own agents, on the models you choose. It's also{" "}
+					<Emphasis>open-source</Emphasis>.
 				</motion.p>
 				<RevealItem className="flex flex-wrap items-center gap-3">
 					<a href={siteLinks.getStarted} className={buttonVariants({ size: "lg" })}>
