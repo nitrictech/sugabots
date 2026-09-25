@@ -584,6 +584,35 @@ describe("routes", () => {
 		);
 	});
 
+	it("keeps onboarding on the Provider step while the assistant's model is not enabled", async () => {
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
+		const personalPod = {
+			...pods[0],
+			id: "0199a3a0-0000-7000-8000-0000000000af",
+			ownerId: sam.id,
+			kind: "personal" as const,
+			name: "Personal",
+			slug: "personal",
+		};
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([
+				{
+					...agents[0],
+					id: "0199a3a0-0000-7000-8000-0000000000bf",
+					podId: personalPod.id,
+					name: "Personal Assistant",
+					handle: "personal-assistant",
+					model: "a-model-the-workspace-has-not-enabled",
+				},
+			]),
+		);
+		mount(linearPage);
+
+		expect(await screen.findByRole("heading", { name: "Bring your own model." })).toBeDefined();
+		expect(screen.queryByRole("heading", { name: "Your Personal pod is ready." })).toBeNull();
+	});
+
 	it("still honours the older ?invite= link shape", async () => {
 		client.auth.workspaces.invitation.mockResolvedValue({
 			organizationName: "Nitric",
