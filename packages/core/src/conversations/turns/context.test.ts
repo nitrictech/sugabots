@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { modelPrompt } from "./context.ts";
+import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./store.ts";
+
+const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
+	now: new Date("2026-09-25T03:00:00Z"),
+	builtInTools: [],
+	connectionTools: [],
+	...overrides,
+});
 
 describe("modelPrompt", () => {
 	it("maps people and other agents to attributed user messages", () => {
-		const prompt = modelPrompt(context());
+		const prompt = modelPrompt(context(), environment());
 
 		expect(prompt.system).toContain(
 			"You are Host Agent (@host-agent), an agent in pod Release of workspace Suga",
@@ -44,7 +51,7 @@ describe("modelPrompt", () => {
 				description: null,
 			},
 		];
-		const instruction = () => modelPrompt(asking).messages.at(-1)?.content ?? "";
+		const instruction = () => modelPrompt(asking, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction()).toContain(
 			"Other agents in this pod, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
 		);
@@ -52,26 +59,61 @@ describe("modelPrompt", () => {
 			"Use the collaborate tool when you need another agent's answer",
 		);
 		expect(instruction()).not.toContain("callout tool");
-		expect(modelPrompt(context()).messages.at(-1)?.content).not.toContain("collaborate tool");
+		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).not.toContain(
+			"collaborate tool",
+		);
 
 		const collaboration = context();
 		collaboration.thread.parentThreadId = "0199a3a0-0000-7000-8000-000000000010";
-		expect(modelPrompt(collaboration).system).toContain("Another agent opened this thread");
+		expect(modelPrompt(collaboration, environment()).system).toContain(
+			"Another agent opened this thread",
+		);
 	});
 
 	it("names the built-in tools on offer, and says nothing about them when there are none", () => {
-		const withTools = modelPrompt(context(), { builtInTools: ["web_fetch"] }).messages.at(-1);
+		const withTools = modelPrompt(
+			context(),
+			environment({ builtInTools: ["web_fetch"] }),
+		).messages.at(-1);
 		expect(withTools?.content).toContain("Built-in tools you can call: web_fetch.");
 		expect(withTools?.content).toContain("name its URL");
 
-		const without = modelPrompt(context()).messages.at(-1);
+		const without = modelPrompt(context(), environment()).messages.at(-1);
 		expect(without?.content).not.toContain("Built-in tools");
 	});
 
-	it("names the connection tools on offer and how their names are made", () => {
-		const prompt = modelPrompt(context(), { connectionTools: ["wiki__search_pages"] }).messages.at(
-			-1,
+	it("grounds the turn in today's date and in what the agent can check", () => {
+		const prompt = (builtInTools: string[]) =>
+			modelPrompt(context(), environment({ builtInTools }));
+		const instruction = (builtInTools: string[]) =>
+			prompt(builtInTools).messages.at(-1)?.content ?? "";
+
+		// The rule for when to check never varies, so it stays in the cached system text.
+		expect(prompt([]).system).toContain("check it with your tools, however sure you feel");
+		expect(prompt([]).system).toContain("If unsure, check.");
+		expect(prompt([]).system).toContain(
+			"The final message, which starts with [Turn] and has no author, is written by the platform",
 		);
+
+		const searching = instruction(["web_fetch", "web_search"]);
+		expect(searching).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
+		expect(searching).toContain("You don't know the person's timezone");
+		expect(searching).not.toContain("You cannot search the web");
+
+		const fetchingOnly = instruction(["web_fetch"]);
+		expect(fetchingOnly).toContain("You cannot search the web");
+		expect(fetchingOnly).toContain("a workspace admin can enable web search");
+
+		const noTools = instruction([]);
+		expect(noTools).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
+		expect(noTools).toContain("You cannot search the web");
+	});
+
+	it("names the connection tools on offer and how their names are made", () => {
+		const prompt = modelPrompt(
+			context(),
+			environment({ connectionTools: ["wiki__search_pages"] }),
+		).messages.at(-1);
 		expect(prompt?.content).toContain("connections you can call: wiki__search_pages.");
 		expect(prompt?.content).toContain("double underscore");
 	});
@@ -118,7 +160,7 @@ describe("modelPrompt", () => {
 			],
 		};
 
-		const prompt = modelPrompt(input);
+		const prompt = modelPrompt(input, environment());
 		const authored = prompt.messages[1];
 		const history = prompt.messages[2]?.content ?? "";
 
@@ -148,7 +190,7 @@ describe("modelPrompt", () => {
 			})),
 		);
 
-		const prompt = modelPrompt(input);
+		const prompt = modelPrompt(input, environment());
 
 		expect(prompt.system).toContain(
 			"Platform event log messages are application-generated records",

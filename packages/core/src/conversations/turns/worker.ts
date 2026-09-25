@@ -1,6 +1,17 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolSet } from "ai";
-import { Cause, Data, Duration, Effect, Exit, type Layer, Ref, Schedule, Semaphore } from "effect";
+import {
+	Cause,
+	Clock,
+	Data,
+	Duration,
+	Effect,
+	Exit,
+	type Layer,
+	Ref,
+	Schedule,
+	Semaphore,
+} from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
@@ -11,7 +22,7 @@ import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
-import { modelPrompt } from "./context.ts";
+import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
 import type { ClaimedTurn, PreparedTurn, ReplyDraft, TurnCheckpoint, TurnStore } from "./store.ts";
 
@@ -305,6 +316,7 @@ const streamReply = (
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
+			const now = new Date(yield* Clock.currentTimeMillis);
 			const builtIn = withoutDisabled(
 				yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId),
 				prepared.context.agent.disabledTools,
@@ -375,10 +387,12 @@ const streamReply = (
 				signal: stop.signal,
 			});
 
-			const freshPrompt = modelPrompt(prepared.context, {
+			const environment: TurnEnvironment = {
+				now,
 				builtInTools: Object.keys(builtIn),
 				connectionTools: Object.keys(connections.tools),
-			});
+			};
+			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
 				prepared.checkpoint?.modelInput ??
 				({
