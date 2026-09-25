@@ -1,9 +1,17 @@
+import { Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { snapshotFromModelsDevSync as snapshotFromModelsDev } from "./models-dev.ts";
+import {
+	ModelsDevSnapshotError,
+	type ModelsDevSnapshotInput,
+	snapshotFromModelsDev,
+} from "./models-dev.ts";
+
+const snapshotFrom = (input: ModelsDevSnapshotInput) =>
+	Result.getOrThrow(snapshotFromModelsDev(input));
 
 describe("Models.dev snapshots", () => {
 	it("captures source provenance, cache rates, and exact context tiers", () => {
-		const snapshot = snapshotFromModelsDev({
+		const snapshot = snapshotFrom({
 			snapshotId: "snapshot-1",
 			provider: "anthropic",
 			model: "claude",
@@ -43,7 +51,7 @@ describe("Models.dev snapshots", () => {
 	});
 
 	it("serializes scientific-notation rates as plain decimals", () => {
-		const snapshot = snapshotFromModelsDev({
+		const snapshot = snapshotFrom({
 			snapshotId: "snapshot-small",
 			provider: "local",
 			model: "small",
@@ -54,5 +62,19 @@ describe("Models.dev snapshots", () => {
 		});
 
 		expect(snapshot.tiers[0]?.rates.map((rate) => rate.price)).toEqual(["0.0000001", "0.0000002"]);
+	});
+
+	it("rejects a rate that is not a non-negative number", () => {
+		const result = snapshotFromModelsDev({
+			snapshotId: "snapshot-invalid",
+			provider: "local",
+			model: "broken",
+			catalogGeneratedAt: "v1",
+			retrievedAt: "2026-09-18T01:00:00.000Z",
+			effectiveFrom: "2026-09-18T00:00:00.000Z",
+			cost: { input: -1, output: Number.NaN },
+		});
+
+		expect(Result.isFailure(result) && result.failure).toBeInstanceOf(ModelsDevSnapshotError);
 	});
 });

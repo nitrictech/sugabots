@@ -1,37 +1,33 @@
 import type { Cost, ModelCost } from "@opencode-ai/models";
-import { Data, Effect } from "effect";
-import type { PricingSnapshot, TokenRate } from "./types.ts";
+import { Data, Result, Schema } from "effect";
+import { PricingSnapshot, type RateCategory } from "./schemas.ts";
 
 export interface ModelsDevSnapshotInput {
-	snapshotId: string;
-	provider: string;
-	model: string;
-	cost: ModelCost;
-	catalogGeneratedAt: string;
-	retrievedAt: string;
-	effectiveFrom: string;
-	connectionId?: string;
+	readonly snapshotId: string;
+	readonly provider: string;
+	readonly model: string;
+	readonly cost: ModelCost;
+	readonly catalogGeneratedAt: string;
+	readonly retrievedAt: string;
+	readonly effectiveFrom: string;
+	readonly connectionId?: string;
 }
 
 export class ModelsDevSnapshotError extends Data.TaggedError("ModelsDevSnapshotError")<{
-	readonly cause: unknown;
+	readonly cause: Schema.SchemaError;
 }> {}
 
-export const snapshotFromModelsDev = Effect.fn("accounting.snapshotFromModelsDev")(function* (
-	input: ModelsDevSnapshotInput,
-) {
-	return yield* Effect.try({
-		try: () => snapshotFromModelsDevSync(input),
-		catch: (cause) => new ModelsDevSnapshotError({ cause }),
-	});
-});
+/** Models.dev quotes rates in US dollars per million tokens. */
+const MODELS_DEV_RATE_UNIT = 1_000_000;
 
-export function snapshotFromModelsDevSync(input: ModelsDevSnapshotInput): PricingSnapshot {
-	const snapshot: PricingSnapshot = {
+export function snapshotFromModelsDev(
+	input: ModelsDevSnapshotInput,
+): Result.Result<PricingSnapshot, ModelsDevSnapshotError> {
+	const snapshot = Schema.decodeResult(PricingSnapshot)({
 		snapshotId: input.snapshotId,
 		provider: input.provider,
 		model: input.model,
-		connectionId: input.connectionId,
+		...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
 		currency: "USD",
 		source: {
 			name: "models.dev",
@@ -47,50 +43,43 @@ export function snapshotFromModelsDevSync(input: ModelsDevSnapshotInput): Pricin
 				rates: ratesFromCost(tier),
 			})),
 		],
-	};
-	return Object.freeze({
-		...snapshot,
-		source: Object.freeze({ ...snapshot.source }),
-		tiers: Object.freeze(
-			snapshot.tiers.map((tier) =>
-				Object.freeze({
-					...tier,
-					rates: Object.freeze(tier.rates.map((rate) => Object.freeze({ ...rate }))),
-				}),
-			),
-		),
 	});
+	return Result.mapError(snapshot, (cause) => new ModelsDevSnapshotError({ cause }));
 }
 
-function ratesFromCost(cost: Cost): TokenRate[] {
-	return [
-		rate("input", cost.input),
-		rate("output", cost.output),
-		...(cost.cache_read === undefined ? [] : [rate("cache-read-input", cost.cache_read)]),
-		...(cost.cache_write === undefined ? [] : [rate("cache-write-input", cost.cache_write)]),
-		...(cost.reasoning === undefined ? [] : [rate("reasoning", cost.reasoning)]),
+function ratesFromCost(cost: Cost) {
+	const prices: readonly [RateCategory, number | undefined][] = [
+		["input", cost.input],
+		["output", cost.output],
+		["cache-read-input", cost.cache_read],
+		["cache-write-input", cost.cache_write],
+		["reasoning", cost.reasoning],
 	];
+	return prices.flatMap(([category, usdPerMillionTokens]) =>
+		usdPerMillionTokens === undefined
+			? []
+			: [
+					{
+						category,
+						price: plainDecimal(usdPerMillionTokens),
+						unitTokens: MODELS_DEV_RATE_UNIT,
+					},
+				],
+	);
 }
 
-function rate(category: TokenRate["category"], usdPerMillionTokens: number): TokenRate {
-	return {
-		category,
-		price: decimalFromNumber(usdPerMillionTokens),
-		unitTokens: 1_000_000,
-	};
-}
-
-function decimalFromNumber(value: number): string {
-	if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid Models.dev rate: ${value}`);
+/** Writes a number without exponent notation (`1e-7` becomes `0.0000001`); the schema validates it. */
+function plainDecimal(value: number): string {
 	const text = String(value);
-	if (!/[eE]/.test(text)) return text;
+	if (!/e/i.test(text)) return text;
 	const [coefficient = "", exponentText = ""] = text.toLowerCase().split("e");
 	const exponent = Number(exponentText);
 	const [whole = "", fraction = ""] = coefficient.split(".");
 	const digits = `${whole}${fraction}`;
 	const decimalPosition = whole.length + exponent;
 	if (decimalPosition <= 0) return `0.${"0".repeat(-decimalPosition)}${digits}`;
-	if (decimalPosition >= digits.length)
+	if (decimalPosition >= digits.length) {
 		return `${digits}${"0".repeat(decimalPosition - digits.length)}`;
+	}
 	return `${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`;
 }

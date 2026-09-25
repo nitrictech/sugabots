@@ -1,426 +1,269 @@
-import { Data, Effect } from "effect";
-import { addDecimalAmounts, multiplyRate, validateMoneyAmount, validateRate } from "./decimal.ts";
+import { type DecimalAmount, multiplyRate, sumDecimalAmounts } from "./decimal.ts";
+import type { AttemptLedger } from "./lifecycle.ts";
+import {
+	type Currency,
+	epochMilliseconds,
+	type PricingSnapshot,
+	type PricingTier,
+	type RateCategory,
+	type Timestamp,
+	type TokenRate,
+	type UsageCounters,
+} from "./schemas.ts";
 import type {
 	CostEstimate,
 	CostLine,
 	EstimateCompleteness,
-	NormalizedUsage,
 	PricingIssue,
-	PricingSnapshot,
-	PricingTier,
 	ProviderIdentity,
-	RateCategory,
-	TokenRate,
 } from "./types.ts";
 
-export class PricingCalculationError extends Data.TaggedError("PricingCalculationError")<{
-	readonly cause: unknown;
-}> {}
+const CALCULATION_VERSION = 1;
 
-export const estimateCost = Effect.fn("accounting.estimateCost")(function* (
-	usage: NormalizedUsage,
-	provider: ProviderIdentity,
-	snapshot: PricingSnapshot,
-	occurredAt: string,
-	calculatedAt: string,
-) {
-	yield* Effect.annotateCurrentSpan({
-		"accounting.provider": provider.provider,
-		"accounting.model": provider.returnedModel ?? provider.requestedModel,
-		"accounting.pricing.snapshot_id": snapshot.snapshotId,
-		"accounting.currency": snapshot.currency,
-	});
-	return yield* Effect.try({
-		try: () => estimateCostSync(usage, provider, snapshot, occurredAt, calculatedAt),
-		catch: (cause) => new PricingCalculationError({ cause }),
-	});
-});
-
-export function estimateCostSync(
-	usage: NormalizedUsage,
-	provider: ProviderIdentity,
-	snapshot: PricingSnapshot,
-	occurredAt: string,
-	calculatedAt: string,
+/**
+ * Prices an attempt's active usage against the snapshot in effect when the attempt started, for
+ * the model the provider returned (or requested, if none was returned) and the attempt's connection.
+ */
+export function estimateAttempt(
+	ledger: AttemptLedger,
+	candidateSnapshots: readonly PricingSnapshot[],
+	calculatedAt: Timestamp,
 ): CostEstimate {
-	const issues = validateSnapshot(snapshot);
-	validateEffectivePeriod(snapshot, occurredAt, issues);
-	const model = provider.returnedModel ?? provider.requestedModel;
-	if (snapshot.provider !== provider.provider || snapshot.model !== model) {
-		issues.push({
-			code: "model-mismatch",
-			message: `Snapshot ${snapshot.provider}/${snapshot.model} does not match ${provider.provider}/${model}`,
-		});
-	}
-	if (snapshot.connectionId !== undefined && snapshot.connectionId !== provider.connectionId) {
-		issues.push({
-			code: "model-mismatch",
-			message: `Snapshot connection ${snapshot.connectionId} does not match ${provider.connectionId}`,
-		});
-	}
-	if (usage.issues.length > 0) {
-		issues.push({
-			code: "inconsistent-usage",
-			message: "Usage evidence is inconsistent and cannot produce a complete estimate",
-		});
-	}
-	if (
-		issues.some(
-			(issue) =>
-				issue.code === "invalid-snapshot" ||
-				issue.code === "model-mismatch" ||
-				issue.code === "outside-effective-period",
-		) ||
-		usage.issues.length > 0
-	) {
-		return {
-			calculationVersion: 1,
-			snapshotId: snapshot.snapshotId,
-			currency: snapshot.currency,
-			calculatedAt,
-			lines: [],
-			completeness: "unavailable",
-			issues,
-		};
-	}
+	const unavailable = (
+		issues: readonly PricingIssue[],
+		snapshot?: PricingSnapshot,
+	): CostEstimate => ({
+		calculationVersion: CALCULATION_VERSION,
+		calculatedAt,
+		completeness: "unavailable",
+		snapshotId: snapshot?.snapshotId,
+		issues,
+	});
 
-	const tier = selectTier(snapshot.tiers, usage.input.total, issues);
-	const lines = tier ? calculateLines(usage, tier, snapshot.currency, issues) : [];
-	const total =
-		lines.length > 0
-			? {
-					currency: snapshot.currency,
-					amount: addDecimalAmounts(lines.map((line) => line.amount.amount)),
-				}
-			: undefined;
-	const completeness =
-		issues.length === 0 && usage.completeness === "complete"
-			? "complete"
-			: lines.length > 0
-				? "partial"
-				: "unavailable";
+	if (!ledger.usage) {
+		return unavailable([{ code: "missing-measurement", message: "No usage was recorded" }]);
+	}
+	if (ledger.usage.issues.length > 0) {
+		return unavailable([
+			{
+				code: "inconsistent-usage",
+				message: "Usage evidence is inconsistent and cannot be priced",
+			},
+		]);
+	}
+	const resolved = resolveSnapshot(ledger.provider, ledger.intent.startedAt, candidateSnapshots);
+	if ("issue" in resolved) return unavailable([resolved.issue]);
 
+	const { snapshot } = resolved;
+	const tier = selectTier(snapshot.tiers, ledger.usage.counters.inputTokens);
+	if ("issue" in tier) return unavailable([tier.issue], snapshot);
+
+	const rates = new Map(tier.tier.rates.map((rate) => [rate.category, rate]));
+	const priced = combine([
+		inputLines(ledger.usage.counters, rates),
+		outputLines(ledger.usage.counters, rates),
+	]);
+	if (priced.lines.length === 0) {
+		return unavailable(priced.issues.length > 0 ? priced.issues : [noPricedLines], snapshot);
+	}
 	return {
-		calculationVersion: 1,
+		calculationVersion: CALCULATION_VERSION,
+		calculatedAt,
 		snapshotId: snapshot.snapshotId,
 		currency: snapshot.currency,
-		calculatedAt,
-		lines,
-		total,
-		completeness,
-		issues,
+		lines: priced.lines,
+		total: sumDecimalAmounts(priced.lines.map((line) => line.amount)),
+		completeness: priced.issues.length === 0 ? "complete" : "partial",
+		issues: priced.issues,
 	};
 }
 
+const noPricedLines: PricingIssue = {
+	code: "missing-measurement",
+	message: "No usage could be priced",
+};
+
 export interface CostEstimateAggregate {
-	readonly currency: string;
-	readonly amount?: string;
+	/** Known spend per currency, sorted by currency code. Currencies are never converted. */
+	readonly totals: readonly { readonly currency: Currency; readonly amount: DecimalAmount }[];
+	readonly estimates: number;
+	readonly unavailableEstimates: number;
 	readonly completeness: EstimateCompleteness;
 }
 
-export const aggregateEstimates = Effect.fn("accounting.aggregateEstimates")(function* (
-	estimates: readonly CostEstimate[],
-) {
-	return yield* Effect.try({
-		try: () => aggregateEstimatesSync(estimates),
-		catch: (cause) => new PricingCalculationError({ cause }),
-	});
-});
-
-export function aggregateEstimatesSync(
-	estimates: readonly CostEstimate[],
-): readonly CostEstimateAggregate[] {
-	const currencies = new Map<string, { amounts: string[]; complete: boolean }>();
+export function aggregateEstimates(estimates: readonly CostEstimate[]): CostEstimateAggregate {
+	const amountsByCurrency = new Map<Currency, DecimalAmount[]>();
 	for (const estimate of estimates) {
-		if (estimate.total?.currency !== undefined && estimate.total.currency !== estimate.currency) {
-			throw new Error("Estimate total currency does not match estimate currency");
-		}
-		if (estimate.total && validateMoneyAmount(estimate.total.amount)) {
-			throw new Error("Estimate total has an invalid amount");
-		}
-		const aggregate = currencies.get(estimate.currency) ?? { amounts: [], complete: true };
-		if (estimate.total) aggregate.amounts.push(estimate.total.amount);
-		aggregate.complete &&= estimate.completeness === "complete";
-		currencies.set(estimate.currency, aggregate);
+		if (estimate.completeness === "unavailable") continue;
+		amountsByCurrency.set(estimate.currency, [
+			...(amountsByCurrency.get(estimate.currency) ?? []),
+			estimate.total,
+		]);
 	}
-	return [...currencies.entries()]
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([currency, aggregate]) => ({
-			currency,
-			amount: aggregate.amounts.length > 0 ? addDecimalAmounts(aggregate.amounts) : undefined,
-			completeness:
-				aggregate.amounts.length === 0
-					? "unavailable"
-					: aggregate.complete
-						? "complete"
-						: "partial",
-		}));
+	const unavailableEstimates = estimates.filter(
+		(estimate) => estimate.completeness === "unavailable",
+	).length;
+	const allComplete = estimates.every((estimate) => estimate.completeness === "complete");
+	return {
+		totals: [...amountsByCurrency.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([currency, amounts]) => ({ currency, amount: sumDecimalAmounts(amounts) })),
+		estimates: estimates.length,
+		unavailableEstimates,
+		completeness: allComplete
+			? "complete"
+			: unavailableEstimates === estimates.length
+				? "unavailable"
+				: "partial",
+	};
 }
 
-export type ResolvePricingSnapshotResult =
-	| { status: "resolved"; snapshot: PricingSnapshot }
-	| { status: "unavailable"; issue: PricingIssue };
+type Resolution<T> = T | { readonly issue: PricingIssue };
 
-export const resolvePricingSnapshot = Effect.fn("accounting.resolvePricingSnapshot")(function* (
+/** Prefers a snapshot for the attempt's connection, then the latest-starting one in effect. */
+function resolveSnapshot(
 	provider: ProviderIdentity,
-	occurredAt: string,
+	occurredAt: Timestamp,
 	candidates: readonly PricingSnapshot[],
-) {
-	return yield* Effect.succeed(resolvePricingSnapshotSync(provider, occurredAt, candidates));
-});
-
-export function resolvePricingSnapshotSync(
-	provider: ProviderIdentity,
-	occurredAt: string,
-	candidates: readonly PricingSnapshot[],
-): ResolvePricingSnapshotResult {
-	const timestamp = Date.parse(occurredAt);
-	if (!Number.isFinite(timestamp)) {
-		return {
-			status: "unavailable",
-			issue: { code: "invalid-snapshot", message: `Invalid attempt timestamp: ${occurredAt}` },
-		};
-	}
+): Resolution<{ readonly snapshot: PricingSnapshot }> {
 	const model = provider.returnedModel ?? provider.requestedModel;
 	const matching = candidates.filter(
 		(snapshot) =>
 			snapshot.provider === provider.provider &&
 			snapshot.model === model &&
 			(snapshot.connectionId === undefined || snapshot.connectionId === provider.connectionId) &&
-			isEffective(snapshot, timestamp),
+			isEffectiveAt(snapshot, epochMilliseconds(occurredAt)),
 	);
 	const connectionSpecific = matching.filter(
 		(snapshot) => snapshot.connectionId === provider.connectionId,
 	);
 	const eligible = connectionSpecific.length > 0 ? connectionSpecific : matching;
-	const latestEffectiveFrom = Math.max(
-		...eligible.map((snapshot) => Date.parse(snapshot.effectiveFrom)),
+	const latestStart = Math.max(
+		...eligible.map((snapshot) => epochMilliseconds(snapshot.effectiveFrom)),
 	);
-	const latest = eligible.filter(
-		(snapshot) => Date.parse(snapshot.effectiveFrom) === latestEffectiveFrom,
+	const [latest, ...tied] = eligible.filter(
+		(snapshot) => epochMilliseconds(snapshot.effectiveFrom) === latestStart,
 	);
-	if (latest.length === 0) {
+	if (!latest) {
 		return {
-			status: "unavailable",
-			issue: { code: "missing-measurement", message: "No effective pricing snapshot was found" },
-		};
-	}
-	if (latest.length > 1) {
-		return {
-			status: "unavailable",
 			issue: {
-				code: "ambiguous-snapshot",
-				message: `Multiple pricing snapshots are effective for ${provider.provider}/${model}`,
+				code: "no-snapshot",
+				message: `No pricing snapshot for ${provider.provider}/${model} was in effect at ${occurredAt}`,
 			},
 		};
 	}
-	return { status: "resolved", snapshot: latest[0] as PricingSnapshot };
+	if (tied.length > 0) {
+		return {
+			issue: {
+				code: "ambiguous-snapshot",
+				message: `Multiple pricing snapshots are in effect for ${provider.provider}/${model}`,
+			},
+		};
+	}
+	return { snapshot: latest };
 }
 
-function validateSnapshot(snapshot: PricingSnapshot): PricingIssue[] {
-	const issues: PricingIssue[] = [];
-	if (!/^[A-Z]{3}$/.test(snapshot.currency)) {
-		issues.push({ code: "invalid-snapshot", message: "Currency must be an ISO 4217 code" });
-	}
-	if (snapshot.tiers.length === 0 || snapshot.tiers[0]?.minimumContextTokens !== 0) {
-		issues.push({ code: "invalid-snapshot", message: "Pricing tiers must start at zero" });
-	}
-	let previousMinimum = -1;
-	for (const tier of snapshot.tiers) {
-		if (
-			!Number.isSafeInteger(tier.minimumContextTokens) ||
-			tier.minimumContextTokens < 0 ||
-			tier.minimumContextTokens <= previousMinimum
-		) {
-			issues.push({
-				code: "invalid-snapshot",
-				message: "Pricing tiers must be strictly ascending",
-			});
-		}
-		previousMinimum = tier.minimumContextTokens;
-		const categories = new Set<RateCategory>();
-		for (const rate of tier.rates) {
-			if (categories.has(rate.category)) {
-				issues.push({
-					code: "invalid-snapshot",
-					category: rate.category,
-					message: `Tier contains duplicate ${rate.category} rates`,
-				});
-			}
-			categories.add(rate.category);
-			const error = validateRate(rate.price, rate.unitTokens);
-			if (error) {
-				issues.push({
-					code: "invalid-snapshot",
-					category: rate.category,
-					message: error,
-				});
-			}
-		}
-	}
-	return issues;
-}
-
-function validateEffectivePeriod(
-	snapshot: PricingSnapshot,
-	occurredAt: string,
-	issues: PricingIssue[],
-): void {
-	const timestamp = Date.parse(occurredAt);
-	if (!Number.isFinite(timestamp) || !isEffective(snapshot, timestamp)) {
-		issues.push({
-			code: "outside-effective-period",
-			message: `Snapshot ${snapshot.snapshotId} was not effective at ${occurredAt}`,
-		});
-	}
-}
-
-function isEffective(snapshot: PricingSnapshot, timestamp: number): boolean {
-	const start = Date.parse(snapshot.effectiveFrom);
+function isEffectiveAt(snapshot: PricingSnapshot, timestamp: number): boolean {
+	const start = epochMilliseconds(snapshot.effectiveFrom);
 	const end =
 		snapshot.effectiveUntil === undefined
 			? Number.POSITIVE_INFINITY
-			: Date.parse(snapshot.effectiveUntil);
-	return (
-		Number.isFinite(start) &&
-		(snapshot.effectiveUntil === undefined || Number.isFinite(end)) &&
-		timestamp >= start &&
-		timestamp < end
-	);
+			: epochMilliseconds(snapshot.effectiveUntil);
+	return timestamp >= start && timestamp < end;
 }
 
 function selectTier(
 	tiers: readonly PricingTier[],
-	contextTokens: number | undefined,
-	issues: PricingIssue[],
-): PricingTier | undefined {
-	if (tiers.length === 0) return undefined;
-	if (tiers.length > 1 && contextTokens === undefined) {
-		issues.push({
-			code: "missing-measurement",
-			message: "Input total is required to select a context-length pricing tier",
-		});
-		return undefined;
+	inputTokens: number | undefined,
+): Resolution<{ readonly tier: PricingTier }> {
+	if (tiers.length > 1 && inputTokens === undefined) {
+		return {
+			issue: {
+				code: "missing-measurement",
+				category: "input",
+				message: "Input total is required to select a context-length pricing tier",
+			},
+		};
 	}
-	return tiers.findLast((tier) => tier.minimumContextTokens <= (contextTokens ?? 0));
+	const tier = tiers.findLast((candidate) => candidate.minimumContextTokens <= (inputTokens ?? 0));
+	if (!tier) throw new Error("PricingSnapshot bypassed validation: no tier starts at zero");
+	return { tier };
 }
 
-function calculateLines(
-	usage: NormalizedUsage,
-	tier: PricingTier,
-	currency: string,
-	issues: PricingIssue[],
-): CostLine[] {
-	const rates = new Map(tier.rates.map((rate) => [rate.category, rate]));
-	return [
-		...inputLines(usage, rates, currency, issues),
-		...outputLines(usage, rates, currency, issues),
-	];
+interface Priced {
+	readonly lines: readonly CostLine[];
+	readonly issues: readonly PricingIssue[];
 }
 
-function inputLines(
-	usage: NormalizedUsage,
-	rates: ReadonlyMap<RateCategory, TokenRate>,
-	currency: string,
-	issues: PricingIssue[],
-): CostLine[] {
-	if (usage.input.total === undefined) {
-		missing("input", issues);
-		return [];
-	}
-	const hasCacheRates = rates.has("cache-read-input") || rates.has("cache-write-input");
-	if (!hasCacheRates) return lineFor("input", usage.input.total, rates, currency, issues);
+type RatesByCategory = ReadonlyMap<RateCategory, TokenRate>;
 
-	const lines: CostLine[] = [];
-	if (usage.input.uncached === undefined) missing("input", issues);
-	else lines.push(...lineFor("input", usage.input.uncached, rates, currency, issues));
-	lines.push(
-		...cacheLine("cache-read-input", usage.input.cacheRead, rates, currency, issues),
-		...cacheLine("cache-write-input", usage.input.cacheWrite, rates, currency, issues),
-	);
-	return lines;
+/** Splits input into cache components when the tier prices cache tokens separately. */
+function inputLines(counters: UsageCounters, rates: RatesByCategory): Priced {
+	if (counters.inputTokens === undefined) return missing("input");
+	const pricesCache = rates.has("cache-read-input") || rates.has("cache-write-input");
+	if (!pricesCache) return line("input", counters.inputTokens, rates);
+	return combine([
+		counters.uncachedInputTokens === undefined
+			? missing("input")
+			: line("input", counters.uncachedInputTokens, rates),
+		cacheLine("cache-read-input", counters.cacheReadInputTokens, rates),
+		cacheLine("cache-write-input", counters.cacheWriteInputTokens, rates),
+	]);
 }
 
-function outputLines(
-	usage: NormalizedUsage,
-	rates: ReadonlyMap<RateCategory, TokenRate>,
-	currency: string,
-	issues: PricingIssue[],
-): CostLine[] {
-	if (usage.output.total === undefined) {
-		missing("output", issues);
-		return [];
-	}
-	if (!rates.has("reasoning")) {
-		return lineFor("output", usage.output.total, rates, currency, issues);
-	}
-	if (usage.output.reasoning === undefined) {
-		missing("reasoning", issues);
-		return [];
-	}
-	if (usage.output.reasoning > usage.output.total) return [];
-	return [
-		...lineFor("output", usage.output.total - usage.output.reasoning, rates, currency, issues),
-		...lineFor("reasoning", usage.output.reasoning, rates, currency, issues),
-	];
+/** Splits reasoning out of output when the tier prices reasoning tokens separately. */
+function outputLines(counters: UsageCounters, rates: RatesByCategory): Priced {
+	if (counters.outputTokens === undefined) return missing("output");
+	if (!rates.has("reasoning")) return line("output", counters.outputTokens, rates);
+	if (counters.reasoningTokens === undefined) return missing("reasoning");
+	return combine([
+		line("output", counters.outputTokens - counters.reasoningTokens, rates),
+		line("reasoning", counters.reasoningTokens, rates),
+	]);
 }
 
 function cacheLine(
 	category: "cache-read-input" | "cache-write-input",
 	quantity: number | undefined,
-	rates: ReadonlyMap<RateCategory, TokenRate>,
-	currency: string,
-	issues: PricingIssue[],
-): CostLine[] {
-	if (rates.has(category)) {
-		if (quantity === undefined) {
-			missing(category, issues);
-			return [];
-		}
-		return lineFor(category, quantity, rates, currency, issues);
-	}
-	if (quantity !== undefined && quantity > 0) {
-		issues.push({
-			code: "unsupported-category",
-			category,
-			message: `No ${category} rate is available for ${quantity} measured tokens`,
-		});
-	}
-	return [];
+	rates: RatesByCategory,
+): Priced {
+	if (quantity !== undefined) return line(category, quantity, rates);
+	return rates.has(category) ? missing(category) : priced([], []);
 }
 
-function lineFor(
-	category: RateCategory,
-	quantity: number,
-	rates: ReadonlyMap<RateCategory, TokenRate>,
-	currency: string,
-	issues: PricingIssue[],
-): CostLine[] {
+function line(category: RateCategory, quantity: number, rates: RatesByCategory): Priced {
 	const rate = rates.get(category);
-	if (!rate) {
-		if (quantity > 0) {
-			issues.push({
+	if (rate) {
+		const amount = multiplyRate(quantity, rate.price, rate.unitTokens);
+		return priced([{ category, quantity, rate, amount }], []);
+	}
+	if (quantity === 0) return priced([], []);
+	return priced(
+		[],
+		[
+			{
 				code: "unsupported-category",
 				category,
 				message: `No ${category} rate is available for ${quantity} measured tokens`,
-			});
-		}
-		return [];
-	}
-	return [
-		{
-			category,
-			quantity,
-			rate: { ...rate },
-			amount: { currency, amount: multiplyRate(quantity, rate.price, rate.unitTokens) },
-		},
-	];
+			},
+		],
+	);
 }
 
-function missing(category: RateCategory, issues: PricingIssue[]): void {
-	issues.push({
-		code: "missing-measurement",
-		category,
-		message: `${category} usage is not measured`,
-	});
+function missing(category: RateCategory): Priced {
+	return priced(
+		[],
+		[{ code: "missing-measurement", category, message: `${category} usage is not measured` }],
+	);
+}
+
+function priced(lines: readonly CostLine[], issues: readonly PricingIssue[]): Priced {
+	return { lines, issues };
+}
+
+function combine(parts: readonly Priced[]): Priced {
+	return {
+		lines: parts.flatMap((part) => part.lines),
+		issues: parts.flatMap((part) => part.issues),
+	};
 }

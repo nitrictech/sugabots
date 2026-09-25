@@ -20,9 +20,12 @@
       "name": "@sugabots/accounting",
       "version": "0.0.0",
       "dependencies": {
+        "@sugabots/contracts": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
         "@opencode-ai/models": "^0.0.73",
         "ai": "^7.0.100",
-        "effect": "catalog:",
       },
     },
     "packages/contracts": {

@@ -1,23 +1,21 @@
+import { Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { aggregateAttemptsSync as aggregateAttempts } from "./aggregation.ts";
-import { completeUsageEvidence, partialUsageEvidence, successfulAttempt } from "./examples.ts";
+import { aggregateAttempts, DuplicateAttemptError } from "./aggregation.ts";
+import { reduceAttempt } from "./lifecycle.ts";
 import {
-	applyObservationSync as applyObservation,
-	createAttemptLedgerSync as createAttemptLedger,
-} from "./lifecycle.ts";
-import type { UsageEvidence } from "./types.ts";
+	completeUsageEvidence,
+	intentFor,
+	ledgerWithUsage,
+	partialUsageEvidence,
+} from "./test-fixtures.ts";
 
 describe("attempt aggregation", () => {
 	it("sums known counters while retaining coverage and unresolved attempts", () => {
-		const complete = withUsage("attempt-1", completeUsageEvidence);
-		const partial = withUsage("attempt-2", partialUsageEvidence);
-		const unresolved = createAttemptLedger({
-			...successfulAttempt,
-			attemptId: "attempt-3",
-			executionId: "execution-3",
-		});
+		const complete = ledgerWithUsage(intentFor("attempt-1"), completeUsageEvidence);
+		const partial = ledgerWithUsage(intentFor("attempt-2"), partialUsageEvidence);
+		const unresolved = reduceAttempt(intentFor("attempt-3"), []);
 
-		const result = aggregateAttempts([complete, partial, unresolved]);
+		const result = Result.getOrThrow(aggregateAttempts([complete, partial, unresolved]));
 
 		expect(result.attempts).toBe(3);
 		expect(result.unresolvedAttempts).toBe(3);
@@ -39,17 +37,19 @@ describe("attempt aggregation", () => {
 	});
 
 	it("rejects duplicate attempts instead of double-counting them", () => {
-		const ledger = withUsage("attempt-1", completeUsageEvidence);
-		expect(() => aggregateAttempts([ledger, ledger])).toThrow("only be aggregated once");
+		const ledger = ledgerWithUsage(intentFor("attempt-1"));
+		const result = aggregateAttempts([ledger, ledger]);
+
+		expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DuplicateAttemptError);
 	});
 
 	it("excludes inconsistent evidence and exposes the dispute", () => {
-		const invalid = withUsage("attempt-invalid", {
+		const invalid = ledgerWithUsage(intentFor("attempt-invalid"), {
 			...completeUsageEvidence,
 			counters: { ...completeUsageEvidence.counters, reasoningTokens: 500 },
 		});
 
-		const result = aggregateAttempts([invalid]);
+		const result = Result.getOrThrow(aggregateAttempts([invalid]));
 
 		expect(result.disputedAttempts).toBe(1);
 		expect(result.counters.outputTokens).toEqual({
@@ -61,14 +61,3 @@ describe("attempt aggregation", () => {
 		});
 	});
 });
-
-function withUsage(attemptId: string, evidence: UsageEvidence) {
-	const intent = { ...successfulAttempt, attemptId, executionId: `execution-${attemptId}` };
-	const result = applyObservation(createAttemptLedger(intent), {
-		observationId: `${attemptId}:usage:1`,
-		attemptId,
-		observedAt: "2026-09-18T10:00:01.000Z",
-		payload: { type: "usage", evidence },
-	});
-	return result.ledger;
-}

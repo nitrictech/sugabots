@@ -1,6 +1,12 @@
 import { Data, Effect } from "effect";
+import { dispatchedObservation } from "./collection.ts";
 import type { AccountingStore } from "./lifecycle.ts";
-import type { AttemptIntent, AttemptObservation } from "./types.ts";
+import {
+	type AttemptIntent,
+	type AttemptObservation,
+	epochMilliseconds,
+	Timestamp,
+} from "./schemas.ts";
 
 export interface AccountingStoreContractFixture {
 	readonly intent: AttemptIntent;
@@ -13,6 +19,10 @@ export class AccountingStoreContractError extends Data.TaggedError("AccountingSt
 	readonly actual: string;
 }> {}
 
+/**
+ * Checks that a store adapter meets `AccountingStore`'s idempotency and claim guarantees. It writes
+ * the fixture's records, so run it against an isolated store.
+ */
 export const verifyAccountingStoreContract = Effect.fn("accounting.verifyStoreContract")(function* <
 	E,
 	R,
@@ -32,13 +42,7 @@ export const verifyAccountingStoreContract = Effect.fn("accounting.verifyStoreCo
 	};
 	yield* assertResult(store.putIntent(conflictingIntent), "conflict", "conflicting intent");
 
-	const dispatchedAt = fixture.intent.startedAt;
-	const dispatch = {
-		observationId: `${fixture.intent.attemptId}:dispatched`,
-		attemptId: fixture.intent.attemptId,
-		observedAt: dispatchedAt,
-		payload: { type: "dispatched" as const, dispatchedAt },
-	};
+	const dispatch = dispatchedObservation(fixture.intent.attemptId, fixture.intent.startedAt);
 	yield* assertResult(store.claimDispatch(dispatch), "claimed", "claim dispatch");
 	yield* assertResult(store.claimDispatch(dispatch), "already-dispatched", "reclaim dispatch");
 
@@ -55,7 +59,9 @@ export const verifyAccountingStoreContract = Effect.fn("accounting.verifyStoreCo
 	yield* assertResult(
 		store.putObservation({
 			...fixture.usageObservation,
-			observedAt: new Date(Date.parse(fixture.usageObservation.observedAt) + 1).toISOString(),
+			observedAt: Timestamp.make(
+				new Date(epochMilliseconds(fixture.usageObservation.observedAt) + 1).toISOString(),
+			),
 		}),
 		"conflict",
 		"conflicting observation",

@@ -1,4 +1,4 @@
-import { Data, Effect, Fiber } from "effect";
+import { Data, Effect, Fiber, Struct } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	AccountingDispatchAlreadyClaimedError,
@@ -9,9 +9,11 @@ import {
 	collectAttempt,
 	InvalidAccountingObservationError,
 } from "./collection.ts";
-import { completeUsageEvidence, successfulAttempt } from "./examples.ts";
 import type { AccountingStore } from "./lifecycle.ts";
-import type { AttemptObservation } from "./types.ts";
+import type { AttemptObservation } from "./schemas.ts";
+import { completeUsageEvidence, successfulAttempt as fixtureIntent } from "./test-fixtures.ts";
+
+const successfulAttempt = Struct.omit(fixtureIntent, ["startedAt"]);
 
 class ToolFailed extends Data.TaggedError("ToolFailed")<{ readonly message: string }> {}
 
@@ -44,7 +46,11 @@ describe("attempt collection", () => {
 
 		const result = await Effect.runPromise(
 			collectAttempt({
-				store: store({ intentError: new Error("database unavailable") }),
+				// A store without the intent cannot accept a dispatch claim either.
+				store: store({
+					intentError: new Error("database unavailable"),
+					claimError: new Error("no such attempt"),
+				}),
 				intent: successfulAttempt,
 				dispatchPolicy: "continue",
 				onPersistenceFailure: (failure) =>
@@ -65,8 +71,7 @@ describe("attempt collection", () => {
 		const operation = vi.fn((writer: AttemptObservationWriter) =>
 			Effect.gen(function* () {
 				yield* writer.recordUsage({
-					usageKey: "provider-response-1",
-					observedAt: "2026-09-18T10:00:01.000Z",
+					key: "provider-response-1",
 					evidence: completeUsageEvidence,
 				});
 				return yield* new ToolFailed({ message: "tool failed" });
@@ -204,7 +209,7 @@ describe("attempt collection", () => {
 					dispatchPolicy: "block",
 					onPersistenceFailure: () => Effect.void,
 					operation: () => Effect.succeed("result"),
-					persistenceTimeoutMs: 1,
+					persistenceTimeout: "1 millis",
 				}),
 			),
 		).rejects.toBeInstanceOf(AccountingDispatchBlockedError);
@@ -314,8 +319,7 @@ describe("attempt collection", () => {
 					onPersistenceFailure: () => Effect.void,
 					operation: (writer) =>
 						writer.recordUsage({
-							usageKey: "not valid",
-							observedAt: "2026-09-18T10:00:01.000Z",
+							key: "not valid",
 							evidence: completeUsageEvidence,
 						}),
 				}),
@@ -326,20 +330,58 @@ describe("attempt collection", () => {
 		);
 	});
 
-	it("rejects an intent whose dispatch timestamp precedes its start", async () => {
-		const operation = vi.fn(() => Effect.succeed("result"));
-		await expect(
-			Effect.runPromise(
-				collectAttempt({
-					store: store(),
-					intent: { ...successfulAttempt, startedAt: "2999-01-01T00:00:00.000Z" },
-					dispatchPolicy: "block",
-					onPersistenceFailure: () => Effect.void,
-					operation,
-				}),
-			),
-		).rejects.toBeInstanceOf(InvalidAccountingObservationError);
-		expect(operation).not.toHaveBeenCalled();
+	it("rejects observations recorded after the operation finished", async () => {
+		const observations: AttemptObservation[] = [];
+		let escapedWriter: AttemptObservationWriter | undefined;
+		await Effect.runPromise(
+			collectAttempt({
+				store: store({ observations }),
+				intent: successfulAttempt,
+				dispatchPolicy: "block",
+				onPersistenceFailure: () => Effect.void,
+				operation: (writer) =>
+					Effect.sync(() => {
+						escapedWriter = writer;
+					}),
+			}),
+		);
+		if (!escapedWriter) throw new Error("Expected the operation to receive a writer");
+
+		const late = await Effect.runPromise(
+			Effect.flip(escapedWriter.recordUsage({ key: "late", evidence: completeUsageEvidence })),
+		);
+
+		expect(late).toBeInstanceOf(InvalidAccountingObservationError);
+		expect(observations.map((observation) => observation.payload.type)).toEqual([
+			"dispatched",
+			"terminal",
+		]);
+	});
+
+	it("records a correction against the key it supersedes", async () => {
+		const observations: AttemptObservation[] = [];
+		await Effect.runPromise(
+			collectAttempt({
+				store: store({ observations }),
+				intent: successfulAttempt,
+				dispatchPolicy: "block",
+				onPersistenceFailure: () => Effect.void,
+				operation: (writer) =>
+					Effect.gen(function* () {
+						yield* writer.recordUsage({ key: "first", evidence: completeUsageEvidence });
+						yield* writer.recordUsage({
+							key: "second",
+							supersedesKey: "first",
+							evidence: completeUsageEvidence,
+						});
+					}),
+			}),
+		);
+
+		const [first, second] = observations.filter(
+			(observation) => observation.payload.type === "usage",
+		);
+		expect(second?.supersedesObservationId).toBe(first?.observationId);
 	});
 });
 

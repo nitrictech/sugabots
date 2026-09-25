@@ -5,40 +5,39 @@ invoices or customer-billable amounts.
 
 ## API
 
-Public operations return Effects and add named tracing spans to the caller's trace. The package does
-not configure telemetry. Application code should use the unsuffixed Effect APIs.
+Records that enter the package — intents, observations, usage evidence, rate snapshots, and
+provider charges — are Effect Schemas. Decode them at the boundary; identifiers, timestamps,
+currencies, and amounts are branded so unvalidated values cannot reach the calculations.
 
-## Key Operations
+`collectAttempt` and `verifyAccountingStoreContract` perform I/O and return Effects with tracing
+spans. Everything else is a plain function; ones that can fail return a `Result`.
 
-| Function                 | Purpose                                                        |
-| ------------------------ | -------------------------------------------------------------- |
-| `collectAttempt`         | Runs one provider request and records its accounting lifecycle |
-| `normalizeUsage`         | Validates counters and reports measurement completeness        |
-| `aggregateAttempts`      | Combines usage while retaining coverage and disputes           |
-| `snapshotFromModelsDev`  | Creates a rate snapshot from [Models.dev](https://models.dev/)  |
-| `resolvePricingSnapshot` | Selects the applicable rate snapshot for an attempt            |
-| `estimateCost`           | Prices one attempt against an applicable rate snapshot         |
-| `aggregateEstimates`     | Sums estimates without mixing currencies                       |
-| `providerReportedCharge` | Validates charges without treating them as estimates           |
-| `costEstimateRevision`   | Records estimate provenance and corrections                    |
-
-Import `snapshotFromModelsDev` from `@sugabots/accounting/models-dev`; the other operations above
-are available from the package root.
+| Function                        | Purpose                                                        |
+| ------------------------------- | -------------------------------------------------------------- |
+| `collectAttempt`                | Runs one provider request and records its accounting lifecycle |
+| `reduceAttempt`                 | Rebuilds an attempt's ledger from stored observations          |
+| `applyObservation`              | Adds one observation to a ledger, reporting conflicts          |
+| `normalizeUsage`                | Validates counters and reports measurement completeness        |
+| `aggregateAttempts`             | Combines usage while retaining coverage and disputes           |
+| `estimateAttempt`               | Prices an attempt against the snapshot in effect at its start  |
+| `aggregateEstimates`            | Sums estimates without mixing currencies                       |
+| `evidenceFromAiSdkUsage`        | Converts AI SDK usage to evidence (`/ai-sdk`)                  |
+| `snapshotFromModelsDev`         | Creates a rate snapshot from [Models.dev](https://models.dev/) (`/models-dev`) |
+| `verifyAccountingStoreContract` | Checks a store adapter against isolated fixtures               |
 
 ## Collection
 
 `collectAttempt` manages one provider request from intent through terminal observation:
 
-- Every request and retry has its own attempt ID.
+- Every request and retry has its own attempt ID. The start and observation times come from `Clock`.
 - Dispatch requires an atomic claim, preventing duplicate provider calls.
-- Callers choose whether an unavailable intent write should `block` or `continue`.
+- Callers choose whether an unavailable intent write should `block` or `continue` untracked.
 - Observation writes are idempotent; failed writes are reported without replaying the request.
 - Provider failures and interruptions remain unchanged after terminal accounting.
 
-Store adapters can validate isolated fixtures with `verifyAccountingStoreContract`.
-
 ## Pricing
 
-Rate snapshots are immutable and retain source provenance. Calculations use exact decimal arithmetic,
-preserve missing measurements, and resolve rates for the attempt's time, context tier, and connection.
-Incomplete evidence produces a partial or unavailable estimate rather than a misleading zero.
+Rate snapshots retain source provenance. Calculations use exact decimal arithmetic, preserve
+missing measurements, and resolve rates for the attempt's start time, context tier, returned model,
+and connection. Incomplete evidence produces a partial or unavailable estimate rather than a
+misleading zero.

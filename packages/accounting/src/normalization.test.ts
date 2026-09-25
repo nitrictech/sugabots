@@ -1,8 +1,9 @@
 import type { LanguageModelUsage } from "ai";
 import { describe, expect, it } from "vitest";
-import { evidenceFromAiSdkUsageSync as evidenceFromAiSdkUsage } from "./ai-sdk.ts";
-import { normalizeUsageSync as normalizeUsage } from "./normalization.ts";
-import type { UsageEvidence } from "./types.ts";
+import { evidenceFromAiSdkUsage } from "./ai-sdk.ts";
+import { normalizeUsage } from "./normalization.ts";
+import type { UsageEvidence } from "./schemas.ts";
+import { partialUsageEvidence } from "./test-fixtures.ts";
 
 describe("usage normalization", () => {
 	it("distinguishes absent cache evidence from an explicit zero", () => {
@@ -57,7 +58,11 @@ describe("usage normalization", () => {
 			"input-components-exceed-total",
 			"reasoning-exceeds-output",
 		]);
-		expect(normalized.input).toEqual({ total: 10, uncached: 8, cacheRead: 4 });
+		expect(normalized.counters).toEqual(evidence.counters);
+	});
+
+	it("reports usage without an output total as partial", () => {
+		expect(normalizeUsage(partialUsageEvidence).completeness).toBe("partial");
 	});
 
 	it("keeps Anthropic cache writes and flags model-scoped iterations", () => {
@@ -75,7 +80,14 @@ describe("usage normalization", () => {
 		);
 		const normalized = normalizeUsage(evidence);
 
-		expect(normalized.input).toEqual({ total: 15, uncached: 8, cacheRead: 4, cacheWrite: 3 });
+		expect(normalized.counters).toEqual(
+			expect.objectContaining({
+				inputTokens: 15,
+				uncachedInputTokens: 8,
+				cacheReadInputTokens: 4,
+				cacheWriteInputTokens: 3,
+			}),
+		);
 		expect(normalized.issues).toContainEqual(
 			expect.objectContaining({ code: "unsupported-provider-evidence" }),
 		);

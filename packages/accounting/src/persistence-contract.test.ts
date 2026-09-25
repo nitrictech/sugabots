@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import { describe, it } from "vitest";
-import { completeUsageEvidence, successfulAttempt } from "./examples.ts";
 import type { AccountingStore } from "./lifecycle.ts";
 import { verifyAccountingStoreContract } from "./persistence-contract.ts";
-import type { AttemptIntent, AttemptObservation } from "./types.ts";
+import type { AttemptIntent, AttemptObservation } from "./schemas.ts";
+import { successfulAttempt, usageObservation } from "./test-fixtures.ts";
 
 describe("accounting store contract", () => {
 	it("provides a reusable adapter conformance check", async () => {
@@ -28,12 +28,10 @@ describe("accounting store contract", () => {
 		await Effect.runPromise(
 			verifyAccountingStoreContract(store, {
 				intent: successfulAttempt,
-				usageObservation: {
-					observationId: `${successfulAttempt.attemptId}:usage:provider-response`,
-					attemptId: successfulAttempt.attemptId,
-					observedAt: "2026-09-18T10:00:01.000Z",
-					payload: { type: "usage", evidence: completeUsageEvidence },
-				},
+				usageObservation: usageObservation(
+					successfulAttempt,
+					`${successfulAttempt.attemptId}:usage:provider-response`,
+				),
 			}),
 		);
 	});

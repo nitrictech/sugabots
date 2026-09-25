@@ -1,26 +1,29 @@
 import type { LanguageModelUsage } from "ai";
-import { Effect } from "effect";
-import type { JsonValue, UsageCounters, UsageEvidence } from "./types.ts";
+import type { Schema } from "effect";
+import type { UsageCounters, UsageEvidence } from "./schemas.ts";
 
+type JsonValue = Schema.Json;
+
+/** The provider response shape inside the AI SDK's raw usage. */
 export type AiSdkProviderFormat = "anthropic" | "openai";
 
-export const evidenceFromAiSdkUsage = Effect.fn("accounting.evidenceFromAiSdkUsage")(function* (
-	format: AiSdkProviderFormat,
-	usage: LanguageModelUsage,
-) {
-	return yield* Effect.succeed(evidenceFromAiSdkUsageSync(format, usage));
-});
-
-export function evidenceFromAiSdkUsageSync(
+/** Keeps only token-count fields of the raw usage, so no response content is retained. */
+export function evidenceFromAiSdkUsage(
 	format: AiSdkProviderFormat,
 	usage: LanguageModelUsage,
 ): UsageEvidence {
+	const raw = allowlistedRawUsage(format, usage.raw);
 	return {
 		normalizationVersion: 1,
-		source: { kind: "ai-sdk", name: format, version: "7.0.100" },
+		source: { kind: "ai-sdk", name: format },
 		counters: format === "openai" ? openAiCounters(usage) : anthropicCounters(usage),
-		raw: allowlistedRawUsage(format, usage.raw),
+		...(hasAnthropicIterations(raw) ? { containsProviderSubrequests: true } : {}),
+		...(raw === undefined ? {} : { raw }),
 	};
+}
+
+function hasAnthropicIterations(raw: { [key: string]: JsonValue } | undefined): boolean {
+	return Array.isArray(raw?.iterations) && raw.iterations.length > 0;
 }
 
 function openAiCounters(usage: LanguageModelUsage): UsageCounters {

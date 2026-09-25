@@ -5,15 +5,18 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./ai-sdk": "./src/public-ai-sdk.ts",
-		"./models-dev": "./src/public-models-dev.ts"
+		"./ai-sdk": "./src/ai-sdk.ts",
+		"./models-dev": "./src/models-dev.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@opencode-ai/models": "^0.0.73",
-		"ai": "^7.0.100",
+		"@sugabots/contracts": "workspace:*",
 		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@opencode-ai/models": "^0.0.73",
+		"ai": "^7.0.100"
 	}
 }
