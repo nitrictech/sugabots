@@ -4,7 +4,7 @@
  * testable. Core services read their own settings through Effect's `Config`.
  */
 
-import { type EmailAddress, parseEmailAddress } from "@sugabots/core/email/email";
+import { Email } from "@sugabots/core/email/email";
 
 export type Environment = "development" | "production";
 
@@ -50,7 +50,7 @@ export interface Config {
 	 */
 	requireEmailVerification: boolean;
 	/** The sender of emails a user's own action triggers, such as verification and invitations. */
-	transactionalEmailFrom: EmailAddress;
+	transactionalEmailFrom: Email.Address;
 }
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
@@ -136,7 +136,10 @@ function booleanFromEnv(value: string, name: string): boolean {
 	throw new Error(`${name} must be true or false`);
 }
 
-function transactionalEmailFromEnv(env: NodeJS.ProcessEnv, environment: Environment): EmailAddress {
+function transactionalEmailFromEnv(
+	env: NodeJS.ProcessEnv,
+	environment: Environment,
+): Email.Address {
 	const value = env.EMAIL_TRANSACTIONAL_FROM;
 	if (!value) {
 		// A provider sends only from addresses it has verified, so production must name one.
@@ -144,7 +147,7 @@ function transactionalEmailFromEnv(env: NodeJS.ProcessEnv, environment: Environm
 			throw new Error("EMAIL_TRANSACTIONAL_FROM is required in production.");
 		return DEVELOPMENT_TRANSACTIONAL_EMAIL_FROM;
 	}
-	const address = parseEmailAddress(value);
+	const address = Email.parseAddress(value);
 	if (!address) {
 		throw new Error(
 			"EMAIL_TRANSACTIONAL_FROM must be an address, like `Sugabots <no-reply@example.com>`.",

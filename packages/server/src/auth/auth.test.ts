@@ -48,7 +48,7 @@ afterAll(async () => {
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
-	const sent: Email[] = [];
+	const sent: Email.Message[] = [];
 	const auth = createAuth({
 		db: authDb,
 		run: runOnPostgres,
@@ -675,8 +675,8 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => {
-	const sent: Email[] = [];
-	const mailer = async (email: Email) => {
+	const sent: Email.Message[] = [];
+	const mailer = async (email: Email.Message) => {
 		sent.push(email);
 	};
 	const options = {
@@ -772,7 +772,7 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 describe.skipIf(!process.env.DATABASE_URL)(
 	"an installation that requires email verification",
 	() => {
-		const sent: Email[] = [];
+		const sent: Email.Message[] = [];
 		const auth = createAuth({
 			db: authDb,
 			run: runOnPostgres,

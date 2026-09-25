@@ -1,9 +1,9 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { HttpClient, type HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { describe, expect, it } from "vitest";
-import { type Email, EmailService, parseEmailAddress } from "./email.ts";
+import { Email } from "./email.ts";
 
-const email: Email = {
+const message: Email.Message = {
 	from: { email: "sugabots@example.com", name: "Sugabots" },
 	to: [{ email: "person@example.com" }],
 	subject: "Invitation",
@@ -24,9 +24,9 @@ async function sendWith(env: Record<string, string>, status = 204) {
 		}),
 	);
 	const exit = await Effect.runPromiseExit(
-		Effect.flatMap(EmailService, (service) => service.send(email)).pipe(
+		Effect.flatMap(Email.Service, (email) => email.send(message)).pipe(
 			Effect.provide(
-				EmailService.layerNoDeps.pipe(
+				Email.layerNoDeps.pipe(
 					Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
@@ -41,7 +41,7 @@ function jsonBody(request: HttpClientRequest.HttpClientRequest | undefined) {
 	return JSON.parse(new TextDecoder().decode(request.body.body));
 }
 
-describe("EmailService.layerNoDeps", () => {
+describe("Email.layerNoDeps", () => {
 	it.each([
 		["with nothing set", {}],
 		["in production", { NODE_ENV: "production" }],
@@ -61,7 +61,7 @@ describe("EmailService.layerNoDeps", () => {
 		expect(requests[0]?.method).toBe("POST");
 		expect(requests[0]?.url).toBe(webhook.EMAIL_WEBHOOK_URL);
 		expect(requests[0]?.headers.authorization).toBe("Bearer secret");
-		expect(jsonBody(requests[0])).toEqual(email);
+		expect(jsonBody(requests[0])).toEqual(message);
 	});
 
 	it("sends no authorization header without a token", async () => {
@@ -99,7 +99,7 @@ describe("EmailService.layerNoDeps", () => {
 	});
 });
 
-describe("parseEmailAddress", () => {
+describe("Email.parseAddress", () => {
 	it.each([
 		["Sugabots <no-reply@example.com>", { email: "no-reply@example.com", name: "Sugabots" }],
 		[
@@ -110,6 +110,6 @@ describe("parseEmailAddress", () => {
 		["Sugabots", undefined],
 		["Sugabots <not-an-address>", undefined],
 	])("parses %j", (value, expected) => {
-		expect(parseEmailAddress(value)).toEqual(expected);
+		expect(Email.parseAddress(value)).toEqual(expected);
 	});
 });

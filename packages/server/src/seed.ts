@@ -8,7 +8,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { EmailService } from "@sugabots/core/email/email";
+import { Email } from "@sugabots/core/email/email";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
@@ -38,9 +38,7 @@ if (config.environment !== "development") {
 	throw new Error("The development seed cannot turn in production.");
 }
 
-const database = ManagedRuntime.make(
-	Layer.merge(databaseLayer(config.databaseUrl), EmailService.layer),
-);
+const database = ManagedRuntime.make(Layer.merge(databaseLayer(config.databaseUrl), Email.layer));
 // better-auth's adapter only speaks node-postgres.
 const authPool = new Pool({ connectionString: config.databaseUrl });
 
@@ -52,7 +50,7 @@ const signUp = Effect.promise(() => {
 		db: drizzle({ client: authPool }),
 		run: effectRunner(database),
 		mailer: (email) =>
-			database.runPromise(Effect.flatMap(EmailService, (service) => service.send(email))),
+			database.runPromise(Effect.flatMap(Email.Service, (service) => service.send(email))),
 		allowOpenSignUp: true,
 		requireEmailVerification: false,
 		emailFrom: config.transactionalEmailFrom,
