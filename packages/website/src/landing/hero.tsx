@@ -29,9 +29,9 @@ export function Hero() {
 				<BotCrowd />
 				<motion.h1
 					variants={riseIn}
-					className="text-5xl font-black leading-none tracking-tighter text-balance sm:text-6xl"
+					className="text-5xl leading-13 font-black tracking-tight text-balance sm:text-6xl sm:leading-16"
 				>
-					Agents, now <span className={accentText({ tone: "emerald" })}>multiplayer.</span>
+					<span className={accentText({ tone: "emerald" })}>Multiplayer</span> agents on any model.
 				</motion.h1>
 				<motion.p
 					variants={riseIn}
