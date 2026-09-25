@@ -1,0 +1,27 @@
+{
+	"name": "@sugabots/avatars",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./bot-crowd.svg": "./assets/bot-crowd.svg"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"generate:bot-crowd": "node scripts/generate-bot-crowd.ts"
+	},
+	"dependencies": {
+		"@sugabots/contracts": "workspace:*",
+		"cn": "^0.2.6"
+	},
+	"peerDependencies": {
+		"react": "^19.2.8"
+	},
+	"devDependencies": {
+		"@types/culori": "^4.0.1",
+		"@types/react": "^19.2.18",
+		"culori": "^4.0.2",
+		"tailwindcss": "^4.3.3"
+	}
+}
