@@ -20,6 +20,7 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
+import { sandboxPausingLayer } from "@sugabots/core/sandboxes/pausing";
 import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import { Layer } from "effect";
 
@@ -48,6 +49,8 @@ export interface BackgroundOptions {
 	connectionTools: ConnectionTools;
 	/** Pods' sandboxes, for agents an admin let use theirs. */
 	sandboxes?: PodSandboxStore;
+	/** How long a sandbox sits unused before it is paused. */
+	sandboxIdlePauseMinutes?: number;
 	/** For the facilitator to announce who it invited. */
 	publishEvents: PublishEvents;
 }
@@ -65,6 +68,7 @@ export function backgroundLayer({
 	builtInTools,
 	connectionTools,
 	sandboxes,
+	sandboxIdlePauseMinutes,
 	publishEvents,
 }: BackgroundOptions): Layer.Layer<never, never, Database> {
 	return Layer.mergeAll(
@@ -84,6 +88,9 @@ export function backgroundLayer({
 			sandboxes,
 			routines,
 		}),
+		...(sandboxes
+			? [sandboxPausingLayer({ store: sandboxes, idlePauseMinutes: sandboxIdlePauseMinutes })]
+			: []),
 		summaryWorkerLayer({ store: summaries, model }),
 		facilitatorWorkerLayer({ model, publishEvents, routines }),
 	);

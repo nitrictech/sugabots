@@ -5,6 +5,7 @@
  */
 
 import { Email } from "@sugabots/core/email/email";
+import { DEFAULT_IDLE_PAUSE_MINUTES } from "@sugabots/core/sandboxes/pausing";
 
 export type Environment = "development" | "production";
 
@@ -42,6 +43,8 @@ export interface Config {
 	 * escape from one is an escape to the host, which is the installation's.
 	 */
 	allowUnisolatedSandboxes: boolean;
+	/** How long a pod's sandbox sits unused before it is paused. */
+	sandboxIdlePauseMinutes: number;
 	/**
 	 * Whether anybody may create an account. Off unless the installation says
 	 * otherwise: the first account is admitted regardless, and after that the
@@ -114,6 +117,11 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		env.SANDBOX_ALLOW_UNISOLATED === undefined
 			? false
 			: booleanFromEnv(env.SANDBOX_ALLOW_UNISOLATED, "SANDBOX_ALLOW_UNISOLATED");
+	const sandboxIdlePauseMinutes = positiveNumberFromEnv(
+		env.SANDBOX_IDLE_PAUSE_MINUTES,
+		"SANDBOX_IDLE_PAUSE_MINUTES",
+		DEFAULT_IDLE_PAUSE_MINUTES,
+	);
 	const allowOpenSignUp =
 		env.ALLOW_OPEN_SIGNUP === undefined
 			? false
@@ -135,10 +143,20 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		allowPrivateModelProviderNetwork,
 		allowPrivateWebFetchNetwork,
 		allowUnisolatedSandboxes,
+		sandboxIdlePauseMinutes,
 		allowOpenSignUp,
 		requireEmailVerification,
 		transactionalEmailFrom,
 	};
+}
+
+function positiveNumberFromEnv(value: string | undefined, name: string, fallback: number): number {
+	if (value === undefined || value.trim() === "") return fallback;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		throw new Error(`${name} must be a number above 0, not "${value}"`);
+	}
+	return parsed;
 }
 
 function booleanFromEnv(value: string, name: string): boolean {

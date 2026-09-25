@@ -21,7 +21,19 @@ export interface Interface {
 	readonly connect: (id: string) => Effect.Effect<Handle, Missing | Unavailable>;
 	/** Whether the service answers and accepts the key, without making anything. */
 	readonly check: Effect.Effect<void, Unavailable>;
+	/** What survives a pause, so the agent can be told what to expect after one. */
+	readonly pauseKeeps: PauseKeeps;
+	/** Stops the sandbox costing compute until it is resumed. */
+	readonly pause: (id: string) => Effect.Effect<void, Missing | Unavailable>;
+	/** Brings a paused sandbox back, connected. */
+	readonly resume: (id: string) => Effect.Effect<Handle, Missing | Unavailable>;
 }
+
+/**
+ * `memory`: running programs carry on after a resume, as if nothing happened.
+ * `filesystem`: files are kept, but programs may have stopped.
+ */
+export type PauseKeeps = "memory" | "filesystem";
 
 /** What a workspace's sandbox provider row says about reaching its service. */
 export interface Connection {

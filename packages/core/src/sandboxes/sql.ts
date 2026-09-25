@@ -46,7 +46,7 @@ export const podSandbox = pgTable(
 	],
 );
 
-export type PodSandboxStatus = "running" | "missing";
+export type PodSandboxStatus = "running" | "paused" | "missing";
 export type PodSandboxRow = typeof podSandbox.$inferSelect;
 
 /**

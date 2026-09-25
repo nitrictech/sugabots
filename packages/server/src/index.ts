@@ -189,6 +189,7 @@ const main = Effect.gen(function* () {
 			builtInTools,
 			connectionTools,
 			sandboxes: stores.podSandboxes,
+			sandboxIdlePauseMinutes: config.sandboxIdlePauseMinutes,
 			publishEvents,
 		}),
 	);
