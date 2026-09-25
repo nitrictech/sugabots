@@ -1,6 +1,6 @@
 import { SiteLogo } from "@/components/site-logo";
 import { Button } from "@/components/ui/button";
-import { siteLinks } from "@/site-links";
+import { launched, siteLinks } from "@/site-links";
 
 export function SiteHeader() {
 	return (
@@ -11,22 +11,26 @@ export function SiteHeader() {
 					Sugabots
 				</a>
 				<div className="flex flex-1 gap-5">
-					<Button
-						variant="nav"
-						size="inline"
-						nativeButton={false}
-						render={<a href={siteLinks.docs} />}
-					>
-						Docs
-					</Button>
-					<Button
-						variant="nav"
-						size="inline"
-						nativeButton={false}
-						render={<a href={siteLinks.github} />}
-					>
-						GitHub
-					</Button>
+					{launched && (
+						<>
+							<Button
+								variant="nav"
+								size="inline"
+								nativeButton={false}
+								render={<a href={siteLinks.docs} />}
+							>
+								Docs
+							</Button>
+							<Button
+								variant="nav"
+								size="inline"
+								nativeButton={false}
+								render={<a href={siteLinks.github} />}
+							>
+								GitHub
+							</Button>
+						</>
+					)}
 				</div>
 				<Button nativeButton={false} render={<a href={siteLinks.getStarted} />}>
 					Get started

@@ -12,7 +12,7 @@ export const Route = createRootRoute({
 			{ title: "Sugabots — agents, now multiplayer" },
 			{
 				name: "description",
-				content: "An open-source group chat where people and AI agents work things out together.",
+				content: "An open-source harness where people and agents work together.",
 			},
 		],
 		links: [

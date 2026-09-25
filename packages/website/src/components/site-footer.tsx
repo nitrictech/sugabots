@@ -1,6 +1,6 @@
 import { SiteLogo } from "@/components/site-logo";
 import { Button } from "@/components/ui/button";
-import { siteLinks } from "@/site-links";
+import { launched, siteLinks } from "@/site-links";
 
 export function SiteFooter() {
 	return (
@@ -12,22 +12,26 @@ export function SiteFooter() {
 				</span>
 				<span className="flex-1 whitespace-nowrap">Open source, made by Nitric</span>
 				<div className="flex gap-5">
-					<Button
-						variant="nav"
-						size="inline"
-						nativeButton={false}
-						render={<a href={siteLinks.docs} />}
-					>
-						Docs
-					</Button>
-					<Button
-						variant="nav"
-						size="inline"
-						nativeButton={false}
-						render={<a href={siteLinks.github} />}
-					>
-						GitHub
-					</Button>
+					{launched && (
+						<>
+							<Button
+								variant="nav"
+								size="inline"
+								nativeButton={false}
+								render={<a href={siteLinks.docs} />}
+							>
+								Docs
+							</Button>
+							<Button
+								variant="nav"
+								size="inline"
+								nativeButton={false}
+								render={<a href={siteLinks.github} />}
+							>
+								GitHub
+							</Button>
+						</>
+					)}
 					<Button
 						variant="nav"
 						size="inline"

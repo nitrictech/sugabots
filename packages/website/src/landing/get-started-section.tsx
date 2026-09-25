@@ -1,8 +1,9 @@
 import { motion } from "motion/react";
 import { BotAvatar } from "@/components/bot-avatar";
+import { EarlyAccessButton } from "@/components/early-access-button";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
-import { siteLinks } from "@/site-links";
+import { launched, siteLinks } from "@/site-links";
 
 export function GetStartedSection() {
 	return (
@@ -29,17 +30,23 @@ export function GetStartedSection() {
 					Set it up in a few minutes, invite your people, and add your first bot.
 				</motion.p>
 				<RevealItem className="flex flex-wrap justify-center gap-3">
-					<Button size="lg" nativeButton={false} render={<a href={siteLinks.docs} />}>
-						Read the docs
-					</Button>
-					<Button
-						size="lg"
-						variant="outline"
-						nativeButton={false}
-						render={<a href={siteLinks.github} />}
-					>
-						View on GitHub
-					</Button>
+					{launched ? (
+						<>
+							<Button size="lg" nativeButton={false} render={<a href={siteLinks.docs} />}>
+								Read the docs
+							</Button>
+							<Button
+								size="lg"
+								variant="outline"
+								nativeButton={false}
+								render={<a href={siteLinks.github} />}
+							>
+								View on GitHub
+							</Button>
+						</>
+					) : (
+						<EarlyAccessButton size="lg" />
+					)}
 				</RevealItem>
 			</Reveal>
 		</section>

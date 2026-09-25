@@ -9,7 +9,11 @@ export default defineConfig({
 		// Portless passes both; see packages/web/vite.config.ts for why $HOST matters.
 		port: Number(process.env.PORT) || 3000,
 		host: process.env.HOST || "localhost",
-		allowedHosts: ["responsibility-symphony-athletic-sofa.trycloudflare.com"],
 	},
-	plugins: [tailwindcss(), tanstackStart(), react()],
+	plugins: [
+		tailwindcss(),
+		// Every page is rendered to static HTML at build time, found by following links from "/".
+		tanstackStart({ prerender: { enabled: true, crawlLinks: true, failOnError: true } }),
+		react(),
+	],
 });
