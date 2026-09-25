@@ -174,8 +174,18 @@ export function sandboxTools(
 					}),
 				).catch(explainFailure);
 				if (execution.exitCode !== 0) {
+					const credentialsFailed = turn.gitCredentialsFailed();
 					throw new Error(
-						`Checking out ${place.repository} failed: ${execution.stderr.text.trim() || execution.stdout.text.trim()}${known ? "" : " It isn't one of this pod's repositories, so only a public repository can be checked out."}`,
+						[
+							`Checking out ${place.repository} failed: ${execution.stderr.text.trim() || execution.stdout.text.trim()}`,
+							known
+								? credentialsFailed
+									? `The sandbox couldn't be given GitHub access (${credentialsFailed}). A sandbox made before GitHub was connected can't take it: ask someone who manages the pod to choose "Start a new sandbox" from its menu.`
+									: undefined
+								: "It isn't one of this pod's repositories, so only a public repository can be checked out.",
+						]
+							.filter(Boolean)
+							.join(" "),
 					);
 				}
 				return withResumeNote({

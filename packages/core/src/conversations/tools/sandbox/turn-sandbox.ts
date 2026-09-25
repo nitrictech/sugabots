@@ -23,6 +23,8 @@ export interface TurnSandbox {
 	 * the first tool result after the lease that woke it carries it.
 	 */
 	takeResumeNote(): string | undefined;
+	/** Why the sandbox has no git credentials this turn, when it was meant to have them. */
+	gitCredentialsFailed(): string | undefined;
 	release(): Promise<void>;
 }
 
@@ -34,10 +36,12 @@ export function turnSandbox(
 	let leased: Promise<LeasedSandbox> | undefined;
 	let renewal: ReturnType<typeof setInterval> | undefined;
 	let resumeNote: string | undefined;
+	let gitFailure: string | undefined;
 
 	const lease = async () => {
 		const held = await run(store.lease(scope));
 		if (held.resumedAfterPause) resumeNote = RESUME_NOTES[held.resumedAfterPause];
+		gitFailure = held.gitCredentialsFailed;
 		renewal = setInterval(() => {
 			run(store.renew(held.leaseId)).catch(() => {});
 		}, LEASE_RENEWAL_INTERVAL_SECONDS * 1_000);
@@ -54,6 +58,7 @@ export function turnSandbox(
 			});
 			return (await leased).sandbox;
 		},
+		gitCredentialsFailed: () => gitFailure,
 		takeResumeNote: () => {
 			const note = resumeNote;
 			resumeNote = undefined;

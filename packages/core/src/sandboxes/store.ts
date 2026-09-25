@@ -66,6 +66,11 @@ export interface LeasedSandbox {
 	sandbox: Sandbox.Handle;
 	/** Set when this lease woke a paused sandbox, with what the pause kept. */
 	resumedAfterPause?: Sandbox.PauseKeeps;
+	/**
+	 * Why the pod's git credentials couldn't be given to the sandbox, when they
+	 * couldn't: private repositories won't clone until that's put right.
+	 */
+	gitCredentialsFailed?: string;
 }
 
 /** How long a lease lasts without being renewed. Three renewals' worth, so one late renewal is harmless. */
@@ -318,13 +323,14 @@ export function podSandboxStore({
 				if (reached.kind === "lost") return reached;
 
 				const git = yield* gitCredentialsFor(scope);
-				yield* reached.sandbox
-					.setGitCredentials(git)
-					.pipe(
-						Effect.catchTag("SandboxUnavailable", (failure) =>
-							Effect.logWarning("Giving a sandbox its git credentials failed", failure),
+				const gitCredentialsFailed = yield* reached.sandbox.setGitCredentials(git).pipe(
+					Effect.as(undefined),
+					Effect.catchTag("SandboxUnavailable", (failure) =>
+						Effect.logWarning("Giving a sandbox its git credentials failed", failure).pipe(
+							Effect.as(failure.reason ?? "the sandbox provider refused them"),
 						),
-					);
+					),
+				);
 
 				const [lease] = yield* query((db) =>
 					db
@@ -344,6 +350,7 @@ export function podSandboxStore({
 					leaseId: lease.id,
 					sandbox: reached.sandbox,
 					resumedAfterPause: reached.resumedAfterPause,
+					gitCredentialsFailed,
 				};
 			}),
 		);
@@ -366,6 +373,9 @@ export function podSandboxStore({
 					leaseId: result.leaseId,
 					sandbox: result.sandbox,
 					...(result.resumedAfterPause ? { resumedAfterPause: result.resumedAfterPause } : {}),
+					...(result.gitCredentialsFailed
+						? { gitCredentialsFailed: result.gitCredentialsFailed }
+						: {}),
 				};
 			}),
 

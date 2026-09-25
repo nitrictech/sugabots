@@ -409,6 +409,43 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 		expect(fake.gitCredentialsSet).toEqual([git, git]);
 	});
 
+	it("says why the sandbox couldn't be given its git credentials", async () => {
+		const refusing = podSandboxStore({
+			providers: {
+				resolve: () => Effect.succeed(configured),
+				connection: () => Effect.succeed(configured),
+			},
+			allowsUnisolated: false,
+			publishEvents,
+			providerFor: () => ({
+				...fake.provider,
+				create: (spec) =>
+					Effect.map(fake.provider.create(spec), (handle) => ({
+						...handle,
+						setGitCredentials: () =>
+							Effect.fail(
+								new Sandbox.Unavailable({
+									provider: "opensandbox",
+									cause: new Error("no vault"),
+									reason: "credential proxy is not enabled",
+								}),
+							),
+					})),
+			}),
+			gitCredentialsFor: () =>
+				Effect.succeed({
+					host: "github.com",
+					username: "x",
+					token: "t",
+					repositories: ["acme/app"],
+				}),
+		});
+
+		const held = await runOnPostgres(refusing.lease(scope));
+
+		expect(held.gitCredentialsFailed).toBe("credential proxy is not enabled");
+	});
+
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {
 		const held = await lease();
 		await runOnPostgres(store.release(held.leaseId));
