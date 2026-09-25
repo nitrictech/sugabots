@@ -1,13 +1,10 @@
 /**
- * The colours a bot can wear. Each sets the bot's face and the eyes drawn on
- * it, a swatch of the face colour for where the bot appears as a dot, and the
- * tint behind anything the bot says or owns (its chat bubbles, a pod it
- * belongs to), so a bot reads as the same character everywhere.
+ * The colours a bot can wear: its face, its eyes, a swatch of the face colour,
+ * and a tint for what it says or owns.
  *
- * Keys are Tailwind hue names. Faces are always shade BOT_FACE_SHADE and eyes
- * BOT_EYES_SHADE; scripts/generate-bot-crowd.ts reads those shades from
- * Tailwind's palette, so the class names below must use them. They are
- * written out in full so Tailwind can find them.
+ * Keys are Tailwind hue names. Class names must use BOT_FACE_SHADE and
+ * BOT_EYES_SHADE, which scripts/generate-assets.ts reads from Tailwind's
+ * palette, and are written out in full so Tailwind can find them.
  */
 export const BOT_FACE_SHADE = 500;
 export const BOT_EYES_SHADE = 950;
