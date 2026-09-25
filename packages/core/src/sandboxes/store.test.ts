@@ -38,6 +38,7 @@ function fakeProvider() {
 			}),
 		readFile: () => Effect.succeed(new Uint8Array()),
 		writeFile: () => Effect.void,
+		launch: () => Effect.void,
 		setAllowedHosts: (hosts) =>
 			Effect.sync(() => {
 				allowListsSet.push({ id, hosts });
@@ -49,6 +50,7 @@ function fakeProvider() {
 		isolation: "gvisor",
 		check: Effect.void,
 		pauseKeeps: "filesystem",
+		desktopViewer: () => Effect.succeed(undefined),
 		pause: (id) =>
 			sandboxes.has(id)
 				? Effect.sync(() => {

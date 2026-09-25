@@ -1,9 +1,10 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { sandboxDesktopProxy } from "./dev/sandbox-desktop-proxy.ts";
 
 export default defineConfig({
-	plugins: [react(), tailwindcss()],
+	plugins: [react(), tailwindcss(), sandboxDesktopProxy()],
 	// One .env for the whole workspace, next to compose.yml, rather than one per
 	// app. The API and the tests read the same file.
 	envDir: "../..",

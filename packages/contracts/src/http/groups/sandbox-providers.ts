@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	newSandboxProviderSchema,
+	podSandboxDesktopSchema,
 	podSandboxStatusSchema,
 	sandboxProviderResponseSchema,
 	sandboxProviderSchema,
@@ -40,6 +41,10 @@ export class SandboxProvidersApi extends HttpApiGroup.make("sandboxProviders")
 		HttpApiEndpoint.get("podStatus", "/pods/:podId/sandbox", {
 			params: { podId: uuidSchema },
 			success: podSandboxStatusSchema,
+		}),
+		HttpApiEndpoint.get("podDesktop", "/pods/:podId/sandbox/desktop", {
+			params: { podId: uuidSchema },
+			success: podSandboxDesktopSchema,
 		}),
 	)
 	.middleware(Authorise)

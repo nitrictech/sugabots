@@ -81,7 +81,7 @@ export interface Stores {
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
 	sandboxProviders: SandboxProviderStore;
-	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts">;
+	podSandboxes: Pick<PodSandboxStore, "status" | "desktopViewer" | "applyAllowedHosts">;
 	connections: ConnectionStore;
 	threads: ThreadStore;
 	chats: ChatStore;

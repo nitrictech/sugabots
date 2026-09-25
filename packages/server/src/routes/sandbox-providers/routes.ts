@@ -12,7 +12,7 @@ import { asHttpError } from "../../http/errors.ts";
 export interface SandboxProviderRoutesOptions {
 	sandboxProviders: SandboxProviderStore;
 	/** Pods' sandboxes, for whether one is up and in use. */
-	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts">;
+	podSandboxes: Pick<PodSandboxStore, "status" | "desktopViewer" | "applyAllowedHosts">;
 	validateProviderUrl: EgressUrlValidator;
 	/** Whether this installation lets a workspace choose `container` isolation. */
 	allowsUnisolated: boolean;
@@ -60,6 +60,11 @@ export function sandboxProviderRoutes({
 			)
 			.handle("podStatus", () =>
 				Effect.flatMap(grantedPod, ({ pod }) => podSandboxes.status(pod.id)),
+			)
+			.handle("podDesktop", () =>
+				Effect.flatMap(grantedPod, ({ pod }) =>
+					Effect.map(podSandboxes.desktopViewer(pod.id), (viewer) => ({ viewer: viewer ?? null })),
+				),
 			),
 	);
 }

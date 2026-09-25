@@ -9,8 +9,15 @@ export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
 export const WRITE_FILE_TOOL = "write_file";
 export const EDIT_FILE_TOOL = "edit_file";
+export const OPEN_BROWSER_TOOL = "open_browser";
 
-export const SANDBOX_TOOLS = [RUN_COMMAND_TOOL, READ_FILE_TOOL, WRITE_FILE_TOOL, EDIT_FILE_TOOL];
+export const SANDBOX_TOOLS = [
+	RUN_COMMAND_TOOL,
+	READ_FILE_TOOL,
+	WRITE_FILE_TOOL,
+	EDIT_FILE_TOOL,
+	OPEN_BROWSER_TOOL,
+];
 
 const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 const MAX_COMMAND_TIMEOUT_SECONDS = 600;
@@ -131,6 +138,40 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 				return withResumeNote({ path: absolute, characters: content.length });
 			},
 		}),
+		[OPEN_BROWSER_TOOL]: tool({
+			description:
+				"Open a web page in the browser on the sandbox's desktop, which people in the pod can watch. Use it to show them a page, or a site you are running in the sandbox (http://localhost:<port>). It opens a new window and returns straight away; only some internet hosts are reachable.",
+			inputSchema: Schema.Struct({
+				url: Schema.String.check(
+					Schema.isMaxLength(2_048),
+					Schema.isPattern(/^https?:\/\//, { message: "An http or https address" }),
+				),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ url }) => {
+				const machine = await sandbox();
+				const desktop = await run(
+					machine.exec("pgrep -x Xvfb >/dev/null", {
+						cwd: Sandbox.WORKSPACE_DIRECTORY,
+						timeoutSeconds: 10,
+						maxOutputCharacters: 200,
+					}),
+				).catch(explainFailure);
+				if (desktop.exitCode !== 0) {
+					throw new Error(
+						"This pod's sandbox has no desktop to open a browser on. A workspace admin can switch its image to one with a desktop.",
+					);
+				}
+				await run(
+					machine.launch(`firefox-esr --new-window "$${BROWSER_URL_VARIABLE}"`, {
+						[BROWSER_URL_VARIABLE]: url,
+					}),
+				).catch(explainFailure);
+				return withResumeNote({
+					opened: url,
+					note: "It can take a few seconds to appear. People watching the pod's desktop see it there.",
+				});
+			},
+		}),
 		[EDIT_FILE_TOOL]: tool({
 			description:
 				"Change part of a text file in the sandbox by replacing exact text. oldText must appear in the file exactly once, including its whitespace, unless replaceAll is set; include enough surrounding lines to make it unique. Read the file first.",
@@ -163,6 +204,9 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 		}),
 	};
 }
+
+/** Carries the address to the browser, so it is never quoted into the command line. */
+const BROWSER_URL_VARIABLE = "SUGABOTS_BROWSER_URL";
 
 function resolvePath(path: string): string {
 	return posix.resolve(Sandbox.WORKSPACE_DIRECTORY, path);

@@ -17,6 +17,7 @@
 	},
 	"include": [
 		"src",
+		"dev",
 		"vite.config.ts",
 		"vitest.config.ts",
 		".storybook/**/*.ts",

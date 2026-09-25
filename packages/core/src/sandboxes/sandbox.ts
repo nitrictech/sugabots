@@ -27,6 +27,11 @@ export interface Interface {
 	readonly pause: (id: string) => Effect.Effect<void, Missing | Unavailable>;
 	/** Brings a paused sandbox back, connected. */
 	readonly resume: (id: string) => Effect.Effect<Handle, Missing | Unavailable>;
+	/**
+	 * Where the sandbox's desktop viewer (noVNC) answers, as `host:port`, or
+	 * undefined when its image has no desktop or the sandbox isn't running.
+	 */
+	readonly desktopViewer: (id: string) => Effect.Effect<string | undefined, Unavailable>;
 }
 
 /**
@@ -63,6 +68,11 @@ export const WORKSPACE_DIRECTORY = "/workspace";
 export const AGENT_HOME_DIRECTORY = "/home/agent";
 /** The user agents' commands run as, so nothing they run is root. */
 export const AGENT_USER_ID = 1000;
+/**
+ * The display a desktop image draws on, set for every command so a program an
+ * agent starts appears on it. Harmless in an image without one.
+ */
+export const DESKTOP_DISPLAY = ":0";
 
 export interface Spec {
 	/** Written on the provider's record of the sandbox, to find it from the provider's side. */
@@ -81,6 +91,15 @@ export interface Handle {
 		path: string,
 		content: Uint8Array,
 	) => Effect.Effect<void, FileFailed | Unavailable>;
+	/**
+	 * Starts a program and returns without waiting for it, for things that keep
+	 * running, like a browser. `env` is how to pass it values without quoting
+	 * them into the command.
+	 */
+	readonly launch: (
+		command: string,
+		env?: Record<string, string>,
+	) => Effect.Effect<void, Unavailable>;
 	/**
 	 * Replaces the hosts the running sandbox may reach. Only for a sandbox made
 	 * with a list: one made to reach anywhere has nothing enforcing a list.

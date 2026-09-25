@@ -368,6 +368,34 @@ Not done: re-sending egress credentials after a resume (nothing uses
 OpenSandbox's credential vault yet), and freeing memory on Docker, where a
 pause only stops CPU.
 
+## Desktop demo
+
+A sandbox image with a desktop people can watch, and a tool for agents to put
+a web page on it.
+
+- `docker/sandbox-desktop`: Debian with Xfce on a virtual display, Firefox ESR,
+  x11vnc and noVNC on port 8080 (the one port OpenSandbox's Docker mode
+  publishes for a sandbox). Build it with
+  `docker build -t sugabots/sandbox-desktop docker/sandbox-desktop` and set it
+  as the workspace's sandbox image.
+- When Sugabots makes a sandbox it runs `/usr/local/bin/sugabots-desktop` if the
+  image has one. Every command gets `DISPLAY=:0`.
+- `open_browser(url)` opens a page in a new Firefox window on the desktop.
+- Clicking the pod's sandbox chip opens a floating panel with the live desktop.
+  People can click and type into it too.
+- `GET /pods/:podId/sandbox/desktop` answers where the viewer is. In
+  development, `packages/web/dev/sandbox-desktop-proxy.ts` serves it and its
+  websocket at `/sandbox-desktop/<host:port>/` on the app's origin, since an
+  HTTPS page can't frame the plain-HTTP viewer.
+
+Not for deployment as it is: the viewer has no password and the development
+proxy doesn't check who is asking, so anyone who can reach the dev server can
+watch and drive any sandbox desktop on this machine. A real version proxies the
+viewer through the API, behind the pod's permissions. The agent also can't see
+the screen: `open_browser` puts pages on it for people to watch, and reading a
+page is still `web_fetch` or `run_command`. Letting the agent look and click is
+the computer-use step after this.
+
 ## Out of the PoC
 
 Kubernetes and microVM providers, snapshots, preview URLs for dev servers,

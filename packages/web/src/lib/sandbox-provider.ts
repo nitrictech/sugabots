@@ -31,6 +31,19 @@ export function usePodSandbox(podId: string) {
 	});
 }
 
+/** Where the pod's sandbox desktop can be watched, fetched only while someone wants to watch it. */
+export function usePodDesktop(podId: string, wanted: boolean) {
+	return useQuery({
+		queryKey: ["pod-desktop", podId],
+		queryFn: wanted
+			? ({ signal }) =>
+					Effect.runPromise(client.api.sandboxProviders.podDesktop({ params: { podId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
 export function useSandboxProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();

@@ -1,0 +1,21 @@
+{
+	"policies": {
+		"OverrideFirstRunPage": "",
+		"OverridePostUpdatePage": "",
+		"DontCheckDefaultBrowser": true,
+		"DisableTelemetry": true,
+		"DisableFirefoxStudies": true,
+		"DisablePocket": true,
+		"UserMessaging": {
+			"WhatsNew": false,
+			"ExtensionRecommendations": false,
+			"FeatureRecommendations": false,
+			"SkipOnboarding": true,
+			"MoreFromMozilla": false
+		},
+		"Homepage": {
+			"URL": "about:blank",
+			"StartPage": "homepage"
+		}
+	}
+}

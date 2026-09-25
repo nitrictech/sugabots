@@ -174,3 +174,12 @@ export const podSandboxStatusSchema = Schema.Struct({
 });
 
 export type PodSandboxStatus = typeof podSandboxStatusSchema.Type;
+
+/**
+ * Where a pod's sandbox desktop can be watched: the viewer's `host:port`, or
+ * null when the sandbox's image has no desktop or the sandbox isn't running.
+ * Development's web server forwards `/sandbox-desktop/<host:port>/` to it.
+ */
+export const podSandboxDesktopSchema = Schema.Struct({ viewer: Schema.NullOr(Schema.String) });
+
+export type PodSandboxDesktop = typeof podSandboxDesktopSchema.Type;

@@ -170,7 +170,10 @@ async function applyWorkspaceEvent(
 	} else if (update.type === "thread.changed") {
 		await queries.invalidateQueries({ queryKey: ["chat-history"] });
 	} else if (update.type === "sandbox.updated") {
-		await queries.invalidateQueries({ queryKey: ["pod-sandbox", update.podId] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["pod-sandbox", update.podId] }),
+			queries.invalidateQueries({ queryKey: ["pod-desktop", update.podId] }),
+		]);
 		return;
 	}
 	await queries.invalidateQueries({ queryKey: ["threads", workspaceId] });

@@ -55,6 +55,7 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 							: {}),
 					});
 					await prepareAgentUser(sandbox);
+					await startDesktop(sandbox);
 					return sandbox;
 				},
 				catch: unavailable,
@@ -77,6 +78,26 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 				try: () => OpenSandbox.resume({ sandboxId: id, connectionConfig: connectionConfig() }),
 				catch: (cause) => missingOr(cause, id),
 			}).pipe(Effect.map(toHandle)),
+		desktopViewer: (id) =>
+			Effect.tryPromise({
+				try: async () => {
+					const sandbox = await OpenSandbox.connect({
+						sandboxId: id,
+						connectionConfig: connectionConfig(),
+						skipHealthCheck: true,
+					});
+					try {
+						const { endpoint } = await sandbox.getEndpoint(DESKTOP_VIEWER_PORT);
+						const answer = await fetch(`http://${endpoint}/vnc.html`, {
+							signal: AbortSignal.timeout(DESKTOP_PROBE_TIMEOUT_MS),
+						}).catch(() => undefined);
+						return answer?.ok ? endpoint : undefined;
+					} finally {
+						await sandbox.close();
+					}
+				},
+				catch: unavailable,
+			}),
 		check: Effect.tryPromise({
 			try: () =>
 				SandboxManager.create({ connectionConfig: connectionConfig() }).listSandboxInfos({
@@ -101,7 +122,7 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 								timeoutSeconds: options.timeoutSeconds,
 								uid: Sandbox.AGENT_USER_ID,
 								gid: Sandbox.AGENT_USER_ID,
-								envs: { HOME: Sandbox.AGENT_HOME_DIRECTORY },
+								envs: agentEnvironment(),
 							},
 							// Output arrives a line at a time with its line break taken off.
 							{
@@ -147,6 +168,18 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 						]),
 					catch: (cause) => fileFailure(path, cause) ?? unavailable(cause),
 				}),
+			launch: (command, env = {}) =>
+				Effect.tryPromise({
+					try: () =>
+						sandbox.commands.run(command, {
+							background: true,
+							workingDirectory: Sandbox.WORKSPACE_DIRECTORY,
+							uid: Sandbox.AGENT_USER_ID,
+							gid: Sandbox.AGENT_USER_ID,
+							envs: { ...agentEnvironment(), ...env },
+						}),
+					catch: unavailable,
+				}).pipe(Effect.asVoid),
 			setAllowedHosts: (hosts) =>
 				Effect.tryPromise({
 					try: async () => {
@@ -174,6 +207,32 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
  * already has, such as `node` in the Node images.
  */
 const AGENT_USER_NAME = "agent";
+
+/**
+ * The port OpenSandbox's Docker mode publishes for a sandbox's own use, which
+ * is where a desktop image serves noVNC.
+ */
+const DESKTOP_VIEWER_PORT = 8080;
+/** How long to wait for the viewer to answer before deciding there is none. */
+const DESKTOP_PROBE_TIMEOUT_MS = 2_000;
+/** What a desktop image runs to start its display and viewer. */
+const DESKTOP_STARTER = "/usr/local/bin/sugabots-desktop";
+
+function agentEnvironment() {
+	return { HOME: Sandbox.AGENT_HOME_DIRECTORY, DISPLAY: Sandbox.DESKTOP_DISPLAY };
+}
+
+/** Starts the image's desktop, as the agents' user, if the image has one. */
+async function startDesktop(sandbox: OpenSandbox) {
+	const found = await sandbox.commands.run(`test -x ${DESKTOP_STARTER}`);
+	if (found.exitCode !== 0) return;
+	await sandbox.commands.run(DESKTOP_STARTER, {
+		background: true,
+		uid: Sandbox.AGENT_USER_ID,
+		gid: Sandbox.AGENT_USER_ID,
+		envs: agentEnvironment(),
+	});
+}
 
 /**
  * Makes the agents' user and the directories they work in. The image's own

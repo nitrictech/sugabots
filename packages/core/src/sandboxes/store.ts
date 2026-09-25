@@ -27,6 +27,11 @@ export interface PodSandboxStore {
 		SandboxLost | SandboxProviderUnavailable | Sandbox.Unavailable,
 		Database
 	>;
+	/**
+	 * Where the pod's sandbox desktop can be watched, as `host:port`, or
+	 * undefined when it has none or isn't running.
+	 */
+	desktopViewer(podId: string): Effect.Effect<string | undefined, never, Database>;
 	/** Whether the pod has a sandbox, and which agents' turns are using it now. */
 	status(podId: string): Effect.Effect<PodSandboxStatus, never, Database>;
 	/**
@@ -340,6 +345,19 @@ export function podSandboxStore({
 					sandbox: result.sandbox,
 					...(result.resumedAfterPause ? { resumedAfterPause: result.resumedAfterPause } : {}),
 				};
+			}),
+
+		desktopViewer: (podId) =>
+			Effect.gen(function* () {
+				const [row] = yield* query((db) =>
+					db.select().from(podSandbox).where(eq(podSandbox.podId, podId)).limit(1),
+				);
+				if (row?.status !== "running") return undefined;
+				const connection = yield* providers.connection(row.workspaceId);
+				if (!connection || connection.preset !== row.provider) return undefined;
+				return yield* providerFor(connection)
+					.desktopViewer(row.providerSandboxId)
+					.pipe(Effect.catchTag("SandboxUnavailable", () => Effect.succeed(undefined)));
 			}),
 
 		status: (podId) =>

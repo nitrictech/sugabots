@@ -168,7 +168,7 @@ function PodSection({
 				open={open}
 				onToggle={onToggle}
 				count={agents.length}
-				status={<PodSandboxChip podId={pod.id} />}
+				status={<PodSandboxChip podId={pod.id} podName={pod.name} />}
 				actions={<PodActions pod={pod} onNew={() => setCreating(true)} onNavigate={onNavigate} />}
 			>
 				{body()}

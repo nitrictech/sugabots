@@ -1,0 +1,18 @@
+#!/bin/bash
+# Starts the desktop on display :0 and serves it over noVNC on port 8080.
+# Runs as the agents' user, so the programs they start can draw on it.
+set -u
+export DISPLAY=:0
+export HOME="${HOME:-/home/agent}"
+log=/tmp/sugabots-desktop.log
+
+# -ac: any local program may draw, which is every program in this sandbox.
+Xvfb :0 -screen 0 1280x800x24 -ac >>"$log" 2>&1 &
+for _ in $(seq 50); do [ -e /tmp/.X11-unix/X0 ] && break; sleep 0.1; done
+
+dbus-launch --exit-with-session startxfce4 >>"$log" 2>&1 &
+# No password: the viewer is reached only through Sugabots, and the port only
+# on the Docker host's bridge address.
+x11vnc -display :0 -nopw -forever -shared -quiet -rfbport 5900 >>"$log" 2>&1 &
+websockify --web /usr/share/novnc 8080 localhost:5900 >>"$log" 2>&1 &
+wait
