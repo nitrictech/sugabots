@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Credentials } from "../../credentials/credentials.ts";
 import { workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
-import { aesCredentialCipher } from "../model-providers/credentials.ts";
 import { type SearchProviderStore, searchProviderStore } from "./store.ts";
 
 /**
@@ -9,7 +9,7 @@ import { type SearchProviderStore, searchProviderStore } from "./store.ts";
  * rather than added to, and what a turn is given to search with.
  */
 describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres", () => {
-	const cipher = aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"));
+	const cipher = Credentials.fromKey(Buffer.alloc(32, 7).toString("base64"));
 	const providers: Promised<SearchProviderStore> = onPostgres(searchProviderStore(cipher));
 	const userId = null as unknown as string;
 	let workspaceId: string;

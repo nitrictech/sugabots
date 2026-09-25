@@ -8,10 +8,10 @@ import type {
 import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
-import type { CredentialCipher } from "../model-providers/credentials.ts";
 import type { OAuthRecord } from "./oauth.ts";
 
 /** What it takes to call the server: where, and with which headers. */
@@ -106,7 +106,7 @@ export interface ConnectionStore {
 	>;
 }
 
-export function connectionStore(cipher: CredentialCipher): ConnectionStore {
+export function connectionStore(cipher: Credentials.Interface): ConnectionStore {
 	const load = (workspaceId: string, podId: string, connectionId: string) =>
 		query((db) =>
 			db
@@ -318,7 +318,7 @@ function sqlMillis(configurationUpdatedAt: Date) {
 	return sql`date_trunc('milliseconds', ${connection.updatedAt}) = ${configurationUpdatedAt}`;
 }
 
-function toTarget(row: ConnectionRow, cipher: CredentialCipher): ConnectionTarget {
+function toTarget(row: ConnectionRow, cipher: Credentials.Interface): ConnectionTarget {
 	const headers: Record<string, string> = {};
 	if (row.secretHeader && row.secretEncrypted) {
 		headers[row.secretHeader] = cipher.decrypt(row.secretEncrypted);
@@ -335,13 +335,13 @@ function toTarget(row: ConnectionRow, cipher: CredentialCipher): ConnectionTarge
 	};
 }
 
-function unsealOauth(row: ConnectionRow, cipher: CredentialCipher): OAuthRecord | undefined {
+function unsealOauth(row: ConnectionRow, cipher: Credentials.Interface): OAuthRecord | undefined {
 	return row.oauthEncrypted
 		? (JSON.parse(cipher.decrypt(row.oauthEncrypted)) as OAuthRecord)
 		: undefined;
 }
 
-function toConnection(row: ConnectionRow, cipher: CredentialCipher): Connection {
+function toConnection(row: ConnectionRow, cipher: Credentials.Interface): Connection {
 	const hasSecret = row.secretEncrypted !== null;
 	return {
 		id: row.id,
