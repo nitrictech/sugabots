@@ -370,7 +370,7 @@ function AllowedHostsRow({
 	return (
 		<Row
 			title="Allowed hosts"
-			description="What sandboxes may reach, one per line. *.example.com covers its subdomains; * alone allows anywhere. Applies to sandboxes made after a change."
+			description="What sandboxes may reach, one per line. *.example.com covers its subdomains; * alone allows anywhere. Changes reach running sandboxes too, except switching to or from *, which only new sandboxes get."
 		>
 			<form
 				className="flex flex-col gap-2"

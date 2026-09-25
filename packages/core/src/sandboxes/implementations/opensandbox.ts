@@ -147,6 +147,22 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 						]),
 					catch: (cause) => fileFailure(path, cause) ?? unavailable(cause),
 				}),
+			setAllowedHosts: (hosts) =>
+				Effect.tryPromise({
+					try: async () => {
+						const current = await sandbox.getEgressPolicy();
+						const wanted = new Set(hosts);
+						const stale = (current.egress ?? [])
+							.map((rule) => rule.target)
+							.filter((target) => !wanted.has(target));
+						// Rules are merged by target, so a replacement is a delete and a patch.
+						if (stale.length > 0) await sandbox.deleteEgressRules(stale);
+						if (hosts.length > 0) {
+							await sandbox.patchEgressRules(hosts.map((target) => ({ action: "allow", target })));
+						}
+					},
+					catch: unavailable,
+				}),
 			disconnect: Effect.promise(() => sandbox.close()),
 		};
 	}

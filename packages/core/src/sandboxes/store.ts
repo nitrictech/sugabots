@@ -34,6 +34,15 @@ export interface PodSandboxStore {
 	 * answering how many it paused. The next lease on one resumes it.
 	 */
 	pauseIdle(idleSeconds: number): Effect.Effect<number, never, Database>;
+	/**
+	 * Gives the workspace's running sandboxes its current allowed hosts, for
+	 * when an admin changes them. Answers how many took the change and how many
+	 * couldn't: a sandbox made to reach anywhere, or a change to anywhere, only
+	 * reaches sandboxes made after it. A paused sandbox gets it when it wakes.
+	 */
+	applyAllowedHosts(
+		workspaceId: string,
+	): Effect.Effect<{ applied: number; notApplied: number }, never, Database>;
 	/** Keeps a lease from expiring for another `LEASE_DURATION_SECONDS`. */
 	renew(leaseId: string): Effect.Effect<void, never, Database>;
 	release(leaseId: string): Effect.Effect<void, never, Database>;
@@ -126,6 +135,8 @@ export function podSandboxStore({
 		const reached =
 			row.status === "paused"
 				? sandboxes.resume(row.providerSandboxId).pipe(
+						// A change to the allowed hosts made while it slept reaches it now.
+						Effect.tap((sandbox) => allowListOnto(sandbox)),
 						Effect.tap(() =>
 							query((db) =>
 								db.update(podSandbox).set({ status: "running" }).where(eq(podSandbox.id, row.id)),
@@ -149,6 +160,28 @@ export function podSandboxStore({
 						);
 		return reached.pipe(Effect.catchTag("SandboxMissing", () => markMissing(row)));
 	};
+
+	/** Gives a sandbox the workspace's current list, if it has one; false when it couldn't. */
+	const allowListOnto = (sandbox: Sandbox.Handle) =>
+		Effect.gen(function* () {
+			const [row] = yield* query((db) =>
+				db
+					.select({ workspaceId: podSandbox.workspaceId })
+					.from(podSandbox)
+					.where(eq(podSandbox.providerSandboxId, sandbox.id))
+					.limit(1),
+			);
+			const connection = row ? yield* providers.connection(row.workspaceId) : undefined;
+			if (connection?.allowedHosts.kind !== "only") return false;
+			return yield* sandbox.setAllowedHosts(connection.allowedHosts.hosts).pipe(
+				Effect.as(true),
+				Effect.catchTag("SandboxUnavailable", (failure) =>
+					Effect.logWarning("Updating a sandbox's allowed hosts failed", failure).pipe(
+						Effect.as(false),
+					),
+				),
+			);
+		});
 
 	const markMissing = (row: typeof podSandbox.$inferSelect) =>
 		query((db) =>
@@ -356,6 +389,34 @@ export function podSandboxStore({
 					if (yield* pauseOne(candidate, idleSeconds)) paused += 1;
 				}
 				return paused;
+			}),
+
+		applyAllowedHosts: (workspaceId) =>
+			Effect.gen(function* () {
+				const connection = yield* providers.connection(workspaceId);
+				const rows = yield* query((db) =>
+					db
+						.select()
+						.from(podSandbox)
+						.where(and(eq(podSandbox.workspaceId, workspaceId), eq(podSandbox.status, "running"))),
+				);
+				if (!connection || connection.allowedHosts.kind !== "only") {
+					return { applied: 0, notApplied: rows.length };
+				}
+				const provider = providerFor(connection);
+				let applied = 0;
+				for (const row of rows) {
+					const took =
+						row.provider === connection.preset &&
+						(yield* provider.connect(row.providerSandboxId).pipe(
+							Effect.flatMap((sandbox) =>
+								allowListOnto(sandbox).pipe(Effect.ensuring(sandbox.disconnect)),
+							),
+							Effect.catch(() => Effect.succeed(false)),
+						));
+					if (took) applied += 1;
+				}
+				return { applied, notApplied: rows.length - applied };
 			}),
 
 		renew: (leaseId) =>

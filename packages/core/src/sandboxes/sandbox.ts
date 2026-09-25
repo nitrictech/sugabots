@@ -81,6 +81,11 @@ export interface Handle {
 		path: string,
 		content: Uint8Array,
 	) => Effect.Effect<void, FileFailed | Unavailable>;
+	/**
+	 * Replaces the hosts the running sandbox may reach. Only for a sandbox made
+	 * with a list: one made to reach anywhere has nothing enforcing a list.
+	 */
+	readonly setAllowedHosts: (hosts: readonly string[]) => Effect.Effect<void, Unavailable>;
 	/** Lets go of whatever this process holds for the sandbox. The sandbox itself carries on. */
 	readonly disconnect: Effect.Effect<void>;
 }

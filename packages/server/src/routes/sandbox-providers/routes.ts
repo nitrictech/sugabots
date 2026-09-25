@@ -12,7 +12,7 @@ import { asHttpError } from "../../http/errors.ts";
 export interface SandboxProviderRoutesOptions {
 	sandboxProviders: SandboxProviderStore;
 	/** Pods' sandboxes, for whether one is up and in use. */
-	podSandboxes: Pick<PodSandboxStore, "status">;
+	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts">;
 	validateProviderUrl: EgressUrlValidator;
 	/** Whether this installation lets a workspace choose `container` isolation. */
 	allowsUnisolated: boolean;
@@ -28,6 +28,7 @@ export function sandboxProviderRoutes({
 		providers: sandboxProviders,
 		validateProviderUrl,
 		allowsUnisolated,
+		podSandboxes,
 	});
 
 	return HttpApiBuilder.group(ServerApi, "sandboxProviders", (handlers) =>
