@@ -279,6 +279,27 @@ export function githubOperations({
 				return added;
 			}),
 
+		listAvailableRepositories: (pod: { workspaceId: string; podId: string }) =>
+			Effect.gen(function* () {
+				const secrets = yield* github.secrets(pod.workspaceId);
+				const credentials = yield* tokens.credentialsFor(pod.workspaceId, { access: "read" });
+				if (!secrets || !credentials) return yield* new GithubConnectionNotFound();
+				const reachable = yield* githubClient(
+					httpClients.for({ baseUrl: credentials.apiBaseUrl }),
+					credentials,
+				)
+					.accessibleRepositories(secrets.method === "app" ? "installation" : "personal")
+					.pipe(
+						Effect.mapError((failure) => new RepositoryNotReadable({ message: failure.message })),
+					);
+				const added = new Set(
+					(yield* github.listRepositories(pod.podId)).map((repository) =>
+						repository.fullName.toLowerCase(),
+					),
+				);
+				return reachable.filter((repository) => !added.has(repository.fullName.toLowerCase()));
+			}),
+
 		removeRepository: (podId: string, repositoryId: string) =>
 			Effect.asVoid(github.removeRepository(podId, repositoryId)),
 	};

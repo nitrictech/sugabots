@@ -29,9 +29,12 @@ const PERMISSIONS: Record<TokenAccess, Record<string, "read" | "write">> = {
 };
 
 /**
- * The manifest GitHub registers the app from. No webhooks: Sugabots asks
- * GitHub for what it needs rather than listening for it. Private, so only the
- * account that made it can install it.
+ * The manifest GitHub registers the app from. Private, so only the account
+ * that made it can install it. No webhooks: Sugabots asks GitHub for what it
+ * needs rather than listening for it, and leaving `hook_attributes` out is
+ * also what lets an installation GitHub can't reach, such as one on
+ * `localhost`, register an app at all; GitHub refuses a hook URL it can't
+ * reach even when the hook is switched off.
  */
 export function appManifest({
 	name,
@@ -53,7 +56,6 @@ export function appManifest({
 		setup_url: installedUrl,
 		setup_on_update: true,
 		public: false,
-		hook_attributes: { url: homepageUrl, active: false },
 		default_permissions: PERMISSIONS.write,
 		default_events: [],
 	};

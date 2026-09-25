@@ -83,9 +83,26 @@ export function usePodRepositories(podId: string) {
 	});
 }
 
+/** What can still be added to the pod, fetched only for someone who can add it. */
+export function useAvailableRepositories(podId: string, wanted: boolean) {
+	return useQuery({
+		queryKey: ["available-repositories", podId],
+		queryFn: wanted
+			? ({ signal }) =>
+					Effect.runPromise(client.api.github.listAvailableRepositories({ params: { podId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
 export function usePodRepositoryActions(podId: string) {
 	const queryClient = useQueryClient();
-	const refresh = () => queryClient.invalidateQueries({ queryKey: ["pod-repositories", podId] });
+	const refresh = () =>
+		Promise.all([
+			queryClient.invalidateQueries({ queryKey: ["pod-repositories", podId] }),
+			queryClient.invalidateQueries({ queryKey: ["available-repositories", podId] }),
+		]);
 	return {
 		add: useMutation({
 			mutationFn: (payload: NewPodRepository) =>

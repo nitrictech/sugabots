@@ -71,6 +71,35 @@ export function githubClient(fetch: EgressHttpClient, credentials: GithubCredent
 					}),
 				),
 			),
+		/**
+		 * The repositories this credential reaches: an installation token's
+		 * installed repositories, or a personal token's own. Sorted by name.
+		 */
+		accessibleRepositories: (kind: "installation" | "personal") =>
+			Effect.gen(function* () {
+				const found: GithubRepository[] = [];
+				for (let page = 1; page <= MAX_REPOSITORY_PAGES; page++) {
+					const batch =
+						kind === "installation"
+							? (yield* call(
+									`installation/repositories?per_page=100&page=${page}`,
+									installationRepositoriesSchema,
+								)).repositories
+							: yield* call(
+									`user/repos?per_page=100&page=${page}&sort=full_name`,
+									Schema.Array(repositorySchema),
+								);
+					found.push(
+						...batch.map((repository) => ({
+							fullName: repository.full_name,
+							defaultBranch: repository.default_branch,
+							private: repository.private,
+						})),
+					);
+					if (batch.length < 100) break;
+				}
+				return found.sort((a, b) => a.fullName.localeCompare(b.fullName));
+			}),
 		/** Opens a draft pull request from `head` into `base`, for a person to review and mark ready. */
 		openPullRequest: (
 			fullName: string,
@@ -83,6 +112,12 @@ export function githubClient(fetch: EgressHttpClient, credentials: GithubCredent
 }
 
 const pullRequestSchema = Schema.Struct({ number: Schema.Number, html_url: Schema.String });
+const installationRepositoriesSchema = Schema.Struct({
+	repositories: Schema.Array(repositorySchema),
+});
+
+/** Pages of 100, and no more than this many: enough for any pod picker. */
+const MAX_REPOSITORY_PAGES = 10;
 
 /** GitHub's own explanation, which for a 422 is the only useful part. */
 async function detail(response: Response): Promise<string | undefined> {

@@ -119,6 +119,7 @@ export const accessPolicy: AccessPolicy = {
 				"github/operations.ts opens the sealed state and asks again on the way back from GitHub",
 		},
 		listPodRepositories: { pod: "pod.read" },
+		listAvailableRepositories: { pod: "sandbox.manage" },
 		addPodRepository: { pod: "sandbox.manage" },
 		removePodRepository: { pod: "sandbox.manage" },
 	},

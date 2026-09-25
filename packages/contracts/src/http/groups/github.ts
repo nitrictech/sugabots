@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
+	availableRepositorySchema,
 	githubAppManifestSchema,
 	githubAppStartSchema,
 	githubConnectionResponseSchema,
@@ -63,6 +64,13 @@ export class GithubApi extends HttpApiGroup.make("github")
 		HttpApiEndpoint.get("listPodRepositories", "/pods/:podId/repositories", {
 			params: { podId: uuidSchema },
 			success: Schema.Array(podRepositorySchema),
+		}),
+		// What the connection can reach and the pod doesn't have yet: an app's
+		// installed repositories, or a token's.
+		HttpApiEndpoint.get("listAvailableRepositories", "/pods/:podId/repositories/available", {
+			params: { podId: uuidSchema },
+			success: Schema.Array(availableRepositorySchema),
+			error: BadRequest,
 		}),
 		HttpApiEndpoint.post("addPodRepository", "/pods/:podId/repositories", {
 			params: { podId: uuidSchema },

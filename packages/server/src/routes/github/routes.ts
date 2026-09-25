@@ -130,6 +130,13 @@ export function githubRoutes(options: GithubRoutesOptions) {
 			.handle("listPodRepositories", () =>
 				Effect.flatMap(grantedPod, ({ pod }) => operations.listRepositories(pod.id)),
 			)
+			.handle("listAvailableRepositories", () =>
+				Effect.flatMap(grantedPod, ({ pod }) =>
+					operations
+						.listAvailableRepositories({ workspaceId: pod.workspaceId, podId: pod.id })
+						.pipe(asHttpError(githubErrors)),
+				),
+			)
 			.handle("addPodRepository", ({ payload }) =>
 				Effect.flatMap(grantedPod, ({ pod, actor }) =>
 					operations

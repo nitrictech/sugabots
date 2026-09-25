@@ -2,6 +2,7 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { noDatabase } from "../database/testing.ts";
+import { appManifest } from "./app.ts";
 import type { GithubSecrets } from "./store.ts";
 import { githubTokens } from "./tokens.ts";
 
@@ -104,5 +105,19 @@ describe("GitHub app installation tokens", () => {
 			),
 		).toBeUndefined();
 		expect(asked).toHaveLength(0);
+	});
+});
+
+describe("the app's manifest", () => {
+	it("asks for no webhook, so an installation GitHub can't reach can still register one", () => {
+		const manifest = appManifest({
+			name: "Sugabots dev",
+			homepageUrl: "https://sugabots.localhost",
+			createdUrl: "https://sugabots.localhost/api/github/app/created",
+			installedUrl: "https://sugabots.localhost/api/github/app/installed",
+		});
+
+		expect(manifest).not.toHaveProperty("hook_attributes");
+		expect(manifest).toMatchObject({ public: false, default_events: [] });
 	});
 });

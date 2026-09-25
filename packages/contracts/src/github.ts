@@ -115,6 +115,15 @@ export type PodRepository = typeof podRepositorySchema.Type;
 
 export const newPodRepositorySchema = Schema.Struct({ fullName: repositoryFullNameSchema });
 
+/** A repository the workspace's GitHub connection can reach, offered for adding to a pod. */
+export const availableRepositorySchema = Schema.Struct({
+	fullName: Schema.String,
+	private: Schema.Boolean,
+	defaultBranch: Schema.String,
+});
+
+export type AvailableRepository = typeof availableRepositorySchema.Type;
+
 export type NewPodRepository = typeof newPodRepositorySchema.Type;
 
 /** Where GitHub should register the app: the admin's own account, or an organisation they own. */
