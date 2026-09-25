@@ -26,6 +26,7 @@ import { type LeaseScope, podSandboxStore } from "./store.ts";
 function fakeProvider() {
 	const sandboxes = new Set<string>();
 	const created: string[] = [];
+	const destroyed: string[] = [];
 	const paused = new Set<string>();
 	const allowListsSet: Array<{ id: string; hosts: readonly string[] }> = [];
 	const handle = (id: string): Sandbox.Handle => ({
@@ -49,6 +50,12 @@ function fakeProvider() {
 		isolation: "gvisor",
 		check: Effect.void,
 		pauseKeeps: "filesystem",
+		destroy: (id) =>
+			sandboxes.delete(id)
+				? Effect.sync(() => {
+						destroyed.push(id);
+					})
+				: Effect.fail(new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })),
 		pause: (id) =>
 			sandboxes.has(id)
 				? Effect.sync(() => {
@@ -77,6 +84,7 @@ function fakeProvider() {
 	return {
 		provider,
 		created,
+		destroyed,
 		paused,
 		allowListsSet,
 		lose: (id: string) => sandboxes.delete(id),
@@ -349,6 +357,26 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 
 		await lease();
 		expect(fake.allowListsSet).toContainEqual({ id, hosts: ["pypi.org"] });
+	});
+
+	it("throws a sandbox away, so the pod's next lease makes a new one", async () => {
+		const first = await usedOnce();
+
+		expect(await runOnPostgres(store.discard(scope.podId))).toBe(true);
+		expect(fake.destroyed).toEqual([first]);
+		expect(await runOnPostgres(store.status(scope.podId))).toMatchObject({ state: "none" });
+
+		const next = await lease();
+		expect(next.sandbox.id).not.toBe(first);
+	});
+
+	it("starts again after a lost sandbox", async () => {
+		const first = await usedOnce();
+		fake.lose(first);
+		await failedLease();
+
+		expect(await runOnPostgres(store.discard(scope.podId))).toBe(true);
+		expect((await lease()).sandbox.id).not.toBe(first);
 	});
 
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {

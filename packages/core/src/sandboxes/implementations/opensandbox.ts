@@ -72,6 +72,11 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 				try: () => SandboxManager.create({ connectionConfig: connectionConfig() }).pauseSandbox(id),
 				catch: (cause) => missingOr(cause, id),
 			}),
+		destroy: (id) =>
+			Effect.tryPromise({
+				try: () => SandboxManager.create({ connectionConfig: connectionConfig() }).killSandbox(id),
+				catch: (cause) => missingOr(cause, id),
+			}),
 		resume: (id) =>
 			Effect.tryPromise({
 				try: () => OpenSandbox.resume({ sandboxId: id, connectionConfig: connectionConfig() }),

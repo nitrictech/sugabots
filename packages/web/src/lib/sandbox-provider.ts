@@ -31,6 +31,16 @@ export function usePodSandbox(podId: string) {
 	});
 }
 
+/** Throws the pod's sandbox away, so the next agent to need one gets a new one. */
+export function useDiscardPodSandbox(podId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () =>
+			Effect.runPromise(client.api.sandboxProviders.discardPod({ params: { podId } })),
+		onSettled: () => queryClient.invalidateQueries({ queryKey: ["pod-sandbox", podId] }),
+	});
+}
+
 export function useSandboxProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();

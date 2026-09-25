@@ -75,7 +75,9 @@ export type PodPermission =
 	/** Decide a tool call an agent raised in ordinary conversation. */
 	| "approval.decide"
 	/** Decide a tool call an agent raised while a Routine was running. */
-	| "approval.routine.decide";
+	| "approval.routine.decide"
+	/** Throw away the pod's sandbox, so the next agent to need one gets a new one. */
+	| "sandbox.manage";
 
 /**
  * The caller.
@@ -139,6 +141,7 @@ const POD_GRANTS: Record<WorkspaceRole, Readonly<Partial<Record<PodPermission, P
 		"routine.history.read": "shared-pods",
 		"approval.decide": "shared-pods",
 		"approval.routine.decide": "shared-pods",
+		"sandbox.manage": "shared-pods",
 	},
 	member: {
 		"pod.read": "joined-pods",
@@ -250,6 +253,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		manageConnections: may("connection.manage"),
 		manageRoutines: may("routine.manage"),
 		runRoutines: may("routine.run"),
+		manageSandbox: may("sandbox.manage"),
 	};
 }
 

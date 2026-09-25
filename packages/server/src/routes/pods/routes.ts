@@ -1,6 +1,7 @@
 import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
+import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import {
 	type FacilitatorNotSetUp,
 	type PersonalPodFixed,
@@ -25,11 +26,13 @@ import { asHttpError } from "../../http/errors.ts";
 export interface PodRoutesOptions {
 	pods: PodStore;
 	modelProviders: Pick<ModelProviderStore, "isEnabled">;
+	/** So a deleted pod's sandbox goes with it, rather than running on with nothing pointing at it. */
+	podSandboxes?: Pick<PodSandboxStore, "discard">;
 }
 
 const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
-export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
+export function podRoutes({ pods, modelProviders, podSandboxes }: PodRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 		handlers
 			.handle("list", () =>
@@ -93,7 +96,10 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 			)
 			.handle("remove", () =>
 				Effect.flatMap(grantedPod, ({ pod }) =>
-					pods.remove(pod.workspaceId, pod.id).pipe(asHttpError(podErrors)),
+					(podSandboxes?.discard(pod.id) ?? Effect.void).pipe(
+						Effect.andThen(pods.remove(pod.workspaceId, pod.id)),
+						asHttpError(podErrors),
+					),
 				),
 			)
 			.handle("listMembers", () =>

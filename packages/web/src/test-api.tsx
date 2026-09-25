@@ -70,6 +70,7 @@ const ADMIN_IN_POD: PodPermissions = {
 	manageConnections: true,
 	manageRoutines: true,
 	runRoutines: true,
+	manageSandbox: true,
 };
 
 /** What a member gets in a shared pod they have joined. */
@@ -82,6 +83,7 @@ const MEMBER_IN_POD: PodPermissions = {
 	manageConnections: false,
 	manageRoutines: false,
 	runRoutines: false,
+	manageSandbox: false,
 };
 
 /** What a viewer gets there: nothing they could change. */

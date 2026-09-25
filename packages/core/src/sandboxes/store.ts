@@ -43,6 +43,13 @@ export interface PodSandboxStore {
 	applyAllowedHosts(
 		workspaceId: string,
 	): Effect.Effect<{ applied: number; notApplied: number }, never, Database>;
+	/**
+	 * Throws the pod's sandbox away, and everything in it, so the next agent to
+	 * need one gets a new one: the way out of a lost sandbox, and what happens
+	 * to a pod's sandbox before the pod is deleted. A turn using it at the time
+	 * finds it gone. Answers whether the pod had one.
+	 */
+	discard(podId: string): Effect.Effect<boolean, never, Database>;
 	/** Keeps a lease from expiring for another `LEASE_DURATION_SECONDS`. */
 	renew(leaseId: string): Effect.Effect<void, never, Database>;
 	release(leaseId: string): Effect.Effect<void, never, Database>;
@@ -400,7 +407,7 @@ export function podSandboxStore({
 						.from(podSandbox)
 						.where(and(eq(podSandbox.workspaceId, workspaceId), eq(podSandbox.status, "running"))),
 				);
-				if (!connection || connection.allowedHosts.kind !== "only") {
+				if (connection?.allowedHosts.kind !== "only") {
 					return { applied: 0, notApplied: rows.length };
 				}
 				const provider = providerFor(connection);
@@ -418,6 +425,40 @@ export function podSandboxStore({
 				}
 				return { applied, notApplied: rows.length - applied };
 			}),
+
+		discard: (podId) =>
+			transaction(
+				Effect.gen(function* () {
+					yield* query((db) =>
+						db.execute(
+							sql`select pg_advisory_xact_lock(hashtextextended(${`pod-sandbox:${podId}`}, 0))`,
+						),
+					);
+					const [row] = yield* query((db) =>
+						db.select().from(podSandbox).where(eq(podSandbox.podId, podId)).limit(1),
+					);
+					if (!row) return false;
+					const connection = yield* providers.connection(row.workspaceId);
+					if (row.status !== "missing" && connection?.preset === row.provider) {
+						// Gone already is as good as destroyed. Unreachable leaves it running
+						// with nothing pointing at it, which the log is left to say.
+						yield* providerFor(connection)
+							.destroy(row.providerSandboxId)
+							.pipe(
+								Effect.catchTag("SandboxMissing", () => Effect.void),
+								Effect.catchTag("SandboxUnavailable", (failure) =>
+									Effect.logWarning(
+										`Could not destroy sandbox ${row.providerSandboxId}; it may still be running`,
+										failure,
+									),
+								),
+							);
+					}
+					yield* query((db) => db.delete(podSandbox).where(eq(podSandbox.id, row.id)));
+					yield* announce(row.workspaceId, row.podId);
+					return true;
+				}),
+			),
 
 		renew: (leaseId) =>
 			query((db) =>

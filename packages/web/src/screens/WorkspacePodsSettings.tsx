@@ -18,6 +18,7 @@ import {
 	usePods,
 	useUpdatePod,
 } from "@/lib/pods.ts";
+import { useDiscardPodSandbox, usePodSandbox } from "@/lib/sandbox-provider.ts";
 import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -235,6 +236,7 @@ function PodDetails({
 				canManage={may.manageConnections}
 				signInError={connectionSignInError}
 			/>
+			<PodSandbox pod={pod} />
 			<PodBots pod={pod} bots={bots} />
 			{shared && <Members pod={pod} canManageMembers={may.manageMembers} />}
 			{shared && may.rename && (
@@ -250,6 +252,40 @@ function PodDetails({
 				onDelete={deletePod}
 			/>
 		</SettingsPage>
+	);
+}
+
+/** The pod's sandbox, which an admin can throw away once one has been made. */
+function PodSandbox({ pod }: { pod: Pod }) {
+	const { data: sandbox } = usePodSandbox(pod.id);
+	const [restarting, setRestarting] = useState(false);
+	const discard = useDiscardPodSandbox(pod.id);
+	if (!pod.permissions.manageSandbox || sandbox === undefined || sandbox.state === "none") {
+		return null;
+	}
+	return (
+		<SettingsGroup label="Sandbox">
+			<SettingsRow label="Start a new sandbox" onClick={() => setRestarting(true)} />
+			<DeleteDialog
+				open={restarting}
+				onOpenChange={(open) => {
+					setRestarting(open);
+					if (!open) discard.reset();
+				}}
+				title={`Start a new sandbox for ${pod.name}?`}
+				description="The pod's current sandbox is thrown away, with every file and program in it. The next bot to need one gets a fresh one. A bot using it right now loses it mid-task."
+				confirmLabel="Yes, start again"
+				pending={discard.isPending}
+				error={discard.error ? failureMessage(discard.error) : undefined}
+				onDelete={() =>
+					discard
+						.mutateAsync()
+						.then(() => setRestarting(false))
+						// Shown in the dialog from the mutation's error.
+						.catch(() => {})
+				}
+			/>
+		</SettingsGroup>
 	);
 }
 

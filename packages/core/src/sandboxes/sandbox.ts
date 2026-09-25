@@ -25,6 +25,8 @@ export interface Interface {
 	readonly pauseKeeps: PauseKeeps;
 	/** Stops the sandbox costing compute until it is resumed. */
 	readonly pause: (id: string) => Effect.Effect<void, Missing | Unavailable>;
+	/** Throws the sandbox away, and everything in it. `Missing` if it was already gone. */
+	readonly destroy: (id: string) => Effect.Effect<void, Missing | Unavailable>;
 	/** Brings a paused sandbox back, connected. */
 	readonly resume: (id: string) => Effect.Effect<Handle, Missing | Unavailable>;
 }

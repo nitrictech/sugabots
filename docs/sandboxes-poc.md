@@ -144,7 +144,9 @@ in its egress sidecar's memory, so they're gone after a Kubernetes pause or a
 sidecar restart.
 
 A lost sandbox is reported, never silently replaced (Open SWE's rule): the
-agent is told, and the pod offers an explicit "recreate".
+agent is told, and someone with `sandbox.manage` on the pod (a workspace
+admin, or a Personal pod's owner) chooses **Start a new sandbox** from the
+pod's menu. The same discards a working sandbox that has got into a mess.
 
 ### OpenSandbox provider
 
@@ -331,13 +333,15 @@ first one's files.
 
 Differences from the plan, and what's left for later phases:
 
-- The allowlist is the workspace's, not yet each pod's, and applies to sandboxes
-  made after it changes. Default-deny is already on, so phase 2 is per-pod
-  lists and applying changes to running sandboxes.
+- The allowlist is the workspace's, not yet each pod's. Saving a change updates
+  running sandboxes' egress rules straight away, and a paused one when it
+  wakes, except a switch to or from `*` (anywhere): a sandbox made to reach
+  anywhere has no egress filter to change, so that reaches new sandboxes only.
+  Phase 2 is per-pod lists.
 - Exec calls show in the web app as any tool call does: the command and the
   final output, not output streaming as it arrives.
-- A lost sandbox is reported to the agent, but nothing in the web app can make
-  a new one yet.
+- Deleting a pod destroys its sandbox first. Deleting a whole workspace does
+  not yet: its sandboxes' rows go with it, and the sandboxes keep running.
 - The pod's advisory lock is held, in a transaction, while its sandbox is first
   made. That's seconds with the image cached, and about a minute the first
   time an image is pulled, during which the pod's other turns wait on it.

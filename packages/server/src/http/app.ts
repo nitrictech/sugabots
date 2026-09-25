@@ -82,7 +82,7 @@ export interface Stores {
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
 	sandboxProviders: SandboxProviderStore;
-	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts">;
+	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts" | "discard">;
 	connections: ConnectionStore;
 	threads: ThreadStore;
 	chats: ChatStore;
@@ -137,7 +137,11 @@ export function apiLayer({
 		workspaceRoutes({ membership }),
 		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
 		onboardingRoutes({ onboarding: stores.onboarding }),
-		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),
+		podRoutes({
+			pods: stores.pods,
+			modelProviders: stores.modelProviders,
+			podSandboxes: stores.podSandboxes,
+		}),
 		systemAgentRoutes({
 			systemAgents: stores.systemAgents,
 			modelProviders: stores.modelProviders,

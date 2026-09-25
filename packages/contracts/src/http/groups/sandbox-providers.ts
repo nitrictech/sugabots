@@ -41,6 +41,10 @@ export class SandboxProvidersApi extends HttpApiGroup.make("sandboxProviders")
 			params: { podId: uuidSchema },
 			success: podSandboxStatusSchema,
 		}),
+		// Throws the pod's sandbox away; the next agent to need one gets a new one.
+		HttpApiEndpoint.delete("discardPod", "/pods/:podId/sandbox", {
+			params: { podId: uuidSchema },
+		}),
 	)
 	.middleware(Authorise)
 	.middleware(Session) {}
