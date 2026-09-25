@@ -2,7 +2,7 @@ import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import { noToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { ModelRequestFailed, type TurnModel } from "@sugabots/core/conversations/turns/model";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
@@ -72,7 +72,7 @@ export function createTestApp(options: TestAppOptions): TestApp {
 			stream: options.events?.stream,
 		},
 		model: options.model ?? {
-			stream: () => Effect.fail(new Error("This test app has no model")),
+			stream: () => Effect.fail(new ModelRequestFailed({ message: "This test app has no model" })),
 		},
 		httpClients: options.httpClients ?? {
 			for: () => async () => new Response(null, { status: 503 }),

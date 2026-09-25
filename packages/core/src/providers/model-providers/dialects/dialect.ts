@@ -5,7 +5,7 @@ import {
 	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
-import { Effect, Schema, SchemaGetter } from "effect";
+import { Data, Effect, Schema, SchemaGetter } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
 /**
@@ -68,8 +68,13 @@ export interface ProviderDialect {
 		root: string,
 		model: DiscoveredModel,
 		http: EgressHttpClient,
-	): Effect.Effect<DiscoveredModel, Error>;
+	): Effect.Effect<DiscoveredModel, ModelInspectionFailed>;
 }
+
+export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
+	readonly message: string;
+	readonly cause?: unknown;
+}> {}
 
 /** A listing whose entries sit under `data`: OpenAI's shape, and the one most providers copy. */
 export const dataListing = Schema.Struct({

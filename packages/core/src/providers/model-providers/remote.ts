@@ -39,6 +39,10 @@ class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
 	readonly reason: string;
 }> {}
 
+export class ModelDiscoveryFailed extends Data.TaggedError("ModelDiscoveryFailed")<{
+	readonly message: string;
+}> {}
+
 type ProviderFailure =
 	| ConnectionMissing
 	| ProviderRejected
@@ -99,7 +103,11 @@ export function fetchProviderModels(
 		registry = modelsDev,
 		activateOnSuccess = false,
 	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
-): Effect.Effect<{ added: number; updated: number; unchanged: number }, Error, Database> {
+): Effect.Effect<
+	{ added: number; updated: number; unchanged: number },
+	ModelDiscoveryFailed,
+	Database
+> {
 	const discover = Effect.gen(function* () {
 		const connection = yield* requireConnection(store, workspaceId, providerId);
 		const outcome = yield* requestModels(connection, httpClients).pipe(
@@ -126,7 +134,9 @@ export function fetchProviderModels(
 	});
 
 	// The tags are this module's business. A caller only needs the sentence.
-	return discover.pipe(Effect.mapError((failure) => new Error(describe(failure))));
+	return discover.pipe(
+		Effect.mapError((failure) => new ModelDiscoveryFailed({ message: describe(failure) })),
+	);
 }
 
 function requireConnection(

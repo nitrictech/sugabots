@@ -3,6 +3,7 @@ import {
 	type CapabilityVocabulary,
 	capabilitiesNamed,
 	discoveredModel,
+	ModelInspectionFailed,
 	type ProviderDialect,
 	type ProviderModelFields,
 } from "./dialect.ts";
@@ -58,16 +59,23 @@ export const ollama: ProviderDialect = {
 						body: JSON.stringify({ model: model.modelId }),
 						signal: AbortSignal.timeout(INSPECT_TIMEOUT_MS),
 					}),
-				catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+				catch: (cause) =>
+					new ModelInspectionFailed({
+						message: cause instanceof Error ? cause.message : String(cause),
+						cause,
+					}),
 			});
 			if (!response.ok) {
-				return yield* Effect.fail(
-					new Error(`Ollama returned ${response.status} for ${model.modelId}`),
-				);
+				return yield* new ModelInspectionFailed({
+					message: `Ollama returned ${response.status} for ${model.modelId}`,
+				});
 			}
 			const body = yield* Effect.tryPromise({
 				try: () => response.json() as Promise<unknown>,
-				catch: () => new Error(`Ollama described ${model.modelId} with something that is not JSON`),
+				catch: () =>
+					new ModelInspectionFailed({
+						message: `Ollama described ${model.modelId} with something that is not JSON`,
+					}),
 			});
 			const details = Schema.decodeUnknownResult(shown)(body);
 			if (details._tag === "Failure") return model;

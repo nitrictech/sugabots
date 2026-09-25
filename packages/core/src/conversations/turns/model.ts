@@ -11,7 +11,7 @@ import {
 	type ToolModelMessage,
 	type ToolSet,
 } from "ai";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
 import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
@@ -51,21 +51,27 @@ export interface TurnModelResult {
 	 * a promise so nothing exists until the caller asks, which is what keeps an
 	 * aborted turn from leaving a rejection nobody handles.
 	 */
-	accounting: Effect.Effect<ModelAccounting, Error>;
+	accounting: Effect.Effect<ModelAccounting, ModelRequestFailed>;
 	continuation?: Effect.Effect<
 		{
 			approvalRequests: ToolApprovalRequestOutput<ToolSet>[];
 			responseMessages: Array<AssistantModelMessage | ToolModelMessage>;
 		},
-		Error
+		ModelRequestFailed
 	>;
 }
 
 /** Streams one model response for a workspace, through the provider it has configured. */
 export interface TurnModel {
 	/** The Effect ends once the stream has been opened; `text` is then read as it arrives. */
-	stream(input: TurnModelInput): Effect.Effect<TurnModelResult, Error, Database>;
+	stream(input: TurnModelInput): Effect.Effect<TurnModelResult, ModelRequestFailed, Database>;
 }
+
+/** The model could not be asked, or its provider failed the request. */
+export class ModelRequestFailed extends Data.TaggedError("ModelRequestFailed")<{
+	readonly message: string;
+	readonly cause?: unknown;
+}> {}
 
 export interface TurnModelOptions {
 	modelProviders: Pick<ModelProviderStore, "resolve">;
@@ -78,9 +84,9 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 			Effect.gen(function* () {
 				const connection = yield* modelProviders.resolve(input.workspaceId, input.model);
 				if (!connection) {
-					return yield* Effect.fail(
-						new Error(`No active provider offers the model "${input.model}"`),
-					);
+					return yield* new ModelRequestFailed({
+						message: `No active provider offers the model "${input.model}"`,
+					});
 				}
 				const fetch = httpClients.for(connection);
 				const model =
@@ -143,17 +149,21 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 								contextTokens: steps.at(-1)?.usage.inputTokens,
 							};
 						},
-						catch: (cause) =>
-							new Error(
-								describeModelFailure(providerFailure === undefined ? cause : providerFailure),
-							),
+						catch: (cause) => {
+							const failure = providerFailure === undefined ? cause : providerFailure;
+							return new ModelRequestFailed({
+								message: describeModelFailure(failure),
+								cause: failure,
+							});
+						},
 					}),
 					continuation: Effect.tryPromise({
 						try: async () => ({
 							approvalRequests: [...approvalRequests],
 							responseMessages: await result.responseMessages,
 						}),
-						catch: (cause) => new Error(describeModelFailure(cause)),
+						catch: (cause) =>
+							new ModelRequestFailed({ message: describeModelFailure(cause), cause }),
 					}),
 				};
 			}),
@@ -170,7 +180,7 @@ export function probeModel(
 	model: TurnModel,
 	workspaceId: string,
 	modelId: string,
-): Effect.Effect<void, Error, Database> {
+): Effect.Effect<void, ModelRequestFailed, Database> {
 	return Effect.scoped(
 		Effect.gen(function* () {
 			const stop = new AbortController();
@@ -187,7 +197,10 @@ export function probeModel(
 		}).pipe(
 			Effect.timeoutOrElse({
 				duration: "30 seconds",
-				orElse: () => Effect.fail(new Error("Model did not answer within 30 seconds")),
+				orElse: () =>
+					Effect.fail(
+						new ModelRequestFailed({ message: "Model did not answer within 30 seconds" }),
+					),
 			}),
 		),
 	);
@@ -235,16 +248,24 @@ export const forEachDelta = <E, R>(
 	text: AsyncIterable<string>,
 	stop: AbortController,
 	onDelta: (delta: string) => Effect.Effect<void, E, R>,
-): Effect.Effect<void, E | Error, R> => {
+): Effect.Effect<void, E | ModelRequestFailed, R> => {
 	const iterator = text[Symbol.asyncIterator]();
-	const next = Effect.callback<IteratorResult<string>, Error>((resume) => {
+	const next = Effect.callback<IteratorResult<string>, ModelRequestFailed>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) => resume(Effect.fail(cause instanceof Error ? cause : new Error(String(cause)))),
+			(cause) =>
+				resume(
+					Effect.fail(
+						new ModelRequestFailed({
+							message: cause instanceof Error ? cause.message : String(cause),
+							cause,
+						}),
+					),
+				),
 		);
 		return Effect.sync(() => stop.abort());
 	});
-	const loop: Effect.Effect<void, E | Error, R> = Effect.flatMap(next, (result) =>
+	const loop: Effect.Effect<void, E | ModelRequestFailed, R> = Effect.flatMap(next, (result) =>
 		result.done ? Effect.void : Effect.andThen(onDelta(result.value), loop),
 	);
 	return loop;

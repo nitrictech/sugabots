@@ -1,6 +1,6 @@
 import { Effect, Exit } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { retryUnusable, UnusableAnswer } from "./answer.ts";
+import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 
 describe("asking a model again", () => {
 	it("asks up to three times when the answer is the wrong shape", async () => {
@@ -26,7 +26,9 @@ describe("asking a model again", () => {
 	it("does not ask again for anything but the shape", async () => {
 		// A timeout costs the same next time, and a dead provider is the job's
 		// problem, not this one's.
-		const ask = vi.fn(() => Effect.fail(new Error("Thread summary timed out")));
+		const ask = vi.fn(() =>
+			Effect.fail(new AnswerTimedOut({ message: "Thread summary timed out" })),
+		);
 
 		const exit = await Effect.runPromiseExit(retryUnusable(Effect.suspend(ask)));
 

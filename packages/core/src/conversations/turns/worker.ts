@@ -1,6 +1,6 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolSet } from "ai";
-import { Cause, Duration, Effect, Exit, type Layer, Ref, Schedule, Semaphore } from "effect";
+import { Cause, Data, Duration, Effect, Exit, type Layer, Ref, Schedule, Semaphore } from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
@@ -115,14 +115,28 @@ type StreamOutcome =
 	  };
 
 /** Why a reply stopped streaming before the model finished. */
-class TurnCancelled extends Error {
-	constructor() {
-		super("Turn cancelled");
+class TurnCancelled extends Data.TaggedError("TurnCancelled") {
+	override get message() {
+		return "Turn cancelled";
 	}
 }
-class TurnTimedOut extends Error {
-	constructor() {
-		super("Turn timed out");
+class TurnTimedOut extends Data.TaggedError("TurnTimedOut") {
+	override get message() {
+		return "Turn timed out";
+	}
+}
+class ApprovedToolChanged extends Data.TaggedError("ApprovedToolChanged")<{
+	readonly tool: string;
+}> {
+	override get message() {
+		return `Approved tool ${this.tool} no longer has the reviewed configuration`;
+	}
+}
+class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<{
+	readonly tool: string;
+}> {
+	override get message() {
+		return `Approval requested for unknown tool ${this.tool}`;
 	}
 }
 
@@ -309,9 +323,7 @@ const streamReply = (
 					offered.connectionRevision !== binding.connectionRevision ||
 					offered.remoteToolName !== binding.remoteToolName
 				) {
-					return yield* Effect.fail(
-						new Error(`Approved tool ${binding.tool} no longer has the reviewed configuration`),
-					);
+					return yield* new ApprovedToolChanged({ tool: binding.tool });
 				}
 				approvalBoundTools.add(binding.tool);
 			}
@@ -416,7 +428,7 @@ const streamReply = (
 				const pending = terminal.approvalRequests.map((request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.mutating) {
-						throw new Error(`Approval requested for unknown tool ${request.toolCall.toolName}`);
+						throw new ApprovalForUnknownTool({ tool: request.toolCall.toolName });
 					}
 					return {
 						id: crypto.randomUUID(),
