@@ -5,7 +5,7 @@ import {
 	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
 /**
@@ -93,7 +93,7 @@ export type CapabilityVocabulary = Record<string, ProviderModelCapability>;
 export const capabilitiesNamed = (vocabulary: CapabilityVocabulary) =>
 	Schema.Array(Schema.String).pipe(
 		Schema.withDecodingDefault(Effect.succeed([])),
-		Schema.catchDecoding(() => Effect.succeed(Option.some([]))),
+		Schema.catchDecoding(() => Effect.succeedSome([])),
 		Schema.decodeTo(Schema.mutable(Schema.Array(providerModelCapabilitySchema)), {
 			decode: SchemaGetter.transform((names) => names.flatMap((name) => vocabulary[name] ?? [])),
 			encode: SchemaGetter.forbiddenEncoding,

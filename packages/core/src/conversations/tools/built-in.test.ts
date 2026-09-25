@@ -12,7 +12,7 @@ describe("the built-in tools for a workspace", () => {
 	it("offers web_fetch always and web_search only with a search provider to call", async () => {
 		const without = builtInTools({
 			fetchPage,
-			searchProviders: { resolve: () => Effect.succeed(undefined) },
+			searchProviders: { resolve: () => Effect.undefined },
 			httpClients,
 		});
 		expect(Object.keys(await run(without.forWorkspace("w1")))).toEqual(["web_fetch"]);

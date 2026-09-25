@@ -45,7 +45,7 @@ function show(input: ToolCallPart["input"]) {
 }
 
 beforeEach(() => {
-	client.api.toolApprovals.decide.mockReturnValue(Effect.succeed(undefined));
+	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
 });
 
 afterEach(() => {

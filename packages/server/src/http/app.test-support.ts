@@ -121,7 +121,7 @@ const emptyPodStore: PodStore = {
 
 const emptyAgentStore: AgentStore = {
 	listVisible: () => Effect.succeed([]),
-	get: () => Effect.succeed(undefined),
+	get: () => Effect.undefined,
 	fromRow: (row) => {
 		const crew = crewAgentRow(row);
 		return Effect.succeed(crew ? toAgent(crew) : undefined);
@@ -133,65 +133,65 @@ const emptyAgentStore: AgentStore = {
 
 const emptyThreadStore: ThreadStore = {
 	listVisible: () => Effect.succeed([]),
-	visibleThreadId: () => Effect.succeed(undefined),
-	getVisible: () => Effect.succeed(undefined),
+	visibleThreadId: () => Effect.undefined,
+	getVisible: () => Effect.undefined,
 };
 
 const emptyChatStore: ChatStore = {
 	getOrCreate: () => notStubbed("chats.getOrCreate"),
-	messages: () => Effect.succeed(undefined),
-	history: () => Effect.succeed(undefined),
-	sendMain: () => Effect.succeed(undefined),
+	messages: () => Effect.undefined,
+	history: () => Effect.undefined,
+	sendMain: () => Effect.undefined,
 };
 
 const emptyRoutineStore: RoutineStore = {
 	list: () => Effect.succeed([]),
-	get: () => Effect.succeed(undefined),
+	get: () => Effect.undefined,
 	create: () => notStubbed("routines.create"),
 	update: () => notStubbed("routines.update"),
 	remove: () => Effect.void,
 	acceptTrigger: () => notStubbed("routines.acceptTrigger"),
-	listExecutions: () => Effect.succeed(undefined),
-	claimNext: () => Effect.succeed(undefined),
+	listExecutions: () => Effect.undefined,
+	claimNext: () => Effect.undefined,
 	settleThread: () => Effect.succeed(false),
 	reconcileRunning: () => Effect.void,
-	processNextDue: () => Effect.succeed(undefined),
+	processNextDue: () => Effect.undefined,
 	rotateSecret: () => notStubbed("routines.rotateSecret"),
-	acceptWebhook: () => Effect.succeed(undefined),
+	acceptWebhook: () => Effect.undefined,
 };
 
 const emptyConnectionStore: ConnectionStore = {
 	list: () => Effect.succeed([]),
-	get: () => Effect.succeed(undefined),
+	get: () => Effect.undefined,
 	create: () => notStubbed("connections.create"),
-	update: () => Effect.succeed(undefined),
+	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
-	target: () => Effect.succeed(undefined),
+	target: () => Effect.undefined,
 	targetsForPod: () => Effect.succeed([]),
 	recordTest: () => Effect.void,
-	oauthRecord: () => Effect.succeed(undefined),
+	oauthRecord: () => Effect.undefined,
 	saveOauthRecord: () => Effect.void,
-	byOauthState: () => Effect.succeed(undefined),
+	byOauthState: () => Effect.undefined,
 };
 
 const emptySearchProviderStore: SearchProviderStore = {
-	get: () => Effect.succeed(undefined),
+	get: () => Effect.undefined,
 	replace: () => notStubbed("searchProviders.replace"),
-	update: () => Effect.succeed(undefined),
+	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
-	connection: () => Effect.succeed(undefined),
-	resolve: () => Effect.succeed(undefined),
+	connection: () => Effect.undefined,
+	resolve: () => Effect.undefined,
 	recordTest: () => Effect.void,
 };
 
 const emptyModelProviderStore: ModelProviderStore = {
 	list: () => Effect.succeed([]),
-	get: () => Effect.succeed(undefined),
+	get: () => Effect.undefined,
 	create: () => notStubbed("modelProviders.create"),
-	update: () => Effect.succeed(undefined),
+	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
-	connection: () => Effect.succeed(undefined),
-	resolve: () => Effect.succeed(undefined),
+	connection: () => Effect.undefined,
+	resolve: () => Effect.undefined,
 	recordTest: () => Effect.void,
 	addModels: () => Effect.succeed(0),
 	syncDiscovered: () => Effect.succeed({ added: 0, updated: 0 }),
@@ -205,7 +205,7 @@ const emptyModelProviderStore: ModelProviderStore = {
 const emptyOnboardingStore: OnboardingStore = {
 	isCompleted: () => Effect.succeed(true),
 	complete: () => Effect.succeed(false),
-	completeAcceptedInvite: () => Effect.succeed(undefined),
+	completeAcceptedInvite: () => Effect.undefined,
 };
 
 const emptySystemAgentStore: SystemAgentStore = {

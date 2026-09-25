@@ -297,8 +297,8 @@ const ask = (
 	).pipe(
 		Effect.timeoutOrElse({
 			duration: ANSWER_TIMEOUT,
-			orElse: () => Effect.succeed(undefined),
+			orElse: () => Effect.undefined,
 		}),
-		Effect.catch(() => Effect.succeed(undefined)),
-		Effect.catchDefect(() => Effect.succeed(undefined)),
+		Effect.orElseSucceed(() => undefined),
+		Effect.catchDefect(() => Effect.undefined),
 	);

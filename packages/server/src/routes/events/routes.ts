@@ -166,7 +166,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 								break;
 							}
 							if (
-								!(await Effect.runPromise(Queue.offer(queue, frame(delivery)), {
+								!(await runPromise(Queue.offer(queue, frame(delivery)), {
 									signal: leaving.signal,
 								}))
 							) {

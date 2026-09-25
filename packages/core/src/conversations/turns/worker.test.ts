@@ -790,7 +790,7 @@ describe("the turn worker", () => {
 function turnStore(): TurnStore {
 	return {
 		requeueInterrupted: vi.fn(() => Effect.void),
-		claimNext: vi.fn(() => Effect.succeed(undefined)),
+		claimNext: vi.fn(() => Effect.undefined),
 		releaseFailedClaim: vi.fn(() => Effect.succeed(true)),
 		prepare: vi.fn(() => Effect.succeed(prepared)),
 		saveStreamingMessage: vi.fn(() => Effect.void),
@@ -827,7 +827,7 @@ function toolCalls(): ToolCallStore {
 		open: vi.fn(({ atOffset }) =>
 			Effect.succeed(part("0199a3a0-0000-7000-8000-0000000000aa", atOffset)),
 		),
-		close: vi.fn(() => Effect.succeed(undefined)),
+		close: vi.fn(() => Effect.undefined),
 	};
 }
 

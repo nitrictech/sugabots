@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	dataListing,
 	discoveredModel,
@@ -20,7 +20,7 @@ export const anthropic: ProviderDialect = {
 	model: Schema.Struct({
 		id: Schema.String,
 		display_name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
 		),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {

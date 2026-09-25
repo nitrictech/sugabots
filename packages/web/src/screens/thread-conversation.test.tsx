@@ -121,7 +121,7 @@ beforeEach(() => {
 			connection("linear", "Linear", "https://mcp.linear.app/mcp"),
 		]),
 	);
-	client.api.toolApprovals.decide.mockReturnValue(Effect.succeed(undefined));
+	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
 });
 
 afterEach(() => {

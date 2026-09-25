@@ -290,7 +290,7 @@ describe("the summary worker", () => {
 function summaryStore(): SummaryStore {
 	return {
 		requeueInterrupted: vi.fn(() => Effect.void),
-		claimNext: vi.fn(() => Effect.succeed(undefined)),
+		claimNext: vi.fn(() => Effect.undefined),
 		releaseFailedClaim: vi.fn(() => Effect.void),
 		prepare: vi.fn(() => Effect.succeed(prepared)),
 		complete: vi.fn(() => Effect.void),

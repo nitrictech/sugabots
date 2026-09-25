@@ -81,7 +81,7 @@ it("rolls back on failure, and hands the caller its own error", async () => {
 		transaction(
 			Effect.gen(function* () {
 				yield* insert(2);
-				return yield* Effect.fail(new Rejected());
+				return yield* new Rejected();
 			}),
 		),
 	);
@@ -166,7 +166,7 @@ it("rolls back only the inner work when a nested transaction fails", async () =>
 				yield* transaction(
 					Effect.gen(function* () {
 						yield* insert(20);
-						return yield* Effect.fail(new Rejected());
+						return yield* new Rejected();
 					}),
 				).pipe(Effect.catchTag("Rejected", () => Effect.void));
 				return yield* count;
@@ -246,7 +246,7 @@ it("drops deferred work when the transaction rolls back", async () => {
 						ran = true;
 					}),
 				);
-				return yield* Effect.fail(new Rejected());
+				return yield* new Rejected();
 			}),
 		),
 	);

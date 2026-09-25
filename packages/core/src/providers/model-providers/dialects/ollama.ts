@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	type CapabilityVocabulary,
 	capabilitiesNamed,
@@ -22,7 +22,7 @@ const shown = Schema.Struct({
 	capabilities: capabilitiesNamed(OLLAMA_CAPABILITIES),
 	model_info: Schema.Record(Schema.String, Schema.Unknown).pipe(
 		Schema.withDecodingDefault(Effect.succeed({})),
-		Schema.catchDecoding(() => Effect.succeed(Option.some({}))),
+		Schema.catchDecoding(() => Effect.succeedSome({})),
 	),
 });
 

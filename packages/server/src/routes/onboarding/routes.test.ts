@@ -20,7 +20,7 @@ function onboardingStoreWith(overrides: Partial<OnboardingStore> = {}): Onboardi
 	return {
 		isCompleted: () => Effect.succeed(false),
 		complete: () => Effect.succeed(false),
-		completeAcceptedInvite: () => Effect.succeed(undefined),
+		completeAcceptedInvite: () => Effect.undefined,
 		...overrides,
 	};
 }

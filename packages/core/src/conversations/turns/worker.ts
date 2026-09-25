@@ -342,7 +342,7 @@ const streamReply = (
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
 				reply: {
-					length: () => Effect.runSync(Ref.get(reply)).content.length,
+					length: () => Ref.getUnsafe(reply).content.length,
 					noteCollaboration: (collaboration) =>
 						Ref.update(reply, (draft) => ({
 							...draft,

@@ -185,7 +185,7 @@ function requestModels(
 		if (!inspect) return listed;
 		return yield* Effect.forEach(
 			listed,
-			(model) => inspect(root, model, http).pipe(Effect.catch(() => Effect.succeed(model))),
+			(model) => inspect(root, model, http).pipe(Effect.orElseSucceed(() => model)),
 			{ concurrency: INSPECT_CONCURRENCY },
 		);
 	});

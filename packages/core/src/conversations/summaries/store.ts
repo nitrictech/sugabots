@@ -113,7 +113,7 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 			// One transaction, so the system-agent thread and its turn are created
 			// together or not at all.
 			transaction(
-				Effect.flatMap(
+				Effect.filterOrElse(
 					query((db) =>
 						Effect.gen(function* () {
 							const scope = yield* loadSummarisedThread(db, claimed);
@@ -180,8 +180,9 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							};
 						}),
 					),
-					(outcome) =>
-						outcome instanceof JobNotRunnable ? Effect.fail(outcome) : Effect.succeed(outcome),
+					(outcome): outcome is Exclude<typeof outcome, JobNotRunnable> =>
+						!(outcome instanceof JobNotRunnable),
+					Effect.fail,
 				),
 			),
 

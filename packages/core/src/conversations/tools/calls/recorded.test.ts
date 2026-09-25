@@ -37,7 +37,7 @@ function store(): ToolCallStore {
 				finishedAt: null,
 			}),
 		),
-		close: vi.fn(() => Effect.succeed(undefined)),
+		close: vi.fn(() => Effect.undefined),
 	};
 }
 
