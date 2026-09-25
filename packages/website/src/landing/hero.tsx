@@ -8,6 +8,7 @@ import { Emphasis } from "@/components/emphasis";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
+import { siteMeta } from "@/site-meta";
 
 /** The bot crowd, drawn inline so each face can pop in. Poses assume a 40px face. */
 function BotCrowd() {
@@ -29,9 +30,10 @@ export function Hero() {
 				<BotCrowd />
 				<motion.h1
 					variants={riseIn}
-					className="text-5xl font-black leading-none tracking-tighter text-balance sm:text-6xl"
+					className="text-5xl leading-13 font-black tracking-tight text-balance sm:text-6xl sm:leading-16"
 				>
-					Agents, now <span className={accentText({ tone: "emerald" })}>multiplayer.</span>
+					<span className={accentText({ tone: "emerald" })}>{siteMeta.headline.accent}</span>{" "}
+					{siteMeta.headline.rest}.
 				</motion.h1>
 				<motion.p
 					variants={riseIn}

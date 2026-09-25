@@ -17,9 +17,6 @@ import { siteMeta } from "../src/site-meta.ts";
 const WIDTH = 1200;
 const HEIGHT = 630;
 
-const HEADLINE = "Agents, now";
-const HEADLINE_ACCENT = "multiplayer.";
-
 const toSrgb = toGamut("rgb", "oklch");
 function hex(tailwindColor: string): string {
 	const parsed = parse(tailwindColor);
@@ -70,18 +67,22 @@ const image = (
 			/>
 		</div>
 		<div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+			{/* One span per word, so satori wraps the headline between words like a browser. */}
 			<div
 				style={{
 					display: "flex",
-					flexDirection: "column",
-					fontSize: 120,
+					flexWrap: "wrap",
+					columnGap: 26,
+					fontSize: 100,
 					fontWeight: 900,
-					lineHeight: 1,
-					letterSpacing: -4,
+					lineHeight: 1.08,
+					letterSpacing: -2,
 				}}
 			>
-				<span>{HEADLINE}</span>
-				<span style={{ color: hex(colors.emerald[400]) }}>{HEADLINE_ACCENT}</span>
+				<span style={{ color: hex(colors.emerald[400]) }}>{siteMeta.headline.accent}</span>
+				{`${siteMeta.headline.rest}.`.split(" ").map((word) => (
+					<span key={word}>{word}</span>
+				))}
 			</div>
 			<span style={{ fontSize: 34, color: hex(colors.zinc[400]) }}>{siteMeta.description}</span>
 		</div>

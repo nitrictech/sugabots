@@ -1,7 +1,11 @@
-/** What the site says about itself, in the page head and the link-preview image. */
+/** The headline, split where the accent colour ends. */
+const headline = { accent: "Multiplayer", rest: "agents on any model" } as const;
+
+/** What the site says about itself: the hero, the page head and the link-preview image. */
 export const siteMeta = {
 	url: "https://sugabots.ai",
-	title: "Sugabots — agents, now multiplayer",
+	headline,
+	title: `Sugabots | ${headline.accent} ${headline.rest}`,
 	description: "An open-source harness where people and agents work together.",
 	/** Written by scripts/generate-og-image.tsx. */
 	ogImagePath: "/og.png",
