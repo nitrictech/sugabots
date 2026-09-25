@@ -147,3 +147,29 @@ export const sandboxProviderTestResultSchema = Schema.Struct({
 });
 
 export type SandboxProviderTestResult = typeof sandboxProviderTestResultSchema.Type;
+
+/**
+ * Whether a pod has a sandbox, and whether anything is using it now.
+ *
+ * `in_use` while a turn holds a lease on it, naming the agents whose turns do;
+ * `idle` when it is up and nobody is; `lost` when the provider no longer has
+ * it; `none` before any agent in the pod has needed one.
+ */
+export const podSandboxStateSchema = Schema.Literals(["none", "in_use", "idle", "lost"]);
+export type PodSandboxState = typeof podSandboxStateSchema.Type;
+
+export const podSandboxStatusSchema = Schema.Struct({
+	state: podSandboxStateSchema,
+	/** The agents whose turns are using it, when `in_use`. */
+	usedBy: Schema.mutable(
+		Schema.Array(
+			Schema.Struct({ agentId: uuidSchema, name: Schema.String, handle: Schema.String }),
+		),
+	),
+	isolation: Schema.NullOr(sandboxIsolationSchema),
+	/** When the last turn using it finished, or null if none has yet. */
+	lastUsedAt: Schema.NullOr(isoTimestampSchema),
+	createdAt: Schema.NullOr(isoTimestampSchema),
+});
+
+export type PodSandboxStatus = typeof podSandboxStatusSchema.Type;

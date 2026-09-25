@@ -88,6 +88,8 @@ export const eventPayloadSchemas = {
 	}),
 	"agent.updated": nothing,
 	"pod.updated": nothing,
+	/** A pod's sandbox was made, lost, or started or stopped being used. */
+	"sandbox.updated": Schema.Struct({ podId: uuidSchema }),
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -122,6 +124,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"collaboration.updated",
 	"agent.updated",
 	"pod.updated",
+	"sandbox.updated",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
@@ -241,6 +244,7 @@ export type ThreadUpdateEvent = typeof threadUpdateEventSchema.Type;
 export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("thread.changed", P["thread.changed"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
+	withEnvelope("sandbox.updated", P["sandbox.updated"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 

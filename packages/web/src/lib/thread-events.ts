@@ -169,6 +169,9 @@ async function applyWorkspaceEvent(
 		]);
 	} else if (update.type === "thread.changed") {
 		await queries.invalidateQueries({ queryKey: ["chat-history"] });
+	} else if (update.type === "sandbox.updated") {
+		await queries.invalidateQueries({ queryKey: ["pod-sandbox", update.podId] });
+		return;
 	}
 	await queries.invalidateQueries({ queryKey: ["threads", workspaceId] });
 }

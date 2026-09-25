@@ -24,6 +24,7 @@ import {
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { Sidebar as Rail, SidebarRow, SidebarSection } from "@/ui/sidebar.tsx";
+import { PodSandboxChip } from "./PodSandboxChip.tsx";
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 	return (
@@ -167,6 +168,7 @@ function PodSection({
 				open={open}
 				onToggle={onToggle}
 				count={agents.length}
+				status={<PodSandboxChip podId={pod.id} />}
 				actions={<PodActions pod={pod} onNew={() => setCreating(true)} onNavigate={onNavigate} />}
 			>
 				{body()}

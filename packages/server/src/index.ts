@@ -128,6 +128,7 @@ const main = Effect.gen(function* () {
 	const modelProviders = modelProviderStore(credentialCipher);
 	// One model client for turns, system agents, trials, and chat routing.
 	const model = workspaceTurnModel({ modelProviders, httpClients });
+	const sandboxProviders = sandboxProviderStore(credentialCipher);
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -135,7 +136,12 @@ const main = Effect.gen(function* () {
 		onboarding: onboardingStore,
 		modelProviders,
 		searchProviders: searchProviderStore(credentialCipher),
-		sandboxProviders: sandboxProviderStore(credentialCipher),
+		sandboxProviders,
+		podSandboxes: podSandboxStore({
+			providers: sandboxProviders,
+			allowsUnisolated: config.allowUnisolatedSandboxes,
+			publishEvents,
+		}),
 		connections: connectionStore(credentialCipher),
 		chats: chatStore(publishEvents),
 		routines: routineStore(publishEvents),
@@ -146,11 +152,6 @@ const main = Effect.gen(function* () {
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents),
 	};
-	const sandboxes = podSandboxStore({
-		providers: stores.sandboxProviders,
-		allowsUnisolated: config.allowUnisolatedSandboxes,
-	});
-
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -187,7 +188,7 @@ const main = Effect.gen(function* () {
 			approvals: stores.approvals,
 			builtInTools,
 			connectionTools,
-			sandboxes,
+			sandboxes: stores.podSandboxes,
 			publishEvents,
 		}),
 	);

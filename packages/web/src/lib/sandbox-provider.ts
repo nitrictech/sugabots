@@ -20,6 +20,17 @@ export function useSandboxProvider() {
 	});
 }
 
+/** Whether a pod's sandbox is up and in use. Kept current by `sandbox.updated` events. */
+export function usePodSandbox(podId: string) {
+	return useQuery({
+		queryKey: ["pod-sandbox", podId],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.sandboxProviders.podStatus({ params: { podId } }), { signal }),
+		// A lease that expires because its process died sends no event.
+		refetchInterval: 60_000,
+	});
+}
+
 export function useSandboxProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();

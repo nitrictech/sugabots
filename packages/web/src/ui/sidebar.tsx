@@ -29,6 +29,7 @@ export function SidebarSection({
 	open,
 	onToggle,
 	count,
+	status,
 	actions,
 	children,
 	className,
@@ -38,6 +39,8 @@ export function SidebarSection({
 	onToggle: () => void;
 	/** How many rows are inside. Drawn only while folded. */
 	count?: number;
+	/** A state shown beside the name, outside the disclosure so it can have its own tooltip. */
+	status?: ReactNode;
 	/** Controls at the end of the heading, beside the disclosure. */
 	actions?: ReactNode;
 	children?: ReactNode;
@@ -71,6 +74,7 @@ export function SidebarSection({
 						</Badge>
 					)}
 				</button>
+				{status}
 				{actions}
 			</h2>
 			{open && children}

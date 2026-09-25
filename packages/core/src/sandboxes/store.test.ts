@@ -81,6 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 		podSandboxStore({
 			providers: { resolve: () => Effect.succeed(configured) },
 			allowsUnisolated,
+			publishEvents,
 			providerFor: () => fake.provider,
 		});
 
@@ -236,6 +237,22 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 
 		expect(await runOnPostgres(store.offered(scope.workspaceId))).toBe(false);
 		expect(await runOnPostgres(storeFor(true).offered(scope.workspaceId))).toBe(true);
+	});
+
+	it("reports whether the pod's sandbox is in use, and by whom", async () => {
+		expect(await runOnPostgres(store.status(scope.podId))).toMatchObject({ state: "none" });
+
+		const held = await lease();
+		const inUse = await runOnPostgres(store.status(scope.podId));
+		expect(inUse.state).toBe("in_use");
+		expect(inUse.usedBy).toHaveLength(1);
+		expect(inUse.usedBy[0]?.handle).toMatch(/^builder-/);
+
+		await runOnPostgres(store.release(held.leaseId));
+		expect(await runOnPostgres(store.status(scope.podId))).toMatchObject({
+			state: "idle",
+			usedBy: [],
+		});
 	});
 
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {

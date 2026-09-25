@@ -17,6 +17,7 @@ import type {
 } from "@sugabots/core/providers/network/egress";
 import type { SandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
@@ -80,6 +81,7 @@ export interface Stores {
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
 	sandboxProviders: SandboxProviderStore;
+	podSandboxes: Pick<PodSandboxStore, "status">;
 	connections: ConnectionStore;
 	threads: ThreadStore;
 	chats: ChatStore;
@@ -154,6 +156,7 @@ export function apiLayer({
 		}),
 		sandboxProviderRoutes({
 			sandboxProviders: stores.sandboxProviders,
+			podSandboxes: stores.podSandboxes,
 			validateProviderUrl,
 			allowsUnisolated: allowsUnisolatedSandboxes,
 		}),

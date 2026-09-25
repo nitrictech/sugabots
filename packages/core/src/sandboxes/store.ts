@@ -1,7 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import type { PodSandboxStatus } from "@sugabots/contracts";
+import { streamEvent, workspaceChannel } from "@sugabots/contracts";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../database/database.ts";
-import { podSandbox, sandboxLease } from "../database/schema.ts";
+import type { PublishEvents } from "../database/events/publish.ts";
+import { agent, podSandbox, sandboxLease, turn } from "../database/schema.ts";
 import type { SandboxProviderStore } from "../providers/sandbox-providers/store.ts";
 import { Sandbox } from "./sandbox.ts";
 
@@ -24,6 +27,8 @@ export interface PodSandboxStore {
 		SandboxLost | SandboxProviderUnavailable | Sandbox.Unavailable,
 		Database
 	>;
+	/** Whether the pod has a sandbox, and which agents' turns are using it now. */
+	status(podId: string): Effect.Effect<PodSandboxStatus, never, Database>;
 	/** Keeps a lease from expiring for another `LEASE_DURATION_SECONDS`. */
 	renew(leaseId: string): Effect.Effect<void, never, Database>;
 	release(leaseId: string): Effect.Effect<void, never, Database>;
@@ -63,6 +68,8 @@ export interface PodSandboxStoreOptions {
 	providers: Pick<SandboxProviderStore, "resolve">;
 	/** Whether this installation lets sandboxes share the host's kernel. */
 	allowsUnisolated: boolean;
+	/** Tells the workspace when a pod's sandbox is made, lost, or starts or stops being used. */
+	publishEvents: PublishEvents;
 	/** How a workspace's configuration becomes a provider. Tests pass a double. */
 	providerFor?: (connection: Sandbox.Connection) => Sandbox.Interface;
 }
@@ -74,8 +81,14 @@ type Reached =
 export function podSandboxStore({
 	providers,
 	allowsUnisolated,
+	publishEvents,
 	providerFor = Sandbox.forConnection,
 }: PodSandboxStoreOptions): PodSandboxStore {
+	const announce = (workspaceId: string, podId: string) =>
+		publishEvents([
+			{ channel: workspaceChannel(workspaceId), event: streamEvent("sandbox.updated", { podId }) },
+		]);
+
 	/** The workspace's provider, unless it is off or the installation doesn't allow its isolation. */
 	const usableProvider = (workspaceId: string) =>
 		Effect.map(providers.resolve(workspaceId), (connection) =>
@@ -103,6 +116,7 @@ export function podSandboxStore({
 				query((db) =>
 					db.update(podSandbox).set({ status: "missing" }).where(eq(podSandbox.id, row.id)),
 				).pipe(
+					Effect.andThen(announce(row.workspaceId, row.podId)),
 					Effect.as<Reached>({
 						kind: "lost",
 						reason: "The sandbox provider no longer has the pod's sandbox.",
@@ -166,6 +180,7 @@ export function podSandboxStore({
 				);
 				if (!lease)
 					return yield* Effect.die(new Error("Inserting a sandbox lease returned no row"));
+				yield* announce(scope.workspaceId, scope.podId);
 				return { kind: "leased" as const, leaseId: lease.id, sandbox: reached.sandbox };
 			}),
 		);
@@ -187,6 +202,33 @@ export function podSandboxStore({
 				return { leaseId: result.leaseId, sandbox: result.sandbox };
 			}),
 
+		status: (podId) =>
+			Effect.gen(function* () {
+				const [row] = yield* query((db) =>
+					db.select().from(podSandbox).where(eq(podSandbox.podId, podId)).limit(1),
+				);
+				if (!row) {
+					return { state: "none", usedBy: [], isolation: null, lastUsedAt: null, createdAt: null };
+				}
+				const users = yield* query((db) =>
+					db
+						.selectDistinct({ agentId: agent.id, name: agent.name, handle: agent.handle })
+						.from(sandboxLease)
+						.innerJoin(turn, eq(turn.id, sandboxLease.turnId))
+						.innerJoin(agent, eq(agent.id, turn.agentId))
+						.where(
+							and(eq(sandboxLease.podSandboxId, row.id), gt(sandboxLease.expiresAt, sql`now()`)),
+						),
+				);
+				return {
+					state: row.status === "missing" ? "lost" : users.length > 0 ? "in_use" : "idle",
+					usedBy: row.status === "missing" ? [] : users,
+					isolation: row.isolation,
+					lastUsedAt: row.lastLeaseEndedAt?.toISOString() ?? null,
+					createdAt: row.createdAt.toISOString(),
+				} satisfies PodSandboxStatus;
+			}),
+
 		renew: (leaseId) =>
 			query((db) =>
 				db
@@ -205,12 +247,14 @@ export function podSandboxStore({
 							.returning({ podSandboxId: sandboxLease.podSandboxId }),
 					);
 					if (!ended) return;
-					yield* query((db) =>
+					const [updated] = yield* query((db) =>
 						db
 							.update(podSandbox)
 							.set({ lastLeaseEndedAt: sql`now()` })
-							.where(eq(podSandbox.id, ended.podSandboxId)),
+							.where(eq(podSandbox.id, ended.podSandboxId))
+							.returning({ workspaceId: podSandbox.workspaceId, podId: podSandbox.podId }),
 					);
+					if (updated) yield* announce(updated.workspaceId, updated.podId);
 				}),
 			),
 	};
