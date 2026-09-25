@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 import { type BotColor, botColors } from "./bot-colors.ts";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "./face-marks.ts";
 
-/** How a bot looks: the pair is its identity, so keep them together. */
+/** How a bot looks. */
 export interface BotLook {
 	color: BotColor;
 	face: AgentFace;

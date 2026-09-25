@@ -5,11 +5,12 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./bot-crowd.svg": "./assets/bot-crowd.svg"
+		"./bot-crowd.svg": "./assets/bot-crowd.svg",
+		"./sugabots-logo.svg": "./assets/sugabots-logo.svg"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"generate:bot-crowd": "node scripts/generate-bot-crowd.ts"
+		"generate:assets": "node scripts/generate-assets.ts"
 	},
 	"dependencies": {
 		"@sugabots/contracts": "workspace:*",

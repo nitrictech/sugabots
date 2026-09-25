@@ -1,0 +1,106 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/rubik";
+@import "@fontsource-variable/jetbrains-mono";
+/* The shared packages style their components with Tailwind classes. */
+@source "../../avatars/src";
+@source "../../provider-logos/src";
+
+@theme inline {
+	--font-sans: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
+	--font-heading: var(--font-sans);
+	--font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-brand: var(--brand);
+	--color-brand-foreground: var(--brand-foreground);
+
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+	color-scheme: light;
+	--radius: 0.625rem;
+
+	--background: var(--color-white);
+	--foreground: var(--color-zinc-900);
+	--card: var(--color-zinc-50);
+	--card-foreground: var(--color-zinc-900);
+	--popover: var(--color-white);
+	--popover-foreground: var(--color-zinc-900);
+	--primary: var(--color-zinc-900);
+	--primary-foreground: var(--color-white);
+	--secondary: var(--color-zinc-100);
+	--secondary-foreground: var(--color-zinc-900);
+	--muted: var(--color-zinc-100);
+	--muted-foreground: var(--color-zinc-500);
+	--accent: var(--color-zinc-100);
+	--accent-foreground: var(--color-zinc-900);
+	--destructive: var(--color-red-600);
+	--border: var(--color-zinc-200);
+	--input: var(--color-zinc-300);
+	--ring: var(--color-zinc-400);
+	--brand: var(--color-indigo-600);
+	--brand-foreground: var(--color-white);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		color-scheme: dark;
+
+		--background: var(--color-zinc-950);
+		--foreground: var(--color-zinc-100);
+		--card: var(--color-zinc-900);
+		--card-foreground: var(--color-zinc-100);
+		--popover: var(--color-zinc-900);
+		--popover-foreground: var(--color-zinc-100);
+		--primary: var(--color-zinc-100);
+		--primary-foreground: var(--color-zinc-950);
+		--secondary: var(--color-zinc-800);
+		--secondary-foreground: var(--color-zinc-100);
+		--muted: var(--color-zinc-800);
+		--muted-foreground: var(--color-zinc-400);
+		--accent: var(--color-zinc-800);
+		--accent-foreground: var(--color-zinc-100);
+		--destructive: var(--color-red-500);
+		--border: var(--color-zinc-800);
+		--input: var(--color-zinc-700);
+		--ring: var(--color-zinc-600);
+	}
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	html {
+		@apply scroll-smooth font-sans antialiased;
+	}
+	body {
+		@apply bg-background text-foreground;
+	}
+}
