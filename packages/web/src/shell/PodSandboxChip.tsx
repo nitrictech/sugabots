@@ -28,6 +28,7 @@ export function PodSandboxChip({ podId }: { podId: string }) {
 						"size-1.5 rounded-full",
 						status.state === "in_use" && "animate-pulse bg-success motion-reduce:animate-none",
 						status.state === "idle" && "border border-muted-foreground/60",
+						status.state === "paused" && "bg-muted-foreground/40",
 						status.state === "lost" && "bg-warning",
 					)}
 				/>
@@ -44,6 +45,8 @@ function describe(status: PodSandboxStatus): string {
 			return status.lastUsedAt
 				? `Sandbox idle, last used ${sinceText(new Date(status.lastUsedAt))}`
 				: "Sandbox idle";
+		case "paused":
+			return "Sandbox paused while nobody is using it. The next agent to need it wakes it.";
 		case "lost":
 			return "Sandbox lost: the provider no longer has it";
 		case "none":

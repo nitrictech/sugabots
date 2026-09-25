@@ -345,6 +345,29 @@ Differences from the plan, and what's left for later phases:
   sandbox gets a user named `agent` (uid 1000) when it's made. Images need
   `useradd` and `groupadd`, which Debian and Ubuntu images have.
 
+## Pausing as built
+
+- A sweep in every API process (`sandboxes/pausing.ts`, once a minute) pauses
+  running sandboxes that have had no live lease for
+  `SANDBOX_IDLE_PAUSE_MINUTES` (5 by default). It takes each pod's lock
+  without waiting, so a pod whose turn is taking a lease is skipped until the
+  next sweep, and checks again under the lock that the sandbox is still idle.
+- The next lease on a paused sandbox resumes it, marks it running, and the
+  agent's first sandbox result after that carries a note saying it was paused
+  and that programs left running may have stopped.
+- Providers declare `pauseKeeps`. OpenSandbox declares `filesystem` because it
+  can't say whether it runs on Docker (which keeps memory) or Kubernetes (which
+  doesn't), so the note is worded for the worse case.
+- The pod's sidebar chip shows `paused`.
+
+Checked against the local OpenSandbox: a sandbox running a background loop
+paused in about 100ms (`docker inspect` shows it paused), resumed in about a
+second on the next command, and the loop carried on with a gap for the pause.
+
+Not done: re-sending egress credentials after a resume (nothing uses
+OpenSandbox's credential vault yet), and freeing memory on Docker, where a
+pause only stops CPU.
+
 ## Out of the PoC
 
 Kubernetes and microVM providers, snapshots, preview URLs for dev servers,

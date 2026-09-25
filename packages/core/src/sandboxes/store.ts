@@ -1,6 +1,6 @@
 import type { PodSandboxStatus } from "@sugabots/contracts";
 import { streamEvent, workspaceChannel } from "@sugabots/contracts";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, notExists, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../database/database.ts";
 import type { PublishEvents } from "../database/events/publish.ts";
@@ -29,6 +29,11 @@ export interface PodSandboxStore {
 	>;
 	/** Whether the pod has a sandbox, and which agents' turns are using it now. */
 	status(podId: string): Effect.Effect<PodSandboxStatus, never, Database>;
+	/**
+	 * Pauses every running sandbox nobody has had a lease on for `idleSeconds`,
+	 * answering how many it paused. The next lease on one resumes it.
+	 */
+	pauseIdle(idleSeconds: number): Effect.Effect<number, never, Database>;
 	/** Keeps a lease from expiring for another `LEASE_DURATION_SECONDS`. */
 	renew(leaseId: string): Effect.Effect<void, never, Database>;
 	release(leaseId: string): Effect.Effect<void, never, Database>;
@@ -43,6 +48,8 @@ export interface LeaseScope {
 export interface LeasedSandbox {
 	leaseId: string;
 	sandbox: Sandbox.Handle;
+	/** Set when this lease woke a paused sandbox, with what the pause kept. */
+	resumedAfterPause?: Sandbox.PauseKeeps;
 }
 
 /** How long a lease lasts without being renewed. Three renewals' worth, so one late renewal is harmless. */
@@ -65,7 +72,8 @@ export class SandboxProviderUnavailable extends Data.TaggedError("SandboxProvide
 }> {}
 
 export interface PodSandboxStoreOptions {
-	providers: Pick<SandboxProviderStore, "resolve">;
+	/** `resolve` for turns; `connection` for pausing, which goes ahead even with sandboxes switched off. */
+	providers: Pick<SandboxProviderStore, "resolve" | "connection">;
 	/** Whether this installation lets sandboxes share the host's kernel. */
 	allowsUnisolated: boolean;
 	/** Tells the workspace when a pod's sandbox is made, lost, or starts or stops being used. */
@@ -75,7 +83,12 @@ export interface PodSandboxStoreOptions {
 }
 
 type Reached =
-	| { kind: "reached"; podSandboxId: string; sandbox: Sandbox.Handle }
+	| {
+			kind: "reached";
+			podSandboxId: string;
+			sandbox: Sandbox.Handle;
+			resumedAfterPause?: Sandbox.PauseKeeps;
+	  }
 	| { kind: "lost"; reason: string };
 
 export function podSandboxStore({
@@ -110,21 +123,105 @@ export function podSandboxStore({
 				reason: `The pod's sandbox was made by ${row.provider}, which this workspace no longer uses.`,
 			});
 		}
-		return sandboxes.connect(row.providerSandboxId).pipe(
-			Effect.map((sandbox): Reached => ({ kind: "reached", podSandboxId: row.id, sandbox })),
-			Effect.catchTag("SandboxMissing", () =>
-				query((db) =>
-					db.update(podSandbox).set({ status: "missing" }).where(eq(podSandbox.id, row.id)),
-				).pipe(
-					Effect.andThen(announce(row.workspaceId, row.podId)),
-					Effect.as<Reached>({
-						kind: "lost",
-						reason: "The sandbox provider no longer has the pod's sandbox.",
-					}),
-				),
-			),
-		);
+		const reached =
+			row.status === "paused"
+				? sandboxes.resume(row.providerSandboxId).pipe(
+						Effect.tap(() =>
+							query((db) =>
+								db.update(podSandbox).set({ status: "running" }).where(eq(podSandbox.id, row.id)),
+							),
+						),
+						Effect.map(
+							(sandbox): Reached => ({
+								kind: "reached",
+								podSandboxId: row.id,
+								sandbox,
+								resumedAfterPause: sandboxes.pauseKeeps,
+							}),
+						),
+					)
+				: sandboxes
+						.connect(row.providerSandboxId)
+						.pipe(
+							Effect.map(
+								(sandbox): Reached => ({ kind: "reached", podSandboxId: row.id, sandbox }),
+							),
+						);
+		return reached.pipe(Effect.catchTag("SandboxMissing", () => markMissing(row)));
 	};
+
+	const markMissing = (row: typeof podSandbox.$inferSelect) =>
+		query((db) =>
+			db.update(podSandbox).set({ status: "missing" }).where(eq(podSandbox.id, row.id)),
+		).pipe(
+			Effect.andThen(announce(row.workspaceId, row.podId)),
+			Effect.as<Reached>({
+				kind: "lost",
+				reason: "The sandbox provider no longer has the pod's sandbox.",
+			}),
+		);
+
+	/** No unexpired lease on the sandbox. */
+	const unleased = notExists(
+		sql`(select 1 from ${sandboxLease} where ${sandboxLease.podSandboxId} = ${podSandbox.id} and ${sandboxLease.expiresAt} > now())`,
+	);
+	const idleFor = (idleSeconds: number) =>
+		and(
+			eq(podSandbox.status, "running"),
+			lt(podSandbox.lastLeaseEndedAt, sql`now() - make_interval(secs => ${idleSeconds})`),
+			unleased,
+		);
+
+	/**
+	 * Pauses one sandbox if it is still idle once its pod's lock is held. A pod
+	 * whose lock is taken is skipped rather than waited for: whoever holds it is
+	 * about to use the sandbox, and the next sweep can look again.
+	 */
+	const pauseOne = (candidate: { id: string; podId: string }, idleSeconds: number) =>
+		transaction(
+			Effect.gen(function* () {
+				const locked = yield* query((db) =>
+					Effect.gen(function* () {
+						const rows = yield* db.execute<{ locked: boolean }>(
+							sql`select pg_try_advisory_xact_lock(hashtextextended(${`pod-sandbox:${candidate.podId}`}, 0)) as locked`,
+							"objects",
+						);
+						const [first] = rows;
+						return first?.locked === true;
+					}),
+				);
+				if (!locked) return false;
+				const [row] = yield* query((db) =>
+					db
+						.select()
+						.from(podSandbox)
+						.where(and(eq(podSandbox.id, candidate.id), idleFor(idleSeconds)))
+						.limit(1),
+				);
+				if (!row) return false;
+				const connection = yield* providers.connection(row.workspaceId);
+				if (!connection || connection.preset !== row.provider) return false;
+				const outcome = yield* providerFor(connection)
+					.pause(row.providerSandboxId)
+					.pipe(
+						Effect.as("paused" as const),
+						Effect.catchTag("SandboxMissing", () =>
+							markMissing(row).pipe(Effect.as("lost" as const)),
+						),
+						Effect.catchTag("SandboxUnavailable", (failure) =>
+							Effect.logWarning("Pausing a pod's sandbox failed", failure).pipe(
+								Effect.as("unreachable" as const),
+							),
+						),
+					);
+				if (outcome !== "paused") return false;
+				yield* query((db) =>
+					db.update(podSandbox).set({ status: "paused" }).where(eq(podSandbox.id, row.id)),
+				);
+				yield* announce(row.workspaceId, row.podId);
+				return true;
+			}),
+		);
 
 	const createFor = (scope: LeaseScope, sandboxes: Sandbox.Interface) =>
 		Effect.gen(function* () {
@@ -145,7 +242,8 @@ export function podSandboxStore({
 					.returning({ id: podSandbox.id }),
 			);
 			if (!row) return yield* Effect.die(new Error("Inserting a pod sandbox returned no row"));
-			return { kind: "reached", podSandboxId: row.id, sandbox } satisfies Reached;
+			const reached: Reached = { kind: "reached", podSandboxId: row.id, sandbox };
+			return reached;
 		});
 
 	const leaseSandbox = (scope: LeaseScope, sandboxes: Sandbox.Interface) =>
@@ -181,7 +279,12 @@ export function podSandboxStore({
 				if (!lease)
 					return yield* Effect.die(new Error("Inserting a sandbox lease returned no row"));
 				yield* announce(scope.workspaceId, scope.podId);
-				return { kind: "leased" as const, leaseId: lease.id, sandbox: reached.sandbox };
+				return {
+					kind: "leased" as const,
+					leaseId: lease.id,
+					sandbox: reached.sandbox,
+					resumedAfterPause: reached.resumedAfterPause,
+				};
 			}),
 		);
 
@@ -199,7 +302,11 @@ export function podSandboxStore({
 				if (result.kind === "lost") {
 					return yield* new SandboxLost({ podId: scope.podId, reason: result.reason });
 				}
-				return { leaseId: result.leaseId, sandbox: result.sandbox };
+				return {
+					leaseId: result.leaseId,
+					sandbox: result.sandbox,
+					...(result.resumedAfterPause ? { resumedAfterPause: result.resumedAfterPause } : {}),
+				};
 			}),
 
 		status: (podId) =>
@@ -221,12 +328,34 @@ export function podSandboxStore({
 						),
 				);
 				return {
-					state: row.status === "missing" ? "lost" : users.length > 0 ? "in_use" : "idle",
+					state:
+						row.status === "missing"
+							? "lost"
+							: users.length > 0
+								? "in_use"
+								: row.status === "paused"
+									? "paused"
+									: "idle",
 					usedBy: row.status === "missing" ? [] : users,
 					isolation: row.isolation,
 					lastUsedAt: row.lastLeaseEndedAt?.toISOString() ?? null,
 					createdAt: row.createdAt.toISOString(),
 				} satisfies PodSandboxStatus;
+			}),
+
+		pauseIdle: (idleSeconds) =>
+			Effect.gen(function* () {
+				const candidates = yield* query((db) =>
+					db
+						.select({ id: podSandbox.id, podId: podSandbox.podId })
+						.from(podSandbox)
+						.where(idleFor(idleSeconds)),
+				);
+				let paused = 0;
+				for (const candidate of candidates) {
+					if (yield* pauseOne(candidate, idleSeconds)) paused += 1;
+				}
+				return paused;
 			}),
 
 		renew: (leaseId) =>

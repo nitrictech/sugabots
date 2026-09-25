@@ -18,6 +18,11 @@ import {
 export interface TurnSandbox {
 	/** The sandbox, leased on first use. Rejects with the store's error when it can't be had. */
 	sandbox(): Promise<Sandbox.Handle>;
+	/**
+	 * What the agent should hear about the sandbox having been paused, once:
+	 * the first tool result after the lease that woke it carries it.
+	 */
+	takeResumeNote(): string | undefined;
 	release(): Promise<void>;
 }
 
@@ -28,9 +33,11 @@ export function turnSandbox(
 ): TurnSandbox {
 	let leased: Promise<LeasedSandbox> | undefined;
 	let renewal: ReturnType<typeof setInterval> | undefined;
+	let resumeNote: string | undefined;
 
 	const lease = async () => {
 		const held = await run(store.lease(scope));
+		if (held.resumedAfterPause) resumeNote = RESUME_NOTES[held.resumedAfterPause];
 		renewal = setInterval(() => {
 			run(store.renew(held.leaseId)).catch(() => {});
 		}, LEASE_RENEWAL_INTERVAL_SECONDS * 1_000);
@@ -47,6 +54,11 @@ export function turnSandbox(
 			});
 			return (await leased).sandbox;
 		},
+		takeResumeNote: () => {
+			const note = resumeNote;
+			resumeNote = undefined;
+			return note;
+		},
 		release: async () => {
 			clearInterval(renewal);
 			const held = await leased?.catch(() => undefined);
@@ -56,3 +68,10 @@ export function turnSandbox(
 		},
 	};
 }
+
+const RESUME_NOTES: Record<Sandbox.PauseKeeps, string> = {
+	memory:
+		"The sandbox had been paused while nobody was using it, and was resumed for this call. Everything, including programs left running, carried on where it was.",
+	filesystem:
+		"The sandbox had been paused while nobody was using it, and was resumed for this call. Files are as they were, but programs left running, such as servers, may have stopped; start them again if you need them.",
+};

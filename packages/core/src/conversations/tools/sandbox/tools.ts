@@ -31,6 +31,11 @@ const DEFAULT_READ_LINES = 2_000;
  */
 export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 	const sandbox = () => turn.sandbox().catch(explainFailure);
+	/** A result, with the note about a resumed sandbox if this is the first since it woke. */
+	const withResumeNote = <Output extends object>(output: Output) => {
+		const note = turn.takeResumeNote();
+		return note ? { ...output, sandboxNote: note } : output;
+	};
 	const readBytes = async (path: string) =>
 		run((await sandbox()).readFile(path)).catch(explainFailure);
 	const readText = async (path: string) => new TextDecoder().decode(await readBytes(path));
@@ -66,14 +71,14 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 						signal: abortSignal,
 					}),
 				).catch(explainFailure);
-				return {
+				return withResumeNote({
 					exitCode: execution.exitCode,
 					...(execution.exitCode === null
 						? { note: "The command did not finish: it timed out or was stopped." }
 						: {}),
 					stdout: describeOutput(execution.stdout),
 					stderr: describeOutput(execution.stderr),
-				};
+				});
 			},
 		}),
 		[READ_FILE_TOOL]: tool({
@@ -104,14 +109,14 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 				}
 				const lines = new TextDecoder().decode(bytes).split("\n");
 				const shown = lines.slice(offset - 1, offset - 1 + limit);
-				return {
+				return withResumeNote({
 					path: absolute,
 					totalLines: lines.length,
 					content: shown.map((line, index) => `${offset + index}\t${line}`).join("\n"),
 					...(offset - 1 + shown.length < lines.length
 						? { more: `Lines ${offset + shown.length} to ${lines.length} not shown.` }
 						: {}),
-				};
+				});
 			},
 		}),
 		[WRITE_FILE_TOOL]: tool({
@@ -123,7 +128,7 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 			execute: async ({ path, content }) => {
 				const absolute = resolvePath(path);
 				await writeText(absolute, content);
-				return { path: absolute, characters: content.length };
+				return withResumeNote({ path: absolute, characters: content.length });
 			},
 		}),
 		[EDIT_FILE_TOOL]: tool({
@@ -153,7 +158,7 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 					absolute,
 					current.replaceAll(oldText, () => newText),
 				);
-				return { path: absolute, replacements: occurrences };
+				return withResumeNote({ path: absolute, replacements: occurrences });
 			},
 		}),
 	};

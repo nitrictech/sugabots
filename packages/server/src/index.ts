@@ -31,6 +31,7 @@ import { modelProviderStore } from "@sugabots/core/providers/model-providers/sto
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { sandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { DEFAULT_IDLE_PAUSE_MINUTES } from "@sugabots/core/sandboxes/pausing";
 import { podSandboxStore } from "@sugabots/core/sandboxes/store";
 import { Lanes } from "@sugabots/core/workflows/lanes";
 import { authorization } from "@sugabots/core/workspaces/access";
@@ -98,6 +99,10 @@ const main = Effect.gen(function* () {
 	// an escape to the host. Off unless the installation says otherwise.
 	const allowsUnisolatedSandboxes = yield* Config.Boolean("SANDBOX_ALLOW_UNISOLATED").pipe(
 		Config.withDefault(false),
+	);
+	// How long a pod's sandbox sits unused before it is paused.
+	const sandboxIdlePauseMinutes = yield* Config.Number("SANDBOX_IDLE_PAUSE_MINUTES").pipe(
+		Config.withDefault(DEFAULT_IDLE_PAUSE_MINUTES),
 	);
 	const sandboxProviders = sandboxProviderStore(credentials);
 	const stores = {
@@ -185,6 +190,7 @@ const main = Effect.gen(function* () {
 			builtInTools,
 			connectionTools,
 			sandboxes: stores.podSandboxes,
+			sandboxIdlePauseMinutes,
 			publishEvents,
 		}),
 	);

@@ -26,6 +26,7 @@ import { type LeaseScope, podSandboxStore } from "./store.ts";
 function fakeProvider() {
 	const sandboxes = new Set<string>();
 	const created: string[] = [];
+	const paused = new Set<string>();
 	const handle = (id: string): Sandbox.Handle => ({
 		id,
 		exec: () =>
@@ -42,6 +43,20 @@ function fakeProvider() {
 		provider: "opensandbox",
 		isolation: "gvisor",
 		check: Effect.void,
+		pauseKeeps: "filesystem",
+		pause: (id) =>
+			sandboxes.has(id)
+				? Effect.sync(() => {
+						paused.add(id);
+					})
+				: Effect.fail(new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })),
+		resume: (id) =>
+			sandboxes.has(id)
+				? Effect.sync(() => {
+						paused.delete(id);
+						return handle(id);
+					})
+				: Effect.fail(new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })),
 		create: () =>
 			Effect.sync(() => {
 				const id = crypto.randomUUID();
@@ -54,7 +69,7 @@ function fakeProvider() {
 				? Effect.succeed(handle(id))
 				: Effect.fail(new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })),
 	};
-	return { provider, created, lose: (id: string) => sandboxes.delete(id) };
+	return { provider, created, paused, lose: (id: string) => sandboxes.delete(id) };
 }
 
 describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", () => {
@@ -79,7 +94,10 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 
 	const storeFor = (allowsUnisolated: boolean) =>
 		podSandboxStore({
-			providers: { resolve: () => Effect.succeed(configured) },
+			providers: {
+				resolve: () => Effect.succeed(configured),
+				connection: () => Effect.succeed(configured),
+			},
 			allowsUnisolated,
 			publishEvents,
 			providerFor: () => fake.provider,
@@ -253,6 +271,42 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 			state: "idle",
 			usedBy: [],
 		});
+	});
+
+	/** Makes the pod's sandbox and lets it go, as a turn that used it would. */
+	async function usedOnce() {
+		const held = await lease();
+		await runOnPostgres(store.release(held.leaseId));
+		return held.sandbox.id;
+	}
+
+	it("pauses a sandbox nobody has used for the idle time, and wakes it for the next lease", async () => {
+		const id = await usedOnce();
+		expect(await runOnPostgres(store.pauseIdle(3_600))).toBe(0);
+
+		await runOnPostgres(store.pauseIdle(0));
+		expect(fake.paused.has(id)).toBe(true);
+		expect(await runOnPostgres(store.status(scope.podId))).toMatchObject({ state: "paused" });
+
+		const woken = await lease();
+		expect(woken.sandbox.id).toBe(id);
+		expect(woken.resumedAfterPause).toBe("filesystem");
+		expect(fake.paused.has(id)).toBe(false);
+		expect(await runOnPostgres(store.status(scope.podId))).toMatchObject({ state: "in_use" });
+	});
+
+	it("leaves a sandbox alone while a turn holds a lease on it", async () => {
+		const id = await usedOnce();
+		await lease();
+
+		expect(await runOnPostgres(store.pauseIdle(0))).toBe(0);
+		expect(fake.paused.has(id)).toBe(false);
+	});
+
+	it("does not say a sandbox was resumed when it was never paused", async () => {
+		await usedOnce();
+
+		expect((await lease()).resumedAfterPause).toBeUndefined();
 	});
 
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {

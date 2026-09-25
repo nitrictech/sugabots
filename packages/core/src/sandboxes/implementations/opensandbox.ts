@@ -32,6 +32,11 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 		});
 	const unavailable = (cause: unknown) =>
 		new Sandbox.Unavailable({ provider: "opensandbox", cause });
+	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
+	const missingOr = (cause: unknown, id: string) =>
+		cause instanceof SandboxApiException && cause.statusCode === 404
+			? new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })
+			: unavailable(cause);
 
 	return {
 		provider: "opensandbox",
@@ -57,10 +62,20 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 		connect: (id) =>
 			Effect.tryPromise({
 				try: () => OpenSandbox.connect({ sandboxId: id, connectionConfig: connectionConfig() }),
-				catch: (cause) =>
-					cause instanceof SandboxApiException && cause.statusCode === 404
-						? new Sandbox.Missing({ provider: "opensandbox", sandboxId: id })
-						: unavailable(cause),
+				catch: (cause) => missingOr(cause, id),
+			}).pipe(Effect.map(toHandle)),
+		// Docker pauses keep memory, but a Kubernetes pause keeps only the root
+		// filesystem, and the server doesn't say which it runs.
+		pauseKeeps: "filesystem",
+		pause: (id) =>
+			Effect.tryPromise({
+				try: () => SandboxManager.create({ connectionConfig: connectionConfig() }).pauseSandbox(id),
+				catch: (cause) => missingOr(cause, id),
+			}),
+		resume: (id) =>
+			Effect.tryPromise({
+				try: () => OpenSandbox.resume({ sandboxId: id, connectionConfig: connectionConfig() }),
+				catch: (cause) => missingOr(cause, id),
 			}).pipe(Effect.map(toHandle)),
 		check: Effect.tryPromise({
 			try: () =>
