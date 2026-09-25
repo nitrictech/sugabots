@@ -7,16 +7,22 @@ import type {
 	ProviderModelUpdate,
 	ProviderPresetId,
 } from "@sugabots/contracts";
-import { presetRequiresApiKey, providerPreset, seededPresets } from "@sugabots/contracts";
+import {
+	presetRequiresApiKey,
+	presetSignsIn,
+	providerPreset,
+	seededPresets,
+} from "@sugabots/contracts";
 import { and, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
-import { query, queryCatching, serviceOperations } from "../../database/database.ts";
+import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ModelProviderRow, modelProvider, providerModel } from "../../database/schema.ts";
 import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
+import { ChatgptTokens } from "./chatgpt.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 
 /**
@@ -44,6 +50,26 @@ export interface Interface {
 	) => Effect.Effect<ModelProviderRow | undefined>;
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
+	/**
+	 * Signs a ChatGPT provider in with `tokens`, or out with null. Like a new
+	 * key, it leaves the provider inactive and untested until it is tried.
+	 */
+	readonly saveChatgptSignIn: (
+		workspaceId: string,
+		providerId: string,
+		tokens: ChatgptTokens | null,
+	) => Effect.Effect<void>;
+	/**
+	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
+	 * holding its row locked meanwhile: a refresh token is good for one use, so
+	 * two turns must not both spend it. Not a configuration change, so the
+	 * provider's last test still stands. `undefined` if it is not signed in.
+	 */
+	readonly renewChatgptTokens: <E>(
+		workspaceId: string,
+		providerId: string,
+		renew: (current: ChatgptTokens) => Effect.Effect<ChatgptTokens, E>,
+	) => Effect.Effect<ChatgptTokens | undefined, E>;
 	/**
 	 * Records how a test of the configuration last updated at `testedAt` went,
 	 * unless the provider has been reconfigured since. A failure switches the
@@ -95,7 +121,7 @@ export interface Interface {
 		providerId: string,
 		modelId: string,
 	) => Effect.Effect<boolean>;
-	/** How to reach a provider, or nothing while its preset needs a key it lacks. */
+	/** How to reach a provider, or nothing while it lacks the key or sign-in its preset needs. */
 	readonly endpoint: (
 		workspaceId: string,
 		providerId: string,
@@ -184,7 +210,7 @@ export const make = Effect.gen(function* () {
 					.from(modelProvider)
 					.where(and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId))),
 			);
-			if (!row || (presetRequiresApiKey(row.preset) && !row.apiKeyEncrypted)) {
+			if (!row || lacksCredential(row)) {
 				return undefined;
 			}
 			return {
@@ -193,6 +219,9 @@ export const make = Effect.gen(function* () {
 				baseUrl: row.baseUrl,
 				apiFormat: row.apiFormat,
 				apiKey: row.apiKeyEncrypted ? cipher.decrypt(row.apiKeyEncrypted) : undefined,
+				chatgptTokens: row.chatgptTokensEncrypted
+					? openChatgptTokens(row.chatgptTokensEncrypted, cipher)
+					: undefined,
 				configurationUpdatedAt: row.updatedAt,
 				headers: Object.fromEntries(
 					row.customHeadersEncrypted.map(({ name, value }) => [name, cipher.decrypt(value)]),
@@ -303,6 +332,60 @@ export const make = Effect.gen(function* () {
 						)
 						.returning({ id: modelProvider.id }),
 				).pipe(Effect.map((rows) => rows.length > 0)),
+			),
+
+		saveChatgptSignIn: (workspaceId, providerId, tokens) =>
+			operation(
+				"saveChatgptSignIn",
+				query((db) =>
+					db
+						.update(modelProvider)
+						.set({
+							active: false,
+							chatgptTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
+							lastTestedAt: null,
+							lastTestError: null,
+						})
+						.where(
+							and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
+						),
+				),
+			),
+
+		renewChatgptTokens: (workspaceId, providerId, renew) =>
+			operation(
+				"renewChatgptTokens",
+				transaction(
+					Effect.gen(function* () {
+						const [row] = yield* query((db) =>
+							db
+								.select({
+									sealed: modelProvider.chatgptTokensEncrypted,
+									updatedAt: modelProvider.updatedAt,
+								})
+								.from(modelProvider)
+								.where(
+									and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
+								)
+								.for("update"),
+						);
+						if (!row?.sealed) return undefined;
+						const current = openChatgptTokens(row.sealed, cipher);
+						const renewed = yield* renew(current);
+						if (renewed === current) return current;
+						yield* query((db) =>
+							db
+								.update(modelProvider)
+								// Kept as it was, so a test of the configuration still records against it.
+								.set({
+									chatgptTokensEncrypted: cipher.encrypt(JSON.stringify(renewed)),
+									updatedAt: row.updatedAt,
+								})
+								.where(eq(modelProvider.id, providerId)),
+						);
+						return renewed;
+					}),
+				),
 			),
 
 		recordTest: (workspaceId, providerId, testedAt, outcome) =>
@@ -508,6 +591,12 @@ export interface ProviderEndpoint {
 	apiFormat: "openai" | "anthropic";
 	apiKey?: string;
 	headers: Record<string, string>;
+	/**
+	 * A signed-in ChatGPT provider's tokens, which stand in for its key. Use
+	 * the endpoint through `withChatgptAccess`, which puts a live token in
+	 * `apiKey`.
+	 */
+	chatgptTokens?: ChatgptTokens;
 	/** The provider's `updatedAt`, so a test's result is recorded against what it tried. */
 	configurationUpdatedAt: Date;
 }
@@ -582,4 +671,16 @@ function providerValues(input: NewModelProvider, cipher: Credentials.Interface) 
 function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: Credentials.Interface) {
 	if (apiKey === undefined) return undefined;
 	return apiKey === null ? null : cipher.encrypt(apiKey);
+}
+
+/** A provider that cannot be used yet: it wants a key, or a sign-in, it has not had. */
+export function lacksCredential(
+	row: Pick<ModelProviderRow, "preset" | "apiKeyEncrypted" | "chatgptTokensEncrypted">,
+): boolean {
+	if (presetSignsIn(row.preset)) return row.chatgptTokensEncrypted === null;
+	return presetRequiresApiKey(row.preset) && row.apiKeyEncrypted === null;
+}
+
+function openChatgptTokens(sealed: string, cipher: Credentials.Interface): ChatgptTokens {
+	return Schema.decodeUnknownSync(ChatgptTokens)(JSON.parse(cipher.decrypt(sealed)));
 }

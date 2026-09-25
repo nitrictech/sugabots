@@ -336,8 +336,10 @@ function PresetStep({
 	const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? preset.baseUrl);
 	const [error, setError] = useState<unknown>();
 	const local = preset.hosting === "local";
+	const requiresApiKey = preset.credential === "api-key";
+	const signsIn = preset.credential === "chatgpt-sign-in";
 	const typedBaseUrl = parseProviderBaseUrl(baseUrl);
-	const ready = (!preset.requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
+	const ready = (!requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
 	const pending = actions.create.isPending || actions.update.isPending;
 
 	async function submit(event: FormEvent) {
@@ -371,6 +373,9 @@ function PresetStep({
 			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup note={preset.hint}>
+					{signsIn && (
+						<SettingsRow label="Once it is added, sign in with the ChatGPT account whose plan it should use." />
+					)}
 					{local && (
 						<SettingsFieldRow
 							label="Server URL"
@@ -380,14 +385,16 @@ function PresetStep({
 							mono
 						/>
 					)}
-					<SettingsFieldRow
-						label="API key"
-						value={apiKey}
-						onChange={setApiKey}
-						placeholder={preset.requiresApiKey ? "Paste your key" : "Optional"}
-						mono
-						secret
-					/>
+					{!signsIn && (
+						<SettingsFieldRow
+							label="API key"
+							value={apiKey}
+							onChange={setApiKey}
+							placeholder={requiresApiKey ? "Paste your key" : "Optional"}
+							mono
+							secret
+						/>
+					)}
 				</SettingsGroup>
 				{local && baseUrl.trim() !== "" && typedBaseUrl === undefined && (
 					<Alert>

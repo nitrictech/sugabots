@@ -45,6 +45,8 @@ export const modelProvider = pgTable(
 			.$type<EncryptedProviderHeader[]>()
 			.notNull()
 			.default([]),
+		/** A ChatGPT sign-in's tokens, sealed JSON; only a provider that signs in has them. */
+		chatgptTokensEncrypted: text("chatgpt_tokens_encrypted"),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),

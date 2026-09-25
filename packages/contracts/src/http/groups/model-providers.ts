@@ -2,6 +2,9 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	bulkProviderModelUpdateSchema,
+	chatgptSignInCompletionSchema,
+	chatgptSignInOutcomeSchema,
+	chatgptSignInStartedSchema,
 	modelProviderSchema,
 	modelProviderUpdateSchema,
 	newModelProviderSchema,
@@ -63,6 +66,22 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			params: provider,
 			success: providerTestResultSchema,
 			error: refused,
+		}),
+		HttpApiEndpoint.post("startChatgptSignIn", `${root}/:providerId/chatgpt-sign-in`, {
+			params: provider,
+			success: chatgptSignInStartedSchema,
+			error: [BadRequest, ...refused],
+		}),
+		HttpApiEndpoint.post("completeChatgptSignIn", `${root}/:providerId/chatgpt-sign-in/complete`, {
+			params: provider,
+			payload: chatgptSignInCompletionSchema,
+			success: chatgptSignInOutcomeSchema,
+			error: [BadRequest, ...refused],
+		}),
+		HttpApiEndpoint.delete("signOutChatgpt", `${root}/:providerId/chatgpt-sign-in`, {
+			params: provider,
+			success: modelProviderSchema,
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.post("fetchModels", `${root}/:providerId/fetch-models`, {
 			params: provider,

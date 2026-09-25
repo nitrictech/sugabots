@@ -41,6 +41,7 @@ const groq: ModelProvider = {
 	status: "untested",
 	hasApiKey: true,
 	apiKeyHint: "",
+	signedIn: false,
 	customHeaders: [],
 	modelCount: 0,
 	enabledModelCount: 0,

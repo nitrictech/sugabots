@@ -1,5 +1,6 @@
 import type { ModelProvider, ProviderModel, SystemAgent } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
 import { expect, screen, within } from "storybook/test";
@@ -62,6 +63,7 @@ function provider(
 		status: "connected",
 		hasApiKey: true,
 		apiKeyHint: "4f2a",
+		signedIn: false,
 		customHeaders: [],
 		modelCount: models.length,
 		enabledModelCount: models.filter((one) => one.enabled).length,
@@ -113,7 +115,23 @@ const openrouter = provider(
 		);
 	}),
 );
-const providers = [anthropic, openai, ollama, openrouter];
+const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
+	baseUrl: "https://chatgpt.com/backend-api/codex",
+	status: "signed_out",
+	hasApiKey: false,
+	apiKeyHint: null,
+});
+const chatgptSignedIn: ModelProvider = {
+	...chatgpt,
+	status: "connected",
+	signedIn: true,
+	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
+	modelCount: 1,
+	enabledModelCount: 1,
+};
+const providers = [anthropic, openai, ollama, openrouter, chatgpt];
+
+const API = import.meta.env.VITE_API_URL as string;
 
 const bots = [
 	{ ...growthDesk, model: "claude-sonnet" },
@@ -133,7 +151,13 @@ const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((
 	model: "claude-haiku",
 }));
 
-function Preview({ children }: { children: ReactNode }) {
+function Preview({
+	providers,
+	children,
+}: {
+	providers: readonly ModelProvider[];
+	children: ReactNode;
+}) {
 	const [queryClient] = useState(() => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -168,7 +192,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	decorators: [
 		(Story, context) => (
-			<Preview key={context.id}>
+			<Preview key={context.id} providers={context.parameters.providers ?? providers}>
 				<Story />
 			</Preview>
 		),
@@ -222,6 +246,51 @@ export const LocalServer = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(ollama.baseUrl)).toBeInTheDocument();
 		await expect(canvas.getByText("None")).toBeInTheDocument();
+	},
+});
+
+/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one person's. */
+export const ChatgptSignIn = meta.story({
+	render: () => <ProviderSettings providerId={chatgpt.id} />,
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/workspaces/:workspace/model-providers/:providerId/chatgpt-sign-in`, () =>
+				HttpResponse.json({
+					verificationUrl: "https://auth.openai.com/codex/device",
+					userCode: "ABCD-1234",
+					attempt: "sealed-attempt",
+					pollIntervalMs: 60_000,
+					expiresAt: "2026-09-01T00:15:00.000Z",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(await canvas.findByText("Not signed in")).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Sign in with ChatGPT" }));
+		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		await expect(within(warning).getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
+			"href",
+			"https://openai.com/policies/terms-of-use/#registration-and-access",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Sign in" }));
+		await expect(await canvas.findByText("ABCD-1234")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Copy code" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Open sign-in page" })).toHaveAttribute(
+			"href",
+			"https://auth.openai.com/codex/device",
+		);
+	},
+});
+
+/** A signed-in ChatGPT provider, with the plan's models. */
+export const ChatgptSignedIn = meta.story({
+	parameters: { providers: [chatgptSignedIn] },
+	render: () => <ProviderSettings providerId={chatgptSignedIn.id} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("Signed in")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+		await expect(canvas.queryByText("API key")).toBeNull();
 	},
 });
 

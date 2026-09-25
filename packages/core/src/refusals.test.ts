@@ -251,6 +251,15 @@ const table: ReadonlyArray<ServiceRefusals> = [
 		},
 		remove: { call: (s, f) => s.remove(inProvider(f)), forbiddenFor: "member" },
 		test: { call: (s, f) => s.test(inProvider(f)), forbiddenFor: "member" },
+		startChatgptSignIn: {
+			call: (s, f) => s.startChatgptSignIn(inProvider(f)),
+			forbiddenFor: "member",
+		},
+		completeChatgptSignIn: {
+			call: (s, f) => s.completeChatgptSignIn({ ...inProvider(f), attempt: "attempt" }),
+			forbiddenFor: "member",
+		},
+		signOutChatgpt: { call: (s, f) => s.signOutChatgpt(inProvider(f)), forbiddenFor: "member" },
 		fetchModels: { call: (s, f) => s.fetchModels(inProvider(f)), forbiddenFor: "member" },
 		addModel: {
 			call: (s, f) =>
@@ -408,7 +417,15 @@ const workspaceServices = Layer.mergeAll(
 	ModelTrials.layer,
 ).pipe(
 	Layer.provide([
-		unimplemented(Egress.Service),
+		// The ChatGPT sign-in builds its client when the setup is built, and
+		// only a request through it is past a refusal.
+		unimplemented(Egress.Service, {
+			providers: {
+				for: () => async () => {
+					throw new Error("Egress.providers has no test double in this test");
+				},
+			},
+		}),
 		unimplemented(ModelProbe.Service),
 		unimplemented(Models),
 		unimplemented(Email.Service),

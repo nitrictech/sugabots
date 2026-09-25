@@ -5,7 +5,8 @@ import {
 	type ProviderModel,
 	type ProviderModelCapability,
 	type ProviderPresetId,
-	presetRequiresApiKey,
+	presetSignsIn,
+	providerLacksCredential,
 	providerModelCapabilityCatalog,
 	providerPreset,
 	seededPresets,
@@ -54,6 +55,8 @@ import {
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { ChatgptSignInRow } from "./ChatgptSignIn.tsx";
+import { ConnectionRow, valueText } from "./connection-row.tsx";
 
 /*
  * One provider: how it is reached, which of its models bots may use, and
@@ -65,12 +68,12 @@ import { Toggle } from "@/ui/toggle.tsx";
 const LARGE_CATALOG = 20;
 
 /**
- * Whether bots can reach a provider: switched on, and holding a key if it
- * needs one. Anthropic, OpenAI and Ollama exist in every workspace from the
+ * Whether bots can reach a provider: switched on, and holding the key or
+ * sign-in it needs. Anthropic, OpenAI and Ollama exist in every workspace from the
  * start, so for them this, not existing, is what "added" means.
  */
 export function isConnected(provider: ModelProvider): boolean {
-	return provider.active && (!presetRequiresApiKey(provider.preset) || provider.hasApiKey);
+	return provider.active && !providerLacksCredential(provider);
 }
 
 /**
@@ -157,14 +160,20 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const navigate = useNavigate();
 	const [disconnecting, setDisconnecting] = useState(false);
 	const preset = provider.preset === null ? null : providerPreset(provider.preset);
-	// The three every workspace starts with cannot be deleted, so disconnecting
-	// one takes its key away and switches it off, and adding it again brings it back.
+	// The ones every workspace starts with cannot be deleted, so disconnecting
+	// one takes its key or sign-in away and switches it off, and adding it again brings it back.
 	const seeded = provider.preset !== null && seededPresets.includes(provider.preset);
+	const signsIn = presetSignsIn(provider.preset);
 	const disconnect = seeded ? actions.update : actions.remove;
+	const disconnectPending = disconnect.isPending || actions.signOutChatgpt.isPending;
+	const disconnectError = disconnect.error ?? actions.signOutChatgpt.error;
 
 	async function confirmDisconnect() {
 		try {
 			if (seeded) {
+				if (provider.signedIn) {
+					await actions.signOutChatgpt.mutateAsync({ providerId: provider.id });
+				}
 				await actions.update.mutateAsync({
 					providerId: provider.id,
 					json: { active: false, ...(provider.hasApiKey ? { apiKey: null } : {}) },
@@ -224,12 +233,12 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				title={`Disconnect ${provider.name}?`}
 				description={
 					seeded
-						? "Its key is removed and bots can no longer use its models. You can connect it again at any time."
+						? `${signsIn ? "It is signed out" : "Its key is removed"} and bots can no longer use its models. You can connect it again at any time.`
 						: "Bots can no longer use its models. Adding it again means entering its details again."
 				}
 				confirmLabel="Disconnect"
-				pending={disconnect.isPending}
-				error={disconnect.error ? failureMessage(disconnect.error) : undefined}
+				pending={disconnectPending}
+				error={disconnectError ? failureMessage(disconnectError) : undefined}
 				onDelete={confirmDisconnect}
 			/>
 		</SettingsPage>
@@ -250,8 +259,9 @@ export function BackToModels() {
 }
 
 /**
- * How the provider is reached. A hosted one is its key; one you run is its
- * address and an optional key; a custom one also says which API it speaks.
+ * How the provider is reached. A hosted one is its key, or for ChatGPT a
+ * sign-in; one you run is its address and an optional key; a custom one also
+ * says which API it speaks.
  */
 function Connection({ provider, local }: { provider: ModelProvider; local: boolean }) {
 	const actions = useProviderActions();
@@ -319,7 +329,11 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 					{null}
 				</ConnectionRow>
 			)}
-			<KeyRow provider={provider} optional={local || custom} />
+			{presetSignsIn(provider.preset) ? (
+				<ChatgptSignInRow provider={provider} />
+			) : (
+				<KeyRow provider={provider} optional={local || custom} />
+			)}
 			{error && (
 				<div className="border-border border-t px-4 py-3">
 					<Alert>{failureMessage(error)}</Alert>
@@ -335,26 +349,6 @@ export const API_FORMATS = [
 	{ value: "anthropic", label: "Anthropic" },
 ] as const;
 
-/** A label, its value in the mono face, and Replace, which turns the value into a field. */
-function ConnectionRow({
-	label,
-	children,
-	action,
-}: {
-	label: string;
-	children: ReactNode;
-	action?: ReactNode;
-}) {
-	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="w-[110px] shrink-0 text-[14px] text-muted-foreground">{label}</span>
-			<span className="min-w-0 flex-1">{children}</span>
-			{action}
-		</div>
-	);
-}
-
-const valueText = "block truncate font-mono text-[13.5px] text-foreground";
 const fieldText =
 	"w-full min-w-0 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground";
 
@@ -653,10 +647,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 					variant="link"
 					size="bare"
 					className="text-sm"
-					disabled={
-						actions.fetchModels.isPending ||
-						(presetRequiresApiKey(provider.preset) && !provider.hasApiKey)
-					}
+					disabled={actions.fetchModels.isPending || providerLacksCredential(provider)}
 					onClick={() => actions.fetchModels.mutate({ providerId: provider.id })}
 				>
 					{actions.fetchModels.isPending ? "Refreshing…" : "Refresh list"}
