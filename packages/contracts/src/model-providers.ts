@@ -1,6 +1,11 @@
 import { Effect, Result, Schema } from "effect";
 import { modelIdSchema } from "./agents.ts";
-import { providerCatalog, providerPresetIdSchema } from "./provider-catalog.ts";
+import {
+	presetRequiresApiKey,
+	presetSignsIn,
+	providerCatalog,
+	providerPresetIdSchema,
+} from "./provider-catalog.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -8,6 +13,7 @@ export const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
 export type ProviderApiFormat = typeof providerApiFormatSchema.Type;
 export const providerStatusSchema = Schema.Literals([
 	"missing_key",
+	"signed_out",
 	"untested",
 	"connected",
 	"error",
@@ -190,6 +196,8 @@ export const modelProviderSchema = Schema.Struct({
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,
 	apiKeyHint: Schema.NullOr(Schema.String),
+	/** For a provider signed in to rather than given a key (ChatGPT), whether somebody has. */
+	signedIn: Schema.Boolean,
 	customHeaders: Schema.mutable(
 		Schema.Array(Schema.Struct({ name: Schema.String, valueHint: Schema.String })),
 	),
@@ -201,6 +209,33 @@ export const modelProviderSchema = Schema.Struct({
 });
 
 export type ModelProvider = typeof modelProviderSchema.Type;
+
+/** Whether the provider still needs its key, or its sign-in, before it can be used. */
+export function providerLacksCredential(
+	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn">,
+): boolean {
+	if (presetSignsIn(provider.preset)) return !provider.signedIn;
+	return presetRequiresApiKey(provider.preset) && !provider.hasApiKey;
+}
+
+/**
+ * A ChatGPT sign-in waiting on the person: they open `verificationUrl`, enter
+ * `userCode`, and the page asks for the outcome with `attempt` every
+ * `pollIntervalMs` until it is no longer pending.
+ */
+export const chatgptSignInStartedSchema = Schema.Struct({
+	verificationUrl: Schema.String,
+	userCode: Schema.String,
+	/** Opaque to the page: the sealed sign-in it hands back when it asks. */
+	attempt: Schema.String,
+	pollIntervalMs: Schema.Int.check(Schema.isGreaterThan(0)),
+	expiresAt: isoTimestampSchema,
+});
+export type ChatgptSignInStarted = typeof chatgptSignInStartedSchema.Type;
+
+export const chatgptSignInCompletionSchema = Schema.Struct({
+	attempt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+});
 
 const presetNames = new Set(providerCatalog.map(({ name }) => name.toLowerCase()));
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
@@ -308,6 +343,12 @@ export const workspaceModelsResponseSchema = Schema.Struct({
 	models: Schema.mutable(Schema.Array(workspaceModelSchema)),
 });
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;
+
+export const chatgptSignInOutcomeSchema = Schema.Union([
+	Schema.Struct({ status: Schema.Literal("pending") }),
+	Schema.Struct({ status: Schema.Literal("signed_in"), provider: modelProviderSchema }),
+]);
+export type ChatgptSignInOutcome = typeof chatgptSignInOutcomeSchema.Type;
 
 export const providerTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,

@@ -15,7 +15,8 @@ import { modelProviderStore } from "./store.ts";
  * once. Needs a migrated database and skips without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", () => {
-	const providers = modelProviderStore(Credentials.fromKey(Buffer.alloc(32, 7).toString("base64")));
+	const credentials = Credentials.fromKey(Buffer.alloc(32, 7).toString("base64"));
+	const providers = modelProviderStore(credentials);
 	const store = onPostgres(providers);
 	const operationsWithResponse = (
 		respond: () => Response | Promise<Response>,
@@ -31,6 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				httpClients: { for: () => async () => respond() },
 				validateProviderUrl: async () => {},
 				model,
+				cipher: credentials,
 			}),
 		);
 

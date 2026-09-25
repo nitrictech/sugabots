@@ -4,6 +4,7 @@ import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import { noToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import { ModelRequestFailed, type TurnModel } from "@sugabots/core/conversations/turns/model";
+import { Credentials } from "@sugabots/core/credentials/credentials";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
@@ -46,6 +47,8 @@ type TestAppOptions = TestIdentity & {
 	model?: TurnModel;
 };
 
+const TEST_CREDENTIAL_KEY = Buffer.alloc(32, 7).toString("base64");
+
 /** The test API's address. */
 export const BASE_URL = "http://localhost:3000";
 /** Where the test app's web app is served, a browser origin it trusts besides its own. */
@@ -87,6 +90,7 @@ export function createTestApp(options: TestAppOptions): TestApp {
 		},
 		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
 		oauthFetch: async () => new Response(null, { status: 503 }),
+		credentials: Credentials.fromKey(TEST_CREDENTIAL_KEY),
 	}).pipe(Layer.provide([noDatabase, HttpServer.layerServices]));
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 	return {
@@ -197,6 +201,8 @@ const emptyModelProviderStore: ModelProviderStore = {
 	create: () => notStubbed("modelProviders.create"),
 	update: () => Effect.undefined,
 	remove: () => Effect.succeed(false),
+	saveChatgptSignIn: () => Effect.undefined,
+	renewChatgptTokens: () => Effect.undefined,
 	connection: () => Effect.undefined,
 	resolve: () => Effect.undefined,
 	recordTest: () => Effect.void,

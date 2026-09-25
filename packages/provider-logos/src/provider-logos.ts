@@ -68,6 +68,16 @@ export const providerLogos: Record<ProviderPresetId, ProviderLogoAsset> = {
 		// The flower fills about half of its square.
 		scale: "scale-175",
 	},
+	// ChatGPT is OpenAI's product and OpenAI's brand page gives it the same Blossom mark.
+	chatgpt: {
+		light: openai,
+		dark: openaiDark,
+		source:
+			"https://cdn.openai.com/brand/openai-logos.zip (OpenAI-logos/SVGs/OAI_OpenAI-Blossom_Black.svg and _White.svg)",
+		guidelines: "https://openai.com/brand/",
+		fetched: FETCHED,
+		scale: "scale-175",
+	},
 	gemini: {
 		light: gemini,
 		source: "https://www.gstatic.com/images/branding/productlogos/gemini_2026/v1/192px.svg",

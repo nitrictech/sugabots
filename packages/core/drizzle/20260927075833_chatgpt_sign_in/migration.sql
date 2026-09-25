@@ -1,0 +1,1 @@
+ALTER TABLE "model_provider" ADD COLUMN "chatgpt_tokens_encrypted" text;

@@ -5,6 +5,7 @@ import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import type { ToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
+import type { Credentials } from "@sugabots/core/credentials/credentials";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { Installation } from "@sugabots/core/installation/installation";
@@ -104,6 +105,8 @@ export interface AppOptions {
 	oauthFetch: EgressHttpClient;
 	/** Runs a model, for trying one out on a system agent before choosing it. */
 	model: TurnModel;
+	/** Seals what the server hands out and takes back, such as a ChatGPT sign-in in progress. */
+	credentials: Credentials.Interface;
 }
 
 export function apiLayer({
@@ -117,6 +120,7 @@ export function apiLayer({
 	validateProviderUrl,
 	oauthFetch,
 	model,
+	credentials,
 }: AppOptions) {
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 
@@ -136,6 +140,7 @@ export function apiLayer({
 			httpClients,
 			validateProviderUrl,
 			model,
+			credentials,
 		}),
 		searchProviderRoutes({
 			searchProviders: stores.searchProviders,

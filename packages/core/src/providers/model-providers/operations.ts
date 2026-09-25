@@ -1,15 +1,25 @@
 import type {
+	ChatgptSignInOutcome,
+	ChatgptSignInStarted,
 	ModelProviderUpdate,
 	NewModelProvider,
 	ProviderModel,
 	ProviderModelUpdate,
 } from "@sugabots/contracts";
-import { presetRequiresApiKey, providerPreset } from "@sugabots/contracts";
-import { Data, Effect } from "effect";
+import { presetSignsIn, providerLacksCredential, providerPreset } from "@sugabots/contracts";
+import { Data, Effect, Schema } from "effect";
 import type { TurnModel } from "../../conversations/turns/model.ts";
 import { probeModel } from "../../conversations/turns/model.ts";
+import type { Credentials } from "../../credentials/credentials.ts";
 import type { Database } from "../../database/database.ts";
 import type { EgressHttpClients, EgressUrlValidator } from "../network/egress.ts";
+import {
+	CHATGPT_ISSUER,
+	type ChatgptSignInFailed,
+	type ChatgptTokens,
+	redeemDeviceCode,
+	requestDeviceCode,
+} from "./chatgpt.ts";
 import { fetchProviderModels, testProvider } from "./remote.ts";
 import type { ModelProviderStore } from "./store.ts";
 
@@ -77,6 +87,28 @@ export class ProviderModelRemovalNotAllowed extends Data.TaggedError(
 	}
 }
 
+export class ChatgptSignInNotOffered extends Data.TaggedError("ChatgptSignInNotOffered") {
+	override get message() {
+		return "This provider is not signed in to with ChatGPT";
+	}
+}
+
+export class ChatgptSignInAttemptInvalid extends Data.TaggedError("ChatgptSignInAttemptInvalid") {
+	override get message() {
+		return "This sign-in has expired; start again";
+	}
+}
+
+/** A device code in progress, sealed and handed to the page so the server keeps no state for it. */
+const SignInAttempt = Schema.Struct({
+	workspaceId: Schema.String,
+	providerId: Schema.String,
+	deviceAuthId: Schema.String,
+	userCode: Schema.String,
+	expiresAt: Schema.Number,
+});
+type SignInAttempt = typeof SignInAttempt.Type;
+
 export interface ProviderTestOutcome {
 	reachable: boolean;
 	latencyMs: number;
@@ -88,11 +120,14 @@ export function modelProviderOperations({
 	httpClients,
 	validateProviderUrl,
 	model,
+	cipher,
 }: {
 	providers: ModelProviderStore;
 	httpClients: EgressHttpClients;
 	validateProviderUrl: EgressUrlValidator;
 	model: TurnModel;
+	/** Seals a sign-in in progress; the same key as the stored credentials'. */
+	cipher: Credentials.Interface;
 }) {
 	const requireProvider = (workspaceId: string, providerId: string) =>
 		Effect.filterOrFail(
@@ -104,10 +139,41 @@ export function modelProviderOperations({
 	const requireConnectedProvider = (workspaceId: string, providerId: string) =>
 		requireProvider(workspaceId, providerId).pipe(
 			Effect.filterOrFail(
-				(provider) => !presetRequiresApiKey(provider.preset) || provider.hasApiKey,
+				(provider) => !providerLacksCredential(provider),
 				() => new ProviderModelsRequireApiKey(),
 			),
 		);
+
+	const requireSignInProvider = (workspaceId: string, providerId: string) =>
+		requireProvider(workspaceId, providerId).pipe(
+			Effect.filterOrFail(
+				(provider) => presetSignsIn(provider.preset),
+				() => new ChatgptSignInNotOffered(),
+			),
+		);
+
+	const openSignInAttempt = (sealed: string, workspaceId: string, providerId: string) =>
+		Effect.try(() => JSON.parse(cipher.decrypt(sealed)) as unknown).pipe(
+			Effect.flatMap(Schema.decodeUnknownEffect(SignInAttempt)),
+			Effect.mapError(() => new ChatgptSignInAttemptInvalid()),
+			Effect.filterOrFail(
+				(attempt) =>
+					attempt.workspaceId === workspaceId &&
+					attempt.providerId === providerId &&
+					attempt.expiresAt > Date.now(),
+				() => new ChatgptSignInAttemptInvalid(),
+			),
+		);
+
+	const chatgptAuth = httpClients.for({ baseUrl: CHATGPT_ISSUER });
+	const seal = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
+
+	const saveSignIn = (workspaceId: string, providerId: string, tokens: ChatgptTokens) =>
+		Effect.gen(function* () {
+			yield* providers.saveChatgptSignIn(workspaceId, providerId, tokens);
+			yield* discoverModelsQuietly(workspaceId, providerId, true);
+			return yield* requireProvider(workspaceId, providerId);
+		});
 
 	const requireAllowedUrl = (baseUrl: string) =>
 		Effect.tryPromise({
@@ -173,12 +239,7 @@ export function modelProviderOperations({
 				if (input.baseUrl) {
 					yield* requireAllowedUrl(input.baseUrl);
 				}
-				if (
-					input.active &&
-					presetRequiresApiKey(current.preset) &&
-					!current.hasApiKey &&
-					!input.apiKey
-				) {
+				if (input.active && providerLacksCredential(current) && !input.apiKey) {
 					return yield* new ProviderActivationRequiresApiKey();
 				}
 				const updated = yield* providers.update(workspaceId, providerId, {
@@ -214,6 +275,62 @@ export function modelProviderOperations({
 				const listed = yield* testProvider(providers, workspaceId, providerId, httpClients);
 				if (!listed.reachable) return listed;
 				return yield* tryAnEnabledModel(workspaceId, providerId, listed);
+			}),
+
+		startChatgptSignIn: (
+			workspaceId: string,
+			providerId: string,
+		): Effect.Effect<
+			ChatgptSignInStarted,
+			ModelProviderNotFound | ChatgptSignInNotOffered | ChatgptSignInFailed,
+			Database
+		> =>
+			Effect.gen(function* () {
+				yield* requireSignInProvider(workspaceId, providerId);
+				const code = yield* requestDeviceCode(chatgptAuth);
+				return {
+					verificationUrl: code.verificationUrl,
+					userCode: code.userCode,
+					attempt: seal({
+						workspaceId,
+						providerId,
+						deviceAuthId: code.deviceAuthId,
+						userCode: code.userCode,
+						expiresAt: code.expiresAt,
+					}),
+					pollIntervalMs: code.pollIntervalMs,
+					expiresAt: new Date(code.expiresAt).toISOString(),
+				};
+			}),
+
+		completeChatgptSignIn: (
+			workspaceId: string,
+			providerId: string,
+			sealedAttempt: string,
+		): Effect.Effect<
+			ChatgptSignInOutcome,
+			| ModelProviderNotFound
+			| ChatgptSignInNotOffered
+			| ChatgptSignInAttemptInvalid
+			| ChatgptSignInFailed,
+			Database
+		> =>
+			Effect.gen(function* () {
+				yield* requireSignInProvider(workspaceId, providerId);
+				const attempt = yield* openSignInAttempt(sealedAttempt, workspaceId, providerId);
+				const tokens = yield* redeemDeviceCode(chatgptAuth, attempt);
+				if (!tokens) return { status: "pending" as const };
+				return {
+					status: "signed_in" as const,
+					provider: yield* saveSignIn(workspaceId, providerId, tokens),
+				};
+			}),
+
+		signOutChatgpt: (workspaceId: string, providerId: string) =>
+			Effect.gen(function* () {
+				yield* requireSignInProvider(workspaceId, providerId);
+				yield* providers.saveChatgptSignIn(workspaceId, providerId, null);
+				return yield* requireProvider(workspaceId, providerId);
 			}),
 
 		fetchModels: (workspaceId: string, providerId: string) =>

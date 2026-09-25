@@ -183,6 +183,7 @@ const main = Effect.gen(function* () {
 		httpClients,
 		validateProviderUrl: egress.validateProviderUrl,
 		model,
+		credentials,
 	});
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
