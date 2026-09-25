@@ -12,7 +12,8 @@
 			"!**/node_modules",
 			"!**/*.svg",
 			"!packages/core/drizzle",
-			"!packages/web/.storybook/public/mockServiceWorker.js"
+			"!packages/web/.storybook/public/mockServiceWorker.js",
+			"!packages/website/src/routeTree.gen.ts"
 		]
 	},
 	"formatter": {
@@ -49,7 +50,8 @@
 				"packages/web/src/ui/dialog.tsx",
 				"packages/web/src/ui/dropdown-menu.tsx",
 				"packages/web/src/ui/select.tsx",
-				"packages/web/src/ui/textarea.tsx"
+				"packages/web/src/ui/textarea.tsx",
+				"packages/website/src/components/ui/item.tsx"
 			],
 			"linter": {
 				"enabled": false

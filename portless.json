@@ -1,6 +1,13 @@
 {
 	"apps": {
-		"packages/web": { "name": "sugabots" },
-		"packages/server": { "name": "api.sugabots" }
+		"packages/web": {
+			"name": "sugabots"
+		},
+		"packages/server": {
+			"name": "api.sugabots"
+		},
+		"packages/website": {
+			"name": "www.sugabots"
+		}
 	}
 }
