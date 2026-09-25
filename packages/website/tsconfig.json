@@ -8,5 +8,5 @@
 		/* `@/` as shadcn/ui writes it. Vite resolves it through `tsconfigPaths`. */
 		"paths": { "@/*": ["./src/*"] }
 	},
-	"include": ["src", "vite.config.ts"]
+	"include": ["src", "scripts", "vite.config.ts"]
 }

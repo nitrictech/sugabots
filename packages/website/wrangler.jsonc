@@ -3,5 +3,7 @@
 	"name": "sugabots-website",
 	"compatibility_date": "2026-09-25",
 	// The site is prerendered, so the Worker only serves the built files.
-	"assets": { "directory": "./dist/client" }
+	"assets": { "directory": "./dist/client" },
+	// `wrangler preview` (preview builds) requires this block; the settings above apply to previews too.
+	"previews": {}
 }

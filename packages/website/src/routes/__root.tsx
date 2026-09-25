@@ -2,6 +2,7 @@ import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
 import type { ReactNode } from "react";
+import { siteMeta } from "@/site-meta";
 import stylesUrl from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -9,11 +10,16 @@ export const Route = createRootRoute({
 		meta: [
 			{ charSet: "utf-8" },
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
-			{ title: "Sugabots — agents, now multiplayer" },
-			{
-				name: "description",
-				content: "An open-source harness where people and agents work together.",
-			},
+			{ title: siteMeta.title },
+			{ name: "description", content: siteMeta.description },
+			{ property: "og:type", content: "website" },
+			{ property: "og:url", content: siteMeta.url },
+			{ property: "og:title", content: siteMeta.title },
+			{ property: "og:description", content: siteMeta.description },
+			{ property: "og:image", content: `${siteMeta.url}${siteMeta.ogImagePath}` },
+			{ property: "og:image:width", content: "1200" },
+			{ property: "og:image:height", content: "630" },
+			{ name: "twitter:card", content: "summary_large_image" },
 		],
 		links: [
 			{ rel: "stylesheet", href: stylesUrl },

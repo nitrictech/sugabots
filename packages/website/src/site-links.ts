@@ -13,7 +13,7 @@ const EARLY_ACCESS_BODY = "Let me know when it's ready, I want to try Sugabots."
 export const siteLinks = {
 	docs: "https://docs.sugabots.ai",
 	github: "https://github.com/nitrictech/sugabots",
-	discord: "https://suga.app/chat",
+	discord: "https://discord.gg/YPuHCVAsx",
 	getStarted: "#start",
 	earlyAccess: `mailto:${EARLY_ACCESS_ADDRESS}?subject=${encodeURIComponent(EARLY_ACCESS_SUBJECT)}&body=${encodeURIComponent(EARLY_ACCESS_BODY)}`,
 } as const;
