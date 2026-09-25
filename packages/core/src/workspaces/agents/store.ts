@@ -114,6 +114,7 @@ const create: AgentStore["create"] = (workspaceId, createdById, input) =>
 						model: input.model,
 						prompt: input.prompt ?? "",
 						disabledTools: input.disabledTools ?? [],
+						sandboxEnabled: input.sandboxEnabled ?? false,
 					})
 					.onConflictDoNothing({ target: [agent.podId, agent.name] })
 					.returning(),
@@ -261,6 +262,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		model: row.model,
 		prompt: row.prompt,
 		disabledTools: row.disabledTools,
+		sandboxEnabled: row.sandboxEnabled,
 		createdAt: row.createdAt.toISOString(),
 	};
 }

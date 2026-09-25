@@ -29,6 +29,12 @@ export const workspaceSettingSections = [
 		needs: "manageProviders",
 	},
 	{
+		id: "sandboxes",
+		label: "Sandboxes",
+		path: "/settings/sandboxes",
+		needs: "manageProviders",
+	},
+	{
 		id: "built-in-agents",
 		label: "Built-in agents",
 		path: "/settings/built-in-agents",

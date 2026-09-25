@@ -138,6 +138,7 @@ function agentRow(workspaceId: string, agent: TestAgent): schema.AgentRow {
 		model: agent.model ?? "test-model",
 		prompt: "",
 		disabledTools: [],
+		sandboxEnabled: false,
 		createdById: null,
 		createdAt: CREATED_AT,
 		updatedAt: CREATED_AT,

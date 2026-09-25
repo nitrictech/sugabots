@@ -112,6 +112,7 @@ export function AgentSettingsPage({
 				</TabPanel>
 				<TabPanel value="tools" className="flex max-w-[720px] flex-col gap-7">
 					<BuiltInTools agent={agent} canChange={mayEdit} save={update.mutateAsync} />
+					<SandboxAccess agent={agent} canChange={mayEdit} save={update.mutateAsync} />
 					<InheritedConnections agent={agent} pod={pod} />
 				</TabPanel>
 				<TabPanel value="routines">
@@ -471,6 +472,50 @@ function BuiltInTools({
 						</div>
 					);
 				})}
+			</Card>
+		</LabeledField>
+	);
+}
+
+/*
+ * Whether the agent may use the pod's sandbox. Off until an admin turns it on,
+ * since what the agent writes there runs.
+ */
+function SandboxAccess({
+	agent,
+	canChange,
+	save,
+}: {
+	agent: Agent;
+	canChange: boolean;
+	save: (change: AgentUpdate) => Promise<unknown>;
+}) {
+	const on = agent.sandboxEnabled;
+	return (
+		<LabeledField label="Sandbox">
+			<Card>
+				<div className="flex min-h-11 items-center gap-3 px-4 py-2">
+					<span className="min-w-0 flex-1">
+						<span className="block font-medium text-base text-heading">
+							Run commands and edit files
+						</span>
+						<span className="block text-muted-foreground text-sm">
+							In a Linux machine the pod's agents share, once sandboxes are set up in the
+							workspace's settings.
+						</span>
+					</span>
+					{canChange ? (
+						<Toggle
+							checked={on}
+							label={`${on ? "Turn off" : "Turn on"} the sandbox`}
+							onChange={(next) => save({ sandboxEnabled: next }).catch(() => {})}
+						/>
+					) : (
+						<span className="w-11 text-right text-md text-muted-foreground">
+							{on ? "On" : "Off"}
+						</span>
+					)}
+				</div>
 			</Card>
 		</LabeledField>
 	);

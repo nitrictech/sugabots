@@ -15,6 +15,7 @@ import type {
 	EgressHttpClients,
 	EgressUrlValidator,
 } from "@sugabots/core/providers/network/egress";
+import type { SandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
@@ -45,6 +46,7 @@ import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
 import { podRoutes } from "../routes/pods/routes.ts";
 import { routineRoutes } from "../routes/routines/routes.ts";
+import { sandboxProviderRoutes } from "../routes/sandbox-providers/routes.ts";
 import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
 import { systemRoutes } from "../routes/system/routes.ts";
 import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
@@ -77,6 +79,7 @@ export interface Stores {
 	onboarding: OnboardingStore;
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
+	sandboxProviders: SandboxProviderStore;
 	connections: ConnectionStore;
 	threads: ThreadStore;
 	chats: ChatStore;
@@ -106,6 +109,8 @@ export interface AppOptions {
 	model: TurnModel;
 	/** Seals what the server hands out and takes back, such as a ChatGPT sign-in in progress. */
 	credentialCipher: CredentialCipher;
+	/** Whether a workspace may choose sandboxes that share this machine's kernel. */
+	allowsUnisolatedSandboxes?: boolean;
 }
 
 export function apiLayer({
@@ -120,6 +125,7 @@ export function apiLayer({
 	oauthFetch,
 	model,
 	credentialCipher,
+	allowsUnisolatedSandboxes = false,
 }: AppOptions) {
 	const origins = trustedOrigins({ baseUrl, webOrigins });
 	const apiUrl = `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}`;
@@ -145,6 +151,11 @@ export function apiLayer({
 			searchProviders: stores.searchProviders,
 			httpClients,
 			validateProviderUrl,
+		}),
+		sandboxProviderRoutes({
+			sandboxProviders: stores.sandboxProviders,
+			validateProviderUrl,
+			allowsUnisolated: allowsUnisolatedSandboxes,
 		}),
 		connectionRoutes({
 			authorization,

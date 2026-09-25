@@ -21,6 +21,7 @@ import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { SurfaceColumn, SurfaceHeader, SurfaceTitle } from "@/ui/surface.tsx";
 import { BuiltInAgentsSettings } from "./BuiltInAgentsSettings.tsx";
 import { ModelProvidersSettings } from "./ModelProvidersSettings/index.tsx";
+import { SandboxSettings } from "./SandboxSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
@@ -118,6 +119,10 @@ export function WorkspaceSettings({
 						{section === "search" && may.manageProviders && <WebSearchSettings />}
 						{section === "search" && !may.manageProviders && (
 							<Alert>Only workspace administrators can manage web search.</Alert>
+						)}
+						{section === "sandboxes" && may.manageProviders && <SandboxSettings />}
+						{section === "sandboxes" && !may.manageProviders && (
+							<Alert>Only workspace administrators can manage sandboxes.</Alert>
 						)}
 						{section === "built-in-agents" && (
 							<Alert>Only workspace administrators can configure the built-in agents.</Alert>

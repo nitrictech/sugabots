@@ -15,6 +15,7 @@ export * from "./onboarding.ts";
 export * from "./pods.ts";
 export * from "./provider-catalog.ts";
 export * from "./routines.ts";
+export * from "./sandbox-providers.ts";
 export * from "./search-providers.ts";
 export * from "./system-agents.ts";
 export * from "./threads.ts";

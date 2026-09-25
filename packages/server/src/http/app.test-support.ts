@@ -13,6 +13,7 @@ import type {
 	EgressHttpClients,
 	EgressUrlValidator,
 } from "@sugabots/core/providers/network/egress";
+import type { SandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import { type Authorization, closedAuthorization } from "@sugabots/core/workspaces/access";
 import { type AgentStore, crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/store";
@@ -188,6 +189,16 @@ const emptySearchProviderStore: SearchProviderStore = {
 	recordTest: () => Effect.void,
 };
 
+const emptySandboxProviderStore: SandboxProviderStore = {
+	get: () => Effect.undefined,
+	replace: () => notStubbed("sandboxProviders.replace"),
+	update: () => Effect.undefined,
+	remove: () => Effect.succeed(false),
+	connection: () => Effect.undefined,
+	resolve: () => Effect.undefined,
+	recordTest: () => Effect.void,
+};
+
 const emptyModelProviderStore: ModelProviderStore = {
 	list: () => Effect.succeed([]),
 	get: () => Effect.undefined,
@@ -226,6 +237,7 @@ const emptyStores: Stores = {
 	onboarding: emptyOnboardingStore,
 	modelProviders: emptyModelProviderStore,
 	searchProviders: emptySearchProviderStore,
+	sandboxProviders: emptySandboxProviderStore,
 	connections: emptyConnectionStore,
 	threads: emptyThreadStore,
 	chats: emptyChatStore,

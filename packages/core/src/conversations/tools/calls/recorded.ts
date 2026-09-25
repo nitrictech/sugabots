@@ -23,7 +23,7 @@ export interface RecordingOptions {
 	noteToolCall: (call: { id: string; atOffset: number; mutating: boolean }) => Effect.Effect<void>;
 	/** Marks the external mutation boundary, after approval and before dispatch. */
 	markActed?: () => Effect.Effect<void>;
-	/** Whether the tool may change something at the other end (ADR 002). Built-in tools do not. */
+	/** Whether the tool may change something at the other end (ADR 002). Built-in tools do not; sandbox tools do. */
 	mutating?: boolean;
 	approval?: {
 		store: ToolApprovalStore;

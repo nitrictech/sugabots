@@ -31,7 +31,9 @@ import {
 	createEgressHttpClients,
 	createEgressUrlValidator,
 } from "@sugabots/core/providers/network/egress";
+import { sandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { podSandboxStore } from "@sugabots/core/sandboxes/store";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
@@ -133,6 +135,7 @@ const main = Effect.gen(function* () {
 		onboarding: onboardingStore,
 		modelProviders,
 		searchProviders: searchProviderStore(credentialCipher),
+		sandboxProviders: sandboxProviderStore(credentialCipher),
 		connections: connectionStore(credentialCipher),
 		chats: chatStore(publishEvents),
 		routines: routineStore(publishEvents),
@@ -143,6 +146,11 @@ const main = Effect.gen(function* () {
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents),
 	};
+	const sandboxes = podSandboxStore({
+		providers: stores.sandboxProviders,
+		allowsUnisolated: config.allowUnisolatedSandboxes,
+	});
+
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -179,6 +187,7 @@ const main = Effect.gen(function* () {
 			approvals: stores.approvals,
 			builtInTools,
 			connectionTools,
+			sandboxes,
 			publishEvents,
 		}),
 	);
@@ -194,6 +203,7 @@ const main = Effect.gen(function* () {
 		validateProviderUrl,
 		model,
 		credentialCipher,
+		allowsUnisolatedSandboxes: config.allowUnisolatedSandboxes,
 	});
 	yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(

@@ -37,6 +37,12 @@ export interface Config {
 	 */
 	allowPrivateWebFetchNetwork: boolean;
 	/**
+	 * Whether a workspace may run sandboxes that share this machine's kernel
+	 * (`container` isolation). Off unless the installation says otherwise: an
+	 * escape from one is an escape to the host, which is the installation's.
+	 */
+	allowUnisolatedSandboxes: boolean;
+	/**
 	 * Whether anybody may create an account. Off unless the installation says
 	 * otherwise: the first account is admitted regardless, and after that the
 	 * only way in is an invitation.
@@ -104,6 +110,10 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		env.ALLOW_PRIVATE_WEB_FETCH_NETWORK === undefined
 			? false
 			: booleanFromEnv(env.ALLOW_PRIVATE_WEB_FETCH_NETWORK, "ALLOW_PRIVATE_WEB_FETCH_NETWORK");
+	const allowUnisolatedSandboxes =
+		env.SANDBOX_ALLOW_UNISOLATED === undefined
+			? false
+			: booleanFromEnv(env.SANDBOX_ALLOW_UNISOLATED, "SANDBOX_ALLOW_UNISOLATED");
 	const allowOpenSignUp =
 		env.ALLOW_OPEN_SIGNUP === undefined
 			? false
@@ -124,6 +134,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		modelProviderEncryptionKey,
 		allowPrivateModelProviderNetwork,
 		allowPrivateWebFetchNetwork,
+		allowUnisolatedSandboxes,
 		allowOpenSignUp,
 		requireEmailVerification,
 		transactionalEmailFrom,

@@ -318,6 +318,8 @@ export const agent = pgTable(
 		// The built-in tools switched off for this agent, by key. What is off
 		// rather than what is on, so a new tool reaches every existing agent.
 		disabledTools: jsonb("disabled_tools").$type<string[]>().notNull().default([]),
+		// Whether it may use the pod's sandbox. Opt-in, unlike the built-in tools.
+		sandboxEnabled: boolean("sandbox_enabled").notNull().default(false),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),

@@ -20,6 +20,7 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
+import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import { Layer } from "effect";
 
 /**
@@ -45,6 +46,8 @@ export interface BackgroundOptions {
 	builtInTools: BuiltInTools;
 	/** The tools inherited from an agent's pod for a turn. */
 	connectionTools: ConnectionTools;
+	/** Pods' sandboxes, for agents an admin let use theirs. */
+	sandboxes?: PodSandboxStore;
 	/** For the facilitator to announce who it invited. */
 	publishEvents: PublishEvents;
 }
@@ -61,6 +64,7 @@ export function backgroundLayer({
 	approvals = noToolApprovalStore,
 	builtInTools,
 	connectionTools,
+	sandboxes,
 	publishEvents,
 }: BackgroundOptions): Layer.Layer<never, never, Database> {
 	return Layer.mergeAll(
@@ -77,6 +81,7 @@ export function backgroundLayer({
 			approvals,
 			builtInTools,
 			connectionTools,
+			sandboxes,
 			routines,
 		}),
 		summaryWorkerLayer({ store: summaries, model }),
