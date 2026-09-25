@@ -103,6 +103,13 @@ export const accessPolicy: AccessPolicy = {
 		remove: { workspace: "workspace.providers.manage" },
 		test: { workspace: "workspace.providers.manage" },
 	},
+	sandboxProviders: {
+		get: { workspace: "workspace.providers.manage" },
+		replace: { workspace: "workspace.providers.manage" },
+		update: { workspace: "workspace.providers.manage" },
+		remove: { workspace: "workspace.providers.manage" },
+		test: { workspace: "workspace.providers.manage" },
+	},
 	connections: {
 		list: { pod: "connection.read" },
 		create: { pod: "connection.manage" },

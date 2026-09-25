@@ -29,7 +29,9 @@ import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import { Egress } from "@sugabots/core/providers/network/egress";
+import { sandboxProviderStore } from "@sugabots/core/providers/sandbox-providers/store";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { podSandboxStore } from "@sugabots/core/sandboxes/store";
 import { Lanes } from "@sugabots/core/workflows/lanes";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
@@ -99,6 +101,7 @@ const main = Effect.gen(function* () {
 		onboarding: onboardingStore,
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
+		sandboxProviders: sandboxProviderStore(credentials),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurn),
 		routines: routineStore(publishEvents, queueTurn, signals),
@@ -109,6 +112,16 @@ const main = Effect.gen(function* () {
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents, signals),
 	};
+	// A container sandbox shares this machine's kernel, so an escape from one is
+	// an escape to the host. Off unless the installation says otherwise.
+	const allowsUnisolatedSandboxes = yield* Config.Boolean("SANDBOX_ALLOW_UNISOLATED").pipe(
+		Config.withDefault(false),
+	);
+	const sandboxes = podSandboxStore({
+		providers: stores.sandboxProviders,
+		allowsUnisolated: allowsUnisolatedSandboxes,
+	});
+
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -147,6 +160,7 @@ const main = Effect.gen(function* () {
 					approvals: stores.approvals,
 					builtInTools,
 					connectionTools,
+					sandboxes,
 					routines: stores.routines,
 					queueSummary: (request) => queueSummary(lanes, request),
 				}),
@@ -169,6 +183,7 @@ const main = Effect.gen(function* () {
 			approvals: stores.approvals,
 			builtInTools,
 			connectionTools,
+			sandboxes,
 			publishEvents,
 		}),
 	);
@@ -184,6 +199,7 @@ const main = Effect.gen(function* () {
 		validateProviderUrl: egress.validateProviderUrl,
 		model,
 		credentials,
+		allowsUnisolatedSandboxes,
 	});
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(

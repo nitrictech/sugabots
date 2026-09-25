@@ -119,6 +119,12 @@ export const agentSchema = Schema.Struct({
 	 * agent (ADR 005). Empty for an agent with everything.
 	 */
 	disabledTools: Schema.mutable(Schema.Array(Schema.String)),
+	/**
+	 * Whether this agent may run commands and edit files in its pod's sandbox.
+	 * Off unless an admin turns it on: unlike the built-in tools, a sandbox runs
+	 * whatever the agent writes, so it is opted into agent by agent.
+	 */
+	sandboxEnabled: Schema.Boolean,
 	createdAt: isoTimestampSchema,
 });
 
@@ -142,6 +148,7 @@ export const newAgentInPodSchema = Schema.Struct({
 	model: modelIdSchema,
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),
 	disabledTools: Schema.optional(toolKeysSchema),
+	sandboxEnabled: Schema.optional(Schema.Boolean),
 });
 
 export const newAgentSchema = newAgentInPodSchema.mapFields(Struct.assign({ podId: uuidSchema }));

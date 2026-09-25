@@ -191,6 +191,7 @@ function ContactCard({
 				/>
 			</SettingsGroup>
 			<Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />
+			<SandboxAccess agent={agent} canChange={may.updateAgents} save={save} />
 			<section
 				id="routines"
 				ref={(element) => {
@@ -212,6 +213,41 @@ function ContactCard({
 				onDelete={deleteAgent}
 			/>
 		</SettingsPage>
+	);
+}
+
+/*
+ * Whether the agent may use the pod's sandbox. Off until an admin turns it on,
+ * since what the agent writes there runs.
+ */
+function SandboxAccess({
+	agent,
+	canChange,
+	save,
+}: {
+	agent: Agent;
+	canChange: boolean;
+	save: Save;
+}) {
+	const on = agent.sandboxEnabled;
+	return (
+		<SettingsGroup label="Sandbox">
+			<SettingsRow
+				label="Run commands and edit files"
+				sub="In a Linux machine the pod's bots share, once sandboxes are set up in the workspace's settings."
+				trailing={
+					canChange ? (
+						<Toggle
+							checked={on}
+							label={`${on ? "Turn off" : "Turn on"} the sandbox`}
+							onChange={(next) => save({ sandboxEnabled: next }).catch(() => {})}
+						/>
+					) : (
+						<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
+					)
+				}
+			/>
+		</SettingsGroup>
 	);
 }
 

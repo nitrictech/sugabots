@@ -16,10 +16,11 @@ import type { OfferedTool } from "./connections.ts";
  * this is the only place that knows which ones exist, so adding a tool is a
  * folder and a line here rather than a change to the worker.
  *
- * Three kinds. The crew tool `collaborate` reaches other agents
- * and leave their own records. The built-in tools do work for the agent, and
- * the connection tools do work at a server the workspace configured; every
- * call to either is recorded as a `tool_call` part of the reply (`calls/`).
+ * Four kinds. The crew tool `collaborate` reaches other agents
+ * and leave their own records. The built-in tools do work for the agent, the
+ * sandbox tools work in the pod's sandbox, and the connection tools do work at
+ * a server the workspace configured; every call to any of these is recorded as
+ * a `tool_call` part of the reply (`calls/`).
  */
 
 export interface ToolDependencies {
@@ -31,6 +32,12 @@ export interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: ToolSet;
+	/**
+	 * The pod sandbox's tools, when this agent may use them. Recorded as acting:
+	 * a command changes the sandbox, so a turn that ran one is not retried.
+	 * They don't ask for approval, since the sandbox is what contains them.
+	 */
+	sandbox?: ToolSet;
 	/** The pod connections' tools, keyed `handle__tool`, each with whether it changes things. */
 	connections?: Record<string, OfferedTool>;
 	/** For a tool that watches for something else to happen. */
@@ -70,6 +77,9 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	};
 	for (const [key, tool] of Object.entries(deps.builtIn)) {
 		tools[key] = recorded(key, tool, recording);
+	}
+	for (const [key, tool] of Object.entries(deps.sandbox ?? {})) {
+		tools[key] = recorded(key, tool, { ...recording, mutating: true });
 	}
 	for (const [key, offered] of Object.entries(deps.connections ?? {})) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;

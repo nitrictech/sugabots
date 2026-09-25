@@ -22,6 +22,7 @@ import {
 import { ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
+import { SandboxSettings } from "./SandboxSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
@@ -98,6 +99,15 @@ export function WorkspaceSettings({
 								<WebSearchSettings />
 							) : (
 								<Alert>Only workspace administrators can manage web search.</Alert>
+							)}
+						</SettingsPage>
+					)}
+					{section === "sandboxes" && (
+						<SettingsPage title="Sandboxes" description="Where bots run commands and edit files.">
+							{may.manageProviders ? (
+								<SandboxSettings />
+							) : (
+								<Alert>Only workspace administrators can manage sandboxes.</Alert>
 							)}
 						</SettingsPage>
 					)}

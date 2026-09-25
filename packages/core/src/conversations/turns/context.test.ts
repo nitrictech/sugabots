@@ -6,6 +6,7 @@ const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment 
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
 	connectionTools: [],
+	sandbox: false,
 	...overrides,
 });
 
@@ -217,6 +218,7 @@ function context(): TurnContext {
 			model: "claude-sonnet-4-20250514",
 			prompt: "Check facts carefully.",
 			disabledTools: [],
+			sandboxEnabled: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

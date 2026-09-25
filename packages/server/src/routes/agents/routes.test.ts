@@ -35,6 +35,7 @@ const agent: Agent = {
 	model: MODEL,
 	prompt: "",
 	disabledTools: [],
+	sandboxEnabled: false,
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 

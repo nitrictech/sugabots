@@ -14,6 +14,7 @@ import {
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import type { PodSandboxStore } from "../../sandboxes/store.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
@@ -25,6 +26,8 @@ import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
+import { sandboxTools } from "../tools/sandbox/tools.ts";
+import { turnSandbox } from "../tools/sandbox/turn-sandbox.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
 import { jobTurnOwner, segmentTurnOwner, type TurnOwner } from "./owner.ts";
@@ -59,6 +62,10 @@ const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_CONCURRENCY = 8;
+/** Model calls in one turn, counting any before it parked for an approval. */
+const MAX_MODEL_CALLS = 8;
+/** Working in a sandbox is many small steps: run, read the error, edit, run again. */
+const MAX_MODEL_CALLS_WITH_SANDBOX = 40;
 
 export interface TurnExecution {
 	store: TurnStore;
@@ -72,6 +79,8 @@ export interface TurnExecution {
 	builtInTools?: BuiltInTools;
 	/** The tools inherited from the agent's pod, opened for the turn (ADR 006). */
 	connectionTools?: ConnectionTools;
+	/** Pods' sandboxes, for agents an admin let use theirs. */
+	sandboxes?: PodSandboxStore;
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
@@ -406,6 +415,7 @@ const streamReply = (
 		approvals = noToolApprovalStore,
 		builtInTools = noBuiltInTools,
 		connectionTools = noConnectionTools,
+		sandboxes,
 	}: TurnExecution,
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<StreamOutcome, Error, Database> =>
@@ -424,6 +434,7 @@ const streamReply = (
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
+			const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) });
 			const now = new Date(yield* Clock.currentTimeMillis);
 			const builtIn = withoutDisabled(
 				yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId),
@@ -434,6 +445,27 @@ const streamReply = (
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId),
 				(opened) => Effect.promise(() => opened.close()),
 			);
+			// Leased on the first sandbox call, and let go when the turn ends or
+			// parks. A release that fails leaves the lease to expire on its own.
+			const sandbox =
+				sandboxes &&
+				prepared.context.agent.sandboxEnabled &&
+				(yield* sandboxes.offered(prepared.context.thread.workspaceId))
+					? yield* Effect.acquireRelease(
+							Effect.sync(() =>
+								turnSandbox(
+									sandboxes,
+									{
+										workspaceId: prepared.context.thread.workspaceId,
+										podId: prepared.context.agent.podId,
+										turnId: prepared.turnId,
+									},
+									run,
+								),
+							),
+							(held) => Effect.promise(() => held.release().catch(() => {})),
+						)
+					: undefined;
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				const offered = connections.tools[binding.tool];
@@ -456,9 +488,10 @@ const streamReply = (
 				approvals,
 				approvalBoundTools,
 				builtIn,
+				...(sandbox ? { sandbox: sandboxTools(sandbox, run) } : {}),
 				connections: connections.tools,
 				bus: events,
-				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
+				run,
 				reply: {
 					length: () => Ref.getUnsafe(reply).content.length,
 					noteCollaboration: (collaboration) =>
@@ -485,6 +518,7 @@ const streamReply = (
 				now,
 				builtInTools: Object.keys(builtIn),
 				connectionTools: Object.keys(connections.tools),
+				sandbox: sandbox !== undefined,
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
@@ -512,7 +546,11 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
-				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.usage.modelCalls ?? 0)),
+				maxSteps: Math.max(
+					1,
+					(sandbox ? MAX_MODEL_CALLS_WITH_SANDBOX : MAX_MODEL_CALLS) -
+						(prepared.checkpoint?.accounting.usage.modelCalls ?? 0),
+				),
 				signal: stop.signal,
 			});
 

@@ -109,6 +109,8 @@ export interface TurnContext {
 		prompt: string;
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];
+		/** Whether an admin let this agent use the pod's sandbox. */
+		sandboxEnabled: boolean;
 		podId: string;
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */
@@ -384,6 +386,7 @@ export function turnStore(
 								model,
 								prompt: scope.agentPrompt,
 								disabledTools: scope.agentDisabledTools,
+								sandboxEnabled: scope.agentSandboxEnabled,
 								podId: scope.podId,
 							},
 							reason: claimed.payload.reason,
@@ -788,6 +791,7 @@ interface TurnScope {
 	agentModel: string | null;
 	agentPrompt: string;
 	agentDisabledTools: string[];
+	agentSandboxEnabled: boolean;
 }
 
 /**
@@ -826,6 +830,7 @@ const loadTurnScope = Effect.fn("TurnStore.loadTurnScope")(function* (
 			agentModel: agent.model,
 			agentPrompt: agent.prompt,
 			agentDisabledTools: agent.disabledTools,
+			agentSandboxEnabled: agent.sandboxEnabled,
 		})
 		.from(thread)
 		.innerJoin(pod, eq(pod.id, thread.podId))

@@ -6,6 +6,8 @@ import type {
 	ProviderModel,
 	ProviderModelCapability,
 	ProviderPresetId,
+	SandboxIsolation,
+	SandboxProviderPresetId,
 	SearchProviderPresetId,
 } from "@sugabots/contracts";
 import {
@@ -122,6 +124,39 @@ export const searchProvider = pgTable(
 );
 
 export type SearchProviderRow = typeof searchProvider.$inferSelect;
+
+/**
+ * Where a workspace's pods get their sandboxes: one sandbox service, from the
+ * sandbox catalog, at the workspace's address with its key. One per
+ * workspace, like a search provider; setting another replaces it. The key is
+ * sealed with the same server key as a model provider's.
+ */
+export const sandboxProvider = pgTable(
+	"sandbox_provider",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id")
+			.notNull()
+			.references(() => workspace.id, { onDelete: "cascade" }),
+		preset: text("preset").$type<SandboxProviderPresetId>().notNull(),
+		baseUrl: text("base_url").notNull(),
+		apiKeyEncrypted: text("api_key_encrypted"),
+		image: text("image").notNull(),
+		/** What the provider runs sandboxes with, which it cannot report, so an admin says. */
+		isolation: text("isolation").$type<SandboxIsolation>().notNull(),
+		/** Hosts sandboxes may reach, `*.` wildcards allowed; `["*"]` is anywhere. */
+		allowedHosts: jsonb("allowed_hosts").$type<string[]>().notNull(),
+		enabled: boolean("enabled").notNull().default(false),
+		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+		lastTestError: text("last_test_error"),
+		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [uniqueIndex("sandbox_provider_workspace_idx").on(table.workspaceId)],
+);
+
+export type SandboxProviderRow = typeof sandboxProvider.$inferSelect;
 
 /**
  * An MCP server a pod owner has configured for every agent in that pod.

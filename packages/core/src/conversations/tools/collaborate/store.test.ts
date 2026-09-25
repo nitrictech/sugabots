@@ -389,6 +389,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			now: new Date(),
 			builtInTools: [],
 			connectionTools: [],
+			sandbox: false,
 		}).messages;
 		expect(promptMessages).toContainEqual(
 			expect.objectContaining({

@@ -66,6 +66,7 @@ const prepared: PreparedTurn = {
 			model: "claude-sonnet-4-20250514",
 			prompt: "",
 			disabledTools: [],
+			sandboxEnabled: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },
