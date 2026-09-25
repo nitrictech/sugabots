@@ -22,6 +22,7 @@ import {
 import { ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
+import { GithubSettings } from "./GithubSettings.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
@@ -99,6 +100,15 @@ export function WorkspaceSettings({
 								<WebSearchSettings />
 							) : (
 								<Alert>Only workspace administrators can manage web search.</Alert>
+							)}
+						</SettingsPage>
+					)}
+					{section === "github" && (
+						<SettingsPage title="GitHub" description="The repositories bots can check out and push to.">
+							{may.manageProviders ? (
+								<GithubSettings />
+							) : (
+								<Alert>Only workspace administrators can connect GitHub.</Alert>
 							)}
 						</SettingsPage>
 					)}

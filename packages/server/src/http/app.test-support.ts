@@ -8,6 +8,7 @@ import { Credentials } from "@sugabots/core/credentials/credentials";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
+import type { GithubStore } from "@sugabots/core/github/store";
 import { Installation } from "@sugabots/core/installation/installation";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
@@ -196,6 +197,18 @@ const emptySearchProviderStore: SearchProviderStore = {
 	recordTest: () => Effect.void,
 };
 
+const emptyGithubStore: GithubStore = {
+	get: () => Effect.undefined,
+	replace: () => notStubbed("github.replace"),
+	update: () => Effect.undefined,
+	remove: () => Effect.succeed(false),
+	credentials: () => Effect.undefined,
+	recordTest: () => Effect.void,
+	listRepositories: () => Effect.succeed([]),
+	addRepository: () => Effect.undefined,
+	removeRepository: () => Effect.succeed(false),
+};
+
 const emptySandboxProviderStore: SandboxProviderStore = {
 	get: () => Effect.undefined,
 	replace: () => notStubbed("sandboxProviders.replace"),
@@ -245,6 +258,7 @@ const emptyStores: Stores = {
 	modelProviders: emptyModelProviderStore,
 	searchProviders: emptySearchProviderStore,
 	sandboxProviders: emptySandboxProviderStore,
+	github: emptyGithubStore,
 	podSandboxes: {
 		applyAllowedHosts: () => Effect.succeed({ applied: 0, notApplied: 0 }),
 		discard: () => Effect.succeed(false),

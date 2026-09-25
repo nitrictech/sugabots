@@ -23,6 +23,8 @@ export interface TurnEnvironment {
 	connectionTools: readonly string[];
 	/** Whether the agent has the pod's sandbox tools this turn. */
 	sandbox: boolean;
+	/** The pod's repositories, `owner/name`, which the sandbox can check out. */
+	repositories?: readonly string[];
 }
 
 /**
@@ -143,6 +145,9 @@ function environmentInstruction(environment: TurnEnvironment): string[] {
 		builtInToolsInstruction(environment.builtInTools),
 		connectionToolsInstruction(environment.connectionTools),
 		environment.sandbox ? SANDBOX_INSTRUCTION : undefined,
+		environment.sandbox && environment.repositories && environment.repositories.length > 0
+			? `This pod's repositories: ${environment.repositories.join(", ")}. Use repo_checkout to work on one; it gives this thread its own directory and branch.`
+			: undefined,
 	].filter((section): section is string => section !== undefined);
 }
 

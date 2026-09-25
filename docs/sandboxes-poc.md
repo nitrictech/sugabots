@@ -372,6 +372,37 @@ Not done: re-sending egress credentials after a resume (nothing uses
 OpenSandbox's credential vault yet), and freeing memory on Docker, where a
 pause only stops CPU.
 
+## Phase 3 as built: checking out code
+
+- **GitHub connection**, one per workspace (Workspace settings → GitHub): a
+  fine-grained personal access token for now, sealed with the credential key
+  and tested against `GET /user`. `apiBaseUrl` and `gitHost` default to
+  github.com and can point at GitHub Enterprise Server. A GitHub App each
+  installation registers through the manifest flow is the next method.
+- **Pod repositories** (pod settings → Repositories), added by whoever holds
+  `sandbox.manage`. Each is checked with GitHub when added, which is where its
+  default branch and privacy come from.
+- **Credentials**: on every lease the pod's sandbox is given the token through
+  OpenSandbox's credential vault, bound to `/<repo>.git/info/refs` and
+  `/<repo>.git/git-upload-pack` on the git host for the pod's repositories
+  only. The sandbox never sees the token, and a push posts to
+  `git-receive-pack`, which gets nothing, so GitHub refuses it. A sandbox made
+  to reach any host (`*`) has no egress sidecar and so gets no credentials.
+- **`repo_checkout(owner/repo)`** clones each repository once per sandbox
+  (`/workspace/.repositories/<repo>.git`) and gives each thread its own
+  worktree (`/workspace/threads/<thread>/<name>`) on branch
+  `pod/<pod>/<thread>`. Calling it again fetches. Commits are authored as the
+  agent. Public repositories that aren't the pod's can be checked out too.
+
+Checked against a live sandbox with public repositories: two threads got
+separate worktrees and branches from the shared clone, a second checkout
+fetched rather than cloned, commits carried the agent's name, and `git push`
+from inside failed for want of credentials. A private repository with a real
+token hasn't been tried yet.
+
+Not done: `.git/hooks` and `.git/config` aren't made read-only, and there are
+no leases on worktrees, so two agents in the same thread share one.
+
 ## Out of the PoC
 
 Kubernetes and microVM providers, snapshots, preview URLs for dev servers,

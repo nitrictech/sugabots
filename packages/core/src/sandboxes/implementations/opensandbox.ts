@@ -50,8 +50,13 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 						// Kept until Sugabots removes it: a pod's sandbox outlives any one turn.
 						timeoutSeconds: null,
 						metadata: spec.labels,
+						// The egress sidecar that enforces the list is also what adds git
+						// credentials, so a sandbox made to reach anywhere can't be given them.
 						...(connection.allowedHosts.kind === "only"
-							? { networkPolicy: networkPolicy(connection.allowedHosts.hosts) }
+							? {
+									networkPolicy: networkPolicy(connection.allowedHosts.hosts),
+									credentialProxy: { enabled: true },
+								}
 							: {}),
 					});
 					await prepareAgentUser(sandbox);
@@ -168,6 +173,17 @@ export const fromOpenSandbox = (connection: Sandbox.Connection): Sandbox.Interfa
 					},
 					catch: unavailable,
 				}),
+			setGitCredentials: (credentials) =>
+				Effect.tryPromise({
+					try: async () => {
+						await sandbox.credentialVault.delete().catch((cause: unknown) => {
+							if (!(cause instanceof SandboxApiException && cause.statusCode === 404)) throw cause;
+						});
+						if (!credentials || credentials.repositories.length === 0) return;
+						await sandbox.credentialVault.create(gitVault(credentials));
+					},
+					catch: unavailable,
+				}),
 			disconnect: Effect.promise(() => sandbox.close()),
 		};
 	}
@@ -201,6 +217,41 @@ async function prepareAgentUser(sandbox: OpenSandbox) {
 			`Could not prepare the agent's directories: ${prepared.logs.stderr.map((line) => line.text).join("")}`,
 		);
 	}
+}
+
+const GIT_CREDENTIAL = "git";
+
+/**
+ * Basic auth on the two requests a clone or fetch makes, for the listed
+ * repositories only. A push starts with the same `info/refs` request but then
+ * posts to `git-receive-pack`, which gets nothing, so GitHub refuses it.
+ */
+function gitVault(credentials: Sandbox.GitCredentials) {
+	return {
+		credentials: [
+			{
+				name: GIT_CREDENTIAL,
+				source: {
+					value: Buffer.from(`${credentials.username}:${credentials.token}`).toString("base64"),
+				},
+			},
+		],
+		bindings: [
+			{
+				name: "git-fetch",
+				match: {
+					schemes: ["https" as const],
+					hosts: [credentials.host],
+					methods: ["GET", "POST"],
+					paths: credentials.repositories.flatMap((repository) => [
+						`/${repository}.git/info/refs`,
+						`/${repository}.git/git-upload-pack`,
+					]),
+				},
+				auth: { type: "basic" as const, credential: GIT_CREDENTIAL },
+			},
+		],
+	};
 }
 
 /** Everything refused except the listed hosts. */

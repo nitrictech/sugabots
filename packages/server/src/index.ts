@@ -24,6 +24,8 @@ import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
+import { gitCredentialsForPod } from "@sugabots/core/github/credentials";
+import { githubStore } from "@sugabots/core/github/store";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
@@ -105,6 +107,7 @@ const main = Effect.gen(function* () {
 		Config.withDefault(DEFAULT_IDLE_PAUSE_MINUTES),
 	);
 	const sandboxProviders = sandboxProviderStore(credentials);
+	const github = githubStore(credentials);
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -113,10 +116,12 @@ const main = Effect.gen(function* () {
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		sandboxProviders,
+		github,
 		podSandboxes: podSandboxStore({
 			providers: sandboxProviders,
 			allowsUnisolated: allowsUnisolatedSandboxes,
 			publishEvents,
+			gitCredentialsFor: gitCredentialsForPod(github),
 		}),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurn),
@@ -190,6 +195,7 @@ const main = Effect.gen(function* () {
 			builtInTools,
 			connectionTools,
 			sandboxes: stores.podSandboxes,
+			github,
 			sandboxIdlePauseMinutes,
 			publishEvents,
 		}),

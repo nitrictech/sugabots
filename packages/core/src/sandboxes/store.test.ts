@@ -29,6 +29,7 @@ function fakeProvider() {
 	const destroyed: string[] = [];
 	const paused = new Set<string>();
 	const allowListsSet: Array<{ id: string; hosts: readonly string[] }> = [];
+	const gitCredentialsSet: Array<Sandbox.GitCredentials | undefined> = [];
 	const handle = (id: string): Sandbox.Handle => ({
 		id,
 		exec: () =>
@@ -39,6 +40,10 @@ function fakeProvider() {
 			}),
 		readFile: () => Effect.succeed(new Uint8Array()),
 		writeFile: () => Effect.void,
+		setGitCredentials: (credentials) =>
+			Effect.sync(() => {
+				gitCredentialsSet.push(credentials);
+			}),
 		setAllowedHosts: (hosts) =>
 			Effect.sync(() => {
 				allowListsSet.push({ id, hosts });
@@ -87,6 +92,7 @@ function fakeProvider() {
 		destroyed,
 		paused,
 		allowListsSet,
+		gitCredentialsSet,
 		lose: (id: string) => sandboxes.delete(id),
 	};
 }
@@ -377,6 +383,30 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 
 		expect(await runOnPostgres(store.discard(scope.podId))).toBe(true);
 		expect((await lease()).sandbox.id).not.toBe(first);
+	});
+
+	it("gives the sandbox the pod's git credentials on every lease", async () => {
+		const git = {
+			host: "github.com",
+			username: "x-access-token",
+			token: "t",
+			repositories: ["acme/app"],
+		};
+		const withGit = podSandboxStore({
+			providers: {
+				resolve: () => Effect.succeed(configured),
+				connection: () => Effect.succeed(configured),
+			},
+			allowsUnisolated: false,
+			publishEvents,
+			providerFor: () => fake.provider,
+			gitCredentialsFor: () => Effect.succeed(git),
+		});
+		const first = await runOnPostgres(withGit.lease(scope));
+		await runOnPostgres(withGit.release(first.leaseId));
+		await runOnPostgres(withGit.lease(scope));
+
+		expect(fake.gitCredentialsSet).toEqual([git, git]);
 	});
 
 	it("ends the lease on release and notes when the sandbox was last in use", async () => {

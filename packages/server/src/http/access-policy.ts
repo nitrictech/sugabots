@@ -103,6 +103,16 @@ export const accessPolicy: AccessPolicy = {
 		remove: { workspace: "workspace.providers.manage" },
 		test: { workspace: "workspace.providers.manage" },
 	},
+	github: {
+		get: { workspace: "workspace.providers.manage" },
+		replace: { workspace: "workspace.providers.manage" },
+		update: { workspace: "workspace.providers.manage" },
+		remove: { workspace: "workspace.providers.manage" },
+		test: { workspace: "workspace.providers.manage" },
+		listPodRepositories: { pod: "pod.read" },
+		addPodRepository: { pod: "sandbox.manage" },
+		removePodRepository: { pod: "sandbox.manage" },
+	},
 	sandboxProviders: {
 		get: { workspace: "workspace.providers.manage" },
 		replace: { workspace: "workspace.providers.manage" },

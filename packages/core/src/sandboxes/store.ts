@@ -94,6 +94,16 @@ export interface PodSandboxStoreOptions {
 	allowsUnisolated: boolean;
 	/** Tells the workspace when a pod's sandbox is made, lost, or starts or stops being used. */
 	publishEvents: PublishEvents;
+	/**
+	 * What the pod's sandbox authenticates its git fetches with: the
+	 * workspace's GitHub token, for the pod's repositories. Given to the
+	 * sandbox on every lease, so a repository added or a token replaced since
+	 * reaches it on the next turn. Without it, sandboxes get no credentials.
+	 */
+	gitCredentialsFor?: (pod: {
+		workspaceId: string;
+		podId: string;
+	}) => Effect.Effect<Sandbox.GitCredentials | undefined, never, Database>;
 	/** How a workspace's configuration becomes a provider. Tests pass a double. */
 	providerFor?: (connection: Sandbox.Connection) => Sandbox.Interface;
 }
@@ -111,6 +121,7 @@ export function podSandboxStore({
 	providers,
 	allowsUnisolated,
 	publishEvents,
+	gitCredentialsFor = () => Effect.undefined,
 	providerFor = Sandbox.forConnection,
 }: PodSandboxStoreOptions): PodSandboxStore {
 	const announce = (workspaceId: string, podId: string) =>
@@ -305,6 +316,15 @@ export function podSandboxStore({
 					: yield* createFor(scope, sandboxes);
 				// Returned rather than failed, so marking a sandbox missing is committed.
 				if (reached.kind === "lost") return reached;
+
+				const git = yield* gitCredentialsFor(scope);
+				yield* reached.sandbox
+					.setGitCredentials(git)
+					.pipe(
+						Effect.catchTag("SandboxUnavailable", (failure) =>
+							Effect.logWarning("Giving a sandbox its git credentials failed", failure),
+						),
+					);
 
 				const [lease] = yield* query((db) =>
 					db

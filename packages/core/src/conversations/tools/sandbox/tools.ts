@@ -9,8 +9,26 @@ export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
 export const WRITE_FILE_TOOL = "write_file";
 export const EDIT_FILE_TOOL = "edit_file";
+export const REPO_CHECKOUT_TOOL = "repo_checkout";
 
-export const SANDBOX_TOOLS = [RUN_COMMAND_TOOL, READ_FILE_TOOL, WRITE_FILE_TOOL, EDIT_FILE_TOOL];
+export const SANDBOX_TOOLS = [
+	RUN_COMMAND_TOOL,
+	READ_FILE_TOOL,
+	WRITE_FILE_TOOL,
+	EDIT_FILE_TOOL,
+	REPO_CHECKOUT_TOOL,
+];
+
+/** Who is working, and where, so a checkout lands in this thread's own place on its own branch. */
+export interface CheckoutContext {
+	threadId: string;
+	podId: string;
+	agent: { name: string; handle: string };
+	/** Where repositories are cloned from, e.g. github.com. */
+	gitHost: string;
+	/** The pod's repositories, which the workspace's GitHub token can fetch. */
+	repositories: ReadonlyArray<{ fullName: string; defaultBranch: string }>;
+}
 
 const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 const MAX_COMMAND_TIMEOUT_SECONDS = 600;
@@ -29,7 +47,11 @@ const DEFAULT_READ_LINES = 2_000;
  * command costs a round trip to start, and the file API is also the only way
  * to write bytes without quoting them into a shell.
  */
-export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
+export function sandboxTools(
+	turn: TurnSandbox,
+	run: RunEffect,
+	checkout: CheckoutContext,
+): ToolSet {
 	const sandbox = () => turn.sandbox().catch(explainFailure);
 	/** A result, with the note about a resumed sandbox if this is the first since it woke. */
 	const withResumeNote = <Output extends object>(output: Output) => {
@@ -131,6 +153,39 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 				return withResumeNote({ path: absolute, characters: content.length });
 			},
 		}),
+		[REPO_CHECKOUT_TOOL]: tool({
+			description: `Check out a git repository to work on, in a directory and branch of this thread's own, so work in other threads doesn't collide with it. The pod's repositories${checkout.repositories.length > 0 ? ` (${checkout.repositories.map((repository) => repository.fullName).join(", ")})` : ""} can be private; any other must be public. Calling it again in this thread fetches the latest and returns the same directory. Commit there as you work; pushing is not possible from the sandbox.`,
+			inputSchema: Schema.Struct({
+				repository: Schema.String.check(
+					Schema.isPattern(REPOSITORY_PATTERN, { message: "owner/repository" }),
+				).annotate({ description: "owner/repository, as on GitHub" }),
+			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async ({ repository }) => {
+				const machine = await sandbox();
+				const known = checkout.repositories.find(
+					(candidate) => candidate.fullName.toLowerCase() === repository.toLowerCase(),
+				);
+				const place = checkoutPlace(checkout, known?.fullName ?? repository);
+				const execution = await run(
+					machine.exec(checkoutScript(checkout, place, known?.defaultBranch), {
+						cwd: Sandbox.WORKSPACE_DIRECTORY,
+						timeoutSeconds: CHECKOUT_TIMEOUT_SECONDS,
+						maxOutputCharacters: 4_000,
+					}),
+				).catch(explainFailure);
+				if (execution.exitCode !== 0) {
+					throw new Error(
+						`Checking out ${place.repository} failed: ${execution.stderr.text.trim() || execution.stdout.text.trim()}${known ? "" : " It isn't one of this pod's repositories, so only a public repository can be checked out."}`,
+					);
+				}
+				return withResumeNote({
+					repository: place.repository,
+					path: place.worktree,
+					branch: place.branch,
+					status: execution.stdout.text.trim(),
+				});
+			},
+		}),
 		[EDIT_FILE_TOOL]: tool({
 			description:
 				"Change part of a text file in the sandbox by replacing exact text. oldText must appear in the file exactly once, including its whitespace, unless replaceAll is set; include enough surrounding lines to make it unique. Read the file first.",
@@ -162,6 +217,80 @@ export function sandboxTools(turn: TurnSandbox, run: RunEffect): ToolSet {
 			},
 		}),
 	};
+}
+
+const REPOSITORY_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+const CHECKOUT_TIMEOUT_SECONDS = 300;
+
+interface CheckoutPlace {
+	repository: string;
+	/** One clone per sandbox, shared by every thread's worktree. */
+	clone: string;
+	worktree: string;
+	branch: string;
+}
+
+/**
+ * Where a thread works on a repository: `/workspace/threads/<thread>/<name>`,
+ * on branch `pod/<pod>/<thread>`. Short ids, since people read them in paths
+ * and branch names; eight characters of a UUIDv7's random tail are plenty
+ * within one pod.
+ */
+function checkoutPlace(checkout: CheckoutContext, repository: string): CheckoutPlace {
+	const thread = shortId(checkout.threadId);
+	const name = repository.split("/")[1] ?? repository;
+	return {
+		repository,
+		clone: `${Sandbox.WORKSPACE_DIRECTORY}/.repositories/${repository}.git`,
+		worktree: `${Sandbox.WORKSPACE_DIRECTORY}/threads/${thread}/${name}`,
+		branch: `pod/${shortId(checkout.podId)}/${thread}`,
+	};
+}
+
+function shortId(id: string): string {
+	return id.replaceAll("-", "").slice(-8);
+}
+
+/**
+ * Clones once, fetches every time, and gives the thread its own worktree on
+ * its own branch from the default branch. Every value it interpolates is
+ * quoted, and the repository name has already been checked against
+ * REPOSITORY_PATTERN.
+ */
+function checkoutScript(
+	checkout: CheckoutContext,
+	place: CheckoutPlace,
+	defaultBranch: string | undefined,
+): string {
+	const url = `https://${checkout.gitHost}/${place.repository}.git`;
+	return [
+		"set -e",
+		"export GIT_TERMINAL_PROMPT=0",
+		`clone=${quote(place.clone)} worktree=${quote(place.worktree)} branch=${quote(place.branch)}`,
+		`if [ ! -d "$clone" ]; then`,
+		`  mkdir -p "$(dirname "$clone")"`,
+		`  git clone --quiet --bare ${quote(url)} "$clone"`,
+		`  git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`,
+		`  git -C "$clone" config user.name ${quote(checkout.agent.name)}`,
+		`  git -C "$clone" config user.email ${quote(`${checkout.agent.handle}@agents.sugabots.invalid`)}`,
+		"fi",
+		`git -C "$clone" fetch --quiet --prune origin`,
+		`base=${defaultBranch ? quote(defaultBranch) : `"$(git -C "$clone" symbolic-ref --short HEAD)"`}`,
+		`if [ -d "$worktree" ]; then`,
+		`  echo "Already checked out; fetched the latest. origin/$base is at $(git -C "$clone" rev-parse --short "origin/$base")."`,
+		`elif git -C "$clone" show-ref --quiet --verify "refs/heads/$branch"; then`,
+		`  git -C "$clone" worktree add --quiet "$worktree" "$branch"`,
+		`  echo "Checked out this thread's existing branch $branch."`,
+		"else",
+		`  git -C "$clone" worktree add --quiet -b "$branch" "$worktree" "origin/$base"`,
+		`  echo "Checked out a new branch $branch from origin/$base."`,
+		"fi",
+	].join("\n");
+}
+
+/** Single-quotes a value for the shell. */
+function quote(value: string): string {
+	return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 function resolvePath(path: string): string {

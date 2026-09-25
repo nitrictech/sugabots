@@ -20,6 +20,7 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
+import type { GithubStore } from "@sugabots/core/github/store";
 import { sandboxPausingLayer } from "@sugabots/core/sandboxes/pausing";
 import type { PodSandboxStore } from "@sugabots/core/sandboxes/store";
 import { type Effect, Layer } from "effect";
@@ -52,6 +53,8 @@ export interface BackgroundOptions {
 	connectionTools: ConnectionTools;
 	/** Pods' sandboxes, for agents an admin let use theirs. */
 	sandboxes?: PodSandboxStore;
+	/** The pod's repositories, for checking them out in its sandbox. */
+	github?: Pick<GithubStore, "get" | "listRepositories">;
 	/** How long a sandbox sits unused before it is paused. */
 	sandboxIdlePauseMinutes?: number;
 	/** For the facilitator to announce who it invited. */
@@ -72,6 +75,7 @@ export function backgroundLayer({
 	builtInTools,
 	connectionTools,
 	sandboxes,
+	github,
 	sandboxIdlePauseMinutes,
 	publishEvents,
 }: BackgroundOptions): Layer.Layer<never, never, Database> {
@@ -90,6 +94,7 @@ export function backgroundLayer({
 			builtInTools,
 			connectionTools,
 			sandboxes,
+			github,
 			routines,
 			queueSummary,
 		}),

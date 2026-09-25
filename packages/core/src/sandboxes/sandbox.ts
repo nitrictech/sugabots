@@ -88,8 +88,27 @@ export interface Handle {
 	 * with a list: one made to reach anywhere has nothing enforcing a list.
 	 */
 	readonly setAllowedHosts: (hosts: readonly string[]) => Effect.Effect<void, Unavailable>;
+	/**
+	 * Sets what the sandbox's git fetches from the pod's repositories are
+	 * authenticated with, replacing whatever was set before; undefined clears
+	 * it. The credential is added by the provider on the way out, never put in
+	 * the sandbox, and only to fetches: a push from inside the sandbox goes out
+	 * without it.
+	 */
+	readonly setGitCredentials: (
+		credentials: GitCredentials | undefined,
+	) => Effect.Effect<void, Unavailable>;
 	/** Lets go of whatever this process holds for the sandbox. The sandbox itself carries on. */
 	readonly disconnect: Effect.Effect<void>;
+}
+
+export interface GitCredentials {
+	/** Where repositories are cloned from, e.g. github.com. */
+	host: string;
+	username: string;
+	token: string;
+	/** `owner/name` of each repository the credential is for. */
+	repositories: readonly string[];
 }
 
 export interface ExecOptions {

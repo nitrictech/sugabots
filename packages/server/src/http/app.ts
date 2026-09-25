@@ -8,6 +8,7 @@ import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import type { Credentials } from "@sugabots/core/credentials/credentials";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
+import type { GithubStore } from "@sugabots/core/github/store";
 import type { Installation } from "@sugabots/core/installation/installation";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
@@ -42,6 +43,7 @@ import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
 import type { ChannelAccess } from "../routes/events/access.ts";
 import { eventRoutes, type StreamOptions } from "../routes/events/routes.ts";
+import { githubRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
@@ -82,6 +84,7 @@ export interface Stores {
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
 	sandboxProviders: SandboxProviderStore;
+	github: GithubStore;
 	podSandboxes: Pick<PodSandboxStore, "status" | "applyAllowedHosts" | "discard">;
 	connections: ConnectionStore;
 	threads: ThreadStore;
@@ -159,6 +162,7 @@ export function apiLayer({
 			httpClients,
 			validateProviderUrl,
 		}),
+		githubRoutes({ github: stores.github, httpClients, validateProviderUrl }),
 		sandboxProviderRoutes({
 			sandboxProviders: stores.sandboxProviders,
 			podSandboxes: stores.podSandboxes,

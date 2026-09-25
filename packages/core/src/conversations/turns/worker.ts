@@ -1,4 +1,4 @@
-import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { GITHUB_DEFAULT_GIT_HOST, streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolSet } from "ai";
 import {
 	Cause,
@@ -14,6 +14,7 @@ import {
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import type { GithubStore } from "../../github/store.ts";
 import type { PodSandboxStore } from "../../sandboxes/store.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
@@ -81,6 +82,8 @@ export interface TurnExecution {
 	connectionTools?: ConnectionTools;
 	/** Pods' sandboxes, for agents an admin let use theirs. */
 	sandboxes?: PodSandboxStore;
+	/** The pod's repositories, and where they are cloned from, for checking them out. */
+	github?: Pick<GithubStore, "get" | "listRepositories">;
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
@@ -416,6 +419,7 @@ const streamReply = (
 		builtInTools = noBuiltInTools,
 		connectionTools = noConnectionTools,
 		sandboxes,
+		github,
 	}: TurnExecution,
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<StreamOutcome, Error, Database> =>
@@ -466,6 +470,11 @@ const streamReply = (
 							(held) => Effect.promise(() => held.release().catch(() => {})),
 						)
 					: undefined;
+			const repositories =
+				sandbox && github ? yield* github.listRepositories(prepared.context.agent.podId) : [];
+			const gitHost =
+				(sandbox && github ? yield* github.get(prepared.context.thread.workspaceId) : undefined)
+					?.gitHost ?? GITHUB_DEFAULT_GIT_HOST;
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				const offered = connections.tools[binding.tool];
@@ -488,7 +497,17 @@ const streamReply = (
 				approvals,
 				approvalBoundTools,
 				builtIn,
-				...(sandbox ? { sandbox: sandboxTools(sandbox, run) } : {}),
+				...(sandbox
+					? {
+							sandbox: sandboxTools(sandbox, run, {
+								threadId: prepared.context.thread.id,
+								podId: prepared.context.agent.podId,
+								agent: { name: prepared.context.agent.name, handle: prepared.context.agent.handle },
+								gitHost,
+								repositories,
+							}),
+						}
+					: {}),
 				connections: connections.tools,
 				bus: events,
 				run,
@@ -519,6 +538,7 @@ const streamReply = (
 				builtInTools: Object.keys(builtIn),
 				connectionTools: Object.keys(connections.tools),
 				sandbox: sandbox !== undefined,
+				repositories: repositories.map((repository) => repository.fullName),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =

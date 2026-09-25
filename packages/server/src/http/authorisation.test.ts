@@ -36,6 +36,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	routineId: "0199a3a0-0000-7000-8000-000000000009",
 	toolCallId: "0199a3a0-0000-7000-8000-00000000000a",
 	ruleId: "0199a3a0-0000-7000-8000-00000000000b",
+	repositoryId: "0199a3a0-0000-7000-8000-00000000000c",
 	// A system agent is addressed by its key, not by an id.
 	key: "summarise",
 	id: "0199a3a0-0000-7000-8000-000000000008",
