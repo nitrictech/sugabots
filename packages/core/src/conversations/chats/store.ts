@@ -12,6 +12,7 @@ import type {
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_PAGE_LIMIT, streamEvent, threadChannel } from "@sugabots/contracts";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
@@ -26,12 +27,14 @@ import {
 	routineExecution,
 	thread,
 	threadParticipant,
+	toolCall,
 	turn,
 	user,
 } from "../../database/schema.ts";
-import { reachesPod } from "../../workspaces/access.ts";
+import { type PodStanding, podStandingFor, reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
+import { routineExecutionAbove } from "../routines/execution.ts";
 import {
 	loadParticipantsByThread,
 	participantColumns,
@@ -120,6 +123,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 			const bots = yield* query((db) => listedBots(db, input));
 			const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
 			const latest = yield* query((db) => latestMessages(db, threadIds));
+			const awaiting = yield* query((db) => chatsAwaitingDecision(db, input, bots));
 			const items = bots.flatMap((row): ChatListItem[] => {
 				const crew = crewAgentRow(row.agent);
 				if (!crew) return [];
@@ -135,6 +139,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 									at: last.createdAt.toISOString(),
 								}
 							: null,
+						needsApproval: row.chatId !== null && awaiting.has(row.chatId),
 					},
 				];
 			});
@@ -310,6 +315,89 @@ const listedBots = Effect.fn("ChatStore.listedBots")(function* (
 		)
 		.orderBy(asc(agent.name));
 });
+
+/**
+ * The chats among `bots` holding a tool call that waits on a decision this
+ * person may make.
+ */
+const chatsAwaitingDecision = Effect.fn("ChatStore.chatsAwaitingDecision")(function* (
+	db: Executor,
+	input: ChatListRequest,
+	bots: readonly { agent: { id: string; podId: string | null }; chatId: string | null }[],
+) {
+	const podIds = [...new Set(bots.flatMap((row) => (row.agent.podId ? [row.agent.podId] : [])))];
+	if (podIds.length === 0) return new Set<string>();
+	const waiting = yield* waitingCalls(db, input.workspaceId, podIds);
+	const standings = new Map(
+		yield* Effect.forEach(new Set(waiting.map((call) => call.podId)), (podId) =>
+			podStandingFor(db, podId, input.userId).pipe(
+				Effect.map((standing) => [podId, standing] as const),
+			),
+		),
+	);
+	const chatOfBot = new Map(
+		bots.flatMap((row) => (row.chatId ? [[row.agent.id, row.chatId] as const] : [])),
+	);
+	return chatsNeedingDecision(waiting, standings, chatOfBot);
+});
+
+const waitingThread = alias(thread, "waiting_thread");
+
+/** Each thread in these pods with a tool call waiting to be allowed or denied. */
+const waitingCalls = Effect.fn("ChatStore.waitingCalls")(function* (
+	db: Executor,
+	workspaceId: string,
+	podIds: readonly string[],
+) {
+	return yield* db
+		.selectDistinct({
+			chatId: waitingThread.chatId,
+			podId: waitingThread.podId,
+			hostAgentId: waitingThread.hostAgentId,
+			type: waitingThread.type,
+			routineExecutionId: routineExecutionAbove(waitingThread.id),
+		})
+		.from(toolCall)
+		.innerJoin(waitingThread, eq(waitingThread.id, toolCall.threadId))
+		.where(
+			and(
+				eq(waitingThread.workspaceId, workspaceId),
+				inArray(waitingThread.podId, [...podIds]),
+				eq(toolCall.status, "awaiting_approval"),
+				eq(toolCall.approvalStatus, "pending"),
+			),
+		);
+});
+
+type WaitingCall = Effect.Success<ReturnType<typeof waitingCalls>>[number];
+
+/**
+ * The chats that show a waiting call its viewer may decide: the chat its
+ * thread belongs to, and for a collaboration also the asked bot's chat, which
+ * shows the collaboration too. Deciding in a routine run takes its own
+ * permission.
+ */
+function chatsNeedingDecision(
+	waiting: readonly WaitingCall[],
+	standings: ReadonlyMap<string, PodStanding | undefined>,
+	chatOfBot: ReadonlyMap<string, string>,
+): Set<string> {
+	return new Set(
+		waiting
+			.filter((call) =>
+				standings
+					.get(call.podId)
+					?.may(call.routineExecutionId ? "approval.routine.decide" : "approval.decide"),
+			)
+			.flatMap((call) => [
+				call.chatId,
+				call.type === "collaboration" && call.hostAgentId
+					? chatOfBot.get(call.hostAgentId)
+					: undefined,
+			])
+			.filter((chatId): chatId is string => chatId != null),
+	);
+}
 
 /** The newest message with words in it on each thread, in one query. */
 const latestMessages = Effect.fn("ChatStore.latestMessages")(function* (

@@ -114,6 +114,11 @@ export function useReviewToolCall(threadId: string, podId: string) {
 			Effect.runPromise(
 				client.api.toolApprovals.decide({ params: { podId, toolCallId }, payload: { decision } }),
 			),
-		onSuccess: () => queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+				// The chat's needs-approval marker clears as soon as its last call is answered.
+				queries.invalidateQueries({ queryKey: ["chat-list"] }),
+			]),
 	});
 }

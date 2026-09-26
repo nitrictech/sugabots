@@ -1,5 +1,5 @@
 import type { RoutineExecution } from "@sugabots/contracts";
-import { sql } from "drizzle-orm";
+import { type AnyColumn, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
@@ -27,8 +27,22 @@ export const routineSettlementLockKey = (executionId: string) => `routine-settle
 
 export const findRoutineExecutionId = Effect.fn("RoutineExecution.findRoutineExecutionId")(
 	function* (db: Executor, threadId: string) {
-		const rows = yield* db.execute<{ id: string }>(
-			sql`
+		const rows = yield* db.execute<{ id: string | null }>(
+			sql`select ${routineExecutionAbove(sql`${threadId}::uuid`)} as id`,
+			"objects",
+		);
+		return rows[0]?.id ?? undefined;
+	},
+);
+
+/**
+ * The id of the routine run the thread `threadId` is, or sits somewhere
+ * inside (a collaboration a run started, and so on), as a query expression:
+ * null when it is in none. `threadId` may be a column of the outer query, as
+ * long as that table is aliased, since the walk up reads `thread` itself.
+ */
+export function routineExecutionAbove(threadId: SQL | AnyColumn): SQL<string | null> {
+	return sql<string | null>`(
 		with recursive ancestors as (
 			select id, parent_thread_id from ${thread} where id = ${threadId}
 			union all
@@ -40,9 +54,5 @@ export const findRoutineExecutionId = Effect.fn("RoutineExecution.findRoutineExe
 		from ${routineExecution} execution
 		join ancestors on ancestors.id = execution.thread_id
 		limit 1
-	`,
-			"objects",
-		);
-		return rows[0]?.id;
-	},
-);
+	)`;
+}

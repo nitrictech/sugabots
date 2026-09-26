@@ -58,6 +58,11 @@ export const chatListItemSchema = Schema.Struct({
 			at: isoTimestampSchema,
 		}),
 	),
+	/**
+	 * Whether a tool call in the chat, or in a collaboration or routine run it
+	 * holds, is waiting on a decision this person may make.
+	 */
+	needsApproval: Schema.Boolean,
 });
 
 export type ChatListItem = typeof chatListItemSchema.Type;

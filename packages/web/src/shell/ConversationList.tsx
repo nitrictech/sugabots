@@ -265,12 +265,26 @@ function ConversationRow({
 			{...link}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				"focus-ring flex items-center gap-3 rounded-[14px] px-2.5 py-[9px] transition-colors",
+				"group focus-ring flex items-center gap-3 rounded-[14px] px-2.5 py-[9px] transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
 			<span className="relative size-11 shrink-0">
 				<AgentAvatar color={agent.color} face={agent.face} size={44} />
+				{row.needsApproval && (
+					// Ringed in the row's own colour, so it reads as cut out of the face.
+					<span
+						role="img"
+						aria-label="Needs your approval"
+						title="Needs your approval"
+						className={cn(
+							"absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border-[2.5px] bg-destructive font-bold text-[14px] text-white leading-none",
+							selected ? "border-row-selected" : "border-list group-hover:border-row-hover",
+						)}
+					>
+						!
+					</span>
+				)}
 				{inAll && (
 					<span className="absolute -right-[5px] -bottom-[5px]" title={pod.name}>
 						<PodTile bots={row.podBots} size={20} className="border-[2.5px] border-list" />

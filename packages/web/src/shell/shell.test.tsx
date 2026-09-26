@@ -139,8 +139,9 @@ describe("the conversation list", () => {
 							authorUserId: sam.id,
 							at: new Date().toISOString(),
 						},
+						needsApproval: false,
 					},
-					{ agent: triager, chatId: null, lastMessage: null },
+					{ agent: triager, chatId: null, lastMessage: null, needsApproval: false },
 				],
 			}),
 		);

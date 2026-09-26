@@ -24,6 +24,7 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: false,
+		needsApproval: true,
 		lastMessage: { preview: "Needs your approval", authorUserId: null, at: minutesAgo(3) },
 	},
 	{
@@ -32,6 +33,7 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Renewal notes for Halcyon are ready",
 			authorUserId: null,
@@ -44,6 +46,7 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: true,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Go deeper on the fintech prospects from last week's list",
 			authorUserId: "0199a3a0-0000-7000-8000-000000000009",
@@ -60,6 +63,7 @@ const allRows: ConversationRowData[] = [
 		podBots: engineeringBots,
 		chatId: null,
 		fromYou: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Filed PLAT-482 for the timeout",
 			authorUserId: null,
@@ -92,8 +96,17 @@ const meta = preview.meta({
 	],
 });
 
-/** Default is a pod's chats, newest first, with the open one marked. */
-export const Default = meta.story({});
+/** Default is a pod's chats, newest first, with the open one marked and a red ! on one waiting on you. */
+export const Default = meta.story({
+	play: async ({ canvas }) => {
+		// Growth Desk is waiting on you; the marker names it for a screen reader too.
+		const waiting = canvas.getAllByRole("img", { name: "Needs your approval" });
+		await expect(waiting).toHaveLength(1);
+		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).toContainElement(
+			waiting[0] ?? null,
+		);
+	},
+});
 
 /** All shows every shared pod's chats, each face carrying its pod's badge. */
 export const All = meta.story({

@@ -365,7 +365,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		return Effect.succeed({
 			items: agents
 				.filter((agent) => agent.systemAgentKey === null && inScope(agent))
-				.map((agent) => ({ agent, chatId: null, lastMessage: null })),
+				.map((agent) => ({ agent, chatId: null, lastMessage: null, needsApproval: false })),
 		});
 	});
 	client.api.chats.getOrCreate.mockReturnValue(

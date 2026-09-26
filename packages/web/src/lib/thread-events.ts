@@ -171,7 +171,11 @@ async function applyWorkspaceEvent(
 			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 		]);
 	} else if (update.type === "thread.changed") {
-		await queries.invalidateQueries({ queryKey: ["chat-history"] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["chat-history"] }),
+			// A turn that stops for an approval, or goes on after one, changes which chats need you.
+			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+		]);
 	}
 }
 

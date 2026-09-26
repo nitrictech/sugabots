@@ -164,6 +164,8 @@ export interface StoryAppData {
 	bots?: Agent[];
 	/** Messages in each bot's chat, by the bot's id. */
 	messages?: Record<string, Message[]>;
+	/** The bots whose chats wait on an approval you may give. */
+	awaitingApproval?: readonly string[];
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	onboarded?: boolean;
@@ -246,6 +248,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 									at: last.createdAt,
 								}
 							: null,
+						needsApproval: data.awaitingApproval?.includes(bot.id) ?? false,
 					};
 				});
 			return HttpResponse.json({ items });

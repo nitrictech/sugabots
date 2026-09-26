@@ -16,6 +16,7 @@ import {
 	routineExecution,
 	thread,
 	threadParticipant,
+	toolCall,
 	turn,
 	user,
 	workspace,
@@ -127,9 +128,183 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 					authorUserId: userId,
 					at: expect.any(String),
 				},
+				needsApproval: false,
 			},
-			{ agent: expect.objectContaining({ id: recipientAgentId }), chatId: null, lastMessage: null },
+			{
+				agent: expect.objectContaining({ id: recipientAgentId }),
+				chatId: null,
+				lastMessage: null,
+				needsApproval: false,
+			},
 		]);
+	});
+
+	/** A reply by `agentOnThread` on `threadId` that stopped on a tool call waiting to be allowed. */
+	async function waitOnApproval(threadId: string, agentOnThread: string) {
+		const [asked] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorUserId: userId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "File the checkout timeouts" }],
+					content: "File the checkout timeouts",
+				})
+				.returning(),
+		);
+		if (!asked) throw new Error("Could not create the asking message");
+		const [stopped] = await onDatabase((db) =>
+			db
+				.insert(turn)
+				.values({
+					threadId,
+					agentId: agentOnThread,
+					triggerMessageId: asked.id,
+					status: "done",
+					model: "test/model",
+					startedAt: new Date(),
+					reason: "default",
+				})
+				.returning(),
+		);
+		if (!stopped) throw new Error("Could not create the stopped turn");
+		const [reply] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId,
+					authorAgentId: agentOnThread,
+					kind: "text",
+					status: "complete",
+					parts: [],
+					content: "",
+					turnId: stopped.id,
+				})
+				.returning(),
+		);
+		if (!reply) throw new Error("Could not create the stopped reply");
+		const [call] = await onDatabase((db) =>
+			db
+				.insert(toolCall)
+				.values({
+					threadId,
+					messageId: reply.id,
+					turnId: stopped.id,
+					tool: "linear__save_issue",
+					approvalId: crypto.randomUUID(),
+					approvalStatus: "pending",
+					input: {},
+					status: "awaiting_approval",
+					mutating: true,
+					atOffset: 0,
+				})
+				.returning(),
+		);
+		if (!call) throw new Error("Could not create the waiting call");
+		return call;
+	}
+
+	const needingApproval = async (asUserId = userId) =>
+		(await store.list({ workspaceId, userId: asUserId, pod: podId }))?.items.flatMap((item) =>
+			item.needsApproval ? [item.agent.id] : [],
+		);
+
+	it("marks a chat whose bot is waiting on an approval, until it is decided", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		const call = await waitOnApproval(current.mainThreadId, agentId);
+
+		expect(await needingApproval()).toEqual([agentId]);
+
+		await onDatabase((db) =>
+			db
+				.update(toolCall)
+				.set({ approvalStatus: "allowed", status: "completed" })
+				.where(eq(toolCall.id, call.id)),
+		);
+		expect(await needingApproval()).toEqual([]);
+	});
+
+	it("marks both bots' chats while their collaboration waits on an approval", async () => {
+		const asking = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		await store.getOrCreate({ workspaceId, podId, hostAgentId: recipientAgentId, userId });
+		const [collaborationThread] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId,
+					podId,
+					hostAgentId: recipientAgentId,
+					chatId: asking.id,
+					type: "collaboration",
+					title: "File the checkout timeouts",
+					parentThreadId: asking.mainThreadId,
+					initiatorUserId: userId,
+				})
+				.returning(),
+		);
+		if (!collaborationThread) throw new Error("Could not create the collaboration thread");
+		await waitOnApproval(collaborationThread.id, recipientAgentId);
+
+		expect((await needingApproval())?.sort()).toEqual([agentId, recipientAgentId].sort());
+	});
+
+	it("marks a routine run's waiting approval only for someone who may decide in routine runs", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		const routines = onPostgres(routineStore(() => Effect.void));
+		const created = await routines.create(workspaceId, agentId, userId, {
+			name: "Overnight review",
+			instructions: "Review overnight changes.",
+			trigger: { kind: "webhook" },
+		});
+		const requestId = crypto.randomUUID();
+		const accepted = await routines.acceptTrigger({
+			workspaceId,
+			agentId,
+			routineId: created.routine.id,
+			triggerIdentity: requestId,
+			trigger: {
+				kind: "manual",
+				requestId,
+				requestedAt: new Date().toISOString(),
+				requestedByUserId: userId,
+			},
+		});
+		const [run] = await onDatabase((db) =>
+			db.select({ chatId: thread.chatId }).from(thread).where(eq(thread.id, accepted.threadId)),
+		);
+		expect(run?.chatId).toBe(current.id);
+		await waitOnApproval(accepted.threadId, agentId);
+
+		// A member decides approvals in chats, but not in routine runs.
+		expect(await needingApproval()).toEqual([]);
+
+		await onDatabase((db) =>
+			db.update(workspaceMember).set({ role: "admin" }).where(eq(workspaceMember.userId, userId)),
+		);
+		expect(await needingApproval()).toEqual([agentId]);
+	});
+
+	it("does not mark a chat for someone who may not decide its approvals", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		await waitOnApproval(current.mainThreadId, agentId);
+		const [onlooker] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Viewer", email: `viewer-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!onlooker) throw new Error("Could not create the viewer");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: onlooker.id, role: "viewer" }),
+		);
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: onlooker.id }),
+		);
+
+		expect(await needingApproval(onlooker.id)).toEqual([]);
+		expect(await needingApproval()).toEqual([agentId]);
 	});
 
 	it("covers every shared pod the person reaches in All, and no pod they cannot", async () => {
