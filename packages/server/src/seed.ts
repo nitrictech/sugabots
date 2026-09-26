@@ -14,10 +14,10 @@ import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Config, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
-import { configFromEnv } from "./config.ts";
+import { ServerConfig } from "./config.ts";
 
 /**
  * Development seed: the smallest amount of data that makes the app worth
@@ -34,22 +34,27 @@ import { configFromEnv } from "./config.ts";
 const EMAIL = "dev@sugabots.local";
 const PASSWORD = "development";
 
-const config = configFromEnv();
 const database = ManagedRuntime.make(
-	Layer.mergeAll(databaseLayer(config.databaseUrl), Email.layer, Installation.layer),
+	Layer.mergeAll(databaseLayer, Email.layer, Installation.layer, ServerConfig.layer),
 );
 const installation = await database.runPromise(Installation.Service);
+const config = await database.runPromise(ServerConfig.Service);
 if (installation.isProduction) {
 	throw new Error("The development seed cannot turn in production.");
 }
 // better-auth's adapter only speaks node-postgres.
-const authPool = new Pool({ connectionString: config.databaseUrl });
+const authPool = await database.runPromise(
+	Effect.map(
+		Config.Redacted("DATABASE_URL"),
+		(url) => new Pool({ connectionString: Redacted.value(url) }),
+	),
+);
 
 /** Signs the development account up. */
 const signUp = Effect.promise(() => {
 	// The seed is the bootstrap, so it is not subject to the installation's policy.
 	const auth = createAuth({
-		...config,
+		secret: Redacted.value(config.secret),
 		installation,
 		db: drizzle({ client: authPool }),
 		run: effectRunner(database),
@@ -57,7 +62,7 @@ const signUp = Effect.promise(() => {
 			database.runPromise(Effect.flatMap(Email.Service, (service) => service.send(email))),
 		allowOpenSignUp: true,
 		requireEmailVerification: false,
-		emailFrom: config.transactionalEmailFrom,
+		emailFrom: config.transactionalSender,
 	});
 	return auth.api.signUpEmail({ body: { name: "Development", email: EMAIL, password: PASSWORD } });
 });

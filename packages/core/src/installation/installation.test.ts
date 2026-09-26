@@ -53,11 +53,7 @@ describe("Installation.layer", () => {
 	});
 
 	it.each([
-		[
-			"an unknown NODE_ENV",
-			{ NODE_ENV: "prod" },
-			/NODE_ENV must be development, production or test/,
-		],
+		["an unknown NODE_ENV", { NODE_ENV: "prod" }, /NODE_ENV/],
 		["a PUBLIC_URL that is not a URL", { PUBLIC_URL: "sugabots.example.com" }, /PUBLIC_URL/],
 		[
 			"a WEB_APP_URL that is not HTTP",

@@ -19,12 +19,7 @@ import { isUniqueViolation } from "./errors.ts";
  * so it is checked.
  */
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-	throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
-}
-
-const database = layer(url);
+const database = layer;
 const table = `database_test_${Date.now().toString(36)}`;
 
 /** One runtime, so every case shares one pool and the layer is built once. */

@@ -20,13 +20,7 @@ import {
  * One runtime for the process, so every test file shares one pool.
  */
 
-const url = process.env.DATABASE_URL;
-
-if (!url) {
-	throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
-}
-
-export const databaseForTests = ManagedRuntime.make(layer(url));
+export const databaseForTests = ManagedRuntime.make(layer);
 
 /** Closes the pool. Call from `afterAll` in any file that uses `onPostgres`. */
 export const closeDatabase = (): Promise<void> => databaseForTests.dispose();

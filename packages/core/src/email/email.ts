@@ -21,7 +21,7 @@ export const make = Effect.gen(function* () {
 		case "console":
 			return fromConsole;
 		case "webhook":
-			return yield* fromWebhook(yield* webhookConfigFromEnv());
+			return yield* fromWebhook(yield* webhookConfig);
 	}
 });
 
@@ -67,19 +67,18 @@ export function parseAddress(value: string): Address | undefined {
 
 const PROVIDERS = ["console", "webhook"] as const;
 
-function webhookConfigFromEnv() {
-	return Effect.gen(function* () {
-		const installation = yield* Installation.Service;
-		const url = yield* Config.URL("EMAIL_WEBHOOK_URL");
-		const token = yield* Config.option(Config.Redacted("EMAIL_WEBHOOK_TOKEN"));
-		if (url.protocol !== "http:" && url.protocol !== "https:") {
-			return yield* new InvalidConfig({ message: "EMAIL_WEBHOOK_URL must use HTTP or HTTPS" });
-		}
-		if (installation.isProduction && url.protocol !== "https:") {
-			return yield* new InvalidConfig({
-				message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
-			});
-		}
-		return { url: url.href, token: Option.getOrUndefined(token) } satisfies WebhookConfig;
-	});
-}
+/** The webhook's settings, `EMAIL_WEBHOOK_URL` and `EMAIL_WEBHOOK_TOKEN`. Production requires HTTPS. */
+const webhookConfig = Effect.gen(function* () {
+	const installation = yield* Installation.Service;
+	const url = yield* Config.URL("EMAIL_WEBHOOK_URL");
+	const token = yield* Config.option(Config.Redacted("EMAIL_WEBHOOK_TOKEN"));
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		return yield* new InvalidConfig({ message: "EMAIL_WEBHOOK_URL must use HTTP or HTTPS" });
+	}
+	if (installation.isProduction && url.protocol !== "https:") {
+		return yield* new InvalidConfig({
+			message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
+		});
+	}
+	return { url: url.href, token: Option.getOrUndefined(token) } satisfies WebhookConfig;
+});
