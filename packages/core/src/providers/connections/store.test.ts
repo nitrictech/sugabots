@@ -78,25 +78,38 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		).rejects.toThrow(ConnectionNameTaken);
 	});
 
-	it("hands a turn only the enabled connections among those it names", async () => {
+	it("hands a turn every connection that is not off, with what it may do", async () => {
 		const wiki = await connections.create(workspaceId, podId, userId, {
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
-		await connections.create(workspaceId, podId, userId, {
+		const off = await connections.create(workspaceId, podId, userId, {
 			name: "Off",
 			url: "https://off.example.com/mcp",
 		});
-		await connections.update(workspaceId, podId, wiki.id, {
-			enabled: true,
-			allowMutating: true,
-		});
+		await connections.update(workspaceId, podId, wiki.id, { access: "ask" });
+		await connections.update(workspaceId, podId, off.id, { access: "off" });
 
 		const targets = await connections.targetsForPod(workspaceId, podId);
 
 		expect(targets).toEqual([
-			expect.objectContaining({ connectionId: wiki.id, handle: "wiki", allowMutating: true }),
+			expect.objectContaining({ connectionId: wiki.id, handle: "wiki", access: "ask" }),
 		]);
+	});
+
+	it("keeps a connection that signs in off until it has", async () => {
+		const pasted = await connections.create(workspaceId, podId, userId, {
+			name: "Wiki",
+			url: "https://wiki.example.com/mcp",
+		});
+		const signsIn = await connections.create(workspaceId, podId, userId, {
+			name: "Linear",
+			url: "https://mcp.linear.app/mcp",
+			auth: "oauth",
+		});
+
+		expect(pasted.access).toBe("allow");
+		expect(signsIn.access).toBe("off");
 	});
 
 	it("does not expose a connection through another pod", async () => {
@@ -108,7 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		expect(await connections.get(workspaceId, otherPodId, made.id)).toBeUndefined();
 		expect(await connections.target(workspaceId, otherPodId, made.id)).toBeUndefined();
 		expect(
-			await connections.update(workspaceId, otherPodId, made.id, { enabled: true }),
+			await connections.update(workspaceId, otherPodId, made.id, { access: "ask" }),
 		).toBeUndefined();
 		expect(await connections.remove(workspaceId, otherPodId, made.id)).toBe(false);
 		expect(await connections.get(workspaceId, podId, made.id)).toEqual(made);

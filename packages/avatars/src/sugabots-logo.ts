@@ -1,10 +1,10 @@
-import type { BotColor } from "./bot-colors.ts";
+import type { AgentColor } from "@sugabots/contracts";
 
 /** The Sugabots mark: a tile of four bot-coloured dots, drawn to assets/sugabots-logo.svg. */
 export const sugabotsLogo: {
-	tint: BotColor;
-	bots: readonly [BotColor, BotColor, BotColor, BotColor];
+	tint: AgentColor;
+	bots: readonly [AgentColor, AgentColor, AgentColor, AgentColor];
 } = {
 	tint: "purple",
-	bots: ["green", "cyan", "rose", "orange"],
+	bots: ["green", "ice", "rose", "orange"],
 };

@@ -82,6 +82,7 @@ export const client = {
 			startOAuth: vi.fn(),
 		},
 		chats: {
+			list: vi.fn(),
 			getOrCreate: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
@@ -94,10 +95,9 @@ export const client = {
 		},
 		toolApprovals: {
 			decide: vi.fn(),
-			listRules: vi.fn(),
-			revokeRule: vi.fn(),
 		},
 		routines: {
+			listInWorkspace: vi.fn(),
 			list: vi.fn(),
 			create: vi.fn(),
 			previewSchedule: vi.fn(),

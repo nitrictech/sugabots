@@ -1,131 +1,140 @@
-import type {
-	ChatHistoryEntry,
-	RoutineExecutionTriggerKind,
-	ThreadParticipant,
-} from "@sugabots/contracts";
-import { Ban, CalendarClock, ChevronRight, CircleAlert, Clock3, Play, Webhook } from "lucide-react";
+import type { ChatHistoryEntry, ThreadParticipant } from "@sugabots/contracts";
+import { ChevronRight, Repeat } from "lucide-react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 
 export type ChatThreadType = ChatHistoryEntry["type"];
 
-export const threadTypePresentation = {
-	collaboration: { label: "Collaboration", color: "#33478f", tint: "#eef1fb" },
-	routine: { label: "Routine run", color: "#7a3f0c", tint: "#fdf1e5" },
-} as const;
+/** What each kind of thread is called where it is named. */
+const threadTypeLabel = { collaboration: "Collaboration", routine: "Routine run" } as const;
 
-export function ThreadTypeMark({
-	type,
-	triggerKind,
-	size = 13,
-}: {
-	type: ChatThreadType;
-	triggerKind?: RoutineExecutionTriggerKind;
-	size?: number;
-}) {
-	const color = threadTypePresentation[type].color;
-	if (type === "routine") {
-		const Icon =
-			triggerKind === "webhook" ? Webhook : triggerKind === "manual" ? Play : CalendarClock;
-		return <Icon aria-hidden size={size} color={color} />;
-	}
-	return (
-		<svg
-			aria-hidden
-			width={size}
-			height={size}
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke={color}
-			strokeWidth="2"
-		>
-			<circle cx="9" cy="9" r="5" />
-			<circle cx="16" cy="15" r="5" />
-		</svg>
-	);
+type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
+
+/** How a collaboration or routine run stands, as its line says it. */
+export type ActivityState = "running" | "waiting_on_you" | "done" | "failed";
+
+/** A history entry's status in the terms of the line. */
+export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivityState {
+	if (entry?.status === "failed" || entry?.status === "cancelled") return "failed";
+	if (entry?.status === "completed") return "done";
+	return "running";
 }
 
-export function ChatActivityRow({
-	entry,
-	type: explicitType,
-	title,
-	collaborationAgents,
-	onOpen,
-}: {
-	entry?: ChatHistoryEntry;
-	type?: ChatThreadType;
-	title: string;
-	collaborationAgents?: {
-		initiator: Extract<ThreadParticipant, { kind: "agent" }>;
-		recipient: Extract<ThreadParticipant, { kind: "agent" }>;
-	};
-	onOpen: () => void;
-}) {
-	const type: ChatThreadType = entry?.type ?? explicitType ?? "collaboration";
-	const presentation = threadTypePresentation[type];
+/**
+ * A centred line for something that happened in the chat around the bot's
+ * messages: a collaboration with another bot, or a routine run. The whole line
+ * opens it.
+ */
+export function ChatActivityRow(
+	props: { state: ActivityState; onOpen: () => void } & (
+		| {
+				type: "collaboration";
+				initiator: AgentParticipant;
+				recipient: AgentParticipant;
+				/**
+				 * Whose chat the line is in: the bot that asked, by default, or the
+				 * one it asked, whose line says it helped.
+				 */
+				inChatOf?: "initiator" | "recipient";
+		  }
+		| { type: "routine"; routineName: string }
+	),
+) {
+	const { state, onOpen } = props;
+	const text =
+		props.type === "collaboration"
+			? props.inChatOf === "recipient"
+				? helpedText(props.recipient.name, props.initiator.name, state)
+				: collaborationText(props.initiator.name, props.recipient.name, state)
+			: routineText(props.routineName, state);
 	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			className="chat-activity-row focus-ring group flex w-full items-center gap-3 rounded-full px-1.5 py-1 text-left"
-			aria-label={`Open ${presentation.label}: ${title}`}
-		>
-			<span aria-hidden className="h-px min-w-3 flex-1 bg-border-subtle" />
-			<span className="flex min-w-0 max-w-[520px] items-center gap-2 text-sm text-muted-foreground">
-				{!collaborationAgents && (
-					<ThreadTypeMark type={type} triggerKind={entry?.routineExecution?.triggerKind} />
-				)}
-				{collaborationAgents ? (
-					<span className="flex min-w-0 items-center gap-1.5 font-medium">
+		<div className="flex justify-center py-2.5">
+			<button
+				type="button"
+				onClick={onOpen}
+				aria-label={`Open ${threadTypeLabel[props.type]}: ${text}`}
+				className="focus-ring flex min-w-0 items-center gap-[7px] rounded-md px-0.5 py-0.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
+			>
+				{props.type === "collaboration" ? (
+					<span aria-hidden className="relative h-[18px] w-[30px] shrink-0">
 						<AgentAvatar
-							hue={collaborationAgents.initiator.hue}
-							face={collaborationAgents.initiator.face}
+							color={props.initiator.color}
+							face={props.initiator.face}
 							size={18}
+							className="absolute top-0 left-0"
 						/>
-						<span className="truncate">{collaborationAgents.initiator.name}</span>
-						<span className="shrink-0 font-normal text-subtle-foreground">talked to</span>
 						<AgentAvatar
-							hue={collaborationAgents.recipient.hue}
-							face={collaborationAgents.recipient.face}
+							color={props.recipient.color}
+							face={props.recipient.face}
 							size={18}
+							className="absolute top-0 left-3 rounded-full shadow-[0_0_0_2px_var(--background)]"
 						/>
-						<span className="truncate">{collaborationAgents.recipient.name}</span>
+					</span>
+				) : state === "failed" ? (
+					<span
+						aria-hidden
+						className="grid size-3.5 shrink-0 place-items-center rounded-full bg-destructive font-bold text-[10px] text-white leading-none"
+					>
+						!
 					</span>
 				) : (
-					<span className="min-w-0 truncate font-medium">{title}</span>
+					<Repeat aria-hidden size={13} strokeWidth={2.2} className="shrink-0" />
 				)}
-				{entry?.status === "running" && (
-					<span
-						className="chat-working-dots"
-						title={type === "collaboration" ? "Agents working" : "Running"}
-						style={{ color: presentation.color }}
-					>
+				<span className="min-w-0 truncate">{text}</span>
+				{state === "running" ? (
+					<span aria-hidden className="typing-dots typing-dots-small">
 						<i />
 						<i />
 						<i />
 					</span>
+				) : (
+					<ChevronRight
+						aria-hidden
+						size={10}
+						strokeWidth={3}
+						className="shrink-0 text-subtle-foreground"
+					/>
 				)}
-				{entry?.status === "queued" && <Clock3 aria-label="Queued" size={13} />}
-				{entry?.status === "cancelled" && <Ban aria-label="Cancelled" size={13} />}
-				{entry?.status === "failed" && (
-					<CircleAlert aria-label="Failed" size={14} color="#a4453a" />
-				)}
-				{entry?.status === "completed" && (
-					<time
-						className="shrink-0 text-xs text-subtle-foreground"
-						dateTime={entry.latestActivityAt}
-					>
-						{formatTime(entry.latestActivityAt)}
-					</time>
-				)}
-				<ChevronRight aria-hidden size={12} className="shrink-0 text-subtle-foreground" />
-			</span>
-			<span aria-hidden className="h-px min-w-3 flex-1 bg-border-subtle" />
-		</button>
+			</button>
+		</div>
 	);
 }
 
-function formatTime(value: string): string {
-	return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(
-		new Date(value),
-	);
+function collaborationText(host: string, other: string, state: ActivityState): string {
+	switch (state) {
+		case "running":
+			return `${host} is talking to ${other}`;
+		case "waiting_on_you":
+			return `${host} is waiting on your approval`;
+		case "done":
+			return `${host} collaborated with ${other}`;
+		case "failed":
+			return `Collaboration with ${other} failed`;
+	}
+}
+
+/** The same line in the chat of the bot that was asked, which it says it helped. */
+function helpedText(helper: string, asker: string, state: ActivityState): string {
+	switch (state) {
+		case "running":
+			return `${helper} is helping ${asker}`;
+		case "waiting_on_you":
+			return `${helper} is waiting on your approval`;
+		case "done":
+			return `${helper} helped ${asker}`;
+		case "failed":
+			return `Collaboration with ${asker} failed`;
+	}
+}
+
+function routineText(name: string, state: ActivityState): string {
+	switch (state) {
+		case "running":
+			return `${name} is running`;
+		case "waiting_on_you":
+			return `${name} is waiting on your approval`;
+		case "done":
+			return `${name} ran`;
+		case "failed":
+			return `${name} failed`;
+	}
 }

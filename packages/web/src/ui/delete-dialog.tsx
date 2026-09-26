@@ -1,15 +1,11 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { Alert } from "@/ui/alert.tsx";
-import { Button } from "@/ui/button.tsx";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@/ui/dialog.tsx";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog.tsx";
 
+const choice =
+	"focus-ring flex-1 p-[13px] text-[15px] transition-colors hover:bg-chip disabled:cursor-default disabled:opacity-50";
+
+/** A confirmation with Cancel and a red action side by side, like a phone's alert. */
 export function DeleteDialog({
 	open,
 	onOpenChange,
@@ -17,7 +13,7 @@ export function DeleteDialog({
 	description,
 	pending,
 	error,
-	confirmLabel = "Yes, delete",
+	confirmLabel = "Delete",
 	onDelete,
 }: {
 	open: boolean;
@@ -26,10 +22,11 @@ export function DeleteDialog({
 	description: ReactNode;
 	pending: boolean;
 	error?: string;
-	/** Say what the button does when it isn't a deletion, e.g. "Yes, remove". */
+	/** Say what the button does when it isn't a deletion, e.g. "Remove". */
 	confirmLabel?: string;
 	onDelete: () => void | Promise<void>;
 }) {
+	const cancel = useRef<HTMLButtonElement>(null);
 	return (
 		<Dialog
 			open={open}
@@ -37,7 +34,12 @@ export function DeleteDialog({
 				if (!pending) onOpenChange(nextOpen);
 			}}
 		>
-			<DialogContent showCloseButton={!pending} className="sm:max-w-md">
+			{/* Cancel takes the focus so a stray Enter can't delete. */}
+			<DialogContent
+				showCloseButton={false}
+				initialFocus={cancel}
+				className="max-w-[min(360px,calc(100%-20px))] gap-0 overflow-hidden rounded-[20px] p-0 text-center sm:max-w-[360px]"
+			>
 				<form
 					className="contents"
 					onSubmit={(event) => {
@@ -45,24 +47,31 @@ export function DeleteDialog({
 						void onDelete();
 					}}
 				>
-					<DialogHeader>
-						<DialogTitle>{title}</DialogTitle>
-						<DialogDescription>{description}</DialogDescription>
-					</DialogHeader>
-					{error && <Alert>{error}</Alert>}
-					<DialogFooter>
-						<Button
+					<div className="flex flex-col items-center gap-2 px-[22px] pt-6 pb-[18px]">
+						<DialogTitle className="text-base">{title}</DialogTitle>
+						<DialogDescription className="text-[13.5px] text-pretty leading-[1.55]">
+							{description}
+						</DialogDescription>
+						{error && <Alert className="mt-2 text-left">{error}</Alert>}
+					</div>
+					<div className="flex border-border-strong border-t">
+						<button
+							ref={cancel}
 							type="button"
-							variant="outline"
+							className={`${choice} border-border-strong border-r font-medium text-soft-foreground`}
 							disabled={pending}
 							onClick={() => onOpenChange(false)}
 						>
-							Keep
-						</Button>
-						<Button type="submit" variant="destructive" disabled={pending}>
+							Cancel
+						</button>
+						<button
+							type="submit"
+							className={`${choice} font-semibold text-destructive-text`}
+							disabled={pending}
+						>
 							{confirmLabel}
-						</Button>
-					</DialogFooter>
+						</button>
+					</div>
 				</form>
 			</DialogContent>
 		</Dialog>

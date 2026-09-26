@@ -40,8 +40,8 @@ const prepared: PreparedTurn = {
 			id: claimed.payload.agentId,
 			name: "Host Agent",
 			handle: "host-agent",
-			hue: 150,
-			face: "bar",
+			color: "green",
+			face: "pill",
 		},
 		kind: "text",
 		status: "streaming",
@@ -189,7 +189,7 @@ describe("runClaimedTurn", () => {
 		);
 	});
 
-	it("offers a connection's tools for the turn, notes when one acted, and closes the session after", async () => {
+	it("offers a connection's tools for the turn, notes when an allowed one acted, and closes the session after", async () => {
 		const store = turnStore();
 		const calls = toolCalls();
 		const close = vi.fn(async () => undefined);
@@ -229,6 +229,7 @@ describe("runClaimedTurn", () => {
 								wiki__wipe: {
 									tool: wipe,
 									mutating: true,
+									requiresApproval: true,
 									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 									connectionRevision: 1,
 									remoteToolName: "wipe",
@@ -238,7 +239,6 @@ describe("runClaimedTurn", () => {
 						}),
 				},
 				approvals: {
-					allowedToolKeys: () => Effect.succeed(new Set(["wiki__wipe"])),
 					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
 					beginExecution: ({ atOffset }) =>
 						calls.open({
@@ -251,8 +251,6 @@ describe("runClaimedTurn", () => {
 							mutating: true,
 						}),
 					decide: () => Effect.die(new Error("unused")),
-					listRules: () => Effect.succeed([]),
-					revokeRule: () => Effect.succeed(false),
 				},
 			}),
 		);
@@ -316,6 +314,7 @@ describe("runClaimedTurn", () => {
 										execute,
 									}),
 									mutating: true,
+									requiresApproval: true,
 									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 									connectionRevision: 1,
 									remoteToolName: "wipe",
@@ -325,13 +324,10 @@ describe("runClaimedTurn", () => {
 						}),
 				},
 				approvals: {
-					allowedToolKeys: () => Effect.succeed(new Set()),
 					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
 					beginExecution: () =>
 						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
 					decide: () => Effect.die(new Error("unused")),
-					listRules: () => Effect.succeed([]),
-					revokeRule: () => Effect.succeed(false),
 				},
 			}),
 		);
@@ -388,12 +384,9 @@ describe("runClaimedTurn", () => {
 				collaborations: collaborations(),
 				calls: toolCalls(),
 				approvals: {
-					allowedToolKeys: () => Effect.succeed(new Set()),
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
 					decide: () => Effect.die(new Error("unused")),
-					listRules: () => Effect.succeed([]),
-					revokeRule: () => Effect.succeed(false),
 				},
 			}),
 		);
@@ -403,6 +396,51 @@ describe("runClaimedTurn", () => {
 			system: "reviewed system",
 			messages: [{ role: "user", content: "reviewed history" }],
 		});
+	});
+
+	it("tells the model which connection tools wait for a person", async () => {
+		const store = turnStore();
+		const lookup = tool({
+			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
+			execute: async () => ({ content: [] }),
+		});
+		const offered = (name: string, requiresApproval: boolean) => ({
+			tool: lookup,
+			mutating: false,
+			requiresApproval,
+			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+			connectionRevision: 1,
+			remoteToolName: name,
+		});
+		let received: TurnModelInput | undefined;
+		const model: TurnModel = {
+			stream: (input) => {
+				received = input;
+				return Effect.succeed({ text: chunks("Done"), accounting: Effect.succeed({ usage: {} }) });
+			},
+		};
+
+		await runWithServices(
+			runClaimedTurn(claimed, {
+				store,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				calls: toolCalls(),
+				connectionTools: {
+					forPod: () =>
+						Effect.succeed({
+							tools: {
+								wiki__lookup: offered("lookup", false),
+								notes__lookup: offered("lookup", true),
+							},
+							close: async () => undefined,
+						}),
+				},
+			}),
+		);
+
+		expect(received?.toolApproval).toEqual({ notes__lookup: "user-approval" });
 	});
 
 	it("leaves out a built-in tool the agent has switched off", async () => {

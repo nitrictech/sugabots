@@ -1,7 +1,10 @@
-export function hueFromText(text: string): number {
-	let hue = 0;
+import { type AgentColor, agentColors } from "./agents.ts";
+
+/** A stable colour for something named `text`, so the same name always gets the same colour. */
+export function colorFromText(text: string): AgentColor {
+	let hash = 0;
 	for (const character of text) {
-		hue = (hue * 31 + (character.codePointAt(0) ?? 0)) % 360;
+		hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 997;
 	}
-	return hue;
+	return agentColors[hash % agentColors.length] ?? "green";
 }

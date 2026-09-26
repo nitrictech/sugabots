@@ -9,5 +9,5 @@ import type { ComponentProps } from "react";
  * is the failure mode this is here to prevent.
  */
 export function Alert({ className, ...props }: ComponentProps<"p">) {
-	return <p role="alert" className={cn("text-md text-destructive", className)} {...props} />;
+	return <p role="alert" className={cn("text-md text-destructive-text", className)} {...props} />;
 }

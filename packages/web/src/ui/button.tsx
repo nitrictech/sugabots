@@ -12,10 +12,10 @@ import { cn } from "cn";
  * design — instead of the CLI overwriting it with the library's default and
  * quietly introducing a second look.
  *
- * The design only draws three of these (the accent Send, the bordered
- * secondary, the bare text link); the rest are here to satisfy the contract and
- * are mapped onto tokens above so they cannot drift into a palette of their
- * own. `bare` is the one addition, for a link with no padding.
+ * The design draws buttons as pills: the accent primary, a neutral chip for
+ * everything secondary, and bare text for links and destructive actions. The rest are here to satisfy the
+ * contract and are mapped onto those so they cannot drift into a palette of
+ * their own. `bare` is the one addition, for a link with no padding.
  *
  * An icon-only control should still be `IconButton`, which requires a label.
  * `size="icon"` exists for registry components that do not know about it.
@@ -26,24 +26,24 @@ import { cn } from "cn";
  */
 
 const button = cva(
-	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap font-sans font-semibold transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-sans font-semibold transition-colors disabled:cursor-default [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
 	{
 		variants: {
 			variant: {
-				default: "bg-primary text-primary-foreground hover:bg-primary-hover",
-				secondary:
-					"border border-control-border bg-secondary font-medium text-secondary-foreground hover:bg-accent",
-				outline:
-					"border border-control-border bg-control font-medium text-control-foreground hover:bg-accent",
-				ghost: "font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-				link: "font-medium text-primary underline-offset-2 hover:underline",
-				destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
+				default:
+					"bg-primary text-primary-foreground hover:bg-primary-hover disabled:bg-chip disabled:text-disabled-foreground",
+				secondary: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
+				outline: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
+				ghost:
+					"font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50",
+				link: "rounded-md font-medium text-link hover:opacity-80 disabled:text-disabled-foreground",
+				destructive: "font-medium text-destructive-text hover:opacity-80 disabled:opacity-50",
 			},
 			size: {
-				sm: "h-7 rounded-md px-2.5 text-sm",
-				default: "h-8 rounded-md px-3.5 text-md",
-				lg: "h-10 rounded-lg px-4 text-base",
-				icon: "size-[30px] rounded-md [&_svg]:size-[15px]",
+				sm: "h-[29px] px-3.5 text-md",
+				default: "h-9 px-4 text-[14px]",
+				lg: "h-12 px-5 text-lg",
+				icon: "size-[34px] [&_svg]:size-[15px]",
 				bare: "h-auto p-0",
 			},
 		},

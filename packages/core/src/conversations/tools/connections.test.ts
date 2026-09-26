@@ -79,7 +79,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 	url,
 	auth: "header",
 	headers: { "x-fixture-key": "open-sesame" },
-	allowMutating: false,
+	access: "allow",
 	configurationUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),
 	configurationRevision: 1,
 	...extra,
@@ -94,13 +94,15 @@ function toolsFor(...targets: ConnectionTarget[]) {
 }
 
 describe("a turn's connection tools", () => {
-	it("offers the read-only tools under the connection's handle, and holds back the rest", async () => {
+	it("runs read-only tools straight away and asks before a tool that changes things", async () => {
 		const offered = toolsFor(target());
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
-			expect(Object.keys(set.tools)).toEqual(["wiki__lookup"]);
-			expect(set.tools.wiki__lookup?.mutating).toBe(false);
+			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: false });
+			// No hints at all is taken to change things, as the spec has it.
+			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: true });
 			const result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, {
 				toolCallId: "1",
 				messages: [],
@@ -111,14 +113,13 @@ describe("a turn's connection tools", () => {
 		}
 	});
 
-	it("offers a tool that changes things once the admin allowed it, marked as such", async () => {
-		const offered = toolsFor(target({ allowMutating: true }));
+	it("asks before every tool of a connection set to ask, reads included", async () => {
+		const offered = toolsFor(target({ access: "ask" }));
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
-			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			// No hints at all is taken to change things, as the spec has it.
-			expect(set.tools.wiki__wipe?.mutating).toBe(true);
+			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: true });
+			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: true });
 		} finally {
 			await set.close();
 		}
@@ -133,7 +134,7 @@ describe("a turn's connection tools", () => {
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
-			expect(Object.keys(set.tools)).toEqual(["wiki__lookup"]);
+			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(quiet).toHaveBeenCalledWith(
 				"Connection locked left out of the turn",
 				expect.anything(),

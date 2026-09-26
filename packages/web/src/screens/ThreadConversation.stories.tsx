@@ -7,7 +7,7 @@ import type {
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
-import { expect, screen, userEvent } from "storybook/test";
+import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
@@ -16,8 +16,8 @@ const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	id: "0199a3a0-0000-7000-8000-000000000001",
 	name: "Issue Triager",
 	handle: "issue-triager",
-	hue: 150,
-	face: "smile",
+	color: "green",
+	face: "arc",
 };
 
 const person: Extract<ThreadParticipant, { kind: "person" }> = {
@@ -25,6 +25,14 @@ const person: Extract<ThreadParticipant, { kind: "person" }> = {
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam Rivera",
 	handle: "sam-rivera",
+	image: null,
+};
+
+const jay: Extract<ThreadParticipant, { kind: "person" }> = {
+	kind: "person",
+	id: "0199a3a0-0000-7000-8000-000000000003",
+	name: "Jay Park",
+	handle: "jay-park",
 	image: null,
 };
 
@@ -77,9 +85,10 @@ const meta = preview.meta({
 	args: {
 		host,
 		isRunning: false,
-		mentionable: [host, person],
+		participants: [host, person],
 		user,
 		podId: POD,
+		onOpenCollaboration: fn(),
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -92,7 +101,7 @@ const meta = preview.meta({
 			useEffect(() => () => queryClient.clear(), [queryClient]);
 			return (
 				<QueryClientProvider client={queryClient}>
-					<div className="mx-auto max-w-home py-4">
+					<div className="mx-auto py-4">
 						<Story />
 					</div>
 				</QueryClientProvider>
@@ -101,12 +110,15 @@ const meta = preview.meta({
 	],
 });
 
-/** Hovering a message's time shows the full date and time, with the year for an earlier year. */
-export const FullTimestampOnHover = meta.story({
+/**
+ * Hovering a bubble shows its time beside it (hover in the canvas to see it);
+ * the full date and time, with the year, is its title.
+ */
+export const TimeOnHover = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.hover(canvas.getByText(/\d:\d{2}/, { selector: "time" }));
+		const time = canvas.getByText(/\d:\d{2}/, { selector: "time" });
 		// Date order and clock style follow the browser's locale; the year and seconds are what matter.
-		await expect(await screen.findByText(/2025 at \d{1,2}:\d{2}:46/)).toBeVisible();
+		await expect(time.title).toMatch(/2025 at \d{1,2}:\d{2}:46/);
 	},
 	args: {
 		messages: [
@@ -115,6 +127,117 @@ export const FullTimestampOnHover = meta.story({
 				createdAt: "2025-08-05T05:46:46.000Z",
 			},
 		],
+	},
+});
+
+/**
+ * Runs groups one author's messages: the name above the first bubble, the face
+ * beside the last. Your own messages sit on the right in the accent, with no face.
+ */
+export const Runs = meta.story({
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000201",
+				host,
+				"Overnight outbound queued `38` leads and six have already replied.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000202",
+				host,
+				"The two Northwind accounts are in there, and both asked for pricing. Want me to draft replies?",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000203",
+				jay,
+				"Yes please. Keep the tone short, they hate long emails.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000204",
+				person,
+				"Also, billing timeouts are back on checkout.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000205",
+				person,
+				"Can you check Sentry and get it tracked if nothing's open?",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		// Two bot bubbles in a row carry the name once and the face once.
+		await expect(canvas.getAllByText("Issue Triager")).toHaveLength(1);
+		await expect(canvas.getByText("Jay Park")).toBeInTheDocument();
+		await expect(canvas.queryByText("Sam Rivera")).toBeNull();
+	},
+});
+
+/** A new day in the middle of a thread gets room above its separator, so it reads as a new stretch. */
+export const ANewDay = meta.story({
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000211",
+				host,
+				"Drafted both. They're in your outbox.",
+			),
+			{
+				...message("0199a3a0-0000-7000-8000-000000000212", person, "Did either of them reply?"),
+				createdAt: "2026-09-23T09:12:00.000Z",
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		const separators = canvas.getAllByText(/\d:\d\d$/, { selector: "p" });
+		await expect(separators).toHaveLength(2);
+	},
+});
+
+const other: Extract<ThreadParticipant, { kind: "agent" }> = {
+	kind: "agent",
+	id: "0199a3a0-0000-7000-8000-000000000007",
+	name: "Linear Handler",
+	handle: "linear-handler",
+	color: "orange",
+	face: "dot",
+};
+
+/**
+ * Mirrored is a collaboration as its sidebar shows it: the chat's bot on the
+ * right, the bot it asked on the left, smaller faces and bubbles, and no names.
+ */
+export const Mirrored = meta.story({
+	args: {
+		rightAgentId: host.id,
+		compact: true,
+		participants: [host, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000301",
+				host,
+				"Ryan is seeing billing timeouts on checkout. Can you check Sentry and open an issue if nothing's tracked?",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000302",
+				other,
+				"41 events in 24h, all on `POST /checkout`, hitting the 30s gateway limit.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000303",
+				other,
+				"Nothing open in Linear. I'd like to create one.",
+			),
+		],
+	},
+	decorators: [
+		(Story) => (
+			<div className="w-[360px] px-3.5">
+				<Story />
+			</div>
+		),
+	],
+	play: async ({ canvas }) => {
+		await expect(canvas.queryByText("Linear Handler")).toBeNull();
 	},
 });
 

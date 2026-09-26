@@ -12,38 +12,23 @@ export interface ToolApprovalRoutesOptions {
 
 export function toolApprovalRoutes({ approvals }: ToolApprovalRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "toolApprovals", (handlers) =>
-		handlers
-			.handle("decide", ({ params, payload }) =>
-				Effect.gen(function* () {
-					const { pod, actor } = yield* grantedPod;
-					if (!isUuid(params.toolCallId)) {
-						return yield* new NotFound({ message: "No such pending tool approval" });
-					}
-					return yield* approvals
-						.decide({
-							workspaceId: pod.workspaceId,
-							podId: pod.id,
-							toolCallId: params.toolCallId,
-							userId: actor.userId,
-							decision: payload.decision,
-						})
-						.pipe(asHttpError(approvalErrors));
-				}),
-			)
-			.handle("listRules", () =>
-				Effect.flatMap(grantedPod, ({ pod }) => approvals.listRules(pod.workspaceId, pod.id)),
-			)
-			.handle("revokeRule", ({ params }) =>
-				Effect.gen(function* () {
-					const { pod } = yield* grantedPod;
-					const removed =
-						isUuid(params.ruleId) &&
-						(yield* approvals.revokeRule(pod.workspaceId, pod.id, params.ruleId));
-					if (!removed) {
-						return yield* new NotFound({ message: "No such tool approval rule" });
-					}
-				}),
-			),
+		handlers.handle("decide", ({ params, payload }) =>
+			Effect.gen(function* () {
+				const { pod, actor } = yield* grantedPod;
+				if (!isUuid(params.toolCallId)) {
+					return yield* new NotFound({ message: "No such pending tool approval" });
+				}
+				return yield* approvals
+					.decide({
+						workspaceId: pod.workspaceId,
+						podId: pod.id,
+						toolCallId: params.toolCallId,
+						userId: actor.userId,
+						decision: payload.decision,
+					})
+					.pipe(asHttpError(approvalErrors));
+			}),
+		),
 	);
 }
 

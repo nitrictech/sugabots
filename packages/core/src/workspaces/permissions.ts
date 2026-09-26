@@ -73,11 +73,7 @@ export type PodPermission =
 	/** Decide a tool call an agent raised in ordinary conversation. */
 	| "approval.decide"
 	/** Decide a tool call an agent raised while a Routine was running. */
-	| "approval.routine.decide"
-	/** Turn one decision into a standing approval for that tool. */
-	| "approval.alwaysAllow"
-	/** Withdraw a standing approval, whoever granted it. */
-	| "approval.revoke";
+	| "approval.routine.decide";
 
 /**
  * The caller.
@@ -140,8 +136,6 @@ const POD_GRANTS: Record<WorkspaceRole, Readonly<Partial<Record<PodPermission, P
 		"routine.history.read": "shared-pods",
 		"approval.decide": "shared-pods",
 		"approval.routine.decide": "shared-pods",
-		"approval.alwaysAllow": "shared-pods",
-		"approval.revoke": "shared-pods",
 	},
 	member: {
 		"pod.read": "joined-pods",

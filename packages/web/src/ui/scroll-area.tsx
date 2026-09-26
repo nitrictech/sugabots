@@ -48,7 +48,7 @@ function Scrollbar({
 			)}
 			{...props}
 		>
-			<ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-input" />
+			<ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border-strong" />
 		</ScrollAreaPrimitive.Scrollbar>
 	);
 }

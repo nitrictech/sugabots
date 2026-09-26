@@ -586,8 +586,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 					name: "Facilitator",
 					handle: "facilitator",
 					systemAgentKey: "facilitate",
-					hue: 205,
-					face: "bar",
+					color: "teal",
+					face: "pill",
 					model,
 				}),
 			);

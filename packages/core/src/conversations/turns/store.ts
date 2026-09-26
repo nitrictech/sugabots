@@ -1,4 +1,4 @@
-import type { PodRouting, ThreadType } from "@sugabots/contracts";
+import type { AgentColor, PodRouting, ThreadType } from "@sugabots/contracts";
 import {
 	type Message,
 	messagePartsFor,
@@ -297,7 +297,7 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 							agentId: scope.agentId,
 							agentName: scope.agentName,
 							agentHandle: scope.agentHandle,
-							agentHue: scope.agentHue,
+							agentColor: scope.agentColor,
 							agentFace: scope.agentFace,
 						}),
 						context: {
@@ -492,7 +492,7 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 										input: boundedJson(approval.input),
 										executionInput: executionJson(approval.input),
 										status: "awaiting_approval",
-										mutating: true,
+										mutating: approval.mutating,
 										atOffset: approval.atOffset,
 									})
 									.returning();
@@ -776,7 +776,7 @@ interface TurnScope {
 	agentId: string;
 	agentName: string;
 	agentHandle: string;
-	agentHue: number;
+	agentColor: AgentColor;
 	agentFace: AgentRow["face"];
 	/** Null when nobody has chosen one. The turn refuses rather than guessing. */
 	agentModel: string | null;
@@ -815,7 +815,7 @@ const loadTurnScope = Effect.fn("TurnStore.loadTurnScope")(function* (
 			agentId: agent.id,
 			agentName: agent.name,
 			agentHandle: agent.handle,
-			agentHue: agent.hue,
+			agentColor: agent.color,
 			agentFace: agent.face,
 			agentModel: agent.model,
 			agentPrompt: agent.prompt,

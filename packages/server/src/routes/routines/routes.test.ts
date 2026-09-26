@@ -27,6 +27,7 @@ function webhookApp() {
 		),
 	);
 	const routines: RoutineStore = {
+		listInWorkspace: () => Effect.succeed([]),
 		list: () => Effect.succeed([]),
 		get: () => Effect.undefined,
 		create: () => Effect.die("not used"),
@@ -230,5 +231,37 @@ describe("Routine execution history", () => {
 
 		expect(response.status).toBe(403);
 		expect(acceptTrigger).not.toHaveBeenCalled();
+	});
+});
+
+describe("the workspace's routines", () => {
+	const listFor = (userId: string, listInWorkspace: RoutineStore["listInWorkspace"]) =>
+		createTestApp({
+			resolveSession: async () => ({
+				user: { id: userId, name: "Somebody", email: "somebody@example.com", image: null },
+			}),
+			authorization,
+			stores: { routines: { ...webhookApp().routines, listInWorkspace } },
+		}).request(`/workspaces/${WORKSPACE_ID}/routines`, {
+			headers: { authorization: "Bearer session" },
+		});
+
+	it("lists what the store finds for the person asking", async () => {
+		const listInWorkspace = vi.fn<RoutineStore["listInWorkspace"]>(() => Effect.succeed([]));
+
+		const response = await listFor(MEMBER_ID, listInWorkspace);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ items: [] });
+		expect(listInWorkspace).toHaveBeenCalledWith(WORKSPACE_ID, MEMBER_ID);
+	});
+
+	it("does not list another workspace's routines", async () => {
+		const listInWorkspace = vi.fn<RoutineStore["listInWorkspace"]>(() => Effect.succeed([]));
+
+		const response = await listFor("0199a3a0-0000-7000-8000-0000000000ff", listInWorkspace);
+
+		expect(response.status).toBe(404);
+		expect(listInWorkspace).not.toHaveBeenCalled();
 	});
 });

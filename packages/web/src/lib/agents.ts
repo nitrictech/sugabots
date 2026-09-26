@@ -47,7 +47,7 @@ export function useAgents(): {
  * The pod and agent an address names. A handle is unique only within its pod,
  * so the same handle in another pod is a different agent, not a fallback.
  */
-export function findPodAgent(
+function findPodAgent(
 	pods: readonly Pod[] | undefined,
 	agents: readonly Agent[] | undefined,
 	podSlug: string,
@@ -157,6 +157,10 @@ function useInvalidateAgents(): () => Promise<void> {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return async () => {
-		await queries.invalidateQueries({ queryKey: ["agents", workspaceId] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+			// Every bot is a row in its pod's conversation list.
+			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+		]);
 	};
 }

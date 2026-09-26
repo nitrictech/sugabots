@@ -9,6 +9,7 @@ import type {
 	RoutineExecutionPageQuery,
 	RoutineExecutionTrigger,
 	RoutineUpdate,
+	WorkspaceRoutine,
 } from "@sugabots/contracts";
 import {
 	DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT,
@@ -31,6 +32,7 @@ import {
 	collaboration,
 	job,
 	message,
+	pod,
 	routine,
 	routineExecution,
 	thread,
@@ -38,6 +40,8 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import { reachesPod } from "../../workspaces/access.ts";
+import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { queueTurn } from "../turns/queue.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
 import {
@@ -81,6 +85,11 @@ export interface AcceptRoutineTriggerInput {
 }
 
 export interface RoutineStore {
+	/** Every routine on a crew bot in a pod the person reaches, by name, with its bot and pod. */
+	listInWorkspace(
+		workspaceId: string,
+		userId: string,
+	): Effect.Effect<WorkspaceRoutine[], never, Database>;
 	list(workspaceId: string, agentId: string): Effect.Effect<Routine[], never, Database>;
 	get(
 		workspaceId: string,
@@ -156,6 +165,32 @@ export interface RoutineStore {
 
 export function routineStore(publishEvents: PublishEvents): RoutineStore {
 	const store: RoutineStore = {
+		listInWorkspace: (workspaceId, userId) =>
+			query((db) =>
+				Effect.gen(function* () {
+					const rows = yield* db
+						.select({ routine, agent, pod: { id: pod.id, slug: pod.slug } })
+						.from(routine)
+						.innerJoin(agent, eq(agent.id, routine.agentId))
+						.innerJoin(pod, eq(pod.id, agent.podId))
+						.where(
+							and(
+								eq(routine.workspaceId, workspaceId),
+								isNull(routine.deletedAt),
+								isNull(agent.systemAgentKey),
+								reachesPod(pod.id, userId),
+							),
+						)
+						.orderBy(asc(routine.name), asc(routine.id));
+					return rows.flatMap((row): WorkspaceRoutine[] => {
+						const crew = crewAgentRow(row.agent);
+						return crew
+							? [{ routine: toRoutine(row.routine), agent: toAgent(crew), pod: row.pod }]
+							: [];
+					});
+				}),
+			),
+
 		list: (workspaceId, agentId) =>
 			query((db) =>
 				Effect.gen(function* () {

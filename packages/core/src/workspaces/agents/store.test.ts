@@ -161,8 +161,8 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 					name: "Scribe",
 					handle: "scribe",
 					systemAgentKey: "summarise",
-					hue: 36,
-					face: "smile",
+					color: "orange",
+					face: "arc",
 					model: null,
 				})
 				.returning(),

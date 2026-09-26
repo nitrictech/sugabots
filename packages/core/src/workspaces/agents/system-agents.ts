@@ -1,4 +1,4 @@
-import type { AgentFace, SystemAgent, SystemAgentKey } from "@sugabots/contracts";
+import type { AgentColor, AgentFace, SystemAgent, SystemAgentKey } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
@@ -28,7 +28,7 @@ export interface SystemAgentDefinition {
 	key: SystemAgentKey;
 	name: string;
 	description: string;
-	hue: number;
+	color: AgentColor;
 	face: AgentFace;
 	prompt: string;
 }
@@ -38,16 +38,16 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		key: SUMMARISE_SYSTEM_AGENT,
 		name: "Scribe",
 		description: "Keeps concise summaries of ongoing conversations.",
-		hue: 36,
-		face: "smile",
+		color: "orange",
+		face: "arc",
 		prompt: "Summarize conversations accurately and concisely. Do not invent details.",
 	},
 	{
 		key: FACILITATE_SYSTEM_AGENT,
 		name: "Facilitator",
 		description: "Decides who speaks next when nobody was addressed.",
-		hue: 205,
-		face: "bar",
+		color: "teal",
+		face: "pill",
 		prompt:
 			"Keep the conversation on track: bring in the agent who can answer, and let it rest when the question has been answered.",
 	},
@@ -132,7 +132,7 @@ export const listSystemAgents = Effect.fn("SystemAgents.listSystemAgents")(funct
 			key: definition.key,
 			name: definition.name,
 			description: definition.description,
-			hue: definition.hue,
+			color: definition.color,
 			face: definition.face,
 			model: modelOf.get(definition.key) ?? null,
 		}),
@@ -155,7 +155,7 @@ const ensureSystemAgent = Effect.fn("SystemAgents.ensureSystemAgent")(function* 
 			handle: handleFromName(definition.name),
 			systemAgentKey: definition.key,
 			description: definition.description,
-			hue: definition.hue,
+			color: definition.color,
 			face: definition.face,
 			model: null,
 			prompt: definition.prompt,

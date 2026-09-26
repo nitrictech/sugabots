@@ -1,24 +1,23 @@
+import { botColorVariables } from "@sugabots/avatars";
 import type {
-	ChatHistoryEntry,
 	CollaborationPart,
 	Message,
 	SessionUser,
 	ThreadParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
-import { Fragment, type ReactNode, useMemo, useRef } from "react";
+import { cn } from "cn";
+import { Fragment, useRef } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
+import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
-import { ChatActivityRow } from "./ChatActivityRow.tsx";
-import { CollaborationThread } from "./CollaborationThread.tsx";
-import { MessageActions } from "./MessageActions.tsx";
+import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
-import { textWithMentions } from "./mentions.tsx";
-import { DeniedToolLine, ToolApprovalCard } from "./ToolApprovalCard.tsx";
+import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
+import { ToolLine } from "./ToolLine.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
-import { isNarration, splitToolKey, toolActivityOf } from "./tool-activity.ts";
+import { isNarration, splitToolKey } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -50,86 +49,128 @@ export function ThreadConversation({
 	messages,
 	host,
 	isRunning,
-	mentionable,
+	participants,
 	user,
-	hostAgentOnRight = false,
+	rightAgentId,
 	dividers = true,
 	onOpenCollaboration,
-	threadEntries = [],
 	podId,
 	canApproveToolCalls = false,
-	canAlwaysAllowToolCalls = false,
+	compact = false,
+	approvalsPinned = false,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
 	isRunning: boolean;
-	/** Everyone a mention in these messages could name. See `mentionableIn`. */
-	mentionable: ThreadParticipant[];
+	/** Everyone in the thread, which is how a collaboration's other bot is found. */
+	participants: ThreadParticipant[];
 	user: SessionUser;
-	hostAgentOnRight?: boolean;
-	/** Day and long-gap markers between messages; off where the thread is a short aside. */
+	/**
+	 * The bot whose messages sit on the right, as a person's own do: in a
+	 * collaboration, the bot whose chat it was opened from. None elsewhere.
+	 */
+	rightAgentId?: string;
+	/**
+	 * Day and long-gap markers between messages. Off where the caller places its
+	 * own, as the chat does between these messages and its activity rows.
+	 */
 	dividers?: boolean;
-	/** Presents child work as a quiet activity row when the conversation owns a foreground panel. */
-	onOpenCollaboration?: (threadId: string) => void;
-	threadEntries?: ChatHistoryEntry[];
+	/** Opens a collaboration from its line, in the sidebar beside this conversation. */
+	onOpenCollaboration: (threadId: string) => void;
 	podId: string;
 	canApproveToolCalls?: boolean;
-	canAlwaysAllowToolCalls?: boolean;
+	/** Whether, on a phone, the caller pins Allow and Deny below the thread instead of on each card. */
+	approvalsPinned?: boolean;
+	/**
+	 * The sidebar's narrower thread: smaller faces and bubbles, and no names,
+	 * since a collaboration has only its two bots and its header names them.
+	 */
+	compact?: boolean;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
 	const replyPending = isRunning && lastMessage?.author.kind === "person";
 	const looks = useConnectionLooks(podId);
-	const names = useMemo(
-		() => new Map([...looks].map(([handle, look]) => [handle, look.name])),
-		[looks],
-	);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
+	const breaks = messages.map(
+		(message, index) => dividers && separatesFrom(messages[index - 1], message),
+	);
+	// Whether the current run's name is placed yet. It goes above the run's
+	// first bubble, not above a centred collaboration line that leads it.
+	let runNamed = false;
 	return (
-		<div className="flex flex-col gap-[17px]">
+		<div className="flex flex-col gap-1">
 			{messages.map((message, index) => {
-				const divider = dividers ? dividerBefore(messages[index - 1], message) : undefined;
-				const activity = toolActivityOf(message, names);
+				const divider = breaks[index];
+				const previous = messages[index - 1];
+				const next = messages[index + 1];
+				// A run is one author's messages in a row, with no marker between them.
+				const continuesRun = previous !== undefined && !divider && sameAuthor(previous, message);
+				const runContinues = next !== undefined && !breaks[index + 1] && sameAuthor(message, next);
+				const calls = message.parts.filter(
+					(part): part is ToolCallPart => part.type === "tool_call",
+				);
 				const outgoing =
 					(message.author.kind === "person" && message.author.id === user.id) ||
-					(hostAgentOnRight && message.author.kind === "agent" && message.author.id === host.id);
+					(message.author.kind === "agent" && message.author.id === rightAgentId);
 				const segments = segmentsOf(message);
 				// Tool calls draw nothing, so the message's state and its action bar
 				// belong to the last bubble rather than to the last part.
 				const lastBubble = segments.findLastIndex((segment) => segment.type === "text");
+				const mine = outgoing && message.author.kind === "person";
+				const startsRun = !continuesRun;
+				if (startsRun) runNamed = compact || mine;
+				/** The run's name, the first time something of the run sits beside the face. */
+				const nameOnce = () => {
+					if (runNamed || message.author.kind === "routine_trigger") return null;
+					runNamed = true;
+					return (
+						<div
+							className={cn(
+								"pb-[3px] text-[11.5px] text-subtle-foreground",
+								outgoing ? "pr-[50px] text-right" : "pl-[50px]",
+							)}
+						>
+							{message.author.name}
+						</div>
+					);
+				};
 				return (
 					<Fragment key={message.id}>
-						{divider && <ActivityDivider>{divider}</ActivityDivider>}
+						{divider && <DaySeparator at={message.createdAt} />}
+						{startsRun && <span aria-hidden className="h-2.5" />}
+						{message.author.kind === "agent" && calls.length > 0 && nameOnce()}
+						{message.author.kind === "agent" && (
+							<ToolLine
+								calls={calls}
+								looks={looks}
+								className={
+									compact
+										? outgoing
+											? "items-end pr-[34px]"
+											: "pl-[34px]"
+										: outgoing
+											? "items-end pr-[50px]"
+											: "pl-[50px]"
+								}
+							/>
+						)}
 						{segments.map((segment, position) => {
 							if (segment.type === "collaboration") {
-								if (onOpenCollaboration) {
-									const recipient = mentionable.find(
-										(participant): participant is AgentParticipant =>
-											participant.kind === "agent" &&
-											participant.id === segment.collaboration.agentId,
-									);
-									return (
-										<ChatActivityRow
-											key={segment.key}
-											entry={threadEntries.find(
-												(entry) => entry.threadId === segment.collaboration.threadId,
-											)}
-											title={`${authorName(message)} talked to ${segment.collaboration.agentName}`}
-											collaborationAgents={
-												message.author.kind === "agent" && recipient
-													? { initiator: message.author, recipient }
-													: undefined
-											}
-											onOpen={() => onOpenCollaboration(segment.collaboration.threadId)}
-										/>
-									);
-								}
+								const recipient = participants.find(
+									(participant): participant is AgentParticipant =>
+										participant.kind === "agent" &&
+										participant.id === segment.collaboration.agentId,
+								);
+								if (message.author.kind !== "agent" || !recipient) return null;
 								return (
-									<CollaborationThread
+									<ChatActivityRow
 										key={segment.key}
-										collaboration={segment.collaboration}
-										arrivedLive={message.status === "streaming"}
-										user={user}
+										type="collaboration"
+										initiator={message.author}
+										recipient={recipient}
+										state={collaborationState(segment.collaboration)}
+										onOpen={() => onOpenCollaboration(segment.collaboration.threadId)}
 									/>
 								);
 							}
@@ -140,68 +181,55 @@ export function ThreadConversation({
 								// Only an agent calls tools; the check narrows the author for the card.
 								if (pending && message.author.kind === "agent") {
 									return (
-										<ToolApprovalCard
-											key={segment.key}
-											call={call}
-											agent={message.author}
-											threadId={message.threadId}
-											podId={podId}
-											canApprove={canApproveToolCalls}
-											canAlwaysAllow={canAlwaysAllowToolCalls}
-											look={looks.get(splitToolKey(call.tool).handle)}
-										/>
+										<Fragment key={segment.key}>
+											{nameOnce()}
+											<ToolApprovalCard
+												call={call}
+												agent={message.author}
+												threadId={message.threadId}
+												podId={podId}
+												canApprove={canApproveToolCalls}
+												answerPinned={approvalsPinned}
+												outgoing={outgoing}
+												look={looks.get(splitToolKey(call.tool).handle)}
+											/>
+										</Fragment>
 									);
 								}
-								if (call.approval?.status === "denied" && message.author.kind === "agent") {
-									return (
-										<DeniedToolLine
-											key={segment.key}
-											call={call}
-											agent={message.author}
-											look={looks.get(splitToolKey(call.tool).handle)}
-										/>
-									);
-								}
-								// Every other call is the turn's own business: the log holds it.
+								// Every other call is on the tool line above the message.
 								return null;
 							}
 							const isLast = position === lastBubble;
 							return (
-								<MessageBubble
-									key={segment.key}
-									message={message}
-									text={segment.text}
-									outgoing={outgoing}
-									mentionable={mentionable}
-									isLast={isLast}
-									arrivedLive={watchedWritten.has(message.id)}
-									actions={
-										isLast && message.author.kind === "agent" && message.status !== "streaming" ? (
-											<MessageActions
-												text={textOf(message)}
-												activity={activity}
-												looks={looks}
-												at={message.createdAt}
-											/>
-										) : undefined
-									}
-								/>
+								<Fragment key={segment.key}>
+									{nameOnce()}
+									<MessageBubble
+										message={message}
+										text={segment.text}
+										outgoing={outgoing}
+										endsRun={isLast && !runContinues && !isTyping(message)}
+										isLast={isLast}
+										compact={compact}
+										arrivedLive={watchedWritten.has(message.id)}
+									/>
+								</Fragment>
 							);
 						})}
+						{message.author.kind === "agent" && isTyping(message) && nameOnce()}
 						{message.author.kind === "agent" && isTyping(message) && (
 							<TypingIndicator
 								key={`${message.id}-typing`}
 								agent={message.author}
-								activity={activity}
-								waitingOn={waitingOn(message)}
-								looks={looks}
 								outgoing={outgoing}
+								compact={compact}
 							/>
 						)}
 					</Fragment>
 				);
 			})}
-			{replyPending && <TypingIndicator agent={host} outgoing={hostAgentOnRight} />}
+			{replyPending && (
+				<TypingIndicator agent={host} outgoing={host.id === rightAgentId} compact={compact} />
+			)}
 		</div>
 	);
 }
@@ -234,10 +262,26 @@ function revealDurationMs(text: string): number {
  * it, and the line would say the same thing twice.
  */
 function isTyping(message: Message): boolean {
+	// While a collaboration runs the bot is quiet in its own chat; the collaboration line says so.
+	if (waitingOn(message)) return false;
 	const awaitingApproval = message.parts.some(
 		(part) => part.type === "tool_call" && part.status === "awaiting_approval",
 	);
 	return message.status === "streaming" && !awaitingApproval;
+}
+
+/** A collaboration's status in the terms of its line. */
+function collaborationState(collaboration: CollaborationPart): ActivityState {
+	switch (collaboration.status) {
+		case "waiting":
+			return "running";
+		case "pending":
+			return "waiting_on_you";
+		case "answered":
+			return "done";
+		default:
+			return "failed";
+	}
 }
 
 /** The collaborator a running reply has asked and not yet heard back from. */
@@ -246,18 +290,9 @@ function waitingOn(message: Message): string | undefined {
 	return last?.type === "collaboration" ? last.agentName : undefined;
 }
 
-/** A pending approval or a refusal: the only tool calls the thread draws. */
+/** A call waiting for approval: the only one drawn among the bubbles, as its card. */
 function drawsInThread(call: ToolCallPart): boolean {
-	const pending = call.status === "awaiting_approval" && call.approval?.status === "pending";
-	return pending || call.approval?.status === "denied";
-}
-
-/** What the message's bubbles say, narration left out, for the copy action. */
-function textOf(message: Message): string {
-	return message.parts
-		.filter((_, index) => !isNarration(message.parts, index))
-		.map((part) => (part.type === "text" ? part.text : ""))
-		.join("");
+	return call.status === "awaiting_approval" && call.approval?.status === "pending";
 }
 
 type Segment =
@@ -305,116 +340,126 @@ function segmentsOf(message: Message): Segment[] {
 	return segments;
 }
 
-/** The time or status beside an author's name, lighter so the name leads without a separator. */
-const authorDetailClass = "font-normal text-muted-foreground text-xs";
-
 function MessageBubble({
 	message,
 	text,
 	outgoing,
-	mentionable,
+	endsRun,
 	isLast,
 	arrivedLive,
-	actions,
+	compact,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
 	text: string;
 	outgoing: boolean;
-	mentionable: ThreadParticipant[];
+	/** The last bubble of its author's run, which carries the author's face. */
+	endsRun: boolean;
 	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
-	/** Copy and activity, shown beside the bubble's top on hover and on focus. */
-	actions?: ReactNode;
+	compact: boolean;
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
 	}
 	const agent = message.author.kind === "agent" ? message.author : undefined;
-	const fromAgent = agent !== undefined;
+	const mine = !agent && outgoing;
 	const status = messageStatus(message);
-	/*
-	 * Level with the name line, and sticky: on a reply taller than the screen the
-	 * bar stays in view while any of it is, and leaves with it, since sticky
-	 * never takes an element outside its parent.
-	 */
-	const pinnedActions = actions && <div className="sticky top-3 shrink-0 pt-2">{actions}</div>;
+	const bubble = cn(
+		compact
+			? "max-w-[380px] px-3.5 py-[9px] text-[14.5px]"
+			: "max-w-[520px] px-[15px] py-2.5 text-lg",
+		outgoing ? "rounded-[20px_20px_6px_20px]" : "rounded-[20px_20px_20px_6px]",
+		agent
+			? "bg-bot-tint text-bot-text"
+			: mine
+				? "bg-primary text-white"
+				: "bg-bubble-human text-foreground",
+	);
 	return (
 		<article
 			aria-label={`${message.author.name}, ${status}`}
-			className={`group/message agent-tint flex items-start gap-1.5 motion-reduce:animate-none ${
+			className={cn(
+				"group/message flex flex-col motion-reduce:animate-none",
+				outgoing ? "items-end" : "items-start",
 				arrivedLive
-					? `animate-reply-in ${outgoing ? "origin-top-right" : "origin-top-left"}`
-					: "animate-rise"
-			} ${outgoing ? "justify-end pl-8 pr-3.5" : "justify-start pl-3.5 pr-8"}`}
-			style={agent ? { ["--agent-hue" as string]: agent.hue } : undefined}
+					? `animate-reply-in ${outgoing ? "origin-bottom-right" : "origin-bottom-left"}`
+					: "animate-rise",
+			)}
+			style={agent ? botColorVariables(agent.color) : undefined}
 		>
-			{outgoing && pinnedActions}
-			<div className="relative max-w-[min(100%,480px)]">
-				{message.author.kind === "agent" ? (
-					<AgentAvatar
-						hue={message.author.hue}
-						face={message.author.face}
-						size={38}
-						ringed
-						className={`absolute -top-[11px] z-10 ${outgoing ? "-right-[15px]" : "-left-[15px]"}`}
-					/>
-				) : (
-					<PersonAvatar
-						name={message.author.name}
-						image={message.author.image}
-						size={34}
-						className={`absolute -top-[11px] z-10 border-[2.5px] border-card ${outgoing ? "-right-[15px]" : "-left-[15px]"}`}
-					/>
+			<div className={cn("flex w-full items-end gap-2", outgoing && "flex-row-reverse")}>
+				{!mine && (
+					<span className={cn("flex shrink-0", compact ? "w-[26px]" : "w-[34px]")}>
+						{endsRun &&
+							(agent ? (
+								<AgentAvatar color={agent.color} face={agent.face} size={compact ? 26 : 34} />
+							) : (
+								<PersonAvatar
+									name={message.author.name}
+									image={message.author.kind === "person" ? message.author.image : null}
+									size={compact ? 26 : 34}
+								/>
+							))}
+					</span>
 				)}
 				<div
-					className={`min-w-0 rounded-4xl px-5 py-3.5 ${fromAgent ? "bg-agent-wash" : "bg-muted"}`}
+					className={cn(
+						"relative min-w-0",
+						compact ? "max-w-[calc(100%-40px)]" : "max-w-[calc(100%-60px)]",
+					)}
 				>
-					<div
-						className={`flex flex-wrap items-baseline gap-x-2 pb-1 font-semibold text-md ${
-							outgoing ? "justify-end pr-5" : "pl-5"
-						} ${fromAgent ? "text-agent-name" : "text-muted-foreground"}`}
-					>
-						<span>{message.author.name}</span>
-						<Tooltip label={formatFullTimestamp(message.createdAt)} side="top">
-							<time
-								dateTime={message.createdAt}
-								className={`${authorDetailClass} cursor-default hover:underline`}
+					<div className={bubble}>
+						{agent && arrivedLive ? (
+							<div
+								className="reply-grow"
+								style={{ ["--reveal-duration" as string]: `${revealDurationMs(text)}ms` }}
 							>
-								{formatTime(message.createdAt)}
-							</time>
-						</Tooltip>
-					</div>
-					{fromAgent && arrivedLive ? (
-						<div
-							className="reply-grow"
-							style={{ ["--reveal-duration" as string]: `${revealDurationMs(text)}ms` }}
-						>
-							<div>
-								<MessageMarkdown text={text} mentionable={mentionable} />
+								<div>
+									<MessageMarkdown text={text} />
+								</div>
 							</div>
-						</div>
-					) : fromAgent ? (
-						<MessageMarkdown text={text} mentionable={mentionable} />
-					) : (
-						<p className="m-0 whitespace-pre-wrap break-words text-foreground text-xl leading-relaxed">
-							{textWithMentions(text, mentionable)}
-						</p>
-					)}
-					{isLast && message.status === "failed" && (
-						<p className="m-0 pt-2 text-destructive text-xs">
-							<span className="font-semibold">Reply failed</span>
-							{message.error && <span className="font-normal"> · {message.error}</span>}
-						</p>
-					)}
-					{isLast && message.status === "cancelled" && (
-						<p className="m-0 pt-2 font-semibold text-subtle-foreground text-xs">Reply stopped</p>
-					)}
+						) : agent ? (
+							<MessageMarkdown text={text} />
+						) : (
+							<p className="m-0 whitespace-pre-wrap break-words">{text}</p>
+						)}
+					</div>
+					{/* The time shows only while the bubble is hovered or holds the focus. */}
+					<div
+						className={cn(
+							"absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
+							outgoing ? "right-[calc(100%+8px)]" : "left-[calc(100%+8px)]",
+						)}
+					>
+						<time
+							dateTime={message.createdAt}
+							title={formatFullTimestamp(message.createdAt)}
+							className="whitespace-nowrap text-subtle-foreground text-xs"
+						>
+							{formatTime(message.createdAt)}
+						</time>
+					</div>
 				</div>
 			</div>
-			{!outgoing && pinnedActions}
+			{isLast && message.status === "failed" && (
+				<p className={cn("m-0 pt-1 text-destructive-text text-xs", !mine && "pl-[42px]")}>
+					<span className="font-semibold">Reply failed.</span>
+					{message.error && <span> {message.error}</span>}
+				</p>
+			)}
+			{isLast && message.status === "cancelled" && (
+				<p
+					className={cn(
+						"m-0 pt-1 font-semibold text-subtle-foreground text-xs",
+						!mine && "pl-[42px]",
+					)}
+				>
+					Reply stopped
+				</p>
+			)}
 		</article>
 	);
 }
@@ -429,9 +474,9 @@ function RoutineTriggerBubble({ message, text }: { message: Message; text: strin
 				: "Manual run";
 	return (
 		<article aria-label={`${source} for ${message.author.routineName}`} className="px-3.5">
-			<div className="rounded-2xl border border-border-subtle bg-sunken px-4 py-3">
-				<div className="pb-1 font-semibold text-muted-foreground text-xs uppercase tracking-wide">
-					{source} · {message.author.routineName}
+			<div className="rounded-2xl border border-border-subtle bg-list px-4 py-3">
+				<div className="pb-1 font-semibold text-muted-foreground text-xs">
+					{message.author.routineName} <span className="font-normal">{source}</span>
 				</div>
 				<p className="m-0 whitespace-pre-wrap break-words text-foreground text-md leading-relaxed">
 					{text}
@@ -441,42 +486,43 @@ function RoutineTriggerBubble({ message, text }: { message: Message; text: strin
 	);
 }
 
-function authorName(message: Message): string {
-	return message.author.kind === "routine_trigger"
-		? message.author.routineName
-		: message.author.name;
-}
-
-function ActivityDivider({ children }: { children: string }) {
+/** Where a run of messages starts on a new day, or after an hour's quiet: "Today 6:04". */
+export function DaySeparator({ at }: { at: string }) {
 	return (
-		<div className="flex items-center gap-3">
-			<span className="h-px flex-1 bg-border-subtle" />
-			<span className="rounded-full bg-sunken px-3 py-1 font-semibold text-muted-foreground text-xs">
-				{children}
-			</span>
-			<span className="h-px flex-1 bg-border-subtle" />
-		</div>
+		// Room above it between messages, so what follows reads as a new stretch of the chat.
+		<p className="m-0 pt-7 pb-3.5 text-center font-semibold text-subtle-foreground text-xs first:pt-1">
+			<span className="text-soft-foreground">{formatDay(new Date(at))}</span> {formatTime(at)}
+		</p>
 	);
 }
 
-function dividerBefore(previous: Message | undefined, current: Message): string | undefined {
-	const currentDate = new Date(current.createdAt);
-	if (!previous) {
-		return formatDay(currentDate);
-	}
+const LONG_QUIET_MS = 60 * 60_000;
+
+/** Whether `current` starts on a new day or after an hour's quiet, and so wants a separator. */
+export function separatesFrom(
+	previous: { createdAt: string } | undefined,
+	current: { createdAt: string },
+): boolean {
+	if (!previous) return true;
 	const previousDate = new Date(previous.createdAt);
-	if (!sameDay(previousDate, currentDate)) {
-		return formatDay(currentDate);
+	const currentDate = new Date(current.createdAt);
+	return (
+		!sameDay(previousDate, currentDate) ||
+		currentDate.getTime() - previousDate.getTime() >= LONG_QUIET_MS
+	);
+}
+
+function sameAuthor(left: Message, right: Message): boolean {
+	if (left.author.kind === "routine_trigger" || right.author.kind === "routine_trigger") {
+		return false;
 	}
-	const gapMinutes = Math.floor((currentDate.getTime() - previousDate.getTime()) / 60_000);
-	if (gapMinutes < 30) {
-		return undefined;
-	}
-	if (gapMinutes < 60) {
-		return `${gapMinutes} minutes later`;
-	}
-	const hours = Math.round(gapMinutes / 60);
-	return `${hours} ${hours === 1 ? "hour" : "hours"} later`;
+	return left.author.kind === right.author.kind && left.author.id === right.author.id;
+}
+
+function shortDateFor(date: Date): Intl.DateTimeFormatOptions {
+	return date.getFullYear() === new Date().getFullYear()
+		? { month: "short", day: "numeric" }
+		: dateWithYear;
 }
 
 const dateWithYear: Intl.DateTimeFormatOptions = {
@@ -485,8 +531,8 @@ const dateWithYear: Intl.DateTimeFormatOptions = {
 	year: "numeric",
 };
 
-/** "Today", "Yesterday", or the date in `dateFormat`. */
-function formatDay(date: Date, dateFormat = dateWithYear): string {
+/** "Today", "Yesterday", or the date in `dateFormat`: by default the month and day, and the year only for another year. */
+function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
 	const today = new Date();
 	if (sameDay(date, today)) {
 		return "Today";
@@ -523,9 +569,7 @@ function sameDay(left: Date, right: Date): boolean {
 }
 
 function formatTime(createdAt: string): string {
-	return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(
-		new Date(createdAt),
-	);
+	return formatClockTime(new Date(createdAt));
 }
 
 function messageStatus(message: Message): string {

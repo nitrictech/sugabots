@@ -1,5 +1,10 @@
 import { Schema } from "effect";
-import { agentFaceSchema, agentHueSchema, modelIdSchema, systemAgentKeySchema } from "./agents.ts";
+import {
+	agentColorSchema,
+	agentFaceSchema,
+	modelIdSchema,
+	systemAgentKeySchema,
+} from "./agents.ts";
 
 /**
  * The Scribe and the Facilitator as the settings screens see them.
@@ -17,7 +22,7 @@ export const systemAgentSchema = Schema.Struct({
 	key: systemAgentKeySchema,
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
-	hue: agentHueSchema,
+	color: agentColorSchema,
 	face: agentFaceSchema,
 	/**
 	 * The model an administrator chose for it. `null` until one is chosen, and

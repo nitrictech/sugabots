@@ -68,3 +68,21 @@ if (!Element.prototype.scrollIntoView) {
 if (!Element.prototype.getAnimations) {
 	Element.prototype.getAnimations = () => [];
 }
+
+/*
+ * Media queries, which jsdom does not evaluate. None matches, so a test sees
+ * the phone's layout choices unless it says otherwise.
+ */
+if (!window.matchMedia) {
+	window.matchMedia = (query: string) =>
+		({
+			matches: false,
+			media: query,
+			onchange: null,
+			addEventListener: () => {},
+			removeEventListener: () => {},
+			addListener: () => {},
+			removeListener: () => {},
+			dispatchEvent: () => false,
+		}) as MediaQueryList;
+}

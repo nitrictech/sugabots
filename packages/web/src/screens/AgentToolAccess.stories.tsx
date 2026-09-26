@@ -1,10 +1,8 @@
-import type { Connection, ToolApprovalRule } from "@sugabots/contracts";
+import type { Connection, ConnectionAccess } from "@sugabots/contracts";
 import preview from "#storybook/preview";
 import { AgentToolsDialog, agentToolsOf } from "./AgentToolAccess.tsx";
 
-const AGENT_ID = "0199a3a0-0000-7000-8000-0000000000a1";
-
-function linear(allowMutating: boolean): Connection {
+function linear(access: ConnectionAccess): Connection {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: "0199a3a0-0000-7000-8000-0000000000w1",
@@ -16,8 +14,7 @@ function linear(allowMutating: boolean): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		enabled: true,
-		allowMutating,
+		access,
 		status: "connected",
 		tools: [
 			{
@@ -58,38 +55,27 @@ function linear(allowMutating: boolean): Connection {
 	};
 }
 
-const alwaysSaveIssue: ToolApprovalRule = {
-	id: "0199a3a0-0000-7000-8000-0000000000r1",
-	agentId: AGENT_ID,
-	agentName: "Personal Assistant",
-	connectionId: "0199a3a0-0000-7000-8000-0000000000f1",
-	connectionName: "Linear",
-	toolName: "save_issue",
-	createdAt: "2026-09-19T00:00:00.000Z",
-};
-
 const meta = preview.meta({
 	title: "Product/AgentToolsDialog",
 	component: AgentToolsDialog,
 	tags: ["ai-generated"],
 	args: {
 		agentName: "Personal Assistant",
-		connection: linear(false),
-		tools: agentToolsOf(linear(false), [], AGENT_ID),
+		connection: linear("allow"),
+		tools: agentToolsOf(linear("allow")),
 		presetId: "linear",
-		markHue: 210,
 		open: true,
 		onOpenChange: () => {},
 	},
 });
 
-/** A read-only connection: its reads run freely, and every change is out of the agent's reach. */
-export const ReadOnlyConnection = meta.story({});
+/** Allowed: its reads run freely, and each change asks first. */
+export const Allowed = meta.story({});
 
-/** Changes allowed: each asks first, unless someone has always allowed it for this agent. */
-export const ChangesAllowed = meta.story({
+/** Set to ask: every call waits for a person, reads included. */
+export const Asks = meta.story({
 	args: {
-		connection: linear(true),
-		tools: agentToolsOf(linear(true), [alwaysSaveIssue], AGENT_ID),
+		connection: linear("ask"),
+		tools: agentToolsOf(linear("ask")),
 	},
 });

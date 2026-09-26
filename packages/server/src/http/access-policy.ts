@@ -112,6 +112,7 @@ export const accessPolicy: AccessPolicy = {
 		thread: { reach: "events/access.ts asks the same thread visibility" },
 	},
 	chats: {
+		list: { workspace: "workspace.read" },
 		getOrCreate: { workspace: "workspace.read" },
 		messages: { reach: "chats/store.ts scopes by visibleChat" },
 		history: { reach: "chats/store.ts scopes by visibleChat" },
@@ -124,10 +125,9 @@ export const accessPolicy: AccessPolicy = {
 	},
 	toolApprovals: {
 		decide: { pod: "approval.decide" },
-		listRules: { pod: "pod.read" },
-		revokeRule: { pod: "approval.revoke" },
 	},
 	routines: {
+		listInWorkspace: { workspace: "workspace.read" },
 		list: { agent: "routine.read" },
 		create: { agent: "routine.manage" },
 		previewSchedule: { agent: "routine.manage" },

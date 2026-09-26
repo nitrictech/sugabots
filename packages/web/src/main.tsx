@@ -29,7 +29,7 @@ function App() {
 
 	if (session.user === undefined) {
 		return session.error ? (
-			<div className="grid h-full place-items-center bg-sunken">
+			<div className="grid h-full place-items-center bg-list">
 				<EmptyState title="Could not check your session">
 					<div className="flex flex-col items-center gap-3">
 						<p>{failureMessage(session.error)}</p>
@@ -75,7 +75,7 @@ function SessionRouter({ session }: { session: Session }) {
  * reads as a fault.
  */
 function Splash() {
-	return <div className="h-full bg-sunken" />;
+	return <div className="h-full bg-list" />;
 }
 
 const root = document.getElementById("root");

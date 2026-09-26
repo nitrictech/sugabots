@@ -113,8 +113,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 					podId: room?.id ?? "",
 					name: `Host ${suffix}`,
 					handle: handleFromName(`Host ${suffix}`),
-					hue: 1,
-					face: "bar",
+					color: "rose",
+					face: "pill",
 					model: "m",
 				})
 				.returning(),

@@ -13,56 +13,63 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+const [openai] = modelProviders;
+if (!openai) throw new Error("fixture");
+
 describe("a provider's API key", () => {
-	it("can be shown while it is being pasted, and never once saved", async () => {
-		mount("/suga/settings/providers");
+	it("is shown only by its last characters, and replaced without being shown", async () => {
+		mount(`/suga/settings/providers/${openai.id}`);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
+		expect(await screen.findByText(`••••••${openai.apiKeyHint}`)).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 		const field = screen.getByLabelText("OpenAI API key") as HTMLInputElement;
-		fireEvent.change(field, { target: { value: " sk-with-a-space" } });
 		expect(field.type).toBe("password");
-
-		fireEvent.click(screen.getByRole("button", { name: "Show what you pasted" }));
-		expect(field.type).toBe("text");
-		expect(field.value).toBe(" sk-with-a-space");
+		expect(field.value).toBe("");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(screen.getByText("••••••••")).toBeDefined();
-		expect(screen.queryByRole("button", { name: /API key/ })).toBeNull();
+		expect(screen.getByText(`••••••${openai.apiKeyHint}`)).toBeDefined();
 	});
 });
 
 describe("a model's capabilities", () => {
-	it("can be switched off within what the provider reports, and not on beyond it", async () => {
+	/** A server the workspace added itself, whose models' capabilities are set here. */
+	const gateway = {
+		...openai,
+		id: "0199a3a0-0000-7000-8000-0000000000cf",
+		preset: null,
+		name: "Company gateway",
+	};
+
+	it("can be switched off within what the server reports, and not on beyond it", async () => {
 		const providers = client.api.modelProviders;
-		const [openai] = modelProviders;
-		const [gpt] = openai?.models ?? [];
-		if (!openai || !gpt) throw new Error("fixture");
+		const [gpt] = gateway.models;
+		if (!gpt) throw new Error("fixture");
+		providers.list.mockReturnValue(Effect.succeed([gateway]));
 		providers.updateModel.mockImplementation(() => {
 			providers.list.mockReturnValue(
-				Effect.succeed([{ ...openai, models: [{ ...gpt, disabledCapabilities: ["vision"] }] }]),
+				Effect.succeed([{ ...gateway, models: [{ ...gpt, disabledCapabilities: ["vision"] }] }]),
 			);
 			return Effect.succeed({ updated: 1 });
 		});
-		mount("/suga/settings/providers");
+		mount(`/suga/settings/providers/${gateway.id}`);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Edit gpt-5 capabilities" }));
-		const dialog = await screen.findByRole("dialog", { name: "Capabilities" });
-		// gpt-5 reports tools, vision and images: those can go off, the rest cannot go on.
-		expect(within(dialog).getByRole("switch", { name: "Turn on Reasoning" })).toHaveProperty(
-			"disabled",
-			true,
-		);
-		fireEvent.click(within(dialog).getByRole("switch", { name: "Turn off Vision" }));
+		expect(await screen.findByRole("img", { name: "Vision" })).toBeDefined();
+		fireEvent.click(await screen.findByRole("button", { name: "What gpt-5 can do" }));
+		const dialog = await screen.findByRole("dialog", { name: "What it can do" });
+		// gpt-5 reports tools, vision and images: those can go off, the rest are not offered.
+		expect(within(dialog).queryByRole("switch", { name: "Reasoning" })).toBeNull();
+		fireEvent.click(within(dialog).getByRole("switch", { name: "Vision" }));
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
 			expect(providers.updateModel).toHaveBeenCalledWith({
-				params: { workspace: expect.any(String), providerId: openai.id, modelId: gpt.id },
+				params: { workspace: expect.any(String), providerId: gateway.id, modelId: gpt.id },
 				payload: { disabledCapabilities: ["vision"] },
 			}),
 		);
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Capabilities" })).toBeNull());
-		expect(await screen.findByLabelText("Vision (off)")).toBeDefined();
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog", { name: "What it can do" })).toBeNull(),
+		);
+		await waitFor(() => expect(screen.queryByRole("img", { name: "Vision" })).toBeNull());
 	});
 });

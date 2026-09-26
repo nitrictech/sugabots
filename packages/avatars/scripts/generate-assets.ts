@@ -5,29 +5,18 @@
  * - assets/bot-crowd.svg: the loose row of faces in src/bot-crowd.ts.
  * - assets/sugabots-logo.svg: the mark in src/sugabots-logo.ts.
  *
- * A standalone file cannot see Tailwind, so colours are resolved here from
- * Tailwind's palette and written as hex, which every SVG renderer supports.
+ * The palette in src/bot-colors.ts is hex already, which every SVG renderer
+ * supports, so it is written as it is.
  *
  * Run with `bun run --cwd packages/avatars generate:assets` after changing the
  * faces, the colours, the crowd or the logo.
  */
 import { writeFileSync } from "node:fs";
-import { formatHex, parse, toGamut } from "culori";
-import colors from "tailwindcss/colors";
-import { BOT_EYES_SHADE, BOT_FACE_SHADE } from "../src/bot-colors.ts";
+import { botColors } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
 import type { BotLook } from "../src/bot-face.tsx";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
 import { sugabotsLogo } from "../src/sugabots-logo.ts";
-
-// Tailwind v4 defines its palette in oklch; map it into sRGB through oklch.
-const toSrgb = toGamut("rgb", "oklch");
-
-function hex(tailwindColor: string): string {
-	const parsed = parse(tailwindColor);
-	if (!parsed) throw new Error(`Unparseable Tailwind colour: ${tailwindColor}`);
-	return formatHex(toSrgb(parsed));
-}
 
 function markElement(mark: FaceMark, eyesHex: string): string {
 	switch (mark.shape) {
@@ -41,8 +30,8 @@ function markElement(mark: FaceMark, eyesHex: string): string {
 }
 
 function faceElements({ color, face }: BotLook): string {
-	const faceHex = hex(colors[color][BOT_FACE_SHADE]);
-	const eyesHex = hex(colors[color][BOT_EYES_SHADE]);
+	const faceHex = botColors[color].face;
+	const eyesHex = botColors[color].eyes;
 	const radius = FACE_VIEWBOX_SIZE / 2;
 	const disc = `<circle cx="${radius}" cy="${radius}" r="${radius}" fill="${faceHex}"/>`;
 	return (
@@ -87,18 +76,17 @@ const LOGO_PX = 40;
 const LOGO_RADIUS_PX = 14;
 const LOGO_PADDING_PX = 6;
 const LOGO_GAP_PX = 2;
-/** Solid and dark, so the dots stand out on light and dark backgrounds. */
-const LOGO_TILE_SHADE = 950;
 
 function writeSugabotsLogo() {
 	const dotPx = (LOGO_PX - LOGO_PADDING_PX * 2 - LOGO_GAP_PX) / 2;
 	const radius = dotPx / 2;
 	const centre = (cell: number) => LOGO_PADDING_PX + cell * (dotPx + LOGO_GAP_PX) + radius;
 	const dots = sugabotsLogo.bots.map((color, index) => {
-		const fill = hex(colors[color][BOT_FACE_SHADE]);
+		const fill = botColors[color].face;
 		return `<circle cx="${centre(index % 2)}" cy="${centre(Math.floor(index / 2))}" r="${radius}" fill="${fill}"/>`;
 	});
-	const tile = hex(colors[sugabotsLogo.tint][LOGO_TILE_SHADE]);
+	// The tint's eye colour: solid and dark, so the dots stand out on light and dark backgrounds.
+	const tile = botColors[sugabotsLogo.tint].eyes;
 	const background = `<rect width="${LOGO_PX}" height="${LOGO_PX}" rx="${LOGO_RADIUS_PX}" fill="${tile}"/>`;
 	writeAsset("sugabots-logo.svg", LOGO_PX, LOGO_PX, background + dots.join(""));
 }

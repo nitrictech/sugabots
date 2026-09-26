@@ -2,10 +2,10 @@ import type { BotLook } from "@sugabots/avatars";
 
 /** The cast of bots the landing page shows off. */
 export const bots = {
-	tripPlanner: { color: "sky", face: "bar" },
+	tripPlanner: { color: "sky", face: "pill" },
 	budgetKeeper: { color: "yellow", face: "square" },
-	copywriter: { color: "purple", face: "smile" },
-	researcher: { color: "cyan", face: "smile" },
-	inboxSorter: { color: "yellow", face: "bar" },
-	journal: { color: "teal", face: "dots" },
+	copywriter: { color: "purple", face: "arc" },
+	researcher: { color: "ice", face: "arc" },
+	inboxSorter: { color: "yellow", face: "pill" },
+	journal: { color: "teal", face: "dot" },
 } satisfies Record<string, BotLook>;

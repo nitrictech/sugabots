@@ -1,200 +1,148 @@
 @import "tailwindcss";
-@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/rubik";
 @import "@fontsource-variable/jetbrains-mono";
 /* Streamdown builds its markdown elements from Tailwind utilities; scan them in. */
 @source "../node_modules/streamdown/dist/*.js";
+@source "../../provider-logos/src";
 
 :root {
-	/* No `data-theme` means follow the system, which is the default. */
-	color-scheme: light dark;
+	/*
+	 * Dark is the primary theme. `data-theme="light"` picks light, and
+	 * `data-theme="system"` follows the machine; see `lib/theme.ts`.
+	 */
+	color-scheme: dark;
 
 	/*
-	 * Surfaces, outermost first.
-	 *
-	 * `background` is the ground the whole app sits on, and it is *not* white:
-	 * the working pane is a white card nested on it (`--card`), which is what
-	 * makes the frame read as one window with something in it rather than as
-	 * three abutting columns.
+	 * Surfaces. The thread and the rail share the ground in dark; light gives
+	 * the rail its own grey so the white thread reads as the working area.
 	 */
-	--background: light-dark(#f4f3f1, #141416);
-	--foreground: light-dark(#3f444b, #c9c8cd);
-	--heading: light-dark(#2f3339, #e9e8e6);
-	/* The nested pane, and anything else that floats on the ground. */
-	--card: light-dark(#ffffff, #1b1b1f);
-	--card-foreground: var(--foreground);
-	/* Recessed inside the card: the composer box, a day pill, an icon button. */
-	--sunken: light-dark(#f7f6f4, #111113);
-	/* A raised surface on a recessed one: the buttons inside the composer. */
-	--raised: light-dark(#ffffff, #1b1b1f);
-	/* The neutral wash: a person's bubble, a hover on the page. */
-	--muted: light-dark(#f6f5f2, #1e1e22);
-	--muted-foreground: light-dark(#5f6672, #8b9099);
-	--subtle-foreground: light-dark(#7b8189, #8f8e96);
+	--background: light-dark(#ffffff, #0b0c0f);
+	--rail: light-dark(#eeeef1, #0b0c0f);
+	/* The conversation list column, and the grouped rows in settings. */
+	--list: light-dark(#f7f7f9, #111216);
+	/* A raised panel: a dialog, a settings card, the composer's input. */
+	--panel: light-dark(#ffffff, #15161a);
+	/* A chip, a secondary button, the search pill. */
+	--chip: light-dark(#eeeef1, #1d1f25);
+	--hover: light-dark(#e4e4e8, #262830);
+	/* Rows sit on the list column, which is already a step up, so their hover is quieter. */
+	--row-hover: light-dark(#f0f0f3, #191a1f);
+	/* The open conversation in the list. */
+	--row-selected: light-dark(#e8e8ed, #1d1f25);
+	/* A message from a person who isn't you. */
+	--bubble-human: light-dark(#efeff2, #24262c);
+
+	--foreground: light-dark(#16171b, #eceef2);
+	--soft-foreground: light-dark(#3d4048, #c9ccd3);
+	/* Light is a shade darker than the design's #646973 so it passes AA on a hover wash. */
+	--muted-foreground: light-dark(#5f646e, #9096a1);
+	/*
+	 * Names above bubbles, times, section labels. Light is a shade darker than
+	 * the design's #6f747e so it passes AA on the list column.
+	 */
+	--subtle-foreground: light-dark(#696e78, #7d838e);
+	--disabled-foreground: light-dark(#b4b7bf, #4a4e57);
+	/* A text action, such as Cancel or Create in a dialog header. */
+	--link: light-dark(#4f5bd5, #aebbff);
+
+	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
+	--border-subtle: light-dark(#efeff2, #1a1b20);
+	--border: light-dark(#eaeaee, #1d1f25);
+	--border-strong: light-dark(#e8e8ec, #2a2c33);
+	--border-dashed: light-dark(#cfd0d6, #2f323a);
+	/* A pod tile, and a slot in one with no bot in it. */
+	--tile: light-dark(#eaeaee, #1d1f25);
+	--tile-empty: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
 
 	/*
-	 * Lines. `border` is the card's own edge against the ground; `border-subtle`
-	 * is a hairline *inside* a card, between a header and its body.
+	 * The accent is the same in both themes. Your bubbles and primary buttons
+	 * use the base, and switches sit a step brighter so they read at their size.
 	 */
-	--border: light-dark(#e6e3df, #26262b);
-	--border-subtle: light-dark(#eeebe7, #26262b);
-
-	/* Controls: buttons and fields, which are white-on-warm in the light theme. */
-	--control: light-dark(#ffffff, #1c1c20);
-	--control-foreground: light-dark(#5f6672, #c9c8cd);
-	--control-border: light-dark(#e2ded8, #313138);
-	--input: light-dark(#e2ded8, #303038);
-
-	--primary: light-dark(#2f7d5b, oklch(0.72 0.11 158));
-	--primary-foreground: light-dark(#ffffff, #0e0e10);
-	--primary-hover: light-dark(#276148, oklch(0.78 0.11 158));
-	/* Accent held right back: a selected row, an inline hint. */
-	--primary-tint: light-dark(#e9f6ef, oklch(0.3 0.05 158));
-	--primary-tint-foreground: light-dark(#276148, #d8efe3);
-	--primary-tint-border: light-dark(#2f7a5b, oklch(0.5 0.09 158));
+	--primary: oklch(0.52 0.17 268);
+	--primary-foreground: #ffffff;
+	--primary-hover: oklch(0.57 0.17 268);
+	--switch-on: oklch(0.56 0.17 268);
+	--primary-tint-border: oklch(0.62 0.17 268);
 	/*
 	 * `--ring` is a solid colour, because that is what a shadcn-registry
 	 * component means by `ring-ring`. Our own focus treatment is a soft halo
 	 * rather than a hard ring, so the translucent value it needs lives beside
 	 * it as `--ring-halo` and `focus-ring` composes the two.
 	 */
-	--ring: light-dark(#2f7a5b, oklch(0.5 0.09 158));
-	--ring-halo: light-dark(oklch(0.5 0.09 158 / 0.22), oklch(0.62 0.1 158 / 0.24));
+	--ring: oklch(0.62 0.17 268);
+	--ring-halo: oklch(0.62 0.17 268 / 0.3);
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
 
-	/* Status. Amber for waiting, red for gone wrong; success borrows the accent. */
-	--success: var(--primary);
+	/* Red is only for needs-approval, errors and delete. */
+	--destructive: #ef4444;
+	/*
+	 * Red text, such as Delete pod, and the wash behind it on hover. Light is a
+	 * shade darker than the design's #d6384e so it passes AA on a chip.
+	 */
+	--destructive-text: light-dark(#c42d45, #f47a8a);
+	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
-	--destructive: light-dark(oklch(0.55 0.16 25), oklch(0.68 0.16 25));
-	--destructive-foreground: light-dark(#ffffff, #0e0e10);
 
-	--sidebar-foreground: var(--foreground);
-	--sidebar-muted-foreground: light-dark(#4b5057, #8b9099);
-	--sidebar-border: var(--border);
-	--sidebar-accent: light-dark(#e9e7e1, #232329);
-	--sidebar-accent-foreground: light-dark(#2f3339, #e9e8e6);
+	/* A person with no photo: initials on a grey disc. */
+	--person-avatar: light-dark(#dcdee3, #3a3d45);
+	--person-avatar-foreground: light-dark(#3d4048, #dfe1e6);
 
-	/* A person with no photo: initials on a warm disc. */
-	--person-avatar: light-dark(#dcd8d3, #35353c);
-	--person-avatar-foreground: light-dark(#4b5057, #c9c8cd);
-
-	/*
-	 * The shadcn contract.
-	 *
-	 * AI Elements is a shadcn registry, and every component in it is written
-	 * against these names (ADR: the chat surface is theirs — see the Web
-	 * section of the README). Rather than let a second palette in through the
-	 * back door, each one is mapped onto a token above, so an installed
-	 * component inherits this design instead of shadcn's defaults.
-	 *
-	 * Note what `accent` means here: shadcn uses it for the hover and selected
-	 * wash, not for the brand colour. Pointing it at `--surface-accent` is what
-	 * makes a registry component hover correctly inside the sidebar as well as
-	 * on the page. The brand accent is `--primary`.
-	 */
-	--popover: var(--card);
-	--popover-foreground: var(--foreground);
-	--secondary: var(--control);
-	--secondary-foreground: var(--control-foreground);
-	--accent: var(--surface-accent);
-	--accent-foreground: var(--surface-accent-foreground);
-	/* shadcn derives its sm/md/lg/xl radii from this one. */
-	--radius: 10px;
-
-	/*
-	 * Surface-relative colours: "the wash a row takes when you hover it here",
-	 * "the quieter text colour here". A shared component reaches for these
-	 * rather than naming a surface, so an icon button or a section label is one
-	 * component that is correct in the sidebar, in a panel and in a dialog. The
-	 * surface declares its own palette; the component never asks where it is.
-	 *
-	 * This is the whole trick behind not having three of everything. Anything
-	 * that hard-codes `--sidebar-accent` outside the sidebar is a bug.
-	 */
-	--surface-accent: var(--muted);
-	--surface-accent-foreground: var(--heading);
-	--surface-muted-foreground: var(--muted-foreground);
-	--surface-border: var(--border);
-
-	--shadow-card: 0 1px 3px rgba(40, 35, 30, 0.04);
-	--shadow-row: 0 1px 3px rgba(40, 35, 30, 0.07);
-	--shadow-control: 0 1px 2px rgba(40, 35, 30, 0.05);
+	/* Separation is by colour and hairline, not shadow; only floating things cast one. */
+	--scrim: rgba(0, 0, 0, 0.55);
+	--dialog-shadow:
+		0 30px 80px rgba(0, 0, 0, 0.6),
+		0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
 }
 
-/* An explicit choice, from the theme menu, wins over the system. */
 :root[data-theme="light"] {
 	color-scheme: light;
 }
 
-:root[data-theme="dark"] {
-	color-scheme: dark;
-}
-
-/* Dark surfaces use borders instead of shadows for separation. */
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) {
-		--shadow-card: none;
-		--shadow-row: none;
-		--shadow-control: none;
-	}
-}
-
-:root[data-theme="dark"] {
-	--shadow-card: none;
-	--shadow-row: none;
-	--shadow-control: none;
+:root[data-theme="system"] {
+	color-scheme: light dark;
 }
 
 @theme inline {
 	--color-background: var(--background);
+	--color-rail: var(--rail);
+	--color-list: var(--list);
+	--color-panel: var(--panel);
+	--color-chip: var(--chip);
+	--color-hover: var(--hover);
+	--color-row-hover: var(--row-hover);
+	--color-row-selected: var(--row-selected);
+	--color-bubble-human: var(--bubble-human);
+	--color-disabled-foreground: var(--disabled-foreground);
+	--color-link: var(--link);
+	--color-soft-foreground: var(--soft-foreground);
+	--color-border-strong: var(--border-strong);
+	--color-border-dashed: var(--border-dashed);
+	--color-tile: var(--tile);
+	--color-tile-empty: var(--tile-empty);
+	--color-switch-on: var(--switch-on);
+	--color-destructive-text: var(--destructive-text);
+	--color-destructive-hover: var(--destructive-hover);
+	--color-scrim: var(--scrim);
 	--color-foreground: var(--foreground);
-	--color-heading: var(--heading);
-	--color-sunken: var(--sunken);
-	--color-raised: var(--raised);
-	--color-muted: var(--muted);
 	--color-muted-foreground: var(--muted-foreground);
 	--color-subtle-foreground: var(--subtle-foreground);
 	--color-border: var(--border);
 	--color-border-subtle: var(--border-subtle);
-	--color-control: var(--control);
-	--color-control-foreground: var(--control-foreground);
-	--color-control-border: var(--control-border);
-	--color-input: var(--input);
 	--color-primary: var(--primary);
 	--color-primary-foreground: var(--primary-foreground);
 	--color-primary-hover: var(--primary-hover);
-	--color-primary-tint: var(--primary-tint);
-	--color-primary-tint-foreground: var(--primary-tint-foreground);
 	--color-primary-tint-border: var(--primary-tint-border);
 	--color-ring: var(--ring);
-	--color-success: var(--success);
 	--color-warning: var(--warning);
 	--color-destructive: var(--destructive);
-	--color-destructive-foreground: var(--destructive-foreground);
-	--color-sidebar-foreground: var(--sidebar-foreground);
-	--color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
-	--color-sidebar-border: var(--sidebar-border);
-	--color-sidebar-accent: var(--sidebar-accent);
-	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
 	--color-person-avatar: var(--person-avatar);
 	--color-person-avatar-foreground: var(--person-avatar-foreground);
-	--color-agent-fill: var(--agent-fill);
-	--color-agent-ink: var(--agent-ink);
-	--color-agent-wash: var(--agent-wash);
-	--color-agent-name: var(--agent-name);
-	--color-card: var(--card);
-	--color-card-foreground: var(--card-foreground);
-	--color-popover: var(--popover);
-	--color-popover-foreground: var(--popover-foreground);
-	--color-secondary: var(--secondary);
-	--color-secondary-foreground: var(--secondary-foreground);
-	--color-accent: var(--accent);
-	--color-accent-foreground: var(--accent-foreground);
-	--color-surface-accent: var(--surface-accent);
-	--color-surface-accent-foreground: var(--surface-accent-foreground);
-	--color-surface-muted-foreground: var(--surface-muted-foreground);
-	--color-surface-border: var(--surface-border);
+	/* Set on an element by `botColorVariables()` from `@sugabots/avatars`. */
+	--color-bot-tint: var(--bot-tint);
+	--color-bot-text: var(--bot-text);
+	--color-bot-mono: var(--bot-mono);
 
-	--font-sans: "Public Sans Variable", "Public Sans", system-ui, sans-serif;
+	--font-sans: "Rubik Variable", "Rubik", system-ui, sans-serif;
 	--font-mono: "JetBrains Mono Variable", ui-monospace, Menlo, monospace;
 
 	--text-2xs: 11px;
@@ -213,10 +161,6 @@
 	--text-xl--line-height: 1.65;
 	--text-2xl: 17px;
 	--text-2xl--line-height: 1.3;
-	--text-3xl: 19px;
-	--text-3xl--line-height: 1.3;
-
-	--font-weight-book: 450;
 
 	--radius-xs: 5px;
 	--radius-sm: 7px;
@@ -224,42 +168,34 @@
 	--radius-lg: 10px;
 	--radius-xl: 12px;
 	--radius-2xl: 16px;
-	--radius-3xl: 18px;
-	--radius-4xl: 20px;
+	/* Named radii from the design. A bubble's tail corner is `tail`. */
+	--radius-tail: 6px;
+	--radius-tile: 14px;
+	--radius-panel: 16px;
+	--radius-bubble: 20px;
+	--radius-dialog: 22px;
+	--radius-composer: 22px;
 
-	--spacing-topbar: 72px;
-	--spacing-sidebar: clamp(240px, 21vw, 304px);
-	--spacing-rail: 232px;
-	--spacing-panel: 380px;
-	--spacing-header: 76px;
-	--spacing-gutter: clamp(8px, 1.4vw, 20px);
-	/*
-	 * The margin a window over the app keeps, rather than the one panes keep
-	 * beside each other. It is wider than `gutter` on purpose: what shows around
-	 * a full-screen dialog is the app it was opened from, and too thin a margin
-	 * reads as a page that replaced it. On a phone it closes up to the same
-	 * hairline, where the screen has nothing to spare.
-	 */
-	--spacing-overlay-gutter: clamp(8px, 3vw, 56px);
-
-	--container-home: 760px;
-	--container-task: 640px;
+	--shadow-dialog: var(--dialog-shadow);
 }
 
 /*
  * `dark:` for the few places a token pair cannot express — a shadow's spread, an
- * image swap. Both arms are needed because "dark" is either an explicit choice
- * or the system's, and `light` must be able to override the system.
+ * image swap. Dark is the default, so it applies unless light is chosen, or the
+ * system is followed and the system is light.
  */
 @custom-variant dark {
-	@media (prefers-color-scheme: dark) {
-		&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
-			@slot;
-		}
+	&:where(
+		:root:not([data-theme="light"], [data-theme="system"]),
+		:root:not([data-theme="light"], [data-theme="system"]) *
+	) {
+		@slot;
 	}
 
-	&:where([data-theme="dark"], [data-theme="dark"] *) {
-		@slot;
+	@media (prefers-color-scheme: dark) {
+		&:where([data-theme="system"], [data-theme="system"] *) {
+			@slot;
+		}
 	}
 }
 
@@ -298,26 +234,6 @@
 }
 
 /*
- * The hue is an inline custom property rather than part of the class name
- * because agents are created at run time, and Tailwind only generates classes
- * it can find in the source. One hue per agent is what stops a task with six
- * participants turning into a colour chart, and means a new agent needs one
- * number rather than a design decision.
- */
-@utility agent-tint {
-	--agent-fill: oklch(0.81 0.085 var(--agent-hue, 158));
-	--agent-ink: oklch(0.37 0.09 var(--agent-hue, 158));
-	--agent-wash: light-dark(
-		oklch(0.96 0.025 var(--agent-hue, 158)),
-		oklch(0.26 0.04 var(--agent-hue, 158))
-	);
-	--agent-name: light-dark(
-		oklch(0.37 0.09 var(--agent-hue, 158)),
-		oklch(0.85 0.09 var(--agent-hue, 158))
-	);
-}
-
-/*
  * `focus-ring-within` is for a control made of several elements — the composer
  * is a textarea and buttons inside one bordered box — where the box should
  * light up rather than the part that happens to hold the caret.
@@ -337,18 +253,9 @@
 	}
 }
 
-@utility surface-card {
-	background: var(--card);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-2xl);
-	box-shadow: var(--shadow-card);
-	overflow: hidden;
-}
-
 @theme {
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-	--animate-unfold: unfold 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-	--animate-chat-panel-in: chat-panel-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	--animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-reply-in: reply-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
 	@keyframes rise {
@@ -374,35 +281,33 @@
 		}
 	}
 
-	@keyframes unfold {
+	@keyframes sheet-up {
 		from {
-			opacity: 0;
-			max-height: 0;
+			transform: translateY(100%);
 		}
 		to {
-			opacity: 1;
-			max-height: var(--unfold-to, 560px);
-		}
-	}
-
-	@keyframes chat-panel-in {
-		from {
-			opacity: 0;
-			transform: translateX(26px);
-		}
-		to {
-			opacity: 1;
-			transform: translateX(0);
+			transform: translateY(0);
 		}
 	}
 }
 
-.chat-thread-panel {
-	animation: chat-panel-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+/*
+ * A link in a bot's message is its own words, underlined; the accent would not
+ * read on the tint. Streamdown draws a link as a button that asks before leaving.
+ */
+.message-markdown a,
+.message-markdown [data-streamdown="link"] {
+	color: inherit;
+	text-decoration: underline;
+	text-underline-offset: 2px;
 }
 
-.chat-activity-row:hover {
-	background: var(--sunken);
+/* An ID or a number inline in a bot's message, in the bot's brighter tint. */
+.message-markdown :not(pre) > code {
+	padding: 0;
+	background: none;
+	color: var(--bot-mono);
+	font: 500 13.5px var(--font-mono);
 }
 
 /*
@@ -458,75 +363,54 @@
 	}
 }
 
-.chat-working-dots {
+/* A bot typing, or a collaboration still talking: three dots that rise in turn. */
+.typing-dots {
 	display: inline-flex;
 	flex: none;
-	gap: 2px;
+	gap: 5px;
 }
 
-.chat-working-dots i {
-	width: 3px;
-	height: 3px;
+.typing-dots i {
+	display: block;
+	width: 7px;
+	height: 7px;
 	border-radius: 999px;
 	background: currentColor;
-	animation: chat-blink 1.6s ease-in-out infinite;
+	animation: typing-dot 1.2s ease-in-out infinite;
 }
 
-.chat-working-dots i:nth-child(2) {
-	animation-delay: 160ms;
+.typing-dots i:nth-child(2) {
+	animation-delay: 150ms;
 }
 
-.chat-working-dots i:nth-child(3) {
-	animation-delay: 320ms;
+.typing-dots i:nth-child(3) {
+	animation-delay: 300ms;
 }
 
-@keyframes chat-blink {
+.typing-dots-small {
+	gap: 3px;
+}
+
+.typing-dots-small i {
+	width: 3.5px;
+	height: 3.5px;
+}
+
+@keyframes typing-dot {
 	0%,
-	45% {
-		opacity: 1;
-	}
-	55%,
+	60%,
 	100% {
-		opacity: 0.15;
+		opacity: 0.35;
+		transform: translateY(0);
 	}
-}
-
-@media (max-width: 767px) {
-	.chat-history-panel {
-		position: absolute;
-		inset: 0;
-		z-index: 25;
-		width: 100%;
-		border-left: 0;
-	}
-
-	.chat-thread-panel {
-		width: 100%;
-		border-left: 0;
-		border-radius: 0;
-		box-shadow: none;
-	}
-
-	.chat-activity-row {
-		gap: 9px;
-		font-size: 12px;
-	}
-}
-
-@media (max-width: 899px) {
-	.chat-thread-panel {
-		width: 100%;
-		min-width: 0;
-		max-width: none;
-		border-left: 0;
-		border-radius: 0;
-		box-shadow: none;
+	30% {
+		opacity: 1;
+		transform: translateY(-3px);
 	}
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.chat-thread-panel,
-	.chat-working-dots i,
+	.typing-dots i,
 	.reply-grow,
 	.reply-grow > * {
 		animation: none;

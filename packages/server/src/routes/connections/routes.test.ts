@@ -90,8 +90,7 @@ function stored(extra: Partial<Connection> = {}): Connection {
 		signedIn: true,
 		secretHeader: "authorization",
 		hasSecret: false,
-		enabled: false,
-		allowMutating: false,
+		access: "allow",
 		status: "untested",
 		tools: [],
 		lastTestedAt: null,
@@ -116,6 +115,7 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 					url: input.url,
 					auth: input.auth ?? "header",
 					signedIn: input.auth !== "oauth",
+					access: input.auth === "oauth" ? "off" : "allow",
 				});
 				return held;
 			}),
@@ -137,7 +137,7 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 	const update = vi.fn((_w: string, podId: string, connectionId: string, input: ConnectionUpdate) =>
 		Effect.sync(() => {
 			if (!held || held.podId !== podId || held.id !== connectionId) return undefined;
-			held = { ...held, enabled: input.enabled ?? held.enabled };
+			held = { ...held, access: input.access ?? held.access };
 			return held;
 		}),
 	);
@@ -167,7 +167,7 @@ function routes(allowPrivateNetwork: boolean, current: Connection | undefined) {
 							url: held.url,
 							auth: "header" as const,
 							headers: {},
-							allowMutating: false,
+							access: "allow" as const,
 							configurationUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),
 							configurationRevision: 1,
 						}
@@ -389,7 +389,7 @@ describe("signing a connection in", () => {
 			expect.any(Function),
 		);
 		expect(harness.update).toHaveBeenCalledWith(WORKSPACE_ID, POD_ID, made.id, {
-			enabled: true,
+			access: "allow",
 		});
 		expect(harness.listTools).toHaveBeenCalledOnce();
 	});

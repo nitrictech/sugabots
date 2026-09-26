@@ -7,7 +7,7 @@ import type {
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
@@ -24,8 +24,8 @@ const host: AgentParticipant = {
 	id: "0199a3a0-0000-7000-8000-0000000000b3",
 	name: "Linear Handler",
 	handle: "linear-handler",
-	hue: 158,
-	face: "bar",
+	color: "green",
+	face: "pill",
 };
 
 const user: SessionUser = {
@@ -82,8 +82,7 @@ function connection(handle: string, name: string, url: string): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		enabled: true,
-		allowMutating: true,
+		access: "allow",
 		status: "connected",
 		tools: [],
 		lastTestedAt: null,
@@ -93,7 +92,10 @@ function connection(handle: string, name: string, url: string): Connection {
 }
 
 /** Renders the thread, and returns `update` to redraw it as a live thread would. */
-function show(messages: Message[], over: { canApprove?: boolean; canAlwaysAllow?: boolean } = {}) {
+function show(
+	messages: Message[],
+	over: { canApprove?: boolean; participants?: AgentParticipant[] } = {},
+) {
 	const queryClient = createQueryClient();
 	const thread = (shown: Message[]) => (
 		<QueryClientProvider client={queryClient}>
@@ -101,12 +103,12 @@ function show(messages: Message[], over: { canApprove?: boolean; canAlwaysAllow?
 				messages={shown}
 				host={host}
 				isRunning={false}
-				mentionable={[host]}
+				participants={over.participants ?? [host]}
 				user={user}
 				podId={POD}
+				onOpenCollaboration={() => undefined}
 				dividers={false}
 				canApproveToolCalls={over.canApprove ?? true}
-				canAlwaysAllowToolCalls={over.canAlwaysAllow ?? false}
 			/>
 		</QueryClientProvider>
 	);
@@ -129,6 +131,31 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+describe("what people and bots write", () => {
+	it("renders a bot's Markdown without interpreting a person's", async () => {
+		const asked = "Is **this** bold?";
+		const answered = "**Tim's bill** is high.\n\n- Look up plans\n- Draft a note";
+		show([
+			reply([{ type: "text", text: asked }], {
+				id: "0199a3a0-0000-7000-8000-0000000000c0",
+				author: {
+					kind: "person",
+					id: user.id,
+					name: user.name,
+					handle: "ryan-eyes",
+					image: null,
+				},
+				createdAt: "2026-09-18T09:00:00.000Z",
+			}),
+			reply([{ type: "text", text: answered }]),
+		]);
+
+		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
+		expect(screen.getByText("Look up plans").tagName).toBe("LI");
+		expect(screen.getByText(asked)).toBeDefined();
+	});
+});
+
 describe("a finished reply that used tools", () => {
 	const answered = reply([
 		toolCall("sentry__search_issues"),
@@ -138,23 +165,25 @@ describe("a finished reply that used tools", () => {
 		{ type: "text", text: "Yes — 41 events, all on checkout." },
 	]);
 
-	it("leaves nothing in the thread but the answer", () => {
+	it("shows the answer, and what it used on one line above it", async () => {
 		show([answered]);
 
 		expect(screen.getByText("Yes — 41 events, all on checkout.")).toBeDefined();
-		expect(screen.queryByText(/search_issues/)).toBeNull();
-		expect(screen.queryByText(/list_issues/)).toBeNull();
+		expect(
+			await screen.findByRole("button", { name: /Used Sentry and Linear for 6s/ }),
+		).toBeDefined();
+		expect(screen.queryByText("Search issues")).toBeNull();
 	});
 
-	it("opens the steps behind the message, counted, from its action bar", async () => {
+	it("lists each call when its line is opened", async () => {
 		show([answered]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Show activity · 4 steps" }));
+		const line = await screen.findByRole("button", { name: /Used Sentry and Linear/ });
+		fireEvent.click(line);
 
-		const log = await screen.findByRole("dialog");
-		expect(log.textContent).toContain("4 steps");
-		expect(within(log).getByText("Sentry ·")).toBeDefined();
-		expect(within(log).getByText("Linear ·")).toBeDefined();
+		expect(line.getAttribute("aria-expanded")).toBe("true");
+		expect(screen.getAllByText("Search issues")).toHaveLength(3);
+		expect(screen.getByText("List issues")).toBeDefined();
 	});
 });
 
@@ -167,17 +196,13 @@ describe("a reply that wrote a line before each tool call", () => {
 		{ type: "text", text: "Here are the 2 issues in Cycle 33." },
 	]);
 
-	it("shows the answer in the thread, and what it said on the way in the log", async () => {
+	it("shows only the answer: what it said on the way is the tool line's to stand for", async () => {
 		show([narrated]);
 
 		const bubble = screen.getByRole("article");
 		expect(bubble.textContent).toContain("Here are the 2 issues in Cycle 33.");
 		expect(bubble.textContent).not.toContain("Let me find the current cycle:");
-
-		fireEvent.click(await screen.findByRole("button", { name: "Show activity · 2 steps" }));
-		const log = await screen.findByRole("dialog");
-		expect(within(log).getByText("Let me find the current cycle:")).toBeDefined();
-		expect(within(log).getByText("Now the issues in it:")).toBeDefined();
+		expect(await screen.findByRole("button", { name: /Used Linear/ })).toBeDefined();
 	});
 });
 
@@ -201,17 +226,47 @@ describe("a reply arriving", () => {
 	});
 });
 
+describe("a reply that opens by asking another bot", () => {
+	const helper: AgentParticipant = {
+		...host,
+		id: "0199a3a0-0000-7000-8000-0000000000b5",
+		name: "Sentry Scout",
+		handle: "sentry-scout",
+	};
+	const asked = reply([
+		{
+			type: "collaboration",
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			agentId: helper.id,
+			agentName: helper.name,
+			threadId: "0199a3a0-0000-7000-8000-0000000000c3",
+			brief: "Check Sentry",
+			status: "answered",
+			answer: "41 events",
+			atOffset: 0,
+		},
+		{ type: "text", text: "Sentry Scout found 41 events." },
+	]);
+
+	it("names the bot above its message, not above the collaboration line", async () => {
+		show([asked], { participants: [host, helper] });
+
+		const line = await screen.findByRole("button", { name: /collaborated with Sentry Scout/ });
+		const name = screen.getByText(host.name, { selector: "div" });
+		expect(line.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+});
+
 describe("a reply that wrote nothing but used tools", () => {
 	// A turn that called a tool and produced no text has no text part at all —
-	// `messagePartsFor` adds none when the content is empty. The bubble is where
-	// the author, the time, a failure and the way into the log all live, so
-	// without one the whole message would be invisible.
+	// `messagePartsFor` adds none when the content is empty. It still needs a
+	// bubble: that is where a failure shows.
 	const wordless = reply([toolCall("sentry__search_issues")], { content: "" });
 
-	it("still shows who replied, and the way into what it did", async () => {
+	it("still shows who replied, and what it used", async () => {
 		show([wordless]);
 
-		expect(await screen.findByRole("button", { name: "Show activity · 1 step" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: /Used Sentry/ })).toBeDefined();
 		expect(screen.getByLabelText(/Linear Handler/)).toBeDefined();
 	});
 
@@ -224,39 +279,15 @@ describe("a reply that wrote nothing but used tools", () => {
 			}),
 		]);
 
-		expect(await screen.findByText("Reply failed")).toBeDefined();
+		expect(await screen.findByText("Reply failed.")).toBeDefined();
 		expect(screen.getByText(/Ran out of context/)).toBeDefined();
-	});
-});
-
-describe("a reply still using its tools", () => {
-	it("says what is happening on one line, and draws no cards", () => {
-		show([
-			reply(
-				[
-					{ type: "text", text: "" },
-					toolCall("sentry__search_issues", {
-						status: "running",
-						output: null,
-						finishedAt: null,
-					}),
-				],
-				{ status: "streaming" },
-			),
-		]);
-
-		// The service is shown as its mark, so its name is only in the accessible text.
-		expect(screen.getByText(/Search issues/)).toBeDefined();
-		expect(screen.getByText("Sentry:", { selector: ".sr-only" })).toBeDefined();
-		expect(screen.getByText("is using")).toBeDefined();
-		expect(screen.queryByRole("button", { name: /Show activity/ })).toBeNull();
 	});
 });
 
 describe("a reply still being written", () => {
 	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
 
-	it("shows none of it until it is finished, only that the agent is typing", () => {
+	it("shows none of it until it is finished, only that the bot is typing and what it is using", async () => {
 		const search = toolCall("sentry__search_issues", {
 			status: "running",
 			output: null,
@@ -266,21 +297,20 @@ describe("a reply still being written", () => {
 			reply([{ type: "text", text: "Let me look" }], { status: "streaming" }),
 		]);
 		expect(screen.queryByRole("article")).toBeNull();
-		expect(screen.getByRole("status", { name: "Linear Handler, typing" })).toBeDefined();
-		expect(screen.getByText("is typing")).toBeDefined();
+		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
 
 		update([reply([search], { status: "streaming" })]);
-		expect(screen.getByText(/Search issues/)).toBeDefined();
+		expect(await screen.findByRole("button", { name: /Using Sentry/ })).toBeDefined();
 
 		update([reply([{ ...search, status: "completed", finishedAt: search.startedAt }, answer])]);
 		expect(screen.queryByRole("status")).toBeNull();
 		expect(screen.getByRole("article").textContent).toContain("Here are the 2 issues in Cycle 33.");
 	});
 
-	it("says the agent is typing between one call and the next", () => {
+	it("says the bot is typing between one call and the next", () => {
 		show([reply([toolCall("sentry__search_issues")], { status: "streaming" })]);
 
-		expect(screen.getByText("is typing")).toBeDefined();
+		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
 	});
 
 	it("gives way to a write waiting on approval, which says so itself", async () => {
@@ -299,68 +329,8 @@ describe("a reply still being written", () => {
 			),
 		]);
 
-		expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: "Allow" })).toBeDefined();
 		expect(screen.queryByRole("status")).toBeNull();
-	});
-});
-
-describe("the typing line while tools come and go", () => {
-	const NOW = Date.parse("2026-09-18T09:00:00.000Z");
-
-	function running(tool: string, startedAt = new Date().toISOString()) {
-		return toolCall(tool, { status: "running", output: null, startedAt, finishedAt: null });
-	}
-
-	function working(...parts: MessagePart[]) {
-		return reply(parts, { status: "streaming" });
-	}
-
-	beforeEach(() => {
-		vi.useFakeTimers();
-		vi.setSystemTime(NOW);
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("keeps a step that finished at once up for long enough to read", () => {
-		const search = running("sentry__search_issues");
-		const { update } = show([working(search)]);
-
-		update([working({ ...search, status: "completed" }, running("sentry__get_issue"))]);
-		expect(screen.getByText(/Search issues/)).toBeDefined();
-
-		act(() => vi.advanceTimersByTime(1_000));
-		expect(screen.getByText(/Get issue/)).toBeDefined();
-	});
-
-	it("skips steps that came and went while one was up, rather than falling behind", () => {
-		const search = running("sentry__search_issues");
-		const read = toolCall("sentry__get_issue");
-		const { update } = show([working(search)]);
-
-		update([working(search, read)]);
-		act(() => vi.advanceTimersByTime(300));
-		update([working(search, read, running("linear__list_issues"))]);
-		act(() => vi.advanceTimersByTime(300));
-		expect(screen.getByText(/Search issues/)).toBeDefined();
-
-		act(() => vi.advanceTimersByTime(400));
-
-		expect(screen.getByText(/List issues/)).toBeDefined();
-		expect(screen.queryByText(/Get issue/)).toBeNull();
-	});
-
-	it("counts from the first step, not the one in flight", () => {
-		show([
-			working(
-				toolCall("sentry__search_issues", { startedAt: new Date(NOW - 12_000).toISOString() }),
-				running("sentry__get_issue"),
-			),
-		]);
-
-		expect(screen.getByText("12s")).toBeDefined();
 	});
 });
 
@@ -375,32 +345,28 @@ describe("a write that needs approving", () => {
 	});
 	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
 
-	it("stops the thread and shows what it would send, as fields", async () => {
+	it("stops the thread, says so on its tool line, and shows what it would send on request", async () => {
 		show([asking]);
 
 		expect(
 			await screen.findByRole("region", { name: "Approval needed: Create issue in Linear" }),
 		).toBeDefined();
-		expect(screen.getByText("wants to make a change")).toBeDefined();
-		expect(screen.getByText("Team")).toBeDefined();
-		expect(screen.getByText("Platform")).toBeDefined();
+		expect(screen.getByRole("button", { name: /Waiting on Linear approval/ })).toBeDefined();
+
+		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
+		const request = await screen.findByRole("dialog");
+		expect(within(request).getByText("Team")).toBeDefined();
+		expect(within(request).getByText("Platform")).toBeDefined();
 	});
 
-	it("allows it once by default, and always when that is ticked", async () => {
+	it("allows it once, with no standing permission offered here", async () => {
 		const approval = client.api.toolApprovals.decide;
-		show([asking], { canAlwaysAllow: true });
+		show([asking]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
-
-		cleanup();
-		approval.mockClear();
-		show([asking], { canAlwaysAllow: true });
-		fireEvent.click(await screen.findByRole("checkbox"));
-		fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "always_allow" });
+		expect(screen.queryByRole("checkbox")).toBeNull();
 	});
 
 	it("sends a refusal when denied", async () => {
@@ -418,10 +384,10 @@ describe("a write that needs approving", () => {
 		expect(
 			await screen.findByText("Waiting for someone with permission to answer this."),
 		).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
 	});
 
-	it("leaves a line behind when it was refused, unlike everything else", async () => {
+	it("says on its tool line when it was refused, and by whom when opened", async () => {
 		show([
 			reply([
 				{ type: "text", text: "Left it untracked." },
@@ -435,10 +401,9 @@ describe("a write that needs approving", () => {
 			]),
 		]);
 
-		expect(await screen.findByText(/Ryan Eyes denied/)).toBeDefined();
-		// The service is its mark, so its name is only in the accessible text.
-		expect(screen.getByText("Create issue")).toBeDefined();
-		expect(screen.getByText("in Linear", { selector: ".sr-only" })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Review" })).toBeDefined();
+		const line = await screen.findByRole("button", { name: /Linear denied/ });
+		fireEvent.click(line);
+		expect(screen.getByText("Denied by Ryan Eyes")).toBeDefined();
+		expect(screen.queryByRole("region", { name: /Approval needed/ })).toBeNull();
 	});
 });

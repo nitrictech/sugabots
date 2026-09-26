@@ -30,7 +30,6 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { connection } from "../providers/sql.ts";
 import { agent, pod, user, workspace } from "../workspaces/sql.ts";
 
 export const routine = pgTable(
@@ -562,48 +561,6 @@ export const toolCall = pgTable(
 );
 
 export type ToolCallRow = typeof toolCall.$inferSelect;
-
-export const toolApprovalRule = pgTable(
-	"tool_approval_rule",
-	{
-		id: primaryKey(),
-		workspaceId: uuid("workspace_id")
-			.notNull()
-			.references(() => workspace.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").notNull(),
-		agentId: uuid("agent_id")
-			.notNull()
-			.references(() => agent.id, { onDelete: "cascade" }),
-		connectionId: uuid("connection_id").notNull(),
-		connectionRevision: integer("connection_revision").notNull(),
-		toolName: text("tool_name").notNull(),
-		createdById: uuid("created_by_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		createdAt: stamp("created_at"),
-	},
-	(table) => [
-		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "tool_approval_rule_pod_workspace_fkey",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.connectionId, table.podId],
-			foreignColumns: [connection.id, connection.podId],
-			name: "tool_approval_rule_connection_pod_fkey",
-		}).onDelete("cascade"),
-		uniqueIndex("tool_approval_rule_identity_idx").on(
-			table.agentId,
-			table.connectionId,
-			table.toolName,
-			table.createdById,
-		),
-		index("tool_approval_rule_pod_idx").on(table.podId),
-	],
-);
-
-export type ToolApprovalRuleRow = typeof toolApprovalRule.$inferSelect;
 
 export const threadSummary = pgTable("thread_summary", {
 	threadId: uuid("thread_id")

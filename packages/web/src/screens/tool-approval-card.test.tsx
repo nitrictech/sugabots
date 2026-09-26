@@ -5,11 +5,11 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
 import { client } from "@/test-client.ts";
-import { DeniedToolLine, ToolApprovalCard } from "./ToolApprovalCard.tsx";
+import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const agent = { name: "Linear Handler", hue: 158, face: "bar" as const };
+const agent = { name: "Linear Handler", color: "green" as const, face: "pill" as const };
 
 function asking(input: ToolCallPart["input"]): ToolCallPart {
 	return {
@@ -37,8 +37,7 @@ function show(input: ToolCallPart["input"]) {
 				threadId="0199a3a0-0000-7000-8000-0000000000b2"
 				podId="0199a3a0-0000-7000-8000-0000000000b1"
 				canApprove
-				canAlwaysAllow={false}
-				look={{ name: "Linear", presetId: "linear", hue: 262 }}
+				look={{ name: "Linear", presetId: "linear" }}
 			/>
 		</QueryClientProvider>,
 	);
@@ -54,37 +53,26 @@ afterEach(() => {
 });
 
 describe("an approval request", () => {
-	it("shows a few of its fields, named in words, and counts the rest", () => {
-		show(Object.fromEntries(Array.from({ length: 9 }, (_, index) => [`field${index + 1}`, "x"])));
+	it("asks what it would do and where, and allows it once", async () => {
+		const approval = client.api.toolApprovals.decide;
+		show({ team: "Platform" });
 
-		expect(screen.getByText("Field1")).toBeDefined();
-		expect(screen.getByText("Field6")).toBeDefined();
-		expect(screen.queryByText("Field7")).toBeNull();
-		expect(screen.getByText("3 more fields")).toBeDefined();
+		const card = screen.getByRole("region", { name: "Approval needed: Update issue in Linear" });
+		expect(within(card).queryByRole("checkbox")).toBeNull();
+		fireEvent.click(within(card).getByRole("button", { name: "Allow" }));
+
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
 	});
 
-	it("says a structured value by what it holds, and a plain list as its items", () => {
-		show({
-			dueDate: "2026-10-02",
-			labels: ["performance", "chat"],
-			assignee: { id: "u_123", name: "Tim Holm" },
-			subscribers: [{ id: "u_1" }, { id: "u_2" }, { id: "u_3" }],
-		});
+	it("denies it", async () => {
+		const approval = client.api.toolApprovals.decide;
+		show({ team: "Platform" });
 
-		expect(screen.getByText("Due date")).toBeDefined();
-		expect(screen.getByText("performance, chat")).toBeDefined();
-		expect(screen.getByText("2 fields")).toBeDefined();
-		expect(screen.getByText("3 items")).toBeDefined();
-		expect(screen.queryByText(/Tim Holm/)).toBeNull();
-	});
+		fireEvent.click(screen.getByRole("button", { name: "Deny" }));
 
-	it("previews the first few entries of a list, and counts the rest", () => {
-		show(Array.from({ length: 60 }, (_, index) => ({ title: `Issue ${index}`, state: "todo" })));
-
-		expect(screen.getByRole("columnheader", { name: "Title" })).toBeDefined();
-		expect(screen.getByText("Issue 2")).toBeDefined();
-		expect(screen.queryByText("Issue 3")).toBeNull();
-		expect(screen.getByText("57 more")).toBeDefined();
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
 	});
 
 	it("lays out every field on request, structured values as fields of their own", () => {
@@ -94,7 +82,7 @@ describe("an approval request", () => {
 			subscribers: [{ id: "u_1" }, { id: "u_2" }],
 		});
 
-		fireEvent.click(screen.getByRole("button", { name: "View full request" }));
+		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
 
 		const request = screen.getByRole("dialog", { name: "Update issue" });
 		expect(within(request).getByText("Field7")).toBeDefined();
@@ -109,36 +97,10 @@ describe("an approval request", () => {
 		const approval = client.api.toolApprovals.decide;
 		show({ team: "Platform" });
 
-		fireEvent.click(screen.getByRole("button", { name: "View full request" }));
-		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
+		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Allow" }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
-	});
-});
-
-describe("a refused request", () => {
-	it("shows on review what was refused and who refused it, with no way to answer again", () => {
-		render(
-			<QueryClientProvider client={createQueryClient()}>
-				<DeniedToolLine
-					call={{
-						...asking({ team: "Platform", body: "Looks like the gateway limit." }),
-						approval: { status: "denied", decidedByName: "Ryan Eyes", decidedAt: null },
-					}}
-					agent={agent}
-					look={{ name: "Linear", presetId: "linear", hue: 262 }}
-				/>
-			</QueryClientProvider>,
-		);
-		expect(screen.getByText(/Ryan Eyes denied/)).toBeDefined();
-
-		fireEvent.click(screen.getByRole("button", { name: "Review" }));
-
-		const request = screen.getByRole("dialog", { name: "Update issue" });
-		expect(within(request).getByText("Platform")).toBeDefined();
-		expect(within(request).getByText("Looks like the gateway limit.")).toBeDefined();
-		expect(within(request).getByText("Denied by Ryan Eyes")).toBeDefined();
-		expect(within(request).queryByRole("button", { name: "Approve" })).toBeNull();
 	});
 });

@@ -1,7 +1,6 @@
 import {
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	type Message,
-	type Thread,
 	type ThreadDetails,
 	type ToolApprovalDecision,
 } from "@sugabots/contracts";
@@ -10,25 +9,8 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { mergeThreadMessages } from "@/lib/thread-events.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
 
 const RUNNING_THREAD_REFETCH_INTERVAL_MS = 1_000;
-
-export function useThreads() {
-	const workspace = useWorkspace();
-	const workspaceId = workspace.workspace?.id;
-	const query = useQuery({
-		queryKey: ["threads", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.threads.list({ params: { workspace: workspaceId } }), {
-						signal,
-					})
-			: skipToken,
-	});
-
-	return { ...query, isPending: workspace.isPending || query.isPending };
-}
 
 /**
  * A message fetched while it streams is behind the deltas already applied: the
@@ -119,28 +101,6 @@ export function useThread(threadId: string | undefined) {
 	};
 }
 
-export function threadsForAgent(
-	threads: readonly Thread[] | undefined,
-	agentId: string,
-	podId?: string,
-): Thread[] {
-	return (threads ?? []).filter(
-		(thread) => thread.hostAgentId === agentId && (podId === undefined || thread.podId === podId),
-	);
-}
-
-export function useCancelTurn(threadId: string) {
-	const queries = useQueryClient();
-	return useMutation({
-		mutationFn: async (turnId: string) => {
-			await Effect.runPromise(client.api.threads.cancelTurn({ params: { turnId } }));
-		},
-		onSuccess: async () => {
-			await queries.invalidateQueries({ queryKey: ["thread", threadId] });
-		},
-	});
-}
-
 export function useReviewToolCall(threadId: string, podId: string) {
 	const queries = useQueryClient();
 	return useMutation({
@@ -154,11 +114,6 @@ export function useReviewToolCall(threadId: string, podId: string) {
 			Effect.runPromise(
 				client.api.toolApprovals.decide({ params: { podId, toolCallId }, payload: { decision } }),
 			),
-		onSuccess: async () => {
-			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["thread", threadId] }),
-				queries.invalidateQueries({ queryKey: ["tool-approval-rules", podId] }),
-			]);
-		},
+		onSuccess: () => queries.invalidateQueries({ queryKey: ["thread", threadId] }),
 	});
 }

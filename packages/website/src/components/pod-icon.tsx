@@ -1,4 +1,4 @@
-import { type BotColor, botColors } from "@sugabots/avatars";
+import { type BotColor, botColors, botColorVariables } from "@sugabots/avatars";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
@@ -26,13 +26,17 @@ interface PodIconProps extends VariantProps<typeof podIcon> {
 export function PodIcon({ tint, bots, size, className }: PodIconProps) {
 	const slots = Array.from({ length: POD_ICON_SLOTS }, (_, index) => bots[index]);
 	return (
-		<span className={cn(podIcon({ size }), botColors[tint].tint, className)}>
+		<span
+			className={cn(podIcon({ size }), "bg-(--bot-tint)", className)}
+			style={botColorVariables(tint)}
+		>
 			{slots.map((bot, index) => (
 				<span
 					// Slots are positional and never reorder.
 					// biome-ignore lint/suspicious/noArrayIndexKey: see above
 					key={index}
-					className={cn("rounded-full", bot ? botColors[bot].swatch : "bg-foreground/5")}
+					className={cn("rounded-full", !bot && "bg-foreground/5")}
+					style={bot ? { background: botColors[bot].face } : undefined}
 				/>
 			))}
 		</span>

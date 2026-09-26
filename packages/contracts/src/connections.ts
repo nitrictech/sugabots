@@ -14,8 +14,8 @@ import { uuidSchema } from "./uuid.ts";
  *
  * A connection is the workspace's: a URL, a secret entered once and sealed,
  * and the tools the server was found to offer. There is no catalog yet; the
- * first vendor server worth naming arrives with OAuth (C14c). Which agents get those tools
- * is decided on each agent, off by default (ADR 006). Remote servers over
+ * first vendor server worth naming arrives with OAuth (C14c). Every bot in the
+ * pod gets those tools, as far as the connection's `access` allows. Remote servers over
  * Streamable HTTP only; nothing here spawns a process.
  */
 
@@ -38,6 +38,20 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
 export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
 
+/**
+ * What the pod's bots may do with a connection's tools.
+ *
+ * - `off`: none of its tools are offered.
+ * - `ask`: every tool is offered, and every call waits for a person to allow it.
+ * - `allow`: tools the server marked read-only run straight away; the rest wait
+ *   for a person to allow them.
+ *
+ * A tool that may change something always waits, whatever the setting.
+ */
+export const connectionAccesses = ["off", "ask", "allow"] as const;
+export const connectionAccessSchema = Schema.Literals(connectionAccesses);
+export type ConnectionAccess = typeof connectionAccessSchema.Type;
+
 /** The web page a connection's OAuth sign-in returns to, with ids only. */
 export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
 
@@ -54,14 +68,11 @@ export const connectionSchema = Schema.Struct({
 	signedIn: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
-	/** Whether agents may be given this connection's tools at all. */
-	enabled: Schema.Boolean,
 	/**
-	 * Whether agents may also be given the tools that change things. Off, only
-	 * tools the server marked read-only are offered; a tool with no hints is
-	 * taken to change things, as the MCP spec has it (ADR 006).
+	 * What the pod's bots may do with its tools. A tool with no hints is taken
+	 * to change things, as the MCP spec has it (ADR 006).
 	 */
-	allowMutating: Schema.Boolean,
+	access: connectionAccessSchema,
 	status: providerStatusSchema,
 	tools: Schema.mutable(Schema.Array(connectionToolSchema)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
@@ -118,8 +129,7 @@ export const connectionUpdateSchema = Schema.Struct({
 	secretHeader: Schema.optional(Schema.NullOr(secretHeaderSchema)),
 	/** Absent leaves the stored secret alone; null removes it. */
 	secret: Schema.optional(Schema.NullOr(secretSchema)),
-	enabled: Schema.optional(Schema.Boolean),
-	allowMutating: Schema.optional(Schema.Boolean),
+	access: Schema.optional(connectionAccessSchema),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
 );
@@ -174,8 +184,6 @@ export interface ConnectionPreset {
 	/** One line on what its tools reach. */
 	description: string;
 	url: string;
-	/** The tint a lettered mark is drawn in, where there is no logo. */
-	hue: number;
 }
 
 export const connectionCatalog: readonly ConnectionPreset[] = [
@@ -184,35 +192,30 @@ export const connectionCatalog: readonly ConnectionPreset[] = [
 		name: "Linear",
 		description: "Issues, projects and cycles",
 		url: "https://mcp.linear.app/mcp",
-		hue: 262,
 	},
 	{
 		id: "stripe",
 		name: "Stripe",
 		description: "Customers, payments and invoices",
 		url: "https://mcp.stripe.com",
-		hue: 275,
 	},
 	{
 		id: "notion",
 		name: "Notion",
 		description: "Pages and databases",
 		url: "https://mcp.notion.com/mcp",
-		hue: 40,
 	},
 	{
 		id: "sentry",
 		name: "Sentry",
 		description: "Errors and performance issues",
 		url: "https://mcp.sentry.dev/mcp",
-		hue: 350,
 	},
 	{
 		id: "jira",
 		name: "Jira",
 		description: "Issues and boards",
 		url: "https://mcp.atlassian.com/v1/mcp",
-		hue: 235,
 	},
 ];
 

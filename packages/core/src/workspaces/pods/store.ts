@@ -221,8 +221,8 @@ export const provisionPersonalPod = Effect.fn("PodStore.provisionPersonalPod")(f
 			handle: "personal-assistant",
 			provisionedKey: "personal-assistant",
 			description: "Your private assistant.",
-			hue: 225,
-			face: "bar",
+			color: "sky",
+			face: "pill",
 			model: model ?? FALLBACK_ASSISTANT_MODEL,
 			prompt: PERSONAL_ASSISTANT_PROMPT,
 		})

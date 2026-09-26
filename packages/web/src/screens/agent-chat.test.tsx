@@ -1,13 +1,14 @@
 import {
 	type Chat,
 	type ChatHistoryEntry,
+	DEFAULT_THREAD_HISTORY_LIMIT,
 	handleFromName,
 	type Message,
 	type RoutineExecution,
 	streamEvent,
 	type ThreadDetails,
 } from "@sugabots/contracts";
-import { InternalServerError } from "@sugabots/contracts/http";
+import { Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -69,7 +70,7 @@ const host = {
 	id: linear.id,
 	name: linear.name,
 	handle: linear.handle,
-	hue: linear.hue,
+	color: linear.color,
 	face: linear.face,
 };
 const collaborator = {
@@ -77,7 +78,7 @@ const collaborator = {
 	id: triager.id,
 	name: triager.name,
 	handle: triager.handle,
-	hue: triager.hue,
+	color: triager.color,
 	face: triager.face,
 };
 const mainMessage: Message = {
@@ -332,13 +333,14 @@ describe("ongoing agent Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		const personMessage = (await screen.findByText(mainMessage.content)).closest("article");
-		expect(personMessage?.classList.contains("justify-end")).toBe(true);
+		expect(personMessage?.classList.contains("items-end")).toBe(true);
 		const reply = screen.getByText(agentMessage.content).closest("article");
-		expect(reply?.classList.contains("justify-start")).toBe(true);
+		expect(reply?.classList.contains("items-start")).toBe(true);
 		const collaboration = screen.getByRole("button", {
-			name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+			name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 		});
-		expect(collaboration.querySelectorAll(".agent-tint")).toHaveLength(2);
+		// Both bots' faces, each a disc filling its 40-unit viewbox.
+		expect(collaboration.querySelectorAll('svg > circle[r="20"]')).toHaveLength(2);
 		expect(client.api.chats.getOrCreate).toHaveBeenCalledWith({
 			params: { workspace: linear.workspaceId },
 			payload: { podId: linear.podId, hostAgentId: linear.id },
@@ -364,10 +366,10 @@ describe("ongoing agent Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		const activity = await screen.findByRole("button", {
-			name: `Open Routine run: ${routineExecution.routineName}`,
+			name: new RegExp(`^Open Routine run: ${routineExecution.routineName}`),
 		});
-		expect(activity.querySelector(".lucide-webhook")).not.toBeNull();
-		expect(screen.queryByText(`Start a conversation with ${linear.name}`)).toBeNull();
+		expect(activity.textContent).toContain(routineExecution.routineName);
+		expect(screen.queryByText(`Say hello to ${linear.name}`)).toBeNull();
 	});
 
 	it("sends a main-chat message", async () => {
@@ -465,7 +467,7 @@ describe("ongoing agent Chat", () => {
 		updates.emit(
 			streamEvent("message.created", { threadId: chat.mainThreadId, message: streaming }),
 		);
-		await screen.findByText("is typing");
+		await screen.findByRole("status", { name: `${linear.name} is typing` });
 		await waitFor(() => expect(messages.scrollTop).toBe(1_400));
 
 		scrollHeight = 1_700;
@@ -508,32 +510,34 @@ describe("ongoing agent Chat", () => {
 
 		const leadIn = await screen.findByText("Checking ownership.");
 		const collaboration = screen.getByRole("button", {
-			name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+			name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 		});
-		const typing = screen.getByRole("status", { name: `${linear.name}, waiting` });
 		const follows = (first: Node, second: Node) =>
 			Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(follows(leadIn, collaboration)).toBe(true);
-		expect(follows(collaboration, typing)).toBe(true);
-		expect(screen.queryByRole("button", { name: /Show activity/ })).toBeNull();
+		// While the collaboration runs the bot says nothing else; its line says it is talking.
+		expect(collaboration.getAttribute("aria-label")).toContain("is talking to");
+		expect(screen.queryByRole("status", { name: /is typing/ })).toBeNull();
 	});
 
 	it("opens a read-only collaboration panel from an inline part", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
 			await screen.findByRole("button", {
-				name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+				name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 			}),
 		);
 
 		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		// Seen from the chat's bot: its request on the right, the answer it got on the left.
 		const request = within(panel).getByRole("article", { name: new RegExp(linear.name) });
 		expect(within(request).getByText(collaborationRequest.content)).toBeDefined();
-		expect(request.classList.contains("justify-start")).toBe(true);
+		expect(request.classList.contains("items-end")).toBe(true);
 		expect(within(panel).queryByText("The request")).toBeNull();
 		const answer = within(panel).getByRole("article", { name: new RegExp(triager.name) });
 		expect(within(answer).getByText(collaborationAnswer.content)).toBeDefined();
-		expect(answer.classList.contains("justify-end")).toBe(true);
+		expect(answer.classList.contains("items-start")).toBe(true);
+		expect(within(panel).getByText(`with ${triager.name}`)).toBeDefined();
 		expect(within(panel).queryByRole("textbox")).toBeNull();
 		await waitFor(() => expect(router.state.location.search.thread).toBe(collaborationId));
 	});
@@ -551,7 +555,7 @@ describe("ongoing agent Chat", () => {
 			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 			fireEvent.click(
 				await screen.findByRole("button", {
-					name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+					name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 				}),
 			);
 
@@ -598,7 +602,7 @@ describe("ongoing agent Chat", () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(
 			await screen.findByRole("button", {
-				name: `Open Collaboration: ${triager.name} contacted me`,
+				name: new RegExp(`^Open Collaboration: ${linear.name} helped ${triager.name}`),
 			}),
 		);
 
@@ -606,34 +610,14 @@ describe("ongoing agent Chat", () => {
 		expect(within(panel).getByText(collaborationAnswer.content)).toBeDefined();
 	});
 
-	it("lists only collaborations and routine runs in compact day groups", async () => {
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		fireEvent.click(
-			(await screen.findAllByRole("button", { name: "Open Chat history" }))[0] as Element,
-		);
-
-		const history = await screen.findByRole("complementary", { name: "Chat history" });
-		expect(within(history).getByText(collaborationEntry.title)).toBeDefined();
-		expect(within(history).getByText(routineEntry.title)).toBeDefined();
-		expect(
-			within(history)
-				.getAllByRole("button")
-				.some((button) => button.querySelector("svg")),
-		).toBe(true);
-		expect(within(history).getByRole("heading", { level: 3 })).toBeDefined();
-	});
-
-	it("opens collaboration and routine panels from history through the thread query", async () => {
-		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
-		const history = await screen.findByRole("complementary", { name: "Chat history" });
-		fireEvent.click(within(history).getByRole("button", { name: collaborationEntry.title }));
-
-		expect(await screen.findByRole("heading", { name: collaborationEntry.title })).toBeDefined();
-		await waitFor(() => expect(router.state.location.search.thread).toBe(collaborationId));
-		fireEvent.click(within(history).getByRole("button", { name: routineEntry.title }));
+	it("opens a routine run's panel from the thread query", async () => {
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
 
 		const routinePanel = await screen.findByRole("complementary", { name: routineEntry.title });
-		expect(routinePanel.querySelector(".lucide-webhook")).not.toBeNull();
+		expect(
+			within(routinePanel).getByRole("heading", { name: routineExecution.routineName }),
+		).toBeDefined();
+		expect(within(routinePanel).getByText("Routine run")).toBeDefined();
 		expect(within(routinePanel).getByText(routineMessage.content)).toBeDefined();
 		expect(within(routinePanel).queryByText(routineExecution.instructions)).toBeNull();
 		expect(
@@ -645,17 +629,15 @@ describe("ongoing agent Chat", () => {
 		expect(within(routinePanel).queryByText(/Routine instructions:/)).toBeNull();
 		expect(within(routinePanel).queryByText(/Trigger data \(untrusted\):/)).toBeNull();
 		expect(within(routinePanel).queryByRole("textbox")).toBeNull();
-		await waitFor(() => expect(router.state.location.search.thread).toBe(routineId));
+		expect(router.state.location.search.thread).toBe(routineId);
 	});
 
 	it("returns from a Routine collaboration to its parent Routine", async () => {
-		mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
-		const history = await screen.findByRole("complementary", { name: "Chat history" });
-		fireEvent.click(within(history).getByRole("button", { name: routineEntry.title }));
+		mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${routineId}`);
 		const routinePanel = await screen.findByRole("complementary", { name: routineEntry.title });
 		fireEvent.click(
 			within(routinePanel).getByRole("button", {
-				name: `Open Collaboration: ${linear.name} talked to ${triager.name}`,
+				name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 			}),
 		);
 
@@ -667,17 +649,6 @@ describe("ongoing agent Chat", () => {
 		expect(await screen.findByRole("complementary", { name: routineEntry.title })).toBeDefined();
 	});
 
-	it("paginates collaboration and routine history", async () => {
-		client.api.chats.history
-			.mockReturnValueOnce(Effect.succeed({ items: [collaborationEntry], nextCursor: "older" }))
-			.mockReturnValueOnce(Effect.succeed({ items: [routineEntry], nextCursor: null }));
-		mount(`/suga/pods/suga-team/agents/${linear.handle}?history=open`);
-		const history = await screen.findByRole("complementary", { name: "Chat history" });
-		fireEvent.click(within(history).getByRole("button", { name: "Load older threads" }));
-
-		expect(await within(history).findByText(routineEntry.title)).toBeDefined();
-	});
-
 	it("uses message-focused copy when the Chat is empty", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		client.api.threads.get.mockReturnValue(
@@ -685,14 +656,35 @@ describe("ongoing agent Chat", () => {
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-		expect(await screen.findByText(`Start a conversation with ${linear.name}`)).toBeDefined();
-		expect(screen.getByText("Send a message to start working together.")).toBeDefined();
+		expect(await screen.findByText(`Say hello to ${linear.name}`)).toBeDefined();
+		expect(screen.getByText(`Your chats with ${linear.name} will show up here.`)).toBeDefined();
+	});
+
+	it("opens Details from the bot's name, and leads back to the pod's list", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+
+		const name = await screen.findByRole("button", { name: linear.name });
+		expect(screen.getByRole("link", { name: "Back to Suga-Team" }).getAttribute("href")).toBe(
+			"/suga/pods/suga-team",
+		);
+		fireEvent.click(name);
+
+		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
+	});
+
+	it("leads back to All from a chat opened there", async () => {
+		mount(`/suga/all/pods/suga-team/agents/${linear.handle}`);
+
+		expect((await screen.findByRole("link", { name: "Back to All" })).getAttribute("href")).toBe(
+			"/suga/all",
+		);
 	});
 
 	it("lists who has written in the Chat lately, most recent first", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 
-		const rail = await screen.findByRole("complementary", { name: "Chat summary" });
+		const rail = await screen.findByRole("complementary", { name: "Details" });
 		const recent = within(rail)
 			.getByRole("heading", { name: "Recent participants" })
 			.closest("section");
@@ -703,37 +695,414 @@ describe("ongoing agent Chat", () => {
 		expect(rest).toEqual([]);
 	});
 
-	it("keeps the Chat's participants out of a collaboration's summary while it loads", async () => {
-		const loading = pendingAnswer();
-		const answerThread = client.api.threads.get.getMockImplementation();
-		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
-			request.params.threadId === collaborationId ? loading.effect : answerThread?.(request),
-		);
-		mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${collaborationId}`);
-
-		const rail = await screen.findByRole("complementary", { name: "Collaboration summary" });
-		expect(within(rail).queryByText(sam.name)).toBeNull();
-
-		loading.answer(
-			Effect.succeed(
-				details(collaborationId, collaborationEntry.title, "collaboration", [
-					collaborationRequest,
-					collaborationAnswer,
-				]),
-			),
-		);
-		expect(await within(rail).findByText(triager.name)).toBeDefined();
-		expect(within(rail).queryByText(sam.name)).toBeNull();
-	});
-
 	it("closes a direct-linked collaboration without leaving Chat", async () => {
 		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}?thread=${collaborationId}`);
-		expect(await screen.findByRole("heading", { name: collaborationEntry.title })).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Close thread (Escape)" }));
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		expect(within(panel).getByRole("heading", { name: "Collaboration" })).toBeDefined();
+		fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
 
 		await waitFor(() =>
-			expect(screen.queryByRole("heading", { name: collaborationEntry.title })).toBeNull(),
+			expect(screen.queryByRole("complementary", { name: collaborationEntry.title })).toBeNull(),
 		);
 		expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${linear.handle}`);
+	});
+});
+
+describe("a thread open beside the Chat", () => {
+	const chatPage = `/suga/pods/suga-team/agents/${linear.handle}`;
+	const threadPage = `${chatPage}?thread=${collaborationId}`;
+	const collaboration = details(collaborationId, collaborationEntry.title, "collaboration", [
+		collaborationRequest,
+		collaborationAnswer,
+	]);
+	const incoming = (id: string, text: string): Message => ({
+		...collaborationAnswer,
+		id,
+		status: "complete",
+		parts: [{ type: "text", text }],
+		content: text,
+		createdAt: "2026-09-18T09:20:00.000Z",
+	});
+
+	/** Answers for the open thread; every other thread keeps the Chat's own answers. */
+	function answerThread(
+		answer: (request: {
+			params: { threadId: string };
+			query?: { cursor?: string };
+		}) => Effect.Effect<unknown, unknown>,
+	) {
+		const others = client.api.threads.get.getMockImplementation();
+		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
+			request.params.threadId === collaborationId ? answer(request) : others?.(request),
+		);
+	}
+
+	/** A stream for the open thread alone, so what it is sent is not also the Chat's. */
+	function threadStream() {
+		const updates = controlledEventStream();
+		client.events.thread.mockImplementation((threadId: string) =>
+			threadId === collaborationId ? updates.stream : controlledEventStream().stream,
+		);
+		return updates;
+	}
+
+	const threadCalls = () =>
+		client.api.threads.get.mock.calls.filter(
+			([request]) =>
+				(request as { params: { threadId: string } }).params.threadId === collaborationId,
+		);
+
+	it("says why a reply failed, in the provider's words", async () => {
+		answerThread(() =>
+			Effect.succeed({
+				...collaboration,
+				messages: [
+					collaborationRequest,
+					{
+						...collaborationAnswer,
+						status: "failed",
+						parts: [],
+						content: "",
+						error: "Provider returned 403: This model requires 18+ age confirmation.",
+					},
+				],
+			}),
+		);
+		mount(threadPage);
+
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		expect(await within(panel).findByText("Reply failed.")).toBeDefined();
+		expect(within(panel).getByText(/18\+ age confirmation/)).toBeDefined();
+	});
+
+	it("says when the thread could not be loaded", async () => {
+		answerThread(() => Effect.fail(new Forbidden({ message: "Unavailable" })));
+		mount(threadPage);
+
+		expect(await screen.findByText("Could not load this thread")).toBeDefined();
+	});
+
+	it("applies streamed messages to the thread once each", async () => {
+		const updates = threadStream();
+		answerThread(() => Effect.succeed(collaboration));
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		await within(panel).findByText(collaborationAnswer.content);
+
+		const messageId = "0199a3a0-0000-7000-8000-000000000101";
+		const created = streamEvent("message.created", {
+			threadId: collaborationId,
+			message: { ...incoming(messageId, ""), status: "streaming", parts: [] },
+		});
+		updates.emit(created);
+		updates.emit(created);
+		updates.emit(
+			streamEvent("message.delta", {
+				threadId: collaborationId,
+				messageId,
+				offset: 0,
+				text: "Release checked",
+			}),
+		);
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: collaborationId,
+				messageId,
+				content: "Release checked",
+				status: "complete",
+			}),
+		);
+
+		expect(await within(panel).findByText("Release checked")).toBeDefined();
+		expect(within(panel).getAllByText("Release checked")).toHaveLength(1);
+	});
+
+	it("loads and deduplicates older messages while keeping live updates", async () => {
+		const updates = threadStream();
+		const cursor = "older-page";
+		const earlier = { ...incoming("0199a3a0-0000-7000-8000-000000000102", "Earlier context") };
+		earlier.createdAt = "2026-09-18T09:00:00.000Z";
+		answerThread((request) =>
+			Effect.succeed(
+				request.query?.cursor
+					? {
+							...collaboration,
+							messages: [earlier, collaborationRequest],
+							olderMessagesCursor: null,
+						}
+					: { ...collaboration, olderMessagesCursor: cursor },
+			),
+		);
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+
+		fireEvent.click(await within(panel).findByRole("button", { name: "Load older messages" }));
+
+		expect(await within(panel).findByText("Earlier context")).toBeDefined();
+		expect(within(panel).getAllByText(collaborationRequest.content)).toHaveLength(1);
+		expect(client.api.threads.get).toHaveBeenCalledWith({
+			params: { threadId: collaborationId },
+			query: { cursor, limit: DEFAULT_THREAD_HISTORY_LIMIT },
+		});
+
+		updates.emit(
+			streamEvent("message.created", {
+				threadId: collaborationId,
+				message: incoming("0199a3a0-0000-7000-8000-000000000103", "Live after paging"),
+			}),
+		);
+		expect(await within(panel).findByText("Live after paging")).toBeDefined();
+		expect(within(panel).getByText("Earlier context")).toBeDefined();
+	});
+
+	it("keeps current thread metadata and messages when an older page resolves late", async () => {
+		const updates = threadStream();
+		const olderPage = pendingAnswer();
+		answerThread((request) =>
+			request.query?.cursor
+				? olderPage.effect
+				: Effect.succeed({ ...collaboration, olderMessagesCursor: "older-page" }),
+		);
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		fireEvent.click(await within(panel).findByRole("button", { name: "Load older messages" }));
+
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: collaborationId,
+				messageId: collaborationAnswer.id,
+				status: "complete",
+				content: "Completed while paging",
+			}),
+		);
+		expect(await within(panel).findByText("Completed while paging")).toBeDefined();
+
+		olderPage.answer(
+			Effect.succeed({
+				...collaboration,
+				thread: { ...collaboration.thread, title: "Stale page title" },
+				messages: [{ ...collaborationAnswer, content: "Stale page message" }],
+				olderMessagesCursor: null,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(within(panel).queryByRole("button", { name: "Load older messages" })).toBeNull(),
+		);
+		expect(within(panel).getByText("Completed while paging")).toBeDefined();
+		expect(screen.queryByText("Stale page message")).toBeNull();
+		expect(screen.queryByRole("complementary", { name: "Stale page title" })).toBeNull();
+	});
+
+	it("says when older messages could not be loaded, and lets you try again", async () => {
+		answerThread((request) =>
+			request.query?.cursor
+				? Effect.fail(new InternalServerError({ message: "History unavailable" }))
+				: Effect.succeed({ ...collaboration, olderMessagesCursor: "older-page" }),
+		);
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+
+		fireEvent.click(await within(panel).findByRole("button", { name: "Load older messages" }));
+
+		expect((await within(panel).findByRole("alert")).textContent).toContain(
+			"Earlier messages could not be loaded.",
+		);
+		expect(
+			within(panel).getByRole("button", { name: "Load older messages" }).hasAttribute("disabled"),
+		).toBe(false);
+	});
+
+	it("refetches when an event arrives before the thread has loaded", async () => {
+		const updates = threadStream();
+		const initial = pendingAnswer();
+		const early = incoming("0199a3a0-0000-7000-8000-000000000104", "Arrived early");
+		let first = true;
+		answerThread(() => {
+			if (first) {
+				first = false;
+				return initial.effect;
+			}
+			return Effect.succeed({ ...collaboration, messages: [...collaboration.messages, early] });
+		});
+		mount(threadPage);
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(collaborationId));
+
+		updates.emit(streamEvent("message.created", { threadId: collaborationId, message: early }));
+		initial.answer(Effect.succeed(collaboration));
+
+		expect(await screen.findByText("Arrived early")).toBeDefined();
+		expect(threadCalls()).toHaveLength(2);
+	});
+
+	it("says the bot is typing from when its reply starts until it is finished", async () => {
+		const updates = threadStream();
+		answerThread(() =>
+			Effect.succeed({
+				...collaboration,
+				thread: { ...collaboration.thread, status: "running" },
+				messages: [collaborationRequest],
+			}),
+		);
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		await within(panel).findByText(collaborationRequest.content);
+
+		updates.emit(
+			streamEvent("message.created", {
+				threadId: collaborationId,
+				message: { ...collaborationAnswer, status: "streaming", content: "", parts: [] },
+			}),
+		);
+		updates.emit(
+			streamEvent("message.delta", {
+				threadId: collaborationId,
+				messageId: collaborationAnswer.id,
+				offset: 0,
+				text: "Sam ",
+			}),
+		);
+		// One line for the whole reply, and none of its words until it is done.
+		expect(
+			await within(panel).findAllByRole("status", { name: `${triager.name} is typing` }),
+		).toHaveLength(1);
+		expect(within(panel).queryByText("Sam")).toBeNull();
+
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: collaborationId,
+				messageId: collaborationAnswer.id,
+				content: "Sam owns it.",
+				status: "complete",
+			}),
+		);
+
+		expect(await within(panel).findByText("Sam owns it.")).toBeDefined();
+		expect(within(panel).queryByRole("status", { name: `${triager.name} is typing` })).toBeNull();
+	});
+
+	it("answers the call the thread waits on from the foot of a phone's sheet", async () => {
+		client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
+		const waitingCall = {
+			type: "tool_call" as const,
+			id: "0199a3a0-0000-7000-8000-000000000110",
+			tool: "linear__create_issue",
+			input: { title: "Checkout requests time out" },
+			output: null,
+			status: "awaiting_approval" as const,
+			error: null,
+			mutating: true,
+			atOffset: 0,
+			startedAt: "2026-09-18T09:12:00.000Z",
+			finishedAt: null,
+			approval: { status: "pending" as const, decidedByName: null, decidedAt: null },
+		};
+		answerThread(() =>
+			Effect.succeed({
+				...collaboration,
+				capabilities: { ...collaboration.capabilities, approveToolCalls: true },
+				messages: [
+					collaborationRequest,
+					{ ...collaborationAnswer, parts: [...collaborationAnswer.parts, waitingCall] },
+				],
+			}),
+		);
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+
+		fireEvent.click(await within(panel).findByRole("button", { name: "Allow: Create issue" }));
+
+		await waitFor(() =>
+			expect(client.api.toolApprovals.decide).toHaveBeenCalledWith({
+				params: { podId: collaboration.thread.podId, toolCallId: waitingCall.id },
+				payload: { decision: "allow_once" },
+			}),
+		);
+	});
+
+	it("closes the thread's stream when the sidebar closes", async () => {
+		const updates = threadStream();
+		answerThread(() => Effect.succeed(collaboration));
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		await within(panel).findByText(collaborationAnswer.content);
+
+		fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
+
+		await waitFor(() => expect(updates.close).toHaveBeenCalledOnce());
+	});
+});
+
+describe("the Chat's summary", () => {
+	const chatPage = `/suga/pods/suga-team/agents/${linear.handle}`;
+
+	function answerChatThread(change: (chatThread: ThreadDetails) => ThreadDetails) {
+		const others = client.api.threads.get.getMockImplementation();
+		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
+			request.params.threadId === chat.mainThreadId
+				? Effect.succeed(
+						change(details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage])),
+					)
+				: others?.(request),
+		);
+	}
+
+	async function openDetails() {
+		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+		return screen.findByRole("complementary", { name: "Details" });
+	}
+
+	it("says the Scribe has no model, and where to set it up", async () => {
+		answerChatThread((thread) => ({ ...thread, summary: null, summaryEnabled: false }));
+		mount(chatPage);
+		const sidebar = await openDetails();
+
+		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
+		expect(
+			within(sidebar).getByRole("link", { name: "Set up the Scribe" }).getAttribute("href"),
+		).toBe("/suga/settings/providers/system");
+	});
+
+	it("tells a member why there is no summary without a link they cannot follow", async () => {
+		apiAnswers({ role: "member" });
+		chatAnswers();
+		answerChatThread((thread) => ({ ...thread, summary: null, summaryEnabled: false }));
+		mount(chatPage);
+		const sidebar = await openDetails();
+
+		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
+		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
+	});
+
+	it("says nothing about setting the Scribe up when the API did not answer that", async () => {
+		// `summaryEnabled` is optional: absent means the API did not say, which
+		// must not read as "the Scribe is unset".
+		answerChatThread(({ summaryEnabled: _omitted, ...thread }) => ({ ...thread, summary: null }));
+		mount(chatPage);
+		const sidebar = await openDetails();
+
+		expect(
+			await within(sidebar).findByText("A summary will appear after the first reply."),
+		).toBeDefined();
+		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
+	});
+
+	it("shows a new summary once the thread says it changed", async () => {
+		const updates = controlledEventStream();
+		client.events.thread.mockImplementation((threadId: string) =>
+			threadId === chat.mainThreadId ? updates.stream : controlledEventStream().stream,
+		);
+		let summarised = false;
+		answerChatThread((thread) => (summarised ? thread : { ...thread, summary: null }));
+		mount(chatPage);
+		const sidebar = await openDetails();
+		expect(
+			await within(sidebar).findByText("A summary will appear after the first reply."),
+		).toBeDefined();
+
+		summarised = true;
+		updates.emit(streamEvent("thread.changed", { threadId: chat.mainThreadId }));
+
+		expect(await within(sidebar).findByText("Chat is complete.")).toBeDefined();
 	});
 });

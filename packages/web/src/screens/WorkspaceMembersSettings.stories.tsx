@@ -1,55 +1,63 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-// A dialog and a select's listbox are portalled to the body, so reaching them
-// means `screen` rather than the story's own canvas.
+// A dialog is portalled to the body, so reaching it means `screen` rather
+// than the story's own canvas.
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
+import {
+	accountManager,
+	engineering,
+	growthDesk,
+	leadResearcher,
+	linearHandler,
+	oncall,
+	personal,
+	revenue,
+} from "@/shell/story-fixtures.ts";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
 
 const workspace = {
 	id: "0199a3a0-0000-7000-8000-000000000001",
-	name: "Suga Workspace",
-	slug: "suga",
+	name: "Nitric",
+	slug: "nitric",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 
-const ada = {
-	id: "0199a3a0-0000-7000-8000-0000000000d1",
-	organizationId: workspace.id,
-	userId: "0199a3a0-0000-7000-8000-000000000009",
-	role: "admin",
-	createdAt: "2026-09-01T00:00:00.000Z",
-	user: { id: "0199a3a0-0000-7000-8000-000000000009", name: "Ada", email: "ada@example.com" },
-};
+function person(n: number, name: string, email: string, role: string) {
+	const userId = `0199a3a0-0000-7000-8000-0000000000${String(n).padStart(2, "0")}`;
+	return {
+		id: `0199a3a0-0000-7000-8000-0000000000d${n}`,
+		organizationId: workspace.id,
+		userId,
+		role,
+		createdAt: `2026-09-0${n}T00:00:00.000Z`,
+		user: { id: userId, name, email },
+	};
+}
 
-const jye = {
-	id: "0199a3a0-0000-7000-8000-0000000000d2",
-	organizationId: workspace.id,
-	userId: "0199a3a0-0000-7000-8000-00000000000a",
-	role: "member",
-	createdAt: "2026-09-02T00:00:00.000Z",
-	user: { id: "0199a3a0-0000-7000-8000-00000000000a", name: "Jye", email: "jye@example.com" },
-};
+const ryan = person(1, "Ryan Eyes", "ryan@nitric.io", "admin");
+const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
+const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
+const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
 
-const kim = {
-	id: "0199a3a0-0000-7000-8000-0000000000d3",
-	organizationId: workspace.id,
-	userId: "0199a3a0-0000-7000-8000-00000000000b",
-	role: "viewer",
-	createdAt: "2026-09-03T00:00:00.000Z",
-	user: { id: "0199a3a0-0000-7000-8000-00000000000b", name: "Kim", email: "kim@example.com" },
-};
+const inPod = (member: typeof ryan) => ({
+	userId: member.userId,
+	name: member.user.name,
+	email: member.user.email,
+	image: null,
+	addedAt: member.createdAt,
+});
 
-/** Somebody asked and not yet arrived: a row in the same list as the people. */
-const dana = {
+/** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */
+const alex = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
-	email: "dana@studioform.co",
-	role: "viewer",
+	email: "alex@nitric.io",
+	role: "member",
 	status: "pending",
 	organizationId: workspace.id,
-	inviterId: ada.userId,
-	expiresAt: "2026-09-24T00:00:00.000Z",
+	inviterId: ryan.userId,
+	expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
 };
 
 const auth = `${import.meta.env.VITE_API_URL}/auth/organization`;
@@ -59,13 +67,25 @@ const refuses = (code: string, message: string) =>
 	HttpResponse.json({ code, message }, { status: 400 });
 
 function SettingsPreview({ children }: { children: ReactNode }) {
-	const [queryClient] = useState(
-		() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }),
-	);
+	const [queryClient] = useState(() => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+		});
+		// What a member's page reads besides the roster: the pods, their bots and who is in each.
+		client.setQueryData(["workspaces"], [workspace]);
+		client.setQueryData(["pods", workspace.id], [revenue, engineering, personal]);
+		client.setQueryData(
+			["agents", workspace.id],
+			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
+		);
+		client.setQueryData(["pod-members", revenue.id], [inPod(ryan), inPod(jay), inPod(mara)]);
+		client.setQueryData(["pod-members", engineering.id], [inPod(ryan), inPod(sam)]);
+		return client;
+	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
 	return (
 		<QueryClientProvider client={queryClient}>
-			<div className="flex h-screen flex-col bg-card p-6">{children}</div>
+			<div className="flex min-h-screen flex-col bg-background">{children}</div>
 		</QueryClientProvider>
 	);
 }
@@ -74,7 +94,7 @@ const meta = preview.meta({
 	title: "Views/WorkspaceMembersSettings",
 	component: WorkspaceMembersSettings,
 	tags: ["ai-generated"],
-	args: { workspaceId: workspace.id, canManage: true, currentUserId: ada.userId },
+	args: { workspaceId: workspace.id, canManage: true, currentUserId: ryan.userId },
 	parameters: {
 		layout: "fullscreen",
 		// Inline docs examples share MSW handlers; separate frames keep their responses independent.
@@ -90,11 +110,11 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${auth}/list-members`, () =>
-				HttpResponse.json({ members: [ada, jye, kim], total: 3 }),
+				HttpResponse.json({ members: [ryan, jay, mara, sam], total: 4 }),
 			),
-			http.get(`${auth}/list-invitations`, () => HttpResponse.json([dana])),
+			http.get(`${auth}/list-invitations`, () => HttpResponse.json([alex])),
 			http.post(`${auth}/update-member-role`, () =>
-				refuses("PREVIEW", "This preview does not save access changes."),
+				refuses("PREVIEW", "This preview does not save role changes."),
 			),
 			http.post(`${auth}/remove-member`, () =>
 				refuses("PREVIEW", "This preview does not remove anybody."),
@@ -106,152 +126,79 @@ const meta = preview.meta({
 	},
 });
 
-/**
- * Managing is what an administrator sees: people and the invitation nobody has
- * accepted in one list, everybody else's access editable, and their own row
- * stated rather than editable. Demoting yourself would take away the control
- * needed to undo it, and the API only stops the very last administrator.
- */
+/** Everybody with their role, you as You, and the invitation still out below them. */
 export const Managing = meta.story({
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("combobox", { name: "Access for Jye" })).toBeVisible();
+		const mara = await canvas.findByRole("link", { name: /Mara Kent/ });
+		await expect(mara).toHaveTextContent("Member");
+		await expect(canvas.getByRole("link", { name: /Ryan Eyes/ })).toHaveTextContent("You");
 		// People and invitations are two requests, so the invitation is awaited.
-		await expect(await canvas.findByText("dana@studioform.co")).toBeVisible();
-		await expect(canvas.getByText("Invited, not yet accepted")).toBeVisible();
-
-		await expect(canvas.getByText("you")).toBeVisible();
-		await expect(canvas.queryByRole("combobox", { name: "Access for Ada" })).toBeNull();
+		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
+		await expect(canvas.getByText("Expires within a day")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Resend" })).toBeInTheDocument();
 	},
 });
 
-/** The invite panel, where the role is described at the moment it is picked. */
+/** Addresses in one field, and the role described as it is picked. */
 export const Inviting = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Invite people" }));
-		const panel = await screen.findByRole("dialog");
+		const dialog = await screen.findByRole("dialog", { name: "Invite people" });
 
-		await expect(within(panel).getByLabelText("Email address")).toBeVisible();
+		await expect(within(dialog).getByLabelText("Email addresses")).toBeInTheDocument();
 		await expect(
-			within(panel).getByText("Builds agents in the pods they are added to."),
-		).toBeVisible();
-		await expect(
-			within(panel).getByText("Reads and takes part in the pods they are added to."),
-		).toBeVisible();
+			within(dialog).getByText("Builds agents in the pods they are added to."),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Send" })).toBeDisabled();
 	},
 });
 
-/**
- * ChoosingARole leaves the role menu open, because that is the state worth
- * looking at: each option carries a sentence, so the menu is sized to the
- * sentences rather than to the trigger it hangs from.
- */
-export const ChoosingARole = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("combobox", { name: "Access for Jye" }));
-
-		const options = await screen.findAllByRole("option");
-		await expect(options).toHaveLength(3);
-		await expect(
-			within(options[1] as HTMLElement).getByText("Builds agents in the pods they are added to."),
-		).toBeVisible();
-
-		// Wide enough that a description is one or two lines, not a column of
-		// single words: the whole point of putting it here.
-		const menu = options[0]?.closest("[data-slot=select-content]");
-		await expect((menu as HTMLElement).getBoundingClientRect().width).toBeGreaterThan(280);
-	},
-});
-
-/** An invitation's own menu: copy the link, send it again, or withdraw it. */
-export const PendingInvitation = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Invitation for dana@studioform.co options" }),
+/** Somebody else's page: their role, the pods they are in, when they joined, and removing them. */
+export const Person = meta.story({
+	args: { selectedMemberId: mara.id },
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "Mara Kent" })).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "Member" })).toBeChecked();
+		await expect(canvas.getByRole("switch", { name: "Mara Kent is in Revenue" })).toHaveAttribute(
+			"aria-checked",
+			"true",
 		);
-
 		await expect(
-			await screen.findByRole("menuitem", { name: "Copy invitation link" }),
-		).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Send it again" })).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Revoke invitation" })).toBeVisible();
+			canvas.getByRole("switch", { name: "Mara Kent is in Engineering" }),
+		).toHaveAttribute("aria-checked", "false");
+		await expect(canvas.getByRole("button", { name: "Remove from workspace" })).toBeInTheDocument();
 	},
 });
 
-/** Leaving is the one thing your own row offers, and it says what it costs. */
+/** Your own page: your role stated rather than chosen, and leaving in place of removing. */
+export const You = meta.story({
+	args: { selectedMemberId: ryan.id },
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "Ryan Eyes" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("radio", { name: "Member" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Leave workspace" })).toBeInTheDocument();
+	},
+});
+
+/** Leaving says what it costs before it happens. */
 export const Leaving = meta.story({
+	args: { selectedMemberId: ryan.id },
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Ada options" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Leave workspace" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "Leave workspace" }));
 
 		const dialog = await screen.findByRole("dialog");
 		await expect(dialog).toHaveTextContent("somebody inviting you again");
 	},
 });
 
-/** Reading is everybody else: the same roster, stated rather than editable. */
+/** Reading is everybody else: the same pages, stated rather than editable. */
 export const Reading = meta.story({
-	args: { canManage: false, currentUserId: jye.userId },
+	args: { canManage: false, currentUserId: mara.userId, selectedMemberId: sam.id },
 	play: async ({ canvas }) => {
-		// Kim holds Viewer and the outstanding invitation is for one too, so the
-		// roles are read from their own rows rather than from the page.
-		const kimRow = (await canvas.findByText("kim@example.com")).closest("li");
-		await expect(within(kimRow as HTMLElement).getByText("Viewer")).toBeVisible();
-		await expect(await canvas.findByText("Administrator")).toBeVisible();
-		await expect(canvas.queryByRole("combobox", { name: "Access for Jye" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Invite people" })).toBeNull();
-	},
-});
-
-/**
- * Removing asks first, and says what goes with the person — their Personal pod
- * is deleted with their membership, which is not obvious from "remove".
- */
-export const Removing = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Jye options" }));
-		await userEvent.click(await screen.findByRole("menuitem", { name: "Remove from workspace" }));
-
-		const dialog = await screen.findByRole("dialog");
-		await expect(dialog).toHaveTextContent("their Personal pod and its conversations are deleted");
-	},
-});
-
-/**
- * LastAdministrator shows better-auth's refusal in this product's words: it
- * says organization and owner, and people here read workspace and
- * administrator.
- */
-export const LastAdministrator = meta.story({
-	// Looking as Jye, so the administrator being demoted is somebody else's row.
-	args: { currentUserId: jye.userId },
-	beforeEach({ msw }) {
-		msw.use(
-			http.get(`${auth}/list-members`, () => HttpResponse.json({ members: [ada, jye], total: 2 })),
-			http.get(`${auth}/list-invitations`, () => HttpResponse.json([])),
-			http.post(`${auth}/update-member-role`, () =>
-				refuses(
-					"YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER",
-					"You cannot leave the organization as the only owner",
-				),
-			),
-		);
-	},
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("combobox", { name: "Access for Ada" }));
-		await userEvent.click(await screen.findByRole("option", { name: /Member/ }));
-
-		await expect(
-			await canvas.findByText("A workspace needs at least one administrator"),
-		).toBeVisible();
-	},
-});
-
-/** Loading holds the roster request open so the loading state can be reviewed. */
-export const Loading = meta.story({
-	beforeEach({ msw }) {
-		msw.use(http.get(`${auth}/list-members`, () => new Promise(() => {})));
-	},
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("Loading members…")).toBeVisible();
+		await expect(await canvas.findByRole("heading", { name: "Sam Park" })).toBeInTheDocument();
+		await expect(canvas.getByText("Viewer")).toBeInTheDocument();
+		await expect(canvas.queryByRole("radio", { name: "Viewer" })).toBeNull();
+		await expect(canvas.getByRole("switch", { name: "Sam Park is in Engineering" })).toBeDisabled();
+		await expect(canvas.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
 	},
 });
