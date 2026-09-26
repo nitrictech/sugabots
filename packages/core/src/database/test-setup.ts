@@ -1,6 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import { Effect } from "effect";
-import { clientLayer } from "./database.ts";
+import { Effect, Layer, Redacted } from "effect";
 import { applyMigrations } from "./migrations.ts";
 import { testDatabaseUrl } from "./test-database.ts";
 
@@ -30,9 +29,7 @@ export default async function prepareTestDatabase(project: {
 		return;
 	}
 	await Effect.runPromise(createIfMissing(url));
-	await Effect.runPromise(
-		Effect.andThen(applyMigrations, empty).pipe(Effect.provide(clientLayer(url))),
-	);
+	await Effect.runPromise(Effect.andThen(applyMigrations, empty).pipe(Effect.provide(poolAt(url))));
 }
 
 /** Connects to the server's default database to create ours. */
@@ -49,7 +46,7 @@ function createIfMissing(url: string): Effect.Effect<void> {
 			// has no parameter form for an identifier here.
 			yield* client.unsafe(`create database "${name.replace(/"/g, '""')}"`);
 		}
-	}).pipe(Effect.orDie, Effect.provide(clientLayer(server.toString())));
+	}).pipe(Effect.orDie, Effect.provide(poolAt(server.toString())));
 }
 
 /** Every table the app owns, emptied in one statement so foreign keys allow it. */
@@ -66,3 +63,8 @@ const empty = Effect.gen(function* () {
 		`truncate ${rows.map((row) => row.name).join(", ")} restart identity cascade`,
 	);
 }).pipe(Effect.orDie);
+
+/** A pool at `url`: setup reaches the test database, and the server that creates it, by address. */
+function poolAt(url: string) {
+	return PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie);
+}

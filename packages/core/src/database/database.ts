@@ -1,7 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
 import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
-import { Cause, Context, Effect, Exit, Layer, type ManagedRuntime, Redacted } from "effect";
+import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime } from "effect";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 
 /**
@@ -99,23 +99,25 @@ function transactional(client: PgClient.PgClient) {
 		});
 }
 
-/** A pool at `url`, closed when the layer's scope is. */
-export const clientLayer = (url: string): Layer.Layer<PgClient.PgClient> =>
-	PgClient.layer({ url: Redacted.make(url) }).pipe(Layer.orDie);
+/** The connection pool at `DATABASE_URL`, closed when the layer's scope is. */
+export const clientLayer = PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }).pipe(
+	Layer.orDie,
+);
 
-/** The pool at `url`, and drizzle on it. The pool closes when the layer's scope does. */
-export const layer = (url: string): Layer.Layer<Database | PgClient.PgClient> =>
-	Layer.effect(
-		Database,
-		Effect.gen(function* () {
-			const client = yield* PgClient.PgClient;
-			const root = yield* makeWithDefaults();
-			return {
-				execute: (run) => run(root),
-				transaction: transactional(client),
-			};
-		}),
-	).pipe(Layer.provideMerge(clientLayer(url)));
+/** Drizzle on whichever pool `PgClient` provides. */
+export const make = Effect.gen(function* () {
+	const client = yield* PgClient.PgClient;
+	const root = yield* makeWithDefaults();
+	return Database.of({
+		execute: (run) => run(root),
+		transaction: transactional(client),
+	});
+});
+
+export const layerNoDeps = Layer.effect(Database, make);
+
+/** The database at `DATABASE_URL`, with its pool, which other modules also use directly. */
+export const layer = layerNoDeps.pipe(Layer.provideMerge(clientLayer));
 
 /** A query against the pool, or the open transaction. The store's whole vocabulary. */
 export const query = <A>(

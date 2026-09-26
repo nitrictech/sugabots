@@ -35,11 +35,11 @@ import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Duration, Effect, Layer } from "effect";
+import { Config, Duration, Effect, Layer, Redacted } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Pool } from "pg";
 import { createAuth } from "./auth/auth.ts";
-import { API_BASE_PATH, configFromEnv } from "./config.ts";
+import { API_BASE_PATH, ServerConfig } from "./config.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
 import { observabilityLayer } from "./observability.ts";
@@ -48,12 +48,9 @@ import { backgroundLayer } from "./runtime.ts";
 import { VERSION } from "./version.ts";
 
 /**
- * The process. Reads the environment once, builds every part of the API from
- * it, and binds a port. This is the only file that knows how the parts fit.
+ * The process. Builds every part of the API and binds a port. This is the only
+ * file that knows how the parts fit.
  */
-
-const config = configFromEnv();
-const { port, secret, allowOpenSignUp, requireEmailVerification } = config;
 
 /**
  * How long a client gets to finish what it was sent before its socket is cut.
@@ -69,22 +66,26 @@ const main = Effect.gen(function* () {
 	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
 	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
+	const config = yield* ServerConfig.Service;
 
 	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
 	// of its own until it can be ported onto the database's.
 	const authPool = yield* Effect.acquireRelease(
-		Effect.sync(() => new Pool({ connectionString: config.databaseUrl })),
+		Effect.map(
+			Config.Redacted("DATABASE_URL"),
+			(url) => new Pool({ connectionString: Redacted.value(url) }),
+		),
 		(pool) => Effect.promise(() => pool.end()),
 	);
 	const auth = createAuth({
 		db: drizzle({ client: authPool }),
 		run,
-		secret,
+		secret: Redacted.value(config.secret),
 		installation,
 		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
-		emailFrom: config.transactionalEmailFrom,
-		allowOpenSignUp,
-		requireEmailVerification,
+		emailFrom: config.transactionalSender,
+		allowOpenSignUp: config.allowOpenSignUp,
+		requireEmailVerification: config.requireEmailVerification,
 	});
 
 	const eventStore = yield* postgresEventStore;
@@ -169,7 +170,10 @@ const main = Effect.gen(function* () {
 	yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
 			Layer.provide(
-				NodeHttpServer.layer(createServer, { port, gracefulShutdownTimeout: SHUTDOWN_GRACE }),
+				NodeHttpServer.layer(createServer, {
+					port: config.port,
+					gracefulShutdownTimeout: SHUTDOWN_GRACE,
+				}),
 			),
 		),
 	);
@@ -177,7 +181,7 @@ const main = Effect.gen(function* () {
 	// holds a socket open for as long as its browser is there, and closing the
 	// server first would wait on clients that never hang up.
 	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
-	console.log(`sugabots ${VERSION} listening on http://localhost:${port}`);
+	console.log(`sugabots ${VERSION} listening on http://localhost:${config.port}`);
 	return yield* Effect.never;
 });
 
@@ -187,11 +191,12 @@ main.pipe(
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
 		Layer.mergeAll(
-			databaseLayer(config.databaseUrl),
+			databaseLayer,
 			Email.layer,
 			Credentials.layer,
 			Installation.layer,
 			Egress.layer,
+			ServerConfig.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,
