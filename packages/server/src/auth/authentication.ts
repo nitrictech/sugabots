@@ -6,6 +6,7 @@ import {
 	WORKSPACE_ROLES,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import {
 	type Database,
 	layer as databaseLayer,
@@ -30,7 +31,6 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
 import { Pool } from "pg";
 import { API_BASE_PATH } from "../http/api.ts";
-import { admitSignUp } from "./sign-up.ts";
 
 /**
  * How the HTTP API proves who is calling: better-auth's users, credentials and
@@ -93,13 +93,8 @@ export const make = Effect.gen(function* () {
 	const email = yield* Email.Service;
 	const database = yield* Effect.context<Database>();
 	const secret = yield* signingSecret;
-	const sender = yield* transactionalSender;
-	const policy = {
-		allowOpenSignUp: yield* Config.Boolean("ALLOW_OPEN_SIGNUP").pipe(Config.withDefault(false)),
-		requireEmailVerification: yield* Config.Boolean("REQUIRE_EMAIL_VERIFICATION").pipe(
-			Config.withDefault(false),
-		),
-	};
+	const accounts = yield* Accounts.Service;
+	const sender = yield* Email.transactionalSender;
 	const pool = yield* Effect.acquireRelease(
 		Effect.map(
 			Config.Redacted("DATABASE_URL"),
@@ -110,7 +105,7 @@ export const make = Effect.gen(function* () {
 	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
 	const send = (message: Email.Message) => Effect.runPromiseWith(database)(email.send(message));
 
-	const instance = (policy: SignUpPolicy) => {
+	const instance = (accounts: Accounts.Interface) => {
 		return betterAuth({
 			appName: "Sugabots",
 			secret: Redacted.value(secret),
@@ -137,7 +132,13 @@ export const make = Effect.gen(function* () {
 					create: {
 						// By address, not by session: an invitee has no account yet.
 						before: async (creating) => {
-							await run(admitSignUp(policy.allowOpenSignUp, creating.email));
+							await run(
+								Effect.mapError(
+									accounts.admit(creating.email),
+									(closed) =>
+										new APIError("FORBIDDEN", { code: "SIGN_UP_CLOSED", message: closed.message }),
+								),
+							);
 						},
 					},
 				},
@@ -145,7 +146,7 @@ export const make = Effect.gen(function* () {
 
 			emailAndPassword: {
 				enabled: true,
-				requireEmailVerification: policy.requireEmailVerification,
+				requireEmailVerification: accounts.requireEmailVerification,
 			},
 			emailVerification: {
 				sendOnSignUp: true,
@@ -184,7 +185,7 @@ export const make = Effect.gen(function* () {
 					// not require verification may have no mailer to prove an address
 					// with, and demanding it anyway would make every invitation a dead
 					// end.
-					requireEmailVerificationOnInvitation: policy.requireEmailVerification,
+					requireEmailVerificationOnInvitation: accounts.requireEmailVerification,
 					organizationHooks: {
 						beforeCreateOrganization: async ({ organization }) => {
 							requireSlugUnlikeUuid(organization.slug);
@@ -267,8 +268,8 @@ export const make = Effect.gen(function* () {
 			],
 		});
 	};
-	const auth = instance(policy);
-	const bootstrap = instance({ allowOpenSignUp: true, requireEmailVerification: false });
+	const auth = instance(accounts);
+	const bootstrap = instance({ admit: () => Effect.void, requireEmailVerification: false });
 
 	return Service.of({
 		handler: (request) => Effect.promise(() => auth.handler(request)),
@@ -293,18 +294,12 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([databaseLayer, Installation.layer, Email.layer]),
+	Layer.provide([databaseLayer, Installation.layer, Email.layer, Accounts.layer]),
 );
 
 export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
 	message: string;
 }> {}
-
-/** Who may create an account, and whether they must prove their address first. */
-interface SignUpPolicy {
-	allowOpenSignUp: boolean;
-	requireEmailVerification: boolean;
-}
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
@@ -314,7 +309,6 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 	"your-secret",
 	"your-secret-key",
 ]);
-const DEVELOPMENT_TRANSACTIONAL_SENDER = { email: "sugabots@localhost", name: "Sugabots" };
 
 /** `BETTER_AUTH_SECRET`, which production refuses when it is short or a placeholder. */
 const signingSecret = Effect.gen(function* () {
@@ -337,29 +331,6 @@ const signingSecret = Effect.gen(function* () {
 		});
 	}
 	return secret.value;
-});
-
-/** `EMAIL_TRANSACTIONAL_FROM`, which production requires. */
-const transactionalSender = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	const value = yield* Config.option(Config.String("EMAIL_TRANSACTIONAL_FROM"));
-	if (Option.isNone(value)) {
-		// A provider sends only from addresses it has verified, so production must name one.
-		if (installation.isProduction) {
-			return yield* new InvalidConfig({
-				message: "EMAIL_TRANSACTIONAL_FROM is required in production.",
-			});
-		}
-		return DEVELOPMENT_TRANSACTIONAL_SENDER;
-	}
-	const address = Email.parseAddress(value.value);
-	if (!address) {
-		return yield* new InvalidConfig({
-			message:
-				"EMAIL_TRANSACTIONAL_FROM must be an address, like `Sugabots <no-reply@example.com>`.",
-		});
-	}
-	return address;
 });
 
 /**

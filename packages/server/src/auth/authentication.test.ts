@@ -1,4 +1,5 @@
 import { sessionUserSchema } from "@sugabots/contracts";
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import { layer as databaseLayer } from "@sugabots/core/database/database";
 import {
 	pod,
@@ -57,6 +58,7 @@ function authenticationWith(
 			Layer.provide([
 				databaseLayer,
 				Installation.layer,
+				Accounts.layer,
 				Layer.succeed(
 					Email.Service,
 					Email.Service.of({

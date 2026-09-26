@@ -1,3 +1,4 @@
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
@@ -27,6 +28,10 @@ async function startup(env: Record<string, string>) {
 						noDatabase,
 						Installation.layer,
 						Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+						Layer.succeed(
+							Accounts.Service,
+							Accounts.Service.of({ admit: () => Effect.void, requireEmailVerification: false }),
+						),
 					]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
@@ -59,31 +64,4 @@ describe("Authentication.layer", () => {
 	it("accepts a generated-length production signing secret", async () => {
 		expect(await startup(PRODUCTION)).toBe("started");
 	});
-
-	it("requires a transactional sender in production", async () => {
-		const { EMAIL_TRANSACTIONAL_FROM: _, ...withoutSender } = PRODUCTION;
-
-		expect(await startup(withoutSender)).toMatch(
-			/EMAIL_TRANSACTIONAL_FROM is required in production/,
-		);
-	});
-
-	it("accepts a named transactional sender", async () => {
-		expect(
-			await startup({ ...REQUIRED, EMAIL_TRANSACTIONAL_FROM: "Sugabots <no-reply@example.com>" }),
-		).toBe("started");
-	});
-
-	it("refuses a transactional sender that is not an address", async () => {
-		expect(await startup({ ...REQUIRED, EMAIL_TRANSACTIONAL_FROM: "Sugabots" })).toMatch(
-			/EMAIL_TRANSACTIONAL_FROM must be an address/,
-		);
-	});
-
-	it.each(["ALLOW_OPEN_SIGNUP", "REQUIRE_EMAIL_VERIFICATION"])(
-		"refuses to start when %s is not a boolean",
-		async (name) => {
-			expect(await startup({ ...REQUIRED, [name]: "maybe" })).toMatch(name);
-		},
-	);
 });
