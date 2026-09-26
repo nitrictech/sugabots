@@ -69,51 +69,6 @@ describe("configFromEnv", () => {
 			email: "sugabots@localhost",
 			name: "Sugabots",
 		});
-		// The model server is usually this machine in development.
-		expect(config.allowPrivateModelProviderNetwork).toBe(true);
-	});
-
-	it("keeps model providers off the private network in production unless told otherwise", () => {
-		const productionEnv = {
-			NODE_ENV: "production",
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "x".repeat(32),
-			EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
-		};
-		expect(configFromEnv(productionEnv).allowPrivateModelProviderNetwork).toBe(false);
-		expect(
-			configFromEnv({ ...productionEnv, ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true" })
-				.allowPrivateModelProviderNetwork,
-		).toBe(true);
-	});
-
-	it("requires an explicit boolean to allow private model provider networking", () => {
-		const base = {
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "s",
-		};
-		expect(
-			configFromEnv({ ...base, ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "false" })
-				.allowPrivateModelProviderNetwork,
-		).toBe(false);
-		expect(() => configFromEnv({ ...base, ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "yes" })).toThrow(
-			/must be true or false/,
-		);
-	});
-
-	it("keeps the web_fetch tool off private networks unless told otherwise", () => {
-		const base = {
-			DATABASE_URL,
-			BETTER_AUTH_SECRET: "s",
-		};
-		expect(configFromEnv(base).allowPrivateWebFetchNetwork).toBe(false);
-		expect(
-			configFromEnv({ ...base, ALLOW_PRIVATE_WEB_FETCH_NETWORK: "true" })
-				.allowPrivateWebFetchNetwork,
-		).toBe(true);
-		expect(() => configFromEnv({ ...base, ALLOW_PRIVATE_WEB_FETCH_NETWORK: "on" })).toThrow(
-			/must be true or false/,
-		);
 	});
 
 	it("requires a transactional sender in production", () => {

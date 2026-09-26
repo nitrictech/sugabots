@@ -27,11 +27,7 @@ import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import {
-	createEgressHttpClient,
-	createEgressHttpClients,
-	createEgressUrlValidator,
-} from "@sugabots/core/providers/network/egress";
+import { Egress } from "@sugabots/core/providers/network/egress";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
@@ -57,14 +53,7 @@ import { VERSION } from "./version.ts";
  */
 
 const config = configFromEnv();
-const {
-	port,
-	secret,
-	allowPrivateModelProviderNetwork,
-	allowPrivateWebFetchNetwork,
-	allowOpenSignUp,
-	requireEmailVerification,
-} = config;
+const { port, secret, allowOpenSignUp, requireEmailVerification } = config;
 
 /**
  * How long a client gets to finish what it was sent before its socket is cut.
@@ -103,22 +92,8 @@ const main = Effect.gen(function* () {
 	const bus = createEventBus({ store: eventStore, relay: yield* postgresEventRelay(eventStore) });
 	const publishEvents = eventPublisher(bus);
 
-	const httpClients = yield* acquireClosable(() =>
-		createEgressHttpClients({ allowPrivateNetwork: allowPrivateModelProviderNetwork }),
-	);
-	const validateProviderUrl = createEgressUrlValidator({
-		allowPrivateNetwork: allowPrivateModelProviderNetwork,
-	});
-	// A sign-in goes where the server's authorization server says: its well-known
-	// documents, then often another host. So that client is unbound, under the
-	// same policy as the providers'.
-	const oauthClient = yield* acquireClosable(() =>
-		createEgressHttpClient({ allowPrivateNetwork: allowPrivateModelProviderNetwork }),
-	);
-	// Pages may be anywhere, so the tool's client is unbound, under its own policy.
-	const webFetchClient = yield* acquireClosable(() =>
-		createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork }),
-	);
+	const egress = yield* Egress.Service;
+	const httpClients = egress.providers;
 
 	const credentials = yield* Credentials.Service;
 	const modelProviders = modelProviderStore(credentials);
@@ -144,7 +119,7 @@ const main = Effect.gen(function* () {
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
-		fetchPage: pageFetcher({ fetch: webFetchClient }),
+		fetchPage: pageFetcher({ fetch: egress.webFetch }),
 		searchProviders: stores.searchProviders,
 		httpClients,
 	});
@@ -160,7 +135,7 @@ const main = Effect.gen(function* () {
 				run: Effect.runPromiseWith(database),
 				redirectUrl: `${installation.publicUrl}${API_BASE_PATH}/connections/oauth/callback`,
 			}),
-			fetch: oauthClient,
+			fetch: egress.oauth,
 		},
 	});
 
@@ -183,12 +158,12 @@ const main = Effect.gen(function* () {
 	const api = apiLayer({
 		auth,
 		installation,
-		oauthFetch: oauthClient,
+		oauthFetch: egress.oauth,
 		authorization,
 		stores,
 		events: { bus, access: channelAccess(authorization, stores.threads) },
 		httpClients,
-		validateProviderUrl,
+		validateProviderUrl: egress.validateProviderUrl,
 		model,
 	});
 	yield* Layer.build(
@@ -216,13 +191,8 @@ main.pipe(
 			Email.layer,
 			Credentials.layer,
 			Installation.layer,
+			Egress.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,
 );
-
-function acquireClosable<A extends { close(): Promise<void> }>(make: () => A) {
-	return Effect.acquireRelease(Effect.sync(make), (resource) =>
-		Effect.promise(() => resource.close()),
-	);
-}

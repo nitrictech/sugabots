@@ -14,21 +14,6 @@ export interface Config {
 	/** Signing key for sessions and tokens. */
 	secret: string;
 	/**
-	 * Whether model providers may connect over plain HTTP or to private network
-	 * addresses. On by default in development, where the model server is usually
-	 * the same machine; off by default in production, where the installation
-	 * may serve tenants who must not reach its network. The installation sets
-	 * it, never a workspace.
-	 */
-	allowPrivateModelProviderNetwork: boolean;
-	/**
-	 * Whether the `web_fetch` tool may read pages at private network addresses.
-	 * Off unless the installation says otherwise, in development too: a model
-	 * server on this machine is the usual case, an agent reading this machine's
-	 * other services is not.
-	 */
-	allowPrivateWebFetchNetwork: boolean;
-	/**
 	 * Whether anybody may create an account. Off unless the installation says
 	 * otherwise: the first account is admitted regardless, and after that the
 	 * only way in is an invitation.
@@ -82,17 +67,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	if (!databaseUrl) {
 		throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
 	}
-	const allowPrivateModelProviderNetwork =
-		env.ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK === undefined
-			? environment === "development"
-			: booleanFromEnv(
-					env.ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK,
-					"ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK",
-				);
-	const allowPrivateWebFetchNetwork =
-		env.ALLOW_PRIVATE_WEB_FETCH_NETWORK === undefined
-			? false
-			: booleanFromEnv(env.ALLOW_PRIVATE_WEB_FETCH_NETWORK, "ALLOW_PRIVATE_WEB_FETCH_NETWORK");
 	const allowOpenSignUp =
 		env.ALLOW_OPEN_SIGNUP === undefined
 			? false
@@ -107,8 +81,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		port,
 		databaseUrl,
 		secret,
-		allowPrivateModelProviderNetwork,
-		allowPrivateWebFetchNetwork,
 		allowOpenSignUp,
 		requireEmailVerification,
 		transactionalEmailFrom,

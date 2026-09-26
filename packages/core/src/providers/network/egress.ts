@@ -1,11 +1,67 @@
+export * as Egress from "./egress.ts";
+
 import { lookup as nodeLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
+import { Config, Context, Effect, Layer } from "effect";
 import {
 	Agent,
 	type Dispatcher,
 	type RequestInit as UndiciRequestInit,
 	fetch as undiciFetch,
 } from "undici";
+import { Installation } from "../../installation/installation.ts";
+
+/** The clients the API reaches the outside world with, each under this installation's egress policy. */
+export interface Interface {
+	/** For model providers and model discovery: a client bound to one provider's base URL. */
+	readonly providers: EgressHttpClients;
+	/** Checks an address a workspace gives for a provider or connection, under the providers' policy. */
+	readonly validateProviderUrl: EgressUrlValidator;
+	/**
+	 * Unbound, under the providers' policy. A connection's sign-in goes wherever
+	 * its authorization server says: its well-known documents, then often
+	 * another host.
+	 */
+	readonly oauth: EgressHttpClient;
+	/** Unbound, under its own policy, for the `web_fetch` tool: a page may be anywhere. */
+	readonly webFetch: EgressHttpClient;
+}
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Egress") {}
+
+/**
+ * Reads the two policies: model providers may reach private networks outside
+ * production unless `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` says otherwise, and
+ * `web_fetch` may not unless `ALLOW_PRIVATE_WEB_FETCH_NETWORK` says it may.
+ * The clients close when the layer does.
+ */
+export const make = Effect.gen(function* () {
+	const installation = yield* Installation.Service;
+	const allowPrivateProviderNetwork = yield* Config.Boolean(
+		"ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK",
+	).pipe(Config.withDefault(!installation.isProduction));
+	const allowPrivateWebFetchNetwork = yield* Config.Boolean("ALLOW_PRIVATE_WEB_FETCH_NETWORK").pipe(
+		Config.withDefault(false),
+	);
+	return {
+		providers: yield* closedWithLayer(() =>
+			createEgressHttpClients({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+		),
+		validateProviderUrl: createEgressUrlValidator({
+			allowPrivateNetwork: allowPrivateProviderNetwork,
+		}),
+		oauth: yield* closedWithLayer(() =>
+			createEgressHttpClient({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+		),
+		webFetch: yield* closedWithLayer(() =>
+			createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork }),
+		),
+	} satisfies Interface;
+});
+
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(Layer.provide(Installation.layer));
 
 /**
  * How the API reaches the outside world: `fetch`, with this installation's
@@ -310,4 +366,10 @@ export function egressUrl(value: string, { allowHttp = false }: { allowHttp?: bo
 
 async function resolveHostname(hostname: string) {
 	return nodeLookup(hostname, { all: true, verbatim: true });
+}
+
+function closedWithLayer<A extends { close(): Promise<void> }>(create: () => A) {
+	return Effect.acquireRelease(Effect.sync(create), (acquired) =>
+		Effect.promise(() => acquired.close()),
+	);
 }
