@@ -9,6 +9,7 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
+import { Installation } from "@sugabots/core/installation/installation";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
@@ -34,11 +35,13 @@ const EMAIL = "dev@sugabots.local";
 const PASSWORD = "development";
 
 const config = configFromEnv();
-if (config.environment !== "development") {
+const database = ManagedRuntime.make(
+	Layer.mergeAll(databaseLayer(config.databaseUrl), Email.layer, Installation.layer),
+);
+const installation = await database.runPromise(Installation.Service);
+if (installation.isProduction) {
 	throw new Error("The development seed cannot turn in production.");
 }
-
-const database = ManagedRuntime.make(Layer.merge(databaseLayer(config.databaseUrl), Email.layer));
 // better-auth's adapter only speaks node-postgres.
 const authPool = new Pool({ connectionString: config.databaseUrl });
 
@@ -47,6 +50,7 @@ const signUp = Effect.promise(() => {
 	// The seed is the bootstrap, so it is not subject to the installation's policy.
 	const auth = createAuth({
 		...config,
+		installation,
 		db: drizzle({ client: authPool }),
 		run: effectRunner(database),
 		mailer: (email) =>

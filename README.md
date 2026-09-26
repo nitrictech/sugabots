@@ -112,7 +112,7 @@ development Vite serves the app and proxies `/api` to the API process; in a
 deployment the API serves the built app itself. Either way the browser sees
 one origin and nothing about the installation's address is built into the
 app. Hosting the web app on an origin of its own is still supported: see
-`WEB_ORIGIN` and `VITE_API_URL` in `.env.example`.
+`WEB_APP_URL` and `VITE_API_URL` in `.env.example`.
 
 Portless gives the app stable local names, HTTPS, and HTTP/2. Use these commands
 to inspect or troubleshoot it:
@@ -177,14 +177,14 @@ the repository root and give it a PostgreSQL 18 database.
 docker build -t sugabots .
 ```
 
-The container takes the variables `.env.example` describes. `BETTER_AUTH_URL`
+The container takes the variables `.env.example` describes. `PUBLIC_URL`
 is the installation's public address, the one in the browser's address bar.
 On start it applies pending database migrations, then listens on `$PORT`; set
 `SUGABOTS_SKIP_MIGRATIONS=true` to skip that, for example when a deploy step
 migrates or several instances share a database.
 
-To host the web app on an origin of its own instead, name that origin in
-`WEB_ORIGIN` and build the web app with `VITE_API_URL`; the image still
+To host the web app on an origin of its own instead, set its address in
+`WEB_APP_URL` and build the web app with `VITE_API_URL`; the image still
 serves its own copy at its own address.
 
 ## Contributing

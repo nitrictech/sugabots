@@ -23,6 +23,7 @@ import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
+import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
@@ -58,8 +59,6 @@ import { VERSION } from "./version.ts";
 const config = configFromEnv();
 const {
 	port,
-	baseUrl,
-	webOrigins,
 	secret,
 	allowPrivateModelProviderNetwork,
 	allowPrivateWebFetchNetwork,
@@ -80,6 +79,7 @@ const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
 	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
 	const email = yield* Email.Service;
+	const installation = yield* Installation.Service;
 
 	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
 	// of its own until it can be ported onto the database's.
@@ -91,8 +91,7 @@ const main = Effect.gen(function* () {
 		db: drizzle({ client: authPool }),
 		run,
 		secret,
-		baseUrl,
-		webOrigins,
+		installation,
 		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
 		emailFrom: config.transactionalEmailFrom,
 		allowOpenSignUp,
@@ -159,7 +158,7 @@ const main = Effect.gen(function* () {
 			providers: oauthProviders({
 				connections: stores.connections,
 				run: Effect.runPromiseWith(database),
-				redirectUrl: `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}/connections/oauth/callback`,
+				redirectUrl: `${installation.publicUrl}${API_BASE_PATH}/connections/oauth/callback`,
 			}),
 			fetch: oauthClient,
 		},
@@ -183,8 +182,7 @@ const main = Effect.gen(function* () {
 	);
 	const api = apiLayer({
 		auth,
-		webOrigins,
-		baseUrl,
+		installation,
 		oauthFetch: oauthClient,
 		authorization,
 		stores,
@@ -213,9 +211,12 @@ main.pipe(
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
-		Layer.mergeAll(databaseLayer(config.databaseUrl), Email.layer, Credentials.layer).pipe(
-			Layer.provideMerge(observabilityLayer),
-		),
+		Layer.mergeAll(
+			databaseLayer(config.databaseUrl),
+			Email.layer,
+			Credentials.layer,
+			Installation.layer,
+		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,
 );

@@ -5,18 +5,12 @@
  */
 
 import { Email } from "@sugabots/core/email/email";
-
-export type Environment = "development" | "production";
+import { Installation } from "@sugabots/core/installation/installation";
 
 export interface Config {
-	environment: Environment;
 	port: number;
 	/** Where Postgres is. The only place this is read. */
 	databaseUrl: string;
-	/** Where a browser reaches the API, without `API_BASE_PATH`. Links in emails start here. */
-	baseUrl: string;
-	/** Browser origins besides `baseUrl`'s that may call the API with a cookie. The first is where invite links point. */
-	webOrigins: string[];
 	/** Signing key for sessions and tokens. */
 	secret: string;
 	/**
@@ -63,7 +57,10 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	const port = Number(env.PORT ?? 3000);
-	const environment = env.NODE_ENV === "production" ? "production" : "development";
+	const environment = Installation.environmentFrom(env.NODE_ENV ?? "development");
+	if (!environment) {
+		throw new Error(`NODE_ENV must be development, production or test, not "${env.NODE_ENV}"`);
+	}
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) {
 		throw new Error("PORT must be an integer between 1 and 65535");
 	}
@@ -73,7 +70,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		throw new Error("BETTER_AUTH_SECRET is required. Generate one with `openssl rand -base64 32`.");
 	}
 	if (
-		env.NODE_ENV === "production" &&
+		environment === "production" &&
 		(secret.trim().length < MIN_PRODUCTION_SECRET_LENGTH ||
 			PRODUCTION_SECRET_PLACEHOLDERS.has(secret.trim().toLowerCase()))
 	) {
@@ -107,11 +104,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	const transactionalEmailFrom = transactionalEmailFromEnv(env, environment);
 
 	return {
-		environment,
 		port,
 		databaseUrl,
-		baseUrl: env.BETTER_AUTH_URL ?? `http://localhost:${port}`,
-		webOrigins: parseOrigins(env.WEB_ORIGIN),
 		secret,
 		allowPrivateModelProviderNetwork,
 		allowPrivateWebFetchNetwork,
@@ -129,7 +123,7 @@ function booleanFromEnv(value: string, name: string): boolean {
 
 function transactionalEmailFromEnv(
 	env: NodeJS.ProcessEnv,
-	environment: Environment,
+	environment: Installation.Environment,
 ): Email.Address {
 	const value = env.EMAIL_TRANSACTIONAL_FROM;
 	if (!value) {
@@ -147,28 +141,5 @@ function transactionalEmailFromEnv(
 	return address;
 }
 
-/** The path under `baseUrl` the API answers at, better-auth's routes included. */
+/** The path under the installation's `publicUrl` the API answers at, better-auth's routes included. */
 export const API_BASE_PATH = "/api";
-
-export function parseOrigins(value: string | undefined): string[] {
-	return (value ?? "")
-		.split(",")
-		.map((origin) => origin.trim())
-		.filter(Boolean);
-}
-
-/** The origins allowed to send the API a cookie: `baseUrl`'s own plus `webOrigins`. */
-export function trustedOrigins({ baseUrl, webOrigins }: Pick<Config, "baseUrl" | "webOrigins">) {
-	return [new URL(baseUrl).origin, ...webOrigins];
-}
-
-/**
- * Where the web app is served, for links that must open in it rather than at
- * the API: invitation emails and the return from a connection sign-in. It is
- * the first of `webOrigins`, else `baseUrl`, because an installation that
- * names no web origin serves the web app from the API's own address. No
- * trailing slash.
- */
-export function webAppUrl({ baseUrl, webOrigins }: Pick<Config, "baseUrl" | "webOrigins">) {
-	return (webOrigins[0] ?? baseUrl).replace(/\/$/, "");
-}
