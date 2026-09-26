@@ -6,6 +6,7 @@ import { ModelRequestFailed, type TurnModel } from "@sugabots/core/conversations
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
+import { Installation } from "@sugabots/core/installation/installation";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import type {
@@ -32,7 +33,8 @@ type TestIdentity =
 	| { auth?: never; resolveSession: SessionResolver };
 
 type TestAppOptions = TestIdentity & {
-	webOrigins?: string[];
+	/** Where the web app is served, when a case needs it apart from the API. */
+	webAppUrl?: string;
 	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
 	authorization?: Authorization;
 	/** The stores a case is about. Anything left out answers nothing. */
@@ -44,7 +46,7 @@ type TestAppOptions = TestIdentity & {
 
 /** The test API's address. */
 export const BASE_URL = "http://localhost:3000";
-/** A browser origin the test app trusts besides its own. */
+/** Where the test app's web app is served, a browser origin it trusts besides its own. */
 export const WEB_ORIGIN = "http://localhost:5173";
 
 export interface TestApp {
@@ -62,8 +64,11 @@ export function createTestApp(options: TestAppOptions): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
 	const routes = apiLayer({
 		auth: options.auth ?? authForSessionResolver(options.resolveSession),
-		webOrigins: options.webOrigins ?? [WEB_ORIGIN],
-		baseUrl: BASE_URL,
+		installation: Installation.fromUrls({
+			isProduction: false,
+			publicUrl: BASE_URL,
+			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
+		}),
 		authorization: options.authorization ?? closedAuthorization(),
 		stores: { ...emptyStores, ...options.stores },
 		events: {

@@ -18,7 +18,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * which is what stops CSRF. Routes under `/auth` and `/hooks` are exempt:
  * better-auth checks for itself, and webhooks carry no browser cookie.
  */
-export function requireCookieOrigin(trustedOrigins: string[]) {
+export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 	const trusted = new Set(trustedOrigins);
 	const exempt = [`${API_BASE_PATH}/auth/`, `${API_BASE_PATH}/hooks/`];
 	return <E, R>(

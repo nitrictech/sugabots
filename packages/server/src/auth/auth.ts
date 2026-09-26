@@ -2,6 +2,7 @@ import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/
 import { query, type RunEffect, transaction } from "@sugabots/core/database/database";
 import { isUuid } from "@sugabots/core/database/ids";
 import type { Email } from "@sugabots/core/email/email";
+import type { Installation } from "@sugabots/core/installation/installation";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { provisionPersonalPod } from "@sugabots/core/workspaces/pods/store";
@@ -14,7 +15,7 @@ import { organization } from "better-auth/plugins/organization";
 import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Effect } from "effect";
-import { API_BASE_PATH, trustedOrigins, webAppUrl } from "../config.ts";
+import { API_BASE_PATH } from "../config.ts";
 import { admitSignUp } from "./sign-up.ts";
 
 /**
@@ -58,10 +59,8 @@ export interface AuthOptions {
 	run: RunEffect;
 	/** Signing key for sessions and tokens. */
 	secret: string;
-	/** Where a browser reaches the API, without `API_BASE_PATH`. */
-	baseUrl: string;
-	/** Browser origins besides `baseUrl`'s allowed to sign in. The first is where invite links point. */
-	webOrigins: string[];
+	/** Where the API and web app are reached. Invite links point at its `webAppUrl`. */
+	installation: Installation.Interface;
 	/** Sends verification and invitation emails. */
 	mailer: (message: Email.Message) => Promise<void>;
 	emailFrom: Email.Address;
@@ -124,21 +123,20 @@ export function createAuth({
 	db,
 	run,
 	secret,
-	baseUrl,
-	webOrigins,
+	installation,
 	mailer,
 	emailFrom,
 	allowOpenSignUp,
 	requireEmailVerification,
 }: AuthOptions) {
-	const links = webAppUrl({ baseUrl, webOrigins });
+	const links = installation.webAppUrl;
 
 	return betterAuth({
 		appName: "Sugabots",
 		secret,
-		baseURL: baseUrl,
+		baseURL: installation.publicUrl,
 		basePath: `${API_BASE_PATH}/auth`,
-		trustedOrigins: trustedOrigins({ baseUrl, webOrigins }),
+		trustedOrigins: [...installation.trustedOrigins],
 
 		database: drizzleAdapter(db, { provider: "pg", schema }),
 

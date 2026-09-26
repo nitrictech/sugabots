@@ -2,6 +2,7 @@ export * as Email from "./email.ts";
 
 import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
+import { Installation } from "../installation/installation.ts";
 import { fromConsole } from "./implementations/console.ts";
 import { fromWebhook, type WebhookConfig } from "./implementations/webhook.ts";
 
@@ -26,7 +27,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
+export const layer = layerNoDeps.pipe(Layer.provide([FetchHttpClient.layer, Installation.layer]));
 
 export interface Address {
 	email: string;
@@ -68,14 +69,13 @@ const PROVIDERS = ["console", "webhook"] as const;
 
 function webhookConfigFromEnv() {
 	return Effect.gen(function* () {
-		const production =
-			(yield* Config.String("NODE_ENV").pipe(Config.withDefault(""))) === "production";
+		const installation = yield* Installation.Service;
 		const url = yield* Config.URL("EMAIL_WEBHOOK_URL");
 		const token = yield* Config.option(Config.Redacted("EMAIL_WEBHOOK_TOKEN"));
 		if (url.protocol !== "http:" && url.protocol !== "https:") {
 			return yield* new InvalidConfig({ message: "EMAIL_WEBHOOK_URL must use HTTP or HTTPS" });
 		}
-		if (production && url.protocol !== "https:") {
+		if (installation.isProduction && url.protocol !== "https:") {
 			return yield* new InvalidConfig({
 				message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
 			});

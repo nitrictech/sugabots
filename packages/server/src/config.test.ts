@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configFromEnv, parseOrigins, trustedOrigins, webAppUrl } from "./config.ts";
+import { configFromEnv } from "./config.ts";
 
 describe("configFromEnv", () => {
 	/** Present in every case: what is under test here is everything else. */
@@ -9,14 +9,10 @@ describe("configFromEnv", () => {
 		expect(() => configFromEnv({ DATABASE_URL })).toThrow(/BETTER_AUTH_SECRET/);
 	});
 
-	it("points the base url at its own port when none is given", () => {
-		expect(
-			configFromEnv({
-				DATABASE_URL,
-				BETTER_AUTH_SECRET: "s",
-				PORT: "8080",
-			}).baseUrl,
-		).toBe("http://localhost:8080");
+	it("refuses an unknown NODE_ENV", () => {
+		expect(() =>
+			configFromEnv({ DATABASE_URL, BETTER_AUTH_SECRET: "s", NODE_ENV: "prod" }),
+		).toThrow(/NODE_ENV must be development, production or test/);
 	});
 
 	it.each(["0", "65536", "3000.5", "not-a-port"])('rejects invalid PORT "%s"', (port) => {
@@ -69,7 +65,6 @@ describe("configFromEnv", () => {
 			BETTER_AUTH_SECRET: "s",
 		});
 
-		expect(config.environment).toBe("development");
 		expect(config.transactionalEmailFrom).toEqual({
 			email: "sugabots@localhost",
 			name: "Sugabots",
@@ -171,34 +166,5 @@ describe("configFromEnv", () => {
 		});
 
 		expect(config.requireEmailVerification).toBe(true);
-	});
-});
-
-describe("parseOrigins", () => {
-	it("splits a comma-separated list and trims it", () => {
-		expect(parseOrigins("http://a.test, http://b.test")).toEqual([
-			"http://a.test",
-			"http://b.test",
-		]);
-	});
-
-	it("is empty when unset or blank", () => {
-		expect(parseOrigins(undefined)).toEqual([]);
-		expect(parseOrigins("  , ")).toEqual([]);
-	});
-});
-
-describe("origins", () => {
-	const installation = { baseUrl: "https://sugabots.example.com/", webOrigins: [] };
-	const split = { baseUrl: "https://api.example.com", webOrigins: ["https://app.example.com"] };
-
-	it("always trusts the API's own origin, then any web origins", () => {
-		expect(trustedOrigins(installation)).toEqual(["https://sugabots.example.com"]);
-		expect(trustedOrigins(split)).toEqual(["https://api.example.com", "https://app.example.com"]);
-	});
-
-	it("points links at the first web origin, else at the API's own address", () => {
-		expect(webAppUrl(installation)).toBe("https://sugabots.example.com");
-		expect(webAppUrl(split)).toBe("https://app.example.com");
 	});
 });

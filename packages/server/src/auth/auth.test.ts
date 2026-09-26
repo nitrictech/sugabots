@@ -8,6 +8,7 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import type { Email } from "@sugabots/core/email/email";
+import { Installation } from "@sugabots/core/installation/installation";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -37,6 +38,11 @@ function atServerRoot(app: TestApp) {
  */
 
 const ORIGIN = "http://localhost:5173";
+const installation = Installation.fromUrls({
+	isProduction: false,
+	publicUrl: "http://localhost:3000",
+	webAppUrl: ORIGIN,
+});
 
 // better-auth's adapter only speaks node-postgres, so it gets a pool of its own.
 const authPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -53,8 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		db: authDb,
 		run: runOnPostgres,
 		secret: "test-secret-not-used-anywhere-else",
-		baseUrl: "http://localhost:3000",
-		webOrigins: [ORIGIN],
+		installation,
 		mailer: async (email) => {
 			sent.push(email);
 		},
@@ -64,7 +69,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	});
 	// Mounted as the process mounts it, so better-auth answers where its own
 	// links point.
-	const app = atServerRoot(createTestApp({ auth, webOrigins: [ORIGIN] }));
+	const app = atServerRoot(createTestApp({ auth, webAppUrl: ORIGIN }));
 
 	/** Signs somebody up and returns the bearer token they were given. */
 	async function signUp(name: string, email: string): Promise<string> {
@@ -683,8 +688,7 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		db: authDb,
 		run: runOnPostgres,
 		secret: "test-secret-not-used-anywhere-else",
-		baseUrl: "http://localhost:3000",
-		webOrigins: [ORIGIN],
+		installation,
 		mailer,
 		emailFrom: { email: "sugabots@example.com" },
 		requireEmailVerification: false,
@@ -694,13 +698,13 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 	const open = atServerRoot(
 		createTestApp({
 			auth: createAuth({ ...options, allowOpenSignUp: true }),
-			webOrigins: [ORIGIN],
+			webAppUrl: ORIGIN,
 		}),
 	);
 	const closed = atServerRoot(
 		createTestApp({
 			auth: createAuth({ ...options, allowOpenSignUp: false }),
-			webOrigins: [ORIGIN],
+			webAppUrl: ORIGIN,
 		}),
 	);
 
@@ -777,8 +781,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			db: authDb,
 			run: runOnPostgres,
 			secret: "test-secret-not-used-anywhere-else",
-			baseUrl: "http://localhost:3000",
-			webOrigins: [ORIGIN],
+			installation,
 			mailer: async (email) => {
 				sent.push(email);
 			},
@@ -786,7 +789,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			allowOpenSignUp: true,
 			requireEmailVerification: true,
 		});
-		const app = atServerRoot(createTestApp({ auth, webOrigins: [ORIGIN] }));
+		const app = atServerRoot(createTestApp({ auth, webAppUrl: ORIGIN }));
 
 		function post(path: string, body: unknown) {
 			return app.request(`${API_BASE_PATH}${path}`, {

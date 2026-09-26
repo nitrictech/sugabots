@@ -7,6 +7,7 @@ import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
+import type { Installation } from "@sugabots/core/installation/installation";
 import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import type {
@@ -33,7 +34,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi";
 import type { Auth } from "../auth/auth.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { betterAuthSessionResolver } from "../auth/session.ts";
-import { API_BASE_PATH, trustedOrigins, webAppUrl } from "../config.ts";
+import { API_BASE_PATH } from "../config.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
@@ -87,10 +88,8 @@ export interface Stores {
 export interface AppOptions {
 	/** better-auth. Mounted under `/auth`, and asked who a token belongs to. */
 	auth: Auth;
-	/** Browser origins besides `baseUrl`'s that may call the API with a cookie. The first is where links point. */
-	webOrigins: string[];
-	/** Where a browser reaches the API, without `API_BASE_PATH`. */
-	baseUrl: string;
+	/** Where the API and web app are reached, and which origins may send a cookie. */
+	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
 	stores: Stores;
@@ -107,8 +106,7 @@ export interface AppOptions {
 
 export function apiLayer({
 	auth,
-	baseUrl,
-	webOrigins,
+	installation,
 	authorization,
 	stores,
 	events,
@@ -117,8 +115,7 @@ export function apiLayer({
 	oauthFetch,
 	model,
 }: AppOptions) {
-	const origins = trustedOrigins({ baseUrl, webOrigins });
-	const apiUrl = `${baseUrl.replace(/\/$/, "")}${API_BASE_PATH}`;
+	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 
 	const groups = Layer.mergeAll(
 		systemRoutes,
@@ -148,7 +145,7 @@ export function apiLayer({
 			validateProviderUrl,
 			oauth: {
 				redirectUrl: `${apiUrl}/connections/oauth/callback`,
-				webAppUrl: webAppUrl({ baseUrl, webOrigins }),
+				webAppUrl: installation.webAppUrl,
 				fetch: oauthFetch,
 			},
 		}),
@@ -179,7 +176,9 @@ export function apiLayer({
 		// Each handler's Effect runs against the process's database, which the
 		// router hands to it per request rather than capturing it once.
 		HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
-		Layer.provide(HttpRouter.middleware(everyRequest(origins), { global: true })),
+		Layer.provide(
+			HttpRouter.middleware(everyRequest(installation.trustedOrigins), { global: true }),
+		),
 	);
 }
 
@@ -201,7 +200,7 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 }
 
 /** What happens to every request, the outermost first. */
-function everyRequest(origins: string[]) {
+function everyRequest(origins: readonly string[]) {
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
 		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],

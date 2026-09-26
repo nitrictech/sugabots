@@ -145,7 +145,7 @@ describe("JSON body limit", () => {
 
 describe("cors", () => {
 	it("allows the web origin to authenticate and resume an event stream", async () => {
-		const app = createTestApp({ resolveSession, webOrigins: ["http://localhost:5173"] });
+		const app = createTestApp({ resolveSession, webAppUrl: "http://localhost:5173" });
 
 		const response = await app.request("/workspaces/example/events", {
 			method: "OPTIONS",
@@ -171,7 +171,7 @@ describe("cors", () => {
 describe("cookie request origins", () => {
 	const trustedOrigin = "https://app.example.com";
 	const cookieApp = createTestApp({
-		webOrigins: [trustedOrigin],
+		webAppUrl: trustedOrigin,
 		resolveSession: async (headers) =>
 			headers.get("cookie") === "better-auth.session_token=cookie-token" ||
 			headers.get("authorization") === "Bearer good-token"
