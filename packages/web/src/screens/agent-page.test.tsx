@@ -123,8 +123,10 @@ describe("what everybody sees", () => {
 
 		const shared = await screen.findByRole("link", { name: new RegExp(`Tools from ${suga.name}`) });
 		expect(shared.getAttribute("href")).toBe(`/suga/settings/pods/${suga.slug}`);
-		expect(screen.getByText("Read web pages")).toBeDefined();
-		expect(screen.getByText("Search the web")).toBeDefined();
+		// Scoped, since the settings navigation beside the page has a Web search section too.
+		const tools = screen.getByRole("region", { name: "Tools" });
+		expect(within(tools).getByText("Web fetch")).toBeDefined();
+		expect(within(tools).getByText("Web search")).toBeDefined();
 	});
 });
 
@@ -549,7 +551,7 @@ describe("an admin", () => {
 	it("switches a built-in tool off for the bot, and back on", async () => {
 		mount(page);
 
-		const search = await screen.findByRole("switch", { name: "Turn off Search the web" });
+		const search = await screen.findByRole("switch", { name: "Turn off Web search" });
 		expect(search.getAttribute("aria-checked")).toBe("true");
 		rosterAnswers({ disabledTools: ["web_search"] });
 		fireEvent.click(search);
@@ -560,7 +562,7 @@ describe("an admin", () => {
 				payload: { disabledTools: ["web_search"] },
 			});
 		});
-		const off = await screen.findByRole("switch", { name: "Turn on Search the web" });
+		const off = await screen.findByRole("switch", { name: "Turn on Web search" });
 		expect(off.getAttribute("aria-checked")).toBe("false");
 
 		rosterAnswers({ disabledTools: [] });

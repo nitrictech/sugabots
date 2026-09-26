@@ -156,6 +156,18 @@ export const DetailsOnAPhone = meta.story({
 	},
 });
 
+/** On a desktop, Details starts open beside the chat, and the ⓘ puts it away. */
+export const DetailsOpenOnADesktop = meta.story({
+	globals: { viewport: { value: "desktop", isRotated: false } },
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("complementary", { name: "Details" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Details" }));
+		await expect(canvas.queryByRole("complementary", { name: "Details" })).toBeNull();
+	},
+});
+
 /** On a tablet there is no room beside the chat, so Details slides over it from the right. */
 export const DetailsOnATablet = meta.story({
 	globals: { viewport: { value: "ipad11p", isRotated: false } },

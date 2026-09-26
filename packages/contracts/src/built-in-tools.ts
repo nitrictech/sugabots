@@ -19,12 +19,12 @@ export interface BuiltInToolEntry {
 export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 	{
 		key: "web_fetch",
-		name: "Read web pages",
+		name: "Web fetch",
 		description: "Fetches a public page by its address and reads it as text.",
 	},
 	{
 		key: "web_search",
-		name: "Search the web",
+		name: "Web search",
 		description: "Searches through the workspace's search provider, when one is switched on.",
 	},
 ];

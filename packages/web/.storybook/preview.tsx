@@ -44,7 +44,17 @@ export default definePreview({
 	parameters: {
 		layout: "padded",
 		backgrounds: { disable: true },
-		viewport: { options: INITIAL_VIEWPORTS },
+		viewport: {
+			options: {
+				...INITIAL_VIEWPORTS,
+				// Wide enough that a chat's sidebar sits beside it, which the built-in sizes never are.
+				desktop: {
+					name: "Desktop",
+					styles: { width: "1440px", height: "900px" },
+					type: "desktop",
+				},
+			},
+		},
 		a11y: { test: "error" },
 		options: { storySort: { order: ["Controls", "Patterns", "Product", "Views"] } },
 	},
