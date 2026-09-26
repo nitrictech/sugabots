@@ -2,7 +2,7 @@ import type { SessionUser } from "@sugabots/contracts";
 import { CurrentUser, Forbidden, Session, Unauthorized } from "@sugabots/contracts/http";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
-import { API_BASE_PATH } from "../config.ts";
+import { API_BASE_PATH } from "../http/api.ts";
 import { failureResponse } from "../http/errors.ts";
 
 /**

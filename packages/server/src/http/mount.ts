@@ -7,7 +7,7 @@ import {
 	HttpServerResponse,
 	HttpStaticServer,
 } from "effect/unstable/http";
-import { API_BASE_PATH } from "../config.ts";
+import { API_BASE_PATH } from "./api.ts";
 
 /** The web app's build output, which the image lays out beside the server. */
 const WEB_ROOT = fileURLToPath(new URL("../../../web/dist/", import.meta.url));

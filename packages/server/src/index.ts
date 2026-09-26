@@ -29,10 +29,10 @@ import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
-import { Duration, Effect, Layer } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { Config, Duration, Effect, Layer } from "effect";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
-import { API_BASE_PATH, ServerConfig } from "./config.ts";
+import { API_BASE_PATH } from "./http/api.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
 import { observabilityLayer } from "./observability.ts";
@@ -57,7 +57,6 @@ const SHUTDOWN_GRACE = Duration.seconds(3);
 const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
 	const installation = yield* Installation.Service;
-	const config = yield* ServerConfig.Service;
 
 	const authentication = yield* Authentication.Service;
 
@@ -140,12 +139,12 @@ const main = Effect.gen(function* () {
 		validateProviderUrl: egress.validateProviderUrl,
 		model,
 	});
-	yield* Layer.build(
+	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
-			Layer.provide(
-				NodeHttpServer.layer(createServer, {
-					port: config.port,
-					gracefulShutdownTimeout: SHUTDOWN_GRACE,
+			Layer.provideMerge(
+				NodeHttpServer.layerConfig(createServer, {
+					port: Config.Port("PORT").pipe(Config.withDefault(3000)),
+					gracefulShutdownTimeout: Config.succeed(SHUTDOWN_GRACE),
 				}),
 			),
 		),
@@ -154,7 +153,9 @@ const main = Effect.gen(function* () {
 	// holds a socket open for as long as its browser is there, and closing the
 	// server first would wait on clients that never hang up.
 	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
-	console.log(`sugabots ${VERSION} listening on http://localhost:${config.port}`);
+	yield* HttpServer.addressFormattedWith((address) =>
+		Effect.sync(() => console.log(`sugabots ${VERSION} listening on ${address}`)),
+	).pipe(Effect.provide(server));
 	return yield* Effect.never;
 });
 
@@ -168,7 +169,6 @@ main.pipe(
 			Credentials.layer,
 			Installation.layer,
 			Egress.layer,
-			ServerConfig.layer,
 			Authentication.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),

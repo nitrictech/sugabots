@@ -14,7 +14,7 @@ import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { and, eq, or } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { API_BASE_PATH } from "../config.ts";
+import { API_BASE_PATH } from "../http/api.ts";
 import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
 import { Authentication } from "./authentication.ts";
 

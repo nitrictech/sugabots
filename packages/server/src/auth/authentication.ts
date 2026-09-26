@@ -29,7 +29,7 @@ import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
 import { Pool } from "pg";
-import { API_BASE_PATH } from "../config.ts";
+import { API_BASE_PATH } from "../http/api.ts";
 import { admitSignUp } from "./sign-up.ts";
 
 /**

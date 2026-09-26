@@ -33,7 +33,6 @@ import {
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import type { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { API_BASE_PATH } from "../config.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
@@ -49,7 +48,7 @@ import { systemRoutes } from "../routes/system/routes.ts";
 import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
 import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
-import { ServerApi } from "./api.ts";
+import { API_BASE_PATH, ServerApi } from "./api.ts";
 import { authoriseLayer } from "./authorisation.ts";
 import { failureResponse } from "./errors.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";

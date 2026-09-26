@@ -23,9 +23,9 @@ import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import type { Authentication } from "../auth/authentication.ts";
 import type { SessionResolver } from "../auth/session.ts";
-import { API_BASE_PATH } from "../config.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
+import { API_BASE_PATH } from "./api.ts";
 import { apiLayer, type Stores } from "./app.ts";
 
 type TestIdentity =
