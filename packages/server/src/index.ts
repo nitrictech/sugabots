@@ -13,16 +13,11 @@ import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Credentials } from "@sugabots/core/credentials/credentials";
-import {
-	type Database,
-	layer as databaseLayer,
-	effectRunner,
-} from "@sugabots/core/database/database";
+import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
-import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
@@ -34,11 +29,9 @@ import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Duration, Effect, Layer, Redacted } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
-import { Pool } from "pg";
-import { createAuth } from "./auth/auth.ts";
+import { Authentication } from "./auth/authentication.ts";
 import { API_BASE_PATH, ServerConfig } from "./config.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
@@ -63,30 +56,10 @@ const SHUTDOWN_GRACE = Duration.seconds(3);
 
 const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
-	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
-	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
 	const config = yield* ServerConfig.Service;
 
-	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
-	// of its own until it can be ported onto the database's.
-	const authPool = yield* Effect.acquireRelease(
-		Effect.map(
-			Config.Redacted("DATABASE_URL"),
-			(url) => new Pool({ connectionString: Redacted.value(url) }),
-		),
-		(pool) => Effect.promise(() => pool.end()),
-	);
-	const auth = createAuth({
-		db: drizzle({ client: authPool }),
-		run,
-		secret: Redacted.value(config.secret),
-		installation,
-		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
-		emailFrom: config.transactionalSender,
-		allowOpenSignUp: config.allowOpenSignUp,
-		requireEmailVerification: config.requireEmailVerification,
-	});
+	const authentication = yield* Authentication.Service;
 
 	const eventStore = yield* postgresEventStore;
 	// Every process runs a worker, so what one writes the others must hear about.
@@ -157,7 +130,7 @@ const main = Effect.gen(function* () {
 		}),
 	);
 	const api = apiLayer({
-		auth,
+		authentication,
 		installation,
 		oauthFetch: egress.oauth,
 		authorization,
@@ -192,11 +165,11 @@ main.pipe(
 	Effect.provide(
 		Layer.mergeAll(
 			databaseLayer,
-			Email.layer,
 			Credentials.layer,
 			Installation.layer,
 			Egress.layer,
 			ServerConfig.layer,
+			Authentication.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,

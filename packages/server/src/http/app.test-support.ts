@@ -21,7 +21,7 @@ import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
-import type { Auth } from "../auth/auth.ts";
+import type { Authentication } from "../auth/authentication.ts";
 import type { SessionResolver } from "../auth/session.ts";
 import { API_BASE_PATH } from "../config.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
@@ -29,8 +29,8 @@ import type { StreamOptions } from "../routes/events/routes.ts";
 import { apiLayer, type Stores } from "./app.ts";
 
 type TestIdentity =
-	| { auth: Auth; resolveSession?: never }
-	| { auth?: never; resolveSession: SessionResolver };
+	| { authentication: Authentication.Interface; resolveSession?: never }
+	| { authentication?: never; resolveSession: SessionResolver };
 
 type TestAppOptions = TestIdentity & {
 	/** Where the web app is served, when a case needs it apart from the API. */
@@ -63,7 +63,8 @@ export interface TestApp {
 export function createTestApp(options: TestAppOptions): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
 	const routes = apiLayer({
-		auth: options.auth ?? authForSessionResolver(options.resolveSession),
+		authentication:
+			options.authentication ?? authenticationForSessionResolver(options.resolveSession),
 		installation: Installation.fromUrls({
 			isProduction: false,
 			publicUrl: BASE_URL,
@@ -93,15 +94,14 @@ export function createTestApp(options: TestAppOptions): TestApp {
 	};
 }
 
-function authForSessionResolver(resolveSession: SessionResolver): Auth {
+function authenticationForSessionResolver(
+	resolveSession: SessionResolver,
+): Authentication.Interface {
 	return {
-		handler: async () => new Response(null, { status: 404 }),
-		api: {
-			getSession: ({ headers }: { headers: Headers }) => {
-				return resolveSession(headers);
-			},
-		},
-	} as unknown as Auth;
+		handler: () => Effect.succeed(new Response(null, { status: 404 })),
+		identify: identifyFromResolver(resolveSession),
+		createAccount: () => Effect.die(new Error("This test app creates no accounts")),
+	};
 }
 
 /**
@@ -234,3 +234,12 @@ const emptyStores: Stores = {
 	turns: { requestCancel: () => Effect.succeed(false) },
 	approvals: noToolApprovalStore,
 };
+
+/** The `Authentication.identify` a test's resolver stands in for. */
+export function identifyFromResolver(resolveSession: SessionResolver) {
+	return (headers: Headers) =>
+		Effect.map(
+			Effect.promise(() => resolveSession(headers)),
+			(session) => session?.user,
+		);
+}

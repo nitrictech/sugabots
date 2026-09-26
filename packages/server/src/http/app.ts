@@ -31,9 +31,8 @@ import {
 	HttpServerResponse,
 } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import type { Auth } from "../auth/auth.ts";
+import type { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { betterAuthSessionResolver } from "../auth/session.ts";
 import { API_BASE_PATH } from "../config.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
@@ -87,7 +86,7 @@ export interface Stores {
 
 export interface AppOptions {
 	/** better-auth. Mounted under `/auth`, and asked who a token belongs to. */
-	auth: Auth;
+	authentication: Authentication.Interface;
 	/** Where the API and web app are reached, and which origins may send a cookie. */
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
@@ -105,7 +104,7 @@ export interface AppOptions {
 }
 
 export function apiLayer({
-	auth,
+	authentication,
 	installation,
 	authorization,
 	stores,
@@ -156,7 +155,7 @@ export function apiLayer({
 		threadRoutes({ threads: stores.threads, turns: stores.turns }),
 	);
 	const middleware = Layer.mergeAll(
-		sessionLayer(betterAuthSessionResolver(auth)),
+		sessionLayer(authentication.identify),
 		authoriseLayer(authorization),
 		validateRequestLayer,
 	);
@@ -167,7 +166,7 @@ export function apiLayer({
 	// Sign-up, sign-in, workspaces and invitations.
 	const betterAuth = HttpRouter.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
 		toWebRequest(request).pipe(
-			Effect.flatMap((web) => Effect.promise(() => auth.handler(web))),
+			Effect.flatMap(authentication.handler),
 			Effect.map(HttpServerResponse.fromWeb),
 		),
 	);

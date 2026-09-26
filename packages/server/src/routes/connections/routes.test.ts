@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import { sessionLayer } from "../../auth/middleware.ts";
 import type { SessionResolver } from "../../auth/session.ts";
 import { API_BASE_PATH } from "../../config.ts";
-import { BASE_URL } from "../../http/app.test-support.ts";
+import { BASE_URL, identifyFromResolver } from "../../http/app.test-support.ts";
 import { authoriseLayer } from "../../http/authorisation.ts";
 import { validateRequestLayer } from "../../http/validation.ts";
 import { type ConnectionRoutesOptions, connectionRoutes } from "./routes.ts";
@@ -62,7 +62,7 @@ function serve(options: ConnectionRoutesOptions) {
 		Layer.provide(
 			connectionRoutes(options).pipe(
 				Layer.provide([
-					sessionLayer(resolveSession),
+					sessionLayer(identifyFromResolver(resolveSession)),
 					authoriseLayer(authorization),
 					validateRequestLayer,
 				]),

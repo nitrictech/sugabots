@@ -1,11 +1,6 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { handleFromName, PERSONAL_POD_SLUG } from "@sugabots/contracts";
-import {
-	type Database,
-	layer as databaseLayer,
-	effectRunner,
-	query,
-} from "@sugabots/core/database/database";
+import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import {
 	agent,
 	pod,
@@ -14,16 +9,12 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Effect, Layer, Redacted } from "effect";
-import { Pool } from "pg";
-import { createAuth } from "./auth/auth.ts";
-import { ServerConfig } from "./config.ts";
+import { Effect, Layer } from "effect";
+import { Authentication } from "./auth/authentication.ts";
 
 /**
  * Development seed: the smallest amount of data that makes the app worth
@@ -45,38 +36,17 @@ const seed = Effect.gen(function* () {
 	if (installation.isProduction) {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
-	const config = yield* ServerConfig.Service;
-	const email = yield* Email.Service;
-	const database = yield* Effect.context<Database>();
-	// better-auth's adapter only speaks node-postgres.
-	const authPool = yield* Effect.acquireRelease(
-		Effect.map(
-			Config.Redacted("DATABASE_URL"),
-			(url) => new Pool({ connectionString: Redacted.value(url) }),
-		),
-		(pool) => Effect.promise(() => pool.end()),
-	);
-	// The seed is the bootstrap, so it is not subject to the installation's policy.
-	const auth = createAuth({
-		secret: Redacted.value(config.secret),
-		installation,
-		db: drizzle({ client: authPool }),
-		run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) }),
-		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
-		allowOpenSignUp: true,
-		requireEmailVerification: false,
-		emailFrom: config.transactionalSender,
-	});
+	const authentication = yield* Authentication.Service;
 	// The password has to be hashed the way sign-in will hash it, so the account
 	// is created through better-auth rather than inserted.
-	const signUp = Effect.promise(() =>
-		auth.api.signUpEmail({ body: { name: "Development", email: EMAIL, password: PASSWORD } }),
-	);
+	const signUp = authentication.createAccount({
+		name: "Development",
+		email: EMAIL,
+		password: PASSWORD,
+	});
 
 	yield* query((db) =>
 		Effect.gen(function* () {
-			// The password has to be hashed the way sign-in will hash it, so the account
-			// is created through better-auth rather than inserted.
 			let [person] = yield* db.select().from(user).where(eq(user.email, EMAIL));
 			if (!person) {
 				yield* signUp;
@@ -220,8 +190,6 @@ const seed = Effect.gen(function* () {
 
 seed.pipe(
 	Effect.scoped,
-	Effect.provide(
-		Layer.mergeAll(databaseLayer, Email.layer, Installation.layer, ServerConfig.layer),
-	),
+	Effect.provide(Layer.mergeAll(databaseLayer, Installation.layer, Authentication.layer)),
 	NodeRuntime.runMain,
 );

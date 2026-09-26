@@ -1,4 +1,5 @@
 import { sessionUserSchema } from "@sugabots/contracts";
+import { layer as databaseLayer } from "@sugabots/core/database/database";
 import {
 	pod,
 	podMember,
@@ -7,17 +8,15 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
-import type { Email } from "@sugabots/core/email/email";
+import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { and, eq, or } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Schema } from "effect";
-import { Pool } from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { API_BASE_PATH } from "../config.ts";
 import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
-import { createAuth } from "./auth.ts";
+import { Authentication } from "./authentication.ts";
 
 /** The test app addressed as the process serves it, so better-auth answers where its own client looks. */
 function atServerRoot(app: TestApp) {
@@ -38,38 +37,68 @@ function atServerRoot(app: TestApp) {
  */
 
 const ORIGIN = "http://localhost:5173";
-const installation = Installation.fromUrls({
-	isProduction: false,
-	publicUrl: "http://localhost:3000",
-	webAppUrl: ORIGIN,
-});
-
-// better-auth's adapter only speaks node-postgres, so it gets a pool of its own.
-const authPool = new Pool({ connectionString: process.env.DATABASE_URL });
-const authDb = drizzle({ client: authPool });
+const closers: Array<() => Promise<void>> = [];
 
 afterAll(async () => {
-	await authPool.end();
+	await Promise.all(closers.map((close) => close()));
 	await closeDatabase();
 });
 
+/**
+ * The installation's real `Authentication`, over the test database, under a sign-up
+ * policy of the case's choosing. The emails it would send are kept in `sent`.
+ */
+function authenticationWith(
+	policy: { ALLOW_OPEN_SIGNUP: "true" | "false"; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
+	sent: Email.Message[],
+) {
+	const runtime = ManagedRuntime.make(
+		Authentication.layerNoDeps.pipe(
+			Layer.provide([
+				databaseLayer,
+				Installation.layer,
+				Layer.succeed(
+					Email.Service,
+					Email.Service.of({
+						send: (message) =>
+							Effect.sync(() => {
+								sent.push(message);
+							}),
+					}),
+				),
+			]),
+			Layer.provide(
+				ConfigProvider.layer(
+					ConfigProvider.fromEnv({
+						env: {
+							DATABASE_URL: process.env.DATABASE_URL ?? "",
+							PUBLIC_URL: "http://localhost:3000",
+							WEB_APP_URL: ORIGIN,
+							BETTER_AUTH_SECRET: "test-secret-not-used-anywhere-else",
+							EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
+							...policy,
+						},
+					}),
+				),
+			),
+		),
+	);
+	closers.push(() => runtime.dispose());
+	return runtime.runPromise(Authentication.Service);
+}
+
 describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	const sent: Email.Message[] = [];
-	const auth = createAuth({
-		db: authDb,
-		run: runOnPostgres,
-		secret: "test-secret-not-used-anywhere-else",
-		installation,
-		mailer: async (email) => {
-			sent.push(email);
-		},
-		emailFrom: { email: "sugabots@example.com" },
-		allowOpenSignUp: true,
-		requireEmailVerification: false,
+	let app: ReturnType<typeof atServerRoot>;
+	beforeAll(async () => {
+		const authentication = await authenticationWith(
+			{ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" },
+			sent,
+		);
+		// Mounted as the process mounts it, so better-auth answers where its own
+		// links point.
+		app = atServerRoot(createTestApp({ authentication, webAppUrl: ORIGIN }));
 	});
-	// Mounted as the process mounts it, so better-auth answers where its own
-	// links point.
-	const app = atServerRoot(createTestApp({ auth, webAppUrl: ORIGIN }));
 
 	/** Signs somebody up and returns the bearer token they were given. */
 	async function signUp(name: string, email: string): Promise<string> {
@@ -681,34 +710,22 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 
 describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => {
 	const sent: Email.Message[] = [];
-	const mailer = async (email: Email.Message) => {
-		sent.push(email);
-	};
-	const options = {
-		db: authDb,
-		run: runOnPostgres,
-		secret: "test-secret-not-used-anywhere-else",
-		installation,
-		mailer,
-		emailFrom: { email: "sugabots@example.com" },
-		requireEmailVerification: false,
-	};
 	// The same database seen under both policies: a member invites from the
 	// open one, and the invitee arrives at the closed one.
-	const open = atServerRoot(
-		createTestApp({
-			auth: createAuth({ ...options, allowOpenSignUp: true }),
-			webAppUrl: ORIGIN,
-		}),
-	);
-	const closed = atServerRoot(
-		createTestApp({
-			auth: createAuth({ ...options, allowOpenSignUp: false }),
-			webAppUrl: ORIGIN,
-		}),
-	);
+	let open: ReturnType<typeof atServerRoot>;
+	let closed: ReturnType<typeof atServerRoot>;
+	beforeAll(async () => {
+		const [openAuthentication, closedAuthentication] = await Promise.all([
+			authenticationWith({ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+			authenticationWith({ ALLOW_OPEN_SIGNUP: "false", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+		]);
+		open = atServerRoot(createTestApp({ authentication: openAuthentication, webAppUrl: ORIGIN }));
+		closed = atServerRoot(
+			createTestApp({ authentication: closedAuthentication, webAppUrl: ORIGIN }),
+		);
+	});
 
-	function signUpAt(app: typeof open, name: string, email: string) {
+	function signUpAt(app: ReturnType<typeof atServerRoot>, name: string, email: string) {
 		return app.request(`${API_BASE_PATH}/auth/sign-up/email`, {
 			method: "POST",
 			headers: { "content-type": "application/json", origin: ORIGIN },
@@ -777,19 +794,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	"an installation that requires email verification",
 	() => {
 		const sent: Email.Message[] = [];
-		const auth = createAuth({
-			db: authDb,
-			run: runOnPostgres,
-			secret: "test-secret-not-used-anywhere-else",
-			installation,
-			mailer: async (email) => {
-				sent.push(email);
-			},
-			emailFrom: { email: "sugabots@example.com" },
-			allowOpenSignUp: true,
-			requireEmailVerification: true,
+		let app: ReturnType<typeof atServerRoot>;
+		beforeAll(async () => {
+			const authentication = await authenticationWith(
+				{ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "true" },
+				sent,
+			);
+			app = atServerRoot(createTestApp({ authentication, webAppUrl: ORIGIN }));
 		});
-		const app = atServerRoot(createTestApp({ auth, webAppUrl: ORIGIN }));
 
 		function post(path: string, body: unknown) {
 			return app.request(`${API_BASE_PATH}${path}`, {
