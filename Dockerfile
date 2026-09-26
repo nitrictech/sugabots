@@ -15,8 +15,10 @@ FROM node:26-slim AS base
 COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY packages/avatars/package.json packages/avatars/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
+COPY packages/provider-logos/package.json packages/provider-logos/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
