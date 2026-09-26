@@ -15,10 +15,10 @@ import {
 } from "@sugabots/contracts";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { modelProvider, providerModel } from "../../database/schema.ts";
-import type { CredentialCipher } from "./credentials.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 
 export interface ProviderConnection {
@@ -200,7 +200,7 @@ function modelsFor(workspaceId: string, providerId: string) {
 }
 
 /** The store, over the cipher that seals and opens stored credentials. */
-export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore {
+export function modelProviderStore(cipher: Credentials.Interface): ModelProviderStore {
 	const connection: ModelProviderStore["connection"] = (workspaceId, providerId) =>
 		Effect.gen(function* () {
 			const [row] = yield* query((db) =>
@@ -570,7 +570,7 @@ export function modelProviderStore(cipher: CredentialCipher): ModelProviderStore
  * the name, address and protocol and the caller only the key, and for a local
  * preset perhaps the address; a custom endpoint is described in full.
  */
-function providerValues(input: NewModelProvider, cipher: CredentialCipher) {
+function providerValues(input: NewModelProvider, cipher: Credentials.Interface) {
 	const apiKeyEncrypted = input.apiKey ? cipher.encrypt(input.apiKey) : undefined;
 	if ("preset" in input) {
 		const { id, name, baseUrl, apiFormat } = providerPreset(input.preset);
@@ -597,7 +597,7 @@ function providerValues(input: NewModelProvider, cipher: CredentialCipher) {
 }
 
 /** What an update writes to the key column: absent leaves it, null clears it. */
-function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: CredentialCipher) {
+function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: Credentials.Interface) {
 	if (apiKey === undefined) return undefined;
 	return apiKey === null ? null : cipher.encrypt(apiKey);
 }

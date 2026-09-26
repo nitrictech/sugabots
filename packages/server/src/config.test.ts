@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { configFromEnv, parseOrigins, trustedOrigins, webAppUrl } from "./config.ts";
 
 describe("configFromEnv", () => {
-	const encryptionKey = Buffer.alloc(32).toString("base64");
 	/** Present in every case: what is under test here is everything else. */
 	const DATABASE_URL = "postgresql://localhost:5432/test";
 
@@ -10,18 +9,11 @@ describe("configFromEnv", () => {
 		expect(() => configFromEnv({ DATABASE_URL })).toThrow(/BETTER_AUTH_SECRET/);
 	});
 
-	it("requires a separate key for provider credentials", () => {
-		expect(() => configFromEnv({ DATABASE_URL, BETTER_AUTH_SECRET: "s" })).toThrow(
-			/MODEL_PROVIDER_ENCRYPTION_KEY/,
-		);
-	});
-
 	it("points the base url at its own port when none is given", () => {
 		expect(
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64"),
 				PORT: "8080",
 			}).baseUrl,
 		).toBe("http://localhost:8080");
@@ -32,7 +24,6 @@ describe("configFromEnv", () => {
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				PORT: port,
 			}),
 		).toThrow(/PORT must be an integer between 1 and 65535/);
@@ -43,7 +34,6 @@ describe("configFromEnv", () => {
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				NODE_ENV: "test",
 			}).secret,
 		).toBe("s");
@@ -56,7 +46,6 @@ describe("configFromEnv", () => {
 				configFromEnv({
 					DATABASE_URL,
 					BETTER_AUTH_SECRET: secret,
-					MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 					NODE_ENV: "production",
 				}),
 			).toThrow(/BETTER_AUTH_SECRET/);
@@ -68,7 +57,6 @@ describe("configFromEnv", () => {
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "x".repeat(32),
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				NODE_ENV: "production",
 				EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
 			}).secret,
@@ -79,7 +67,6 @@ describe("configFromEnv", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 		});
 
 		expect(config.environment).toBe("development");
@@ -96,7 +83,6 @@ describe("configFromEnv", () => {
 			NODE_ENV: "production",
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "x".repeat(32),
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 			EMAIL_TRANSACTIONAL_FROM: "sugabots@example.com",
 		};
 		expect(configFromEnv(productionEnv).allowPrivateModelProviderNetwork).toBe(false);
@@ -110,7 +96,6 @@ describe("configFromEnv", () => {
 		const base = {
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 		};
 		expect(
 			configFromEnv({ ...base, ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "false" })
@@ -125,7 +110,6 @@ describe("configFromEnv", () => {
 		const base = {
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 		};
 		expect(configFromEnv(base).allowPrivateWebFetchNetwork).toBe(false);
 		expect(
@@ -142,7 +126,6 @@ describe("configFromEnv", () => {
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "x".repeat(32),
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				NODE_ENV: "production",
 			}),
 		).toThrow(/EMAIL_TRANSACTIONAL_FROM is required in production/);
@@ -152,7 +135,6 @@ describe("configFromEnv", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 			EMAIL_TRANSACTIONAL_FROM: "Sugabots <no-reply@example.com>",
 		});
 
@@ -167,7 +149,6 @@ describe("configFromEnv", () => {
 			configFromEnv({
 				DATABASE_URL,
 				BETTER_AUTH_SECRET: "s",
-				MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 				EMAIL_TRANSACTIONAL_FROM: "Sugabots",
 			}),
 		).toThrow(/EMAIL_TRANSACTIONAL_FROM must be an address/);
@@ -177,7 +158,6 @@ describe("configFromEnv", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 		});
 
 		expect(config.requireEmailVerification).toBe(false);
@@ -187,7 +167,6 @@ describe("configFromEnv", () => {
 		const config = configFromEnv({
 			DATABASE_URL,
 			BETTER_AUTH_SECRET: "s",
-			MODEL_PROVIDER_ENCRYPTION_KEY: encryptionKey,
 			REQUIRE_EMAIL_VERIFICATION: "true",
 		});
 

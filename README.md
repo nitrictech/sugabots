@@ -52,7 +52,7 @@ credentials:
 
 ```dotenv
 BETTER_AUTH_SECRET=<output of openssl rand -base64 32>
-MODEL_PROVIDER_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
+CREDENTIALS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
 ```
 
 Generate each value separately:
@@ -62,8 +62,8 @@ openssl rand -base64 32
 ```
 
 The remaining defaults are ready for a localhost installation. Keep `.env`
-private and backed up. Losing `MODEL_PROVIDER_ENCRYPTION_KEY` makes saved
-provider credentials unreadable; changing `BETTER_AUTH_SECRET` signs everyone
+private and backed up. Losing `CREDENTIALS_ENCRYPTION_KEY` makes saved
+credentials unreadable; changing `BETTER_AUTH_SECRET` signs everyone
 out.
 
 ### 4. Start PostgreSQL

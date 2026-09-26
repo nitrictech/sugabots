@@ -7,9 +7,9 @@ import type {
 import { DEFAULT_SEARCH_PRESET, searchProviderPreset } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, type Executor, query } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
-import type { CredentialCipher } from "../model-providers/credentials.ts";
 
 /** What the `web_search` backend needs to call the workspace's search service. */
 export interface SearchConnection {
@@ -51,7 +51,7 @@ export interface SearchProviderStore {
 	): Effect.Effect<void, never, Database>;
 }
 
-export function searchProviderStore(cipher: CredentialCipher): SearchProviderStore {
+export function searchProviderStore(cipher: Credentials.Interface): SearchProviderStore {
 	const load = (workspaceId: string) =>
 		query((db) =>
 			db
@@ -177,7 +177,7 @@ export const provisionDefaultSearchProvider = Effect.fn(
 /** The connection, or nothing when the preset needs a key the row lacks. */
 function toConnection(
 	row: SearchProviderRow,
-	cipher: CredentialCipher,
+	cipher: Credentials.Interface,
 ): SearchConnection | undefined {
 	if (searchProviderPreset(row.preset).requiresApiKey && !row.apiKeyEncrypted) {
 		return undefined;

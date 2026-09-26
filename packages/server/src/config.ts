@@ -19,8 +19,6 @@ export interface Config {
 	webOrigins: string[];
 	/** Signing key for sessions and tokens. */
 	secret: string;
-	/** Dedicated AES-256 key for provider credentials. */
-	modelProviderEncryptionKey: string;
 	/**
 	 * Whether model providers may connect over plain HTTP or to private network
 	 * addresses. On by default in development, where the model server is usually
@@ -87,12 +85,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 	if (!databaseUrl) {
 		throw new Error("DATABASE_URL is required. Copy .env.example to .env.");
 	}
-	const modelProviderEncryptionKey = env.MODEL_PROVIDER_ENCRYPTION_KEY;
-	if (!modelProviderEncryptionKey) {
-		throw new Error(
-			"MODEL_PROVIDER_ENCRYPTION_KEY is required. Generate one with `openssl rand -base64 32`.",
-		);
-	}
 	const allowPrivateModelProviderNetwork =
 		env.ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK === undefined
 			? environment === "development"
@@ -121,7 +113,6 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
 		baseUrl: env.BETTER_AUTH_URL ?? `http://localhost:${port}`,
 		webOrigins: parseOrigins(env.WEB_ORIGIN),
 		secret,
-		modelProviderEncryptionKey,
 		allowPrivateModelProviderNetwork,
 		allowPrivateWebFetchNetwork,
 		allowOpenSignUp,

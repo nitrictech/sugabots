@@ -12,6 +12,7 @@ import { connectionTools as connectionToolsFor } from "@sugabots/core/conversati
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
+import { Credentials } from "@sugabots/core/credentials/credentials";
 import {
 	type Database,
 	layer as databaseLayer,
@@ -24,7 +25,6 @@ import { postgresEventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
-import { aesCredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import {
 	createEgressHttpClient,
@@ -121,9 +121,8 @@ const main = Effect.gen(function* () {
 		createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork }),
 	);
 
-	// One server key seals every stored credential, model and search alike.
-	const credentialCipher = aesCredentialCipher(config.modelProviderEncryptionKey);
-	const modelProviders = modelProviderStore(credentialCipher);
+	const credentials = yield* Credentials.Service;
+	const modelProviders = modelProviderStore(credentials);
 	// One model client for turns, system agents, trials, and chat routing.
 	const model = workspaceTurnModel({ modelProviders, httpClients });
 	const stores = {
@@ -132,8 +131,8 @@ const main = Effect.gen(function* () {
 		systemAgents: systemAgentStore,
 		onboarding: onboardingStore,
 		modelProviders,
-		searchProviders: searchProviderStore(credentialCipher),
-		connections: connectionStore(credentialCipher),
+		searchProviders: searchProviderStore(credentials),
+		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents),
 		routines: routineStore(publishEvents),
 		threads: threadStore(),
@@ -214,7 +213,7 @@ main.pipe(
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
-		Layer.merge(databaseLayer(config.databaseUrl), Email.layer).pipe(
+		Layer.mergeAll(databaseLayer(config.databaseUrl), Email.layer, Credentials.layer).pipe(
 			Layer.provideMerge(observabilityLayer),
 		),
 	),

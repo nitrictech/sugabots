@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Credentials } from "../../credentials/credentials.ts";
 import { pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
-import { aesCredentialCipher } from "../model-providers/credentials.ts";
 import { ConnectionNameTaken, type ConnectionStore, connectionStore } from "./store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () => {
-	const cipher = aesCredentialCipher(Buffer.alloc(32, 9).toString("base64"));
+	const cipher = Credentials.fromKey(Buffer.alloc(32, 9).toString("base64"));
 	const connections: Promised<ConnectionStore> = onPostgres(connectionStore(cipher));
 	let workspaceId: string;
 	let userId: string;

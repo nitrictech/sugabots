@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelRequestFailed, type TurnModel } from "../../conversations/turns/model.ts";
+import { Credentials } from "../../credentials/credentials.ts";
 import { user, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
-import { aesCredentialCipher } from "./credentials.ts";
 import { modelProviderOperations } from "./operations.ts";
 import { modelProviderStore } from "./store.ts";
 
@@ -15,7 +15,7 @@ import { modelProviderStore } from "./store.ts";
  * once. Needs a migrated database and skips without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", () => {
-	const providers = modelProviderStore(aesCredentialCipher(Buffer.alloc(32, 7).toString("base64")));
+	const providers = modelProviderStore(Credentials.fromKey(Buffer.alloc(32, 7).toString("base64")));
 	const store = onPostgres(providers);
 	const operationsWithResponse = (
 		respond: () => Response | Promise<Response>,
