@@ -1,4 +1,3 @@
-import type { SystemAgentKey } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -18,28 +17,20 @@ import { Button } from "@/ui/button.tsx";
  */
 
 /** Who the reader has to ask, when they cannot choose the model themselves. */
-export const AN_ADMINISTRATOR_CHOOSES = "A workspace administrator chooses its model.";
+const AN_ADMINISTRATOR_CHOOSES = "A workspace administrator chooses its model.";
 
 /** Whether the reader may choose the models the built-in agents run on. */
-export function useCanConfigureBuiltInAgents(): boolean {
+function useCanConfigureBuiltInAgents(): boolean {
 	return useWorkspacePermissions().configureBuiltInAgents;
 }
 
-/** A link to where a built-in agent's model is chosen. Administrators only. */
-export function BuiltInAgentLink({
-	agentKey,
-	children,
-}: {
-	agentKey: SystemAgentKey;
-	children: ReactNode;
-}) {
+/** A link to where the system bots' model is chosen, one for all of them. Administrators only. */
+function SystemModelLink({ children }: { children: ReactNode }) {
 	return (
 		<Button
 			size="bare"
 			variant="link"
-			render={
-				<Link from="/$workspace" to="./settings/built-in-agents/$key" params={{ key: agentKey }} />
-			}
+			render={<Link from="/$workspace" to="./settings/providers/system" />}
 		>
 			{children}
 		</Button>
@@ -57,7 +48,7 @@ export function ScribeNotSetUp() {
 			The Scribe writes these, and it has no model yet.{" "}
 			{mayConfigure ? (
 				<>
-					<BuiltInAgentLink agentKey="summarise">Set up the Scribe</BuiltInAgentLink>.
+					<SystemModelLink>Set up the Scribe</SystemModelLink>.
 				</>
 			) : (
 				AN_ADMINISTRATOR_CHOOSES

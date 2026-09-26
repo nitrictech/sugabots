@@ -2,6 +2,8 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	chatHistoryPageSchema,
+	chatListQuerySchema,
+	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
 	chatSchema,
@@ -14,6 +16,11 @@ import { Authorise, Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
 	.add(
+		HttpApiEndpoint.get("list", "/workspaces/:workspace/chats", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			query: chatListQuerySchema,
+			success: chatListSchema,
+		}),
 		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			payload: getOrCreateChatSchema,

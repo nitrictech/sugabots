@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { agentFaceSchema, agentHueSchema } from "./agents.ts";
+import { agentColorSchema, agentFaceSchema } from "./agents.ts";
 import { routineExecutionSchema, routineTriggerAuthorSchema } from "./routines.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -64,7 +64,7 @@ export const agentParticipantSchema = Schema.Struct({
 	id: uuidSchema,
 	name: Schema.String,
 	handle: Schema.String,
-	hue: agentHueSchema,
+	color: agentColorSchema,
 	face: agentFaceSchema,
 });
 
@@ -322,7 +322,6 @@ export const threadDetailsSchema = Schema.Struct({
 	capabilities: Schema.optional(
 		Schema.Struct({
 			approveToolCalls: Schema.Boolean,
-			alwaysAllowToolCalls: Schema.Boolean,
 		}),
 	),
 	activeTurnId: Schema.NullOr(uuidSchema),

@@ -37,14 +37,15 @@ export function useWorkspaceEvents(): void {
 			return;
 		}
 		const stream = client.events.workspace(workspaceId);
+		// A stream that drops may have missed a new message, so the list is fetched afresh.
 		void consume(stream, (event) => applyWorkspaceEvent(queries, workspaceId, event)).catch(() => {
-			void queries.invalidateQueries({ queryKey: ["threads", workspaceId] });
+			void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] });
 		});
 		return () => stream.close();
 	}, [queries, workspaceId]);
 }
 
-export function upsertThreadMessage(details: ThreadDetails, incoming: Message): ThreadDetails {
+function upsertThreadMessage(details: ThreadDetails, incoming: Message): ThreadDetails {
 	return {
 		...details,
 		messages: mergeThreadMessages(details.messages, [incoming]),
@@ -166,11 +167,12 @@ async function applyWorkspaceEvent(
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-messages", update.chatId] }),
 			queries.invalidateQueries({ queryKey: ["chat-history", update.chatId] }),
+			// A new message moves its chat up the list and changes its preview.
+			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 		]);
 	} else if (update.type === "thread.changed") {
 		await queries.invalidateQueries({ queryKey: ["chat-history"] });
 	}
-	await queries.invalidateQueries({ queryKey: ["threads", workspaceId] });
 }
 
 function updateThreadMessage(
@@ -192,7 +194,7 @@ function withContent(message: Message, content: string): Message {
 }
 
 /** The message with one collaboration or tool call added or brought up to date. */
-export function withPlacedPart(message: Message, part: PlacedPart): Message {
+function withPlacedPart(message: Message, part: PlacedPart): Message {
 	const others = placedParts(message).filter((made) => made.id !== part.id);
 	return { ...message, parts: rebuiltParts(message, message.content, [...others, part]) };
 }

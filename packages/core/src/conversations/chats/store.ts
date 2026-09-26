@@ -2,13 +2,16 @@ import type {
 	Chat,
 	ChatHistoryEntry,
 	ChatHistoryPage,
+	ChatList,
+	ChatListItem,
+	ChatListScope,
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
 	Message,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_PAGE_LIMIT, streamEvent, threadChannel } from "@sugabots/contracts";
-import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
@@ -27,6 +30,7 @@ import {
 	user,
 } from "../../database/schema.ts";
 import { reachesPod } from "../../workspaces/access.ts";
+import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
 import {
 	loadParticipantsByThread,
@@ -73,6 +77,12 @@ interface ChatScope {
 	userId: string;
 }
 
+interface ChatListRequest {
+	workspaceId: string;
+	userId: string;
+	pod: ChatListScope;
+}
+
 interface SendMainMessage {
 	chatId: string;
 	userId: string;
@@ -81,6 +91,8 @@ interface SendMainMessage {
 }
 
 export interface ChatStore {
+	/** The pod's bots with their chats, or undefined when the person cannot reach that pod. */
+	list(input: ChatListRequest): Effect.Effect<ChatList | undefined, never, Database>;
 	getOrCreate(input: ChatScope): Effect.Effect<Chat, ChatPlacementRejected, Database>;
 	messages(
 		chatId: string,
@@ -99,6 +111,36 @@ export interface ChatStore {
 
 export function chatStore(publishEvents: PublishEvents): ChatStore {
 	return {
+		list: Effect.fn("ChatStore.list")(function* (input) {
+			yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
+			if (input.pod !== "all") {
+				const reachable = yield* query((db) => reachablePod(db, input.pod, input));
+				if (!reachable) return undefined;
+			}
+			const bots = yield* query((db) => listedBots(db, input));
+			const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
+			const latest = yield* query((db) => latestMessages(db, threadIds));
+			const items = bots.flatMap((row): ChatListItem[] => {
+				const crew = crewAgentRow(row.agent);
+				if (!crew) return [];
+				const last = row.mainThreadId ? latest.get(row.mainThreadId) : undefined;
+				return [
+					{
+						agent: toAgent(crew),
+						chatId: row.chatId,
+						lastMessage: last
+							? {
+									preview: previewOf(last.content),
+									authorUserId: last.authorUserId,
+									at: last.createdAt.toISOString(),
+								}
+							: null,
+					},
+				];
+			});
+			return { items: items.sort(byLatestMessage) };
+		}),
+
 		getOrCreate: Effect.fn("ChatStore.getOrCreate")(function* (input) {
 			yield* lock(`chat:${input.podId}:${input.hostAgentId}`);
 			const visible = yield* query((db) => visibleChatForScope(db, input));
@@ -227,6 +269,91 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 
 const lock = (key: string) =>
 	query((db) => db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`));
+
+const reachablePod = Effect.fn("ChatStore.reachablePod")(function* (
+	db: Executor,
+	podId: string,
+	input: ChatListRequest,
+) {
+	const [row] = yield* db
+		.select({ id: pod.id })
+		.from(pod)
+		.where(
+			and(
+				eq(pod.id, podId),
+				eq(pod.workspaceId, input.workspaceId),
+				reachesPod(pod.id, input.userId),
+			),
+		)
+		.limit(1);
+	return row !== undefined;
+});
+
+/** Every crew bot the list covers, with its chat in its pod when it has one. */
+const listedBots = Effect.fn("ChatStore.listedBots")(function* (
+	db: Executor,
+	input: ChatListRequest,
+) {
+	const scope = input.pod === "all" ? eq(pod.kind, "shared") : eq(pod.id, input.pod);
+	return yield* db
+		.select({ agent, chatId: chat.id, mainThreadId: chat.mainThreadId })
+		.from(agent)
+		.innerJoin(pod, eq(pod.id, agent.podId))
+		.leftJoin(chat, and(eq(chat.podId, agent.podId), eq(chat.hostAgentId, agent.id)))
+		.where(
+			and(
+				eq(agent.workspaceId, input.workspaceId),
+				isNull(agent.systemAgentKey),
+				scope,
+				reachesPod(pod.id, input.userId),
+			),
+		)
+		.orderBy(asc(agent.name));
+});
+
+/** The newest message with words in it on each thread, in one query. */
+const latestMessages = Effect.fn("ChatStore.latestMessages")(function* (
+	db: Executor,
+	threadIds: readonly string[],
+) {
+	if (threadIds.length === 0) {
+		return new Map<string, { content: string; authorUserId: string | null; createdAt: Date }>();
+	}
+	const rows = yield* db
+		.selectDistinctOn([message.threadId], {
+			threadId: message.threadId,
+			content: message.content,
+			authorUserId: message.authorUserId,
+			createdAt: message.createdAt,
+		})
+		.from(message)
+		.where(and(inArray(message.threadId, [...threadIds]), ne(message.content, "")))
+		.orderBy(message.threadId, desc(message.createdAt));
+	return new Map(rows.map((row) => [row.threadId, row]));
+});
+
+const PREVIEW_MAX_LENGTH = 140;
+
+/** A message's first non-empty line, with runs of spaces closed up, cut to fit one row. */
+function previewOf(content: string): string {
+	const firstLine = content
+		.split("\n")
+		.map((line) => line.replace(/\s+/g, " ").trim())
+		.find((line) => line !== "");
+	if (!firstLine) return "";
+	return firstLine.length > PREVIEW_MAX_LENGTH
+		? `${firstLine.slice(0, PREVIEW_MAX_LENGTH - 1).trimEnd()}…`
+		: firstLine;
+}
+
+function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
+	const leftAt = left.lastMessage?.at;
+	const rightAt = right.lastMessage?.at;
+	if (leftAt && rightAt) return rightAt.localeCompare(leftAt);
+	if (leftAt) return -1;
+	if (rightAt) return 1;
+	return left.agent.name.localeCompare(right.agent.name);
+}
 
 const visibleChatForScope = Effect.fn("ChatStore.visibleChatForScope")(function* (
 	db: Executor,

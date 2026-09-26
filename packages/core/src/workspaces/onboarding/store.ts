@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import { type Database, query, transaction } from "../../database/database.ts";
 import {
 	agent,
-	modelProvider,
 	pod,
 	podMember,
 	providerModel,
@@ -52,7 +51,8 @@ const ROLES_THAT_MAY_FINISH_ONBOARDING = rolesWith("workspace.providers.manage")
 
 /**
  * Marks onboarding done, once the named pod and agent are ones this person may
- * finish with and the agent runs on a model the workspace has enabled.
+ * finish with. Connecting a model is a step that can be skipped, so the agent
+ * need not run on one yet: its chat says it has no model and where to choose one.
  *
  * It does not choose a model for the Scribe. A model chosen here is for an
  * agent somebody talks to, and reusing it for an unattended summariser would
@@ -78,22 +78,6 @@ const complete: OnboardingStore["complete"] = (userId, workspaceId, podId, agent
 							eq(agent.podId, pod.id),
 							eq(agent.workspaceId, workspaceMember.workspaceId),
 							isNull(agent.systemAgentKey),
-						),
-					)
-					.innerJoin(
-						providerModel,
-						and(
-							eq(providerModel.workspaceId, workspaceMember.workspaceId),
-							eq(providerModel.modelId, agent.model),
-							eq(providerModel.enabled, true),
-						),
-					)
-					.innerJoin(
-						modelProvider,
-						and(
-							eq(modelProvider.id, providerModel.providerId),
-							eq(modelProvider.workspaceId, workspaceMember.workspaceId),
-							eq(modelProvider.active, true),
 						),
 					)
 					.where(

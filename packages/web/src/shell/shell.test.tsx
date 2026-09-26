@@ -1,4 +1,4 @@
-import type { Pod } from "@sugabots/contracts";
+import type { ModelProvider, ProviderModel } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { failureForStatus } from "@sugabots/sdk";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -16,7 +16,6 @@ import {
 	modelProviders,
 	mount,
 	open,
-	pendingAnswer,
 	personalAssistant,
 	personalPod,
 	pods,
@@ -30,16 +29,11 @@ import { client } from "@/test-client.ts";
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const linearPage = `/suga/pods/suga-team/agents/${linear.handle}`;
-const writeClipboardText = vi.fn();
 
 beforeEach(() => {
 	apiAnswers();
 	document.documentElement.removeAttribute("data-theme");
 	localStorage.clear();
-	Object.defineProperty(navigator, "clipboard", {
-		configurable: true,
-		value: { writeText: writeClipboardText },
-	});
 	chooseWorkspace(workspace.id);
 });
 
@@ -60,52 +54,16 @@ describe("the shell", () => {
 	});
 });
 
-describe("the top bar", () => {
-	it("offers the workspaces you are in, and the way to their settings", async () => {
-		client.auth.workspaces.list.mockResolvedValue([
-			workspace,
-			{
-				id: "0199a3a0-0000-7000-8000-0000000000f9",
-				name: "Nitric",
-				slug: "nitric",
-			},
-		]);
-		mount(linearPage);
-
-		open(await screen.findByRole("button", { name: /Suga Workspace/ }));
-
-		const menu = await screen.findByRole("menu");
-		expect(within(menu).getByRole("menuitem", { name: /Nitric/ })).toBeDefined();
-		expect(
-			within(menu).getByRole("menuitem", { name: "Workspace settings" }).getAttribute("href"),
-		).toBe("/suga/settings");
-	});
-
-	// Settings opens over the app and covers this menu, so "already open" is no
-	// longer a state the menu can be opened in. What the menu still owes is to
-	// close behind the window it opened.
-	it("closes the workspace menu behind the settings window it opens", async () => {
-		mount(linearPage);
-
-		open(await screen.findByRole("button", { name: /Suga Workspace/ }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace settings" }));
-
-		expect(await screen.findByRole("dialog", { name: "Workspace settings" })).toBeDefined();
-		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-	});
+describe("the workspace choice", () => {
+	const other = { id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Nitric", slug: "nitric" };
 
 	it("keeps a workspace choice in memory when storage is unavailable", async () => {
-		const other = {
-			id: "0199a3a0-0000-7000-8000-0000000000f9",
-			name: "Nitric",
-			slug: "nitric",
-		};
 		client.auth.workspaces.list.mockResolvedValue([workspace, other]);
 		const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
 			throw new Error("Storage disabled");
 		});
 		const router = mount(linearPage);
-		await screen.findByRole("button", { name: /Suga Workspace/ });
+		await screen.findByRole("navigation", { name: "Pods" });
 
 		chooseWorkspace(other.id);
 		await router.navigate({ to: "/" });
@@ -115,264 +73,158 @@ describe("the top bar", () => {
 	});
 
 	it("follows workspace choices made in another tab", async () => {
-		const other = {
-			id: "0199a3a0-0000-7000-8000-0000000000f9",
-			name: "Nitric",
-			slug: "nitric",
-		};
 		client.auth.workspaces.list.mockResolvedValue([workspace, other]);
 		const router = mount(linearPage);
-		await screen.findByRole("button", { name: /Suga Workspace/ });
+		await screen.findByRole("navigation", { name: "Pods" });
 		localStorage.setItem("sugabots-workspace", other.id);
 
 		window.dispatchEvent(
-			new StorageEvent("storage", {
-				key: "sugabots-workspace",
-				newValue: other.id,
-			}),
+			new StorageEvent("storage", { key: "sugabots-workspace", newValue: other.id }),
 		);
 		await router.navigate({ to: "/" });
 
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 	});
+});
 
-	it("signs out from the user menu, and re-asks who you are", async () => {
-		client.auth.signOut.mockResolvedValue(undefined);
-		const refresh = vi.fn();
-		mount(linearPage, sam, refresh);
+describe("the rail", () => {
+	it("lists All, each shared pod and Personal, and marks the pod you are in", async () => {
+		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
+		mount(linearPage);
 
-		open(await screen.findByRole("button", { name: /Sam/ }));
-		(await screen.findByRole("menuitem", { name: "Sign out" })).click();
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		await within(rail).findByRole("link", { name: "Personal" });
+		const names = within(rail)
+			.getAllByRole("link")
+			.map((link) => link.getAttribute("aria-label"));
+		expect(names).toEqual(["All", "Suga-Team", "Sales", "Personal", "Settings"]);
+		expect(within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current")).toBe(
+			"page",
+		);
+	});
 
-		await waitFor(() => {
-			expect(client.auth.signOut).toHaveBeenCalled();
-		});
-		// Dropping the token is not enough on its own: the guard reads the
-		// session, so it has to be asked again before the route can send
-		// anybody to the login page.
-		await waitFor(() => {
-			expect(refresh).toHaveBeenCalled();
-		});
+	it("keeps All selected for a chat opened from it", async () => {
+		mount(`/suga/all/pods/suga-team/agents/${linear.handle}`);
+
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		await within(rail).findByRole("link", { name: "Suga-Team" });
+		expect(within(rail).getByRole("link", { name: "All" }).getAttribute("aria-current")).toBe(
+			"page",
+		);
+		expect(
+			within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current"),
+		).toBeNull();
+	});
+
+	it("opens settings from your avatar", async () => {
+		mount(linearPage);
+
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		expect(within(rail).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+			"/suga/settings",
+		);
 	});
 });
 
-describe("pod-first navigation", () => {
-	it("marks the current agent as the selected page", async () => {
-		mount(linearPage);
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		expect(
-			(await within(rail).findByRole("link", { name: /Linear Handler/ })).getAttribute(
-				"aria-current",
-			),
-		).toBe("page");
-	});
-	it("marks only the owning-pod copy of an agent as the current page", async () => {
-		mount(linearPage);
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(rail).findByRole("link", { name: /Linear Handler/ });
-
-		expect(within(rail).getAllByRole("link", { current: "page" })).toHaveLength(1);
-	});
-	it("closes the navigation drawer after choosing an agent", async () => {
-		const router = mount(linearPage);
-		fireEvent.click(await screen.findByRole("button", { name: "Open navigation" }));
-		const drawer = await screen.findByRole("dialog", {
-			name: "Your workspace",
-		});
-		fireEvent.click(
-			await within(drawer).findByRole("link", {
-				name: new RegExp(triager.name),
+describe("the conversation list", () => {
+	it("lists a pod's bots newest first, marking the open chat and what you last said", async () => {
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{
+						agent: linear,
+						chatId: "0199a3a0-0000-7000-8000-0000000000c1",
+						lastMessage: {
+							preview: "File the timeout as a bug",
+							authorUserId: sam.id,
+							at: new Date().toISOString(),
+						},
+					},
+					{ agent: triager, chatId: null, lastMessage: null },
+				],
 			}),
 		);
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${triager.handle}`),
-		);
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-	});
-	it("closes the drawer with Escape and returns focus to its trigger", async () => {
-		mount(linearPage);
-		const trigger = await screen.findByRole("button", {
-			name: "Open navigation",
-		});
-		trigger.focus();
-		fireEvent.click(trigger);
-		const drawer = await screen.findByRole("dialog", {
-			name: "Your workspace",
-		});
-		fireEvent.keyDown(drawer, { key: "Escape" });
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		await waitFor(() => expect(document.activeElement).toBe(trigger));
-	});
-});
-
-describe("the roster", () => {
-	it("lists each agent under every pod it has been placed into", async () => {
 		mount(linearPage);
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(rail).findByRole("heading", { name: "Suga-Team" });
+		const list = await screen.findByRole("region", { name: "Suga-Team" });
+		const rows = await within(list).findAllByRole("link");
+		expect(rows.map((row) => row.textContent)).toEqual([
+			expect.stringContaining("You: File the timeout as a bug"),
+			expect.stringContaining("Issue Triager"),
+		]);
+		expect(rows[0]?.getAttribute("aria-current")).toBe("page");
+		expect(client.api.chats.list).toHaveBeenCalledWith({
+			params: { workspace: workspace.id },
+			query: { pod: pods[0]?.id },
+		});
+	});
+
+	it("finds a bot by name", async () => {
+		mount("/suga/pods/suga-team");
+
+		const list = await screen.findByRole("region", { name: "Suga-Team" });
+		await within(list).findByRole("link", { name: /Linear Handler/ });
+		fireEvent.change(within(list).getByRole("searchbox", { name: "Search Suga-Team" }), {
+			target: { value: "tri" },
+		});
 
 		expect(
-			within(rail)
-				.getByRole("link", { name: /Linear Handler/ })
-				.getAttribute("href"),
-		).toBe(linearPage);
-		expect(within(rail).getByRole("heading", { name: "Sales" })).toBeDefined();
-		expect(within(rail).getByRole("link", { name: /Customer Research/ })).toBeDefined();
+			within(list)
+				.getAllByRole("link")
+				.map((row) => row.textContent),
+		).toEqual([expect.stringContaining("Issue Triager")]);
 	});
 
-	it("lists an agent only under its owning pod", async () => {
-		mount(linearPage);
+	it("opens chats from All under All, and asks for every shared pod", async () => {
+		mount("/suga/all");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		expect(await within(rail).findByRole("link", { name: /Linear Handler/ })).toBeDefined();
-		expect(within(rail).queryByRole("heading", { name: "In no pod" })).toBeNull();
-	});
-
-	it("pins the private Personal space above the rest", async () => {
-		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
-		client.api.agents.list.mockReturnValue(Effect.succeed([...agents, personalAssistant]));
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(rail).findByRole("heading", { name: "Personal" });
-		const headings = within(rail)
-			.getAllByRole("heading")
-			.map((heading) => heading.textContent);
-		expect(headings).toEqual(["Suga-Team", "Sales", "Personal"]);
-		// The eyebrow existed to fence Personal off from the pods below it.
-		// Personal sits last now, so it has nothing left to separate.
-		expect(within(rail).queryByText("Pods")).toBeNull();
-
-		// Nobody to invite and nothing to rename, so Personal carries the one
-		// action it has and no menu at all.
-		expect(within(rail).getByRole("button", { name: "New agent in Personal" })).toBeDefined();
-		expect(within(rail).queryByRole("button", { name: "Personal actions" })).toBeNull();
-	});
-
-	it("folds a pod away, and says how much went with it", async () => {
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		const heading = await within(rail).findByRole("button", { name: "Suga-Team" });
-		expect(within(rail).getByRole("link", { name: /Linear Handler/ })).toBeDefined();
-
-		fireEvent.click(heading);
-
-		expect(within(rail).queryByRole("link", { name: /Linear Handler/ })).toBeNull();
-		// The count sits a gap away from the name on screen, which a name taken
-		// from the contents does not hear: "Suga-Team2".
-		// The roster leaves out the workspace's own system agents, so the count
-		// on the heading is what was on screen, not what the pod holds.
-		const inSuga = agents.filter(
-			(agent) => agent.podId === pods[0]?.id && agent.systemAgentKey === null,
-		).length;
-		await within(rail).findByRole("button", { name: `Suga-Team, ${inSuga}` });
-	});
-
-	it("keeps a pod folded while you go elsewhere and come back", async () => {
-		const router = mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		fireEvent.click(await within(rail).findByRole("button", { name: "Sales" }));
-		expect(within(rail).queryByRole("link", { name: /Customer Research/ })).toBeNull();
-
-		// Settings replaces the roster, so coming back builds it again from
-		// whatever the last visit left behind.
-		await router.navigate({ to: "/$workspace/settings", params: { workspace: "suga" } });
-		await screen.findByRole("navigation", { name: "Workspace settings" });
-		await router.navigate({
-			to: "/$workspace/pods/$pod/agents/$agent",
-			params: { workspace: "suga", pod: "suga-team", agent: linear.handle },
+		const list = await screen.findByRole("region", { name: "All" });
+		const row = await within(list).findByRole("link", { name: /Linear Handler/ });
+		expect(row.getAttribute("href")).toBe(`/suga/all/pods/suga-team/agents/${linear.handle}`);
+		expect(client.api.chats.list).toHaveBeenCalledWith({
+			params: { workspace: workspace.id },
+			query: { pod: "all" },
 		});
-
-		const roster = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(roster).findByRole("heading", { name: "Sales" });
-		expect(within(roster).queryByRole("link", { name: /Customer Research/ })).toBeNull();
 	});
 
-	/*
-	 * Folding the pod you are reading is a thing people do — it is how you get
-	 * the rest of the rail back while you work. The unfold that opens a pod you
-	 * follow a link into must not undo that.
-	 */
-	it("leaves the pod you are in folded once you fold it", async () => {
-		mount(linearPage);
+	it("says a pod has no bots yet, and offers the first", async () => {
+		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
+		mount("/suga/pods/sales");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		fireEvent.click(await within(rail).findByRole("button", { name: "Suga-Team" }));
+		expect(await screen.findByText("No bots in Sales yet")).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "New bot" }));
+		expect(await screen.findByRole("dialog", { name: "New bot" })).toBeDefined();
+	});
 
-		await waitFor(() =>
-			expect(within(rail).queryByRole("link", { name: /Linear Handler/ })).toBeNull(),
+	it("offers a new bot from All, in a pod chosen in the dialog", async () => {
+		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
+		mount("/suga/all");
+
+		expect(await screen.findByText("No bots yet")).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "New bot" }));
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		expect(within(dialog).getByRole("button", { name: /^Pod:/ })).toBeDefined();
+	});
+
+	it("offers a first pod from All when there is none", async () => {
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
+		mount("/suga/all");
+
+		const list = await screen.findByRole("region", { name: "All" });
+		expect(await within(list).findByText("No pods yet")).toBeDefined();
+		fireEvent.click(within(list).getByRole("button", { name: "New pod" }));
+		expect(await screen.findByRole("dialog", { name: "New pod" })).toBeDefined();
+	});
+
+	it("offers no New bot to somebody who may not make one", async () => {
+		client.api.pods.list.mockReturnValue(
+			Effect.succeed(pods.map((pod) => ({ ...pod, permissions: VIEWER_IN_POD }))),
 		);
-	});
+		mount("/suga/pods/suga-team");
 
-	/*
-	 * Opening it is the test: a menu that renders a label outside a group throws
-	 * only once somebody clicks, which is exactly what shipped.
-	 */
-	it("opens a pod's menu from its heading", async () => {
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		open(await within(rail).findByRole("button", { name: "Suga-Team actions" }));
-
-		const menu = await screen.findByRole("menu");
-		expect(within(menu).getByRole("menuitem", { name: "New agent" })).toBeDefined();
-		expect(within(menu).getByRole("menuitem", { name: "Pod settings" })).toBeDefined();
-		// The menu names the pod it belongs to, the way a section menu does.
-		expect(within(menu).getByText("Suga-Team")).toBeDefined();
-	});
-
-	/*
-	 * A pod with nothing in it is where somebody is looking for the way to put
-	 * something in it, so the row is the offer rather than empty space under a
-	 * heading with a plus on it.
-	 */
-	it("offers the new agent row in a pod with no agents", async () => {
-		const empty = {
-			...(pods[0] as Pod),
-			id: "0199a3a0-0000-7000-8000-0000000000a3",
-			name: "Support",
-			slug: "support",
-		};
-		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, empty]));
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(rail).findByRole("heading", { name: "Support" });
-		fireEvent.click(within(rail).getByRole("button", { name: "New agent" }));
-
-		const dialog = await screen.findByRole("dialog");
-		expect(within(dialog).getByLabelText("Name")).toBeDefined();
-	});
-
-	it("says a pod is empty rather than offering a row nobody may use", async () => {
-		const empty = {
-			...(pods[0] as Pod),
-			id: "0199a3a0-0000-7000-8000-0000000000a3",
-			name: "Support",
-			slug: "support",
-			permissions: VIEWER_IN_POD,
-		};
-		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, empty]));
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		await within(rail).findByRole("heading", { name: "Support" });
-		expect(within(rail).getByText("No agents yet.")).toBeDefined();
-		expect(within(rail).queryByRole("button", { name: "New agent" })).toBeNull();
-		expect(within(rail).queryByRole("button", { name: "New agent in Support" })).toBeNull();
-	});
-
-	it("opens the new agent form from a pod's heading", async () => {
-		mount(linearPage);
-
-		const rail = await screen.findByRole("navigation", { name: "Workspace" });
-		fireEvent.click(await within(rail).findByRole("button", { name: "New agent in Suga-Team" }));
-
-		const dialog = await screen.findByRole("dialog");
-		expect(within(dialog).getByLabelText("Name")).toBeDefined();
+		await screen.findByRole("region", { name: "Suga-Team" });
+		expect(screen.queryByRole("button", { name: "New bot" })).toBeNull();
 	});
 });
 
@@ -386,16 +238,14 @@ describe("the settings navigation", () => {
 	it("lists every section for an administrator, and the way back out", async () => {
 		const router = mount("/suga/settings");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
+		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
-		expect(await within(rail).findByRole("link", { name: "Model providers" })).toBeDefined();
+		expect(await within(rail).findByRole("link", { name: "Models" })).toBeDefined();
 		expect(within(rail).getByRole("link", { name: "General" }).getAttribute("aria-current")).toBe(
 			"page",
 		);
 
-		// Settings is a window over the app, so the way out is the cross that
-		// closes it rather than a link among the sections.
-		fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+		fireEvent.click(screen.getByRole("link", { name: "Close settings" }));
 
 		await waitFor(() =>
 			expect(router.state.location.pathname.startsWith("/suga/agents")).toBe(true),
@@ -405,14 +255,14 @@ describe("the settings navigation", () => {
 	it("counts what each section holds, beside its name", async () => {
 		mount("/suga/settings");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
+		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
 		// The name carries the count, so it is read as a pair rather than "Pods2".
 		expect(await within(rail).findByRole("link", { name: "Members, 2" })).toBeDefined();
 		expect(within(rail).getByRole("link", { name: "Pods, 2" })).toBeDefined();
 		// Crew only: the Scribe and the Facilitator belong to the workspace rather
 		// than to a pod, and are counted in their own section, not this one.
-		expect(within(rail).getByRole("link", { name: "Agents, 3" })).toBeDefined();
+		expect(within(rail).getByRole("link", { name: "Bots, 3" })).toBeDefined();
 		// General holds nothing to count.
 		expect(within(rail).getByRole("link", { name: "General" })).toBeDefined();
 	});
@@ -430,7 +280,7 @@ describe("the settings navigation", () => {
 		]);
 		mount("/suga/settings");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
+		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		await within(rail).findByRole("link", { name: "Pods, 2" });
 
 		// The one member is you. "1" tells nobody anything they did not know.
@@ -441,56 +291,45 @@ describe("the settings navigation", () => {
 		apiAnswers({ role: "member" });
 		mount("/suga/settings");
 
-		const rail = await screen.findByRole("navigation", { name: "Workspace settings" });
+		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		// Waiting on a count waits on the answers the rail is drawn from, the
 		// caller's role among them, so what follows is a settled list.
 		await within(rail).findByRole("link", { name: "Pods, 2" });
 
-		expect(within(rail).queryByRole("link", { name: "Model providers" })).toBeNull();
+		expect(within(rail).queryByRole("link", { name: "Models" })).toBeNull();
 		expect(within(rail).queryByRole("link", { name: "Web search" })).toBeNull();
-		expect(within(rail).queryByRole("link", { name: "Built-in agents" })).toBeNull();
 	});
 
-	it("tells a member who reaches the built-in agents by address that it is not theirs", async () => {
+	it("tells a member who reaches the Models page by address that it is not theirs", async () => {
 		apiAnswers({ role: "member" });
-		mount("/suga/settings/built-in-agents");
+		mount("/suga/settings/providers/system");
 
 		expect(
-			await screen.findByText("Only workspace administrators can configure the built-in agents."),
+			await screen.findByText("Only workspace administrators can manage models."),
 		).toBeDefined();
-		expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
 	});
 });
 
 describe("routes", () => {
-	it("lands on a crew agent, never on a built-in one nobody talks to", async () => {
+	it("lands on All", async () => {
 		const router = mount("/");
 
-		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/suga/pods/sales/agents/customer-research");
-		});
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/all"));
 	});
 
-	it("reaches a built-in agent's settings by its key, not by an id", async () => {
-		const router = mount("/suga/settings/built-in-agents/facilitate");
+	it("lands on Personal for somebody in no shared pod", async () => {
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		const router = mount("/");
 
-		expect(await screen.findByRole("heading", { name: facilitator.name })).toBeDefined();
-		expect(router.state.location.pathname).toBe("/suga/settings/built-in-agents/facilitate");
-		expect(screen.queryByPlaceholderText(/^Message /)).toBeNull();
-	});
-
-	it("sends an unknown built-in agent key back to the section", async () => {
-		const router = mount("/suga/settings/built-in-agents/invent");
-
-		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/suga/settings/built-in-agents");
-		});
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/pods/personal"));
 	});
 
 	it("sends somebody signed out to the login page, remembering where they were going", async () => {
 		const destination = `${linearPage}?thread=0199a3a0-0000-7000-8000-0000000000aa`;
 		const router = mount(destination, null);
 
+		expect(await screen.findByRole("heading", { name: "Welcome to Sugabots" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Continue with email" }));
 		expect(await screen.findByRole("button", { name: "Log in" })).toBeDefined();
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe("/login");
@@ -499,10 +338,10 @@ describe("routes", () => {
 	});
 
 	it("returns a signed-in visit to the login page to where it was going, search and all", async () => {
-		const destination = "/suga/settings/pods/suga-team?tab=routing";
+		const destination = `/suga/settings/pods/suga-team/agents/${linear.handle}?tab=routines`;
 		const router = mount(`/login?returnTo=${encodeURIComponent(destination)}`);
 
-		expect(await screen.findByRole("tab", { name: "Routing", selected: true })).toBeDefined();
+		expect(await screen.findByRole("button", { name: "New routine" })).toBeDefined();
 		expect(router.state.location.href).toBe(destination);
 	});
 
@@ -517,47 +356,144 @@ describe("routes", () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		const router = mount(linearPage);
 
-		expect(
-			await screen.findByRole("heading", {
-				name: "Name the place where work happens.",
-			}),
-		).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Name your workspace" })).toBeDefined();
 		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
 		expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
 	});
 
-	it("keeps an incomplete workspace in onboarding across direct links", async () => {
+	it("walks a new workspace from its first bot to its chat", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
+		const named = {
+			...personalAssistant,
+			name: "Chief",
+			handle: "chief",
+			color: "purple" as const,
+		};
+		client.api.agents.update.mockImplementation(() => {
+			client.api.agents.list.mockReturnValue(Effect.succeed([named]));
+			return Effect.succeed(named);
+		});
+		client.api.onboarding.complete.mockReturnValue(Effect.succeed({ completed: true }));
 		const router = mount(linearPage);
 
-		expect(
-			await screen.findByRole("heading", {
-				name: "Your Personal pod is ready.",
-			}),
-		).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
-
-		client.api.onboarding.complete.mockReturnValue(Effect.void);
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
-		fireEvent.click(screen.getByRole("button", { name: /Enter Personal/ }));
+		const create = screen.getByRole("button", { name: "Create bot" });
+		expect(create.hasAttribute("disabled")).toBe(true);
+		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Chief" } });
+		fireEvent.click(screen.getByRole("radio", { name: "purple" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Inbox" }));
+		fireEvent.click(create);
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/personal-assistant"),
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: personalAssistant.id },
+				payload: {
+					name: "Chief",
+					color: "purple",
+					face: "pill",
+					description: "Sorts your email and flags what needs you.",
+				},
+			}),
+		);
+		expect(await screen.findByRole("heading", { name: "Bring your friends" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+		expect(await screen.findByRole("heading", { name: "Chief is ready" })).toBeDefined();
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
+		fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/chief"),
 		);
 	});
 
-	it("keeps onboarding on the Provider step while the assistant's model is not enabled", async () => {
+	it("invites the addresses typed, and says how many it will send", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(
-			Effect.succeed([{ ...personalAssistant, model: "a-model-the-workspace-has-not-enabled" }]),
+			Effect.succeed([{ ...personalAssistant, name: "Chief" }]),
 		);
+		client.api.agents.update.mockReturnValue(Effect.succeed(personalAssistant));
+		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
 		mount(linearPage);
 
-		expect(await screen.findByRole("heading", { name: "Bring your own model." })).toBeDefined();
-		expect(screen.queryByRole("heading", { name: "Your Personal pod is ready." })).toBeNull();
+		fireEvent.click(await screen.findByRole("button", { name: "Create bot" }));
+		const emails = await screen.findByLabelText("Email addresses");
+		fireEvent.change(emails, { target: { value: "jay@nitric.io" } });
+		fireEvent.keyDown(emails, { key: "Enter" });
+		fireEvent.change(emails, { target: { value: "not an address" } });
+		fireEvent.keyDown(emails, { key: "Enter" });
+		fireEvent.change(emails, { target: { value: "mara@nitric.io," } });
+		fireEvent.blur(emails);
+		fireEvent.click(screen.getByRole("button", { name: "Send 2 invites" }));
+
+		await waitFor(() => {
+			for (const email of ["jay@nitric.io", "mara@nitric.io"]) {
+				expect(client.auth.workspaces.invite).toHaveBeenCalledWith(
+					expect.objectContaining({ email, role: "member" }),
+				);
+			}
+		});
+		expect(await screen.findByRole("heading", { name: "Chief is ready" })).toBeDefined();
+	});
+
+	it("starts at the model step while no model is switched on, and lets it be skipped", async () => {
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
+		client.api.modelProviders.listEnabledModels.mockReturnValue(Effect.succeed({ models: [] }));
+		mount(linearPage);
+
+		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
+	});
+
+	it("connects the first provider by its key and switches its models on", async () => {
+		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
+		client.api.modelProviders.listEnabledModels.mockReturnValue(Effect.succeed({ models: [] }));
+		const openrouter = {
+			...(modelProviders[0] as ModelProvider),
+			id: "0199a3a0-0000-7000-8000-0000000000c9",
+			preset: "openrouter" as const,
+			name: "OpenRouter",
+			models: [
+				{
+					...(modelProviders[0]?.models[0] as ProviderModel),
+					enabled: false,
+					modelId: "meta/llama",
+				},
+			],
+		};
+		client.api.modelProviders.create.mockReturnValue(Effect.succeed(openrouter));
+		client.api.modelProviders.fetchModels.mockReturnValue(
+			Effect.succeed({ added: 1, updated: 0, unchanged: 0 }),
+		);
+		client.api.modelProviders.get.mockReturnValue(Effect.succeed(openrouter));
+		client.api.modelProviders.setModelsEnabled.mockReturnValue(Effect.succeed({ updated: 1 }));
+		mount(linearPage);
+
+		fireEvent.click(await screen.findByRole("radio", { name: /OpenRouter/ }));
+		fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-or-test" } });
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+		await waitFor(() =>
+			expect(client.api.modelProviders.setModelsEnabled).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, providerId: openrouter.id },
+				payload: { modelIds: [openrouter.models[0]?.id], enabled: true },
+			}),
+		);
+		expect(client.api.modelProviders.create).toHaveBeenCalledWith({
+			params: { workspace: workspace.id },
+			payload: { preset: "openrouter", apiKey: "sk-or-test" },
+		});
+		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 	});
 
 	it("still honours the older ?invite= link shape", async () => {
@@ -620,6 +556,7 @@ describe("routes", () => {
 			),
 		);
 		mount("/", null);
+		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		await createAccount("Eve", "eve@example.com");
 
@@ -632,6 +569,7 @@ describe("routes", () => {
 			failureForStatus(403, "Email not verified", "EMAIL_NOT_VERIFIED"),
 		);
 		mount("/", null);
+		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		fireEvent.change(await screen.findByLabelText("Work email"), {
 			target: { value: "sam@example.com" },
@@ -712,6 +650,7 @@ describe("routes", () => {
 		client.auth.signIn.mockResolvedValue(undefined);
 		const refresh = vi.fn().mockRejectedValue(new Error("Offline"));
 		mount("/login", null, refresh);
+		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 		fireEvent.change(await screen.findByLabelText("Work email"), {
 			target: { value: "sam@example.com" },
 		});
@@ -739,31 +678,10 @@ describe("routes", () => {
 		expect(screen.queryByText("No such agent here")).toBeNull();
 	});
 
-	it("says a thread is not there, and when threads arrive", async () => {
-		mount("/suga/threads/anything");
+	it("says so when the pod in the address is not there", async () => {
+		mount("/suga/pods/missing");
 
-		expect(await screen.findByText("No such thread here")).toBeDefined();
-		expect(await screen.findByText(/This thread is unavailable/)).toBeDefined();
-	});
-
-	it("says so when the workspace has no agents in it yet", async () => {
-		client.api.agents.list.mockReturnValue(Effect.succeed([]));
-		mount("/suga/agents");
-
-		expect(await screen.findByText("No agents yet")).toBeDefined();
-	});
-
-	it("waits for pods before deciding the workspace has no agents", async () => {
-		const podList = pendingAnswer();
-		client.api.pods.list.mockReturnValue(podList.effect);
-		client.api.agents.list.mockReturnValue(Effect.succeed([]));
-		mount("/suga/agents");
-
-		await waitFor(() => expect(client.api.pods.list).toHaveBeenCalled());
-		expect(screen.queryByText("No agents yet")).toBeNull();
-
-		podList.answer(Effect.succeed(pods));
-		expect(await screen.findByText("No agents yet")).toBeDefined();
+		expect(await screen.findByText("No such pod here")).toBeDefined();
 	});
 });
 
@@ -785,16 +703,17 @@ describe("creating a pod", () => {
 		expect(screen.queryByRole("button", { name: "New pod" })).toBeNull();
 	});
 
-	it("shows the address it will get, derived from the name", async () => {
+	it("waits for a name before it can make a pod", async () => {
 		mount("/suga/settings/pods");
-		(await screen.findByRole("button", { name: "New pod" })).click();
+		(
+			await within(await screen.findByRole("main")).findByRole("button", { name: "New pod" })
+		).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
-		fireEvent.change(within(dialog).getByLabelText("Name"), {
-			target: { value: "Platform Team" },
-		});
-
-		expect(within(dialog).getByText("platform-team")).toBeDefined();
+		const create = within(dialog).getByRole("button", { name: "Create" });
+		expect(create.hasAttribute("disabled")).toBe(true);
+		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Platform Team" } });
+		expect(create.hasAttribute("disabled")).toBe(false);
 	});
 
 	it("creates one and puts it in the rail", async () => {
@@ -802,7 +721,9 @@ describe("creating a pod", () => {
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
 		mount("/suga/settings/pods");
-		(await screen.findByRole("button", { name: "New pod" })).click();
+		(
+			await within(await screen.findByRole("main")).findByRole("button", { name: "New pod" })
+		).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
@@ -810,7 +731,7 @@ describe("creating a pod", () => {
 		});
 
 		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, made]));
-		within(dialog).getByRole("button", { name: "Create pod" }).click();
+		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		await waitFor(() => {
 			expect(client.api.pods.create).toHaveBeenCalledWith({
@@ -827,13 +748,15 @@ describe("creating a pod", () => {
 		);
 
 		mount("/suga/settings/pods");
-		(await screen.findByRole("button", { name: "New pod" })).click();
+		(
+			await within(await screen.findByRole("main")).findByRole("button", { name: "New pod" })
+		).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New pod" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: "Sales" },
 		});
-		within(dialog).getByRole("button", { name: "Create pod" }).click();
+		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		expect(await within(dialog).findByRole("alert")).toBeDefined();
 		expect(screen.getByRole("dialog", { name: "New pod" })).toBeDefined();
@@ -841,7 +764,7 @@ describe("creating a pod", () => {
 });
 
 describe("Personal pod settings", () => {
-	it("groups the private pod separately and offers no rename action", async () => {
+	it("offers no rename or delete for the private pod", async () => {
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod, ...pods]));
 
 		mount(`/suga/settings/pods/${personalPod.slug}`);
@@ -849,17 +772,18 @@ describe("Personal pod settings", () => {
 		const rail = await screen.findByRole("navigation", {
 			name: "Workspace pods",
 		});
-		expect(await within(rail).findByText("Personal", { selector: "p" })).toBeDefined();
-		expect(within(rail).getByText("Pods")).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Personal options" })).toBeNull();
+		expect(await within(rail).findByRole("link", { name: /Personal/ })).toBeDefined();
+		expect(await screen.findByText("Only you can see this pod and its bots.")).toBeDefined();
+		expect(screen.queryByLabelText("Name")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete pod" })).toBeNull();
 	});
 });
 
 describe("creating an agent", () => {
-	it("offers a member of the pod the same New agent action as an admin", async () => {
+	it("offers a member of the pod the same New bot action as an admin", async () => {
 		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 
-		expect(await screen.findByRole("button", { name: "New agent" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: "New bot" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
@@ -867,14 +791,15 @@ describe("creating an agent", () => {
 		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
-		expect(screen.getByRole("button", { name: "New agent" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "New bot" })).toBeDefined();
 	});
 
-	it("keeps deleting agents, and making pods, to those allowed them", async () => {
+	it("keeps deleting pods, and making them, to those allowed them", async () => {
 		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 
-		expect(await screen.findByRole("button", { name: "New pod" })).toBeDefined();
-		expect(screen.getAllByRole("button", { name: "Delete" }).length).toBeGreaterThan(0);
+		const settings = await screen.findByRole("main");
+		expect(await within(settings).findByRole("button", { name: "New pod" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Delete pod" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
@@ -883,10 +808,10 @@ describe("creating an agent", () => {
 		await screen.findByRole("heading", { name: pods[0]?.name });
 
 		expect(screen.queryByRole("button", { name: "New pod" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete pod" })).toBeNull();
 	});
 
-	it("creates a shared agent in its pod and opens its settings", async () => {
+	it("creates a bot with the face chosen, in its pod, and opens its settings", async () => {
 		const made = {
 			...linear,
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
@@ -897,14 +822,16 @@ describe("creating an agent", () => {
 		};
 		client.api.agents.create.mockReturnValue(Effect.succeed(made));
 		const router = mount(`/suga/settings/pods/${pods[0]?.slug}`);
-		(await screen.findByRole("button", { name: "New agent" })).click();
+		(await screen.findByRole("button", { name: "New bot" })).click();
 
-		const dialog = await screen.findByRole("dialog", { name: "New agent" });
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: `  ${made.name}  ` },
 		});
+		fireEvent.click(within(dialog).getByRole("radio", { name: "orange" }));
+		fireEvent.click(within(dialog).getByRole("radio", { name: "arc" }));
 		client.api.agents.list.mockReturnValue(Effect.succeed([...agents, made]));
-		within(dialog).getByRole("button", { name: "Create agent" }).click();
+		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		await waitFor(() => {
 			expect(client.api.agents.create).toHaveBeenCalledWith({
@@ -912,6 +839,8 @@ describe("creating an agent", () => {
 				payload: {
 					name: made.name,
 					model: made.model,
+					color: "orange",
+					face: "arc",
 				},
 			});
 		});
@@ -920,7 +849,7 @@ describe("creating an agent", () => {
 				`/suga/settings/pods/${pods[0]?.slug}/agents/${made.handle}`,
 			),
 		);
-		expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
+		expect(screen.queryByRole("dialog", { name: "New bot" })).toBeNull();
 		expect((await screen.findAllByText(made.name)).length).toBeGreaterThan(0);
 	});
 
@@ -929,44 +858,72 @@ describe("creating an agent", () => {
 			Effect.fail(new Conflict({ message: "already exists" })),
 		);
 		mount(`/suga/settings/pods/${pods[0]?.slug}`);
-		(await screen.findByRole("button", { name: "New agent" })).click();
+		(await screen.findByRole("button", { name: "New bot" })).click();
 
-		const dialog = await screen.findByRole("dialog", { name: "New agent" });
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: linear.name },
 		});
-		within(dialog).getByRole("button", { name: "Create agent" }).click();
+		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		expect((await within(dialog).findByRole("alert")).textContent).toContain(
-			"An agent with that name already exists",
+			"A bot with that name already exists",
 		);
-		expect(screen.getByRole("dialog", { name: "New agent" })).toBeDefined();
+		expect(screen.getByRole("dialog", { name: "New bot" })).toBeDefined();
 	});
 });
 
 describe("workspace settings", () => {
-	it("shows the selected pod name in the agent filter", async () => {
+	it("makes a bot in the pod chosen when the dialog is not opened from one", async () => {
+		const [first, second] = pods as [(typeof pods)[number], (typeof pods)[number]];
+		client.api.agents.create.mockReturnValue(Effect.succeed({ ...linear, podId: second.id }));
 		mount("/suga/settings/agents");
 
-		const filter = await screen.findByRole("combobox", {
-			name: "Filter by pod",
-		});
-		open(filter);
-		(await screen.findByRole("option", { name: pods[0]?.name })).click();
+		fireEvent.click(await screen.findByRole("button", { name: "New bot" }));
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		fireEvent.click(within(dialog).getByRole("button", { name: `Pod: ${first.name}` }));
+		fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(second.name) }));
+		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Scout" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
 
-		await waitFor(() => {
-			const selected = screen.getByRole("combobox", { name: "Filter by pod" });
-			expect(selected.textContent).toContain(pods[0]?.name);
-			expect(selected.textContent).not.toContain(pods[0]?.id);
-		});
+		await waitFor(() =>
+			expect(client.api.agents.create).toHaveBeenCalledWith(
+				expect.objectContaining({ params: { podId: second.id } }),
+			),
+		);
 	});
 
-	it("keeps the built-in agents out of the agent table, since they are in no pod", async () => {
+	it("opens the first pod when none is chosen", async () => {
+		mount("/suga/settings/pods");
+
+		expect(await screen.findByRole("heading", { name: pods[0]?.name })).toBeDefined();
+		expect(screen.queryByText("Choose a pod")).toBeNull();
+	});
+
+	it("opens the first bot when none is chosen", async () => {
 		mount("/suga/settings/agents");
 
-		// The roster is still behind the settings window, and it names agents
-		// too, so the table is asked rather than the page.
-		const settings = await screen.findByRole("dialog", { name: "Workspace settings" });
+		const first = agents.find((agent) => agent.systemAgentKey === null);
+		expect(await screen.findByRole("heading", { name: first?.name })).toBeDefined();
+	});
+
+	it("finds a bot by name in the list of bots", async () => {
+		mount("/suga/settings/agents");
+
+		const settings = await screen.findByRole("main");
+		await within(settings).findByRole("link", { name: new RegExp(linear.name) });
+		fireEvent.change(within(settings).getByRole("searchbox", { name: "Search bots" }), {
+			target: { value: "triag" },
+		});
+
+		expect(within(settings).queryByRole("link", { name: new RegExp(linear.name) })).toBeNull();
+		expect(within(settings).getByRole("link", { name: new RegExp(triager.name) })).toBeDefined();
+	});
+
+	it("keeps the system bots out of the list of bots, since they are in no pod", async () => {
+		mount("/suga/settings/agents");
+
+		const settings = await screen.findByRole("main");
 		await within(settings).findByText(linear.name);
 		expect(within(settings).queryByText(facilitator.name)).toBeNull();
 	});
@@ -984,24 +941,63 @@ describe("workspace settings", () => {
 		expect(selected.getAttribute("aria-current")).toBe("page");
 	});
 
-	it("selects a provider from the provider rail and searches its models", async () => {
-		mount("/suga/settings/providers");
+	const [openai, anthropic] = modelProviders as [ModelProvider, ModelProvider];
+	const providerPage = (provider: { id: string }) => `/suga/settings/providers/${provider.id}`;
 
-		const providers = await screen.findByRole("navigation", {
-			name: "Model providers",
+	it("lists each connected provider with how many of its models are on, and opens it", async () => {
+		const router = mount("/suga/settings/providers");
+
+		const row = await screen.findByRole("link", { name: /Anthropic/ });
+		expect(row.textContent).toContain(
+			`${anthropic.enabledModelCount} of ${anthropic.modelCount} models on`,
+		);
+		fireEvent.click(row);
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(providerPage(anthropic)));
+		expect(await screen.findByRole("heading", { name: "Anthropic" })).toBeDefined();
+	});
+
+	it("switches a model off without moving it", async () => {
+		client.api.modelProviders.updateModel.mockReturnValue(Effect.void);
+		mount(providerPage(anthropic));
+
+		const model = anthropic.models[0] as ProviderModel;
+		fireEvent.click(
+			await screen.findByRole("switch", {
+				name: `Bots can use ${model.displayName ?? model.modelId}`,
+			}),
+		);
+
+		await waitFor(() =>
+			expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, providerId: anthropic.id, modelId: model.id },
+				payload: { enabled: false },
+			}),
+		);
+	});
+
+	it("shows the system bots' model, and sets it for all of them at once", async () => {
+		client.api.systemAgents.update.mockReturnValue(Effect.succeed(builtInAgents[0]));
+		const router = mount("/suga/settings/providers");
+
+		fireEvent.click(await screen.findByRole("link", { name: /System agents use/ }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/suga/settings/providers/system"),
+		);
+		fireEvent.click(await screen.findByRole("button", { name: "gpt-5" }));
+
+		await waitFor(() => {
+			for (const key of ["summarise", "facilitate"]) {
+				expect(client.api.systemAgents.update).toHaveBeenCalledWith({
+					params: { workspace: workspace.id, key },
+					payload: { model: "gpt-5" },
+				});
+			}
 		});
-		fireEvent.click(within(providers).getByRole("button", { name: /Anthropic/ }));
-
-		await screen.findByRole("region", { name: "Anthropic models" });
-		const search = screen.getByLabelText("Search models");
-		fireEvent.change(search, { target: { value: "opus" } });
-		expect(screen.getByText("claude-opus-4-1-20250805")).toBeDefined();
-		fireEvent.change(search, { target: { value: "gpt" } });
-		expect(screen.queryByText("claude-opus-4-1-20250805")).toBeNull();
 	});
 
 	const ollama = {
-		...modelProviders[0],
+		...openai,
 		id: "0199a3a0-0000-7000-8000-0000000000da",
 		preset: "ollama" as const,
 		name: "Ollama",
@@ -1017,24 +1013,25 @@ describe("workspace settings", () => {
 	function mountOllama(provider: typeof ollama = ollama) {
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([provider]));
 		client.api.modelProviders.update.mockReturnValue(Effect.succeed(provider));
-		mount("/suga/settings/providers");
+		mount(providerPage(provider));
 	}
 
 	const patched = () => client.api.modelProviders.update;
 
-	it("shows the Ollama connection locked in, and needs no key to list models", async () => {
+	it("shows a server you run by its address, with no key needed", async () => {
 		mountOllama();
 
 		expect(await screen.findByText(ollama.baseUrl)).toBeDefined();
 		expect(screen.getByText("None")).toBeDefined();
-		expect(screen.queryByLabelText("Server URL")).toBeNull();
-		expect(screen.getByRole("button", { name: "Refresh" }).hasAttribute("disabled")).toBe(false);
+		expect(screen.getByRole("button", { name: "Refresh list" }).hasAttribute("disabled")).toBe(
+			false,
+		);
 	});
 
 	it("saves the server somebody types, completing it into a base URL", async () => {
 		mountOllama();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Change" }));
 		const serverUrl = screen.getByLabelText("Server URL") as HTMLInputElement;
 		expect(serverUrl.value).toBe(ollama.baseUrl);
 		fireEvent.change(serverUrl, { target: { value: "studio.local:9000" } });
@@ -1051,49 +1048,32 @@ describe("workspace settings", () => {
 	it("refuses to save an address it cannot read, and says so", async () => {
 		mountOllama();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Change" }));
 		fireEvent.change(screen.getByLabelText("Server URL"), {
 			target: { value: "my ollama server" },
 		});
-
-		expect(screen.getByText(/not a server address/)).toBeDefined();
-		expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
-		expect(patched()).not.toHaveBeenCalled();
-	});
-
-	it("puts the fields back to a stock local install", async () => {
-		mountOllama({ ...ollama, baseUrl: "http://studio.local:9000/v1" });
-
-		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-		fireEvent.click(screen.getByRole("button", { name: /Reset to default/ }));
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-		await waitFor(() => {
-			expect(patched()).toHaveBeenCalledWith({
-				params: { workspace: workspace.id, providerId: ollama.id },
-				payload: { baseUrl: "http://127.0.0.1:11434/v1" },
-			});
-		});
+		expect(await screen.findByText(/not a server address/)).toBeDefined();
+		expect(patched()).not.toHaveBeenCalled();
 	});
 
 	it("removes a key that was set, rather than only replacing it", async () => {
 		mountOllama({ ...ollama, hasApiKey: true, apiKeyHint: "1234" });
 
-		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-		fireEvent.click(screen.getByRole("button", { name: "Remove key" }));
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
 
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: ollama.id },
-				payload: { baseUrl: ollama.baseUrl, apiKey: null },
+				payload: { apiKey: null },
 			});
 		});
 	});
 
-	it("creates a provider without requiring an API key", async () => {
+	it("adds a custom provider, which needs no key", async () => {
 		const provider = {
-			...modelProviders[0],
+			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
 			preset: null,
 			name: "Local gateway",
@@ -1106,17 +1086,18 @@ describe("workspace settings", () => {
 			enabledModelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(provider));
-		mount("/suga/settings/providers");
+		const router = mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
-		fireEvent.click(screen.getByRole("button", { name: /Custom endpoint/ }));
-		fireEvent.change(screen.getByLabelText("Name"), {
-			target: { value: provider.name },
-		});
-		fireEvent.change(screen.getByLabelText("Base URL"), {
+		const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+		fireEvent.click(within(dialog).getByRole("button", { name: /Custom provider/ }));
+		const step = await screen.findByRole("dialog", { name: "Custom provider" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: provider.name } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
 			target: { value: provider.baseUrl },
 		});
-		fireEvent.click(screen.getAllByRole("button", { name: "Add provider" }).at(-1) as HTMLElement);
+		fireEvent.click(within(step).getByRole("radio", { name: "Anthropic" }));
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
 
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
@@ -1124,17 +1105,18 @@ describe("workspace settings", () => {
 				payload: {
 					name: provider.name,
 					baseUrl: provider.baseUrl,
-					apiFormat: "openai",
+					apiFormat: "anthropic",
 					apiKey: undefined,
 					customHeaders: [],
 				},
 			});
 		});
+		await waitFor(() => expect(router.state.location.pathname).toBe(providerPage(provider)));
 	});
 
-	it("offers the catalog, minus what the workspace already has, and adds a preset by its key", async () => {
+	it("offers the catalog, minus what is connected, and adds a preset by its key", async () => {
 		const groq = {
-			...modelProviders[0],
+			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000d1",
 			preset: "groq" as const,
 			name: "Groq",
@@ -1147,15 +1129,15 @@ describe("workspace settings", () => {
 		mount("/suga/settings/providers");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
-		const hosted = screen.getByRole("region", { name: "Hosted services" });
-		expect(within(hosted).queryByRole("button", { name: /^OpenAI /i })).toBeNull();
+		const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+		expect(within(dialog).queryByRole("button", { name: /^OpenAI/ })).toBeNull();
 
-		fireEvent.click(within(hosted).getByRole("button", { name: /Groq/ }));
-		expect(screen.getByRole("button", { name: "Add Groq" }).hasAttribute("disabled")).toBe(true);
-		fireEvent.change(screen.getByLabelText("Groq API key"), {
-			target: { value: "gsk-test" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Add Groq" }));
+		fireEvent.click(within(dialog).getByRole("button", { name: /^Groq/ }));
+		const step = await screen.findByRole("dialog", { name: "Groq" });
+		const add = within(step).getByRole("button", { name: "Add" });
+		expect(add.hasAttribute("disabled")).toBe(true);
+		fireEvent.change(within(step).getByLabelText("API key"), { target: { value: "gsk-test" } });
+		fireEvent.click(add);
 
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
@@ -1165,11 +1147,52 @@ describe("workspace settings", () => {
 		});
 	});
 
-	it("labels provider credentials and reports connection failures where they happen", async () => {
+	it("reconnects a starting provider that was disconnected, rather than making another", async () => {
+		client.api.modelProviders.list.mockReturnValue(
+			Effect.succeed([{ ...openai, active: false, hasApiKey: false, apiKeyHint: null }, anthropic]),
+		);
+		client.api.modelProviders.update.mockReturnValue(Effect.succeed(openai));
+		mount("/suga/settings/providers");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Add provider" }));
+		const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+		fireEvent.click(within(dialog).getByRole("button", { name: /^OpenAI/ }));
+		const step = await screen.findByRole("dialog", { name: "OpenAI" });
+		fireEvent.change(within(step).getByLabelText("API key"), { target: { value: "sk-new" } });
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
+
+		await waitFor(() =>
+			expect(patched()).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, providerId: openai.id },
+				payload: { active: true, apiKey: "sk-new" },
+			}),
+		);
+		expect(client.api.modelProviders.create).not.toHaveBeenCalled();
+	});
+
+	it("disconnects a starting provider by taking its key away, after asking", async () => {
+		client.api.modelProviders.update.mockReturnValue(Effect.succeed(openai));
+		const router = mount(providerPage(openai));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Disconnect OpenAI" }));
+		expect(await screen.findByRole("heading", { name: "Disconnect OpenAI?" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+
+		await waitFor(() =>
+			expect(patched()).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, providerId: openai.id },
+				payload: { active: false, apiKey: null },
+			}),
+		);
+		expect(client.api.modelProviders.remove).not.toHaveBeenCalled();
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/providers"));
+	});
+
+	it("replaces a key, and says where a connection test failed", async () => {
 		client.api.modelProviders.test.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: "Provider unavailable" })),
 		);
-		mount("/suga/settings/providers");
+		mount(providerPage(openai));
 
 		fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
 		expect(screen.getByLabelText("OpenAI API key")).toBeDefined();
@@ -1184,7 +1207,7 @@ describe("workspace settings", () => {
 
 	it("keeps a manual model form open when adding the model fails", async () => {
 		const custom = {
-			...modelProviders[0],
+			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
 			preset: null,
 			name: "Local gateway",
@@ -1197,7 +1220,7 @@ describe("workspace settings", () => {
 		client.api.modelProviders.addModel.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: "Could not add model" })),
 		);
-		mount("/suga/settings/providers");
+		mount(providerPage(custom));
 		fireEvent.click(await screen.findByRole("button", { name: "Add model" }));
 		fireEvent.change(screen.getByLabelText("Model ID"), {
 			target: { value: "local-model" },
@@ -1208,6 +1231,7 @@ describe("workspace settings", () => {
 		expect((await screen.findByRole("alert")).textContent).toContain("Could not add model");
 		expect((screen.getByLabelText("Model ID") as HTMLInputElement).value).toBe("local-model");
 	});
+
 	/** Opens the invite panel, which is behind a button rather than always open. */
 	const openInvitePanel = async () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Invite people" }));
@@ -1224,55 +1248,70 @@ describe("workspace settings", () => {
 		expect(dialog.ownerDocument.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
 	});
 
-	it("copies an invitation link for the selected workspace", async () => {
-		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
-		mount("/suga/settings/members");
-		await openInvitePanel();
+	const jyePage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
+	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
 
-		fireEvent.change(await screen.findByLabelText("Email address"), {
-			target: { value: "jye@example.com" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Copy invitation link" }));
-
-		await waitFor(() => {
-			expect(client.auth.workspaces.invite).toHaveBeenCalledWith({
-				email: "jye@example.com",
-				role: "member",
-				workspaceId: workspace.id,
-				resend: undefined,
-			});
-		});
-		expect(writeClipboardText).toHaveBeenCalledWith(
-			`${window.location.origin}/invite/an-invitation`,
-		);
-	});
-
-	it("invites somebody as a viewer, with each role described where it is chosen", async () => {
+	it("invites every address typed, with the role chosen", async () => {
 		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
 		mount("/suga/settings/members");
 		const panel = await openInvitePanel();
 
-		fireEvent.change(await screen.findByLabelText("Email address"), {
-			target: { value: "jye@example.com" },
+		fireEvent.change(within(panel).getByLabelText("Email addresses"), {
+			target: { value: "jye@example.com, kim@example.com" },
 		});
+		expect(within(panel).getByText("Builds agents in the pods they are added to.")).toBeDefined();
+		fireEvent.click(within(panel).getByRole("radio", { name: "Viewer" }));
 		expect(
 			within(panel).getByText("Reads and takes part in the pods they are added to."),
 		).toBeDefined();
-		fireEvent.click(within(panel).getByRole("radio", { name: /Viewer/ }));
-		fireEvent.click(screen.getByRole("button", { name: "Copy invitation link" }));
+		fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
 
 		await waitFor(() => {
+			expect(client.auth.workspaces.invite).toHaveBeenCalledWith({
+				email: "jye@example.com",
+				role: "viewer",
+				workspaceId: workspace.id,
+				resend: undefined,
+			});
 			expect(client.auth.workspaces.invite).toHaveBeenCalledWith(
-				expect.objectContaining({ email: "jye@example.com", role: "viewer" }),
+				expect.objectContaining({ email: "kim@example.com", role: "viewer" }),
 			);
 		});
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite people" })).toBeNull());
 	});
 
-	it("changes what somebody may do", async () => {
+	it("keeps only the addresses that were refused, saying why", async () => {
+		client.auth.workspaces.invite.mockImplementation(async ({ email }: { email: string }) => {
+			if (email === "kim@example.com") throw new Error("Offline");
+			return { id: "an-invitation" };
+		});
 		mount("/suga/settings/members");
+		const panel = await openInvitePanel();
+		const emails = within(panel).getByLabelText("Email addresses");
+		fireEvent.change(emails, { target: { value: "jye@example.com kim@example.com" } });
 
-		open(await screen.findByRole("combobox", { name: `Access for ${jye.name}` }));
-		(await screen.findByRole("option", { name: /Viewer/ })).click();
+		fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
+
+		expect((await within(panel).findByRole("alert")).textContent).toContain("kim@example.com");
+		expect((emails as HTMLInputElement).value).toBe("kim@example.com");
+	});
+
+	it("lists each person with their role, and opens their page", async () => {
+		const router = mount("/suga/settings/members");
+
+		const row = await screen.findByRole("link", { name: new RegExp(jye.name) });
+		expect(row.textContent).toContain("Member");
+		expect(screen.getByRole("link", { name: new RegExp(sam.name) }).textContent).toContain("You");
+		fireEvent.click(row);
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(jyePage));
+		expect(await screen.findByRole("heading", { name: jye.name })).toBeDefined();
+	});
+
+	it("changes what somebody may do from their page", async () => {
+		mount(jyePage);
+
+		fireEvent.click(await screen.findByRole("radio", { name: "Viewer" }));
 
 		await waitFor(() => {
 			expect(client.auth.workspaces.updateRole).toHaveBeenCalledWith({
@@ -1283,17 +1322,30 @@ describe("workspace settings", () => {
 		});
 	});
 
-	it("asks before removing somebody, and says what goes with them", async () => {
-		mount("/suga/settings/members");
+	it("puts somebody in a pod from their page", async () => {
+		client.api.pods.addMember.mockReturnValue(Effect.void);
+		mount(jyePage);
 
-		open(await screen.findByRole("button", { name: `${jye.name} options` }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Remove from workspace" }));
+		fireEvent.click(await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` }));
+
+		await waitFor(() =>
+			expect(client.api.pods.addMember).toHaveBeenCalledWith({
+				params: { podId: pods[0]?.id },
+				payload: { userId: jye.id },
+			}),
+		);
+	});
+
+	it("asks before removing somebody, says what goes with them, and returns to the list", async () => {
+		const router = mount(jyePage);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
 
 		expect(await screen.findByRole("heading", { name: `Remove ${jye.name}?` })).toBeDefined();
 		expect(screen.getByText(/their Personal pod and its conversations are deleted/)).toBeDefined();
 		expect(client.auth.workspaces.removeMember).not.toHaveBeenCalled();
 
-		fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
 		await waitFor(() => {
 			expect(client.auth.workspaces.removeMember).toHaveBeenCalledWith({
@@ -1301,49 +1353,33 @@ describe("workspace settings", () => {
 				memberId: "0199a3a0-0000-7000-8000-0000000000d2",
 			});
 		});
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
 	});
 
-	it("offers leaving on your own row, and no way to change your own access", async () => {
-		mount("/suga/settings/members");
+	it("offers leaving on your own page, and no way to change your own role", async () => {
+		mount(samPage);
 
-		// Somebody else's row can be re-roled; your own cannot, because demoting
-		// yourself takes away the means to undo it. Leaving is still yours.
-		expect(await screen.findByRole("combobox", { name: `Access for ${jye.name}` })).toBeDefined();
-		expect(screen.queryByRole("combobox", { name: `Access for ${sam.name}` })).toBeNull();
-
-		open(screen.getByRole("button", { name: `${sam.name} options` }));
-		expect(await screen.findByRole("menuitem", { name: "Leave workspace" })).toBeDefined();
-		expect(screen.queryByRole("menuitem", { name: "Remove from workspace" })).toBeNull();
-	});
-
-	it("warns what leaving costs before doing it", async () => {
-		mount("/suga/settings/members");
-
-		open(await screen.findByRole("button", { name: `${sam.name} options` }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Leave workspace" }));
+		expect(await screen.findByRole("heading", { name: sam.name })).toBeDefined();
+		expect(screen.queryByRole("radio", { name: "Viewer" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Leave workspace" }));
 
 		expect(await screen.findByRole("heading", { name: "Leave this workspace?" })).toBeDefined();
 		expect(screen.getByText(/somebody inviting you again/)).toBeDefined();
-
-		fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
 
 		await waitFor(() => {
 			expect(client.auth.workspaces.leave).toHaveBeenCalledWith(workspace.id);
 		});
 	});
 
-	it("lists an invitation as somebody who has not arrived, and can withdraw it", async () => {
+	it("lists an invitation that has not been accepted, and can withdraw it", async () => {
 		mount("/suga/settings/members");
 
 		expect(await screen.findByText("dana@example.com")).toBeDefined();
-		expect(screen.getByText("Invited, not yet accepted")).toBeDefined();
-
-		open(
-			screen.getByRole("button", {
-				name: "Invitation for dana@example.com options",
-			}),
+		fireEvent.click(
+			screen.getByRole("button", { name: "Revoke the invitation for dana@example.com" }),
 		);
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Revoke invitation" }));
 
 		await waitFor(() => {
 			expect(client.auth.workspaces.cancelInvite).toHaveBeenCalledWith(
@@ -1353,14 +1389,11 @@ describe("workspace settings", () => {
 	});
 
 	it("sends an invitation again without retyping it", async () => {
+		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
 		mount("/suga/settings/members");
 
-		open(
-			await screen.findByRole("button", {
-				name: "Invitation for dana@example.com options",
-			}),
-		);
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Send it again" }));
+		await screen.findByText("dana@example.com");
+		fireEvent.click(screen.getByRole("button", { name: "Resend" }));
 
 		await waitFor(() => {
 			expect(client.auth.workspaces.invite).toHaveBeenCalledWith({
@@ -1370,29 +1403,29 @@ describe("workspace settings", () => {
 				resend: true,
 			});
 		});
+		expect(await screen.findByText("Sent again")).toBeDefined();
 	});
 
 	it("shows a member who holds what, and no way to change it", async () => {
 		apiAnswers({ role: "member" });
 		mount("/suga/settings/members");
 
-		expect(await screen.findByText("Administrator")).toBeDefined();
-		expect(screen.getByText("Member")).toBeDefined();
-		expect(screen.queryByRole("combobox", { name: `Access for ${jye.name}` })).toBeNull();
+		expect((await screen.findByRole("link", { name: new RegExp(jye.name) })).textContent).toContain(
+			"Member",
+		);
 		expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
-	});
+		expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
+		cleanup();
 
-	it("keeps a rejected invitation address available for retry", async () => {
-		client.auth.workspaces.invite.mockRejectedValue(new Error("Offline"));
-		mount("/suga/settings/members");
-		await openInvitePanel();
-		const email = await screen.findByLabelText("Email address");
-		fireEvent.change(email, { target: { value: "jye@example.com" } });
-
-		fireEvent.click(screen.getByRole("button", { name: "Copy invitation link" }));
-
-		expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
-		expect((email as HTMLInputElement).value).toBe("jye@example.com");
+		mount(jyePage);
+		expect(await screen.findByRole("heading", { name: jye.name })).toBeDefined();
+		expect(screen.queryByRole("radio", { name: "Viewer" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
+		expect(
+			(await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` })).hasAttribute(
+				"disabled",
+			),
+		).toBe(true);
 	});
 
 	it("lets somebody with no workspace start their first one", async () => {
@@ -1435,38 +1468,87 @@ describe("workspace settings", () => {
 	});
 });
 
+describe("settings on a phone", () => {
+	it("lists every section, you first, with a way out", async () => {
+		mount("/suga/settings");
+
+		const list = await screen.findByRole("navigation", { name: "Settings sections" });
+		expect(within(list).getByRole("link", { name: /Done/ }).getAttribute("href")).toBe(
+			"/suga/agents",
+		);
+		expect(
+			within(list)
+				.getByRole("link", { name: new RegExp(sam.name) })
+				.getAttribute("href"),
+		).toBe("/suga/settings/profile");
+		expect((await within(list).findByRole("link", { name: /General/ })).getAttribute("href")).toBe(
+			"/suga/settings/general",
+		);
+	});
+
+	it("opens General by name, with the way back to the list", async () => {
+		mount("/suga/settings/general");
+
+		expect(await screen.findByRole("group", { name: "Theme" })).toBeDefined();
+		const page = screen.getByRole("main");
+		expect(within(page).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+			"/suga/settings",
+		);
+	});
+
+	it("leads from an open pod back to the list of pods", async () => {
+		mount(`/suga/settings/pods/${pods[0]?.slug}`);
+
+		expect((await screen.findByRole("link", { name: "Pods" })).getAttribute("href")).toBe(
+			"/suga/settings/pods",
+		);
+	});
+});
+
 describe("the theme", () => {
-	it("follows the system until something is chosen", async () => {
-		mount(linearPage);
+	it("is dark until something is chosen", async () => {
+		mount("/suga/settings");
 
-		await screen.findByRole("navigation", { name: "Workspace" });
-
+		const theme = await screen.findByRole("group", { name: "Theme" });
+		expect((within(theme).getByRole("radio", { name: "Dark" }) as HTMLInputElement).checked).toBe(
+			true,
+		);
 		expect(document.documentElement.dataset.theme).toBeUndefined();
 	});
 
-	it("is chosen from the user menu, and remembered", async () => {
-		mount(linearPage);
+	it("is chosen in settings, and remembered", async () => {
+		mount("/suga/settings");
 
-		open(await screen.findByRole("button", { name: /Sam/ }));
-		(await screen.findByRole("menuitemradio", { name: "Dark" })).click();
+		fireEvent.click(await screen.findByRole("radio", { name: "Light" }));
 
-		await waitFor(() => {
-			expect(document.documentElement.dataset.theme).toBe("dark");
-		});
-		expect(localStorage.getItem("sugabots-theme")).toBe("dark");
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+		expect(localStorage.getItem("sugabots-theme")).toBe("light");
 	});
 
-	it("stores nothing when told to follow the system, because that is what it is", async () => {
-		localStorage.setItem("sugabots-theme", "dark");
-		mount(linearPage);
+	it("stores nothing when dark is chosen, because that is the default", async () => {
+		localStorage.setItem("sugabots-theme", "light");
+		mount("/suga/settings");
 
-		open(await screen.findByRole("button", { name: /Sam/ }));
-		(await screen.findByRole("menuitemradio", { name: "Follow the system" })).click();
+		fireEvent.click(await screen.findByRole("radio", { name: "Dark" }));
 
-		await waitFor(() => {
-			expect(document.documentElement.dataset.theme).toBeUndefined();
-		});
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBeUndefined());
 		expect(localStorage.getItem("sugabots-theme")).toBeNull();
+	});
+});
+
+describe("your profile", () => {
+	it("signs out, and re-asks who you are", async () => {
+		client.auth.signOut.mockResolvedValue(undefined);
+		const refresh = vi.fn();
+		mount("/suga/settings/profile", sam, refresh);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+
+		await waitFor(() => expect(client.auth.signOut).toHaveBeenCalled());
+		// Dropping the token is not enough on its own: the guard reads the
+		// session, so it has to be asked again before the route can send
+		// anybody to the login page.
+		await waitFor(() => expect(refresh).toHaveBeenCalled());
 	});
 });
 
@@ -1487,93 +1569,6 @@ describe("pod settings", () => {
 		name: jye.name,
 		email: jye.email,
 	};
-	const openRouting = async () => {
-		fireEvent.click(await screen.findByRole("tab", { name: "Routing" }));
-	};
-
-	it("offers facilitator routing for automated threads", async () => {
-		client.api.pods.update.mockReturnValue(
-			Effect.succeed({ ...suga, routing: { facilitator: true } }),
-		);
-		mount(podPage);
-		await openRouting();
-
-		const nobody = await screen.findByRole("radio", { name: "Nobody" });
-		expect((nobody as HTMLInputElement).checked).toBe(true);
-		const decides = screen.getByRole("radio", {
-			name: "The Facilitator decides",
-		});
-		expect((decides as HTMLInputElement).checked).toBe(false);
-		fireEvent.click(decides);
-
-		await waitFor(() =>
-			expect(client.api.pods.update).toHaveBeenCalledWith({
-				params: { podId: suga.id },
-				payload: { routing: { facilitator: true } },
-			}),
-		);
-	});
-
-	it("turns facilitator routing off for the quiet option", async () => {
-		client.api.pods.list.mockReturnValue(
-			Effect.succeed(
-				pods.map((pod) => (pod.id === suga.id ? { ...pod, routing: { facilitator: true } } : pod)),
-			),
-		);
-		client.api.pods.update.mockReturnValue(
-			Effect.succeed({ ...suga, routing: { facilitator: false } }),
-		);
-		mount(podPage);
-		await openRouting();
-
-		fireEvent.click(await screen.findByRole("radio", { name: "Nobody" }));
-
-		await waitFor(() =>
-			expect(client.api.pods.update).toHaveBeenCalledWith({
-				params: { podId: suga.id },
-				payload: { routing: { facilitator: false } },
-			}),
-		);
-	});
-
-	it("names the Facilitator's model beside its option, with a way to change it", async () => {
-		mount(podPage);
-		await openRouting();
-
-		expect(await screen.findByText(facilitator.model as string)).toBeDefined();
-		expect(screen.getByRole("link", { name: "change" }).getAttribute("href")).toBe(
-			"/suga/settings/built-in-agents/facilitate",
-		);
-	});
-
-	it("tells a member the Facilitator is unset without offering a link they cannot follow", async () => {
-		apiAnswers({ role: "member" });
-		client.api.systemAgents.list.mockReturnValue(
-			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
-		);
-		mount(podPage);
-		await openRouting();
-
-		expect(await screen.findByText(/A workspace administrator chooses its model/)).toBeDefined();
-		expect(screen.queryByRole("link", { name: "set it up" })).toBeNull();
-	});
-
-	it("cannot hand the floor to a Facilitator with no model, and says where to set it up", async () => {
-		client.api.systemAgents.list.mockReturnValue(
-			Effect.succeed(builtInAgents.map((one) => ({ ...one, model: null }))),
-		);
-		mount(podPage);
-		await openRouting();
-
-		const option = await screen.findByRole("radio", { name: "The Facilitator decides" });
-		expect(option.hasAttribute("disabled")).toBe(true);
-		expect(screen.getByRole("link", { name: "set it up" }).getAttribute("href")).toBe(
-			"/suga/settings/built-in-agents/facilitate",
-		);
-		fireEvent.click(option);
-		expect(client.api.pods.update).not.toHaveBeenCalled();
-	});
-
 	it("lists only crew in a pod, with nothing to say about built-in agents", async () => {
 		mount(podPage);
 
@@ -1583,31 +1578,11 @@ describe("pod settings", () => {
 		expect(screen.queryByRole("link", { name: facilitator.name })).toBeNull();
 	});
 
-	it("confirms agent deletion in a dialog", async () => {
-		client.api.agents.remove.mockReturnValue(Effect.void);
-		mount(podPage);
-
-		const agentLink = await screen.findByRole("link", { name: linear.name });
-		const row = agentLink.closest("li");
-		if (!row) throw new Error("Agent row not found");
-		fireEvent.click(within(row).getByRole("button", { name: "Delete" }));
-
-		expect(await screen.findByRole("dialog", { name: `Delete ${linear.name}?` })).toBeDefined();
-		expect(client.api.agents.remove).not.toHaveBeenCalled();
-		fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
-
-		await waitFor(() =>
-			expect(client.api.agents.remove).toHaveBeenCalledWith({
-				params: { agentId: linear.id },
-			}),
-		);
-	});
-
 	it("adds somebody from the workspace", async () => {
 		client.api.pods.addMember.mockReturnValue(Effect.void);
 		mount(podPage);
 
-		open(await screen.findByRole("button", { name: "Invite" }));
+		open(await screen.findByRole("button", { name: "Add people" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: sam.name }));
 
 		await waitFor(() =>
@@ -1630,7 +1605,7 @@ describe("pod settings", () => {
 		).toBeDefined();
 		expect(client.api.pods.removeMember).not.toHaveBeenCalled();
 
-		fireEvent.click(screen.getByRole("button", { name: "Yes, remove" }));
+		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
 		await waitFor(() =>
 			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
@@ -1651,7 +1626,7 @@ describe("pod settings", () => {
 		expect(await screen.findByRole("dialog", { name: `Leave ${suga.name}?` })).toBeDefined();
 		expect(screen.getByText(/As an administrator you still reach the pod/)).toBeDefined();
 
-		fireEvent.click(screen.getByRole("button", { name: "Yes, leave" }));
+		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
 
 		await waitFor(() =>
 			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
@@ -1664,7 +1639,7 @@ describe("pod settings", () => {
 		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
 		mount(podPage);
 
-		open(await screen.findByRole("button", { name: "Invite" }));
+		open(await screen.findByRole("button", { name: "Add people" }));
 
 		expect(
 			await screen.findByRole("menuitem", {
@@ -1678,31 +1653,21 @@ describe("pod settings", () => {
 		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod]));
 		mount(podPage);
 
-		// The roster behind the settings window names agents too.
-		const settings = await screen.findByRole("dialog", { name: "Workspace settings" });
+		const settings = await screen.findByRole("main");
 		expect(await within(settings).findByText(linear.name)).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Invite" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Add people" })).toBeNull();
 		expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
-		expect(screen.queryByRole("button", { name: `${suga.name} options` })).toBeNull();
-		await openRouting();
-		expect(
-			(
-				(await screen.findByRole("radio", {
-					name: "Nobody",
-				})) as HTMLInputElement
-			).disabled,
-		).toBe(true);
+		expect(screen.queryByRole("button", { name: "Delete pod" })).toBeNull();
+		expect(screen.queryByLabelText("Name")).toBeNull();
 	});
 
 	it("deletes the pod after asking, and returns to the list", async () => {
 		client.api.pods.remove.mockReturnValue(Effect.void);
 		const router = mount(podPage);
 
-		open(await screen.findByRole("button", { name: `${suga.name} options` }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete pod" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete pod" }));
 		expect(client.api.pods.remove).not.toHaveBeenCalled();
-		fireEvent.click(await screen.findByRole("button", { name: "Yes, delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
 		await waitFor(() =>
 			expect(client.api.pods.remove).toHaveBeenCalledWith({
@@ -1718,9 +1683,8 @@ describe("pod settings", () => {
 		);
 		mount(podPage);
 
-		open(await screen.findByRole("button", { name: `${suga.name} options` }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete pod" }));
-		fireEvent.click(await screen.findByRole("button", { name: "Yes, delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete pod" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
 		expect(await screen.findByRole("alert")).toBeDefined();
 	});

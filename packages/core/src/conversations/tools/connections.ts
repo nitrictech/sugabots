@@ -13,9 +13,10 @@ import type { EgressHttpClient, EgressHttpClients } from "../../providers/networ
  * Opened per turn: one MCP session per enabled connection the pod has,
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
- * carries whether it may change something. That decides two things: whether
- * it is offered at all, since only read-only tools are until the owner allows
- * the rest on the connection, and how a failed turn after it is treated.
+ * carries whether it may change something, which decides how a failed turn
+ * after it is treated, and whether a person must allow each call first: always
+ * for a tool that may change something, and for every tool of a connection
+ * set to `ask`.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
@@ -26,6 +27,8 @@ export interface OfferedTool {
 	tool: Tool;
 	/** Whether a call may change something at the other end (ADR 002). */
 	mutating: boolean;
+	/** Whether each call waits for a person to allow it. */
+	requiresApproval: boolean;
 	connectionId: string;
 	connectionRevision: number;
 	remoteToolName: string;
@@ -76,10 +79,10 @@ export function connectionTools({
 				const tools: Record<string, OfferedTool> = {};
 				for (const { described, tool } of await session.tools()) {
 					const mutating = connectionToolMutating(described);
-					if (mutating && !target.allowMutating) continue;
 					tools[connectionToolKey(target.handle, described.name)] = {
 						tool,
 						mutating,
+						requiresApproval: mutating || target.access === "ask",
 						connectionId: target.connectionId,
 						connectionRevision: target.configurationRevision,
 						remoteToolName: described.name,

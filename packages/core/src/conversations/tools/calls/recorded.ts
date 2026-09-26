@@ -30,7 +30,6 @@ export interface RecordingOptions {
 		connectionId: string;
 		connectionRevision: number;
 		remoteToolName: string;
-		automaticallyAllowed: boolean;
 	};
 }
 
@@ -79,7 +78,6 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 							connectionId: approval.connectionId,
 							connectionRevision: approval.connectionRevision,
 							remoteToolName: approval.remoteToolName,
-							automaticallyAllowed: approval.automaticallyAllowed,
 						}),
 					)
 				: await run(calls.open({ ...from, tool: key, input, atOffset, mutating }));

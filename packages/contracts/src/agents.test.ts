@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { agentHueSchema, agentUpdateSchema, newAgentSchema } from "./agents.ts";
+import { agentColorSchema, agentUpdateSchema, newAgentSchema } from "./agents.ts";
 
 const ID = "0199a3a0-0000-7000-8000-000000000001";
 const request = { podId: ID, name: "Issue triager", model: "example/model" };
@@ -73,11 +73,7 @@ describe("agent request contracts", () => {
 		expect(Result.isFailure(Schema.decodeResult(agentUpdateSchema)({ model: " " }))).toBe(true);
 	});
 
-	it.each([NaN, Infinity, -Infinity, -1, 360, 1.5, "120"])("rejects invalid hue %s", (hue) => {
-		expect(Result.isFailure(Schema.decodeUnknownResult(agentHueSchema)(hue))).toBe(true);
-	});
-
-	it.each([0, 359])("accepts boundary hue %s", (hue) => {
-		expect(Schema.decodeSync(agentHueSchema)(hue)).toBe(hue);
+	it.each(["blue", "", 120, "Green"])("rejects a colour outside the palette: %s", (color) => {
+		expect(Result.isFailure(Schema.decodeUnknownResult(agentColorSchema)(color))).toBe(true);
 	});
 });

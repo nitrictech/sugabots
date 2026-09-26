@@ -1,12 +1,12 @@
-import type { AgentFace } from "@sugabots/contracts";
+import type { AgentColor, AgentFace } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ComponentProps } from "react";
-import { type BotColor, botColors } from "./bot-colors.ts";
+import { botColors } from "./bot-colors.ts";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "./face-marks.ts";
 
 /** How a bot looks. */
 export interface BotLook {
-	color: BotColor;
+	color: AgentColor;
 	face: AgentFace;
 }
 
@@ -14,10 +14,10 @@ type BotFaceProps = BotLook & Omit<ComponentProps<"svg">, "color">;
 
 /**
  * A bot's face: a coloured disc with its eyes. It has no intrinsic size, so
- * size it with `className` (e.g. `size-8`).
+ * size it with `className` (e.g. `size-8`) or `width` and `height`.
  */
 export function BotFace({ color, face, className, ...props }: BotFaceProps) {
-	const colors = botColors[color];
+	const { face: faceColor, eyes } = botColors[color];
 	const radius = FACE_VIEWBOX_SIZE / 2;
 	return (
 		<svg
@@ -26,18 +26,18 @@ export function BotFace({ color, face, className, ...props }: BotFaceProps) {
 			className={cn("shrink-0", className)}
 			{...props}
 		>
-			<circle cx={radius} cy={radius} r={radius} className={colors.faceFill} />
+			<circle cx={radius} cy={radius} r={radius} fill={faceColor} />
 			{faceMarks(face).map((mark) => (
-				<Mark key={markKey(mark)} mark={mark} fill={colors.eyesFill} stroke={colors.eyesStroke} />
+				<Mark key={markKey(mark)} mark={mark} color={eyes} />
 			))}
 		</svg>
 	);
 }
 
-function Mark({ mark, fill, stroke }: { mark: FaceMark; fill: string; stroke: string }) {
+function Mark({ mark, color }: { mark: FaceMark; color: string }) {
 	switch (mark.shape) {
 		case "circle":
-			return <circle cx={mark.cx} cy={mark.cy} r={mark.r} className={fill} />;
+			return <circle cx={mark.cx} cy={mark.cy} r={mark.r} fill={color} />;
 		case "rect":
 			return (
 				<rect
@@ -46,19 +46,11 @@ function Mark({ mark, fill, stroke }: { mark: FaceMark; fill: string; stroke: st
 					width={mark.width}
 					height={mark.height}
 					rx={mark.rx}
-					className={fill}
+					fill={color}
 				/>
 			);
 		case "stroke":
-			return (
-				<path
-					d={mark.d}
-					fill="none"
-					strokeWidth={mark.strokeWidth}
-					strokeLinecap="round"
-					className={stroke}
-				/>
-			);
+			return <path d={mark.d} fill="none" stroke={color} strokeWidth={mark.strokeWidth} />;
 	}
 }
 

@@ -52,7 +52,7 @@ export function workspaceRoleOf(value: unknown): WorkspaceRole | undefined {
  * bargain.
  */
 const ROLE_LABELS: Record<WorkspaceRole, string> = {
-	admin: "Administrator",
+	admin: "Admin",
 	member: "Member",
 	viewer: "Viewer",
 };

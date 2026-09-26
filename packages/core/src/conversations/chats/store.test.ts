@@ -84,8 +84,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 						podId,
 						name: "Personal Agent",
 						handle: handleFromName(`Personal Agent ${suffix}`),
-						hue: 120,
-						face: "bar",
+						color: "green",
+						face: "pill",
 						model: "test/model",
 						createdById: userId,
 					},
@@ -94,7 +94,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 						podId,
 						name: "Impersonal Agent",
 						handle: handleFromName(`Impersonal Agent ${suffix}`),
-						hue: 240,
+						color: "sky",
 						face: "square",
 						model: "test/model",
 						createdById: userId,
@@ -105,6 +105,81 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		if (!host || !recipient) throw new Error("Could not create chat test agents");
 		agentId = host.id;
 		recipientAgentId = recipient.id;
+	});
+
+	it("lists a pod's bots newest message first, with bots nobody has messaged last", async () => {
+		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
+		await store.sendMain({
+			chatId: current.id,
+			userId,
+			messageId: crypto.randomUUID(),
+			content: "\n  Budget   review is Friday\nand bring the numbers",
+		});
+
+		const list = await store.list({ workspaceId, userId, pod: podId });
+
+		expect(list?.items).toEqual([
+			{
+				agent: expect.objectContaining({ id: agentId }),
+				chatId: current.id,
+				lastMessage: {
+					preview: "Budget review is Friday",
+					authorUserId: userId,
+					at: expect.any(String),
+				},
+			},
+			{ agent: expect.objectContaining({ id: recipientAgentId }), chatId: null, lastMessage: null },
+		]);
+	});
+
+	it("covers every shared pod the person reaches in All, and no pod they cannot", async () => {
+		const suffix = crypto.randomUUID();
+		const [personal, unjoined] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values([
+					{
+						workspaceId,
+						ownerId: userId,
+						kind: "personal",
+						name: "Personal",
+						slug: "personal",
+						createdById: userId,
+					},
+					{
+						workspaceId,
+						ownerId: userId,
+						kind: "shared",
+						name: "Elsewhere",
+						slug: `elsewhere-${suffix}`,
+						createdById: userId,
+					},
+				])
+				.returning(),
+		);
+		if (!personal || !unjoined) throw new Error("Could not create list test pods");
+		await onDatabase((db) =>
+			db.insert(agent).values(
+				[personal, unjoined].map((room) => ({
+					workspaceId,
+					podId: room.id,
+					name: `Bot in ${room.name}`,
+					handle: handleFromName(`Bot in ${room.name} ${suffix}`),
+					color: "rose" as const,
+					face: "dot" as const,
+					model: "test/model",
+					createdById: userId,
+				})),
+			),
+		);
+
+		const all = await store.list({ workspaceId, userId, pod: "all" });
+
+		expect(all?.items.map((item) => item.agent.id).sort()).toEqual(
+			[agentId, recipientAgentId].sort(),
+		);
+		expect(await store.list({ workspaceId, userId, pod: unjoined.id })).toBeUndefined();
+		expect((await store.list({ workspaceId, userId, pod: personal.id }))?.items).toHaveLength(1);
 	});
 
 	it("keeps one chat per pod and host and queues top-level messages in the main Chat", async () => {

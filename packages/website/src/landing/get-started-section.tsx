@@ -11,13 +11,13 @@ export function GetStartedSection() {
 			<Reveal className="flex flex-col items-center gap-6">
 				<Reveal stagger={0.08} className="flex gap-1.5" aria-hidden>
 					<RevealItem variant="pop">
-						<BotAvatar size="lg" color="green" face="bar" className="translate-y-1" />
+						<BotAvatar size="lg" color="green" face="pill" className="translate-y-1" />
 					</RevealItem>
 					<RevealItem variant="pop">
-						<BotAvatar size="lg" color="orange" face="dots" />
+						<BotAvatar size="lg" color="orange" face="dot" />
 					</RevealItem>
 					<RevealItem variant="pop">
-						<BotAvatar size="lg" color="purple" face="smile" className="translate-y-1" />
+						<BotAvatar size="lg" color="purple" face="arc" className="translate-y-1" />
 					</RevealItem>
 				</Reveal>
 				<motion.h2

@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { agentSchema } from "./agents.ts";
 import { routineExecutionSummarySchema, routineExecutionTriggerKindSchema } from "./routines.ts";
 import { agentParticipantSchema, messageSchema, threadParticipantSchema } from "./threads.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -29,6 +30,44 @@ export const chatSchema = Schema.Struct({
 });
 
 export type Chat = typeof chatSchema.Type;
+
+/**
+ * Which chats a list covers: one pod, or `all`, every shared pod the person
+ * can reach. Personal is left out of `all` because it is private and has its
+ * own place on the rail.
+ */
+export const chatListScopeSchema = Schema.Union([uuidSchema, Schema.Literal("all")]);
+
+export type ChatListScope = typeof chatListScopeSchema.Type;
+
+export const chatListQuerySchema = Schema.Struct({ pod: chatListScopeSchema });
+
+/**
+ * One row of the conversation list: a bot, since each bot has one chat in its
+ * pod. `chatId` and `lastMessage` are null until somebody first messages it.
+ */
+export const chatListItemSchema = Schema.Struct({
+	agent: agentSchema,
+	chatId: Schema.NullOr(uuidSchema),
+	lastMessage: Schema.NullOr(
+		Schema.Struct({
+			/** The message's first line, shortened for a one-line row. */
+			preview: Schema.String,
+			/** The person who wrote it, or null when the bot did. */
+			authorUserId: Schema.NullOr(uuidSchema),
+			at: isoTimestampSchema,
+		}),
+	),
+});
+
+export type ChatListItem = typeof chatListItemSchema.Type;
+
+/** Most recent message first; bots nobody has messaged come last, by name. */
+export const chatListSchema = Schema.Struct({
+	items: Schema.mutable(Schema.Array(chatListItemSchema)),
+});
+
+export type ChatList = typeof chatListSchema.Type;
 
 export const getOrCreateChatSchema = Schema.Struct({
 	podId: uuidSchema,

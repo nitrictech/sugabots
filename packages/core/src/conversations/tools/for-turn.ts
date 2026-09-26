@@ -27,7 +27,6 @@ export interface ToolDependencies {
 	/** Where a built-in tool's calls are written down. */
 	calls: ToolCallStore;
 	approvals: ToolApprovalStore;
-	automaticallyAllowedTools: ReadonlySet<string>;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
@@ -77,14 +76,13 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		tools[key] = recorded(key, offered.tool, {
 			...recording,
 			mutating: offered.mutating || approvalBound,
-			...(offered.mutating || approvalBound
+			...(offered.requiresApproval || approvalBound
 				? {
 						approval: {
 							store: deps.approvals,
 							connectionId: offered.connectionId,
 							connectionRevision: offered.connectionRevision,
 							remoteToolName: offered.remoteToolName,
-							automaticallyAllowed: deps.automaticallyAllowedTools.has(key),
 						},
 					}
 				: {}),

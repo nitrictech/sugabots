@@ -65,8 +65,6 @@ const POD_PERMISSIONS = Object.keys({
 	"routine.history.read": true,
 	"approval.decide": true,
 	"approval.routine.decide": true,
-	"approval.alwaysAllow": true,
-	"approval.revoke": true,
 } satisfies Record<PodPermission, true>) as PodPermission[];
 
 /** What a Member holds in a shared pod they have been added to. */
@@ -164,12 +162,10 @@ describe("shared pods", () => {
 		expect(mayInPod(actor("member"), "agent.delete", inPod)).toBe(false);
 	});
 
-	it("a member approves ordinary tool calls but not Routine ones, and grants no standing approval", () => {
+	it("a member approves ordinary tool calls but not Routine ones", () => {
 		const inPod = sharedPod(true);
 		expect(mayInPod(actor("member"), "approval.decide", inPod)).toBe(true);
 		expect(mayInPod(actor("member"), "approval.routine.decide", inPod)).toBe(false);
-		expect(mayInPod(actor("member"), "approval.alwaysAllow", inPod)).toBe(false);
-		expect(mayInPod(actor("member"), "approval.revoke", inPod)).toBe(false);
 	});
 
 	it("lets a viewer read and take part, and change nothing", () => {

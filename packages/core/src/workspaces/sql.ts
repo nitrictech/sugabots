@@ -1,4 +1,4 @@
-import type { AgentFace, PodRouting, SystemAgentKey } from "@sugabots/contracts";
+import type { AgentColor, AgentFace, PodRouting, SystemAgentKey } from "@sugabots/contracts";
 import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
@@ -6,7 +6,6 @@ import {
 	check,
 	foreignKey,
 	index,
-	integer,
 	jsonb,
 	pgTable,
 	text,
@@ -288,7 +287,7 @@ export const podMember = pgTable(
  * `name` is unique per workspace because a name is how a person addresses an
  * agent: `@Linear Handler` in a message has to mean one of them.
  *
- * `hue` and `face` are the whole avatar. Two small columns rather than an
+ * `color` and `face` are the whole avatar. Two small columns rather than an
  * image, which is what lets an agent created at run time have a face at all.
  */
 export const agent = pgTable(
@@ -307,9 +306,9 @@ export const agent = pgTable(
 		systemAgentKey: text("system_agent_key").$type<SystemAgentKey>(),
 		provisionedKey: text("provisioned_key").$type<"personal-assistant">(),
 		description: text("description"),
-		// 0-359. Not a Postgres domain: the range is the contract's to state,
-		// and a check constraint here would be a second place to change it.
-		hue: integer("hue").notNull(),
+		// One of the contract's colour names. Not a Postgres enum: the palette is
+		// the contract's to state, and an enum here would be a second place to change it.
+		color: text("color").$type<AgentColor>().notNull(),
 		face: text("face").$type<AgentFace>().notNull(),
 		// Null when nobody has chosen one, or somebody has cleared it. A system
 		// agent with no model does not run; a crew agent's turns refuse.

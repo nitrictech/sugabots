@@ -10,16 +10,33 @@ import { uuidSchema } from "./uuid.ts";
  */
 
 /**
- * An agent's colour, as a hue. One number, not a palette: the avatar and the
- * name are two lightnesses of it. See the `agent-tint` utility in the web app.
+ * The colours a bot's face can be, in the order a colour picker shows them.
+ * Each names a face, eye and bubble palette; see `botColors` in
+ * `@sugabots/avatars`.
  */
-export const agentHueSchema = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 359 }));
+export const agentColors = [
+	"green",
+	"sky",
+	"purple",
+	"ice",
+	"yellow",
+	"orange",
+	"rose",
+	"teal",
+] as const;
+
+export const agentColorSchema = Schema.Literals(agentColors);
+
+export type AgentColor = typeof agentColorSchema.Type;
 
 /**
- * Which face is knocked out of that colour. Geometry rather than an upload, so
- * an agent created at run time has an avatar without anybody drawing one.
+ * The eyes drawn on that colour, in the order an eye picker shows them.
+ * Geometry rather than an upload, so an agent created at run time has an
+ * avatar without anybody drawing one.
  */
-export const agentFaceSchema = Schema.Literals(["bar", "smile", "dots", "square"]);
+export const agentFaces = ["pill", "dot", "arc", "square", "wink"] as const;
+
+export const agentFaceSchema = Schema.Literals(agentFaces);
 
 export type AgentFace = typeof agentFaceSchema.Type;
 
@@ -87,7 +104,7 @@ export const agentSchema = Schema.Struct({
 	 */
 	systemAgentKey: Schema.NullOr(systemAgentKeySchema),
 	description: Schema.NullOr(Schema.String),
-	hue: agentHueSchema,
+	color: agentColorSchema,
 	face: agentFaceSchema,
 	/**
 	 * Which model answers. `null` when nobody has chosen one, or somebody has
@@ -120,7 +137,7 @@ export const newAgentInPodSchema = Schema.Struct({
 	/** Derived from the name when left out. */
 	handle: Schema.optional(handleSchema),
 	description: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(280)))),
-	hue: Schema.optional(agentHueSchema),
+	color: Schema.optional(agentColorSchema),
 	face: Schema.optional(agentFaceSchema),
 	model: modelIdSchema,
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),

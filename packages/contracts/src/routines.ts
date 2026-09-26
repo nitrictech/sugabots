@@ -1,4 +1,6 @@
 import { Effect, Schema } from "effect";
+import { agentSchema } from "./agents.ts";
+import { podSlugSchema } from "./pods.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -62,6 +64,22 @@ export const routineSchema = Schema.Struct({
 });
 
 export type Routine = typeof routineSchema.Type;
+
+/** A routine in the workspace list, with the bot it belongs to and that bot's pod. */
+export const workspaceRoutineSchema = Schema.Struct({
+	routine: routineSchema,
+	agent: agentSchema,
+	pod: Schema.Struct({ id: uuidSchema, slug: podSlugSchema }),
+});
+
+export type WorkspaceRoutine = typeof workspaceRoutineSchema.Type;
+
+/** Every routine on a bot the person can reach, by name. */
+export const workspaceRoutineListSchema = Schema.Struct({
+	items: Schema.mutable(Schema.Array(workspaceRoutineSchema)),
+});
+
+export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
 
 const newRoutineBaseSchema = {
 	name: routineNameSchema,

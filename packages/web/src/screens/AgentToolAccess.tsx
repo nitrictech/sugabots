@@ -1,29 +1,22 @@
-import {
-	type Connection,
-	type ConnectionTool,
-	connectionToolMutating,
-	type ToolApprovalRule,
-} from "@sugabots/contracts";
+import { type Connection, type ConnectionTool, connectionToolMutating } from "@sugabots/contracts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-} from "@/ui/dialog.tsx";
-import { readableToolName } from "./ConnectionsSettings.tsx";
+	DialogFormBody,
+	DialogFormFrame,
+	DialogFormHeader,
+	DialogFormStep,
+} from "@/ui/dialog-form.tsx";
+import { SettingsGroup } from "@/ui/settings-page.tsx";
+import { ConnectionToolRow } from "./ConnectionsSettings.tsx";
 
 /*
- * A connection's tools as one agent meets them. The pod's view lists what a
- * server offers; this says what happens when this agent reaches for each one,
- * which depends on three things at once: whether the tool can change
- * anything, whether the connection allows changes, and whether someone has
- * always allowed that tool for this agent.
+ * A connection's tools as a bot meets them. The pod's view lists what a
+ * server offers; this says what happens when the bot reaches for each one.
  */
 
-/** What happens when an agent calls a tool. */
-export type ToolAccess = "free" | "asks" | "always" | "unavailable";
+/** What happens when a bot calls a tool: it runs, or it waits for a person to allow it. */
+type ToolAccess = "free" | "asks";
 
 export interface AgentTool {
 	tool: ConnectionTool;
@@ -31,33 +24,22 @@ export interface AgentTool {
 }
 
 /**
- * Each of a connection's tools with what happens when `agentId` calls it: a
- * read runs freely; a change is left out while the connection is read-only,
- * and otherwise asks first unless a standing approval covers it for this agent.
+ * Each of a connection's tools with what happens when a bot calls it: a tool
+ * that changes things always asks first, and so does every tool of a
+ * connection set to ask. A connection that is off offers none of them.
  */
-export function agentToolsOf(
-	connection: Connection,
-	rules: readonly ToolApprovalRule[],
-	agentId: string,
-): AgentTool[] {
-	const alwaysAllowed = new Set(
-		rules
-			.filter((rule) => rule.agentId === agentId && rule.connectionId === connection.id)
-			.map((rule) => rule.toolName),
-	);
-	return connection.tools.map((tool) => {
-		if (!connectionToolMutating(tool)) return { tool, access: "free" };
-		if (!connection.allowMutating) return { tool, access: "unavailable" };
-		return { tool, access: alwaysAllowed.has(tool.name) ? "always" : "asks" };
-	});
+export function agentToolsOf(connection: Connection): AgentTool[] {
+	if (connection.access === "off") return [];
+	return connection.tools.map((tool) => ({
+		tool,
+		access: connectionToolMutating(tool) || connection.access === "ask" ? "asks" : "free",
+	}));
 }
 
-/** The groups in the order someone checking an agent's reach cares about them. */
+/** The groups in the order someone checking a bot's reach cares about them. */
 const GROUPS: { access: ToolAccess; heading: string }[] = [
 	{ access: "asks", heading: "Asks first" },
-	{ access: "always", heading: "Always allowed" },
 	{ access: "free", heading: "Runs freely" },
-	{ access: "unavailable", heading: "Not available" },
 ];
 
 export function AgentToolsDialog({
@@ -65,7 +47,6 @@ export function AgentToolsDialog({
 	connection,
 	tools,
 	presetId,
-	markHue,
 	open,
 	onOpenChange,
 }: {
@@ -74,59 +55,52 @@ export function AgentToolsDialog({
 	tools: readonly AgentTool[];
 	/** The catalog entry its logo comes from, when it came from one. */
 	presetId?: string;
-	markHue: number;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="grid max-h-[80vh] grid-rows-[auto_minmax(0,1fr)] sm:max-w-xl">
-				<DialogHeader className="flex-row items-center gap-3">
-					<ConnectionMark presetId={presetId} name={connection.name} hue={markHue} size="sm" />
-					<div className="flex min-w-0 flex-col gap-1">
-						<DialogTitle>{connection.name} tools</DialogTitle>
-						<DialogDescription>What {agentName} can do with them</DialogDescription>
-					</div>
-				</DialogHeader>
-				<div className="flex min-h-0 flex-col gap-5 overflow-y-auto pr-1">
-					{GROUPS.map(({ access, heading }) => {
-						const inGroup = tools.filter((entry) => entry.access === access);
-						if (inGroup.length === 0) return null;
-						return (
-							<section key={access} aria-label={heading} className="flex flex-col gap-2">
-								<h3 className="m-0 flex items-baseline gap-2 font-semibold text-heading text-sm">
-									{heading}
-									<span className="font-normal text-muted-foreground text-xs">
-										{inGroup.length}
-									</span>
-								</h3>
-								{access === "unavailable" && (
-									<p className="m-0 text-muted-foreground text-xs">
-										{connection.name} is read only. Allow changes on the connection to let agents
-										use these, asking first.
-									</p>
-								)}
-								<ul className="m-0 flex list-none flex-col divide-y divide-border-subtle p-0">
-									{inGroup.map(({ tool }) => (
-										<li key={tool.name} className="flex flex-col gap-0.5 py-2">
-											<span
-												className={`text-sm ${access === "unavailable" ? "text-muted-foreground" : "text-foreground"}`}
-											>
-												{readableToolName(tool.name)}
-											</span>
-											{tool.description && (
-												<span className="line-clamp-2 text-muted-foreground text-xs">
-													{tool.description}
+			<DialogFormFrame>
+				<DialogFormStep
+					onSubmit={(event) => {
+						event.preventDefault();
+						onOpenChange(false);
+					}}
+				>
+					<DialogFormHeader title={`${connection.name} tools`} action="Done" cancel={false} />
+					<DialogFormBody>
+						<div className="flex items-center gap-2.5 px-1">
+							<ConnectionMark presetId={presetId} name={connection.name} size="sm" />
+							<p className="m-0 text-[13.5px] text-muted-foreground">
+								What {agentName} can do with them
+							</p>
+						</div>
+						<div className="-mx-1 flex max-h-[min(520px,60vh)] flex-col gap-5 overflow-y-auto px-1">
+							{GROUPS.map(({ access, heading }) => {
+								const inGroup = tools.filter((entry) => entry.access === access);
+								if (inGroup.length === 0) return null;
+								return (
+									<SettingsGroup
+										key={access}
+										label={
+											<>
+												{heading}
+												<span aria-hidden className="pl-1.5 font-normal">
+													{inGroup.length}
 												</span>
-											)}
-										</li>
-									))}
-								</ul>
-							</section>
-						);
-					})}
-				</div>
-			</DialogContent>
+											</>
+										}
+									>
+										{inGroup.map(({ tool }) => (
+											<ConnectionToolRow key={tool.name} tool={tool} />
+										))}
+									</SettingsGroup>
+								);
+							})}
+						</div>
+					</DialogFormBody>
+				</DialogFormStep>
+			</DialogFormFrame>
 		</Dialog>
 	);
 }

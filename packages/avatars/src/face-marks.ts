@@ -9,24 +9,39 @@ export type FaceMark =
 	| { shape: "rect"; x: number; y: number; width: number; height: number; rx: number }
 	| { shape: "stroke"; d: string; strokeWidth: number };
 
-const bars = (rx: number): readonly FaceMark[] => [
-	{ shape: "rect", x: 10, y: 15, width: 7, height: 11, rx },
-	{ shape: "rect", x: 23, y: 15, width: 7, height: 11, rx },
-];
-
+/*
+ * The design sizes each eye as a fraction of the face's diameter and centres
+ * the pair; these are those fractions on a 40-unit face. An arc is the top
+ * half of a ring, drawn along its centre line.
+ */
 const marksByFace: Record<AgentFace, readonly FaceMark[]> = {
-	bar: bars(3.5),
-	square: bars(1.5),
-	dots: [
-		{ shape: "circle", cx: 14, cy: 20, r: 3.8 },
-		{ shape: "circle", cx: 26, cy: 20, r: 3.8 },
+	// 0.125 × 0.25 bars, 0.17 apart.
+	pill: [
+		{ shape: "rect", x: 11.6, y: 15, width: 5, height: 10, rx: 2.8 },
+		{ shape: "rect", x: 23.4, y: 15, width: 5, height: 10, rx: 2.8 },
 	],
-	smile: [
+	// 0.14 dots, 0.15 apart.
+	dot: [
+		{ shape: "circle", cx: 14.2, cy: 20, r: 2.8 },
+		{ shape: "circle", cx: 25.8, cy: 20, r: 2.8 },
+	],
+	// 0.2-wide arcs with a 0.045 stroke, 0.1 apart.
+	arc: [
 		{
 			shape: "stroke",
-			d: "M10.5 21.5a3.5 3.5 0 0 1 7 0M22.5 21.5a3.5 3.5 0 0 1 7 0",
-			strokeWidth: 2.6,
+			d: "M10.9 22a3.1 3.1 0 0 1 6.2 0M22.9 22a3.1 3.1 0 0 1 6.2 0",
+			strokeWidth: 1.8,
 		},
+	],
+	// 0.16 squares, 0.12 apart.
+	square: [
+		{ shape: "rect", x: 11.2, y: 16.8, width: 6.4, height: 6.4, rx: 1.8 },
+		{ shape: "rect", x: 22.4, y: 16.8, width: 6.4, height: 6.4, rx: 1.8 },
+	],
+	// A 0.14 dot and a 0.19-wide arc, 0.13 apart.
+	wink: [
+		{ shape: "circle", cx: 13.6, cy: 20, r: 2.8 },
+		{ shape: "stroke", d: "M22.5 22.4a2.9 2.9 0 0 1 5.8 0", strokeWidth: 1.8 },
 	],
 };
 

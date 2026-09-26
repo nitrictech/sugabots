@@ -7,8 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { History, ListFilter, MessageSquare, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import {
 	useChat,
 	useChatHistory,
@@ -22,16 +21,13 @@ import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
-import { ScribeNotSetUp } from "./BuiltInAgentSetup.tsx";
-import { ChatActivityRow } from "./ChatActivityRow.tsx";
+import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
-import { ChatHistory } from "./ChatHistory.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
-import { ThreadConversation } from "./ThreadConversation.tsx";
+import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -40,33 +36,30 @@ export function AgentChat({
 	pod,
 	user,
 	threadId,
-	historyOpen,
-	onHistoryChange,
+	detailsOpen,
+	onDetailsClose,
 	onThreadChange,
 }: {
 	agent: Agent;
 	pod: Pod;
 	user: SessionUser;
 	threadId?: string;
-	historyOpen: boolean;
-	onHistoryChange: (open: boolean) => void;
+	/** Whether the Details sidebar is open beside the messages. */
+	detailsOpen: boolean;
+	onDetailsClose: () => void;
 	onThreadChange: (threadId: string | undefined) => void;
 }) {
 	const chat = useChat(pod.id, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
 	const mainThread = useThread(chat.data?.mainThreadId);
-	const selectedThread = useThread(threadId);
 	useThreadEvents(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
 	const [draft, setDraft] = useState("");
-	const [summaryOpen, setSummaryOpen] = useState(true);
-	const [newInChat, setNewInChat] = useState(false);
 	const viewport = useRef<HTMLDivElement>(null);
 	const opener = useRef<HTMLElement | null>(null);
 	const previousThreadId = useRef<string | undefined>(undefined);
-	const itemCountAtOpen = useRef(0);
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
 	const details = mainThread.data;
@@ -83,11 +76,10 @@ export function AgentChat({
 		if (!chat.data || !details) return;
 		if (threadId && !previousThreadId.current) {
 			opener.current = document.activeElement as HTMLElement;
-			itemCountAtOpen.current = items.length;
 		}
 		if (!threadId && previousThreadId.current) requestAnimationFrame(() => opener.current?.focus());
 		previousThreadId.current = threadId;
-	}, [chat.data, details, threadId, items.length]);
+	}, [chat.data, details, threadId]);
 
 	useLayoutEffect(() => {
 		if (
@@ -101,11 +93,6 @@ export function AgentChat({
 	}, [latestItemRevision]);
 
 	useFollowContentGrowth(viewport, followingLatest);
-
-	useEffect(() => {
-		if (threadId && items.length > itemCountAtOpen.current) setNewInChat(true);
-		if (!threadId) setNewInChat(false);
-	}, [threadId, items.length]);
 
 	async function submit() {
 		const message = draft.trim();
@@ -145,13 +132,6 @@ export function AgentChat({
 		onThreadChange(nextThreadId);
 	}
 
-	function showNewInChat() {
-		onThreadChange(undefined);
-		requestAnimationFrame(() => {
-			if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
-		});
-	}
-
 	if (chat.isPending) return null;
 	if (!chat.data || chat.isError)
 		return (
@@ -167,7 +147,8 @@ export function AgentChat({
 		);
 
 	return (
-		<div className="relative flex min-h-0 flex-1">
+		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
+		<div className="flex min-h-0 flex-1 md:relative">
 			<div className="relative flex min-w-0 flex-1 flex-col">
 				<div
 					ref={viewport}
@@ -178,9 +159,10 @@ export function AgentChat({
 						followingLatest.current =
 							element.scrollHeight - element.scrollTop - element.clientHeight < 48;
 					}}
-					className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-7"
+					className="min-h-0 flex-1 overflow-y-auto pt-[22px] pb-3"
 				>
-					<div className="mx-auto flex w-full max-w-[760px] flex-col gap-[15px]">
+					{/* The same inset as the header and the composer, so the faces, the + and the header line up. */}
+					<div className="flex min-h-full w-full flex-col px-4 md:px-[22px]">
 						{messages.isError && (
 							<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
 						)}
@@ -196,316 +178,156 @@ export function AgentChat({
 							</Button>
 						)}
 						{items.length === 0 && (
-							<div className="grid min-h-64 place-content-center text-center">
-								<span className="mx-auto mb-3 grid size-11 place-items-center rounded-xl bg-sunken text-subtle-foreground">
-									<MessageSquare aria-hidden size={19} />
-								</span>
-								<h2 className="m-0 font-semibold text-heading text-lg">
-									Start a conversation with {agent.name}
+							<div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-6 text-center">
+								<AgentAvatar color={agent.color} face={agent.face} size={88} />
+								<h2 className="m-0 pt-1.5 font-bold text-[20px] text-foreground">
+									Say hello to {agent.name}
 								</h2>
-								<p className="m-0 pt-1 text-muted-foreground text-sm">
-									Send a message to start working together.
+								<p className="m-0 text-[14px] text-muted-foreground">
+									Your chats with {agent.name} will show up here.
 								</p>
 							</div>
 						)}
-						{items.map((item) => {
-							if (item.kind === "collaboration" || item.kind === "routine") {
-								return (
-									<div key={item.id} id={`chat-item-${item.id}`}>
-										<ChatActivityRow
-											entry={entries.find((entry) => entry.threadId === item.threadId)}
-											type={item.kind}
-											title={
-												item.kind === "routine"
-													? item.routineName
-													: `${item.initiator.name} contacted me`
-											}
-											onOpen={() => openThread(item.threadId)}
-										/>
-									</div>
-								);
-							}
-							return (
-								<div key={item.message.id} id={`chat-item-${item.message.id}`}>
+						{chatGroupsOf(items).map((group) => (
+							<Fragment key={group.key}>
+								{group.separated && <DaySeparator at={group.at} />}
+								{group.kind === "messages" ? (
 									<ThreadConversation
-										messages={[item.message]}
+										messages={group.messages}
 										host={host}
 										isRunning={false}
-										mentionable={[...details.participants, ...details.crew]}
+										participants={[...details.participants, ...details.crew]}
 										user={user}
 										dividers={false}
 										onOpenCollaboration={openThread}
-										threadEntries={entries}
 										podId={pod.id}
 										canApproveToolCalls={details.capabilities?.approveToolCalls}
-										canAlwaysAllowToolCalls={details.capabilities?.alwaysAllowToolCalls}
 									/>
-								</div>
-							);
-						})}
+								) : (
+									<ActivityLine
+										item={group.item}
+										host={host}
+										entry={entries.find((entry) => entry.threadId === group.item.threadId)}
+										onOpen={() => openThread(group.item.threadId)}
+									/>
+								)}
+							</Fragment>
+						))}
 					</div>
 				</div>
-				<div className="shrink-0 bg-card px-4 pb-5 pt-3 md:px-[22px]">
+				<div className="shrink-0 px-4 pt-2.5 pb-[18px] md:px-[22px]">
 					{agent.model === null ? (
 						<AgentNotSetUp agent={agent} pod={pod} />
 					) : (
 						<ChatComposer
 							label={`Message ${agent.name}`}
-							placeholder={`Message ${agent.name}…`}
+							placeholder={`Message ${agent.name}`}
 							value={draft}
 							onValueChange={setDraft}
 							onSubmit={submit}
 							submitLabel="Send message"
 							submitDisabled={!draft.trim() || send.isPending}
 							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
-							mentionables={details.participants.filter(
-								(participant) => participant.kind !== "person" || participant.id !== user.id,
-							)}
-							className="mx-auto w-full max-w-[760px]"
+							className="w-full"
 						/>
 					)}
 				</div>
-				{threadId && (
-					<ChatThreadPanel
-						chatId={chat.data.id}
-						threadId={threadId}
-						entry={selectedEntry}
-						history={entries}
-						user={user}
-						onClose={() => onThreadChange(undefined)}
-						onOpenThread={openThread}
-					/>
-				)}
-				{threadId && newInChat && (
-					<button
-						type="button"
-						onClick={showNewInChat}
-						className="focus-ring absolute bottom-32 left-3 z-40 rounded-full border border-border bg-card px-3 py-2 font-semibold text-heading text-xs shadow-[0_6px_18px_rgba(40,35,30,.12)]"
-					>
-						New in Chat
-					</button>
-				)}
 			</div>
-			{historyOpen && (
-				<ChatHistory
+			{/* One sidebar at a time: an opened collaboration or run takes Details' place. */}
+			{threadId ? (
+				<ChatThreadPanel
 					chatId={chat.data.id}
-					agent={agent}
-					selectedThreadId={threadId}
-					onClose={() => onHistoryChange(false)}
-					onOpen={openThread}
-				/>
-			)}
-			{!historyOpen && summaryOpen && (
-				<ChatSummaryRail
-					details={details}
+					chatAgentId={agent.id}
+					threadId={threadId}
+					entry={selectedEntry}
 					history={entries}
-					selectedEntry={selectedEntry}
-					selectedDetails={selectedThread.data}
+					user={user}
+					onClose={() => onThreadChange(undefined)}
+					onOpenThread={openThread}
 				/>
-			)}
-			<div className="absolute right-3 top-[-55px] z-10 hidden items-center gap-2 md:flex">
-				<IconButton
-					label={historyOpen ? "Close Chat history" : "Open Chat history"}
-					aria-pressed={historyOpen}
-					onClick={() => onHistoryChange(!historyOpen)}
-					variant="pane"
-					size="lg"
-				>
-					<History size={17} />
-				</IconButton>
-				<IconButton
-					label={summaryOpen ? "Hide chat summary" : "Show chat summary"}
-					aria-pressed={summaryOpen}
-					onClick={() => setSummaryOpen(!summaryOpen)}
-					variant="pane"
-					size="lg"
-					className="hidden xl:grid"
-				>
-					{summaryOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-				</IconButton>
-			</div>
-			<button
-				type="button"
-				aria-label={historyOpen ? "Close Chat history" : "Open Chat history"}
-				onClick={() => onHistoryChange(!historyOpen)}
-				className="focus-ring absolute right-3 top-[-53px] grid size-9 place-items-center rounded-xl bg-sunken text-muted-foreground md:hidden"
-			>
-				<History size={16} />
-			</button>
-		</div>
-	);
-}
-
-function ChatSummaryRail({
-	details,
-	history,
-	selectedEntry,
-	selectedDetails,
-}: {
-	details: NonNullable<ReturnType<typeof useThread>["data"]>;
-	history: ChatHistoryEntry[];
-	selectedEntry?: ChatHistoryEntry;
-	/** The open thread, which is `undefined` until it has loaded. */
-	selectedDetails?: NonNullable<ReturnType<typeof useThread>["data"]>;
-}) {
-	const title = selectedEntry
-		? `${selectedEntry.type === "routine" ? "Run" : selectedEntry.type[0]?.toUpperCase()}${selectedEntry.type === "routine" ? "" : selectedEntry.type.slice(1)} summary`
-		: "Chat summary";
-	const counts = { collaboration: 0, routine: 0 };
-	for (const entry of history) counts[entry.type] += 1;
-	return (
-		<aside
-			aria-label={title}
-			className="hidden w-[300px] shrink-0 overflow-y-auto border-border-subtle border-l bg-background px-2.5 py-3 xl:block"
-		>
-			{selectedEntry ? (
-				// Nothing until the thread loads: the Chat's own details in its place
-				// would show the whole Chat's participants under this thread's heading.
-				selectedDetails && <ThreadSummary details={selectedDetails} entry={selectedEntry} />
 			) : (
-				<>
-					<SummaryCard details={details} />
-					<section className="mt-3 rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
-						<CardHeading>Threads in this chat</CardHeading>
-						<dl className="m-0 grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2.5 pt-3 text-md">
-							<dt className="text-muted-foreground">Collaborations</dt>
-							<dd className="m-0 text-heading tabular-nums">{counts.collaboration}</dd>
-							<dt className="text-muted-foreground">Routine runs</dt>
-							<dd className="m-0 text-heading tabular-nums">{counts.routine}</dd>
-						</dl>
-						{details.recentParticipants.length > 0 && (
-							<div className="mt-3 border-border-subtle border-t pt-3">
-								<CardHeading>Recent participants</CardHeading>
-								<ParticipantList participants={details.recentParticipants} />
-							</div>
-						)}
-					</section>
-					<Context details={details} />
-				</>
-			)}
-		</aside>
-	);
-}
-
-function ThreadSummary({
-	details,
-	entry,
-}: {
-	details: NonNullable<ReturnType<typeof useThread>["data"]>;
-	entry: ChatHistoryEntry;
-}) {
-	const threadLabel = entry.type === "routine" ? "run" : entry.type;
-	return (
-		<div className="flex flex-col gap-3">
-			<SummaryCard details={details} />
-			<section className="rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
-				<CardHeading>This {threadLabel}</CardHeading>
-				<dl className="m-0 grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-2.5 pt-3 text-md">
-					<dt className="text-muted-foreground">Started</dt>
-					<dd className="m-0 text-heading">{formatDateTime(details.thread.createdAt)}</dd>
-					<dt className="text-muted-foreground">Messages</dt>
-					<dd className="m-0 text-heading tabular-nums">{details.messages.length}</dd>
-				</dl>
-				<div className="mt-3 border-border-subtle border-t pt-3">
-					<CardHeading>Participants</CardHeading>
-					<ParticipantList participants={details.participants} />
-				</div>
-			</section>
-		</div>
-	);
-}
-
-function ParticipantList({ participants }: { participants: ThreadParticipant[] }) {
-	return (
-		<ul className="m-0 flex list-none flex-col gap-2.5 p-0 pt-3">
-			{participants.map((participant) => (
-				<li key={participant.id} className="flex min-w-0 items-center gap-2 text-md">
-					{participant.kind === "agent" ? (
-						<AgentAvatar hue={participant.hue} face={participant.face} size={21} />
-					) : (
-						<PersonAvatar name={participant.name} image={participant.image} size={21} />
-					)}
-					<span
-						className={
-							participant.kind === "agent"
-								? "agent-tint truncate font-semibold text-agent-name"
-								: "truncate font-medium text-heading"
-						}
-						style={
-							participant.kind === "agent"
-								? { ["--agent-hue" as string]: participant.hue }
-								: undefined
-						}
-					>
-						{participant.name}
-					</span>
-				</li>
-			))}
-		</ul>
-	);
-}
-
-function SummaryCard({ details }: { details: NonNullable<ReturnType<typeof useThread>["data"]> }) {
-	return (
-		<section className="rounded-2xl border border-border-subtle bg-card px-4 py-3.5">
-			<CardHeading icon={<ListFilter aria-hidden size={13} className="text-primary" />}>
-				Summary
-			</CardHeading>
-			{/* `=== false`, not `!`: the field is optional, and an absent one means
-			    the API did not say rather than that the Scribe is unset. */}
-			{details.summaryEnabled === false ? (
-				<ScribeNotSetUp />
-			) : (
-				<p className="m-0 pt-2.5 text-heading text-[13.5px] leading-relaxed">
-					{details.summary?.content ?? "A summary will appear after the first agent reply."}
-				</p>
-			)}
-		</section>
-	);
-}
-
-function CardHeading({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
-	return (
-		<h3 className="m-0 flex items-center gap-1.5 font-semibold text-2xs text-subtle-foreground uppercase tracking-[0.06em]">
-			{icon}
-			{children}
-		</h3>
-	);
-}
-
-function formatDateTime(value: string) {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(new Date(value));
-}
-
-function Context({ details }: { details: NonNullable<ReturnType<typeof useThread>["data"]> }) {
-	const context = details.usage.latestContext;
-	if (!context) return null;
-	const percentage = context.capacityTokens
-		? Math.min(100, Math.round((context.usedTokens / context.capacityTokens) * 100))
-		: undefined;
-	return (
-		<section className="mt-3 rounded-[14px] border border-border-subtle bg-card px-4 py-3.5">
-			<h3 className="m-0 pb-2 font-semibold text-2xs text-subtle-foreground uppercase tracking-[0.06em]">
-				Context
-			</h3>
-			<span className="font-semibold text-heading text-2xl">
-				{percentage === undefined ? "—" : `${percentage}%`}
-			</span>
-			{percentage !== undefined && (
-				<div className="mt-2 h-[7px] overflow-hidden rounded-full bg-border">
-					<span
-						className="block h-full rounded-full bg-agent-fill"
-						style={{ width: `${percentage}%` }}
+				detailsOpen && (
+					<DetailsSidebar
+						agent={agent}
+						pod={pod}
+						details={details}
+						user={user}
+						onClose={onDetailsClose}
 					/>
-				</div>
+				)
 			)}
-		</section>
+		</div>
 	);
+}
+
+type ChatActivityItem = Extract<ChatMessageItem, { kind: "collaboration" | "routine" }>;
+
+/** A routine run, or another bot's collaboration with this one, as a centred line. */
+function ActivityLine({
+	item,
+	host,
+	entry,
+	onOpen,
+}: {
+	item: ChatActivityItem;
+	host: AgentParticipant;
+	entry: ChatHistoryEntry | undefined;
+	onOpen: () => void;
+}) {
+	const state = activityStateOf(entry);
+	return item.kind === "routine" ? (
+		<ChatActivityRow type="routine" routineName={item.routineName} state={state} onOpen={onOpen} />
+	) : (
+		<ChatActivityRow
+			type="collaboration"
+			initiator={item.initiator}
+			recipient={host}
+			inChatOf="recipient"
+			state={state}
+			onOpen={onOpen}
+		/>
+	);
+}
+type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message"];
+
+type ChatGroup = { key: string; at: string; separated: boolean } & (
+	| { kind: "messages"; messages: ChatMessage[] }
+	| { kind: "activity"; item: ChatActivityItem }
+);
+
+/**
+ * The chat's items as they are drawn: runs of messages together, so one
+ * author's messages in a row read as a run, and each collaboration or routine
+ * row on its own. A new day, or an hour's quiet, starts a new group behind a
+ * separator.
+ */
+function chatGroupsOf(items: readonly ChatMessageItem[]): ChatGroup[] {
+	const groups: ChatGroup[] = [];
+	let previousAt: string | undefined;
+	for (const item of items) {
+		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
+		const separated = separatesFrom(previousAt ? { createdAt: previousAt } : undefined, {
+			createdAt: at,
+		});
+		previousAt = at;
+		const last = groups.at(-1);
+		if (item.kind === "message") {
+			if (last?.kind === "messages" && !separated) {
+				last.messages.push(item.message);
+				continue;
+			}
+			groups.push({
+				kind: "messages",
+				key: item.message.id,
+				at,
+				separated,
+				messages: [item.message],
+			});
+			continue;
+		}
+		groups.push({ kind: "activity", key: item.id, at, separated, item });
+	}
+	return groups;
 }
 
 function mergeChatItems(
@@ -545,7 +367,7 @@ function chatItemRevision(item: ChatMessageItem | undefined): string {
  */
 function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 	return (
-		<p className="mx-auto m-0 w-full max-w-[760px] rounded-2xl border border-control-border px-4 py-3.5 text-base text-muted-foreground leading-relaxed">
+		<p className="mx-auto m-0 w-full max-w-[760px] rounded-2xl border border-border-strong px-4 py-3.5 text-base text-muted-foreground leading-relaxed">
 			{agent.name} has no model yet, so it cannot answer.{" "}
 			{pod.permissions.updateAgents ? (
 				<>

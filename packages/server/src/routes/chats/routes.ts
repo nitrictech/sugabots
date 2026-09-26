@@ -13,6 +13,13 @@ export interface ChatRoutesOptions {
 export function chatRoutes({ chats }: ChatRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 		handlers
+			.handle("list", ({ query }) =>
+				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* grantedWorkspace;
+					const list = yield* chats.list({ workspaceId, userId: actor.userId, pod: query.pod });
+					return list ?? (yield* noSuchPod);
+				}),
+			)
 			.handle("getOrCreate", ({ payload }) =>
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* grantedWorkspace;
@@ -57,6 +64,7 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 }
 
 const noSuchChat = new NotFound({ message: "No such chat" });
+const noSuchPod = new NotFound({ message: "No such pod" });
 
 const chatErrors = {
 	ChatPlacementRejected: (failure: { message: string }) =>

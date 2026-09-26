@@ -138,6 +138,7 @@ const emptyThreadStore: ThreadStore = {
 };
 
 const emptyChatStore: ChatStore = {
+	list: () => Effect.succeed({ items: [] }),
 	getOrCreate: () => notStubbed("chats.getOrCreate"),
 	messages: () => Effect.undefined,
 	history: () => Effect.undefined,
@@ -145,6 +146,7 @@ const emptyChatStore: ChatStore = {
 };
 
 const emptyRoutineStore: RoutineStore = {
+	listInWorkspace: () => Effect.succeed([]),
 	list: () => Effect.succeed([]),
 	get: () => Effect.undefined,
 	create: () => notStubbed("routines.create"),

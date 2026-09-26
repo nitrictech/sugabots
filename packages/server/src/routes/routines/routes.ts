@@ -6,7 +6,7 @@ import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { bearerToken } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedAgent } from "../../http/authorisation.ts";
+import { grantedAgent, grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
 export interface RoutineRoutesOptions {
@@ -16,6 +16,13 @@ export interface RoutineRoutesOptions {
 export function routineRoutes({ routines }: RoutineRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "routines", (handlers) =>
 		handlers
+			.handle("listInWorkspace", () =>
+				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* grantedWorkspace;
+					const items = yield* routines.listInWorkspace(workspaceId, actor.userId);
+					return { items };
+				}),
+			)
 			.handle("list", () =>
 				Effect.flatMap(grantedAgent, ({ agent }) => routines.list(agent.workspaceId, agent.id)),
 			)

@@ -1,4 +1,4 @@
-import { type BotColor, botColors } from "@sugabots/avatars";
+import { type BotColor, botColorVariables } from "@sugabots/avatars";
 import { cva } from "class-variance-authority";
 import { cn } from "cn";
 import type { ComponentProps, ReactNode } from "react";
@@ -49,7 +49,8 @@ const chatBubble = cva("max-w-md rounded-3xl px-4 py-2.5 text-pretty", {
 function toneClasses(tone: ChatTone) {
 	if (tone === "person") return "bg-secondary text-secondary-foreground";
 	if (tone === "self") return "bg-brand text-brand-foreground";
-	return botColors[tone].tint;
+	// A bot's tint and text come in as variables from its palette, for both themes.
+	return "bg-(--bot-tint) text-(--bot-text)";
 }
 
 interface ChatBubbleProps extends ComponentProps<"p"> {
@@ -59,8 +60,15 @@ interface ChatBubbleProps extends ComponentProps<"p"> {
 	size?: "default" | "sm";
 }
 
-export function ChatBubble({ tone, side, size, className, ...props }: ChatBubbleProps) {
-	return <p className={cn(chatBubble({ side, size }), toneClasses(tone), className)} {...props} />;
+export function ChatBubble({ tone, side, size, className, style, ...props }: ChatBubbleProps) {
+	const palette = tone === "person" || tone === "self" ? undefined : botColorVariables(tone);
+	return (
+		<p
+			className={cn(chatBubble({ side, size }), toneClasses(tone), className)}
+			style={{ ...palette, ...style }}
+			{...props}
+		/>
+	);
 }
 
 /** A centred aside in the conversation: a timestamp, who is talking. */

@@ -1,79 +1,49 @@
-import { type Agent, hueFromText, type Pod } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
-import { type FormEvent, useState } from "react";
-import { useCreateAgent, useModels } from "@/lib/agents.ts";
+import type { Agent, AgentColor, AgentFace, Pod } from "@sugabots/contracts";
+import { Check, ChevronRight } from "lucide-react";
+import { type FormEvent, useId, useState } from "react";
+import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
+import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { Button, type ButtonProps } from "@/ui/button.tsx";
-import { Dialog, DialogClose, DialogTitle } from "@/ui/dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormFooter } from "@/ui/dialog-form.tsx";
-import { Field } from "@/ui/field.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
-import { Input } from "@/ui/input.tsx";
-import { ModelPicker } from "@/ui/model-picker.tsx";
-import { SurfaceHeader, SurfaceTitle } from "@/ui/surface.tsx";
-
-export function NewAgentButton({
-	pod,
-	iconOnly = false,
-	variant,
-	className,
-}: Pick<ButtonProps, "variant" | "className"> & { pod: Pod; iconOnly?: boolean }) {
-	const [open, setOpen] = useState(false);
-	const navigate = useNavigate();
-
-	return (
-		<>
-			{iconOnly ? (
-				<IconButton label="New agent" size="lg" onClick={() => setOpen(true)}>
-					<Plus />
-				</IconButton>
-			) : (
-				<Button type="button" variant={variant} className={className} onClick={() => setOpen(true)}>
-					<Plus size={15} />
-					New agent
-				</Button>
-			)}
-
-			<Dialog open={open} onOpenChange={setOpen}>
-				<NewAgentDialog
-					podId={pod.id}
-					onCreated={async (agent) => {
-						setOpen(false);
-						await navigate(agentSettingsLink({ pod, agent }));
-					}}
-				/>
-			</Dialog>
-		</>
-	);
-}
+import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
 
 /**
- * The form itself, for callers that bring their own trigger — the rail opens it
- * from a pod's heading, where a `Button` would not fit.
+ * Making a bot: its face first, as it will look, then its name and the pod it
+ * lives in. It runs on the workspace's first switched-on model until somebody
+ * chooses another on its page, which is also where it is described.
  */
 export function NewAgentDialog({
-	podId,
+	podId: fixedPodId,
+	pods = [],
 	onCreated,
 }: {
-	podId: string;
-	onCreated: (agent: Agent) => Promise<void>;
+	/** The pod the bot is made in, when the dialog is opened from one. */
+	podId?: string;
+	/** The pods to choose from when it is not: those the viewer may add a bot to. */
+	pods?: readonly Pod[];
+	onCreated: (agent: Agent, pod: Pod | undefined) => Promise<void>;
 }) {
 	const [name, setName] = useState("");
-	const [selectedModel, setSelectedModel] = useState<string>();
+	const [color, setColor] = useState<AgentColor>("green");
+	const [face, setFace] = useState<AgentFace>("pill");
+	const [chosenPodId, setChosenPodId] = useState(pods[0]?.id);
+	const [choosingPod, setChoosingPod] = useState(false);
+	const podId = fixedPodId ?? chosenPodId ?? "";
 	const create = useCreateAgent(podId);
 	const models = useModels();
-	const model = selectedModel ?? models.data?.models[0]?.modelId ?? "";
+	const model = models.data?.models[0]?.modelId;
 	const trimmedName = name.trim();
+	const nameId = useId();
+	const chosenPod = pods.find((pod) => pod.id === podId);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
+		if (!trimmedName || !model || !podId) return;
 		try {
-			const agent = await create.mutateAsync({ name: trimmedName, model });
-			await onCreated(agent);
+			const agent = await create.mutateAsync({ name: trimmedName, model, color, face });
+			await onCreated(agent, chosenPod);
 		} catch {
 			return;
 		}
@@ -81,59 +51,150 @@ export function NewAgentDialog({
 
 	return (
 		<DialogForm onSubmit={submit}>
-			<SurfaceHeader>
-				<AgentAvatar hue={hueFromText(trimmedName)} face="bar" size={40} />
-				<SurfaceTitle
-					title={<DialogTitle>New agent</DialogTitle>}
-					subtitle="A shared agent for this pod"
-				/>
-			</SurfaceHeader>
+			<DialogFormHeader
+				title="New bot"
+				action="Create"
+				actionDisabled={!trimmedName || !model || !podId || create.isPending}
+			/>
 
-			<DialogFormBody>
-				<Field id="agent-name" label="Name">
-					<Input
-						id="agent-name"
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-						placeholder="Release coordinator"
-						maxLength={64}
-						required
-					/>
-				</Field>
+			<DialogFormBody gap="compact">
+				<div className="flex justify-center pt-1 pb-2">
+					<AgentAvatar color={color} face={face} size={88} />
+				</div>
+				<div className="overflow-hidden rounded-panel bg-list">
+					<div className="flex items-center gap-3 border-border border-b px-4 py-3">
+						<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Colour</span>
+						<ColourPicker value={color} onChange={setColor} />
+					</div>
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Eyes</span>
+						<EyesPicker color={color} value={face} onChange={setFace} variant="chips" />
+					</div>
+				</div>
 
-				<Field id="agent-model" label="Model">
-					<ModelPicker
-						id="agent-model"
-						models={models.data?.models ?? []}
-						value={model}
-						onValueChange={setSelectedModel}
-						disabled={models.isPending}
+				<div className="mt-2 overflow-hidden rounded-panel bg-list">
+					<div className="flex items-center gap-3 border-border border-b px-4 py-3">
+						<label htmlFor={nameId} className="w-[70px] shrink-0 text-[14px] text-muted-foreground">
+							Name
+						</label>
+						<input
+							id={nameId}
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+							placeholder="e.g. Support Desk"
+							maxLength={64}
+							className="min-w-0 flex-1 bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground"
+						/>
+					</div>
+					<PodRow
+						fixed={fixedPodId !== undefined}
+						pods={pods}
+						chosen={chosenPod}
+						open={choosingPod}
+						onToggle={() => setChoosingPod(!choosingPod)}
+						onChoose={(pod) => {
+							setChosenPodId(pod.id);
+							setChoosingPod(false);
+						}}
 					/>
-				</Field>
+				</div>
+
+				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
+					{models.isPending || model
+						? "Every bot lives in one pod and uses that pod's connections. You can describe it and choose a model after it's created."
+						: "Connect a model first, in Settings under Models. Bots think with one."}
+				</p>
 
 				{models.error && <Alert>Models could not be loaded. Close this form and try again.</Alert>}
 				{create.error && (
 					<Alert>
 						{failureMessage(create.error, {
-							Conflict: "An agent with that name already exists. Try another name.",
-							Forbidden: "Only a workspace admin can create an agent.",
+							Conflict: "A bot with that name already exists. Try another name.",
+							Forbidden: "Only a workspace admin can create a bot.",
 						})}
 					</Alert>
 				)}
 			</DialogFormBody>
-
-			<DialogFormFooter>
-				<DialogClose render={<Button type="button" variant="outline" size="sm" />}>
-					Cancel
-				</DialogClose>
-				<Button
-					type="submit"
-					size="sm"
-					disabled={trimmedName === "" || model === "" || create.isPending}
-				>
-					{create.isPending ? "Creating…" : "Create agent"}
-				</Button>
-			</DialogFormFooter>
 		</DialogForm>
+	);
+}
+
+/**
+ * The pod the bot will live in: stated when the dialog was opened from one,
+ * and otherwise a row that opens the pods to choose from beneath it.
+ */
+function PodRow({
+	fixed,
+	pods,
+	chosen,
+	open,
+	onToggle,
+	onChoose,
+}: {
+	fixed: boolean;
+	pods: readonly Pod[];
+	chosen: Pod | undefined;
+	open: boolean;
+	onToggle: () => void;
+	onChoose: (pod: Pod) => void;
+}) {
+	const { agents } = useAgents();
+	const botsIn = (pod: Pod) =>
+		agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
+	const label = <span className="w-[70px] shrink-0 text-[14px] text-muted-foreground">Pod</span>;
+
+	if (fixed || pods.length <= 1) {
+		return (
+			<div className="flex items-center gap-3 px-4 py-3">
+				{label}
+				<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
+					{chosen?.name ?? (fixed ? "This pod" : "No pod to add to")}
+				</span>
+			</div>
+		);
+	}
+	return (
+		<>
+			<button
+				type="button"
+				onClick={onToggle}
+				aria-expanded={open}
+				aria-label={`Pod: ${chosen?.name ?? "choose one"}`}
+				className="focus-ring flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel"
+			>
+				{label}
+				<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
+					{chosen?.name ?? "Choose a pod"}
+				</span>
+				<ChevronRight
+					aria-hidden
+					size={14}
+					strokeWidth={2.6}
+					className={`shrink-0 text-subtle-foreground transition-transform ${open ? "rotate-90" : ""}`}
+				/>
+			</button>
+			{open && (
+				<ul aria-label="Pods" className="m-0 list-none border-border border-t p-0">
+					{pods.map((pod) => (
+						<li key={pod.id}>
+							<button
+								type="button"
+								onClick={() => onChoose(pod)}
+								aria-pressed={pod.id === chosen?.id}
+								className="focus-ring flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-panel"
+							>
+								<PodTile bots={botsIn(pod)} size={28} />
+								<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
+									{pod.name}
+								</span>
+								{pod.id === chosen?.id && (
+									<Check aria-hidden size={15} strokeWidth={2.8} className="shrink-0 text-link" />
+								)}
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
+		</>
 	);
 }

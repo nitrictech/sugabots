@@ -1,19 +1,19 @@
-import type { AgentFace } from "@sugabots/contracts";
+import { BotFace } from "@sugabots/avatars";
+import type { AgentColor, AgentFace } from "@sugabots/contracts";
 import { cn } from "cn";
 
 /*
- * An agent's identity: its face and its name.
+ * An agent's face.
  *
- * Both are self-sufficient — each sets `agent-tint` and the hue on itself
- * rather than inheriting them. That is deliberate: the right panel is a sibling
- * of the main pane rather than a child, a collaboration shows two agents of
- * different hues side by side, and a sidebar row lists a different agent on
- * every line. Anything that leaned on an ancestor for the colour would be wrong
- * in at least one of those places — and was.
+ * It takes its colour as a prop rather than from an ancestor. That is
+ * deliberate: the right panel is a sibling of the main pane rather than a
+ * child, a collaboration shows two agents of different colours side by side,
+ * and a list shows a different agent on every row. Anything that leaned on an
+ * ancestor for the colour would be wrong in at least one of those places.
  */
 
 interface AgentAvatarProps {
-	hue: number;
+	color: AgentColor;
 	face?: AgentFace;
 	size?: number;
 	/**
@@ -25,63 +25,19 @@ interface AgentAvatarProps {
 }
 
 export function AgentAvatar({
-	hue,
-	face = "bar",
+	color,
+	face = "pill",
 	size = 32,
 	ringed = false,
 	className,
 }: AgentAvatarProps) {
 	return (
-		<svg
-			aria-hidden
-			viewBox="0 0 40 40"
+		<BotFace
+			color={color}
+			face={face}
 			width={size}
 			height={size}
-			className={cn("agent-tint shrink-0", className)}
-			style={{ ["--agent-hue" as string]: hue }}
-		>
-			<circle
-				cx="20"
-				cy="20"
-				r={ringed ? 18.5 : 20}
-				fill="var(--agent-fill)"
-				stroke={ringed ? "var(--card)" : undefined}
-				strokeWidth={ringed ? 3 : undefined}
-			/>
-			<Eyes face={face} />
-		</svg>
-	);
-}
-
-function Eyes({ face }: { face: AgentFace }) {
-	const ink = "var(--agent-ink)";
-
-	if (face === "dots") {
-		return (
-			<>
-				<circle cx="14" cy="20" r="3.8" fill={ink} />
-				<circle cx="26" cy="20" r="3.8" fill={ink} />
-			</>
-		);
-	}
-
-	if (face === "smile") {
-		return (
-			<path
-				d="M10.5 21.5a3.5 3.5 0 0 1 7 0M22.5 21.5a3.5 3.5 0 0 1 7 0"
-				stroke={ink}
-				strokeWidth="2.6"
-				strokeLinecap="round"
-				fill="none"
-			/>
-		);
-	}
-
-	const radius = face === "square" ? 1.5 : 3.5;
-	return (
-		<>
-			<rect x="10" y="15" width="7" height="11" rx={radius} fill={ink} />
-			<rect x="23" y="15" width="7" height="11" rx={radius} fill={ink} />
-		</>
+			className={cn(ringed && "rounded-full shadow-[0_0_0_3px_var(--panel)]", className)}
+		/>
 	);
 }

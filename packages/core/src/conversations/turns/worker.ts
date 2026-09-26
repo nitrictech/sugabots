@@ -339,27 +339,13 @@ const streamReply = (
 				}
 				approvalBoundTools.add(binding.tool);
 			}
-			const mutatingConnections = Object.entries(connections.tools)
-				.filter(([, offered]) => offered.mutating)
-				.map(([key, offered]) => ({
-					key,
-					connectionId: offered.connectionId,
-					connectionRevision: offered.connectionRevision,
-					remoteToolName: offered.remoteToolName,
-				}));
-			const automaticallyAllowedTools = yield* approvals.allowedToolKeys(
-				prepared.context.agent.id,
-				{
-					workspaceId: prepared.context.thread.workspaceId,
-					podId: prepared.context.agent.podId,
-				},
-				mutatingConnections,
-			);
+			const toolsNeedingApproval = Object.entries(connections.tools)
+				.filter(([, offered]) => offered.requiresApproval)
+				.map(([key]) => key);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
 				calls,
 				approvals,
-				automaticallyAllowedTools,
 				approvalBoundTools,
 				builtIn,
 				connections: connections.tools,
@@ -417,12 +403,7 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: Object.fromEntries(
-					mutatingConnections.map(({ key }) => [
-						key,
-						automaticallyAllowedTools.has(key) ? "approved" : "user-approval",
-					]),
-				),
+				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
 				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.usage.modelCalls ?? 0)),
 				signal: stop.signal,
 			});
@@ -441,7 +422,7 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const pending = terminal.approvalRequests.map((request) => {
 					const offered = connections.tools[request.toolCall.toolName];
-					if (!offered?.mutating) {
+					if (!offered?.requiresApproval) {
 						throw new ApprovalForUnknownTool({ tool: request.toolCall.toolName });
 					}
 					return {
@@ -454,6 +435,7 @@ const streamReply = (
 						connectionId: offered.connectionId,
 						connectionRevision: offered.connectionRevision,
 						remoteToolName: offered.remoteToolName,
+						mutating: offered.mutating,
 						atOffset,
 					};
 				});

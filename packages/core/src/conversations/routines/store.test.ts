@@ -9,6 +9,7 @@ import {
 	job,
 	message,
 	pod,
+	podMember,
 	routine,
 	routineExecution,
 	thread,
@@ -86,8 +87,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 					podId,
 					name: "Routine Agent",
 					handle: handleFromName(`Routine Agent ${suffix}`),
-					hue: 120,
-					face: "bar",
+					color: "green",
+					face: "pill",
 					model: "test/model",
 					createdById: userId,
 				})
@@ -208,6 +209,70 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		return { accepted, childThread, activeCollaboration, turnJob, facilitateJob };
 	}
 
+	it("lists the workspace's routines on bots in pods the person reaches, by name", async () => {
+		const [joined] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId,
+					ownerId: userId,
+					kind: "shared",
+					name: "Joined pod",
+					slug: `joined-${crypto.randomUUID()}`,
+					createdById: userId,
+				})
+				.returning(),
+		);
+		if (!joined) throw new Error("Could not create the joined pod");
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId: joined.id, userId }),
+		);
+		const [helper] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId: joined.id,
+					name: "Joined Agent",
+					handle: handleFromName(`Joined Agent ${crypto.randomUUID()}`),
+					color: "sky",
+					face: "dot",
+					model: "test/model",
+					createdById: userId,
+				})
+				.returning(),
+		);
+		if (!helper) throw new Error("Could not create the joined agent");
+		const webhook = { kind: "webhook" as const };
+		await store.create(workspaceId, agentId, userId, {
+			name: "Unreached",
+			instructions: "In a pod this member is not in.",
+			trigger: webhook,
+		});
+		const later = await store.create(workspaceId, helper.id, userId, {
+			name: "Weekly report",
+			instructions: "Summarise the week.",
+			trigger: webhook,
+		});
+		const sooner = await store.create(workspaceId, helper.id, userId, {
+			name: "Morning brief",
+			instructions: "Plan the day.",
+			trigger: webhook,
+		});
+		const removed = await store.create(workspaceId, helper.id, userId, {
+			name: "Removed",
+			instructions: "Gone.",
+			trigger: webhook,
+		});
+		await store.remove(workspaceId, helper.id, removed.routine.id);
+
+		const listed = await store.listInWorkspace(workspaceId, userId);
+
+		expect(listed.map((item) => item.routine.id)).toEqual([sooner.routine.id, later.routine.id]);
+		expect(listed[0]?.agent).toMatchObject({ id: helper.id, name: "Joined Agent", color: "sky" });
+		expect(listed[0]?.pod).toEqual({ id: joined.id, slug: joined.slug });
+	});
+
 	it("creates scoped cron and webhook definitions without exposing secret hashes", async () => {
 		const cron = await store.create(workspaceId, agentId, userId, {
 			name: "Weekday briefing",
@@ -264,8 +329,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 					podId: null,
 					name: `Summariser ${suffix}`,
 					handle: handleFromName(`Summariser ${suffix}`),
-					hue: 0,
-					face: "bar",
+					color: "rose",
+					face: "pill",
 					model: "test/model",
 					createdById: userId,
 					systemAgentKey: "summarise",

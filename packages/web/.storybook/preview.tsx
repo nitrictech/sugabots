@@ -35,12 +35,12 @@ export default definePreview({
 			description: "Application colour scheme",
 			toolbar: {
 				icon: "circlehollow",
-				items: ["light", "dark", "system"],
+				items: ["dark", "light", "system"],
 				dynamicTitle: true,
 			},
 		},
 	},
-	initialGlobals: { theme: "light" },
+	initialGlobals: { theme: "dark" },
 	parameters: {
 		layout: "padded",
 		backgrounds: { disable: true },
@@ -61,7 +61,7 @@ export default definePreview({
 		},
 		function AppTheme(Story, context) {
 			useEffect(() => {
-				if (context.globals.theme === "system") {
+				if (context.globals.theme === "dark") {
 					delete document.documentElement.dataset.theme;
 				} else {
 					document.documentElement.dataset.theme = context.globals.theme;

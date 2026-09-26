@@ -264,9 +264,12 @@ export function connectionOperations({
 				}).pipe(Effect.result);
 				if (finished._tag === "Failure") return failed(finished.failure.reason, pod);
 
-				yield* connections
-					.update(owner.workspaceId, owner.podId, owner.connectionId, { enabled: true })
-					.pipe(Effect.catch(() => Effect.void));
+				// Signed in for the first time, it is turned on; a setting somebody chose stays.
+				if (found.access === "off") {
+					yield* connections
+						.update(owner.workspaceId, owner.podId, owner.connectionId, { access: "allow" })
+						.pipe(Effect.catch(() => Effect.void));
+				}
 				yield* discoverQuietly(owner.workspaceId, owner.podId, owner.connectionId);
 				return { pod };
 			}),

@@ -1,4 +1,4 @@
-import type { Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
+import type { AgentColor, Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, max, or, sql } from "drizzle-orm";
 import { Effect, Schema } from "effect";
@@ -24,7 +24,7 @@ export const participantColumns = {
 	agentId: agent.id,
 	agentName: agent.name,
 	agentHandle: agent.handle,
-	agentHue: agent.hue,
+	agentColor: agent.color,
 	agentFace: agent.face,
 };
 
@@ -35,7 +35,7 @@ export interface ParticipantRow {
 	agentId: string | null;
 	agentName: string | null;
 	agentHandle: string | null;
-	agentHue: number | null;
+	agentColor: AgentColor | null;
 	agentFace: schema.AgentRow["face"] | null;
 }
 
@@ -49,13 +49,13 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 			image: row.userImage,
 		};
 	}
-	if (row.agentId && row.agentName && row.agentHandle && row.agentHue !== null && row.agentFace) {
+	if (row.agentId && row.agentName && row.agentHandle && row.agentColor !== null && row.agentFace) {
 		return {
 			kind: "agent",
 			id: row.agentId,
 			name: row.agentName,
 			handle: row.agentHandle,
-			hue: row.agentHue,
+			color: row.agentColor,
 			face: row.agentFace,
 		};
 	}
@@ -73,7 +73,7 @@ export function personAuthor(person: {
 		agentId: null,
 		agentName: null,
 		agentHandle: null,
-		agentHue: null,
+		agentColor: null,
 		agentFace: null,
 	};
 }
@@ -213,7 +213,7 @@ export const loadCrew = Effect.fn("Participants.loadCrew")(function* (
 			id: agent.id,
 			name: agent.name,
 			handle: agent.handle,
-			hue: agent.hue,
+			color: agent.color,
 			face: agent.face,
 		})
 		.from(agent)

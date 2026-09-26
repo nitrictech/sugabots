@@ -1,10 +1,8 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
 import type { Root } from "hast";
-import { createElement, type ReactNode, useMemo } from "react";
+import { createElement, type ReactNode } from "react";
 import { type Components, type ExtraProps, Streamdown } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
-import { MENTION_TAG, Mention, remarkMentions } from "./mentions.tsx";
 
 /*
  * An agent's words as markdown. Streamdown is the AI SDK's renderer: it
@@ -13,25 +11,12 @@ import { MENTION_TAG, Mention, remarkMentions } from "./mentions.tsx";
  * it is finished, so none of its streaming behaviour is used.
  */
 
-export function MessageMarkdown({
-	text,
-	mentionable,
-}: {
-	text: string;
-	mentionable: ThreadParticipant[];
-}) {
-	const remarkPlugins = useMemo(
-		(): PluggableList => [[remarkMentions, mentionable]],
-		[mentionable],
-	);
-	const components = useMemo(() => componentsFor(mentionable), [mentionable]);
+export function MessageMarkdown({ text }: { text: string }) {
 	return (
 		<Streamdown
-			className={`${BREAK_LONG_WORDS} text-foreground text-xl leading-relaxed`}
-			remarkPlugins={remarkPlugins}
+			className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
 			rehypePlugins={REHYPE_PLUGINS}
-			allowedTags={ALLOWED_TAGS}
-			components={components}
+			components={COMPONENTS}
 			controls={CONTROLS}
 			isAnimating={false}
 		>
@@ -70,8 +55,6 @@ const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 
 const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks];
 
-const ALLOWED_TAGS = { [MENTION_TAG]: ["handle"] };
-
 /* A copy button on code is worth its space in a bubble; table and image tooling is not. */
 const CONTROLS = {
 	code: { copy: true, download: false },
@@ -80,24 +63,14 @@ const CONTROLS = {
 	image: false,
 };
 
-function componentsFor(mentionable: ThreadParticipant[]): Components {
-	return {
-		[MENTION_TAG]: ({ handle, children }) => {
-			const participant = mentionable.find((candidate) => candidate.handle === handle);
-			return participant ? <Mention participant={participant} /> : (children as ReactNode);
-		},
-		// Streamdown's headings are sized for a page; a bubble is 480px wide.
-		h1: heading("h1", "text-2xl"),
-		h2: heading("h2", "text-xl"),
-		h3: heading("h3", "text-lg"),
-	};
-}
+const COMPONENTS: Components = {
+	// Streamdown's headings are sized for a page; a bubble is 520px wide.
+	h1: heading("h1", "text-2xl"),
+	h2: heading("h2", "text-xl"),
+	h3: heading("h3", "text-lg"),
+};
 
 function heading(tag: "h1" | "h2" | "h3", size: string) {
 	return ({ children }: ExtraProps & { children?: unknown }) =>
-		createElement(
-			tag,
-			{ className: `mt-4 mb-1 font-semibold text-heading ${size}` },
-			children as ReactNode,
-		);
+		createElement(tag, { className: `mt-4 mb-1 font-semibold ${size}` }, children as ReactNode);
 }

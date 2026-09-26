@@ -1,11 +1,12 @@
 import type {
 	Connection,
+	ConnectionAccess,
 	ConnectionTool,
 	ConnectionUpdate,
 	NewConnection,
 } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
@@ -21,8 +22,8 @@ export interface ConnectionTarget {
 	/** `oauth` calls carry no header of ours: the SDK adds the tokens it holds. */
 	auth: "header" | "oauth";
 	headers: Record<string, string>;
-	/** Whether tools that change things may be offered, not only read-only ones. */
-	allowMutating: boolean;
+	/** What the pod's bots may do with its tools. */
+	access: ConnectionAccess;
 	/** So a test result is recorded against the configuration it tested. */
 	configurationUpdatedAt: Date;
 	configurationRevision: number;
@@ -41,8 +42,8 @@ export class ConnectionNameTaken extends Data.TaggedError("ConnectionNameTaken")
  * Reading and writing a pod's connections.
  *
  * `create` and `update` declare one failure: a name, and the handle made from
- * it, is unique per pod. `enabled` is not checked by `target`; a test is how
- * the pod owner decides whether to enable it.
+ * it, is unique per pod. `access` is not checked by `target`: a connection
+ * that is off can still be tested before it is turned on.
  */
 export interface ConnectionStore {
 	list(workspaceId: string, podId: string): Effect.Effect<Connection[], never, Database>;
@@ -73,7 +74,7 @@ export interface ConnectionStore {
 		podId: string,
 		connectionId: string,
 	): Effect.Effect<ConnectionTarget | undefined, never, Database>;
-	/** The enabled ones among these, for a turn: a connection switched off offers nothing. */
+	/** The ones a turn may use: a connection that is off offers nothing. */
 	targetsForPod(
 		workspaceId: string,
 		podId: string,
@@ -154,6 +155,8 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 					authKind: oauth ? ("oauth" as const) : ("header" as const),
 					secretHeader: oauth ? null : (input.secretHeader ?? null),
 					secretEncrypted: !oauth && input.secret ? cipher.encrypt(input.secret) : null,
+					// Nothing can be asked of a server before it is signed in to.
+					access: oauth ? ("off" as const) : ("allow" as const),
 				};
 				const [inserted] = yield* queryCatching(
 					(db) =>
@@ -180,10 +183,7 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 				const connectionChanged =
 					input.url !== undefined || input.secretHeader !== undefined || input.secret !== undefined;
 				const configurationChanged =
-					input.name !== undefined ||
-					connectionChanged ||
-					input.enabled !== undefined ||
-					input.allowMutating !== undefined;
+					input.name !== undefined || connectionChanged || input.access !== undefined;
 				const [row] = yield* queryCatching(
 					(db) =>
 						db
@@ -199,8 +199,7 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 										: input.secret === null
 											? null
 											: cipher.encrypt(input.secret),
-								enabled: input.enabled,
-								allowMutating: input.allowMutating,
+								access: input.access,
 								configurationRevision: configurationChanged
 									? sql`${connection.configurationRevision} + 1`
 									: undefined,
@@ -247,7 +246,7 @@ export function connectionStore(cipher: CredentialCipher): ConnectionStore {
 							and(
 								eq(connection.workspaceId, workspaceId),
 								eq(connection.podId, podId),
-								eq(connection.enabled, true),
+								ne(connection.access, "off"),
 							),
 						)
 						.orderBy(asc(connection.createdAt)),
@@ -330,7 +329,7 @@ function toTarget(row: ConnectionRow, cipher: CredentialCipher): ConnectionTarge
 		url: row.url,
 		auth: row.authKind,
 		headers,
-		allowMutating: row.allowMutating,
+		access: row.access,
 		configurationUpdatedAt: row.updatedAt,
 		configurationRevision: row.configurationRevision,
 	};
@@ -355,8 +354,7 @@ function toConnection(row: ConnectionRow, cipher: CredentialCipher): Connection 
 		signedIn: row.authKind === "header" || unsealOauth(row, cipher)?.tokens !== undefined,
 		secretHeader: row.secretHeader,
 		hasSecret,
-		enabled: row.enabled,
-		allowMutating: row.allowMutating,
+		access: row.access,
 		status: row.lastTestedAt === null ? "untested" : row.lastTestError ? "error" : "connected",
 		tools: row.tools,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,

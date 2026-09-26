@@ -1,8 +1,4 @@
-/**
- * Bot faces and colours. Components are styled with Tailwind classes, so an
- * app that renders them must scan this package, e.g.
- * `@source "../../avatars/src";` in its stylesheet.
- */
+/** Bot faces and the colours bots wear, shared by the app and the website. */
 
 export * from "./bot-colors.ts";
 export * from "./bot-crowd.ts";

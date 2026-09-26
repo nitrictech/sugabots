@@ -191,7 +191,6 @@ const loadDetails = Effect.fn("ThreadStore.loadDetails")(function* (
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
 			approveToolCalls: may(routineExecutionId ? "approval.routine.decide" : "approval.decide"),
-			alwaysAllowToolCalls: may("approval.alwaysAllow"),
 		},
 		activeTurnId: activeTurn?.id ?? null,
 		routineExecution: execution ? toRoutineExecution(execution) : null,

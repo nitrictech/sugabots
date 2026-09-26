@@ -212,8 +212,8 @@ export const agents: Agent[] = [
 		name: "Customer Research",
 		handle: "customer-research",
 		description: "Digs through calls and notes for what customers asked for.",
-		hue: 310,
-		face: "dots",
+		color: "purple",
+		face: "dot",
 		model: MODELS[1] as string,
 		prompt: "",
 		disabledTools: [],
@@ -227,8 +227,8 @@ export const agents: Agent[] = [
 		name: "Issue Triager",
 		handle: "issue-triager",
 		description: "Sorts incoming issues every weekday morning.",
-		hue: 150,
-		face: "smile",
+		color: "green",
+		face: "arc",
 		model: MODELS[0] as string,
 		prompt: "",
 		disabledTools: [],
@@ -242,8 +242,8 @@ export const agents: Agent[] = [
 		name: "Linear Handler",
 		handle: "linear-handler",
 		description: "Reads and writes Linear on the team's behalf.",
-		hue: 250,
-		face: "bar",
+		color: "sky",
+		face: "pill",
 		model: MODELS[0] as string,
 		prompt: "Be brief.",
 		disabledTools: [],
@@ -263,8 +263,8 @@ export const personalAssistant: Agent = {
 	name: "Personal Assistant",
 	handle: "personal-assistant",
 	description: "Your private assistant.",
-	hue: 151,
-	face: "bar",
+	color: "green",
+	face: "pill",
 	model: MODELS[1] as string,
 	prompt: "",
 	disabledTools: [],
@@ -284,16 +284,16 @@ export const builtInAgents: SystemAgent[] = [
 		key: "summarise",
 		name: "Scribe",
 		description: "Keeps concise summaries of ongoing conversations.",
-		hue: 36,
-		face: "smile",
+		color: "orange",
+		face: "arc",
 		model: MODELS[1] as string,
 	},
 	{
 		key: "facilitate",
 		name: "Facilitator",
 		description: "Decides who speaks next when nobody was addressed.",
-		hue: 205,
-		face: "bar",
+		color: "teal",
+		face: "pill",
 		model: MODELS[0] as string,
 	},
 ];
@@ -354,9 +354,20 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.agents.list.mockReturnValue(Effect.succeed(agents));
 	client.api.systemAgents.list.mockReturnValue(Effect.succeed(builtInAgents));
 	client.api.connections.list.mockReturnValue(Effect.succeed([]));
-	client.api.toolApprovals.listRules.mockReturnValue(Effect.succeed([]));
 	client.api.threads.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.list.mockReturnValue(Effect.succeed([]));
+	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
+	// Every crew bot in the scope, none messaged yet. Personal stays out of All.
+	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
+		const shared = new Set(pods.filter((pod) => pod.kind === "shared").map((pod) => pod.id));
+		const inScope = (agent: Agent) =>
+			query.pod === "all" ? shared.has(agent.podId) : agent.podId === query.pod;
+		return Effect.succeed({
+			items: agents
+				.filter((agent) => agent.systemAgentKey === null && inScope(agent))
+				.map((agent) => ({ agent, chatId: null, lastMessage: null })),
+		});
+	});
 	client.api.chats.getOrCreate.mockReturnValue(
 		Effect.fail(new NotFound({ message: "No chat fixture" })),
 	);

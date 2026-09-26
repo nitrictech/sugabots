@@ -55,13 +55,13 @@ export function IconButton({
 			type: render ? undefined : "button",
 			"aria-label": label,
 			className: cn(
-				"focus-ring grid shrink-0 cursor-pointer place-items-center rounded-md transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none",
+				"focus-ring grid shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none",
 				variant === "outline"
-					? "border border-control-border bg-control text-control-foreground hover:bg-surface-accent"
+					? "bg-chip text-foreground hover:bg-hover"
 					: variant === "pane"
-						? "rounded-xl bg-sunken text-muted-foreground hover:text-heading"
-						: "text-surface-muted-foreground hover:bg-surface-accent hover:text-surface-accent-foreground",
-				size === "lg" && variant === "pane" ? "size-9" : sizes[size],
+						? "bg-chip text-foreground hover:bg-hover"
+						: "text-muted-foreground hover:bg-hover hover:text-foreground",
+				size === "lg" && variant === "pane" ? "size-[34px]" : sizes[size],
 				className,
 			),
 			children,

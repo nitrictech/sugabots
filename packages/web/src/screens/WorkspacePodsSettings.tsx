@@ -1,20 +1,15 @@
 import {
 	type Agent,
-	hueFromText,
 	type Pod,
 	type PodMember,
-	type PodPermissions,
-	type PodRouting,
-	type PodUpdate,
 	type WorkspaceRole,
 	workspaceRoleLabel,
 	workspaceRoleOf,
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { ArrowLeft, Bot, Ellipsis, LockKeyhole, Plus, User } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
-import { useAgents, useDeleteAgent } from "@/lib/agents.ts";
-import { isSetUp, useBuiltInAgent } from "@/lib/built-in-agents.ts";
+import { LockKeyhole, Minus } from "lucide-react";
+import { type ReactNode, useDeferredValue, useId, useState } from "react";
+import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
@@ -25,249 +20,170 @@ import {
 	useUpdatePod,
 } from "@/lib/pods.ts";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
-import { isPodSettingsTab, type PodSettingsTab } from "@/lib/workspace-settings.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { NewAgentButton } from "@/shell/NewAgent.tsx";
-import { NewPodButton } from "@/shell/NewPod.tsx";
+import { NewAgentDialog } from "@/shell/NewAgent.tsx";
+import { NewPodDialog } from "@/shell/NewPod.tsx";
+import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
-import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
-import { Input } from "@/ui/input.tsx";
-import { SettingsRail, SettingsRailItem, SettingsSplitView } from "@/ui/settings-rail.tsx";
-import { StatusDot } from "@/ui/status-dot.tsx";
-import { Tab, TabPanel, Tabs, TabsList } from "@/ui/tabs.tsx";
-import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
 import {
-	AN_ADMINISTRATOR_CHOOSES,
-	BuiltInAgentLink,
-	useCanConfigureBuiltInAgents,
-} from "./BuiltInAgentSetup.tsx";
+	SettingsAddMark,
+	SettingsAddRow,
+	SettingsDanger,
+	SettingsGroup,
+	SettingsListColumn,
+	SettingsListDetail,
+	SettingsListRow,
+	SettingsPage,
+	SettingsRow,
+	SettingsValue,
+} from "@/ui/settings-page.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 
+/**
+ * Every pod you reach, beside the open one: its bots, its people and the
+ * connections its bots share. Bots belong to a pod for good, so adding one
+ * here makes it in this pod.
+ */
 export function WorkspacePodsSettings({
 	selectedPodId,
-	selectedPodTab = "members",
 	connectionSignInError,
-	selectedAgentId,
-	selectedAgentTab,
 	canCreatePods,
 }: {
 	selectedPodId?: string;
-	selectedPodTab?: PodSettingsTab;
 	connectionSignInError?: string;
-	selectedAgentId?: string;
-	selectedAgentTab?: "routines";
 	canCreatePods: boolean;
 }) {
 	const { data: pods, isPending, error } = usePods();
 	const { agents } = useAgents();
-	const personalPod = pods?.find((pod) => pod.kind === "personal");
-	const sharedPods = pods?.filter((pod) => pod.kind === "shared") ?? [];
-	const selected =
-		selectedPodId === undefined
-			? (personalPod ?? sharedPods[0])
-			: pods?.find((pod) => pod.id === selectedPodId);
-	const missing = selectedPodId !== undefined && !isPending && !selected;
-	const selectedAgent = agents?.find(
-		(agent) => agent.id === selectedAgentId && agent.podId === selected?.id,
-	);
-	const selectedPodAgents = agents?.filter((agent) => agent.podId === selected?.id) ?? [];
-	const podRailItem = (pod: Pod) => (
-		<SettingsRailItem
-			key={pod.id}
-			selected={pod.id === selected?.id}
-			render={<Link {...podSettingsLink(pod)} />}
-		>
-			<PodMark pod={pod} />
-			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate text-base font-medium text-foreground">{pod.name}</span>
-				{pod.kind === "personal" ? (
-					<span className="flex items-center gap-0.5 text-muted-foreground text-xs">
-						{agents?.filter((agent) => agent.podId === pod.id).length ?? 0}
-						<Bot aria-hidden size={11} />
-						<span className="sr-only">agents</span>
-					</span>
-				) : (
-					<PodCounts
-						pod={pod}
-						agents={agents?.filter((agent) => agent.podId === pod.id).length ?? 0}
-					/>
-				)}
-			</span>
-		</SettingsRailItem>
-	);
-	const agentRailItem = (agent: Agent, pod: Pod) => (
-		<SettingsRailItem
-			key={agent.id}
-			selected={agent.id === selectedAgentId}
-			render={<Link {...agentSettingsLink({ pod, agent })} />}
-		>
-			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
-			<span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
-				{agent.name}
-			</span>
-			<StatusDot
-				on={agent.model !== null}
-				label={agent.model !== null ? "Set up" : "Not set up"}
-				tooltip={agent.model !== null ? `Runs on ${agent.model}` : "Not set up: choose a model"}
-			/>
-		</SettingsRailItem>
-	);
+	const navigate = useNavigate();
+	const [search, setSearch] = useState("");
+	const [creating, setCreating] = useState(false);
+	const needle = useDeferredValue(search.trim().toLowerCase());
+	const ordered = [
+		...(pods?.filter((pod) => pod.kind === "shared") ?? []),
+		...(pods?.filter((pod) => pod.kind === "personal") ?? []),
+	];
+	const shown = ordered.filter((pod) => needle === "" || pod.name.toLowerCase().includes(needle));
+	// With none chosen, the first pod is open beside the list; on a phone the list comes first.
+	const selected = selectedPodId ? pods?.find((pod) => pod.id === selectedPodId) : ordered[0];
+	const botsIn = (pod: Pod) =>
+		agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
+
+	if (isPending) return null;
 
 	return (
-		<SettingsSplitView
-			showDetail={selectedPodId !== undefined || selectedAgentId !== undefined}
-			rail={
-				selectedAgentId && selected ? (
-					<SettingsRail
-						label={`${selected.name} agents`}
-						footer={
-							selected.permissions.createAgents ? (
-								<NewAgentButton
-									pod={selected}
-									variant="secondary"
-									className="h-11 w-full justify-center border-dashed text-base"
-								/>
-							) : undefined
-						}
+		<>
+			<SettingsListDetail
+				detailOpen={selectedPodId !== undefined}
+				back={{
+					label: "Pods",
+					render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
+				}}
+				list={
+					<SettingsListColumn
+						title="Pods"
+						newLabel="New pod"
+						onNew={canCreatePods ? () => setCreating(true) : undefined}
+						search={search}
+						onSearch={setSearch}
 					>
-						<Link
-							from="/$workspace"
-							to="./settings/$section"
-							params={{ section: "pods" }}
-							className="focus-ring mx-2 mb-3 flex items-center gap-2 rounded-lg px-2 py-2 font-medium text-muted-foreground text-sm hover:bg-sidebar-accent hover:text-foreground"
-						>
-							<ArrowLeft aria-hidden size={16} />
-							<span>Back to pods</span>
-						</Link>
-						{selectedPodAgents.map((agent) => agentRailItem(agent, selected))}
-					</SettingsRail>
-				) : (
-					<SettingsRail
-						label="Workspace pods"
-						footer={
-							canCreatePods ? (
-								<NewPodButton
-									variant="secondary"
-									className="h-11 w-full justify-center border-dashed text-base"
+						{shown.map((pod) => {
+							const bots = botsIn(pod).length;
+							return (
+								<SettingsListRow
+									key={pod.id}
+									picture={<PodPicture pod={pod} bots={botsIn(pod)} size={36} />}
+									label={pod.name}
+									sub={`${bots} ${bots === 1 ? "bot" : "bots"}`}
+									selected={pod.id === selected?.id && (selectedPodId ? true : "wide")}
+									render={<Link {...podSettingsLink(pod)} />}
 								/>
-							) : undefined
-						}
-					>
-						{personalPod && (
-							<p className="px-3 pt-1 pb-1 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-								Personal
-							</p>
+							);
+						})}
+						{error && (
+							<li className="px-2.5 py-3">
+								<Alert>{failureMessage(error)}</Alert>
+							</li>
 						)}
-						{personalPod && podRailItem(personalPod)}
-						{sharedPods.length > 0 && (
-							<p className="px-3 pt-5 pb-1 font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-								Pods
-							</p>
-						)}
-						{sharedPods.map(podRailItem)}
-						{error && <Alert className="px-3 py-2">{failureMessage(error)}</Alert>}
-					</SettingsRail>
-				)
-			}
-			detail={
-				selected && selectedAgent ? (
-					<AgentSettingsPage
-						key={`${selectedAgent.id}:${selectedAgentTab ?? "details"}`}
-						agent={selectedAgent}
-						pod={selected}
-						initialTab={selectedAgentTab}
-					/>
-				) : selectedAgentId ? (
-					<EmptyState title="No such agent in this pod" />
-				) : selected ? (
-					<PodDetails
-						key={selected.id}
-						pod={selected}
-						tab={selectedPodTab}
-						connectionSignInError={connectionSignInError}
-					/>
-				) : missing ? (
-					<EmptyState title="No such pod here">
-						It may have been removed, or you may no longer have access to it.
-					</EmptyState>
-				) : !isPending && pods?.length === 0 ? (
-					<EmptyState title="No pods yet">
-						{canCreatePods
-							? "Create the first pod for this workspace."
-							: "You are not in a pod yet."}
-					</EmptyState>
-				) : null
-			}
-		/>
+					</SettingsListColumn>
+				}
+				detail={
+					selected ? (
+						<PodDetails
+							key={selected.id}
+							pod={selected}
+							bots={botsIn(selected)}
+							connectionSignInError={connectionSignInError}
+						/>
+					) : (
+						<div className="grid min-h-80 place-items-center p-6">
+							<EmptyState title={selectedPodId ? "No such pod here" : "No pods yet"}>
+								{selectedPodId
+									? "It may have been removed, or you may no longer have access to it."
+									: canCreatePods
+										? "Make the first pod for this workspace."
+										: "You are not in a pod yet."}
+							</EmptyState>
+						</div>
+					)
+				}
+			/>
+			<Dialog open={creating} onOpenChange={setCreating}>
+				<NewPodDialog
+					onCreated={async (pod) => {
+						setCreating(false);
+						await navigate(podSettingsLink(pod));
+					}}
+				/>
+			</Dialog>
+		</>
 	);
 }
 
-function PodMark({ pod, large = false }: { pod: Pod; large?: boolean }) {
+/** A pod as its tile of faces, or Personal as its lock. */
+function PodPicture({ pod, bots, size }: { pod: Pod; bots: readonly Agent[]; size: 36 | 88 }) {
 	if (pod.kind === "personal") {
 		return (
 			<span
 				aria-hidden
-				className={`grid shrink-0 place-items-center rounded-lg bg-primary-tint text-primary ${large ? "size-11" : "size-9"}`}
+				className="grid shrink-0 place-items-center bg-tile text-soft-foreground"
+				style={{ width: size, height: size, borderRadius: size === 88 ? 26 : 11 }}
 			>
-				<LockKeyhole size={large ? 20 : 16} strokeWidth={2} />
+				<LockKeyhole size={size === 88 ? 34 : 16} strokeWidth={2} />
 			</span>
 		);
 	}
-	return (
-		<span
-			aria-hidden
-			className={`agent-tint grid shrink-0 place-items-center rounded-lg bg-agent-fill font-semibold text-agent-ink ${large ? "size-11 text-xl" : "size-9 text-base"}`}
-			style={{ ["--agent-hue" as string]: hueFromText(pod.slug) }}
-		>
-			{pod.name.trim().charAt(0).toUpperCase() || "?"}
-		</span>
-	);
-}
-
-function PodCounts({ pod, agents }: { pod: Pod; agents: number }) {
-	const members = usePodMembers(pod.id);
-	return (
-		<span className="flex items-center gap-2.5 text-muted-foreground text-xs">
-			<span className="flex items-center gap-0.5">
-				{members.data?.length ?? "–"}
-				<User aria-hidden size={11} />
-				<span className="sr-only">people</span>
-			</span>
-			<span className="flex items-center gap-0.5">
-				{agents}
-				<Bot aria-hidden size={11} />
-				<span className="sr-only">agents</span>
-			</span>
-		</span>
-	);
+	return <PodTile bots={bots} size={size} />;
 }
 
 function PodDetails({
 	pod,
-	tab,
+	bots,
 	connectionSignInError,
 }: {
 	pod: Pod;
-	tab: PodSettingsTab;
+	bots: readonly Agent[];
 	connectionSignInError?: string;
 }) {
 	const may = pod.permissions;
 	const update = useUpdatePod(pod.id);
-	const [renaming, setRenaming] = useState(false);
+	const members = usePodMembers(pod.id);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeletePod();
 	const navigate = useNavigate();
+	const shared = pod.kind === "shared";
+	const people = members.data?.length;
 
 	async function deletePod() {
 		try {
@@ -278,205 +194,128 @@ function PodDetails({
 		await navigate({ from: "/$workspace", to: "./settings/$section", params: { section: "pods" } });
 	}
 
-	return (
-		<div className="w-full max-w-[720px] px-5 py-6 sm:px-8 sm:py-7">
-			<header className="flex flex-col gap-4">
-				<div className="flex items-center gap-4">
-					<IconButton
-						label="Back to pods"
-						className="lg:hidden"
-						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />
-						}
-					>
-						<ArrowLeft />
-					</IconButton>
-					<PodMark pod={pod} large />
-					{renaming ? (
-						<RenameForm
-							pod={pod}
-							save={update.mutateAsync}
-							savePending={update.isPending}
-							done={() => setRenaming(false)}
-						/>
-					) : (
-						<div className="min-w-0 flex-1">
-							<h2 className="m-0 truncate font-display text-2xl font-semibold text-heading">
-								{pod.name}
-							</h2>
-						</div>
-					)}
-					{may.rename && !renaming && (
-						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<IconButton label={`${pod.name} options`} variant="outline" size="lg">
-										<Ellipsis />
-									</IconButton>
-								}
-							/>
-							<DropdownMenuContent align="end" className="min-w-44">
-								<DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
-								{pod.kind === "shared" && (
-									<>
-										<DropdownMenuSeparator />
-										<DropdownMenuItem
-											variant="destructive"
-											onClick={() => setConfirmingDelete(true)}
-										>
-											Delete pod
-										</DropdownMenuItem>
-									</>
-								)}
-							</DropdownMenuContent>
-						</DropdownMenu>
-					)}
-				</div>
-				<DeleteDialog
-					open={confirmingDelete}
-					onOpenChange={setConfirmingDelete}
-					title={`Delete ${pod.name}?`}
-					description="Its agents and conversations will be permanently deleted."
-					pending={remove.isPending}
-					error={remove.error ? failureMessage(remove.error) : undefined}
-					onDelete={deletePod}
-				/>
-				{update.error && <Alert>{failureMessage(update.error)}</Alert>}
-			</header>
+	const counts = [
+		`${bots.length} ${bots.length === 1 ? "bot" : "bots"}`,
+		shared && people !== undefined ? `${people} ${people === 1 ? "person" : "people"}` : undefined,
+	].filter(Boolean);
 
-			<Tabs
-				value={tab}
-				onValueChange={(value) => {
-					if (!isPodSettingsTab(value)) return;
-					void navigate({
-						...podSettingsLink(pod),
-						search: { tab: value === "members" ? undefined : value },
-						replace: true,
-					});
+	return (
+		<SettingsPage
+			hero={<PodPicture pod={pod} bots={bots} size={88} />}
+			title={pod.name}
+			description={shared ? counts.join(", ") : "Only you can see this pod and its bots."}
+		>
+			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
+			{may.rename && (
+				<SettingsGroup label="Pod">
+					<NameRow
+						name={pod.name}
+						savePending={update.isPending}
+						onCommit={(name) => update.mutateAsync({ name })}
+					/>
+				</SettingsGroup>
+			)}
+			<ConnectionsSettings
+				podId={pod.id}
+				podName={pod.name}
+				canManage={may.manageConnections}
+				signInError={connectionSignInError}
+			/>
+			<PodBots pod={pod} bots={bots} />
+			{shared && <Members pod={pod} canManageMembers={may.manageMembers} />}
+			{shared && may.rename && (
+				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete pod</SettingsDanger>
+			)}
+			<DeleteDialog
+				open={confirmingDelete}
+				onOpenChange={setConfirmingDelete}
+				title={`Delete ${pod.name}?`}
+				description="Its bots, their chats, routines and connections will be deleted. This can't be undone."
+				pending={remove.isPending}
+				error={remove.error ? failureMessage(remove.error) : undefined}
+				onDelete={deletePod}
+			/>
+		</SettingsPage>
+	);
+}
+
+/** The pod's name, which saves when you leave it. */
+function NameRow({
+	name,
+	savePending,
+	onCommit,
+}: {
+	name: string;
+	savePending: boolean;
+	onCommit: (name: string) => Promise<unknown>;
+}) {
+	const [draft, setDraft] = useState(name);
+	const id = useId();
+
+	function commit() {
+		const next = draft.trim();
+		if (savePending || next === name || next === "") {
+			setDraft(name);
+			return;
+		}
+		void onCommit(next).catch(() => setDraft(name));
+	}
+
+	return (
+		<div className="flex items-center gap-3 px-4 py-3">
+			<label htmlFor={id} className="w-[110px] shrink-0 text-[14px] text-muted-foreground">
+				Name
+			</label>
+			<input
+				id={id}
+				value={draft}
+				onChange={(event) => setDraft(event.target.value)}
+				onBlur={commit}
+				onKeyDown={(event) => {
+					if (event.key === "Enter") event.currentTarget.blur();
+					if (event.key === "Escape") setDraft(name);
 				}}
-				className="pt-7"
-			>
-				<TabsList>
-					<Tab value="members">{pod.kind === "personal" ? "Personal" : "Team"}</Tab>
-					<Tab value="connections">Connections</Tab>
-					<Tab value="routing">Routing</Tab>
-				</TabsList>
-				<TabPanel value="members" className="flex flex-col gap-7">
-					{pod.kind === "personal" ? (
-						<Section
-							label="Private pod"
-							description="Only you can access this pod, its agents, and its conversations."
-						/>
-					) : (
-						<Members pod={pod} canManageMembers={may.manageMembers} />
-					)}
-					<PodAgents pod={pod} may={may} />
-				</TabPanel>
-				<TabPanel value="connections">
-					<ConnectionsSettings
-						podId={pod.id}
-						canManage={may.manageConnections}
-						signInError={connectionSignInError}
-					/>
-				</TabPanel>
-				<TabPanel value="routing">
-					<Routing
-						pod={pod}
-						disabled={!may.changeRouting || update.isPending}
-						save={(routing) => update.mutate({ routing })}
-					/>
-				</TabPanel>
-			</Tabs>
+				maxLength={64}
+				className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+			/>
 		</div>
 	);
 }
 
-function RenameForm({
-	pod,
-	save,
-	savePending,
-	done,
-}: {
-	pod: Pod;
-	save: (change: PodUpdate) => Promise<unknown>;
-	savePending: boolean;
-	done: () => void;
-}) {
-	const [draft, setDraft] = useState(pod.name);
-	const id = useId();
-	const name = draft.trim();
-
-	async function rename() {
-		try {
-			await save({ name });
-		} catch {
-			return;
-		}
-		done();
+function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
+	const [creating, setCreating] = useState(false);
+	const navigate = useNavigate();
+	if (bots.length === 0 && !pod.permissions.createAgents) {
+		return (
+			<SettingsGroup label="Bots">
+				<SettingsRow label="No bots in this pod yet" />
+			</SettingsGroup>
+		);
 	}
-
 	return (
-		<form
-			className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
-			onSubmit={(event) => {
-				event.preventDefault();
-				void rename();
-			}}
-		>
-			<label htmlFor={id} className="sr-only">
-				Name
-			</label>
-			<Input
-				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				className="min-w-40 flex-1 font-display text-lg font-semibold"
-				maxLength={64}
-				required
-				disabled={savePending}
-			/>
-			<Button type="submit" size="sm" disabled={savePending || name === "" || name === pod.name}>
-				Save name
-			</Button>
-			<Button type="button" size="sm" variant="outline" onClick={done} disabled={savePending}>
-				Cancel
-			</Button>
-		</form>
-	);
-}
-
-function Section({
-	label,
-	action,
-	description,
-	children,
-}: {
-	label: string;
-	action?: ReactNode;
-	description?: string;
-	children?: ReactNode;
-}) {
-	return (
-		<section className="flex flex-col gap-2.5">
-			<div className="flex flex-col gap-0.5">
-				<div className="flex items-baseline justify-between gap-3">
-					<h3 className="m-0 font-semibold text-md text-heading">{label}</h3>
-					{action}
-				</div>
-				{description !== undefined && (
-					<p className="m-0 text-md text-muted-foreground">{description}</p>
-				)}
-			</div>
-			{children !== undefined && children}
-		</section>
-	);
-}
-
-function Card({ children }: { children: ReactNode }) {
-	return (
-		<ul className="m-0 flex list-none flex-col divide-y divide-border-subtle overflow-hidden rounded-xl border border-border-subtle bg-card p-0">
-			{children}
-		</ul>
+		<SettingsGroup label="Bots">
+			{bots.map((agent) => (
+				<SettingsRow
+					key={agent.id}
+					icon={<AgentAvatar color={agent.color} face={agent.face} size={30} />}
+					label={agent.name}
+					chevron
+					render={<Link {...agentSettingsLink({ pod, agent })} />}
+				/>
+			))}
+			{pod.permissions.createAgents && (
+				<SettingsAddRow label="New bot" onClick={() => setCreating(true)} />
+			)}
+			<Dialog open={creating} onOpenChange={setCreating}>
+				<NewAgentDialog
+					podId={pod.id}
+					onCreated={async (agent) => {
+						setCreating(false);
+						await navigate(agentSettingsLink({ pod, agent }));
+					}}
+				/>
+			</Dialog>
+		</SettingsGroup>
 	);
 }
 
@@ -489,7 +328,7 @@ function Card({ children }: { children: ReactNode }) {
  */
 function removalCost(role: WorkspaceRole | undefined, isYou: boolean): string {
 	if (role !== "admin") {
-		return "They lose this pod, its agents, and its conversations. You can invite them back at any time.";
+		return "They lose this pod, its bots, and their chats. You can add them back at any time.";
 	}
 	return isYou
 		? "You come off this pod's member list. As an administrator you still reach the pod and everything in it."
@@ -511,78 +350,91 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
 		workspaceRoleOf(workspaceMembers.data?.find((member) => member.userId === userId)?.role);
-	const roleLabel = (userId: string) => workspaceRoleLabel(roleOf(userId));
 	const isYou = (userId: string) => userId === session.user?.id;
 	const leaving = removing !== undefined && isYou(removing.userId);
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.userId)) ?? [];
 
-	return (
-		<Section
-			label="Members"
-			action={
-				canManageMembers && (
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<IconButton label="Invite" size="lg" disabled={invite.isPending}>
-									<Plus />
-								</IconButton>
-							}
-						/>
-						<DropdownMenuContent align="end" className="min-w-52">
-							{workspaceMembers.isPending ? (
-								<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-							) : invitable.length === 0 ? (
-								<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
-							) : (
-								invitable.map((member) => (
-									<DropdownMenuItem
-										key={member.userId}
-										onClick={() => invite.mutate({ userId: member.userId, member: true })}
-									>
-										{/* Hidden from the name, or the initials would read as part of it. */}
-										<span aria-hidden>
-											<PersonAvatar name={member.user.name} image={member.user.image} size={22} />
-										</span>
-										<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
-									</DropdownMenuItem>
-								))
-							)}
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)
-			}
-		>
-			{members.isError ? (
+	let rows: ReactNode;
+	if (members.isError) {
+		rows = (
+			<div className="px-4 py-3">
 				<Alert>{failureMessage(members.error)}</Alert>
-			) : members.data?.length === 0 ? (
-				<p className="m-0 text-base text-subtle-foreground">Nobody can see into this pod yet.</p>
-			) : (
-				<Card>
-					{members.data?.map((member: PodMember) => (
-						<li key={member.userId} className="flex min-h-12 items-center gap-3 px-3.5 py-2">
-							<PersonAvatar name={member.name} image={member.image} size={28} />
-							<span className="min-w-0 flex-1 truncate font-medium text-base text-heading">
-								{member.name}
-							</span>
-							<span className="text-muted-foreground text-sm">{roleLabel(member.userId)}</span>
-							{canManageMembers && (
-								<Button
-									variant="ghost"
-									size="sm"
+			</div>
+		);
+	} else if (members.data?.length === 0) {
+		rows = <SettingsRow label="Nobody can see into this pod yet" />;
+	} else {
+		rows = members.data?.map((member) => (
+			<SettingsRow
+				key={member.userId}
+				icon={<PersonAvatar name={member.name} image={member.image} size={30} />}
+				label={member.name}
+				trailing={
+					<>
+						<SettingsValue>
+							{isYou(member.userId)
+								? "You"
+								: // Said once the workspace roster has answered, not guessed before it.
+									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
+						</SettingsValue>
+						{canManageMembers && (
+							<Tooltip label={isYou(member.userId) ? "Leave pod" : "Remove from pod"}>
+								<button
+									type="button"
 									aria-label={isYou(member.userId) ? `Leave ${pod.name}` : `Remove ${member.name}`}
-									className="text-muted-foreground hover:text-destructive"
 									disabled={remove.isPending}
 									onClick={() => setRemoving(member)}
+									className="focus-ring grid size-7 shrink-0 place-items-center rounded-full text-destructive-text transition-colors hover:bg-destructive-hover"
 								>
-									{isYou(member.userId) ? "Leave" : "Remove"}
-								</Button>
-							)}
-						</li>
-					))}
-				</Card>
+									<Minus size={13} strokeWidth={2.6} />
+								</button>
+							</Tooltip>
+						)}
+					</>
+				}
+			/>
+		));
+	}
+
+	return (
+		<SettingsGroup label="Members">
+			{rows}
+			{canManageMembers && (
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						disabled={invite.isPending}
+						className="focus-ring flex w-full items-center gap-3 border-border border-t px-4 py-2.5 text-left transition-colors hover:bg-panel"
+					>
+						<SettingsAddMark />
+						<span className="font-medium text-[14.5px] text-link">Add people</span>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" className="min-w-52">
+						{workspaceMembers.isPending ? (
+							<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+						) : invitable.length === 0 ? (
+							<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
+						) : (
+							invitable.map((member) => (
+								<DropdownMenuItem
+									key={member.userId}
+									onClick={() => invite.mutate({ userId: member.userId, member: true })}
+								>
+									{/* Hidden from the name, or the initials would read as part of it. */}
+									<span aria-hidden>
+										<PersonAvatar name={member.user.name} image={member.user.image} size={22} />
+									</span>
+									<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
+								</DropdownMenuItem>
+							))
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
 			)}
-			{invite.error && <Alert>{failureMessage(invite.error)}</Alert>}
+			{invite.error && (
+				<div className="border-border border-t px-4 py-3">
+					<Alert>{failureMessage(invite.error)}</Alert>
+				</div>
+			)}
 			<DeleteDialog
 				open={removing !== undefined}
 				onOpenChange={(open) => {
@@ -594,7 +446,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 						: `Remove ${removing?.name ?? "this person"} from ${pod.name}?`
 				}
 				description={removalCost(removing && roleOf(removing.userId), leaving)}
-				confirmLabel={leaving ? "Yes, leave" : "Yes, remove"}
+				confirmLabel={leaving ? "Leave" : "Remove"}
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={async () => {
@@ -607,209 +459,6 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 					setRemoving(undefined);
 				}}
 			/>
-		</Section>
-	);
-}
-
-function PodAgents({ pod, may }: { pod: Pod; may: PodPermissions }) {
-	const { agents } = useAgents();
-	const remove = useDeleteAgent();
-	const [deletingAgent, setDeletingAgent] = useState<Agent>();
-	const inPod = agents?.filter((agent) => agent.podId === pod.id) ?? [];
-	const row = (agent: Agent) => (
-		<li key={agent.id} className="flex min-h-12 items-center gap-3 px-3.5 py-2">
-			<AgentAvatar hue={agent.hue} face={agent.face} size={28} />
-			<Link
-				{...agentSettingsLink({ pod, agent })}
-				className="focus-ring min-w-0 flex-1 truncate rounded-sm font-medium text-base text-heading hover:underline"
-			>
-				{agent.name}
-			</Link>
-			{may.deleteAgents && (
-				<Button
-					variant="ghost"
-					size="sm"
-					disabled={remove.isPending}
-					onClick={() => setDeletingAgent(agent)}
-				>
-					Delete
-				</Button>
-			)}
-		</li>
-	);
-
-	return (
-		<>
-			<Section label="Agents" action={may.createAgents && <NewAgentButton pod={pod} iconOnly />}>
-				{inPod.length === 0 ? (
-					<p className="m-0 text-base text-subtle-foreground">No agents in this pod yet.</p>
-				) : (
-					<Card>{inPod.map(row)}</Card>
-				)}
-			</Section>
-			<DeleteDialog
-				open={deletingAgent !== undefined}
-				onOpenChange={(open) => {
-					if (!open) setDeletingAgent(undefined);
-				}}
-				title={`Delete ${deletingAgent?.name ?? "agent"}?`}
-				description="This can't be undone."
-				pending={remove.isPending}
-				error={remove.error ? failureMessage(remove.error) : undefined}
-				onDelete={async () => {
-					if (!deletingAgent) return;
-					try {
-						await remove.mutateAsync(deletingAgent.id);
-						setDeletingAgent(undefined);
-					} catch {
-						return;
-					}
-				}}
-			/>
-		</>
-	);
-}
-
-type RoutingChoice = "nobody" | "facilitator";
-
-const ROUTING: Record<RoutingChoice, PodRouting> = {
-	nobody: { facilitator: false },
-	facilitator: { facilitator: true },
-};
-
-function routingChoice(routing: PodRouting): RoutingChoice {
-	return routing.facilitator ? "facilitator" : "nobody";
-}
-
-function Routing({
-	pod,
-	disabled,
-	save,
-}: {
-	pod: Pod;
-	disabled: boolean;
-	save: (routing: PodRouting) => void;
-}) {
-	const { agent: facilitator } = useBuiltInAgent("facilitate");
-	const ready = isSetUp(facilitator);
-	const mayConfigure = useCanConfigureBuiltInAgents();
-	const chosen = routingChoice(pod.routing);
-	const group = useId();
-
-	return (
-		<Section
-			label="Automated threads"
-			description="Choose whether the Facilitator routes non-chat threads. Direct chats are answered by their agent alone, which consults any agent you @mention."
-		>
-			<div
-				className="flex flex-col gap-2.5"
-				role="radiogroup"
-				aria-label="Automated thread routing"
-			>
-				<RoutingOption
-					group={group}
-					value="nobody"
-					chosen={chosen}
-					disabled={disabled}
-					onChoose={(choice) => save(ROUTING[choice])}
-					title="Nobody"
-					detail="Automated threads stay with their current agent. Quietest option."
-				/>
-				<RoutingOption
-					group={group}
-					value="facilitator"
-					chosen={chosen}
-					// The Facilitator runs on a model the workspace chooses once. Until
-					// somebody has, there is nothing to hand the floor to, and the API
-					// refuses this for the same reason.
-					disabled={disabled || !ready}
-					onChoose={(choice) => save(ROUTING[choice])}
-					title="The Facilitator decides"
-					detail={
-						<>
-							Reads the last few messages and picks who answers, or nobody.{" "}
-							{ready ? (
-								<>
-									Uses <code className="text-foreground">{facilitator?.model}</code>
-									{mayConfigure && (
-										<>
-											, <BuiltInAgentLink agentKey="facilitate">change</BuiltInAgentLink>
-										</>
-									)}
-									.
-								</>
-							) : mayConfigure ? (
-								<>
-									The Facilitator has no model yet —{" "}
-									<BuiltInAgentLink agentKey="facilitate">set it up</BuiltInAgentLink> to use this.
-								</>
-							) : (
-								<>The Facilitator has no model yet. {AN_ADMINISTRATOR_CHOOSES}</>
-							)}
-						</>
-					}
-				/>
-			</div>
-			{chosen === "facilitator" && !ready && (
-				<Alert>
-					Facilitator routing is on, but the Facilitator has no model, so automated threads are
-					staying with their current agent.
-				</Alert>
-			)}
-		</Section>
-	);
-}
-
-function RoutingOption({
-	group,
-	value,
-	chosen,
-	disabled,
-	onChoose,
-	title,
-	detail,
-}: {
-	group: string;
-	value: RoutingChoice;
-	chosen: RoutingChoice;
-	disabled: boolean;
-	onChoose: (choice: RoutingChoice) => void;
-	title: string;
-	detail: ReactNode;
-}) {
-	const titleId = useId();
-	const detailId = useId();
-	const selected = value === chosen;
-	// A disabled radio is not focusable, so what says why is the description —
-	// and the link inside it, which stays reachable by keyboard. The card must
-	// stop offering itself too: hover lighting up reads as clickable.
-	const appearance = [
-		selected ? "border-primary-tint-border bg-primary-tint/40" : "border-border-subtle bg-card",
-		disabled ? "opacity-60" : selected ? "cursor-pointer" : "cursor-pointer hover:bg-muted",
-	].join(" ");
-	return (
-		<label
-			className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${appearance}`}
-		>
-			<input
-				type="radio"
-				name={group}
-				value={value}
-				checked={selected}
-				disabled={disabled}
-				aria-labelledby={titleId}
-				aria-describedby={detailId}
-				onChange={() => onChoose(value)}
-				className="mt-1 size-4 shrink-0 accent-primary"
-			/>
-			<span className="flex min-w-0 flex-col gap-0.5">
-				<span id={titleId} className="font-medium text-base text-heading">
-					{title}
-				</span>
-				<span id={detailId} className="text-md text-muted-foreground">
-					{detail}
-				</span>
-			</span>
-		</label>
+		</SettingsGroup>
 	);
 }

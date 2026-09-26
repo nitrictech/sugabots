@@ -13,8 +13,10 @@ import {
 	routineSecretSchema,
 	routineUpdateSchema,
 	routineWriteResultSchema,
+	workspaceRoutineListSchema,
 } from "../../routines.ts";
 import { uuidSchema } from "../../uuid.ts";
+import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, Unauthorized } from "../errors.ts";
 import { Authorise, Session } from "../middleware.ts";
 
@@ -27,6 +29,12 @@ const routine = { agentId: uuidSchema, routineId: Schema.String };
  * on each of the others rather than on the group.
  */
 export class RoutinesApi extends HttpApiGroup.make("routines").add(
+	HttpApiEndpoint.get("listInWorkspace", "/workspaces/:workspace/routines", {
+		params: { workspace: workspaceIdOrSlugSchema },
+		success: workspaceRoutineListSchema,
+	})
+		.middleware(Authorise)
+		.middleware(Session),
 	HttpApiEndpoint.get("list", "/agents/:agentId/routines", {
 		params: agent,
 		success: Schema.Array(routineSchema),

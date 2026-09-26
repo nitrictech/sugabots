@@ -1,5 +1,5 @@
 import type { Connection } from "@sugabots/contracts";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browser } from "@/lib/connections.ts";
@@ -23,8 +23,7 @@ const wiki: Connection = {
 	signedIn: true,
 	secretHeader: "authorization",
 	hasSecret: false,
-	enabled: false,
-	allowMutating: false,
+	access: "off",
 	status: "connected",
 	tools: [
 		{
@@ -47,12 +46,19 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/** The pod page is one page, so its Connections are there once it has loaded. */
 async function showConnections() {
-	fireEvent.click(await screen.findByRole("tab", { name: "Connections" }));
+	await screen.findByRole("heading", { name: "Connections" });
+}
+
+/** Opens Add connection, and the dialog it opens. */
+async function openAdd() {
+	fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
+	return screen.findByRole("dialog", { name: `Add to ${pod.name}` });
 }
 
 describe("the Connections settings", () => {
-	it("connects a catalog service by signing in, with no key to paste", async () => {
+	it("connects a catalog app by signing in, asking first unless told otherwise", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		route.list.mockReturnValue(Effect.succeed([]));
 		route.connectFromCatalog.mockReturnValue(
@@ -61,10 +67,18 @@ describe("the Connections settings", () => {
 				authorizationUrl: "https://notion.example/authorize?state=s-1",
 			}),
 		);
+		route.update.mockReturnValue(Effect.succeed({ ...wiki, access: "ask" }));
 		mount(page);
 		await showConnections();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Connect Notion" }));
+		const list = await openAdd();
+		fireEvent.click(within(list).getByRole("button", { name: /^Notion/ }));
+		const step = await screen.findByRole("dialog", { name: "Notion" });
+		expect((within(step).getByRole("radio", { name: "Ask" }) as HTMLInputElement).checked).toBe(
+			true,
+		);
+		expect(within(step).queryByRole("radio", { name: "Off" })).toBeNull();
+		fireEvent.click(within(step).getByRole("button", { name: /Connect Notion/ }));
 
 		await waitFor(() =>
 			expect(go).toHaveBeenCalledWith("https://notion.example/authorize?state=s-1"),
@@ -72,7 +86,32 @@ describe("the Connections settings", () => {
 		expect(route.connectFromCatalog.mock.calls[0]?.[0]).toMatchObject({
 			payload: { name: "Notion", url: "https://mcp.notion.com/mcp" },
 		});
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			params: { podId: pod.id, connectionId: "0199a3a0-0000-7000-8000-0000000000f2" },
+			payload: { access: "ask" },
+		});
 		expect(route.create).not.toHaveBeenCalled();
+	});
+
+	it("leaves a catalog app to start at Allow when that is chosen", async () => {
+		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.succeed({
+				connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
+				authorizationUrl: "https://notion.example/authorize",
+			}),
+		);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /^Notion/ }));
+		const step = await screen.findByRole("dialog", { name: "Notion" });
+		fireEvent.click(within(step).getByRole("radio", { name: "Allow" }));
+		fireEvent.click(within(step).getByRole("button", { name: /Connect Notion/ }));
+
+		await waitFor(() => expect(go).toHaveBeenCalled());
+		expect(route.update).not.toHaveBeenCalled();
 	});
 
 	it("offers to sign in a connection whose sign-in never finished", async () => {
@@ -86,161 +125,178 @@ describe("the Connections settings", () => {
 		mount(page);
 		await showConnections();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+		const row = await screen.findByRole("article", { name: "Wiki" });
+		expect(within(row).getByText("Not signed in yet")).toBeDefined();
+		fireEvent.click(within(row).getByRole("button", { name: "Sign in" }));
 
 		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example/authorize"));
 	});
 
-	it("adds any other server by name and URL", async () => {
+	it("adds any other server by name and address, with its approval", async () => {
 		route.list.mockReturnValue(Effect.succeed([]));
 		route.create.mockImplementation(() => {
 			route.list.mockReturnValue(Effect.succeed([wiki]));
 			return Effect.succeed(wiki);
 		});
+		route.update.mockReturnValue(Effect.succeed({ ...wiki, access: "ask" }));
 		mount(page);
 		await showConnections();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Connect by URL" }));
-		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Wiki" } });
-		fireEvent.change(screen.getByLabelText("MCP server URL"), {
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Add" }));
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
 
 		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
 		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
 			payload: { name: "Wiki", url: "https://wiki.example.com/mcp", secretHeader: "Authorization" },
 		});
+		// A server added by address starts at Allow; the dialog asks first unless told otherwise.
+		await waitFor(() =>
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				params: { podId: pod.id, connectionId: wiki.id },
+				payload: { access: "ask" },
+			}),
+		);
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
 	});
 
-	it("explains the actions agents gain from a connection", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
+	it("opens a connection to show its tools, grouped by whether they ask first", async () => {
+		route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "allow" }]));
 		mount(page);
 		await showConnections();
 
-		expect(screen.queryByText("Search Pages")).toBeNull();
-		fireEvent.click(await screen.findByRole("button", { name: "View tools" }));
-		expect(await screen.findByText("Search Pages")).toBeDefined();
-		expect(screen.getByText("Search the wiki for pages.")).toBeDefined();
-		expect(screen.getByText("Makes changes")).toBeDefined();
+		expect(screen.queryByText("Search pages")).toBeNull();
+		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+		const asks = within(dialog).getByRole("heading", { name: "Asks first" }).closest("section");
+		const free = within(dialog).getByRole("heading", { name: "Runs freely" }).closest("section");
+		if (!asks || !free) throw new Error("tool groups not found");
+		expect(within(asks).getByText("Wipe")).toBeDefined();
+		expect(within(free).getByText("Search pages")).toBeDefined();
+		expect(within(free).getByText("Search the wiki for pages.")).toBeDefined();
 	});
 
-	it("turns a connection on for the pod", async () => {
+	it("puts every tool under Asks first when the connection asks", async () => {
+		route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "ask" }]));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+
+		expect(within(dialog).queryByRole("heading", { name: "Runs freely" })).toBeNull();
+		const asks = within(dialog).getByRole("heading", { name: "Asks first" }).closest("section");
+		expect(asks && within(asks).getByText("Search pages")).toBeDefined();
+	});
+
+	it("sets what the pod's bots may do with a connection", async () => {
 		route.list.mockReturnValue(Effect.succeed([wiki]));
 		route.update.mockImplementation(() => {
-			route.list.mockReturnValue(Effect.succeed([{ ...wiki, enabled: true }]));
-			return Effect.succeed({ ...wiki, enabled: true });
+			route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "ask" }]));
+			return Effect.succeed({ ...wiki, access: "ask" });
 		});
 		mount(page);
 		await showConnections();
-		expect(await screen.findByRole("button", { name: "Turn on" })).toBeDefined();
-
-		fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
-
-		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
-		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-			params: { podId: pod.id, connectionId: wiki.id },
-			payload: { enabled: true },
-		});
-		expect(await screen.findByRole("button", { name: "Turn off" })).toBeDefined();
-	});
-
-	it("lets the pod owner allow the tools that change things, off by default", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
-		route.update.mockImplementation(() => {
-			route.list.mockReturnValue(Effect.succeed([{ ...wiki, allowMutating: true }]));
-			return Effect.succeed({ ...wiki, allowMutating: true });
-		});
-		mount(page);
-		await showConnections();
-
-		fireEvent.click(await screen.findByRole("button", { name: "Allow changes" }));
-
-		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
-		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-			params: { podId: pod.id, connectionId: wiki.id },
-			payload: { allowMutating: true },
-		});
-		expect(await screen.findByRole("button", { name: "Make read only" })).toBeDefined();
-	});
-
-	it("shows and revokes an agent's Always allow rule", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
-		const rules = client.api.toolApprovals;
-		rules.listRules.mockReturnValue(
-			Effect.succeed([
-				{
-					id: "0199a3a0-0000-7000-8000-0000000000f2",
-					agentId: linear.id,
-					agentName: linear.name,
-					connectionId: wiki.id,
-					connectionName: wiki.name,
-					toolName: "wipe",
-					createdAt: "2026-09-14T00:00:00.000Z",
-				},
-			]),
+		const access = await screen.findByRole("group", { name: "What bots may do with Wiki" });
+		expect((within(access).getByRole("radio", { name: "Off" }) as HTMLInputElement).checked).toBe(
+			true,
 		);
-		rules.revokeRule.mockReturnValue(Effect.void);
-		mount(page);
-		await showConnections();
-		fireEvent.click(await screen.findByRole("button", { name: "View tools" }));
 
-		expect(await screen.findByText(`Always allowed for ${linear.name}`)).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Return to ask first" }));
+		fireEvent.click(within(access).getByRole("radio", { name: "Ask" }));
 
-		await waitFor(() => expect(rules.revokeRule).toHaveBeenCalledOnce());
-		expect(rules.revokeRule).toHaveBeenCalledWith({
-			params: { podId: pod.id, ruleId: "0199a3a0-0000-7000-8000-0000000000f2" },
+		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			params: { podId: pod.id, connectionId: wiki.id },
+			payload: { access: "ask" },
 		});
+		await waitFor(() =>
+			expect((within(access).getByRole("radio", { name: "Ask" }) as HTMLInputElement).checked).toBe(
+				true,
+			),
+		);
 	});
 
-	it("offers to reconnect a server whose last test failed", async () => {
+	it("offers to reconnect a server whose last test failed, and says how it went", async () => {
 		route.list.mockReturnValue(
-			Effect.succeed([{ ...wiki, enabled: true, status: "error", lastTestError: "HTTP 401" }]),
+			Effect.succeed([{ ...wiki, access: "allow", status: "error", lastTestError: "HTTP 401" }]),
 		);
 		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 2 }));
 		mount(page);
 		await showConnections();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Reconnect" }));
+		const row = await screen.findByRole("article", { name: "Wiki" });
+		expect(within(row).getByText("HTTP 401")).toBeDefined();
+		fireEvent.click(within(row).getByRole("button", { name: "Reconnect" }));
 
 		await waitFor(() => expect(route.test).toHaveBeenCalledOnce());
-		expect(await screen.findByText(/Found 2 actions/)).toBeDefined();
+		expect(await within(row).findByText(/Found 2 actions/)).toBeDefined();
 	});
 
-	it("lets a pod member view connections without mutation controls", async () => {
+	it("checks, replaces the secret of and removes a connection from its own page", async () => {
+		route.list.mockReturnValue(Effect.succeed([{ ...wiki, hasSecret: true }]));
+		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 12, tools: 2 }));
+		route.update.mockReturnValue(Effect.succeed(wiki));
+		route.remove.mockReturnValue(Effect.void);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Check" }));
+		expect(await within(dialog).findByText(/Found 2 actions in 12 ms/)).toBeDefined();
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+		fireEvent.change(within(dialog).getByLabelText("Wiki secret"), {
+			target: { value: "new-secret" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+		await waitFor(() =>
+			expect(route.update).toHaveBeenCalledWith({
+				params: { podId: pod.id, connectionId: wiki.id },
+				payload: { secret: "new-secret" },
+			}),
+		);
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Remove connection" }));
+		expect(await screen.findByRole("heading", { name: "Remove Wiki?" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+		await waitFor(() =>
+			expect(route.remove).toHaveBeenCalledWith({
+				params: { podId: pod.id, connectionId: wiki.id },
+			}),
+		);
+	});
+
+	it("lets a pod member see connections and their tools, with nothing to change", async () => {
 		apiAnswers({ role: "member" });
 		route.list.mockReturnValue(Effect.succeed([wiki]));
 		mount(page);
 		await showConnections();
 
-		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Wiki options" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Connect Notion" })).toBeNull();
-	});
-});
+		const row = await screen.findByRole("article", { name: "Wiki" });
+		expect(within(row).queryByRole("group", { name: "What bots may do with Wiki" })).toBeNull();
+		expect(within(row).getByText("Off")).toBeDefined();
+		expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
 
-describe("the pod settings tabs", () => {
-	it("keeps the open tab in the address, so a reload opens it again", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
-		const router = mount(page);
-		await showConnections();
-
-		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
-		cleanup();
-		mount(`${page}?tab=connections`);
-		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+		fireEvent.click(within(row).getByRole("button", { name: "About Wiki" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+		expect(within(dialog).getByText("Search pages")).toBeDefined();
+		expect(within(dialog).queryByRole("button", { name: "Remove connection" })).toBeNull();
+		expect(within(dialog).queryByRole("button", { name: "Replace" })).toBeNull();
 	});
 });
 
 describe("coming back from a connection sign-in", () => {
-	it("opens the Connections tab of the pod the sign-in was for", async () => {
+	it("opens the pod page of the pod the sign-in was for", async () => {
 		route.list.mockReturnValue(Effect.succeed([wiki]));
 		const router = mount(`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}`);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
-		expect(router.state.location.href).toBe(`${page}?tab=connections`);
+		expect(router.state.location.href).toBe(page);
 	});
 
 	it("says once why a sign-in for a pod did not finish", async () => {
@@ -250,13 +306,12 @@ describe("coming back from a connection sign-in", () => {
 		);
 
 		expect(await screen.findByText("Signing in did not finish: No thanks")).toBeDefined();
-		await waitFor(() => expect(router.state.location.href).toBe(`${page}?tab=connections`));
+		await waitFor(() => expect(router.state.location.href).toBe(page));
 
 		const other = pods[1] as (typeof pods)[number];
 		await router.navigate({
 			to: "/$workspace/settings/pods/$pod",
 			params: { workspace: "suga", pod: other.slug },
-			search: { tab: "connections" },
 		});
 		expect(await screen.findByRole("heading", { name: other.name })).toBeDefined();
 		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();

@@ -1,5 +1,5 @@
-import type { ConnectionUpdate, NewConnection } from "@sugabots/contracts";
-import { connectionPresetFor, hueFromText } from "@sugabots/contracts";
+import type { ConnectionAccess, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
+import { connectionPresetFor } from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo } from "react";
@@ -18,7 +18,6 @@ export interface ConnectionLook {
 	name: string;
 	/** The catalog entry its logo comes from, when it came from one. */
 	presetId?: string;
-	hue: number;
 }
 
 /**
@@ -37,28 +36,10 @@ export function useConnectionLooks(podId: string): ReadonlyMap<string, Connectio
 			looks.set(connection.handle, {
 				name: connection.name,
 				presetId: preset?.id,
-				hue: preset?.hue ?? hueFromText(connection.name),
 			});
 		}
 		return looks;
 	}, [found]);
-}
-
-export function useToolApprovalRules(podId: string) {
-	return useQuery({
-		queryKey: ["tool-approval-rules", podId],
-		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.toolApprovals.listRules({ params: { podId } }), { signal }),
-	});
-}
-
-export function useRevokeToolApprovalRule(podId: string) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (ruleId: string) =>
-			Effect.runPromise(client.api.toolApprovals.revokeRule({ params: { podId, ruleId } })),
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tool-approval-rules", podId] }),
-	});
 }
 
 export function useConnectionActions(podId: string) {
@@ -87,12 +68,31 @@ export function useConnectionActions(podId: string) {
 				Effect.runPromise(connections.test({ params: { podId, connectionId } })),
 			onSettled: refresh,
 		}),
-		/** From the catalog: makes the connection and leaves for its sign-in, as one step. */
+		/**
+		 * From the catalog: makes the connection and leaves for its sign-in, as one
+		 * step. A new signed-in connection starts at Allow once its sign-in
+		 * finishes, which only turns an Off one on, so Ask is set before leaving.
+		 */
 		connect: useMutation({
-			mutationFn: async (json: { name: string; url: string }) => {
+			mutationFn: async ({
+				access,
+				...json
+			}: {
+				name: string;
+				url: string;
+				access: Exclude<ConnectionAccess, "off">;
+			}) => {
 				const result = await Effect.runPromise(
 					connections.connectFromCatalog({ params: { podId }, payload: json }),
 				);
+				if (access === "ask") {
+					await Effect.runPromise(
+						connections.update({
+							params: { podId, connectionId: result.connectionId },
+							payload: { access },
+						}),
+					);
+				}
 				browser.go(result.authorizationUrl);
 				return result;
 			},

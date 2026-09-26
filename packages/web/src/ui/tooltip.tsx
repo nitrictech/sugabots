@@ -17,7 +17,7 @@ export function Tooltip({
 	...props
 }: TooltipPrimitive.Root.Props & {
 	label: ReactNode;
-	side?: "top" | "bottom";
+	side?: "top" | "bottom" | "right";
 	/** The control the tooltip describes. It is the trigger, so it must be one element. */
 	children: ReactElement;
 }) {
@@ -26,7 +26,7 @@ export function Tooltip({
 			<TooltipPrimitive.Trigger render={children} />
 			<TooltipPrimitive.Portal>
 				<TooltipPrimitive.Positioner side={side} sideOffset={6} className="isolate z-50">
-					<TooltipPrimitive.Popup className="rounded-md bg-heading px-2 py-1 font-sans text-xs text-background shadow-sm">
+					<TooltipPrimitive.Popup className="rounded-md bg-foreground px-2 py-1 font-sans text-xs text-background shadow-sm">
 						{label}
 					</TooltipPrimitive.Popup>
 				</TooltipPrimitive.Positioner>

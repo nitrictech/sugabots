@@ -1,44 +1,24 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
 import { useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { ChatComposer } from "./ChatComposer.tsx";
-
-const participants: ThreadParticipant[] = [
-	{
-		kind: "agent",
-		id: "0199a3a0-0000-7000-8000-000000000001",
-		name: "Issue Triager",
-		handle: "issue-triager",
-		hue: 150,
-		face: "smile",
-	},
-	{
-		kind: "person",
-		id: "0199a3a0-0000-7000-8000-000000000002",
-		name: "Sam Rivera",
-		handle: "sam-rivera",
-		image: null,
-	},
-];
 
 const meta = preview.meta({
 	title: "Product/ChatComposer",
 	component: ChatComposer,
 	tags: ["ai-generated"],
 	args: {
-		label: "Message",
-		placeholder: "Message the team, or @mention someone…",
+		label: "Message Growth Desk",
+		placeholder: "Message Growth Desk",
 		value: "",
 		onValueChange: fn(),
 		onSubmit: fn(),
 		submitLabel: "Send message",
 		submitDisabled: false,
-		mentionables: participants,
 	},
 	decorators: [
 		(Story) => (
-			<div className="mx-auto flex min-h-80 max-w-home items-end py-4">
+			<div className="mx-auto flex min-h-80 items-end py-4">
 				<div className="w-full">
 					<Story />
 				</div>
@@ -62,6 +42,7 @@ const meta = preview.meta({
 	},
 });
 
+/** Empty is the composer before anything is typed: the send button stays grey. */
 export const Empty = meta.story({});
 
 /** Draft grows to fit a multi-line message instead of scrolling it out of sight. */
@@ -70,7 +51,7 @@ export const Draft = meta.story({
 		value: "Please summarise the customer feedback.\nHighlight anything we should act on today.",
 	},
 	play: async ({ canvas }) => {
-		const input = canvas.getByRole("textbox", { name: "Message" });
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await expect(input.scrollHeight).toBe(input.clientHeight);
 	},
 });
@@ -89,44 +70,8 @@ export const LongDraft = meta.story({
 		].join("\n"),
 	},
 	play: async ({ canvas }) => {
-		const input = canvas.getByRole("textbox", { name: "Message" });
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await expect(input.scrollHeight).toBeGreaterThan(input.clientHeight);
-	},
-});
-
-/** Mentions exposes thread participants without requiring a live conversation. */
-export const Mentions = meta.story({
-	parameters: { docs: { story: { autoplay: true } } },
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.type(canvas.getByRole("textbox", { name: "Message" }), "@");
-		await expect(
-			canvas.getByRole("listbox", { name: "People and agents in this thread" }),
-		).toBeVisible();
-	},
-});
-
-/** SelectMention uses the keyboard to insert a participant handle into the draft. */
-export const SelectMention = meta.story({
-	args: { value: "@issue-triager " },
-	play: async ({ canvas, userEvent, args }) => {
-		const input = canvas.getByRole("textbox", { name: "Message" });
-		await userEvent.clear(input);
-		await userEvent.type(input, "@");
-		await expect(input).toHaveAttribute(
-			"aria-activedescendant",
-			canvas.getByRole("option", { name: /Issue Triager/, selected: true }).id,
-		);
-		await userEvent.keyboard("{ArrowDown}");
-		await expect(input).toHaveAttribute(
-			"aria-activedescendant",
-			canvas.getByRole("option", { name: /Sam Rivera/, selected: true }).id,
-		);
-		await userEvent.keyboard("{ArrowUp}");
-		await userEvent.keyboard("{Enter}");
-		await expect(input).toHaveValue("@issue-triager ");
-		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
-		await expect(input).not.toHaveAttribute("aria-activedescendant");
-		await expect(args.onSubmit).not.toHaveBeenCalled();
 	},
 });
 
@@ -134,7 +79,7 @@ export const SelectMention = meta.story({
 export const SendWithEnter = meta.story({
 	args: { value: "First line\nSecond line" },
 	play: async ({ canvas, userEvent, args }) => {
-		const input = canvas.getByRole("textbox", { name: "Message" });
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.clear(input);
 		await userEvent.type(input, "First line");
 		await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
@@ -146,6 +91,7 @@ export const SendWithEnter = meta.story({
 	},
 });
 
+/** Sending holds the draft while the message is on its way. */
 export const Sending = meta.story({
 	args: {
 		value: "Please summarise the feedback.",

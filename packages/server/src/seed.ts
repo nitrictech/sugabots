@@ -148,22 +148,22 @@ const seed = query((db) =>
 		for (const seedling of [
 			{
 				name: "Linear Handler",
-				hue: 158,
-				face: "bar" as const,
+				color: "green" as const,
+				face: "pill" as const,
 				description: "Reads and writes Linear on the team's behalf.",
 				pod: PERSONAL_POD_SLUG,
 			},
 			{
 				name: "Issue Triager",
-				hue: 272,
-				face: "dots" as const,
+				color: "purple" as const,
+				face: "dot" as const,
 				description: "Sorts incoming issues every weekday morning.",
 				pod: PERSONAL_POD_SLUG,
 			},
 			{
 				name: "Customer Research",
-				hue: 62,
-				face: "smile" as const,
+				color: "orange" as const,
+				face: "arc" as const,
 				description: "Digs through calls and notes for what customers asked for.",
 				pod: "support",
 			},
@@ -179,7 +179,7 @@ const seed = query((db) =>
 					name: seedling.name,
 					handle: handleFromName(seedling.name),
 					description: seedling.description,
-					hue: seedling.hue,
+					color: seedling.color,
 					face: seedling.face,
 					model,
 				})

@@ -1,26 +1,21 @@
-import type { ToolApprovalDecision, ToolApprovalRule, ToolCallPart } from "@sugabots/contracts";
-import { streamEvent, threadChannel, workspaceRoleOf } from "@sugabots/contracts";
+import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
+import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../../database/database.ts";
 import type { PublishEvents } from "../../../database/events/publish.ts";
-import type * as schema from "../../../database/schema.ts";
 import {
-	agent,
 	connection,
 	job,
 	pod,
-	podMember,
 	routineExecution,
 	thread,
-	toolApprovalRule,
 	toolCall,
 	turn,
 	user,
-	workspaceMember,
 } from "../../../database/schema.ts";
-import { podStanding, podStandingFor } from "../../../workspaces/access.ts";
+import { podStandingFor } from "../../../workspaces/access.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
 import { boundedJson } from "../calls/store.ts";
@@ -35,28 +30,12 @@ export interface PendingToolApproval {
 	connectionId: string;
 	connectionRevision: number;
 	remoteToolName: string;
+	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
+	mutating: boolean;
 	atOffset: number;
 }
 
 export interface ToolApprovalStore {
-	/**
-	 * The offered tools an agent may use without asking again, because a
-	 * standing approval covers them.
-	 *
-	 * A rule is only usable while whoever granted it still belongs to the
-	 * workspace and still holds `approval.alwaysAllow` in this pod, so a
-	 * demotion or a departure withdraws their standing approvals with them.
-	 */
-	allowedToolKeys(
-		agentId: string,
-		scope: { workspaceId: string; podId: string },
-		tools: ReadonlyArray<{
-			key: string;
-			connectionId: string;
-			connectionRevision: number;
-			remoteToolName: string;
-		}>,
-	): Effect.Effect<Set<string>, never, Database>;
 	responsesForTurn(
 		turnId: string,
 		approvalIds: readonly string[],
@@ -72,7 +51,6 @@ export interface ToolApprovalStore {
 		connectionId: string;
 		connectionRevision: number;
 		remoteToolName: string;
-		automaticallyAllowed: boolean;
 	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
 	decide(input: {
 		workspaceId: string;
@@ -85,12 +63,6 @@ export interface ToolApprovalStore {
 		ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
 		Database
 	>;
-	listRules(workspaceId: string, podId: string): Effect.Effect<ToolApprovalRule[], never, Database>;
-	revokeRule(
-		workspaceId: string,
-		podId: string,
-		ruleId: string,
-	): Effect.Effect<boolean, never, Database>;
 }
 
 export class ToolApprovalNotFound extends Data.TaggedError("ToolApprovalNotFound") {}
@@ -105,60 +77,6 @@ export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused
 
 export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalStore {
 	return {
-		allowedToolKeys: (agentId, scope, tools) => {
-			if (tools.length === 0) return Effect.succeed(new Set());
-			return query((db) =>
-				Effect.gen(function* () {
-					const connectionIds = [...new Set(tools.map((tool) => tool.connectionId))];
-					const rows = yield* db
-						.select({
-							connectionId: toolApprovalRule.connectionId,
-							connectionRevision: toolApprovalRule.connectionRevision,
-							toolName: toolApprovalRule.toolName,
-							...grantorColumns,
-						})
-						.from(toolApprovalRule)
-						.innerJoin(pod, eq(pod.id, toolApprovalRule.podId))
-						.leftJoin(
-							workspaceMember,
-							and(
-								eq(workspaceMember.workspaceId, toolApprovalRule.workspaceId),
-								eq(workspaceMember.userId, toolApprovalRule.createdById),
-							),
-						)
-						.leftJoin(
-							podMember,
-							and(
-								eq(podMember.podId, toolApprovalRule.podId),
-								eq(podMember.userId, toolApprovalRule.createdById),
-							),
-						)
-						.where(
-							and(
-								eq(toolApprovalRule.agentId, agentId),
-								eq(toolApprovalRule.workspaceId, scope.workspaceId),
-								eq(toolApprovalRule.podId, scope.podId),
-								inArray(toolApprovalRule.connectionId, connectionIds),
-							),
-						);
-					const allowed = new Set(
-						rows
-							.filter(grantorStillMayAlwaysAllow)
-							.map((row) => `${row.connectionId}:${row.connectionRevision}:${row.toolName}`),
-					);
-					return new Set(
-						tools
-							.filter((tool) =>
-								allowed.has(
-									`${tool.connectionId}:${tool.connectionRevision}:${tool.remoteToolName}`,
-								),
-							)
-							.map((tool) => tool.key),
-					);
-				}),
-			);
-		},
-
 		responsesForTurn: (turnId, approvalIds) =>
 			Effect.flatMap(
 				query((db) =>
@@ -223,7 +141,6 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					const [scope] = yield* query((db) =>
 						db
 							.select({
-								agentId: turn.agentId,
 								workspaceId: thread.workspaceId,
 								podId: thread.podId,
 							})
@@ -251,8 +168,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 									eq(connection.id, input.connectionId),
 									eq(connection.workspaceId, scope.workspaceId),
 									eq(connection.podId, scope.podId),
-									eq(connection.enabled, true),
-									eq(connection.allowMutating, true),
+									ne(connection.access, "off"),
 									eq(connection.configurationRevision, input.connectionRevision),
 								),
 							)
@@ -277,107 +193,42 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 							.limit(1)
 							.for("update"),
 					);
-					if (existing) {
-						if (existing.approvalStatus !== "allowed" || existing.status !== "awaiting_approval") {
-							return yield* new ToolExecutionRefused({
-								message: "Tool call is not approved for execution",
-							});
-						}
-						const [running] = yield* query((db) =>
-							db
-								.update(toolCall)
-								.set({ status: "running", startedAt: new Date() })
-								.where(
-									and(
-										eq(toolCall.id, existing.id),
-										eq(toolCall.threadId, input.threadId),
-										eq(toolCall.messageId, input.messageId),
-										eq(toolCall.status, "awaiting_approval"),
-										eq(toolCall.tool, input.tool),
-										eq(toolCall.connectionId, input.connectionId),
-										eq(toolCall.connectionRevision, input.connectionRevision),
-										eq(toolCall.remoteToolName, input.remoteToolName),
-										sql`${toolCall.executionInput} = ${JSON.stringify(executionJson(input.input))}::jsonb`,
-									),
-								)
-								.returning(),
-						);
-						if (!running)
-							return yield* new ToolExecutionRefused({
-								message: "Tool call execution was already claimed",
-							});
-						yield* markMutationStarted(running.turnId);
-						const part = toToolCallPart(running);
-						yield* publishEvents([
-							callEvent("tool_call.updated", part, running.threadId, running.messageId),
-						]);
-						return part;
-					}
-
-					if (!input.automaticallyAllowed) {
+					// Every call to a connection's tool was parked for a person to allow first.
+					if (!existing) {
 						return yield* new ToolExecutionRefused({ message: "Tool call has no approval record" });
 					}
-					// Locked and re-read inside the settling transaction, and its
-					// grantor's authority asked for again: a rule revoked, or a
-					// grantor demoted or removed, between the turn being prepared
-					// and the call being dispatched must stop the call.
-					const [currentRule] = yield* query((db) =>
+					if (existing.approvalStatus !== "allowed" || existing.status !== "awaiting_approval") {
+						return yield* new ToolExecutionRefused({
+							message: "Tool call is not approved for execution",
+						});
+					}
+					const [running] = yield* query((db) =>
 						db
-							.select({ id: toolApprovalRule.id, grantorId: toolApprovalRule.createdById })
-							.from(toolApprovalRule)
+							.update(toolCall)
+							.set({ status: "running", startedAt: new Date() })
 							.where(
 								and(
-									eq(toolApprovalRule.workspaceId, scope.workspaceId),
-									eq(toolApprovalRule.podId, scope.podId),
-									eq(toolApprovalRule.agentId, scope.agentId),
-									eq(toolApprovalRule.connectionId, input.connectionId),
-									eq(toolApprovalRule.connectionRevision, input.connectionRevision),
-									eq(toolApprovalRule.toolName, input.remoteToolName),
+									eq(toolCall.id, existing.id),
+									eq(toolCall.threadId, input.threadId),
+									eq(toolCall.messageId, input.messageId),
+									eq(toolCall.status, "awaiting_approval"),
+									eq(toolCall.tool, input.tool),
+									eq(toolCall.connectionId, input.connectionId),
+									eq(toolCall.connectionRevision, input.connectionRevision),
+									eq(toolCall.remoteToolName, input.remoteToolName),
+									sql`${toolCall.executionInput} = ${JSON.stringify(executionJson(input.input))}::jsonb`,
 								),
 							)
-							.limit(1)
-							.for("update"),
-					);
-					if (!currentRule) {
-						return yield* new ToolExecutionRefused({
-							message: "Tool call has no current approval rule",
-						});
-					}
-					const grantor = yield* query((db) =>
-						podStandingFor(db, scope.podId, currentRule.grantorId),
-					);
-					if (!grantor?.may("approval.alwaysAllow")) {
-						return yield* new ToolExecutionRefused({
-							message: "The standing approval's grantor is no longer allowed to give one",
-						});
-					}
-					const [created] = yield* query((db) =>
-						db
-							.insert(toolCall)
-							.values({
-								threadId: input.threadId,
-								messageId: input.messageId,
-								turnId: input.turnId,
-								tool: input.tool,
-								sdkToolCallId: input.sdkToolCallId,
-								approvalStatus: "automatic",
-								connectionId: input.connectionId,
-								connectionRevision: input.connectionRevision,
-								remoteToolName: input.remoteToolName,
-								input: boundedJson(input.input),
-								executionInput: executionJson(input.input),
-								status: "running",
-								mutating: true,
-								atOffset: input.atOffset,
-							})
 							.returning(),
 					);
-					if (!created)
-						return yield* new ToolExecutionRefused({ message: "Tool call insert returned no row" });
-					yield* markMutationStarted(created.turnId);
-					const part = toToolCallPart(created);
+					if (!running)
+						return yield* new ToolExecutionRefused({
+							message: "Tool call execution was already claimed",
+						});
+					if (running.mutating) yield* markMutationStarted(running.turnId);
+					const part = toToolCallPart(running);
 					yield* publishEvents([
-						callEvent("tool_call.started", part, created.threadId, created.messageId),
+						callEvent("tool_call.updated", part, running.threadId, running.messageId),
 					]);
 					return part;
 				}),
@@ -447,61 +298,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					if (routineExecutionId && !decider.may("approval.routine.decide")) {
 						return yield* new ToolApprovalForbidden();
 					}
-					if (input.decision === "always_allow" && !decider.may("approval.alwaysAllow")) {
-						return yield* new ToolApprovalForbidden();
-					}
 					const allowed = input.decision !== "deny";
-					if (input.decision === "always_allow") {
-						if (
-							!candidate.call.connectionId ||
-							!candidate.call.connectionRevision ||
-							!candidate.call.remoteToolName
-						) {
-							return yield* new ToolApprovalConflict();
-						}
-						const connectionId = candidate.call.connectionId;
-						const connectionRevision = candidate.call.connectionRevision;
-						const toolName = candidate.call.remoteToolName;
-						const [currentConnection] = yield* query((db) =>
-							db
-								.select({ id: connection.id })
-								.from(connection)
-								.where(
-									and(
-										eq(connection.id, connectionId),
-										eq(connection.workspaceId, input.workspaceId),
-										eq(connection.podId, input.podId),
-										eq(connection.configurationRevision, connectionRevision),
-									),
-								)
-								.limit(1)
-								.for("update"),
-						);
-						if (!currentConnection) return yield* new ToolApprovalConflict();
-						const newRule: typeof toolApprovalRule.$inferInsert = {
-							workspaceId: input.workspaceId,
-							podId: input.podId,
-							agentId: candidate.agentId,
-							connectionId,
-							connectionRevision,
-							toolName,
-							createdById: input.userId,
-						};
-						yield* query((db) =>
-							db
-								.insert(toolApprovalRule)
-								.values(newRule)
-								.onConflictDoUpdate({
-									target: [
-										toolApprovalRule.agentId,
-										toolApprovalRule.connectionId,
-										toolApprovalRule.toolName,
-										toolApprovalRule.createdById,
-									],
-									set: { connectionRevision },
-								}),
-						);
-					}
 					const [updated] = yield* query((db) =>
 						db
 							.update(toolCall)
@@ -562,90 +359,17 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					return part;
 				}),
 			),
-
-		listRules: (workspaceId, podId) =>
-			query((db) =>
-				Effect.gen(function* () {
-					const rows = yield* db
-						.select({
-							rule: toolApprovalRule,
-							agentName: agent.name,
-							connectionName: connection.name,
-						})
-						.from(toolApprovalRule)
-						.innerJoin(agent, eq(agent.id, toolApprovalRule.agentId))
-						.innerJoin(connection, eq(connection.id, toolApprovalRule.connectionId))
-						.where(
-							and(eq(toolApprovalRule.workspaceId, workspaceId), eq(toolApprovalRule.podId, podId)),
-						);
-					return rows.map(({ rule, agentName, connectionName }) => ({
-						id: rule.id,
-						agentId: rule.agentId,
-						agentName,
-						connectionId: rule.connectionId,
-						connectionName,
-						toolName: rule.toolName,
-						createdAt: rule.createdAt.toISOString(),
-					}));
-				}),
-			),
-
-		revokeRule: (workspaceId, podId, ruleId) =>
-			Effect.map(
-				query((db) =>
-					db
-						.delete(toolApprovalRule)
-						.where(
-							and(
-								eq(toolApprovalRule.id, ruleId),
-								eq(toolApprovalRule.workspaceId, workspaceId),
-								eq(toolApprovalRule.podId, podId),
-							),
-						)
-						.returning({ id: toolApprovalRule.id }),
-				),
-				(rows) => rows.length === 1,
-			),
 	};
 }
 
 /** No connection approvals for workers that are not offered connection tools. */
 export const noToolApprovalStore: ToolApprovalStore = {
-	allowedToolKeys: () => Effect.succeed(new Set()),
 	responsesForTurn: () =>
 		Effect.fail(new ToolApprovalsIncomplete({ message: "Tool approvals are not configured" })),
 	beginExecution: () =>
 		Effect.fail(new ToolExecutionRefused({ message: "Tool approvals are not configured" })),
 	decide: () => Effect.fail(new ToolApprovalNotFound()),
-	listRules: () => Effect.succeed([]),
-	revokeRule: () => Effect.succeed(false),
 };
-
-/**
- * The grantor's standing, joined beside a stored approval rule.
- *
- * Joined rather than loaded one rule at a time: this runs while a turn is
- * being prepared, over every rule the agent's connections could match.
- */
-const grantorColumns = {
-	pod,
-	grantorId: toolApprovalRule.createdById,
-	role: workspaceMember.role,
-	membershipId: podMember.id,
-};
-
-function grantorStillMayAlwaysAllow(row: {
-	pod: schema.PodRow;
-	grantorId: string;
-	role: string | null;
-	membershipId: string | null;
-}): boolean {
-	return podStanding(
-		row.pod,
-		{ userId: row.grantorId, workspaceRole: workspaceRoleOf(row.role) },
-		row.membershipId !== null,
-	).may("approval.alwaysAllow");
-}
 
 export function executionJson(value: unknown) {
 	return JSON.parse(JSON.stringify(value ?? null));

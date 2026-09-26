@@ -1,7 +1,6 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import {
 	noToolApprovalStore,
-	ToolApprovalForbidden,
 	type ToolApprovalStore,
 } from "@sugabots/core/conversations/tools/approvals/store";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
@@ -51,11 +50,7 @@ const pending: ToolCallPart = {
 };
 
 function app() {
-	const decide = vi.fn<ToolApprovalStore["decide"]>((input) =>
-		input.decision === "always_allow" && input.userId !== ADMIN_ID
-			? Effect.fail(new ToolApprovalForbidden())
-			: Effect.succeed(pending),
-	);
+	const decide = vi.fn<ToolApprovalStore["decide"]>(() => Effect.succeed(pending));
 	return {
 		decide,
 		app: createTestApp({
@@ -81,18 +76,18 @@ describe("tool approval routes", () => {
 		);
 	});
 
-	it("leaves Always allow to the store, which refuses a member", async () => {
+	it("lets an admin who is not in the pod decide", async () => {
 		const built = app();
 		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
 			method: "POST",
-			headers: { authorization: "Bearer member", "content-type": "application/json" },
-			body: JSON.stringify({ decision: "always_allow" }),
+			headers: { authorization: "Bearer admin", "content-type": "application/json" },
+			body: JSON.stringify({ decision: "deny" }),
 		});
 
-		expect(response.status).toBe(403);
+		expect(response.status).toBe(200);
 	});
 
-	it("lets an admin who is not in the pod decide", async () => {
+	it("has no standing approval to give: every call that changes things is decided on its own", async () => {
 		const built = app();
 		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
 			method: "POST",
@@ -100,15 +95,7 @@ describe("tool approval routes", () => {
 			body: JSON.stringify({ decision: "always_allow" }),
 		});
 
-		expect(response.status).toBe(200);
-	});
-
-	it("refuses a member revoking a standing approval", async () => {
-		const response = await app().app.request(`/pods/${POD_ID}/tool-approval-rules/${CALL_ID}`, {
-			method: "DELETE",
-			headers: { authorization: "Bearer member" },
-		});
-
-		expect(response.status).toBe(403);
+		expect(response.status).toBe(400);
+		expect(built.decide).not.toHaveBeenCalled();
 	});
 });

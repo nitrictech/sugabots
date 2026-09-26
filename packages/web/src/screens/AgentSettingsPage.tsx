@@ -7,48 +7,39 @@ import {
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Ellipsis } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
-import { useDeleteAgent, useUpdateAgent } from "@/lib/agents.ts";
-import { useConnections, useToolApprovalRules } from "@/lib/connections.ts";
+import { ChevronLeft } from "lucide-react";
+import { useId, useState } from "react";
+import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
+import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
+import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
-import { Input } from "@/ui/input.tsx";
-import { LabeledField } from "@/ui/labeled-field.tsx";
-import { Tab, TabPanel, Tabs, TabsList } from "@/ui/tabs.tsx";
-import { Textarea } from "@/ui/textarea.tsx";
+	SettingsDanger,
+	SettingsGroup,
+	SettingsPage,
+	SettingsRow,
+	SettingsValue,
+} from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { AgentModelPicker } from "./AgentModelPicker.tsx";
 import { AgentToolsDialog, agentToolsOf } from "./AgentToolAccess.tsx";
-import { RoutinesSettings } from "./RoutinesSettings.tsx";
+import { AgentRoutines } from "./RoutinesSettings.tsx";
 
 /*
- * One crew agent's settings: who it is at the top, then four tabs. Details is
- * what it is and where it works, Prompt is what it is told, Tools is what it
- * may reach for, Routines is what it does unprompted. What can be changed here
- * comes from the pod's resolved permissions, and a control nobody may use is
- * not drawn at all.
+ * One bot, as its contact card: its face and colour first, then what it is,
+ * what it thinks with and what it is told, what it can reach, and what it does
+ * unprompted. Model and instructions each open on a page of their own in the
+ * same place, so the card never rearranges under you.
  *
- * Crew only. A built-in agent belongs to the workspace rather than to a pod and
- * has none of these, so it has a page of its own in `BuiltInAgentsSettings`.
- *
- * Each field saves on its own. A description saves when you leave it, a
- * model when you pick one, a switch when you flip it. The prompt is the one
- * exception: it is prose somebody may be part-way through, so it waits for
- * Save and offers Revert.
+ * What can be changed comes from the pod's resolved permissions, and a control
+ * nobody may use is not drawn. Each field saves on its own; instructions are
+ * prose somebody may be part-way through, so they wait for Save.
  */
 export function AgentSettingsPage({
 	agent,
@@ -56,93 +47,90 @@ export function AgentSettingsPage({
 	initialTab,
 }: {
 	agent: Agent;
-	/** The pod this agent lives in, and what the caller may do in it. */
+	/** The pod this bot lives in, and what the viewer may do in it. */
 	pod: Pod;
+	/** Opens scrolled to its routines, for a link from a routine run. */
 	initialTab?: "routines";
 }) {
-	const may = pod.permissions;
-	const mayEdit = may.updateAgents;
+	const [page, setPage] = useState<"card" | "model" | "instructions">("card");
 	const update = useUpdateAgent(agent.id);
 	const failure = update.error ? failureMessage(update.error) : undefined;
-
-	return (
-		<div
-			className="agent-tint w-full max-w-[1080px] px-5 py-6 sm:px-8 sm:py-7"
-			style={{ ["--agent-hue" as string]: agent.hue }}
+	const back = (
+		<button
+			type="button"
+			onClick={() => setPage("card")}
+			className="focus-ring flex items-center gap-1 rounded-md font-medium text-[14px] text-link"
 		>
-			<AgentHeader
+			<ChevronLeft aria-hidden size={16} />
+			{agent.name}
+		</button>
+	);
+
+	if (page === "model") {
+		return (
+			<SettingsPage back={back} title="Model" description={`What ${agent.name} thinks with.`}>
+				{failure && <Alert>{failure}</Alert>}
+				<AgentModelPicker
+					model={agent.model}
+					canChoose={pod.permissions.updateAgents}
+					onChoose={(model) => {
+						void update.mutateAsync({ model }).catch(() => {});
+					}}
+				/>
+			</SettingsPage>
+		);
+	}
+	if (page === "instructions") {
+		return (
+			<Instructions
 				agent={agent}
-				pod={pod}
-				canEdit={mayEdit}
-				canDelete={may.deleteAgents}
+				editable={pod.permissions.updateAgents}
+				back={back}
 				save={update.mutateAsync}
 				savePending={update.isPending}
+				failure={failure}
 			/>
-			{failure !== undefined && <Alert className="mt-4">{failure}</Alert>}
-
-			<Tabs defaultValue={initialTab ?? "details"} className="mt-6">
-				<TabsList>
-					<Tab value="details">Details</Tab>
-					<Tab value="prompt">Prompt</Tab>
-					<Tab value="tools">Tools</Tab>
-					<Tab value="routines">Routines</Tab>
-				</TabsList>
-				<TabPanel value="details" className="flex max-w-[720px] flex-col gap-6">
-					<Description
-						agent={agent}
-						editable={mayEdit}
-						save={update.mutateAsync}
-						savePending={update.isPending}
-					/>
-					<AgentModelPicker
-						model={agent.model}
-						canChoose={mayEdit}
-						onChoose={(model) => {
-							void update.mutateAsync({ model }).catch(() => {});
-						}}
-					/>
-				</TabPanel>
-				<TabPanel value="prompt" className="max-w-[720px]">
-					<Prompt
-						agent={agent}
-						editable={mayEdit}
-						save={update.mutateAsync}
-						savePending={update.isPending}
-					/>
-				</TabPanel>
-				<TabPanel value="tools" className="flex max-w-[720px] flex-col gap-7">
-					<BuiltInTools agent={agent} canChange={mayEdit} save={update.mutateAsync} />
-					<InheritedConnections agent={agent} pod={pod} />
-				</TabPanel>
-				<TabPanel value="routines">
-					<RoutinesSettings agent={agent} canManage={may.manageRoutines} canRun={may.runRoutines} />
-				</TabPanel>
-			</Tabs>
-		</div>
+		);
+	}
+	return (
+		<ContactCard
+			agent={agent}
+			pod={pod}
+			initialTab={initialTab}
+			save={update.mutateAsync}
+			savePending={update.isPending}
+			failure={failure}
+			onOpenModel={() => setPage("model")}
+			onOpenInstructions={() => setPage("instructions")}
+		/>
 	);
 }
 
-/*
- * The face, the name and the handle, with a menu for what happens to the
- * agent as a whole: renaming it, or deleting it. Deleting asks first, since a
- * menu item is one slip away.
- */
-function AgentHeader({
+type Save = (change: AgentUpdate) => Promise<unknown>;
+
+function ContactCard({
 	agent,
 	pod,
-	canEdit,
-	canDelete,
+	initialTab,
 	save,
 	savePending,
+	failure,
+	onOpenModel,
+	onOpenInstructions,
 }: {
 	agent: Agent;
 	pod: Pod;
-	canEdit: boolean;
-	canDelete: boolean;
-	save: (change: AgentUpdate) => Promise<unknown>;
+	initialTab?: "routines";
+	save: Save;
 	savePending: boolean;
+	failure: string | undefined;
+	onOpenModel: () => void;
+	onOpenInstructions: () => void;
 }) {
-	const [renaming, setRenaming] = useState(false);
+	const may = pod.permissions;
+	const models = useModels();
+	const inUse = models.data?.models.find((model) => model.modelId === agent.model);
+	const modelName = inUse ? (inUse.displayName ?? inUse.modelId) : undefined;
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteAgent();
 	const navigate = useNavigate();
@@ -153,305 +141,296 @@ function AgentHeader({
 		} catch {
 			return;
 		}
-		await navigate(podSettingsLink(pod));
+		await navigate({
+			from: "/$workspace",
+			to: "./settings/$section",
+			params: { section: "agents" },
+		});
 	}
 
 	return (
-		<header className="flex flex-col gap-4">
-			<div className="flex items-start gap-4">
-				<IconButton
-					label="Back to pod"
-					className="mt-2 lg:hidden"
-					render={<Link {...podSettingsLink(pod)} />}
-				>
-					<ArrowLeft />
-				</IconButton>
-				<AgentAvatar hue={agent.hue} face={agent.face} size={44} />
-				<div className="flex min-w-0 flex-1 flex-col gap-1.5">
-					{renaming ? (
-						<RenameForm
-							agent={agent}
-							save={save}
-							savePending={savePending}
-							done={() => setRenaming(false)}
-						/>
-					) : (
-						<h2 className="m-0 truncate font-display text-2xl font-semibold text-heading">
-							{agent.name}
-						</h2>
-					)}
-					<span className="w-fit rounded-md bg-primary-tint px-1.5 py-0.5 font-mono text-sm text-primary-tint-foreground">
-						@{agent.handle}
-					</span>
-				</div>
-				{(canEdit || canDelete) && (
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<IconButton label={`${agent.name} options`} variant="outline" size="lg">
-									<Ellipsis />
-								</IconButton>
-							}
-						/>
-						<DropdownMenuContent align="end" className="min-w-44">
-							{canEdit && (
-								<DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
-							)}
-							{canDelete && (
-								<>
-									{canEdit && <DropdownMenuSeparator />}
-									<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
-										Delete agent
-									</DropdownMenuItem>
-								</>
-							)}
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
-			</div>
+		<SettingsPage
+			hero={<AgentAvatar color={agent.color} face={agent.face} size={88} />}
+			title={agent.name}
+			description={pod.name}
+		>
+			{failure && <Alert>{failure}</Alert>}
+			{may.updateAgents && <Look agent={agent} save={save} />}
+			<SettingsGroup label="About">
+				<TextRow
+					label="Name"
+					value={agent.name}
+					editable={may.updateAgents}
+					savePending={savePending}
+					maxLength={64}
+					required
+					onCommit={(name) => save({ name })}
+				/>
+				<TextRow
+					label="Description"
+					value={agent.description ?? ""}
+					placeholder="One line on what this bot is for."
+					editable={may.updateAgents}
+					savePending={savePending}
+					maxLength={280}
+					onCommit={(description) => save({ description })}
+				/>
+				<SettingsRow
+					label="Model"
+					trailing={<SettingsValue>{modelName ?? agent.model ?? "None chosen"}</SettingsValue>}
+					chevron
+					onClick={onOpenModel}
+				/>
+				<SettingsRow
+					label="Instructions"
+					trailing={<SettingsValue>{may.updateAgents ? "Edit" : "View"}</SettingsValue>}
+					chevron
+					onClick={onOpenInstructions}
+				/>
+			</SettingsGroup>
+			<Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />
+			<section
+				id="routines"
+				ref={(element) => {
+					if (initialTab === "routines") element?.scrollIntoView();
+				}}
+			>
+				<AgentRoutines agent={agent} pod={pod} />
+			</section>
+			{may.deleteAgents && (
+				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete bot</SettingsDanger>
+			)}
 			<DeleteDialog
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${agent.name}?`}
-				description="This can't be undone."
+				description="Its chat, routines and settings go with it. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteAgent}
 			/>
-		</header>
+		</SettingsPage>
 	);
 }
 
-function RenameForm({
-	agent,
-	save,
-	savePending,
-	done,
-}: {
-	agent: Agent;
-	save: (change: AgentUpdate) => Promise<unknown>;
-	savePending: boolean;
-	done: () => void;
-}) {
-	const [draft, setDraft] = useState(agent.name);
-	const id = useId();
-	const name = draft.trim();
-
-	async function rename() {
-		try {
-			await save({ name });
-		} catch {
-			return;
-		}
-		done();
-	}
-
+/** The bot's colour and eyes, each saved the moment it is picked. */
+function Look({ agent, save }: { agent: Agent; save: Save }) {
 	return (
-		<form
-			className="flex flex-wrap items-center gap-2"
-			onSubmit={(event) => {
-				event.preventDefault();
-				void rename();
-			}}
-		>
-			<label htmlFor={id} className="sr-only">
-				Name
-			</label>
-			<Input
-				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				className="min-w-40 flex-1 font-display text-lg font-semibold"
-				maxLength={64}
-				required
-				disabled={savePending}
-			/>
-			<Button type="submit" size="sm" disabled={savePending || name === "" || name === agent.name}>
-				Save name
-			</Button>
-			<Button type="button" size="sm" variant="outline" onClick={done} disabled={savePending}>
-				Cancel
-			</Button>
-		</form>
+		<SettingsGroup label="Look">
+			<div className="flex items-center gap-3 border-border border-b px-4 py-3">
+				<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Colour</span>
+				<ColourPicker
+					value={agent.color}
+					onChange={(color) => void save({ color }).catch(() => {})}
+				/>
+			</div>
+			<div className="flex items-center gap-3 px-4 py-2.5">
+				<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Eyes</span>
+				<EyesPicker
+					color={agent.color}
+					value={agent.face}
+					onChange={(face) => void save({ face }).catch(() => {})}
+				/>
+			</div>
+		</SettingsGroup>
 	);
 }
 
-/** A bordered list, one row per child. */
-function Card({ children }: { children: ReactNode }) {
-	return (
-		<div className="flex flex-col divide-y divide-border-subtle overflow-hidden rounded-xl border border-border-subtle bg-card">
-			{children}
-		</div>
-	);
-}
-
-/*
- * One line on what the agent is for. Saves when you leave the field or press
- * Enter, and only if it changed; Escape puts back what was there.
- */
-function Description({
-	agent,
+/** A labelled line of text that saves when you leave it, or reads as a value when it cannot change. */
+function TextRow({
+	label,
+	value,
+	placeholder,
 	editable,
-	save,
 	savePending,
+	maxLength,
+	required = false,
+	onCommit,
 }: {
-	agent: Agent;
+	label: string;
+	value: string;
+	placeholder?: string;
 	editable: boolean;
-	save: (change: AgentUpdate) => Promise<unknown>;
 	savePending: boolean;
+	maxLength: number;
+	required?: boolean;
+	onCommit: (value: string) => Promise<unknown>;
 }) {
-	const [draft, setDraft] = useState(agent.description ?? "");
+	const [draft, setDraft] = useState(value);
 	const id = useId();
-	const current = agent.description ?? "";
 
 	function commit() {
 		const next = draft.trim();
-		if (savePending || next === current) return;
-		void save({ description: next }).catch(() => {});
+		if (savePending || next === value || (required && next === "")) {
+			setDraft(value);
+			return;
+		}
+		void onCommit(next).catch(() => setDraft(value));
 	}
 
-	if (!editable) {
-		return (
-			<LabeledField label="Description">
-				<p className="m-0 text-base text-foreground">
-					{agent.description ?? <span className="text-subtle-foreground">No description yet.</span>}
-				</p>
-			</LabeledField>
-		);
-	}
 	return (
-		<LabeledField label="Description" htmlFor={id}>
-			<Input
-				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				onBlur={commit}
-				onKeyDown={(event) => {
-					if (event.key === "Enter") {
-						event.preventDefault();
-						commit();
-					}
-					if (event.key === "Escape") setDraft(current);
-				}}
-				className="h-11 rounded-xl px-3.5"
-				placeholder="One line on what this agent is for."
-				maxLength={280}
-			/>
-		</LabeledField>
+		<div className="flex items-center gap-3 border-border border-b px-4 py-3 last:border-b-0">
+			<label htmlFor={id} className="w-[110px] shrink-0 text-[14px] text-muted-foreground">
+				{label}
+			</label>
+			{editable ? (
+				<input
+					id={id}
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					onBlur={commit}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") event.currentTarget.blur();
+						if (event.key === "Escape") setDraft(value);
+					}}
+					placeholder={placeholder}
+					maxLength={maxLength}
+					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+				/>
+			) : (
+				<span id={id} className="min-w-0 flex-1 text-[14.5px] text-soft-foreground">
+					{value || <span className="text-subtle-foreground">None yet</span>}
+				</span>
+			)}
+		</div>
 	);
 }
 
 const countFormat = new Intl.NumberFormat("en");
 
-/* The system prompt is saved explicitly so Revert can restore the persisted text. */
-function Prompt({
+function Instructions({
 	agent,
 	editable,
+	back,
 	save,
 	savePending,
+	failure,
 }: {
 	agent: Agent;
 	editable: boolean;
-	save: (change: AgentUpdate) => Promise<unknown>;
+	back: React.ReactNode;
+	save: Save;
 	savePending: boolean;
+	failure: string | undefined;
 }) {
 	const [draft, setDraft] = useState(agent.prompt);
 	const id = useId();
 	const dirty = draft !== agent.prompt;
 
-	async function savePrompt() {
-		try {
-			await save({ prompt: draft });
-		} catch {
-			return;
-		}
-	}
-
-	if (!editable) {
-		return (
-			<LabeledField label="System prompt">
-				{agent.prompt === "" ? (
-					<p className="m-0 text-base text-subtle-foreground">No instructions yet.</p>
-				) : (
-					<p className="m-0 whitespace-pre-wrap text-base leading-relaxed text-foreground">
-						{agent.prompt}
-					</p>
-				)}
-			</LabeledField>
-		);
-	}
 	return (
-		<div className="flex flex-col gap-2">
-			<div className="flex items-baseline justify-between gap-3">
-				<label htmlFor={id} className="font-semibold text-md text-heading">
-					System prompt
-				</label>
-				<span className="font-mono text-xs text-muted-foreground tabular-nums">
-					{countFormat.format(draft.length)} / {countFormat.format(PROMPT_MAX_LENGTH)}
-				</span>
-			</div>
-			<Textarea
-				id={id}
-				value={draft}
-				rows={10}
-				maxLength={PROMPT_MAX_LENGTH}
-				onChange={(event) => setDraft(event.target.value)}
-				placeholder="What this agent is for and how it should behave. Left empty, it knows who it is and how to address people, but nothing about specific about its job."
-				className="min-h-56 rounded-xl bg-card px-4 py-3 text-base leading-relaxed md:text-base"
-				disabled={savePending}
-			/>
-			<div className="flex items-center justify-end gap-3 pt-1">
-				<div className="flex items-center gap-2">
-					<Button
-						size="sm"
-						variant="ghost"
+		<SettingsPage
+			back={back}
+			action={
+				editable && (
+					<button
+						type="button"
 						disabled={!dirty || savePending}
-						onClick={() => setDraft(agent.prompt)}
+						onClick={() => void save({ prompt: draft }).catch(() => {})}
+						className="focus-ring rounded-md font-semibold text-[14.5px] text-link disabled:text-disabled-foreground"
 					>
-						Revert
-					</Button>
-					<Button size="sm" disabled={!dirty || savePending} onClick={() => void savePrompt()}>
-						Save
-					</Button>
-				</div>
-			</div>
-		</div>
+						{savePending ? "Saving…" : "Save"}
+					</button>
+				)
+			}
+			title="Instructions"
+			description={`How ${agent.name} should work. It follows these in every chat.`}
+		>
+			{failure && <Alert>{failure}</Alert>}
+			<SettingsGroup
+				className="p-1"
+				note={
+					editable
+						? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${countFormat.format(draft.length)} of ${countFormat.format(PROMPT_MAX_LENGTH)} characters.`
+						: undefined
+				}
+			>
+				<label htmlFor={id} className="sr-only">
+					Instructions
+				</label>
+				<textarea
+					id={id}
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					readOnly={!editable}
+					maxLength={PROMPT_MAX_LENGTH}
+					placeholder="No instructions yet."
+					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[14.5px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+				/>
+			</SettingsGroup>
+		</SettingsPage>
 	);
 }
 
-/*
- * The built-in tools, each with a switch. On unless somebody switched it off
- * for this agent, and each switch is its own write, so there is nothing to
- * save.
+/**
+ * What the bot can reach: the product's own tools, each of which can be
+ * switched off for it, then the pod's connections, which every bot in the pod
+ * shares and which are managed on the pod.
  */
-function BuiltInTools({
+function Tools({
 	agent,
+	pod,
 	canChange,
 	save,
 }: {
 	agent: Agent;
+	pod: Pod;
 	canChange: boolean;
-	save: (change: AgentUpdate) => Promise<unknown>;
+	save: Save;
 }) {
-	const onCount = builtInToolCatalog.filter((entry) => !agent.disabledTools.includes(entry.key));
+	const connections = useConnections(pod.id);
+	const { agents } = useAgents();
+	const [openConnectionId, setOpenConnectionId] = useState<string>();
+	const podBots =
+		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
+	const reachable = connections.data?.filter((connection) => connection.access !== "off") ?? [];
+
 	return (
-		<LabeledField
-			label="Workspace tools"
-			count={`${onCount.length} of ${builtInToolCatalog.length} on`}
-		>
-			<Card>
-				{builtInToolCatalog.map((entry) => {
-					const on = !agent.disabledTools.includes(entry.key);
-					return (
-						<div key={entry.key} className="flex min-h-11 items-center gap-3 px-4 py-2">
-							<span
-								className="min-w-0 flex-1 truncate font-medium text-base text-heading"
-								title={entry.description}
-							>
-								{entry.name}
-							</span>
-							<code className="text-muted-foreground text-xs">{entry.key}</code>
-							{canChange ? (
+		<SettingsGroup label="Tools">
+			<SettingsRow
+				icon={<PodTile bots={podBots} size={30} />}
+				label={`Tools from ${pod.name}`}
+				sub="Every bot in the pod shares these"
+				trailing={<span className="shrink-0 font-medium text-[13.5px] text-link">Edit</span>}
+				render={<Link {...podSettingsLink(pod)} />}
+			/>
+			{connections.isError && (
+				<div className="border-border border-b px-4 py-3">
+					<Alert>{failureMessage(connections.error)}</Alert>
+				</div>
+			)}
+			{reachable.map((connection) => {
+				const tools = agentToolsOf(connection);
+				const available = tools.length;
+				const presetId = connectionPresetFor(connection.url)?.id;
+				return (
+					<div key={connection.id}>
+						<SettingsRow
+							icon={<ConnectionMark presetId={presetId} name={connection.name} size="sm" />}
+							label={connection.name}
+							sub={`${available} ${available === 1 ? "tool" : "tools"}`}
+							chevron
+							onClick={() => setOpenConnectionId(connection.id)}
+						/>
+						<AgentToolsDialog
+							agentName={agent.name}
+							connection={connection}
+							tools={tools}
+							presetId={presetId}
+							open={openConnectionId === connection.id}
+							onOpenChange={(open) => setOpenConnectionId(open ? connection.id : undefined)}
+						/>
+					</div>
+				);
+			})}
+			{builtInToolCatalog.map((entry) => {
+				const on = !agent.disabledTools.includes(entry.key);
+				return (
+					<SettingsRow
+						key={entry.key}
+						label={entry.name}
+						sub={entry.description}
+						trailing={
+							canChange ? (
 								<Toggle
 									checked={on}
 									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
@@ -464,84 +443,12 @@ function BuiltInTools({
 									}
 								/>
 							) : (
-								<span className="w-11 text-right text-md text-muted-foreground">
-									{on ? "On" : "Off"}
-								</span>
-							)}
-						</div>
-					);
-				})}
-			</Card>
-		</LabeledField>
-	);
-}
-
-function InheritedConnections({ agent, pod }: { agent: Agent; pod: Pod }) {
-	const connections = useConnections(pod.id);
-	const rules = useToolApprovalRules(pod.id);
-	const [openConnectionId, setOpenConnectionId] = useState<string>();
-	if (connections.isPending) {
-		return <LabeledField label="Pod connections">Loading connections...</LabeledField>;
-	}
-	if (connections.isError) {
-		return (
-			<LabeledField label="Pod connections">
-				<Alert>{failureMessage(connections.error)}</Alert>
-			</LabeledField>
-		);
-	}
-	const enabled = connections.data.filter((connection) => connection.enabled);
-	return (
-		<LabeledField label="Pod connections" count={`${enabled.length} enabled`}>
-			{enabled.length > 0 ? (
-				<Card>
-					{enabled.map((connection) => {
-						const tools = agentToolsOf(connection, rules.data ?? [], agent.id);
-						const unavailable = tools.filter((entry) => entry.access === "unavailable").length;
-						const available = tools.length - unavailable;
-						const presetId = connectionPresetFor(connection.url)?.id;
-						return (
-							<div key={connection.id}>
-								<button
-									type="button"
-									onClick={() => setOpenConnectionId(connection.id)}
-									className="focus-ring flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 py-2 text-left hover:bg-sunken"
-								>
-									<ConnectionMark presetId={presetId} name={connection.name} hue={agent.hue} />
-									<span className="min-w-0 flex-1 truncate font-medium text-base text-heading">
-										{connection.name}
-									</span>
-									<span className="text-muted-foreground text-sm">
-										{available} {available === 1 ? "tool" : "tools"}
-										{unavailable > 0 && ` · ${unavailable} not available`}
-									</span>
-								</button>
-								<AgentToolsDialog
-									agentName={agent.name}
-									connection={connection}
-									tools={tools}
-									presetId={presetId}
-									markHue={agent.hue}
-									open={openConnectionId === connection.id}
-									onOpenChange={(open) => setOpenConnectionId(open ? connection.id : undefined)}
-								/>
-							</div>
-						);
-					})}
-				</Card>
-			) : (
-				<p className="m-0 text-base text-subtle-foreground">
-					No pod connections are enabled for this agent.
-				</p>
-			)}
-			<Button
-				size="bare"
-				variant="link"
-				className="mt-2"
-				render={<Link {...podSettingsLink(pod)} />}
-			>
-				View pod connections
-			</Button>
-		</LabeledField>
+								<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
+							)
+						}
+					/>
+				);
+			})}
+		</SettingsGroup>
 	);
 }

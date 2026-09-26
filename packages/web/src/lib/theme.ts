@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Light, dark, or whatever the machine is set to.
+ * Dark, light, or whatever the machine is set to.
  *
- * `system` is the default and is not a third palette: the stylesheet declares
- * both arms of every colour with `light-dark()`, so following the system is the
- * absence of a choice rather than a choice of its own. Picking light or dark
- * stamps `data-theme` on the root element, which is the only thing that
- * overrides it — see the top of `app.css`, and the pre-paint script in
- * `index.html` that applies a remembered choice before React turns.
+ * `dark` is the default and needs no attribute: the stylesheet declares both
+ * arms of every colour with `light-dark()` and sets the root to dark. Picking
+ * light or system stamps `data-theme` on the root element, which is the only
+ * thing that overrides it — see the top of `app.css`, and the pre-paint script
+ * in `index.html` that applies a remembered choice before React turns.
  */
 
 export type Theme = "light" | "dark" | "system";
@@ -27,7 +26,7 @@ export function useTheme(): [Theme, (next: Theme) => void] {
 	const setTheme = useCallback((next: Theme) => {
 		setThemeState(next);
 		try {
-			if (next === "system") {
+			if (next === "dark") {
 				localStorage.removeItem(KEY);
 			} else {
 				localStorage.setItem(KEY, next);
@@ -43,14 +42,14 @@ export function useTheme(): [Theme, (next: Theme) => void] {
 function read(): Theme {
 	try {
 		const stored = localStorage.getItem(KEY);
-		return stored === "light" || stored === "dark" ? stored : "system";
+		return stored === "light" || stored === "system" ? stored : "dark";
 	} catch {
-		return "system";
+		return "dark";
 	}
 }
 
 function apply(theme: Theme): void {
-	if (theme === "system") {
+	if (theme === "dark") {
 		delete document.documentElement.dataset.theme;
 	} else {
 		document.documentElement.dataset.theme = theme;

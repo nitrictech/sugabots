@@ -6,124 +6,23 @@ import {
 } from "@sugabots/contracts";
 
 /*
- * What one reply's tool calls add up to, as the thread's live line, its step
- * count and its activity log all read it. Tool calls belong to the turn, not
- * to the transcript, so they are folded here rather than drawn one by one: the
- * log reads as a timeline of what the agent said on the way and the steps it
- * took, with back-to-back calls to the same tool collapsed into a single row
- * carrying how many there were.
+ * How a reply's tool calls are named and timed where the thread shows them:
+ * the tool line above the reply and an approval card among its bubbles.
  *
- * What the agent says just before a call is narration ("Now let me get the
- * cycle:"). It belongs with the steps it introduces, so it lives in the log and
- * not in the thread, where it would read as a sentence pointing at nothing.
+ * What the bot says just before a call is narration ("Now let me get the
+ * cycle:"). The thread leaves it out, where it would read as a sentence
+ * pointing at nothing; the tool line stands for what it introduced.
  */
 
 /** Calls to the product's own tools sit under this handle, which no connection can take. */
 export const BUILT_IN_HANDLE = "";
 
-/** What a step amounted to, in the terms the log colours and words it by. */
-export type StepOutcome = "ok" | "error" | "skipped";
-
-export interface ActivityStep {
-	/** The first call's id, so a row keeps its identity as later calls fold in. */
-	key: string;
-	/** The key the model called, e.g. `sentry__search_issues`. */
-	tool: string;
-	label: string;
-	/** The connection's handle, or `BUILT_IN_HANDLE` for the product's own tools. */
-	handle: string;
-	/** What the connection is called, e.g. `Sentry`. */
-	connection: string;
-	/** How many calls this one row stands for. */
-	count: number;
-	durationMs: number;
-	outcome: StepOutcome;
-	calls: ToolCallPart[];
-}
-
-/** One row of the log: something the agent said on the way, or a step it took. */
-export type ActivityEntry =
-	| { type: "said"; key: string; text: string }
-	| { type: "step"; key: string; step: ActivityStep };
-
-export interface ToolActivity {
-	/** In the order it happened. */
-	entries: ActivityEntry[];
-	/** Calls, not rows: four folded into `×4` still count as four steps. */
-	stepCount: number;
-	durationMs: number;
-	/** The most recent call, finished or not: the step the live line names. */
-	latest: ToolCallPart | undefined;
-	/** When the first call started, which is what the live line counts from. */
-	startedAt: string | undefined;
-}
-
 /**
  * Whether the part at `index` is narration: text that comes straight before a
- * tool call. The thread leaves it out and the log shows it among the steps.
+ * tool call, which the thread leaves out.
  */
 export function isNarration(parts: readonly MessagePart[], index: number): boolean {
 	return parts[index]?.type === "text" && parts[index + 1]?.type === "tool_call";
-}
-
-/**
- * The tool calls in a reply, and what it said before each, as the log shows
- * them. `names` maps a connection's handle to its display name; a handle it
- * does not carry — a connection since deleted — falls back to the handle
- * itself, written out.
- */
-export function toolActivityOf(
-	message: { parts: readonly MessagePart[] },
-	names: ReadonlyMap<string, string> = new Map(),
-): ToolActivity {
-	const entries: ActivityEntry[] = [];
-	const calls: ToolCallPart[] = [];
-	message.parts.forEach((part, index) => {
-		if (part.type === "text") {
-			const text = part.text.trim();
-			if (text && isNarration(message.parts, index)) {
-				entries.push({ type: "said", key: `said@${index}`, text });
-			}
-			return;
-		}
-		if (part.type !== "tool_call") return;
-		calls.push(part);
-		const previous = entries.at(-1);
-		if (previous?.type === "step" && previous.step.tool === part.tool) {
-			foldInto(previous.step, part);
-			return;
-		}
-		entries.push({ type: "step", key: part.id, step: stepOf(part, names) });
-	});
-	return {
-		entries,
-		stepCount: calls.length,
-		durationMs: calls.reduce((total, call) => total + durationOf(call), 0),
-		latest: calls.at(-1),
-		startedAt: calls[0]?.startedAt,
-	};
-}
-
-function stepOf(call: ToolCallPart, names: ReadonlyMap<string, string>): ActivityStep {
-	const { handle, name } = splitToolKey(call.tool);
-	return {
-		key: call.id,
-		tool: call.tool,
-		label: stepLabel(call.tool, name),
-		handle,
-		connection: connectionLabel(handle, names.get(handle)),
-		count: 1,
-		durationMs: durationOf(call),
-		outcome: outcomeOf([call]),
-		calls: [call],
-	};
-}
-
-function foldInto(step: ActivityStep, call: ToolCallPart) {
-	step.count += 1;
-	step.durationMs += durationOf(call);
-	step.calls.push(call);
-	step.outcome = outcomeOf(step.calls);
 }
 
 /**
@@ -180,18 +79,6 @@ export function wordsFromKey(key: string): string {
 	return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/**
- * The worst thing that happened across the calls a row stands for, since that
- * is what someone scanning the log needs to see: a failure outranks a refusal.
- * What a step returned is not judged here — a call that came back with nothing
- * still ran, and the log has nothing to say about it that its own row does not.
- */
-function outcomeOf(calls: readonly ToolCallPart[]): StepOutcome {
-	if (calls.some((call) => call.status === "failed")) return "error";
-	if (calls.some((call) => call.approval?.status === "denied")) return "skipped";
-	return "ok";
-}
-
 export function durationOf(call: ToolCallPart): number {
 	if (!call.finishedAt) return 0;
 	return Math.max(new Date(call.finishedAt).getTime() - new Date(call.startedAt).getTime(), 0);
@@ -216,10 +103,3 @@ export function formatTotal(ms: number): string {
  * Why a failed step failed, once per distinct reason — a row folded from
  * several calls that all timed out has one thing to say, not four.
  */
-export function stepErrors(step: ActivityStep): string[] {
-	const reasons = step.calls
-		.filter((call) => call.status === "failed")
-		.map((call) => call.error)
-		.filter((reason): reason is string => reason !== null && reason.trim() !== "");
-	return [...new Set(reasons)];
-}

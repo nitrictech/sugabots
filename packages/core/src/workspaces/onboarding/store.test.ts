@@ -107,21 +107,21 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 						podId,
 						name: "Coordinator",
 						handle: "coordinator",
-						hue: 120,
-						face: "bar",
+						color: "green",
+						face: "pill",
 						model: "model",
 						createdById: adminId,
 					},
 					{
 						workspaceId,
 						// The workspace's Scribe, in no pod and with no model until an
-						// administrator chooses one on the Built-in agents screen.
+						// administrator chooses one on the Models page.
 						podId: null,
 						name: "Scribe",
 						handle: "scribe",
 						systemAgentKey: "summarise",
-						hue: 36,
-						face: "smile",
+						color: "orange",
+						face: "arc",
 						model: null,
 						createdById: adminId,
 					},
@@ -137,6 +137,15 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	it("completes only for an admin's custom agent in their pod", async () => {
 		expect(await store.complete(adminId, workspaceId, podId, customAgentId)).toBe(true);
 		expect(await store.isCompleted(adminId)).toBe(true);
+	});
+
+	// Connecting a model is a step that can be skipped.
+	it("completes for an agent whose model the workspace has not switched on", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ model: "not-switched-on" }).where(eq(agent.id, customAgentId)),
+		);
+
+		expect(await store.complete(adminId, workspaceId, podId, customAgentId)).toBe(true);
 	});
 
 	it("leaves the Scribe unset, so nobody is given a model they were not shown", async () => {

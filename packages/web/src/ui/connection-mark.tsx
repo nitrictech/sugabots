@@ -2,7 +2,7 @@ import { connectionLetters } from "@sugabots/contracts";
 
 /**
  * A connection's mark: the service's own logo for the catalog entries we have
- * one for, and two letters on a tint for anything else. A one-colour mark is
+ * one for, and two letters on a neutral tile for anything else. A one-colour mark is
  * drawn in its brand colour on a tint of it; a mark the brand draws in several
  * colours is drawn as published, on a neutral tile so the colours read. The
  * paths are the brands' published marks as Simple Icons (CC0) carries them,
@@ -13,20 +13,19 @@ import { connectionLetters } from "@sugabots/contracts";
 /** `xs` is for a mark inline in a line of text, where a tile would tower over it. */
 const sizes = {
 	xs: { box: "size-4 rounded-xs", glyph: "size-2.5", letters: "text-[8px]" },
+	md: { box: "size-6 rounded-[7px]", glyph: "size-3.5", letters: "text-[11px]" },
 	sm: { box: "size-8 rounded-lg", glyph: "size-4", letters: "text-xs" },
+	tile: { box: "size-[34px] rounded-[10px]", glyph: "size-[18px]", letters: "text-[13px]" },
 	default: { box: "size-10 rounded-xl", glyph: "size-5", letters: "text-sm" },
 } as const;
 
 export function ConnectionMark({
 	presetId,
 	name,
-	hue,
 	size = "default",
 }: {
 	presetId?: string;
 	name: string;
-	/** The tint for a lettered mark. */
-	hue: number;
 	size?: keyof typeof sizes;
 }) {
 	const glyph = presetId ? marks[presetId] : undefined;
@@ -36,7 +35,7 @@ export function ConnectionMark({
 		return (
 			<span
 				aria-hidden
-				className={`grid shrink-0 place-items-center border border-border-subtle bg-card ${box}`}
+				className={`grid shrink-0 place-items-center border border-border-subtle bg-panel ${box}`}
 			>
 				<svg viewBox={colour.viewBox} className={glyphSize} aria-hidden>
 					<g transform={colour.transform}>
@@ -54,7 +53,7 @@ export function ConnectionMark({
 				aria-hidden
 				className={`grid shrink-0 place-items-center ${box}`}
 				style={{
-					backgroundColor: `color-mix(in oklab, ${glyph.hex} 14%, var(--card))`,
+					backgroundColor: `color-mix(in oklab, ${glyph.hex} 14%, var(--panel))`,
 					color: darkBrands.has(presetId ?? "") ? "var(--foreground)" : glyph.hex,
 				}}
 			>
@@ -67,8 +66,7 @@ export function ConnectionMark({
 	return (
 		<span
 			aria-hidden
-			className={`agent-tint grid shrink-0 place-items-center bg-agent-wash font-semibold text-agent-name ${box} ${letters}`}
-			style={{ ["--agent-hue" as string]: hue }}
+			className={`grid shrink-0 place-items-center bg-border-strong font-semibold text-foreground ${box} ${letters}`}
 		>
 			{connectionLetters(name)}
 		</span>

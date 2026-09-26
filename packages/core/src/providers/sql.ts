@@ -1,4 +1,5 @@
 import type {
+	ConnectionAccess,
 	ConnectionAuth,
 	ConnectionTool,
 	ProviderApiFormat,
@@ -145,9 +146,8 @@ export const connection = pgTable(
 		oauthEncrypted: text("oauth_encrypted"),
 		/** The `state` of a sign-in under way, so the callback can find its connection. */
 		oauthState: text("oauth_state"),
-		enabled: boolean("enabled").notNull().default(false),
-		/** Whether tools that change things are offered too, not only read-only ones. */
-		allowMutating: boolean("allow_mutating").notNull().default(false),
+		/** What the pod's bots may do with its tools; see `connectionAccesses`. */
+		access: text("access").$type<ConnectionAccess>().notNull().default("allow"),
 		/** Incremented whenever the configured target or availability changes. */
 		configurationRevision: integer("configuration_revision").notNull().default(1),
 		tools: jsonb("tools").$type<ConnectionTool[]>().notNull().default([]),

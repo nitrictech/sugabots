@@ -21,6 +21,7 @@ import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { type PreparedTurn, type TurnCheckpoint, turnStore } from "../../turns/store.ts";
 import {
+	type PendingToolApproval,
 	ToolApprovalNotFound,
 	type ToolApprovalStore,
 	toolApprovalStore,
@@ -101,8 +102,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					podId,
 					name: `Host ${suffix}`,
 					handle: handleFromName(`Host ${suffix}`),
-					hue: 1,
-					face: "bar",
+					color: "rose",
+					face: "pill",
 					model: "m",
 					createdById: memberId,
 				})
@@ -120,8 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 					handle: `linear-${suffix}`,
 					url: "https://linear.example.com/mcp",
 					authKind: "header",
-					enabled: true,
-					allowMutating: true,
+					access: "allow",
 					createdById: memberId,
 				})
 				.returning({ id: connection.id }),
@@ -209,7 +209,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		expect(closed?.finishedAt).not.toBeNull();
 	});
 
-	it("parks an approval, wakes the same job after Always allow, and claims execution once", async () => {
+	it("parks an approval, wakes the same job once allowed, and claims execution once", async () => {
 		const pending = {
 			id: crypto.randomUUID(),
 			approvalId: `approval-${crypto.randomUUID()}`,
@@ -219,6 +219,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			connectionId,
 			connectionRevision: 1,
 			remoteToolName: "create_issue",
+			mutating: true,
 			atOffset: 7,
 		};
 		await turns.suspend(
@@ -266,7 +267,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			podId,
 			toolCallId: pending.id,
 			userId: memberId,
-			decision: "always_allow",
+			decision: "allow_once",
 		});
 		expect(decided.approval?.status).toBe("allowed");
 		const [queued] = await onDatabase((db) =>
@@ -277,9 +278,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			db.select({ status: job.status }).from(job).where(eq(job.id, otherWaitingJob.id)),
 		);
 		expect(stillWaiting?.status).toBe("waiting");
-		expect(await approvals.listRules(workspaceId, podId)).toMatchObject([
-			{ agentId: hostId, connectionId, toolName: "create_issue" },
-		]);
 		await onDatabase((db) =>
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
 		);
@@ -296,7 +294,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			connectionId,
 			connectionRevision: 1,
 			remoteToolName: "create_issue",
-			automaticallyAllowed: false,
 		};
 		await expect(
 			approvals.beginExecution({ ...execution, input: { title: "A different issue" } }),
@@ -315,33 +312,15 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				connectionId,
 				connectionRevision: 1,
 				remoteToolName: "create_issue",
-				automaticallyAllowed: false,
 			}),
 		).rejects.toThrow("not approved for execution");
-		const [rule] = await approvals.listRules(workspaceId, podId);
-		if (!rule) throw new Error("approval rule was not created");
-		expect(await approvals.revokeRule(workspaceId, podId, rule.id)).toBe(true);
 		await expect(
-			approvals.beginExecution({
-				...execution,
-				sdkToolCallId: "sdk-create-automatic-after-revoke",
-				automaticallyAllowed: true,
-			}),
-		).rejects.toThrow("no current approval rule");
+			approvals.beginExecution({ ...execution, sdkToolCallId: "sdk-create-never-parked" }),
+		).rejects.toThrow("no approval record");
 	});
 
-	it("stops using a standing approval once its grantor may no longer grant one", async () => {
-		const pending = {
-			id: crypto.randomUUID(),
-			approvalId: `approval-${crypto.randomUUID()}`,
-			sdkToolCallId: "sdk-standing",
-			tool: "linear__create_issue",
-			input: { title: "Standing approval" },
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: "create_issue",
-			atOffset: 0,
-		};
+	/** Parks `pending` as the turn's one approval, allows it, and resumes the turn. */
+	async function allowAndResume(pending: PendingToolApproval) {
 		await turns.suspend(
 			prepared,
 			checkpoint({
@@ -363,53 +342,73 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			podId,
 			toolCallId: pending.id,
 			userId: memberId,
-			decision: "always_allow",
+			decision: "allow_once",
 		});
-		const offered = [
-			{
-				key: pending.tool,
-				connectionId,
-				connectionRevision: 1,
-				remoteToolName: pending.remoteToolName,
-			},
-		];
-		expect([...(await approvals.allowedToolKeys(hostId, { workspaceId, podId }, offered))]).toEqual(
-			[pending.tool],
-		);
-
-		// Demoted, which takes their standing approvals with them: the rule is
-		// still stored, and nothing may act on it.
-		await onDatabase((db) =>
-			db
-				.update(workspaceMember)
-				.set({ role: "member" })
-				.where(
-					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
-				),
-		);
-
-		expect([...(await approvals.allowedToolKeys(hostId, { workspaceId, podId }, offered))]).toEqual(
-			[],
-		);
 		await onDatabase((db) =>
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, prepared.job.id)),
 		);
 		prepared = await turns.prepare({ ...prepared.job, attempts: 1 });
-		await expect(
-			approvals.beginExecution({
-				threadId,
-				messageId: prepared.responseMessage.id,
-				turnId: prepared.turnId,
-				sdkToolCallId: "sdk-standing-automatic",
-				tool: pending.tool,
-				input: pending.input,
-				atOffset: 1,
-				connectionId,
-				connectionRevision: 1,
-				remoteToolName: pending.remoteToolName,
-				automaticallyAllowed: true,
-			}),
-		).rejects.toThrow("no longer allowed to give one");
+		return {
+			threadId,
+			messageId: prepared.responseMessage.id,
+			turnId: prepared.turnId,
+			sdkToolCallId: pending.sdkToolCallId,
+			tool: pending.tool,
+			input: pending.input,
+			atOffset: 0,
+			connectionId,
+			connectionRevision: 1,
+			remoteToolName: pending.remoteToolName,
+		};
+	}
+
+	it("refuses an allowed call once its connection is turned off", async () => {
+		const execution = await allowAndResume({
+			id: crypto.randomUUID(),
+			approvalId: `approval-${crypto.randomUUID()}`,
+			sdkToolCallId: "sdk-turned-off",
+			tool: "linear__create_issue",
+			input: { title: "Switched off meanwhile" },
+			connectionId,
+			connectionRevision: 1,
+			remoteToolName: "create_issue",
+			mutating: true,
+			atOffset: 0,
+		});
+		await onDatabase((db) =>
+			db.update(connection).set({ access: "off" }).where(eq(connection.id, connectionId)),
+		);
+
+		await expect(approvals.beginExecution(execution)).rejects.toThrow("configuration changed");
+	});
+
+	it("runs an allowed read from a connection that asks, without counting it as a change", async () => {
+		await onDatabase((db) =>
+			db.update(connection).set({ access: "ask" }).where(eq(connection.id, connectionId)),
+		);
+		const execution = await allowAndResume({
+			id: crypto.randomUUID(),
+			approvalId: `approval-${crypto.randomUUID()}`,
+			sdkToolCallId: "sdk-read",
+			tool: "linear__list_issues",
+			input: {},
+			connectionId,
+			connectionRevision: 1,
+			remoteToolName: "list_issues",
+			mutating: false,
+			atOffset: 0,
+		});
+
+		const running = await approvals.beginExecution(execution);
+
+		expect(running.status).toBe("running");
+		const [resumed] = await onDatabase((db) =>
+			db
+				.select({ mutationStarted: turn.mutationStarted })
+				.from(turn)
+				.where(eq(turn.id, prepared.turnId)),
+		);
+		expect(resumed?.mutationStarted).toBe(false);
 	});
 
 	it("conceals a pending approval from somebody who cannot reach the pod", async () => {
@@ -422,6 +421,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			connectionId,
 			connectionRevision: 1,
 			remoteToolName: "create_issue",
+			mutating: true,
 			atOffset: 0,
 		};
 		await turns.suspend(
@@ -539,6 +539,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			connectionId,
 			connectionRevision: 1,
 			remoteToolName: "create_issue",
+			mutating: true,
 			atOffset: 0,
 		};
 		await turns.suspend(
@@ -591,7 +592,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				connectionId,
 				connectionRevision: 1,
 				remoteToolName: pending.remoteToolName,
-				automaticallyAllowed: false,
 			}),
 		).rejects.toThrow("configuration changed");
 	});

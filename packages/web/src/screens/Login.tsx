@@ -1,12 +1,12 @@
+import type { AgentColor, AgentFace } from "@sugabots/contracts";
 import { isEmailUnverified } from "@sugabots/sdk";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AuthLayout } from "@/screens/AuthLayout.tsx";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
-import { Field } from "@/ui/field.tsx";
-import { Input } from "@/ui/input.tsx";
 
 /**
  * Sign in, or create an account.
@@ -25,6 +25,8 @@ export function Login({
 	inviteId?: string;
 	onSignedIn: () => Promise<void>;
 }) {
+	// An invitation link says why you are here, so it goes straight to the form.
+	const [welcomed, setWelcomed] = useState(inviteId !== undefined);
 	const [isNew, setIsNew] = useState(false);
 	// The address of an account that exists but has not been proven. Only an
 	// installation that requires verification reaches this: it withholds the
@@ -100,8 +102,13 @@ export function Login({
 		);
 	}
 
+	if (!welcomed) {
+		return <Welcome onContinue={() => setWelcomed(true)} />;
+	}
+
 	return (
 		<AuthLayout
+			onBack={inviteId === undefined ? () => setWelcomed(false) : undefined}
 			title={isNew ? "Create an account" : "Log in"}
 			subtitle={
 				inviteId !== undefined
@@ -109,56 +116,122 @@ export function Login({
 					: undefined
 			}
 		>
-			<form onSubmit={submit} className="flex flex-col gap-2.5">
-				{isNew && (
-					<Field id="name" label="Name">
-						<Input
-							id="name"
-							value={name}
-							onChange={(event) => setName(event.target.value)}
+			<form onSubmit={submit} className="flex flex-col gap-3.5">
+				<div className="overflow-hidden rounded-panel bg-list">
+					{isNew && (
+						<FormRow id="name" label="Name">
+							<input
+								id="name"
+								value={name}
+								onChange={(event) => setName(event.target.value)}
+								autoComplete="name"
+								required
+								className={fieldClass}
+							/>
+						</FormRow>
+					)}
+					<FormRow id="email" label="Work email">
+						<input
+							id="email"
+							type="email"
+							value={email}
+							onChange={(event) => setEmail(event.target.value)}
+							autoComplete="email"
+							placeholder="you@company.com"
 							required
+							className={fieldClass}
 						/>
-					</Field>
-				)}
-				<Field id="email" label="Work email">
-					<Input
-						id="email"
-						type="email"
-						value={email}
-						onChange={(event) => setEmail(event.target.value)}
-						autoComplete="email"
-						required
-					/>
-				</Field>
-				<Field id="password" label="Password">
-					<Input
-						id="password"
-						type="password"
-						value={password}
-						onChange={(event) => setPassword(event.target.value)}
-						autoComplete={isNew ? "new-password" : "current-password"}
-						minLength={8}
-						required
-					/>
-				</Field>
+					</FormRow>
+					<FormRow id="password" label="Password">
+						<input
+							id="password"
+							type="password"
+							value={password}
+							onChange={(event) => setPassword(event.target.value)}
+							autoComplete={isNew ? "new-password" : "current-password"}
+							placeholder={isNew ? "8 characters or more" : undefined}
+							minLength={8}
+							required
+							className={fieldClass}
+						/>
+					</FormRow>
+				</div>
 
 				{error !== undefined && <Alert>{error}</Alert>}
 
-				<Button type="submit" size="lg" disabled={busy} className="mt-1 w-full">
+				<Button type="submit" size="lg" disabled={busy} className="w-full">
 					{isNew ? "Create account" : "Log in"}
 				</Button>
 			</form>
 
-			<div className="flex items-center gap-2.5">
-				<span className="h-px flex-1 bg-border" />
-				<span className="font-mono text-2xs text-subtle-foreground">or</span>
-				<span className="h-px flex-1 bg-border" />
-			</div>
-
-			<Button variant="outline" size="lg" onClick={() => setIsNew(!isNew)} className="w-full">
+			<button
+				type="button"
+				onClick={() => setIsNew(!isNew)}
+				className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground"
+			>
 				{isNew ? "I already have an account" : "Create an account"}
-			</Button>
+			</button>
 		</AuthLayout>
+	);
+}
+
+/** A bot of each colour, each with its own eyes and a little up or down, as the design lines them up. */
+const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
+	{ color: "rose", face: "dot", drop: 12 },
+	{ color: "yellow", face: "pill", drop: -2 },
+	{ color: "purple", face: "arc", drop: 8 },
+	{ color: "sky", face: "pill", drop: -6 },
+	{ color: "green", face: "square", drop: 10 },
+	{ color: "orange", face: "wink", drop: 2 },
+	{ color: "ice", face: "arc", drop: -4 },
+	{ color: "teal", face: "dot", drop: 8 },
+];
+
+/**
+ * The first thing somebody new sees. Email is the one way in today; the
+ * design's Google button waits for Google sign-in to exist.
+ */
+function Welcome({ onContinue }: { onContinue: () => void }) {
+	return (
+		<main className="grid h-full place-items-center overflow-x-hidden bg-background px-4 text-foreground">
+			<div className="flex w-full max-w-[440px] flex-col items-center gap-[22px] text-center">
+				<div aria-hidden className="flex justify-center gap-3 pb-2">
+					{crowd.map(({ color, face, drop }) => (
+						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>
+							<AgentAvatar color={color} face={face} size={52} />
+						</span>
+					))}
+				</div>
+				<h1 className="m-0 font-bold text-[30px] leading-[1.15] tracking-[-0.02em]">
+					Welcome to Sugabots
+				</h1>
+				<p className="m-0 text-pretty text-[15px] text-muted-foreground leading-[1.55]">
+					Bots that work alongside your team, in chats you already know how to use.
+				</p>
+				<Button
+					size="lg"
+					className="mt-2 w-full bg-foreground text-background hover:bg-foreground/90"
+					onClick={onContinue}
+				>
+					Continue with email
+				</Button>
+			</div>
+		</main>
+	);
+}
+
+const fieldClass =
+	"min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground";
+
+/** One labelled field in the form's card, as every form in the app lays them out. */
+function FormRow({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+	return (
+		<div className="flex items-center gap-3 border-border border-b px-4 py-3.5 last:border-b-0 focus-within:bg-panel">
+			<label htmlFor={id} className="w-[88px] shrink-0 text-[14px] text-muted-foreground">
+				{label}
+			</label>
+			{children}
+		</div>
 	);
 }
 

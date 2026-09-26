@@ -1,13 +1,8 @@
-import type { MessagePart, ToolCallPart } from "@sugabots/contracts";
+import type { ToolCallPart } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
-import type { ActivityStep, ToolActivity } from "./tool-activity.ts";
-import {
-	formatDuration,
-	formatTotal,
-	stepErrors,
-	stepLabel,
-	toolActivityOf,
-} from "./tool-activity.ts";
+import type { ConnectionLook } from "@/lib/connections.ts";
+import { toolLineText } from "./ToolLine.tsx";
+import { formatDuration, formatTotal, stepLabel } from "./tool-activity.ts";
 
 let nextId = 0;
 
@@ -24,179 +19,70 @@ function call(tool: string, over: Partial<ToolCallPart> = {}): ToolCallPart {
 		mutating: false,
 		atOffset: 0,
 		startedAt: "2026-09-14T00:00:00.000Z",
-		finishedAt: "2026-09-14T00:00:01.000Z",
+		finishedAt: "2026-09-14T00:00:02.000Z",
 		...over,
 	};
 }
 
-/** A call that took `ms`, so a row's summed duration is worth asserting on. */
-function lasting(tool: string, ms: number, over: Partial<ToolCallPart> = {}): ToolCallPart {
-	return call(tool, {
-		startedAt: "2026-09-14T00:00:00.000Z",
-		finishedAt: new Date(Date.parse("2026-09-14T00:00:00.000Z") + ms).toISOString(),
-		...over,
-	});
-}
+const looks = new Map<string, ConnectionLook>([
+	["sentry", { name: "Sentry" }],
+	["linear", { name: "Linear" }],
+	["hubspot", { name: "HubSpot" }],
+]);
 
-function message(...parts: MessagePart[]) {
-	return { parts };
-}
+const waiting = {
+	status: "awaiting_approval" as const,
+	finishedAt: null,
+	approval: { status: "pending" as const, decidedByName: null, decidedAt: null },
+};
 
-function stepsOf(activity: ToolActivity): ActivityStep[] {
-	return activity.entries.flatMap((entry) => (entry.type === "step" ? [entry.step] : []));
-}
-
-function onlyStep(activity: ToolActivity) {
-	return stepsOf(activity).at(0);
-}
-
-describe("a turn's tool activity", () => {
-	it("reads in the order it happened, with what was said before each step", () => {
-		const activity = toolActivityOf(
-			message(
-				{ type: "text", text: "Let me find the project:" },
-				call("sentry__find_projects"),
-				call("linear__list_issues"),
-				{ type: "text", text: "Now the issues in it:" },
-				call("sentry__search_issues"),
-				{ type: "text", text: "Here they are." },
-			),
-		);
-
+describe("a reply's tool line", () => {
+	it("names each app once, and how long they took together", () => {
 		expect(
-			activity.entries.map((entry) => (entry.type === "said" ? entry.text : entry.step.tool)),
-		).toEqual([
-			"Let me find the project:",
-			"sentry__find_projects",
-			"linear__list_issues",
-			"Now the issues in it:",
-			"sentry__search_issues",
-		]);
-	});
-
-	it("folds back-to-back calls to the same tool into one row that counts them", () => {
-		const activity = toolActivityOf(
-			message(
-				lasting("sentry__get_resource", 1_000),
-				lasting("sentry__get_resource", 2_000),
-				lasting("sentry__search_issues", 4_000),
-				lasting("sentry__get_resource", 500),
+			toolLineText(
+				[call("hubspot__search"), call("hubspot__get_deal"), call("sentry__search")],
+				looks,
 			),
-		);
-
-		expect(stepsOf(activity).map((step) => [step.tool, step.count, step.durationMs])).toEqual([
-			["sentry__get_resource", 2, 3_000],
-			["sentry__search_issues", 1, 4_000],
-			["sentry__get_resource", 1, 500],
-		]);
-		// Steps are calls, not rows: the two folded reads still count as two.
-		expect(activity.stepCount).toBe(4);
-		expect(activity.durationMs).toBe(7_500);
+		).toBe("Used HubSpot and Sentry for 6s");
 	});
 
-	it("names the product's own tools from the catalog, as no connection's", () => {
-		const activity = toolActivityOf(message(call("web_search"), call("sentry__search_issues")));
-
-		expect(stepsOf(activity).map((step) => [step.label, step.connection])).toEqual([
-			["Search the web", "Built-in tools"],
-			["Search issues", "Sentry"],
-		]);
-	});
-
-	it("takes a connection's display name when it is known, and writes out the handle when it is not", () => {
-		const activity = toolActivityOf(
-			message(call("sentry__search_issues"), call("acme_crm__list_deals")),
-			new Map([["sentry", "Sentry"]]),
-		);
-
-		expect(stepsOf(activity).map((step) => step.connection)).toEqual(["Sentry", "Acme crm"]);
-	});
-
-	it("reports the worst thing that happened in a folded row", () => {
-		const ok = toolActivityOf(message(call("sentry__a")));
-		const failed = toolActivityOf(
-			message(call("sentry__a"), call("sentry__a", { status: "failed", output: null })),
-		);
-		const denied = toolActivityOf(
-			message(
-				call("linear__create_issue", {
-					status: "awaiting_approval",
-					output: null,
-					approval: { status: "denied", decidedByName: "Ryan", decidedAt: null },
-				}),
-			),
-		);
-
-		expect(onlyStep(ok)?.outcome).toBe("ok");
-		expect(onlyStep(failed)?.outcome).toBe("error");
-		expect(onlyStep(denied)?.outcome).toBe("skipped");
-	});
-
-	it("does not judge a step by what it returned: running and returning nothing both read as ok", () => {
-		expect(onlyStep(toolActivityOf(message(call("sentry__a", { output: null }))))?.outcome).toBe(
-			"ok",
-		);
-		expect(onlyStep(toolActivityOf(message(call("sentry__a", { output: [] }))))?.outcome).toBe(
-			"ok",
+	it("says what the reply is waiting to have approved", () => {
+		expect(
+			toolLineText([call("sentry__search"), call("linear__create_issue", waiting)], looks),
+		).toBe("Used Sentry, waiting on Linear approval");
+		expect(toolLineText([call("linear__create_issue", waiting)], looks)).toBe(
+			"Waiting on Linear approval",
 		);
 	});
 
-	it("picks out the newest call, and when the first one started, for the live line", () => {
-		const activity = toolActivityOf(
-			message(
-				call("sentry__search_issues", { startedAt: "2026-09-14T00:00:00.000Z" }),
-				call("sentry__read", {
-					status: "running",
-					output: null,
-					startedAt: "2026-09-14T00:00:05.000Z",
-					finishedAt: null,
-				}),
-			),
-		);
-
-		expect(activity.latest?.tool).toBe("sentry__read");
-		expect(activity.startedAt).toBe("2026-09-14T00:00:00.000Z");
-		expect(toolActivityOf(message({ type: "text", text: "Just words." })).latest).toBeUndefined();
+	it("says which app was refused", () => {
+		const denied = {
+			approval: { status: "denied" as const, decidedByName: "Ryan", decidedAt: null },
+		};
+		expect(
+			toolLineText([call("sentry__search"), call("linear__create_issue", denied)], looks),
+		).toBe("Used Sentry, Linear denied");
 	});
 
-	it("has nothing in it for a reply that called nothing", () => {
-		const activity = toolActivityOf(message({ type: "text", text: "Just words." }));
+	it("says what is still running", () => {
+		expect(
+			toolLineText([call("sentry__search", { status: "running", finishedAt: null })], looks),
+		).toBe("Using Sentry");
+	});
 
-		expect(activity.entries).toEqual([]);
-		expect(activity.stepCount).toBe(0);
+	it("names a built-in tool by itself, and a connection it no longer knows by its handle", () => {
+		expect(toolLineText([call("web_search"), call("acme_crm__list")], looks)).toBe(
+			"Used Web search and Acme crm for 4s",
+		);
 	});
 });
 
-describe("how activity is worded", () => {
-	it("writes a step's time to a tenth, and the turn's total whole", () => {
+describe("how tools are worded", () => {
+	it("writes a call's time to a tenth, and the reply's total whole", () => {
 		expect(formatDuration(473)).toBe("473ms");
 		expect(formatDuration(1_400)).toBe("1.4s");
-		expect(formatDuration(30_600)).toBe("30.6s");
-
-		expect(formatTotal(32_000)).toBe("32s");
 		expect(formatTotal(31_960)).toBe("32s");
 		expect(formatTotal(473)).toBe("473ms");
-	});
-
-	it("gathers a failed row's reasons, once each", () => {
-		const activity = toolActivityOf(
-			message(
-				call("sentry__read", { status: "failed", output: null, error: "Timed out" }),
-				call("sentry__read", { status: "failed", output: null, error: "Timed out" }),
-				call("sentry__read", { status: "failed", output: null, error: "Host is down" }),
-			),
-		);
-
-		expect(onlyStep(activity)?.count).toBe(3);
-		expect(stepErrors(onlyStep(activity) as ActivityStep)).toEqual(["Timed out", "Host is down"]);
-	});
-
-	it("has no reasons to show when a failure recorded none", () => {
-		const activity = toolActivityOf(
-			message(call("sentry__read", { status: "failed", output: null, error: null })),
-		);
-
-		expect(stepErrors(onlyStep(activity) as ActivityStep)).toEqual([]);
 	});
 
 	it("turns a tool key into a phrase", () => {

@@ -1,8 +1,8 @@
 import {
 	type Agent,
 	type AgentUpdate,
+	colorFromText,
 	handleFromName,
-	hueFromText,
 	type NewAgent,
 } from "@sugabots/contracts";
 import { and, asc, eq, isNotNull } from "drizzle-orm";
@@ -109,8 +109,8 @@ const create: AgentStore["create"] = (workspaceId, createdById, input) =>
 						name: input.name,
 						handle: input.handle ?? handleFromName(input.name),
 						description: input.description ?? null,
-						hue: input.hue ?? hueFromText(input.name),
-						face: input.face ?? "bar",
+						color: input.color ?? colorFromText(input.name),
+						face: input.face ?? "pill",
 						model: input.model,
 						prompt: input.prompt ?? "",
 						disabledTools: input.disabledTools ?? [],
@@ -256,7 +256,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		handle: row.handle,
 		systemAgentKey: row.systemAgentKey,
 		description: row.description,
-		hue: row.hue,
+		color: row.color,
 		face: row.face,
 		model: row.model,
 		prompt: row.prompt,
