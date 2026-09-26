@@ -26,7 +26,7 @@ describe("Credentials.layer", () => {
 				const encrypted = cipher.encrypt("sk-secret");
 				return { encrypted, decrypted: cipher.decrypt(encrypted) };
 			}),
-			{ MODEL_PROVIDER_ENCRYPTION_KEY: key },
+			{ CREDENTIALS_ENCRYPTION_KEY: key },
 		);
 
 		expect(exit).toMatchObject({ _tag: "Success", value: { decrypted: "sk-secret" } });
@@ -35,11 +35,7 @@ describe("Credentials.layer", () => {
 
 	it.each([
 		["without a key", {}, /is required/],
-		[
-			"with a key that is not 32 bytes",
-			{ MODEL_PROVIDER_ENCRYPTION_KEY: "not-a-key" },
-			/32-byte key/,
-		],
+		["with a key that is not 32 bytes", { CREDENTIALS_ENCRYPTION_KEY: "not-a-key" }, /32-byte key/],
 	])("refuses to start %s", async (_, env, message) => {
 		const exit = await withEnv(Credentials.Service, env);
 

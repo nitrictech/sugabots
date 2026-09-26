@@ -11,19 +11,19 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Credentials") {}
 
-/** The AES-256-GCM cipher keyed by `MODEL_PROVIDER_ENCRYPTION_KEY`. */
+/** The AES-256-GCM cipher keyed by `CREDENTIALS_ENCRYPTION_KEY`. */
 export const make = Effect.gen(function* () {
-	const encodedKey = yield* Config.option(Config.Redacted("MODEL_PROVIDER_ENCRYPTION_KEY"));
+	const encodedKey = yield* Config.option(Config.Redacted("CREDENTIALS_ENCRYPTION_KEY"));
 	if (Option.isNone(encodedKey)) {
 		return yield* new InvalidConfig({
 			message:
-				"MODEL_PROVIDER_ENCRYPTION_KEY is required. Generate one with `openssl rand -base64 32`.",
+				"CREDENTIALS_ENCRYPTION_KEY is required. Generate one with `openssl rand -base64 32`.",
 		});
 	}
 	const key = decodeKey(Redacted.value(encodedKey.value));
 	if (!key) {
 		return yield* new InvalidConfig({
-			message: "MODEL_PROVIDER_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+			message: "CREDENTIALS_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
 		});
 	}
 	return aes(key);
