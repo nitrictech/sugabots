@@ -7,7 +7,7 @@ export const launched = import.meta.env.VITE_LAUNCHED === "true";
 
 /** Where the site's links point. Change a destination here and every link follows. */
 export const siteLinks = {
-	docs: "https://docs.sugabots.ai",
+	docs: "/docs",
 	github: "https://github.com/nitrictech/sugabots",
 	discord: "https://discord.gg/YPuHCVAsx",
 	getStarted: "#start",

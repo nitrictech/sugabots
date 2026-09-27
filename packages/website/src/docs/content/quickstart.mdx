@@ -1,0 +1,98 @@
+---
+title: Quickstart
+description: Run Sugabots on your own computer with one command.
+---
+
+This guide runs Sugabots and its PostgreSQL database in Docker on your own
+computer, with nothing else to install. It's the quickest way to try Sugabots
+by yourself.
+
+<Tip title="Setting it up for a team?">
+
+Other people can't reach an installation on your computer, and its emails only
+go to its logs. To work with others, host Sugabots somewhere they can reach, with
+email set up: the Deploy with Docker guide covers that.
+
+</Tip>
+
+## Before you start
+
+You need [Docker](https://docs.docker.com/get-docker/) with Docker Compose.
+Check it's there:
+
+```sh
+docker compose version
+```
+
+## Set it up
+
+<Steps>
+
+1. Install and start Sugabots
+
+   On macOS or Linux, in a terminal:
+
+   ```sh title="macOS and Linux"
+   curl -fsSL https://sugabots.ai/install.sh | sh
+   ```
+
+   On Windows, in PowerShell:
+
+   ```powershell title="Windows"
+   irm https://sugabots.ai/install.ps1 | iex
+   ```
+
+   This makes a `sugabots` folder in the current directory and puts two files
+   in it: [`compose.yml`](https://sugabots.ai/compose.yml), which runs
+   Sugabots and its database, and `.env`, with two freshly made secret keys.
+   Then it starts both, and waits until Sugabots answers. The first start
+   downloads the images, so give it a minute.
+
+   Running it again is safe: it keeps the files that are already there.
+
+2. Say hello
+
+   Open [http://localhost:3000](http://localhost:3000) and create your account.
+   You're the first one in, so the installation is yours. Emails, such as your
+   verification link, are printed in the logs:
+
+   ```sh
+   cd sugabots
+   docker compose logs sugabots
+   ```
+
+</Steps>
+
+<Careful title="Keep .env safe">
+
+Back it up, and keep it private. Losing `CREDENTIALS_ENCRYPTION_KEY` makes every
+saved API key unreadable. Changing `BETTER_AUTH_SECRET` signs everybody out.
+
+</Careful>
+
+## What's running
+
+| Service          | Address                            |
+| ---------------- | ---------------------------------- |
+| Web app          | http://localhost:3000              |
+| API              | http://localhost:3000/api          |
+| API health check | http://localhost:3000/api/health   |
+
+The web app and the API share one address: the API answers under `/api`. Your
+data lives in the `sugabots_postgres_data` Docker volume, so it survives
+restarts. In the `sugabots` folder, `docker compose down` stops Sugabots and
+`docker compose up -d` starts it again.
+
+<Tip title="Something not loading?">
+
+`docker compose logs sugabots` shows what Sugabots printed as it started. If
+another program already uses port 3000, open `compose.yml`, change the first
+`3000` in `127.0.0.1:3000:3000` and the port in `PUBLIC_URL` to a free one, and
+run `docker compose up -d`.
+
+</Tip>
+
+## Next
+
+Your workspace is empty. [Set up your first workspace](/docs/first-workspace)
+to connect a model and meet your first bot.

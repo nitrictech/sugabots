@@ -104,3 +104,50 @@
 		@apply bg-background text-foreground;
 	}
 }
+
+/* Docs pages. */
+@layer components {
+	.docs-content :not(pre) > code {
+		@apply rounded-md bg-muted px-1.5 py-0.5 text-[0.85em];
+	}
+
+	/* Shiki writes both themes' colours as variables; show the one for the colour scheme. */
+	.shiki,
+	.shiki span {
+		color: var(--shiki-light);
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.shiki,
+		.shiki span {
+			color: var(--shiki-dark);
+		}
+	}
+}
+
+/* Unlayered, so the steps win over the list utilities their Markdown list comes with. */
+.docs-steps > ol {
+	@apply my-8 flex list-none flex-col gap-0 pl-0;
+	counter-reset: step;
+}
+
+.docs-steps > ol > li {
+	@apply relative pb-8 pl-14;
+	counter-increment: step;
+}
+
+/* The step's number, in a circle on the rail. */
+.docs-steps > ol > li::before {
+	@apply absolute top-0 left-0 flex size-9 items-center justify-center rounded-full bg-brand text-sm font-black text-brand-foreground;
+	content: counter(step);
+}
+
+/* The rail joining one step to the next. */
+.docs-steps > ol > li:not(:last-child)::after {
+	@apply absolute top-11 bottom-2 left-[1.0625rem] w-0.5 rounded-full bg-border;
+	content: "";
+}
+
+.docs-steps > ol > li > p:first-child {
+	@apply mt-1 text-lg font-bold text-foreground;
+}
