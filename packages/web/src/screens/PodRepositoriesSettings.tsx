@@ -1,4 +1,4 @@
-import { Lock, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -8,17 +8,8 @@ import {
 	usePodRepositoryActions,
 } from "@/lib/github.ts";
 import { Alert } from "@/ui/alert.tsx";
-import {
-	Combobox,
-	ComboboxContent,
-	ComboboxEmpty,
-	ComboboxField,
-	ComboboxInput,
-	ComboboxItem,
-	ComboboxList,
-	ComboboxTrigger,
-} from "@/ui/combobox.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /*
  * The repositories this pod's agents may check out in its sandbox, with the
@@ -53,46 +44,35 @@ export function PodRepositoriesSettings({
 	}
 
 	return (
-		<section aria-label="Repositories" className="flex max-w-3xl flex-col gap-5">
-			<header>
-				<h2 className="font-semibold text-heading text-lg">Repositories</h2>
-				<p className="text-muted-foreground text-sm">
-					What this pod's agents can check out in its sandbox. Each thread works in its own
-					directory, on its own branch.
-				</p>
-			</header>
-			{connection.data === null && (
-				<Alert>
-					Connect GitHub in the workspace's settings first, so private repositories can be checked
-					out.
-				</Alert>
-			)}
-			{repositories.data.length > 0 ? (
-				<ul className="flex flex-col divide-y divide-border-subtle rounded-2xl border border-border bg-card">
-					{repositories.data.map((repository) => (
-						<li key={repository.id} className="flex min-h-11 items-center gap-3 px-4 py-2">
-							<span className="min-w-0 flex-1 truncate font-medium font-mono text-heading text-sm">
-								{repository.fullName}
-							</span>
-							{repository.private && (
-								<Lock aria-label="Private" size={14} className="text-muted-foreground" />
-							)}
-							<code className="text-muted-foreground text-xs">{repository.defaultBranch}</code>
-							{canManage && (
-								<IconButton
-									label={`Remove ${repository.fullName}`}
-									onClick={() => actions.remove.mutate(repository.id)}
-									disabled={actions.remove.isPending}
-								>
-									<Trash2 />
-								</IconButton>
-							)}
-						</li>
-					))}
-				</ul>
-			) : (
-				<p className="text-muted-foreground text-sm">No repositories yet.</p>
-			)}
+		<SettingsGroup
+			label="Repositories"
+			note={
+				connection.data === null
+					? "Connect GitHub in the workspace's settings first, so private repositories can be checked out."
+					: "What this pod's bots can check out in its sandbox. Each thread works in its own directory, on its own branch."
+			}
+		>
+			{repositories.data.map((repository) => (
+				<SettingsRow
+					key={repository.id}
+					label={<span className="font-mono text-[13.5px]">{repository.fullName}</span>}
+					sub={
+						repository.private ? `Private · ${repository.defaultBranch}` : repository.defaultBranch
+					}
+					trailing={
+						canManage && (
+							<IconButton
+								label={`Remove ${repository.fullName}`}
+								onClick={() => actions.remove.mutate(repository.id)}
+								disabled={actions.remove.isPending}
+							>
+								<Trash2 />
+							</IconButton>
+						)
+					}
+				/>
+			))}
+			{repositories.data.length === 0 && <SettingsRow label="No repositories yet" />}
 			{canManage && connection.data && (
 				<RepositoryPicker
 					repositories={available.data?.map((repository) => repository.fullName) ?? []}
@@ -103,10 +83,17 @@ export function PodRepositoriesSettings({
 					pick={(fullName) => void add(fullName)}
 				/>
 			)}
-			{error && <Alert>{error}</Alert>}
-		</section>
+			{error && (
+				<div className="px-4 py-3">
+					<Alert>{error}</Alert>
+				</div>
+			)}
+		</SettingsGroup>
 	);
 }
+
+/** How many matches the picker lists at once; typing narrows the rest. */
+const SHOWN_MATCHES = 8;
 
 /*
  * Search what the connection can reach and pick one to add. An app only
@@ -128,38 +115,54 @@ function RepositoryPicker({
 	viaApp: boolean;
 	pick: (fullName: string) => void;
 }) {
-	if (failed) return <Alert>{failed}</Alert>;
+	const [query, setQuery] = useState("");
+	if (failed) {
+		return (
+			<div className="px-4 py-3">
+				<Alert>{failed}</Alert>
+			</div>
+		);
+	}
+	const needle = query.trim().toLowerCase();
+	const matches = repositories.filter((fullName) => fullName.toLowerCase().includes(needle));
 	return (
-		<Combobox
-			items={repositories}
-			value={null}
-			onValueChange={(chosen) => {
-				if (typeof chosen === "string") pick(chosen);
-			}}
-			disabled={disabled || loading}
-		>
-			<ComboboxField>
-				<ComboboxInput
+		<>
+			<SettingsControlRow label="Add">
+				<input
 					aria-label="Add a repository"
-					className="font-mono"
-					placeholder={loading ? "Finding repositories…" : "Add a repository"}
+					autoComplete="off"
+					spellCheck={false}
+					value={query}
+					onChange={(event) => setQuery(event.target.value)}
+					placeholder={loading ? "Finding repositories…" : "Search repositories"}
+					disabled={disabled || loading}
+					className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
 				/>
-				<ComboboxTrigger aria-label="Show repositories" />
-			</ComboboxField>
-			<ComboboxContent>
-				<ComboboxEmpty>
-					{viaApp
-						? "No repositories left to add. To offer others, change the app's repositories in the workspace's GitHub settings."
-						: "No repositories left that the token can reach."}
-				</ComboboxEmpty>
-				<ComboboxList>
-					{(fullName: string) => (
-						<ComboboxItem key={fullName} value={fullName}>
-							<span className="font-mono">{fullName}</span>
-						</ComboboxItem>
-					)}
-				</ComboboxList>
-			</ComboboxContent>
-		</Combobox>
+			</SettingsControlRow>
+			{!loading && matches.length === 0 && (
+				<SettingsRow
+					label={
+						viaApp
+							? "No repositories left to add. To offer others, change the app's repositories in the workspace's GitHub settings."
+							: "No repositories left that the token can reach."
+					}
+				/>
+			)}
+			{needle !== "" &&
+				matches.slice(0, SHOWN_MATCHES).map((fullName) => (
+					<SettingsRow
+						key={fullName}
+						label={<span className="font-mono text-[13.5px]">{fullName}</span>}
+						onClick={
+							disabled
+								? undefined
+								: () => {
+										pick(fullName);
+										setQuery("");
+									}
+						}
+					/>
+				))}
+		</>
 	);
 }

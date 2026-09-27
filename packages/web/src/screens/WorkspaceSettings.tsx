@@ -19,10 +19,10 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { GithubSettings } from "./GithubSettings.tsx";
 import { ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
-import { GithubSettings } from "./GithubSettings.tsx";
 import { SandboxSettings } from "./SandboxSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
@@ -104,7 +104,10 @@ export function WorkspaceSettings({
 						</SettingsPage>
 					)}
 					{section === "github" && (
-						<SettingsPage title="GitHub" description="The repositories bots can check out and push to.">
+						<SettingsPage
+							title="GitHub"
+							description="The repositories bots can check out and push to."
+						>
 							{may.manageProviders ? (
 								<GithubSettings />
 							) : (

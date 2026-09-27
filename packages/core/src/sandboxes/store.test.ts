@@ -3,7 +3,9 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { chatStore } from "../conversations/chats/store.ts";
+import { queueTurnAsJob } from "../conversations/turns/queue.ts";
 import { turnStore } from "../conversations/turns/store.ts";
+import { turnSignalsForTests } from "../conversations/turns/testing.ts";
 import { createEventBus } from "../database/events/bus.ts";
 import { eventPublisher } from "../database/events/publish.ts";
 import { memoryEventStore } from "../database/events/store.ts";
@@ -99,8 +101,8 @@ function fakeProvider() {
 
 describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
-	const chats = onPostgres(chatStore(publishEvents));
-	const turns = onPostgres(turnStore(publishEvents));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
 	let fake: ReturnType<typeof fakeProvider>;
 	let store: ReturnType<typeof podSandboxStore>;
 	let scope: LeaseScope;
@@ -184,8 +186,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 					podId: room.id,
 					name: `Builder ${suffix}`,
 					handle: handleFromName(`Builder ${suffix}`),
-					hue: 1,
-					face: "bar",
+					color: "rose",
+					face: "pill",
 					model: "m",
 					sandboxEnabled: true,
 					createdById: member.id,
@@ -201,7 +203,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 		});
 		await chats.sendMain({
 			chatId: opened.id,
-			userId: member.id,
+			author: { id: member.id, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Run the tests.",
 		});
@@ -217,10 +219,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pod sandboxes, against Postgres", ()
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
 		);
 		const prepared = await turns.prepare({
-			id: queued.id,
+			owner: queued.id,
 			threadId: opened.mainThreadId,
 			payload: queued.payload,
-			dedupeKey: queued.dedupeKey,
 			attempts: 1,
 		});
 		return { workspaceId: space.id, podId: room.id, turnId: prepared.turnId };

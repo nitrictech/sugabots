@@ -7,6 +7,7 @@ import type {
 import { GITHUB_DEFAULT_API_URL, GITHUB_DEFAULT_GIT_HOST } from "@sugabots/contracts";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import type { Credentials } from "../credentials/credentials.ts";
 import { type Database, query } from "../database/database.ts";
 import {
 	type GithubConnectionRow,
@@ -14,7 +15,6 @@ import {
 	type PodRepositoryRow,
 	podRepository,
 } from "../database/schema.ts";
-import type { CredentialCipher } from "../providers/model-providers/credentials.ts";
 import type { GithubRepository } from "./client.ts";
 
 export type GithubSecrets = { apiBaseUrl: string; gitHost: string } & (
@@ -79,7 +79,7 @@ export interface GithubStore {
 	removeRepository(podId: string, repositoryId: string): Effect.Effect<boolean, never, Database>;
 }
 
-export function githubStore(cipher: CredentialCipher): GithubStore {
+export function githubStore(cipher: Credentials.Interface): GithubStore {
 	const load = (workspaceId: string) =>
 		query((db) =>
 			db
@@ -257,7 +257,10 @@ export function githubStore(cipher: CredentialCipher): GithubStore {
 }
 
 /** The row's secrets, or nothing when it is an app whose key is somehow missing. */
-function toSecrets(row: GithubConnectionRow, cipher: CredentialCipher): GithubSecrets | undefined {
+function toSecrets(
+	row: GithubConnectionRow,
+	cipher: Credentials.Interface,
+): GithubSecrets | undefined {
 	const where = { apiBaseUrl: row.apiBaseUrl, gitHost: row.gitHost };
 	if (row.method === "token") {
 		return row.tokenEncrypted

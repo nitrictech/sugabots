@@ -1,9 +1,11 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "b79a47a7-457b-4caa-8f8d-466776064b77",
+  "id": "3dbbeb7d-51e2-4755-bd9a-411f1b9653bc",
   "prevIds": [
-    "42305405-6a9a-4aeb-b5cf-121bbc47aa8e"
+    "2928360c-f7f4-476f-b4e6-c59e36acc5c4",
+    "ac54b0b8-c0ff-431c-98c6-116cd464a70e",
+    "ae23e656-e88b-4283-b9e6-1ab8d0e42446"
   ],
   "ddl": [
     {
@@ -62,12 +64,6 @@
     },
     {
       "isRlsEnabled": false,
-      "name": "tool_approval_rule",
-      "entityType": "tables",
-      "schema": "public"
-    },
-    {
-      "isRlsEnabled": false,
       "name": "tool_call",
       "entityType": "tables",
       "schema": "public"
@@ -81,6 +77,18 @@
     {
       "isRlsEnabled": false,
       "name": "event",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "github_connection",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "pod_repository",
       "entityType": "tables",
       "schema": "public"
     },
@@ -123,6 +131,18 @@
     {
       "isRlsEnabled": false,
       "name": "sandbox_lease",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "lane",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "lane_request",
       "entityType": "tables",
       "schema": "public"
     },
@@ -1497,123 +1517,6 @@
       "name": "id",
       "entityType": "columns",
       "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "workspace_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "pod_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "agent_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "connection_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "integer",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "connection_revision",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "tool_name",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "created_by_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "timestamp with time zone",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "now()",
-      "generated": null,
-      "identity": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "uuidv7()",
-      "generated": null,
-      "identity": null,
-      "name": "id",
-      "entityType": "columns",
-      "schema": "public",
       "table": "tool_call"
     },
     {
@@ -1716,6 +1619,19 @@
       "generated": null,
       "identity": null,
       "name": "approval_reason",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "tool_call"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "approval_summary",
       "entityType": "columns",
       "schema": "public",
       "table": "tool_call"
@@ -1981,14 +1897,14 @@
       "table": "turn"
     },
     {
-      "type": "uuid",
+      "type": "text",
       "typeSchema": null,
       "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "job_id",
+      "name": "owner",
       "entityType": "columns",
       "schema": "public",
       "table": "turn"
@@ -2080,6 +1996,19 @@
       "generated": null,
       "identity": null,
       "name": "cancel_requested",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "turn"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "runs",
       "entityType": "columns",
       "schema": "public",
       "table": "turn"
@@ -2264,6 +2193,318 @@
       "name": "id",
       "entityType": "columns",
       "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "workspace_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "method",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "api_base_url",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "git_host",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "token_encrypted",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "app_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "app_slug",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "app_private_key_encrypted",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "app_installation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_login",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "last_tested_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "last_test_error",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "created_by_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "uuidv7()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "workspace_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "pod_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "full_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "default_branch",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "private",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "created_by_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "uuidv7()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
       "table": "connection"
     },
     {
@@ -2397,27 +2638,14 @@
       "table": "connection"
     },
     {
-      "type": "boolean",
+      "type": "text",
       "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
-      "default": "false",
+      "default": "'allow'",
       "generated": null,
       "identity": null,
-      "name": "enabled",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "connection"
-    },
-    {
-      "type": "boolean",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "false",
-      "generated": null,
-      "identity": null,
-      "name": "allow_mutating",
+      "name": "access",
       "entityType": "columns",
       "schema": "public",
       "table": "connection"
@@ -3372,6 +3600,162 @@
       "table": "sandbox_lease"
     },
     {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "subject",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'idle'",
+      "generated": null,
+      "identity": null,
+      "name": "state",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "workflow",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "payload",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "uuidv7()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "lane_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "workflow",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "payload",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
       "type": "uuid",
       "typeSchema": null,
       "notNull": true,
@@ -3645,14 +4029,14 @@
       "table": "agent"
     },
     {
-      "type": "integer",
+      "type": "text",
       "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "hue",
+      "name": "color",
       "entityType": "columns",
       "schema": "public",
       "table": "agent"
@@ -3840,6 +4224,19 @@
       "table": "pod"
     },
     {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "color",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "pod"
+    },
+    {
       "type": "jsonb",
       "typeSchema": null,
       "notNull": true,
@@ -3991,19 +4388,6 @@
       "generated": null,
       "identity": null,
       "name": "user_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "session"
-    },
-    {
-      "type": "uuid",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "active_workspace_id",
       "entityType": "columns",
       "schema": "public",
       "table": "session"
@@ -4308,19 +4692,6 @@
       "table": "workspace"
     },
     {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "metadata",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "workspace"
-    },
-    {
       "type": "timestamp with time zone",
       "typeSchema": null,
       "notNull": true,
@@ -4388,9 +4759,9 @@
     {
       "type": "text",
       "typeSchema": null,
-      "notNull": false,
+      "notNull": true,
       "dimensions": 0,
-      "default": null,
+      "default": "'member'",
       "generated": null,
       "identity": null,
       "name": "role",
@@ -5198,69 +5569,6 @@
       "nameExplicit": true,
       "columns": [
         {
-          "value": "agent_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        },
-        {
-          "value": "connection_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        },
-        {
-          "value": "tool_name",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        },
-        {
-          "value": "created_by_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "with": "",
-      "method": "btree",
-      "concurrently": false,
-      "name": "tool_approval_rule_identity_idx",
-      "entityType": "indexes",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        {
-          "value": "pod_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "with": "",
-      "method": "btree",
-      "concurrently": false,
-      "name": "tool_approval_rule_pod_idx",
-      "entityType": "indexes",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        {
           "value": "message_id",
           "isExpression": false,
           "asc": true,
@@ -5480,6 +5788,55 @@
       "entityType": "indexes",
       "schema": "public",
       "table": "event"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "workspace_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "github_connection_workspace_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "pod_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "full_name",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "pod_repository_pod_name_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "pod_repository"
     },
     {
       "nameExplicit": true,
@@ -5844,6 +6201,90 @@
       "entityType": "indexes",
       "schema": "public",
       "table": "sandbox_lease"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "state",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"state\" <> 'idle'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "lane_busy_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "subject",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"state\" <> 'idle'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "lane_subject_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "lane_key",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "lane_request_order_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "lane_request"
     },
     {
       "nameExplicit": true,
@@ -6972,95 +7413,6 @@
     {
       "nameExplicit": false,
       "columns": [
-        "workspace_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "workspace",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_approval_rule_workspace_id_workspace_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
-        "agent_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "agent",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_approval_rule_agent_id_agent_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
-        "created_by_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "user",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_approval_rule_created_by_id_user_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        "pod_id",
-        "workspace_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "pod",
-      "columnsTo": [
-        "id",
-        "workspace_id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_approval_rule_pod_workspace_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        "connection_id",
-        "pod_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "connection",
-      "columnsTo": [
-        "id",
-        "pod_id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "tool_approval_rule_connection_pod_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "tool_approval_rule"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
         "thread_id"
       ],
       "schemaTo": "public",
@@ -7180,19 +7532,72 @@
     {
       "nameExplicit": false,
       "columns": [
-        "job_id"
+        "workspace_id"
       ],
       "schemaTo": "public",
-      "tableTo": "job",
+      "tableTo": "workspace",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "github_connection_workspace_id_workspace_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "github_connection"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "created_by_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user",
       "columnsTo": [
         "id"
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
-      "name": "turn_job_id_job_id_fkey",
+      "name": "github_connection_created_by_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "turn"
+      "table": "github_connection"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "created_by_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "name": "pod_repository_created_by_id_user_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "pod_repository"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "pod_id",
+        "workspace_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "pod",
+      "columnsTo": [
+        "id",
+        "workspace_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "pod_repository_pod_workspace_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "pod_repository"
     },
     {
       "nameExplicit": false,
@@ -7441,6 +7846,23 @@
     {
       "nameExplicit": false,
       "columns": [
+        "lane_key"
+      ],
+      "schemaTo": "public",
+      "tableTo": "lane",
+      "columnsTo": [
+        "key"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "lane_request_lane_key_lane_key_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "lane_request"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
         "user_id"
       ],
       "schemaTo": "public",
@@ -7619,23 +8041,6 @@
     {
       "nameExplicit": false,
       "columns": [
-        "active_workspace_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "workspace",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "SET NULL",
-      "name": "session_active_workspace_id_workspace_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "session"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
         "workspace_id"
       ],
       "schemaTo": "public",
@@ -7796,16 +8201,6 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "tool_approval_rule_pkey",
-      "schema": "public",
-      "table": "tool_approval_rule",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "id"
-      ],
-      "nameExplicit": false,
       "name": "tool_call_pkey",
       "schema": "public",
       "table": "tool_call",
@@ -7829,6 +8224,26 @@
       "name": "event_pkey",
       "schema": "public",
       "table": "event",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "github_connection_pkey",
+      "schema": "public",
+      "table": "github_connection",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "pod_repository_pkey",
+      "schema": "public",
+      "table": "pod_repository",
       "entityType": "pks"
     },
     {
@@ -7899,6 +8314,26 @@
       "name": "sandbox_lease_pkey",
       "schema": "public",
       "table": "sandbox_lease",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "key"
+      ],
+      "nameExplicit": false,
+      "name": "lane_pkey",
+      "schema": "public",
+      "table": "lane",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "lane_request_pkey",
+      "schema": "public",
+      "table": "lane_request",
       "entityType": "pks"
     },
     {
@@ -8065,6 +8500,20 @@
       "table": "thread_participant"
     },
     {
+      "value": "\"state\" in ('idle', 'starting', 'running')",
+      "name": "lane_state_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
+      "value": "(\"state\" = 'idle') = (\"execution_id\" is null)",
+      "name": "lane_execution_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "lane"
+    },
+    {
       "value": "(\"system_agent_key\" is null) = (\"pod_id\" is not null)",
       "name": "agent_placement_check",
       "entityType": "checks",
@@ -8091,6 +8540,27 @@
       "entityType": "checks",
       "schema": "public",
       "table": "pod"
+    },
+    {
+      "value": "\"role\" in ('admin', 'member', 'viewer')",
+      "name": "workspace_invite_role_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "workspace_invite"
+    },
+    {
+      "value": "\"status\" in ('pending', 'accepted', 'canceled')",
+      "name": "workspace_invite_status_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "workspace_invite"
+    },
+    {
+      "value": "\"role\" in ('admin', 'member', 'viewer')",
+      "name": "workspace_member_role_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "workspace_member"
     }
   ],
   "renames": []

@@ -6,10 +6,10 @@ import type {
 import { DEFAULT_SANDBOX_ALLOWED_HOSTS, sandboxProviderPreset } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query } from "../../database/database.ts";
 import { type SandboxProviderRow, sandboxProvider } from "../../database/schema.ts";
 import type { Sandbox } from "../../sandboxes/sandbox.ts";
-import type { CredentialCipher } from "../model-providers/credentials.ts";
 
 /**
  * Reading and writing a workspace's one sandbox provider.
@@ -40,7 +40,7 @@ export interface SandboxProviderStore {
 	): Effect.Effect<void, never, Database>;
 }
 
-export function sandboxProviderStore(cipher: CredentialCipher): SandboxProviderStore {
+export function sandboxProviderStore(cipher: Credentials.Interface): SandboxProviderStore {
 	const load = (workspaceId: string) =>
 		query((db) =>
 			db
@@ -152,7 +152,7 @@ export function sandboxProviderStore(cipher: CredentialCipher): SandboxProviderS
 /** The connection, or nothing when the row has no key to call the service with. */
 function toConnection(
 	row: SandboxProviderRow,
-	cipher: CredentialCipher,
+	cipher: Credentials.Interface,
 ): Sandbox.Connection | undefined {
 	if (!row.apiKeyEncrypted) return undefined;
 	return {

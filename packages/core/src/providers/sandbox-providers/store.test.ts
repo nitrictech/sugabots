@@ -1,8 +1,8 @@
 import { DEFAULT_SANDBOX_ALLOWED_HOSTS } from "@sugabots/contracts";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Credentials } from "../../credentials/credentials.ts";
 import { sandboxProvider, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
-import { aesCredentialCipher } from "../model-providers/credentials.ts";
 import { type SandboxProviderStore, sandboxProviderStore } from "./store.ts";
 
 /**
@@ -10,7 +10,7 @@ import { type SandboxProviderStore, sandboxProviderStore } from "./store.ts";
  * from its preset, and what a turn is given to make sandboxes with.
  */
 describe.skipIf(!process.env.DATABASE_URL)("sandbox providers, against Postgres", () => {
-	const cipher = aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"));
+	const cipher = Credentials.fromKey(Buffer.alloc(32, 7).toString("base64"));
 	const providers: Promised<SandboxProviderStore> = onPostgres(sandboxProviderStore(cipher));
 	const userId = null as unknown as string;
 	let workspaceId: string;

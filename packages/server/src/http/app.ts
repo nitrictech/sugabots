@@ -171,10 +171,10 @@ export function apiLayer({
 			tokens: githubTokens,
 			httpClients,
 			validateProviderUrl,
-			cipher: credentialCipher,
+			cipher: credentials,
 			authorization,
 			apiUrl,
-			webAppUrl: webAppUrl({ baseUrl, webOrigins }),
+			webAppUrl: installation.webAppUrl,
 		}),
 		sandboxProviderRoutes({
 			sandboxProviders: stores.sandboxProviders,

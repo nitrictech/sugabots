@@ -1,9 +1,9 @@
 import { GITHUB_APP_RETURN_PATH } from "@sugabots/contracts";
 import { BadRequest, Conflict, CurrentUser } from "@sugabots/contracts/http";
+import type { Credentials } from "@sugabots/core/credentials/credentials";
 import { githubOperations } from "@sugabots/core/github/operations";
 import type { GithubStore } from "@sugabots/core/github/store";
 import type { GithubTokens } from "@sugabots/core/github/tokens";
-import type { CredentialCipher } from "@sugabots/core/providers/model-providers/credentials";
 import type {
 	EgressHttpClients,
 	EgressUrlValidator,
@@ -21,7 +21,7 @@ export interface GithubRoutesOptions {
 	tokens: GithubTokens;
 	httpClients: EgressHttpClients;
 	validateProviderUrl: EgressUrlValidator;
-	cipher: CredentialCipher;
+	cipher: Credentials.Interface;
 	authorization: Authorization;
 	/** Where the API answers, for the addresses GitHub sends the browser back to. */
 	apiUrl: string;

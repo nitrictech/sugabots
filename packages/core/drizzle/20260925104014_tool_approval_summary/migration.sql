@@ -1,1 +1,0 @@
-ALTER TABLE "tool_call" ADD COLUMN "approval_summary" jsonb;

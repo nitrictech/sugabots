@@ -1,8 +1,4 @@
-import type {
-	ToolApprovalDecision,
-	ToolApprovalSummary,
-	ToolCallPart,
-} from "@sugabots/contracts";
+import type { ToolApprovalDecision, ToolApprovalSummary, ToolCallPart } from "@sugabots/contracts";
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";

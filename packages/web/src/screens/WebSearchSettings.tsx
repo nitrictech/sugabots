@@ -253,7 +253,7 @@ function ProviderSettings({
  * saves on Enter or when you leave it, and a secret shows only its hint once
  * saved, with Replace and Remove beside it.
  */
-function TextEntryRow({
+export function TextEntryRow({
 	label,
 	saved,
 	savedDisplay,

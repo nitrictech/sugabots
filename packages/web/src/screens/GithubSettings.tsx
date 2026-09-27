@@ -4,7 +4,6 @@ import { failureMessage } from "@/lib/failure.ts";
 import { useGithubConnectionActions, useGithubSetup } from "@/lib/github.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
-import { Input } from "@/ui/input.tsx";
 
 /*
  * How the workspace's agents reach GitHub. The recommended way is a GitHub App
@@ -53,17 +52,11 @@ function GithubCard({
 	}
 
 	return (
-		<section
-			aria-label="GitHub"
-			className="flex max-w-2xl flex-col gap-4 rounded-2xl border border-border bg-card px-5 py-4"
-		>
-			<div>
-				<h3 className="font-semibold text-heading text-lg">GitHub</h3>
-				<p className="text-muted-foreground text-sm">
-					Lets agents check out the repositories you add to their pods, private ones included, and
-					push branches and open pull requests when someone approves.
-				</p>
-			</div>
+		<section aria-label="GitHub" className="flex flex-col gap-4">
+			<p className="m-0 text-muted-foreground text-sm">
+				Lets bots check out the repositories you add to their pods, private ones included, and push
+				branches and open pull requests when someone approves.
+			</p>
 			{connection === null && !choosingToken && (
 				<CreateApp
 					pending={pending}
@@ -149,9 +142,9 @@ function CreateApp({
 					create(organization.trim());
 				}}
 			>
-				<Input
+				<input
 					aria-label="GitHub organisation"
-					className="min-w-0 flex-1"
+					className={fieldStyles}
 					value={organization}
 					onChange={(event) => setOrganization(event.target.value)}
 					placeholder="Organisation (leave empty for your own account)"
@@ -234,9 +227,9 @@ function TokenConnection({
 					setReplacing(false);
 				}}
 			>
-				<Input
+				<input
 					aria-label="GitHub token"
-					className="min-w-0 flex-1 font-mono"
+					className={`${fieldStyles} font-mono text-[13.5px]`}
 					type="password"
 					autoComplete="off"
 					value={token}
@@ -260,6 +253,10 @@ function TokenConnection({
 		</div>
 	);
 }
+
+/** A one-line field, styled like the settings page's other inputs. */
+const fieldStyles =
+	"focus-ring min-w-0 flex-1 rounded-full bg-list px-4 py-2 text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground disabled:opacity-50";
 
 /**
  * GitHub's manifest flow starts with a form post from the browser, so this

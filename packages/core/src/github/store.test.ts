@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Credentials } from "../credentials/credentials.ts";
 import { githubConnection, pod, user, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../database/testing.ts";
-import { aesCredentialCipher } from "../providers/model-providers/credentials.ts";
 import { gitCredentialsForPod } from "./credentials.ts";
 import { githubStore } from "./store.ts";
 import { githubTokens } from "./tokens.ts";
@@ -11,7 +11,7 @@ import { githubTokens } from "./tokens.ts";
  * token sealed, a pod's repositories, and what a pod's sandbox is given.
  */
 describe.skipIf(!process.env.DATABASE_URL)("GitHub, against Postgres", () => {
-	const cipher = aesCredentialCipher(Buffer.alloc(32, 7).toString("base64"));
+	const cipher = Credentials.fromKey(Buffer.alloc(32, 7).toString("base64"));
 	const store = githubStore(cipher);
 	// A token connection never calls GitHub for its credentials.
 	const tokens = githubTokens({

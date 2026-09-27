@@ -3,31 +3,31 @@ import {
 	DEFAULT_SANDBOX_PRESET,
 	type SandboxIsolation,
 	type SandboxProvider,
+	type SandboxProviderPresetId,
 	type SandboxProviderUpdate,
 	sandboxIsolationSchema,
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
-	sandboxProviderPresetIdSchema,
 } from "@sugabots/contracts";
-import { Schema } from "effect";
-import { type ReactNode, useState } from "react";
+import { Check } from "lucide-react";
+import { useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSandboxProvider, useSandboxProviderActions } from "@/lib/sandbox-provider.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
-import { Input } from "@/ui/input.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select.tsx";
+import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 import { Textarea } from "@/ui/textarea.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { TextEntryRow } from "./WebSearchSettings.tsx";
 
 /*
- * Where a workspace's pods get their sandboxes: one card, laid out like web
- * search's. The switch offers sandbox tools to the agents an admin has allowed
- * a sandbox; below it, which service makes them, its address and key, the
- * image sandboxes start from, how they are isolated, and which hosts they may
- * reach. Until the workspace has saved anything, the rows show the chosen
- * preset's defaults, and the first thing saved sets the provider up. The
- * switch stays off until the service has a key.
+ * Where a workspace's pods get their sandboxes, laid out like web search's. The
+ * switch offers sandbox tools to the bots an admin has allowed a sandbox; below
+ * it, which service makes them, its address and key, the image sandboxes start
+ * from, how they are isolated, and which hosts they may reach. Until the
+ * workspace has saved anything, the rows show the chosen preset's defaults, and
+ * the first thing saved sets the provider up. The switch stays off until the
+ * service has a key.
  */
 
 export function SandboxSettings() {
@@ -35,14 +35,14 @@ export function SandboxSettings() {
 	if (provider.isPending) return null;
 	if (provider.isError) return <Alert>{failureMessage(provider.error)}</Alert>;
 	return (
-		<SandboxCard
+		<SandboxGroups
 			provider={provider.data.provider}
 			allowsUnisolated={provider.data.allowsUnisolated}
 		/>
 	);
 }
 
-function SandboxCard({
+function SandboxGroups({
 	provider,
 	allowsUnisolated,
 }: {
@@ -74,231 +74,91 @@ function SandboxCard({
 		);
 	}
 
+	const isolations = sandboxIsolationSchema.literals.filter(
+		(choice) => choice !== "container" || allowsUnisolated || provider?.isolation === "container",
+	);
+
 	return (
-		<section
-			aria-label="Sandboxes"
-			className="flex max-w-2xl flex-col rounded-2xl border border-border bg-card px-5"
-		>
-			<Row
-				title="Sandboxes"
-				description="Gives each pod a Linux machine, where agents you allow can run commands and edit files."
-				heading
-				control={
-					<Toggle
-						checked={provider?.enabled ?? false}
-						disabled={!hasApiKey || pending}
-						label={provider?.enabled ? "Turn sandboxes off" : "Turn sandboxes on"}
-						onChange={(enabled) => save({ enabled })}
+		<>
+			<SettingsGroup note={hasApiKey ? undefined : `${preset.name} needs an API key first.`}>
+				<SettingsRow
+					label="Bots can use sandboxes"
+					sub="Each pod gets a Linux machine, where bots you allow run commands and edit files"
+					trailing={
+						<Toggle
+							checked={provider?.enabled ?? false}
+							disabled={!hasApiKey || pending}
+							label="Bots can use sandboxes"
+							onChange={(enabled) => save({ enabled })}
+						/>
+					}
+				/>
+			</SettingsGroup>
+			<Choice
+				legend="Provider"
+				options={sandboxProviderCatalog.map((candidate) => ({
+					value: candidate.id,
+					label: candidate.name,
+				}))}
+				chosen={chosen}
+				disabled={pending}
+				onChoose={(next: SandboxProviderPresetId) =>
+					act(() => actions.replace.mutateAsync({ preset: next, enabled: false }))
+				}
+			/>
+			<SettingsGroup
+				label={preset.name}
+				note={
+					(provider ? testStanding(provider, actions.test.data) : undefined) ??
+					"The image needs bash and useradd."
+				}
+			>
+				<TextEntryRow
+					label="Server URL"
+					saved={provider?.baseUrl ?? preset.baseUrl}
+					placeholder={preset.baseUrl}
+					disabled={pending}
+					onSave={(baseUrl) => save({ baseUrl })}
+				/>
+				<TextEntryRow
+					label="API key"
+					secret
+					saved={hasApiKey ? "" : undefined}
+					savedDisplay={hasApiKey ? "••••••••" : undefined}
+					placeholder="The server's api_key setting"
+					disabled={pending}
+					onSave={(apiKey) => save({ apiKey })}
+				/>
+				<TextEntryRow
+					label="Image"
+					saved={provider?.image ?? preset.defaultImage}
+					placeholder={preset.defaultImage}
+					disabled={pending}
+					onSave={(image) => save({ image })}
+				/>
+				{provider && hasApiKey && (
+					<SettingsRow
+						label="Test connection"
+						sub="Reaches the server with these settings."
+						onClick={pending ? undefined : () => act(() => actions.test.mutateAsync())}
 					/>
-				}
+				)}
+			</SettingsGroup>
+			<Choice
+				legend="Isolation"
+				note="What the server runs sandboxes with. It can't report this, so say what it's set up for."
+				options={isolations.map((choice) => ({ value: choice, label: isolationLabels[choice] }))}
+				chosen={provider?.isolation ?? "gvisor"}
+				disabled={pending}
+				onChoose={(isolation: SandboxIsolation) => save({ isolation })}
 			/>
-			<Row
-				title="Sandbox provider"
-				description="Choose the service that runs the pods' sandboxes."
-				control={
-					<Select
-						value={chosen}
-						items={providerLabels}
-						onValueChange={(value) => {
-							if (Schema.is(sandboxProviderPresetIdSchema)(value) && value !== chosen) {
-								act(() => actions.replace.mutateAsync({ preset: value, enabled: false }));
-							}
-						}}
-						disabled={pending}
-					>
-						<SelectTrigger aria-label="Sandbox provider" className="w-48">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent alignItemWithTrigger={false} align="end">
-							{sandboxProviderCatalog.map((candidate) => (
-								<SelectItem key={candidate.id} value={candidate.id}>
-									{candidate.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				}
-			/>
-			<TextRow
-				title="Server URL"
-				description={`Where this API reaches your ${preset.name} server.`}
-				value={provider?.baseUrl ?? preset.baseUrl}
-				pending={pending}
-				save={(baseUrl) => save({ baseUrl })}
-			/>
-			<ApiKeyRow
-				name={preset.name}
-				hasApiKey={hasApiKey}
-				status={provider ? testStanding(provider, actions.test.data) : undefined}
-				pending={pending}
-				save={(apiKey) => save({ apiKey })}
-				test={() => act(() => actions.test.mutateAsync())}
-			/>
-			<TextRow
-				title="Image"
-				description="The container image each pod's sandbox starts from. It needs bash and useradd."
-				value={provider?.image ?? preset.defaultImage}
-				pending={pending}
-				save={(image) => save({ image })}
-			/>
-			<IsolationRow
-				isolation={provider?.isolation ?? "gvisor"}
-				allowsUnisolated={allowsUnisolated}
-				pending={pending}
-				save={(isolation) => save({ isolation })}
-			/>
-			<AllowedHostsRow
+			<AllowedHosts
 				hosts={provider?.allowedHosts ?? DEFAULT_SANDBOX_ALLOWED_HOSTS}
 				pending={pending}
 				save={(allowedHosts) => save({ allowedHosts })}
 			/>
-			{error && <Alert className="mb-4">{error}</Alert>}
-		</section>
-	);
-}
-
-const providerLabels: Record<string, string> = Object.fromEntries(
-	sandboxProviderCatalog.map((preset) => [preset.id, preset.name]),
-);
-
-function Row({
-	title,
-	description,
-	control,
-	heading = false,
-	children,
-}: {
-	title: string;
-	description?: string;
-	control?: ReactNode;
-	/** The first row names the card; it has no rule above it and a larger title. */
-	heading?: boolean;
-	children?: ReactNode;
-}) {
-	return (
-		<div className={`flex flex-col gap-2 py-4 ${heading ? "" : "border-border-subtle border-t"}`}>
-			<div className="flex items-center gap-4">
-				<div className="min-w-0 flex-1">
-					<h3 className={`font-semibold text-heading ${heading ? "text-lg" : "text-md"}`}>
-						{title}
-					</h3>
-					{description && <p className="text-muted-foreground text-sm">{description}</p>}
-				</div>
-				{control && <div className="shrink-0">{control}</div>}
-			</div>
-			{children}
-		</div>
-	);
-}
-
-function TextRow({
-	title,
-	description,
-	value,
-	pending,
-	save,
-}: {
-	title: string;
-	description: string;
-	value: string;
-	pending: boolean;
-	save: (value: string) => void;
-}) {
-	const [draft, setDraft] = useState(value);
-	const changed = draft.trim() !== value && draft.trim() !== "";
-	return (
-		<Row title={title} description={description}>
-			<form
-				className="flex gap-2"
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (changed) save(draft.trim());
-				}}
-			>
-				<Input
-					aria-label={title}
-					className="min-w-0 flex-1 font-mono"
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					disabled={pending}
-				/>
-				<Button type="submit" variant="secondary" disabled={!changed || pending}>
-					Save
-				</Button>
-			</form>
-		</Row>
-	);
-}
-
-function ApiKeyRow({
-	name,
-	hasApiKey,
-	status,
-	pending,
-	save,
-	test,
-}: {
-	name: string;
-	hasApiKey: boolean;
-	/** What the last test said, once one has run. */
-	status?: string;
-	pending: boolean;
-	save: (apiKey: string) => Promise<void> | void;
-	test: () => void;
-}) {
-	const [apiKey, setApiKey] = useState("");
-	const [replacing, setReplacing] = useState(false);
-	const editing = replacing || !hasApiKey;
-	return (
-		<Row
-			title={`${name} API key`}
-			description={status ?? "Required. The server's api_key setting."}
-		>
-			{editing ? (
-				<form
-					className="flex gap-2"
-					onSubmit={async (event) => {
-						event.preventDefault();
-						if (!apiKey) return;
-						await save(apiKey);
-						setApiKey("");
-						setReplacing(false);
-					}}
-				>
-					<Input
-						aria-label={`${name} API key`}
-						className="min-w-0 flex-1 font-mono"
-						type="password"
-						autoComplete="off"
-						value={apiKey}
-						onChange={(event) => setApiKey(event.target.value)}
-						placeholder={`Enter your ${name} API key`}
-						disabled={pending}
-					/>
-					<Button type="submit" disabled={!apiKey || pending}>
-						Save key
-					</Button>
-					{hasApiKey && (
-						<Button type="button" variant="ghost" onClick={() => setReplacing(false)}>
-							Cancel
-						</Button>
-					)}
-				</form>
-			) : (
-				<div className="flex items-center gap-3 text-sm">
-					<code className="text-base text-foreground">••••••••</code>
-					<Button size="bare" variant="link" onClick={() => setReplacing(true)}>
-						Replace
-					</Button>
-					<span aria-hidden className="text-muted-foreground">
-						·
-					</span>
-					<Button size="bare" variant="link" disabled={pending} onClick={test}>
-						Test connection
-					</Button>
-				</div>
-			)}
-		</Row>
+			{error && <Alert>{error}</Alert>}
+		</>
 	);
 }
 
@@ -308,50 +168,57 @@ const isolationLabels: Record<SandboxIsolation, string> = {
 	container: "Container (shares the host kernel)",
 };
 
-function IsolationRow({
-	isolation,
-	allowsUnisolated,
-	pending,
-	save,
+/** A pick-one list, the chosen option ticked, laid out like web search's providers. */
+function Choice<Value extends string>({
+	legend,
+	note,
+	options,
+	chosen,
+	disabled,
+	onChoose,
 }: {
-	isolation: SandboxIsolation;
-	allowsUnisolated: boolean;
-	pending: boolean;
-	save: (isolation: SandboxIsolation) => void;
+	legend: string;
+	note?: string;
+	options: ReadonlyArray<{ value: Value; label: string }>;
+	chosen: Value;
+	disabled: boolean;
+	onChoose: (value: Value) => void;
 }) {
-	const choices = sandboxIsolationSchema.literals.filter(
-		(choice) => choice !== "container" || allowsUnisolated || isolation === "container",
-	);
+	const name = useId();
 	return (
-		<Row
-			title="Isolation"
-			description="What the server runs sandboxes with. It can't report this, so say what it's set up for."
-			control={
-				<Select
-					value={isolation}
-					items={isolationLabels}
-					onValueChange={(value) => {
-						if (Schema.is(sandboxIsolationSchema)(value) && value !== isolation) save(value);
-					}}
-					disabled={pending}
-				>
-					<SelectTrigger aria-label="Isolation" className="w-64">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent alignItemWithTrigger={false} align="end">
-						{choices.map((choice) => (
-							<SelectItem key={choice} value={choice}>
-								{isolationLabels[choice]}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			}
-		/>
+		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
+			<legend className="px-1 pb-2 font-medium text-sm text-subtle-foreground">{legend}</legend>
+			<div className="overflow-hidden rounded-panel bg-list">
+				{options.map((option) => (
+					<label
+						key={option.value}
+						className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-panel has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default"
+					>
+						<input
+							type="radio"
+							name={name}
+							value={option.value}
+							checked={option.value === chosen}
+							onChange={() => {
+								if (option.value !== chosen) onChoose(option.value);
+							}}
+							className="sr-only"
+						/>
+						<span className="min-w-0 flex-1 truncate font-medium text-[14.5px] text-foreground">
+							{option.label}
+						</span>
+						{option.value === chosen && (
+							<Check aria-hidden size={16} strokeWidth={2.4} className="shrink-0 text-link" />
+						)}
+					</label>
+				))}
+			</div>
+			{note && <p className="m-0 px-1 pt-2 text-muted-foreground text-sm">{note}</p>}
+		</fieldset>
 	);
 }
 
-function AllowedHostsRow({
+function AllowedHosts({
 	hosts,
 	pending,
 	save,
@@ -360,6 +227,7 @@ function AllowedHostsRow({
 	pending: boolean;
 	save: (hosts: string[]) => void;
 }) {
+	const id = useId();
 	const saved = hosts.join("\n");
 	const [draft, setDraft] = useState(saved);
 	const parsed = draft
@@ -368,35 +236,42 @@ function AllowedHostsRow({
 		.filter((host) => host.length > 0);
 	const changed = parsed.join("\n") !== saved;
 	return (
-		<Row
-			title="Allowed hosts"
-			description="What sandboxes may reach, one per line. *.example.com covers its subdomains; * alone allows anywhere. Changes reach running sandboxes too, except switching to or from *, which only new sandboxes get."
+		<form
+			className="flex flex-col gap-2"
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (changed) save(parsed);
+			}}
 		>
-			<form
-				className="flex flex-col gap-2"
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (changed) save(parsed);
-				}}
+			<label htmlFor={id} className="px-1 font-medium text-sm text-subtle-foreground">
+				Allowed hosts
+			</label>
+			<Textarea
+				id={id}
+				className="min-h-32 font-mono text-[13.5px]"
+				value={draft}
+				onChange={(event) => setDraft(event.target.value)}
+				disabled={pending}
+			/>
+			<p className="m-0 px-1 text-muted-foreground text-sm">
+				What sandboxes may reach, one per line. *.example.com covers its subdomains; * alone allows
+				anywhere. Changes reach running sandboxes too, except switching to or from *, which only new
+				sandboxes get.
+			</p>
+			<Button
+				type="submit"
+				variant="secondary"
+				size="sm"
+				disabled={!changed || pending}
+				className="self-start"
 			>
-				<Textarea
-					aria-label="Allowed hosts"
-					className="min-h-32 font-mono"
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					disabled={pending}
-				/>
-				<div>
-					<Button type="submit" variant="secondary" disabled={!changed || pending}>
-						Save
-					</Button>
-				</div>
-			</form>
-		</Row>
+				Save hosts
+			</Button>
+		</form>
 	);
 }
 
-/** The key row's line once a test has run, or what the provider recorded; otherwise nothing. */
+/** What the last test said, once one has run, or what the provider recorded; otherwise nothing. */
 function testStanding(
 	provider: SandboxProvider,
 	latest: { reachable: boolean; latencyMs: number; error?: string } | undefined,

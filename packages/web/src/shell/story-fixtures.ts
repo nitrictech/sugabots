@@ -17,6 +17,7 @@ const PERMISSIONS: PodPermissions = {
 	manageConnections: true,
 	manageRoutines: true,
 	runRoutines: true,
+	manageSandbox: true,
 };
 
 function pod(id: string, name: string, color: Pod["color"]): Pod {
@@ -56,6 +57,7 @@ function bot(name: string, home: Pod, color: AgentColor, face: AgentFace = "pill
 		model: "claude-sonnet-4-20250514",
 		prompt: "",
 		disabledTools: [],
+		sandboxEnabled: false,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }

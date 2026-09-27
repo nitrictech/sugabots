@@ -7,9 +7,9 @@ import type {
 } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Data, Effect, Schema } from "effect";
+import type { Credentials } from "../credentials/credentials.ts";
 import { type Database, query } from "../database/database.ts";
 import { workspace } from "../database/schema.ts";
-import type { CredentialCipher } from "../providers/model-providers/credentials.ts";
 import type { EgressHttpClients, EgressUrlValidator } from "../providers/network/egress.ts";
 import { appManifest, githubAppClient, installUrl, manifestActionUrl } from "./app.ts";
 import { githubClient } from "./client.ts";
@@ -54,7 +54,7 @@ export interface GithubOperationsOptions {
 	httpClients: EgressHttpClients;
 	validateUrl: EgressUrlValidator;
 	/** Seals the state GitHub carries through registration, so only this server's links come back. */
-	cipher: CredentialCipher;
+	cipher: Credentials.Interface;
 	/** Addresses GitHub is given for the app, built from the installation's own. */
 	urls: { homepage: string; appCreated: string; appInstalled: string };
 	/** Whether the person may still manage this workspace's providers, asked again on the way back from GitHub. */
