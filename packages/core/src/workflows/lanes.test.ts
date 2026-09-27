@@ -110,6 +110,38 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		});
 	});
 
+	it("says whether work is under way about a subject", async () => {
+		const key = crypto.randomUUID();
+		const subject = crypto.randomUUID();
+		const service = await lanes();
+		const busy = () =>
+			runtime
+				.runPromise(
+					query((db) =>
+						db.execute<{ busy: boolean }>(
+							sql`select ${Lanes.laneBusy(sql`${subject}`, [Held._tag])} as busy`,
+							"objects",
+						),
+					),
+				)
+				.then(([row]) => row?.busy);
+
+		expect(await busy()).toBe(false);
+		await run(
+			service.admit({
+				key,
+				subject,
+				workflow: Held,
+				payload: { key, request: "a" },
+				whenBusy: "queue",
+			}),
+		);
+		expect(await busy()).toBe(true);
+
+		await run(service.release({ key, executionId: await executionIdOf(key, "a") }));
+		expect(await busy()).toBe(false);
+	});
+
 	it("starts again a lane a crash left starting", async () => {
 		const key = crypto.randomUUID();
 		const executionId = await executionIdOf(key, "a");
