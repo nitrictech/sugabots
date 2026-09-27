@@ -1,0 +1,39 @@
+---
+title: People and roles
+description: Who can join a workspace, and what admins, members and viewers can do.
+---
+
+## Who gets in
+
+The first person to sign up on an installation owns it, and becomes the admin of
+the workspace they create. After that, sign-up is by invitation only, unless the
+installation turns on [`ALLOW_OPEN_SIGNUP`](/docs/configuration#access).
+
+To invite people, go to **Settings → Members** and choose **Invite people**.
+Type their email addresses, separated by commas, and pick a **Role**. Each person
+gets an email with a link to join.
+
+<Tip>
+
+Invites expire after two days. Anyone who joins gets their own
+[Personal pod](/docs/pods#your-personal-pod) straight away.
+
+</Tip>
+
+## Roles
+
+There are three. Pick one to see what it can do.
+
+<RoleMatrix />
+
+Members and viewers only see the pods they've been added to. Admins can reach
+every shared pod, but nobody can see into someone else's Personal pod.
+
+## Leaving and removing
+
+Open a person in **Settings → Members** to change their role or remove them.
+Removing someone takes away the workspace and every pod in it. Their Personal pod
+and its conversations are deleted, but pods they made stay.
+
+A workspace always keeps at least one admin: the only admin can't be removed or
+made a member.

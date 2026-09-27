@@ -1,0 +1,64 @@
+---
+title: Models
+description: Connect the AI providers your bots think with, hosted or on your own machine.
+---
+
+Bots think with models, and models come from providers. Connect as many as you
+like, and give each bot the one that suits its job: a clever model for research,
+a quick cheap one for sorting the inbox, a local one for private notes.
+
+Admins manage providers in **Settings → Models**.
+
+## Providers Sugabots knows
+
+Sugabots has presets for these. Pick one and it fills in the address for you.
+
+<ProviderGrid />
+
+Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed.
+Paste a key to use a hosted provider. Local servers need an address, not a key.
+
+<Tip title="Anything else">
+
+**Custom provider** connects any service that speaks the OpenAI or Anthropic
+format. Give it a name, an address, the format and an API key, plus custom
+headers if it needs them.
+
+</Tip>
+
+## Choose which models bots can use
+
+Each provider lists its models. Switch on the ones you want with **Bots can use
+…**, and only those show up when someone picks a bot's model. Use **Refresh
+list** to fetch new ones, or **Add model** to type in a model ID.
+
+Each model also says what it can do, like tools, vision or reasoning. Bots use
+tools, so pick models that support them.
+
+## Models on your own machine
+
+Ollama, LM Studio, llama.cpp and vLLM run on your own hardware, so your messages
+never leave it.
+
+<Careful title="Local addresses in production">
+
+When `NODE_ENV=production`, Sugabots won't reach providers at private or
+plain-HTTP addresses unless you set
+[`ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK=true`](/docs/configuration#network). Set
+it on a self-hosted install that uses local models.
+
+</Careful>
+
+## Web search
+
+Bots [search the web](/docs/tools-and-approvals#built-in-tools) through one
+search provider per workspace, set up in **Settings → Web search**.
+
+| Provider | Notes |
+| --- | --- |
+| Exa | The default. Works out of the box on its free tier |
+| Brave Search | Independent index. Needs a key |
+| Tavily | Made for AI agents. Needs a key |
+| SearXNG | Runs on your own server |
+
+**Test search** runs one search with your settings, so you can check it works.
