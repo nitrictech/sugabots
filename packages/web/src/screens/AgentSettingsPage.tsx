@@ -69,6 +69,7 @@ export function AgentSettingsPage({
 			<SettingsPage back={back} title="Model" description={`What ${agent.name} thinks with.`}>
 				{failure && <Alert>{failure}</Alert>}
 				<AgentModelPicker
+					agentName={agent.name}
 					model={agent.model}
 					canChoose={pod.permissions.updateAgents}
 					onChoose={(model) => {

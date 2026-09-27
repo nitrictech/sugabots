@@ -1,18 +1,24 @@
-import { Check } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Check, Info } from "lucide-react";
 import { useModels } from "@/lib/agents.ts";
+import { useBackToHere } from "@/lib/settings-back.tsx";
+import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
  * Which model a bot thinks with, from the models the workspace has switched
  * on, grouped by provider, as the design draws every choice of model. Choosing
  * one saves it. Somebody who may not choose sees the same list with the one in
- * use checked, and nothing to press.
+ * use checked, and nothing to press. Beneath it, where more models come from.
  */
 export function AgentModelPicker({
+	agentName,
 	model,
 	canChoose,
 	onChoose,
 }: {
+	/** Where Back from the Models settings returns to. */
+	agentName: string;
 	model: string | null;
 	canChoose: boolean;
 	onChoose: (model: string) => void;
@@ -56,11 +62,42 @@ export function AgentModelPicker({
 						.map((candidate) => row(candidate.modelId, candidate.displayName ?? candidate.modelId))}
 				</SettingsGroup>
 			))}
-			{offered.length > 0 && (
-				<p className="-mt-3 m-0 px-1 text-sm text-subtle-foreground">
-					Only models that are switched on appear here.
-				</p>
-			)}
+			{!isPending && <MoreModelsCallout agentName={agentName} />}
 		</>
+	);
+}
+
+/**
+ * Only switched-on models are listed, so this says where the rest are: a link
+ * to the Models settings for somebody who may manage them, and who to ask for
+ * everybody else.
+ */
+function MoreModelsCallout({ agentName }: { agentName: string }) {
+	const may = useWorkspacePermissions();
+	const backToAgent = useBackToHere(agentName);
+	return (
+		<div className="flex items-start gap-3 rounded-panel bg-list px-4 py-3 text-[14px] text-soft-foreground leading-normal">
+			<Info aria-hidden size={16} className="mt-0.5 shrink-0 text-subtle-foreground" />
+			<p className="m-0">
+				Only models switched on for the workspace appear here.{" "}
+				{may.manageProviders ? (
+					<>
+						Add providers and switch on more in{" "}
+						<Link
+							from="/$workspace"
+							to="./settings/$section"
+							params={{ section: "providers" }}
+							state={backToAgent}
+							className="font-medium text-link"
+						>
+							Models
+						</Link>
+						.
+					</>
+				) : (
+					"To use another, ask a workspace admin to switch it on."
+				)}
+			</p>
+		</div>
 	);
 }
