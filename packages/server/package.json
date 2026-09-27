@@ -15,6 +15,7 @@
 		"@effect/platform-node": "catalog:",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/core": "workspace:*",
+		"@sugabots/workflow": "workspace:*",
 		"better-auth": "catalog:",
 		"drizzle-orm": "catalog:",
 		"effect": "catalog:",
