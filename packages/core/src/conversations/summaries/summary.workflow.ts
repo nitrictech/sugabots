@@ -1,6 +1,7 @@
 /**
  * Summarising a thread, as a durable workflow: its definition and its step.
- * What the step does lives behind `SummarySteps`, implemented in `worker.ts`.
+ * What the step does lives behind `SummarySteps`, implemented in
+ * `summary.steps.ts`.
  */
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, type Effect, Schema } from "effect";

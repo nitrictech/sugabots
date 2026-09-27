@@ -18,32 +18,29 @@ import type { EventBus } from "../../database/events/bus.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
-import {
-	noToolApprovalStore,
-	type ToolApprovalStore,
-	type ToolApprovalsIncomplete,
-} from "../tools/approvals/store.ts";
-import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
-import type { ToolCallStore } from "../tools/calls/store.ts";
+import type { ToolApprovalStore, ToolApprovalsIncomplete } from "../tools/approvals/store.ts";
+import type { BuiltInTools } from "../tools/built-in.ts";
+import type { PendingToolApproval, ToolCallRepository } from "../tools/calls/repository.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
-import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
+import type { ConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
+import {
+	type PreparedTurn,
+	replyTurnOf,
+	type TurnExecution,
+	type TurnRun,
+	turnRunFor,
+} from "./execution.ts";
+import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
 import {
 	forEachDelta,
 	type ModelAccounting,
 	type ModelRequestFailed,
 	type TurnModel,
 } from "./model.ts";
-import {
-	type ClaimedTurn,
-	type PreparedTurn,
-	type ReplyDraft,
-	runsAgainAfterFailure,
-	type TurnCheckpoint,
-	type TurnStore,
-} from "./store.ts";
-import { type SegmentOutcome, Turn, type TurnRequest, TurnSteps } from "./turn.workflow.ts";
+import type { ReplyDraft, ReplyTurn, TurnCheckpoint, TurnRepository } from "./repository.ts";
+import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
 const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
@@ -59,18 +56,31 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
 
-export interface TurnExecution {
-	store: TurnStore;
+export interface TurnStepsDependencies {
+	/** Where each segment's turn is opened, and who speaks after a completed reply is decided. */
+	execution: Pick<TurnExecution, "prepare" | "giveFloor">;
+	/** Where the reply and how the run ended are recorded. */
+	turns: Pick<
+		TurnRepository,
+		| "saveReply"
+		| "suspend"
+		| "complete"
+		| "fail"
+		| "cancel"
+		| "isCancellationRequested"
+		| "stopWaiting"
+		| "abandon"
+	>;
+	/** Where a built-in tool's calls, and people's decisions on approvals, are written down. */
+	toolCalls: Pick<ToolCallRepository, "open" | "close" | "recordDecision">;
 	model: TurnModel;
 	/** Behind the collaborate tool, and how a collaborator's answer reaches the asker. */
 	collaborations: CollaborationStore;
-	/** Where a built-in tool's calls are written down. */
-	calls: ToolCallStore;
-	approvals?: ToolApprovalStore;
+	approvals: ToolApprovalStore;
 	/** The built-in tools a workspace's crew turns are offered. */
-	builtInTools?: BuiltInTools;
+	builtInTools: BuiltInTools;
 	/** The tools inherited from the agent's pod, opened for the turn (ADR 006). */
-	connectionTools?: ConnectionTools;
+	connectionTools: ConnectionTools;
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
@@ -78,48 +88,39 @@ export interface TurnExecution {
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
 }
 
-/** The turn workflow's run of its turn: the workflow execution owns the turn. */
-export const claimFor = (request: TurnRequest) =>
-	Effect.map(
-		Turn.executionId(request),
-		(owner): ClaimedTurn => ({
-			owner,
-			threadId: request.threadId,
-			payload: {
-				agentId: request.agentId,
-				triggerMessageId: request.triggerMessageId,
-				reason: request.reason,
-			},
-		}),
-	);
-
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
-export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalStore }) =>
+export const stepsLayer = (dependencies: TurnStepsDependencies) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
 			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: UserMessage }) =>
-				(execution.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
+				(dependencies.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
 			return TurnSteps.of({
 				segment: (request) =>
-					Effect.flatMap(claimFor(request), (claimed) => runClaimedTurn(claimed, execution)).pipe(
+					Effect.flatMap(turnRunFor(request), (run) => runSegment(run, dependencies)).pipe(
 						Effect.provideService(Database, database),
 					),
 				abandon: (request) =>
 					transaction(
 						Effect.gen(function* () {
-							const error = new TurnStoppedUnexpectedly().userMessage;
-							yield* execution.store.abandon(yield* claimFor(request), error);
-							yield* settleRoutine(request.threadId, { state: "failed", error });
+							const run = yield* turnRunFor(request);
+							yield* dependencies.turns.abandon(run.executionId, {
+								status: "failed",
+								userMessage: TURN_STOPPED_UNEXPECTEDLY,
+							});
+							yield* settleRoutine(request.threadId, {
+								state: "failed",
+								error: TURN_STOPPED_UNEXPECTEDLY,
+							});
 						}),
 					).pipe(Effect.provideService(Database, database)),
 				decide: (request, decided) =>
-					execution.approvals
-						.record({ threadId: request.threadId, ...decided })
+					dependencies.toolCalls
+						.recordDecision({ threadId: request.threadId, ...decided })
 						.pipe(Effect.provideService(Database, database)),
 				stopWaiting: (request) =>
-					execution.store.stopWaiting(request).pipe(Effect.provideService(Database, database)),
+					dependencies.turns.stopWaiting(request).pipe(Effect.provideService(Database, database)),
 				settleRoutine: (request) =>
 					settleRoutine(request.threadId).pipe(Effect.provideService(Database, database)),
 			});
@@ -127,29 +128,28 @@ export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalS
 	);
 
 /**
- * Runs one segment of a claimed turn, from preparation to recorded outcome,
- * and says how it ended for the workflow.
+ * Runs one segment of a turn, from preparation to recorded outcome, and says
+ * how it ended for the workflow.
  *
- * A turn that cannot run ends before anything is streamed. Otherwise the reply
- * is streamed, and whatever ends the stream is written back as the turn's
- * outcome. A defect while preparing or recording escapes, and the workflow
- * then ends the turn as failed.
+ * A turn that may not run ends before anything is streamed. Otherwise the
+ * reply is streamed, and whatever ends the stream is written back as the
+ * turn's outcome. A defect while preparing or recording escapes, and the
+ * workflow then ends the turn as failed.
  */
-export const runClaimedTurn = (
-	claimed: ClaimedTurn,
-	execution: TurnExecution,
+export const runSegment = (
+	run: TurnRun,
+	dependencies: TurnStepsDependencies,
 ): Effect.Effect<SegmentOutcome, never, Database> =>
-	execution.store.prepare(claimed).pipe(
-		Effect.flatMap((prepared) => generateReply(prepared, execution)),
-		Effect.catchTag("TurnNotRunnable", (why) =>
-			Effect.as(
-				execution.routines?.settleThread(
-					claimed.threadId,
-					why.terminalOutcome ?? { state: "cancelled" },
-				) ?? Effect.void,
-				finished,
-			),
-		),
+	Effect.flatMap(dependencies.execution.prepare(run), (preparation) =>
+		preparation._tag === "Prepared"
+			? generateReply(preparation, dependencies)
+			: Effect.as(
+					dependencies.routines?.settleThread(
+						run.request.threadId,
+						preparation.ended ?? { state: "cancelled" },
+					) ?? Effect.void,
+					finished,
+				),
 	);
 
 const finished: SegmentOutcome = { _tag: "Finished" };
@@ -159,11 +159,7 @@ const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] 
 
 type StreamOutcome =
 	| { kind: "completed"; accounting: ModelAccounting }
-	| {
-			kind: "suspended";
-			checkpoint: TurnCheckpoint;
-			approvals: import("../tools/approvals/store.ts").PendingToolApproval[];
-	  };
+	| { kind: "suspended"; checkpoint: TurnCheckpoint; approvals: PendingToolApproval[] };
 
 /** Why a reply stopped streaming before the model finished, other than being cancelled. */
 type TurnFailure =
@@ -172,7 +168,8 @@ type TurnFailure =
 	| TurnTimedOut
 	| ApprovedToolChanged
 	| TurnInterrupted
-	| TurnStoppedUnexpectedly;
+	| TurnStoppedUnexpectedly
+	| ApprovalForUnknownTool;
 
 class TurnCancelled extends Data.TaggedError("TurnCancelled") {
 	override get message() {
@@ -216,14 +213,19 @@ class TurnStoppedUnexpectedly
 		return "Turn ended by a defect";
 	}
 	get userMessage() {
-		return UserMessage.of`The reply stopped unexpectedly.`;
+		return TURN_STOPPED_UNEXPECTEDLY;
 	}
 }
-class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<{
-	readonly tool: string;
-}> {
+/** The model asked a person to approve a tool this turn does not offer for approval. */
+class ApprovalForUnknownTool
+	extends Data.TaggedError("ApprovalForUnknownTool")<{ readonly tool: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `Approval requested for unknown tool ${this.tool}`;
+	}
+	get userMessage() {
+		return UserMessage.of`The reply asked to run a tool it was not offered.`;
 	}
 }
 
@@ -238,13 +240,14 @@ class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<
  */
 const generateReply = (
 	prepared: PreparedTurn,
-	execution: TurnExecution,
+	dependencies: TurnStepsDependencies,
 ): Effect.Effect<SegmentOutcome, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { store, collaborations, routines } = execution;
+			const { turns, execution, collaborations, routines } = dependencies;
+			const replyTurn = replyTurnOf(prepared);
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
-			const streamed = yield* Effect.exit(restore(streamReply(prepared, execution, reply)));
+			const streamed = yield* Effect.exit(restore(streamReply(prepared, dependencies, reply)));
 			const draft = yield* Ref.get(reply);
 
 			/**
@@ -257,8 +260,7 @@ const generateReply = (
 					transaction(
 						Effect.gen(function* () {
 							const error = failure.userMessage;
-							const willRetry = runsAgainAfterFailure(prepared, draft);
-							yield* store.fail(prepared, draft, error, willRetry);
+							const willRetry = yield* turns.fail(replyTurn, draft, error);
 							if (!willRetry && routines) {
 								yield* routines.settleThread(prepared.context.thread.id, {
 									state: "failed",
@@ -275,13 +277,13 @@ const generateReply = (
 					const { checkpoint, approvals } = streamed.value;
 					return yield* transaction(
 						Effect.gen(function* () {
-							if (yield* store.suspend(prepared, checkpoint, approvals)) {
+							if (yield* turns.suspend(replyTurn, checkpoint, approvals)) {
 								return {
 									_tag: "Suspended",
 									approvals: checkpoint.approvals.map((approval) => approval.approvalId),
 								} satisfies SegmentOutcome;
 							}
-							yield* store.cancel(prepared, draft);
+							yield* turns.cancel(replyTurn, draft);
 							if (routines) {
 								yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 							}
@@ -295,6 +297,9 @@ const generateReply = (
 				// and gives up waiting for an answer that lands a moment later.
 				yield* transaction(
 					Effect.gen(function* () {
+						// `deliverAnswer` runs in a savepoint of this transaction, so a
+						// defect in it rolls back only what it wrote, and catching it here
+						// still lets the reply complete.
 						const answered = prepared.context.thread.parentThreadId
 							? yield* collaborations
 									.deliverAnswer({ threadId: prepared.context.thread.id, answer: draft.content })
@@ -306,16 +311,16 @@ const generateReply = (
 										),
 									)
 							: false;
-						yield* store.complete(prepared, draft, accounting);
+						yield* turns.complete(replyTurn, draft, accounting);
 						// An answer to a brief goes back to the agent that asked, which
 						// carries on in the parent thread, so nobody speaks next here.
 						if (!answered) {
-							yield* store.giveFloor(prepared, draft);
+							yield* execution.giveFloor(prepared, draft);
 						}
 						if (routines) yield* routines.settleThread(prepared.context.thread.id);
 					}),
 				);
-				yield* execution
+				yield* dependencies
 					.queueSummary({
 						threadId: prepared.context.thread.id,
 						agentId: prepared.context.agent.id,
@@ -337,7 +342,7 @@ const generateReply = (
 			if (failure instanceof TurnCancelled) {
 				return yield* transaction(
 					Effect.gen(function* () {
-						yield* store.cancel(prepared, draft);
+						yield* turns.cancel(replyTurn, draft);
 						if (routines) {
 							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 						}
@@ -368,19 +373,24 @@ const logTurnFailure = (prepared: PreparedTurn, why: string) =>
 const streamReply = (
 	prepared: PreparedTurn,
 	{
-		store,
+		turns,
+		toolCalls,
 		model,
 		events,
 		collaborations,
-		calls,
-		approvals = noToolApprovalStore,
-		builtInTools = noBuiltInTools,
-		connectionTools = noConnectionTools,
-	}: TurnExecution,
+		approvals,
+		builtInTools,
+		connectionTools,
+	}: TurnStepsDependencies,
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
-	ModelRequestFailed | ToolApprovalsIncomplete | TurnTimedOut | ApprovedToolChanged | TurnCancelled,
+	| ModelRequestFailed
+	| ToolApprovalsIncomplete
+	| TurnTimedOut
+	| ApprovedToolChanged
+	| ApprovalForUnknownTool
+	| TurnCancelled,
 	Database
 > =>
 	Effect.scoped(
@@ -393,7 +403,9 @@ const streamReply = (
 			// after a newer one.
 			const oneWriter = yield* Semaphore.make(1);
 			const lastSaved = yield* Ref.make<ReplyDraft>(emptyReply);
-			const saveReply = oneWriter.withPermits(1)(saveReplySoFar(prepared, store, reply, lastSaved));
+			const saveReply = oneWriter.withPermits(1)(
+				saveReplySoFar(replyTurnOf(prepared), turns, reply, lastSaved),
+			);
 
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
@@ -426,7 +438,7 @@ const streamReply = (
 				.map(([key]) => key);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
-				calls,
+				calls: toolCalls,
 				approvals,
 				approvalBoundTools,
 				builtIn,
@@ -502,12 +514,12 @@ const streamReply = (
 					};
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
-				const pending = terminal.approvalRequests.map((request) => {
+				const pending = yield* Effect.forEach(terminal.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.requiresApproval) {
-						throw new ApprovalForUnknownTool({ tool: request.toolCall.toolName });
+						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
-					return {
+					return Effect.succeed({
 						id: crypto.randomUUID(),
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
@@ -519,7 +531,7 @@ const streamReply = (
 						remoteToolName: offered.remoteToolName,
 						mutating: offered.mutating,
 						atOffset,
-					};
+					});
 				});
 				yield* Ref.update(reply, (draft) => ({
 					...draft,
@@ -548,8 +560,10 @@ const streamReply = (
 				};
 			});
 
-			// Suspended so each check asks the store again rather than replaying one answer.
-			const cancelChecks = Effect.suspend(() => store.isCancellationRequested(prepared)).pipe(
+			// Suspended so each check reads the flag again rather than replaying one answer.
+			const cancelChecks = Effect.suspend(() =>
+				turns.isCancellationRequested(prepared.turnId),
+			).pipe(
 				Effect.repeat({
 					schedule: Schedule.spaced(CANCELLATION_CHECK_INTERVAL),
 					until: (requested) => requested,
@@ -579,8 +593,8 @@ function withoutDisabled(tools: ToolSet, disabled: readonly string[]): ToolSet {
 
 /** Saves the reply so far, unless it is what was last saved. */
 const saveReplySoFar = (
-	prepared: PreparedTurn,
-	store: TurnStore,
+	replyTurn: ReplyTurn,
+	turns: Pick<TurnRepository, "saveReply">,
 	reply: Ref.Ref<ReplyDraft>,
 	lastSaved: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<void, never, Database> =>
@@ -594,7 +608,7 @@ const saveReplySoFar = (
 		) {
 			return;
 		}
-		yield* store.saveStreamingMessage(prepared, draft);
+		yield* turns.saveReply(replyTurn, draft);
 		yield* Ref.set(lastSaved, draft);
 	});
 

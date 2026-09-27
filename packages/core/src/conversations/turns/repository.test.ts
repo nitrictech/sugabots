@@ -1,0 +1,270 @@
+import { eq } from "drizzle-orm";
+import { Effect } from "effect";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createEventBus } from "../../database/events/bus.ts";
+import { type CommittedEvent, eventPublisher } from "../../database/events/publish.ts";
+import { memoryEventStore } from "../../database/events/store.ts";
+import { message, turn } from "../../database/schema.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { UserMessage } from "../../user-message.ts";
+import { composeConversations } from "../composition.ts";
+import { routineRunsForTests } from "../routines/testing.ts";
+import { noToolApprovalStore } from "../tools/approvals/store.ts";
+import { noBuiltInTools } from "../tools/built-in.ts";
+import { noConnectionTools } from "../tools/connections.ts";
+import { type PreparedTurn, replyTurnOf } from "./execution.ts";
+import { MAX_TURN_RUNS } from "./lifecycle.ts";
+import { ModelRequestFailed, type TurnModel } from "./model.ts";
+import type { TurnCheckpoint } from "./repository.ts";
+import {
+	aChatAwaitingReply,
+	prepareRunnable,
+	queueFacilitationForTests,
+	queueTurnForTests,
+	runningTurns,
+	turnSignalsForTests,
+} from "./testing.ts";
+import { runSegment } from "./turn.steps.ts";
+
+/**
+ * Turns against Postgres: how a turn opens again for another run, gives up,
+ * parks for approvals and ends, as the repository writes and announces it,
+ * and a whole segment run through the real repository.
+ */
+describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", () => {
+	let delivered: CommittedEvent[] = [];
+	const { repositories, stores } = composeConversations({
+		publishEvents: eventPublisher({
+			publishCommitted: async (events) => {
+				delivered.push(...events);
+			},
+		}),
+		queueTurn: queueTurnForTests,
+		queueFacilitation: queueFacilitationForTests,
+		signals: turnSignalsForTests,
+		routineRuns: routineRunsForTests,
+	});
+	const turns = onPostgres(repositories.turns);
+	const calls = onPostgres(repositories.toolCalls);
+	const chats = onPostgres(stores.chats);
+	const execution = onPostgres(stores.turns);
+	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
+	const providerDown = UserMessage.of`The model provider could not answer.`;
+	let threadId: string;
+	let prepared: PreparedTurn;
+
+	afterAll(async () => {
+		await closeDatabase();
+	});
+
+	beforeEach(async () => {
+		({ threadId } = await aChatAwaitingReply(chats));
+		const [run] = await runOnPostgres(runningTurns(threadId));
+		if (!run) throw new Error("no turn running");
+		prepared = await prepareRunnable(execution, run);
+		delivered = [];
+	});
+
+	const storedTurn = async () => {
+		const [row] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+		);
+		return row;
+	};
+
+	const deliveredEvents = () => delivered.map(({ event }) => event);
+
+	const checkpoint = (): TurnCheckpoint => ({
+		messages: [{ role: "assistant", content: "I need approval." }],
+		approvals: [],
+		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
+		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
+		accounting: { usage: { modelCalls: 1 } },
+	});
+
+	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
+		expect(await turns.fail(replyTurnOf(prepared), emptyReply, providerDown)).toBe(true);
+
+		const second = await prepareRunnable(execution, prepared.run);
+
+		expect(second.turnId).toBe(prepared.turnId);
+		expect(second.responseMessage).toMatchObject({
+			id: prepared.responseMessage.id,
+			status: "streaming",
+		});
+		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
+		// Running again could act again, so the turn stops here for a person (ADR 002).
+		expect(
+			await turns.fail(replyTurnOf(second), { ...emptyReply, acted: true }, providerDown),
+		).toBe(false);
+	});
+
+	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {
+		await onDatabase((db) =>
+			db.update(turn).set({ runs: MAX_TURN_RUNS }).where(eq(turn.id, prepared.turnId)),
+		);
+
+		expect(await execution.prepare(prepared.run)).toMatchObject({
+			_tag: "NotRunnable",
+			ended: { state: "failed" },
+		});
+		expect(await storedTurn()).toMatchObject({ status: "failed" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.failed", messageId: prepared.responseMessage.id }),
+		);
+	});
+
+	it("counts a turn's runs again from its last stop for approvals", async () => {
+		expect((await storedTurn())?.runs).toBe(1);
+
+		expect(await turns.suspend(replyTurnOf(prepared), checkpoint(), [])).toBe(true);
+
+		expect(await storedTurn()).toMatchObject({ status: "waiting", runs: 0 });
+	});
+
+	it("resumes a checkpointed turn left running by a stopped worker from its checkpoint", async () => {
+		const saved = checkpoint();
+		await turns.suspend(replyTurnOf(prepared), saved, []);
+		await onDatabase((db) =>
+			db.update(turn).set({ status: "running" }).where(eq(turn.id, prepared.turnId)),
+		);
+
+		const resumed = await prepareRunnable(execution, prepared.run);
+
+		expect(resumed.turnId).toBe(prepared.turnId);
+		expect(resumed.checkpoint).toEqual(saved);
+	});
+
+	it("ends a turn whose checkpoint cannot be read rather than resuming it", async () => {
+		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ checkpoint: { messages: "not a transcript" } })
+				.where(eq(turn.id, prepared.turnId)),
+		);
+
+		await expect(execution.prepare(prepared.run)).rejects.toThrow();
+	});
+
+	it("ends a turn somebody asked to stop instead of opening it again after a crash", async () => {
+		await onDatabase((db) =>
+			db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId)),
+		);
+
+		expect(await execution.prepare(prepared.run)).toMatchObject({
+			_tag: "NotRunnable",
+			ended: { state: "cancelled" },
+		});
+		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({
+				type: "message.completed",
+				messageId: prepared.responseMessage.id,
+				status: "cancelled",
+			}),
+		);
+	});
+
+	it("tells the thread that a turn its workflow gave up on failed, calls and all", async () => {
+		const opened = await calls.open({
+			threadId,
+			messageId: prepared.responseMessage.id,
+			turnId: prepared.turnId,
+			tool: "web_fetch",
+			input: { url: "https://example.com" },
+			atOffset: 0,
+		});
+		delivered = [];
+		const stopped = UserMessage.of`The reply stopped unexpectedly.`;
+
+		expect(
+			await turns.abandon(prepared.run.executionId, { status: "failed", userMessage: stopped }),
+		).toEqual({ state: "failed", error: stopped });
+
+		expect(deliveredEvents()).toEqual([
+			expect.objectContaining({
+				type: "tool_call.completed",
+				toolCall: expect.objectContaining({ id: opened.id, status: "failed" }),
+			}),
+			expect.objectContaining({
+				type: "message.failed",
+				messageId: prepared.responseMessage.id,
+				willRetry: false,
+				error: "The reply stopped unexpectedly.",
+			}),
+			expect.objectContaining({ type: "thread.changed", threadId }),
+		]);
+	});
+
+	it("records a waiting turn as cancelled once its workflow stops waiting, and says so", async () => {
+		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
+		delivered = [];
+
+		await turns.stopWaiting(prepared.run.request);
+
+		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "turn.completed", status: "cancelled" }),
+		);
+	});
+
+	// Each case's turn is already prepared, so the segment opens it again for its own run.
+	describe("a segment", () => {
+		const events = createEventBus({ store: memoryEventStore() });
+		const segmentWith = (model: TurnModel) =>
+			runOnPostgres(
+				runSegment(prepared.run, {
+					execution: stores.turns,
+					turns: repositories.turns,
+					toolCalls: repositories.toolCalls,
+					model,
+					collaborations: stores.collaborations,
+					approvals: noToolApprovalStore,
+					builtInTools: noBuiltInTools,
+					connectionTools: noConnectionTools,
+					events,
+					queueSummary: vi.fn(() => Effect.void),
+				}),
+			);
+
+		it("prepares, streams and completes the reply, and tells the thread", async () => {
+			const outcome = await segmentWith({
+				stream: () =>
+					Effect.sync(() => ({
+						text: (async function* () {
+							yield "Example Domain";
+							yield " says hello.";
+						})(),
+						accounting: Effect.succeed({ usage: { modelCalls: 1, totalTokens: 12 } }),
+					})),
+			});
+
+			expect(outcome).toEqual({ _tag: "Finished" });
+			expect(await storedTurn()).toMatchObject({
+				status: "done",
+				usage: { modelCalls: 1, totalTokens: 12 },
+			});
+			const [reply] = await onDatabase((db) =>
+				db.select().from(message).where(eq(message.id, prepared.responseMessage.id)),
+			);
+			expect(reply).toMatchObject({ status: "complete", content: "Example Domain says hello." });
+			expect(deliveredEvents().map(({ type }) => type)).toEqual(
+				expect.arrayContaining(["turn.started", "message.completed", "turn.completed"]),
+			);
+		});
+
+		it("records a failed run, which the workflow runs again", async () => {
+			const outcome = await segmentWith({
+				stream: () =>
+					Effect.fail(new ModelRequestFailed({ message: "provider down", reason: "unavailable" })),
+			});
+
+			expect(outcome).toEqual({ _tag: "Retry" });
+			expect(await storedTurn()).toMatchObject({ status: "failed", error: providerDown });
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({ type: "message.failed", willRetry: true, error: providerDown }),
+			);
+		});
+	});
+});

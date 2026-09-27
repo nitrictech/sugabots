@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
-import { type PreparedSummary, SummarySkipped, type SummaryStore } from "./store.ts";
+import type { PreparedSummary, SummaryStore } from "./store.ts";
+import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
-import { summarise } from "./worker.ts";
 
 /**
  * The stores and models in these cases never query, so the database they run
@@ -20,6 +20,7 @@ const request: SummaryRequest = {
 };
 
 const prepared: PreparedSummary = {
+	_tag: "Prepared",
 	request,
 	turnId: "0199a3a0-0000-7000-8000-000000000005",
 	threadId: request.threadId,
@@ -173,9 +174,10 @@ describe("summarise", () => {
 	it("does nothing when the summary is no longer needed", async () => {
 		const store = summaryStore();
 		vi.mocked(store.prepare).mockReturnValueOnce(
-			Effect.fail(
-				new SummarySkipped({ reason: "The thread is already summarised to this message" }),
-			),
+			Effect.succeed({
+				_tag: "Skipped",
+				reason: "The thread is already summarised to this message",
+			}),
 		);
 
 		await runWithServices(summarise(request, { store, model: unusedModel() }));

@@ -31,7 +31,6 @@ import {
 	routineExecution,
 	thread,
 	threadParticipant,
-	toolCall,
 	turn,
 } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
@@ -41,6 +40,7 @@ import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../turns/facilitate.workflow.ts";
 import type { QueueTurn } from "../turns/queue.ts";
+import type { TurnRepository } from "../turns/repository.ts";
 import type { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
@@ -207,6 +207,7 @@ export interface RoutineStore {
 
 export function routineStore(
 	emit: DomainEvents.Emit<ConversationEvent>,
+	turns: Pick<TurnRepository, "cancelUnder">,
 	queueTurn: QueueTurn,
 	signals: TurnSignals,
 	runs: RoutineRuns,
@@ -616,7 +617,7 @@ export function routineStore(
 			),
 
 		settleThread: (threadId, outcome) =>
-			settleRoutineThread(threadId, outcome, emit, signals, runs),
+			settleRoutineThread(threadId, outcome, emit, turns, signals, runs),
 
 		failRun: (run) =>
 			transaction(
@@ -639,6 +640,7 @@ export function routineStore(
 							execution.threadId,
 							{ state: "failed", error: RUN_STOPPED_UNEXPECTEDLY },
 							emit,
+							turns,
 							signals,
 							runs,
 						);
@@ -677,7 +679,7 @@ export function routineStore(
 						.limit(1),
 				);
 				if (!execution) return true;
-				yield* settleRoutineThread(execution.threadId, undefined, emit, signals, runs);
+				yield* settleRoutineThread(execution.threadId, undefined, emit, turns, signals, runs);
 				const [settled] = yield* query((db) =>
 					db
 						.select({ state: routineExecution.state })
@@ -893,6 +895,7 @@ function settleRoutineThread(
 	threadId: string,
 	outcome: { state: "failed" | "cancelled"; error?: UserMessage } | undefined,
 	emit: DomainEvents.Emit<ConversationEvent>,
+	turns: Pick<TurnRepository, "cancelUnder">,
 	signals: TurnSignals,
 	runs: RoutineRuns,
 ) {
@@ -1054,64 +1057,7 @@ function settleRoutineThread(
 				yield* Effect.forEach(waitingOwners, ({ owner }) =>
 					owner ? signals.cancel(owner) : Effect.void,
 				);
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						), cancelled_turns as (
-							update ${turn}
-							set status = 'cancelled', cancel_requested = true, checkpoint = null,
-								finished_at = now(), updated_at = now()
-							where ${turn.threadId} in (select id from tree) and ${turn.status} = 'waiting'
-							returning id
-						)
-						update ${toolCall}
-						set status = 'failed', approval_status = case
-								when approval_status = 'pending' then 'denied'
-								else approval_status
-							end,
-							error = 'Routine execution ended', finished_at = now(), updated_at = now()
-						where ${toolCall.turnId} in (select id from cancelled_turns)
-							and ${toolCall.status} in ('running', 'awaiting_approval')
-					`),
-				);
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						update ${message}
-						set status = 'cancelled'
-						where ${message.turnId} in (
-							select cancelled.id from ${turn} cancelled
-							join tree on tree.id = cancelled.thread_id
-							where cancelled.status = 'cancelled' and cancelled.cancel_requested = true
-						)
-							and ${message.status} = 'streaming'
-					`),
-				);
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						update ${turn}
-						set cancel_requested = true, updated_at = now()
-						where ${turn.id} in (
-							select active_turn.id
-							from ${turn} active_turn
-							join tree on active_turn.thread_id = tree.id
-							where active_turn.status = 'running'
-							for update of active_turn skip locked
-						)
-					`),
-				);
+				yield* turns.cancelUnder(affectedThreadIds);
 				// Turns and facilitations asked for but not yet started never start.
 				yield* query((db) =>
 					db.execute(sql`

@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { UserMessage } from "../../../user-message.ts";
 import type { ToolApprovalStore } from "../approvals/store.ts";
-import type { ToolCallStore } from "./store.ts";
+import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
 export interface RecordingTurn {
@@ -13,7 +13,7 @@ export interface RecordingTurn {
 }
 
 export interface RecordingOptions {
-	calls: ToolCallStore;
+	calls: Pick<ToolCallRepository, "open" | "close">;
 	/** Runs a store Effect from the tool's promise. */
 	run: RunEffect;
 	from: RecordingTurn;

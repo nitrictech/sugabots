@@ -1,7 +1,7 @@
 import type { RoutineExecution } from "@sugabots/contracts";
-import { type SQLWrapper, sql } from "drizzle-orm";
+import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import type { Executor } from "../../database/database.ts";
+import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { routineExecution, thread } from "../../database/schema.ts";
 
@@ -52,3 +52,45 @@ export const findRoutineExecutionId = Effect.fn("RoutineExecution.findRoutineExe
 		return rows[0]?.id ?? undefined;
 	},
 );
+
+/**
+ * routineRejectsTurns reports whether the routine run `executionId` takes no
+ * more turns: it is gone, it has ended, or it has been told to end. It holds
+ * the run's settlement lock until the transaction ends, so the answer stays
+ * true while the caller acts on it.
+ */
+export const routineRejectsTurns = (executionId: string) =>
+	Effect.gen(function* () {
+		const lockKey = routineSettlementLockKey(executionId);
+		yield* query((db) =>
+			db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
+		);
+		const [execution] = yield* query((db) =>
+			db
+				.select({
+					state: routineExecution.state,
+					pendingTerminalState: routineExecution.pendingTerminalState,
+				})
+				.from(routineExecution)
+				.where(eq(routineExecution.id, executionId))
+				.limit(1),
+		);
+		if (!execution) return true;
+		return (
+			execution.pendingTerminalState !== null ||
+			execution.state === "completed" ||
+			execution.state === "failed" ||
+			execution.state === "cancelled"
+		);
+	});
+
+/**
+ * threadRejectsTurns reports whether the routine run the thread belongs to,
+ * if any, takes no more turns, holding its settlement lock as
+ * `routineRejectsTurns` does.
+ */
+export const threadRejectsTurns = (threadId: string) =>
+	Effect.flatMap(
+		query((db) => findRoutineExecutionId(db, threadId)),
+		(executionId) => (executionId ? routineRejectsTurns(executionId) : Effect.succeed(false)),
+	);

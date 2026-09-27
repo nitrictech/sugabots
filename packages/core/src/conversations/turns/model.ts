@@ -29,9 +29,9 @@ export interface TurnModelInput {
 	workspaceId: string;
 	model: string;
 	system: string;
-	messages: TurnPromptMessage[];
+	messages: readonly TurnPromptMessage[];
 	/** Server-owned SDK messages appended when resuming a suspended tool call. */
-	continuationMessages?: ModelMessage[];
+	continuationMessages?: readonly ModelMessage[];
 	/** What the model may call during the turn. The SDK executes them as it streams. */
 	tools?: ToolSet;
 	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;

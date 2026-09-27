@@ -53,5 +53,5 @@ export function builtInTools({
 	};
 }
 
-/** No built-in tools at all, for a worker that has not been given any. */
+/** No built-in tools at all, for a case that offers a turn none. */
 export const noBuiltInTools: BuiltInTools = { forWorkspace: () => Effect.succeed({}) };

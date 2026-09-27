@@ -128,7 +128,7 @@ export const accessPolicy: AccessPolicy = {
 		list: { workspace: "workspace.read" },
 		get: { reach: "threads/store.ts scopes by reachesPod" },
 		activity: { reach: "threads/store.ts scopes by reachesPod" },
-		cancelTurn: { reach: "turns/store.ts scopes by visibleThread" },
+		cancelTurn: { reach: "turns/execution.ts scopes by visibleThread" },
 	},
 	toolApprovals: {
 		decide: { pod: "approval.decide" },

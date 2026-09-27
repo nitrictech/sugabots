@@ -54,13 +54,12 @@ export const summarise = (
 	request: SummaryRequest,
 	execution: SummaryExecution,
 ): Effect.Effect<void, never, Database> =>
-	execution.store.prepare(request).pipe(
-		Effect.flatMap((prepared) => generateSummary(prepared, execution)),
-		Effect.catchTag("SummarySkipped", () => Effect.void),
+	Effect.flatMap(execution.store.prepare(request), (preparation) =>
+		preparation._tag === "Prepared" ? generateSummary(preparation, execution) : Effect.void,
 	);
 
 /**
- * Generates the summary and records how it went. As in the turn worker, only
+ * Generates the summary and records how it went. As in a turn's segment, only
  * the generation may be interrupted; the outcome is always written.
  */
 const generateSummary = (

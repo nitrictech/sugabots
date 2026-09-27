@@ -444,7 +444,7 @@ export type CollaborationRow = typeof collaboration.$inferSelect;
 
 /**
  * One call an agent's reply made to a built-in tool: what it was given, what
- * came back, and where in the reply it happened. See `tools/calls/store.ts`.
+ * came back, and where in the reply it happened. See `tools/calls/repository.ts`.
  *
  * `thread_id` is here as well as on the message so the table can be filtered
  * by thread without a join, which `turn` and `message` cannot be by workspace

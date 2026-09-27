@@ -3,10 +3,10 @@ import type { ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import type { PreparedTurn } from "../turns/store.ts";
+import type { PreparedTurn } from "../turns/execution.ts";
 import type { ToolApprovalStore } from "./approvals/store.ts";
 import { type RecordingOptions, recorded } from "./calls/recorded.ts";
-import type { ToolCallStore } from "./calls/store.ts";
+import type { ToolCallRepository } from "./calls/repository.ts";
 import type { CollaborationStore } from "./collaborate/store.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import type { OfferedTool } from "./connections.ts";
@@ -14,7 +14,7 @@ import type { OfferedTool } from "./connections.ts";
 /**
  * The tools a turn's model may call. One directory per tool under `tools/`;
  * this is the only place that knows which ones exist, so adding a tool is a
- * folder and a line here rather than a change to the worker.
+ * folder and a line here rather than a change to the turn's steps.
  *
  * Three kinds. The crew tool `collaborate` reaches other agents
  * and leave their own records. The built-in tools do work for the agent, and
@@ -25,7 +25,7 @@ import type { OfferedTool } from "./connections.ts";
 export interface ToolDependencies {
 	collaborations: CollaborationStore;
 	/** Where a built-in tool's calls are written down. */
-	calls: ToolCallStore;
+	calls: Pick<ToolCallRepository, "open" | "close">;
 	approvals: ToolApprovalStore;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;

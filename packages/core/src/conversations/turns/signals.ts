@@ -1,6 +1,7 @@
 import { Effect, type Schema } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
-import { type ApprovalDecision, approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
+import type { ApprovalDecision } from "../tools/calls/lifecycle.ts";
+import { approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
 
 /**
  * What people tell a turn's workflow execution while it waits for approvals.

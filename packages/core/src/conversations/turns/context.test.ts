@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
-import type { TurnContext } from "./store.ts";
+import type { TurnContext } from "./execution.ts";
 
 const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
 	now: new Date("2026-09-25T03:00:00Z"),

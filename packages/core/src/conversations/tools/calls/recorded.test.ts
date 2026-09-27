@@ -5,10 +5,10 @@ import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
 import { noToolApprovalStore, ToolExecutionRefused } from "../approvals/store.ts";
 import { recorded } from "./recorded.ts";
-import type { ToolCallStore } from "./store.ts";
+import type { ToolCallRepository } from "./repository.ts";
 
 /**
- * The wrapper against a fake store: what it writes before and after the tool
+ * The wrapper against a fake repository: what it writes before and after the tool
  * runs, and what the model is told when the tool throws or may not run.
  */
 
@@ -21,7 +21,7 @@ const from = {
 };
 const callOptions = { toolCallId: "sdk-1", messages: [] } as never;
 
-function store(): ToolCallStore {
+function store(): Pick<ToolCallRepository, "open" | "close"> {
 	return {
 		open: vi.fn(({ atOffset, tool, input, mutating }) =>
 			Effect.succeed({

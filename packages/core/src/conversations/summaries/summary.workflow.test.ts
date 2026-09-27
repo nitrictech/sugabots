@@ -6,12 +6,12 @@ import { layer as databaseLayer, query } from "../../database/database.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
 import { ModelRequestFailed } from "../turns/model.ts";
-import { queueSummary, SummarySkipped, type SummaryStore } from "./store.ts";
+import { queueSummary, type SummaryStore } from "./store.ts";
+import { stepsLayer } from "./summary.steps.ts";
 import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
-import { stepsLayer } from "./worker.ts";
 
 const store: SummaryStore = {
-	prepare: vi.fn(() => Effect.fail(new SummarySkipped({ reason: "already summarised" }))),
+	prepare: vi.fn(() => Effect.succeed({ _tag: "Skipped" as const, reason: "already summarised" })),
 	complete: vi.fn(() => Effect.void),
 	fail: vi.fn(() => Effect.void),
 };

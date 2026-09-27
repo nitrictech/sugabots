@@ -1,8 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { agent, message, thread, threadSummary, turn, user } from "../../database/schema.ts";
+import { agent, message, thread, threadSummary, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import type { Lanes } from "../../workflows/lanes.ts";
 import {
@@ -14,6 +14,7 @@ import { participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { messageTextWithPlacedParts } from "../turns/context.ts";
 import type { ModelAccounting } from "../turns/model.ts";
+import type { TurnRepository } from "../turns/repository.ts";
 import { Summary, type SummaryRequest, summaryLane } from "./summary.workflow.ts";
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
@@ -28,10 +29,14 @@ const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
  * without it appearing in their conversation.
  */
 
-/** A summary that has nothing to do: its thread or source is gone, or it is already written. */
-export class SummarySkipped extends Data.TaggedError("SummarySkipped")<{
+/**
+ * A summary that has nothing to do: its thread or source is gone, it is
+ * already written, or the Scribe's turn may not run. `reason` is for the logs.
+ */
+export interface SummarySkipped {
+	readonly _tag: "Skipped";
 	readonly reason: string;
-}> {}
+}
 
 export interface TranscriptEntry {
 	author: string;
@@ -41,6 +46,7 @@ export interface TranscriptEntry {
 
 /** A requested summary with its turn opened and its input loaded. */
 export interface PreparedSummary {
+	readonly _tag: "Prepared";
 	request: SummaryRequest;
 	turnId: string;
 	threadId: string;
@@ -56,10 +62,13 @@ export interface PreparedSummary {
 
 export interface SummaryStore {
 	/**
-	 * Opens the system agent's turn and loads the transcript. Fails when the thread
-	 * is gone, has no summariser, or is already summarised this far.
+	 * Opens the Scribe's turn and loads the transcript, or says why there is
+	 * nothing to do. A turn that opening ended stays ended, so skipping is a
+	 * result rather than a failure that would roll the ending back.
 	 */
-	prepare(request: SummaryRequest): Effect.Effect<PreparedSummary, SummarySkipped, Database>;
+	prepare(
+		request: SummaryRequest,
+	): Effect.Effect<PreparedSummary | SummarySkipped, never, Database>;
 	complete(
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
@@ -83,103 +92,96 @@ export const queueSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
 		})
 		.pipe(Effect.asVoid);
 
-export function summaryStore(emit: DomainEvents.Emit<ConversationEvent>): SummaryStore {
+export function summaryStore(
+	emit: DomainEvents.Emit<ConversationEvent>,
+	turns: Pick<TurnRepository, "openScribeTurn" | "completeScribeTurn" | "failScribeTurn">,
+): SummaryStore {
 	return {
 		prepare: (request) =>
 			// One transaction, so the system-agent thread and its turn are created
 			// together or not at all.
 			transaction(
-				Effect.filterOrElse(
-					query((db) =>
-						Effect.gen(function* () {
-							const scope = yield* loadSummarisedThread(db, request);
-							if (!scope) {
-								return new SummarySkipped({
-									reason: "The thread, the agent that triggered it, or its message is gone",
-								});
-							}
-							const summariser = yield* findRunnableSystemAgent(
-								db,
-								scope.workspaceId,
-								SUMMARISE_SYSTEM_AGENT,
-							);
-							if (!summariser) {
-								return new SummarySkipped({
-									reason: "This workspace has chosen no model for the Scribe",
-								});
-							}
+				Effect.gen(function* (): Effect.fn.Return<
+					PreparedSummary | SummarySkipped,
+					never,
+					Database
+				> {
+					const scope = yield* query((db) => loadSummarisedThread(db, request));
+					if (!scope) {
+						return skipped("The thread, the agent that triggered it, or its message is gone");
+					}
+					const summariser = yield* query((db) =>
+						findRunnableSystemAgent(db, scope.workspaceId, SUMMARISE_SYSTEM_AGENT),
+					);
+					if (!summariser) return skipped("This workspace has chosen no model for the Scribe");
 
-							// One query at a time: inside a transaction the executor is a single
-							// connection, and queries sent concurrently down one are not run concurrently
-							// anyway. The driver queues them, and warns that it is about to stop accepting
-							// them at all.
-							const previous = yield* loadThreadSummary(db, scope.threadId);
-							const transcriptRows = yield* loadTranscript(db, scope.threadId);
-							const sourceIndex = transcriptRows.findIndex(
-								(row) => row.id === request.sourceMessageId,
-							);
-							if (sourceIndex === -1) {
-								throw new Error("Thread summary source message disappeared during preparation");
-							}
-							const previousSourceIndex = previous
-								? transcriptRows.findIndex((row) => row.id === previous.sourceMessageId)
-								: -1;
-							if (previousSourceIndex >= sourceIndex) {
-								return new SummarySkipped({
-									reason: "The thread is already summarised to this message",
-								});
-							}
+					// One query at a time: inside a transaction the executor is a single
+					// connection, and queries sent concurrently down one are not run concurrently
+					// anyway. The driver queues them, and warns that it is about to stop accepting
+					// them at all.
+					const previous = yield* query((db) => loadThreadSummary(db, scope.threadId));
+					const transcriptRows = yield* query((db) => loadTranscript(db, scope.threadId));
+					const sourceIndex = transcriptRows.findIndex((row) => row.id === request.sourceMessageId);
+					if (sourceIndex === -1) {
+						return yield* Effect.die(
+							new Error("Thread summary source message disappeared during preparation"),
+						);
+					}
+					const previousSourceIndex = previous
+						? transcriptRows.findIndex((row) => row.id === previous.sourceMessageId)
+						: -1;
+					if (previousSourceIndex >= sourceIndex) {
+						return skipped("The thread is already summarised to this message");
+					}
 
-							const systemAgentThreadId = yield* systemAgentThreadFor(db, scope, summariser.id);
-							const turnId = yield* openSystemAgentTurn(
-								db,
-								request,
-								systemAgentThreadId,
-								summariser,
-							);
+					const systemAgentThreadId = yield* query((db) =>
+						systemAgentThreadFor(db, scope, summariser.id),
+					);
+					const opened = yield* turns.openScribeTurn({
+						threadId: systemAgentThreadId,
+						agentId: summariser.id,
+						triggerMessageId: request.sourceMessageId,
+						model: summariser.model,
+					});
+					if (opened._tag === "NotRunnable") return skipped(opened.reason);
 
-							return {
-								request,
-								turnId,
-								threadId: scope.threadId,
-								workspaceId: scope.workspaceId,
-								sourceMessageId: request.sourceMessageId,
-								threadTitle: scope.threadTitle,
-								model: summariser.model,
-								previousContent: previous?.content,
-								transcript: transcriptRows
-									.slice(
-										Math.max(0, previousSourceIndex + 1 - SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES),
-										sourceIndex + 1,
-									)
-									.flatMap(({ entry }) => (entry ? [entry] : [])),
-							};
-						}),
-					),
-					(outcome): outcome is Exclude<typeof outcome, SummarySkipped> =>
-						!(outcome instanceof SummarySkipped),
-					Effect.fail,
-				),
+					return {
+						_tag: "Prepared",
+						request,
+						turnId: opened.turnId,
+						threadId: scope.threadId,
+						workspaceId: scope.workspaceId,
+						sourceMessageId: request.sourceMessageId,
+						threadTitle: scope.threadTitle,
+						model: summariser.model,
+						previousContent: previous?.content,
+						transcript: transcriptRows
+							.slice(
+								Math.max(0, previousSourceIndex + 1 - SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES),
+								sourceIndex + 1,
+							)
+							.flatMap(({ entry }) => (entry ? [entry] : [])),
+					};
+				}),
 			),
 
 		complete: (prepared, result, accounting) =>
 			transaction(
 				Effect.gen(function* () {
+					const now = yield* DateTime.nowAsDate;
 					if (result.title) {
 						yield* query((db) =>
 							db
 								.update(thread)
-								.set({ title: result.title, updatedAt: new Date() })
+								.set({ title: result.title, updatedAt: now })
 								.where(eq(thread.id, prepared.threadId)),
 						);
-						// And the system-agent thread that holds these summaries, which was
-						// named after the parent before the parent had a real title —
-						// the first summary is what gives it one, so its own name was
-						// always a sentence out of date.
+						// The thread holding the summaries is named after this one, which
+						// had no real title until the first summary gave it one.
 						yield* query((db) =>
 							db
 								.update(thread)
-								.set({ title: summariesTitle(result.title ?? ""), updatedAt: new Date() })
+								.set({ title: summariesTitle(result.title ?? ""), updatedAt: now })
 								.where(
 									and(
 										eq(thread.parentThreadId, prepared.threadId),
@@ -201,24 +203,11 @@ export function summaryStore(emit: DomainEvents.Emit<ConversationEvent>): Summar
 								set: {
 									content: result.content,
 									sourceMessageId: prepared.sourceMessageId,
-									updatedAt: new Date(),
+									updatedAt: now,
 								},
 							}),
 					);
-					yield* query((db) =>
-						db
-							.update(turn)
-							.set({
-								status: "done",
-								usage: accounting.usage,
-								reportedCost:
-									accounting.reportedCost === undefined ? null : String(accounting.reportedCost),
-								contextTokens: accounting.contextTokens ?? null,
-								contextCapacity: accounting.contextCapacity ?? null,
-								finishedAt: new Date(),
-							})
-							.where(eq(turn.id, prepared.turnId)),
-					);
+					yield* turns.completeScribeTurn(prepared.turnId, accounting);
 					yield* emit([
 						ConversationEvent.ThreadSummarised({
 							workspaceId: prepared.workspaceId,
@@ -228,14 +217,12 @@ export function summaryStore(emit: DomainEvents.Emit<ConversationEvent>): Summar
 				}),
 			),
 
-		fail: (prepared, userMessage) =>
-			query((db) =>
-				db
-					.update(turn)
-					.set({ status: "failed", error: userMessage, finishedAt: new Date() })
-					.where(eq(turn.id, prepared.turnId)),
-			).pipe(Effect.asVoid),
+		fail: (prepared, userMessage) => turns.failScribeTurn(prepared.turnId, userMessage),
 	};
+}
+
+function skipped(reason: string): SummarySkipped {
+	return { _tag: "Skipped", reason };
 }
 
 /** The thread being summarised, as much of it as preparing a summary needs. */
@@ -370,43 +357,9 @@ const systemAgentThreadFor = Effect.fn("SummaryStore.systemAgentThreadFor")(func
 		)
 		.limit(1);
 	if (!existing) {
-		throw new Error("Preparing a thread summary returned no system-agent thread");
+		return yield* Effect.die(
+			new Error("Preparing a thread summary returned no system-agent thread"),
+		);
 	}
 	return existing.id;
-});
-
-/** The system agent's turn for this source message: reopened on a retry, created otherwise. */
-const openSystemAgentTurn = Effect.fn("SummaryStore.openSystemAgentTurn")(function* (
-	db: Executor,
-	request: SummaryRequest,
-	systemAgentThreadId: string,
-	summariser: { id: string; model: string },
-) {
-	const [existing] = yield* db
-		.select({ id: turn.id })
-		.from(turn)
-		.where(and(eq(turn.triggerMessageId, request.sourceMessageId), eq(turn.agentId, summariser.id)))
-		.limit(1);
-	if (existing) {
-		yield* db
-			.update(turn)
-			.set({ status: "running", error: null, finishedAt: null })
-			.where(eq(turn.id, existing.id));
-		return existing.id;
-	}
-	const [created] = yield* db
-		.insert(turn)
-		.values({
-			threadId: systemAgentThreadId,
-			agentId: summariser.id,
-			triggerMessageId: request.sourceMessageId,
-			status: "running",
-			model: summariser.model,
-			startedAt: new Date(),
-		})
-		.returning({ id: turn.id });
-	if (!created) {
-		throw new Error("Turn insert returned no row");
-	}
-	return created.id;
 });
