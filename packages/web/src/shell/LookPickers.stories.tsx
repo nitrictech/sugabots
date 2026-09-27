@@ -1,9 +1,10 @@
-import type { AgentColor, AgentFace } from "@sugabots/contracts";
+import type { AgentColor, AgentFace, PodColor } from "@sugabots/contracts";
 import { useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { AgentAvatar } from "./Agent.tsx";
-import { ColourPicker, EyesPicker } from "./LookPickers.tsx";
+import { ColourPicker, EyesPicker, PodColourPicker } from "./LookPickers.tsx";
+import { PodTile } from "./PodTile.tsx";
 
 function Look() {
 	const [color, setColor] = useState<AgentColor>("green");
@@ -32,5 +33,24 @@ export const Pick = meta.story({
 		await expect(canvas.getByRole("radio", { name: "purple" })).toBeChecked();
 		await userEvent.click(canvas.getByRole("radio", { name: "wink" }));
 		await expect(canvas.getByRole("radio", { name: "wink" })).toBeChecked();
+	},
+});
+
+function PodLook() {
+	const [color, setColor] = useState<PodColor>("green");
+	return (
+		<div className="flex max-w-[420px] flex-col items-center gap-4 rounded-panel bg-list p-4">
+			<PodTile bots={[{ color: "sky", face: "pill" }]} color={color} size={72} />
+			<PodColourPicker value={color} onChange={setColor} />
+		</div>
+	);
+}
+
+/** PodColour picks a pod's colour from its own palette; the tile above follows it. */
+export const PodColour = meta.story({
+	render: () => <PodLook />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("radio", { name: "amber" }));
+		await expect(canvas.getByRole("radio", { name: "amber" })).toBeChecked();
 	},
 });

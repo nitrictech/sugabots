@@ -45,6 +45,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 				.values({
 					workspaceId,
 					kind: "shared",
+					color: "green",
 					name: "Support",
 					slug: "support",
 					createdById: adminId,
@@ -97,6 +98,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 				.values({
 					workspaceId: other.id,
 					kind: "shared",
+					color: "green",
 					name: "Other",
 					slug: "other",
 				})

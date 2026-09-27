@@ -125,6 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 					workspaceId,
 					ownerId: memberId,
 					kind: "shared",
+					color: "green",
 					name: "Suga-Team",
 					slug: `suga-${suffix}`,
 					createdById: memberId,
@@ -557,6 +558,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 					workspaceId: otherWorkspace.id,
 					ownerId: memberId,
 					kind: "shared",
+					color: "green",
 					name: "Foreign",
 					slug: "foreign",
 				})

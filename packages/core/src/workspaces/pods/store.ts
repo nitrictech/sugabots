@@ -1,6 +1,8 @@
 import {
+	leastUsedPodColor,
 	PERSONAL_POD_SLUG,
 	type Pod,
+	type PodColor,
 	type PodMember,
 	type PodPermissions,
 	type PodUpdate,
@@ -52,11 +54,12 @@ export interface PodStore {
 	/**
 	 * Creates the pod, puts its creator in it, and places the system agents.
 	 * The slug is derived and validated by the route, so it is required here.
+	 * Without a colour it takes the one fewest of the workspace's pods have.
 	 */
 	create(
 		workspaceId: string,
 		creator: Actor,
-		input: { name: string; slug: string },
+		input: { name: string; slug: string; color?: PodColor },
 	): Effect.Effect<Pod, SlugTaken, Database>;
 	/** Idempotently provisions the private pod and assistant for one member. */
 	ensurePersonal(
@@ -121,7 +124,7 @@ export class PersonalPodFixed extends Data.TaggedError("PersonalPodFixed")<{
 }> {
 	override get message() {
 		return this.attempted === "rename"
-			? "A Personal pod's name and address cannot be changed"
+			? "A Personal pod's name, address and colour cannot be changed"
 			: "Personal pods cannot be deleted";
 	}
 }
@@ -138,17 +141,30 @@ export class FacilitatorNotSetUp extends Data.TaggedError("FacilitatorNotSetUp")
 	}
 }
 
-const create: PodStore["create"] = (workspaceId, creator, { name, slug }) =>
+const create: PodStore["create"] = (workspaceId, creator, { name, slug, color }) =>
 	// The insert and the creator's membership are one unit, so a pod is never
 	// briefly one without the other and whoever made it is in it. It is no
 	// longer a safety net: an admin reaches a shared pod with no members at all
 	// and can add people to it, so an empty pod is recoverable.
 	transaction(
 		Effect.gen(function* () {
+			const taken = yield* query((db) =>
+				db
+					.select({ color: pod.color })
+					.from(pod)
+					.where(and(eq(pod.workspaceId, workspaceId), eq(pod.kind, "shared"))),
+			);
 			const [row] = yield* query((db) =>
 				db
 					.insert(pod)
-					.values({ workspaceId, kind: "shared", name, slug, createdById: creator.userId })
+					.values({
+						workspaceId,
+						kind: "shared",
+						name,
+						slug,
+						color: color ?? leastUsedPodColor(taken.map((one) => one.color)),
+						createdById: creator.userId,
+					})
 					.onConflictDoNothing({
 						target: [pod.workspaceId, pod.slug],
 						where: sql`${pod.kind} = 'shared'`,
@@ -246,7 +262,7 @@ const update: PodStore["update"] = (workspaceId, podId, input) =>
 			return yield* new FacilitatorNotSetUp();
 		}
 
-		if (input.name !== undefined || input.slug !== undefined) {
+		if (input.name !== undefined || input.slug !== undefined || input.color !== undefined) {
 			const [target] = yield* query((db) =>
 				db
 					.select({ kind: pod.kind })
@@ -436,6 +452,7 @@ export function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
 		kind: row.kind,
 		name: row.name,
 		slug: row.slug,
+		color: row.color,
 		routing: row.routing,
 		permissions,
 		createdAt: row.createdAt.toISOString(),

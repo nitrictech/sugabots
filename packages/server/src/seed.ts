@@ -89,6 +89,7 @@ const seed = Effect.gen(function* () {
 						kind,
 						name,
 						slug,
+						color: kind === "shared" ? "green" : null,
 						createdById: person.id,
 					})
 					// A shared pod conflicts on its slug, a Personal one on its owner.

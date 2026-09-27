@@ -789,7 +789,7 @@ describe("creating a pod", () => {
 		expect(create.hasAttribute("disabled")).toBe(false);
 	});
 
-	it("creates one and puts it in the rail", async () => {
+	it("creates one in a colour no other pod has, and puts it in the rail", async () => {
 		const made = { ...pods[0], id: "new", name: "Platform", slug: "platform" };
 		client.api.pods.create.mockReturnValue(Effect.succeed(made));
 
@@ -809,7 +809,8 @@ describe("creating a pod", () => {
 		await waitFor(() => {
 			expect(client.api.pods.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				payload: { name: "Platform" },
+				// Its colour is the one the workspace's green and blue pods leave first.
+				payload: { name: "Platform", color: "plum" },
 			});
 		});
 		expect(await screen.findByRole("heading", { name: "Platform" })).toBeDefined();

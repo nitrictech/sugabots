@@ -85,6 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				.values({
 					workspaceId,
 					kind: "shared",
+					color: "green",
 					name: "Room",
 					slug: `room-${suffix}`,
 					createdById: memberId,

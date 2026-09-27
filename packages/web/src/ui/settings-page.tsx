@@ -201,6 +201,7 @@ export function SettingsFieldRow({
 	value,
 	onChange,
 	placeholder,
+	maxLength,
 	mono = false,
 	secret = false,
 }: {
@@ -208,16 +209,14 @@ export function SettingsFieldRow({
 	value: string;
 	onChange: (value: string) => void;
 	placeholder: string;
+	maxLength?: number;
 	/** For addresses, keys and header names. */
 	mono?: boolean;
 	secret?: boolean;
 }) {
 	const id = useId();
 	return (
-		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label htmlFor={id} className="w-[88px] shrink-0 text-[14px] text-foreground">
-				{label}
-			</label>
+		<SettingsControlRow label={label} htmlFor={id}>
 			<input
 				id={id}
 				type={secret ? "password" : "text"}
@@ -225,12 +224,57 @@ export function SettingsFieldRow({
 				value={value}
 				onChange={(event) => onChange(event.target.value)}
 				placeholder={placeholder}
+				maxLength={maxLength}
 				className={cn(
 					"min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
 					mono ? "font-mono text-[13.5px]" : "text-[14.5px]",
 				)}
 			/>
+		</SettingsControlRow>
+	);
+}
+
+/**
+ * A field row whose control is not a text input, such as a colour picker,
+ * laid out as a `SettingsFieldRow` so the two line up in one form.
+ */
+export function SettingsControlRow({
+	label,
+	htmlFor,
+	children,
+}: {
+	label: string;
+	/** The control's id, when it is one a label can name. */
+	htmlFor?: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
+			<SettingsFieldLabel htmlFor={htmlFor}>{label}</SettingsFieldLabel>
+			{children}
 		</div>
+	);
+}
+
+/**
+ * A field row's label on its own, for a row that is itself the control, such
+ * as a button that opens a list. Given `htmlFor` it labels that control;
+ * without it, it is only text, for a control that names itself.
+ */
+export function SettingsFieldLabel({
+	htmlFor,
+	children,
+}: {
+	htmlFor?: string;
+	children: ReactNode;
+}) {
+	const className = "w-[88px] shrink-0 text-[14px] text-foreground";
+	return htmlFor ? (
+		<label htmlFor={htmlFor} className={className}>
+			{children}
+		</label>
+	) : (
+		<span className={className}>{children}</span>
 	);
 }
 

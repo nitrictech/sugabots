@@ -1,4 +1,4 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Pod, PodColor } from "@sugabots/contracts";
 import { DEFAULT_POD_ROUTING, podSchema } from "@sugabots/contracts";
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { podPermissions } from "@sugabots/core/workspaces/permissions";
@@ -75,6 +75,7 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 	kind,
 	name: "Suga-Team",
 	slug: "suga-team",
+	color: kind === "shared" ? "green" : null,
 	routing: DEFAULT_POD_ROUTING,
 	permissions: podPermissions(
 		{ userId, workspaceRole: userId === admin.id ? "admin" : "member" },
@@ -87,13 +88,14 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 	createdAt: "2026-09-09T00:00:00.000Z",
 });
 
-const row = (input: { name?: string; slug?: string } = {}) => ({
+const row = (input: { name?: string; slug?: string; color?: PodColor } = {}) => ({
 	id: POD,
 	workspaceId: WORKSPACE,
 	ownerId: null,
 	kind: "shared" as const,
 	name: input.name ?? "Suga-Team",
 	slug: input.slug ?? "suga-team",
+	color: input.color ?? "green",
 	routing: DEFAULT_POD_ROUTING,
 	createdById: null,
 	createdAt: new Date("2026-09-09T00:00:00.000Z"),
@@ -101,7 +103,7 @@ const row = (input: { name?: string; slug?: string } = {}) => ({
 });
 
 let store: PodStore;
-let created: { name: string; slug: string } | undefined;
+let created: { name: string; slug: string; color?: PodColor } | undefined;
 let updated: { name?: string; slug?: string } | undefined;
 let added: string[];
 let slugTaken: boolean;
@@ -122,7 +124,8 @@ beforeEach(() => {
 					return yield* new SlugTaken({ slug: input.slug });
 				}
 				created = input;
-				return { ...podFor(creator.userId), ...input };
+				const pod = podFor(creator.userId);
+				return { ...pod, ...input, color: input.color ?? pod.color };
 			}),
 		ensurePersonal: (_workspaceId, owner) =>
 			Effect.succeed({ ...podFor(owner.userId, "personal"), name: "Personal" }),
@@ -131,7 +134,10 @@ beforeEach(() => {
 		// each of its refusals means over HTTP, so the fake raises them too.
 		update: (_workspaceId, _podId, input) =>
 			Effect.gen(function* () {
-				if (podKind === "personal" && (input.name !== undefined || input.slug !== undefined)) {
+				if (
+					podKind === "personal" &&
+					(input.name !== undefined || input.slug !== undefined || input.color !== undefined)
+				) {
 					return yield* new PersonalPodFixed({ attempted: "rename" });
 				}
 				updated = input;

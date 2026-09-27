@@ -1,7 +1,8 @@
-import { type Pod, slugify } from "@sugabots/contracts";
+import { leastUsedPodColor, type Pod, type PodColor, slugify } from "@sugabots/contracts";
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
-import { useCreatePod } from "@/lib/pods.ts";
+import { useCreatePod, usePods } from "@/lib/pods.ts";
+import { PodColourPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {
@@ -10,10 +11,19 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import { SettingsControlRow, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
-/** Making a pod: a name, over the empty tile it starts as. Its bots, people and connections come after. */
+/**
+ * Making a pod: a colour and a name, under the empty tile it starts as, laid
+ * out as New bot is. Its bots, people and connections come after.
+ */
 export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<void> }) {
 	const [name, setName] = useState("");
+	const { data: pods } = usePods();
+	const [chosenColor, setChosenColor] = useState<PodColor>();
+	// Until somebody picks one, the colour the workspace's pods have least of,
+	// so pods made without a second thought still look unlike each other.
+	const color = chosenColor ?? leastUsedPodColor(pods?.map((pod) => pod.color) ?? []);
 	const create = useCreatePod();
 	// The API makes the pod's address from its name, so a name with nothing to make one from is no name.
 	const usable = slugify(name) !== "";
@@ -22,7 +32,7 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 		event.preventDefault();
 		if (!usable) return;
 		try {
-			const pod = await create.mutateAsync({ name });
+			const pod = await create.mutateAsync({ name, color });
 			if (!pod) throw new Error("pod creation returned no pod");
 			await onCreated(pod);
 		} catch {
@@ -31,21 +41,28 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 	}
 
 	return (
-		<DialogForm width="compact" onSubmit={submit}>
+		<DialogForm onSubmit={submit}>
 			<DialogFormHeader title="New pod" />
 
 			<DialogFormBody gap="compact">
-				<div className="flex justify-center pb-1">
-					<PodTile bots={[]} size={72} />
+				<div className="flex justify-center pt-1 pb-2">
+					<PodTile bots={[]} color={color} size={88} />
 				</div>
-				<input
-					aria-label="Name"
-					value={name}
-					onChange={(event) => setName(event.target.value)}
-					placeholder="Pod name, e.g. Support"
-					maxLength={64}
-					className="focus-ring w-full rounded-2xl bg-list px-4 py-3.5 text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
-				/>
+				<SettingsGroup>
+					<SettingsControlRow label="Colour">
+						<PodColourPicker value={color} onChange={setChosenColor} />
+					</SettingsControlRow>
+				</SettingsGroup>
+
+				<SettingsGroup className="mt-2">
+					<SettingsFieldRow
+						label="Name"
+						value={name}
+						onChange={setName}
+						placeholder="e.g. Support"
+						maxLength={64}
+					/>
+				</SettingsGroup>
 				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
 					You'll add bots, people and connections next.
 				</p>

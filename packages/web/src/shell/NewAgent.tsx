@@ -1,6 +1,6 @@
 import type { Agent, AgentColor, AgentFace, Pod } from "@sugabots/contracts";
 import { Check, ChevronRight } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -13,6 +13,12 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import {
+	SettingsControlRow,
+	SettingsFieldLabel,
+	SettingsFieldRow,
+	SettingsGroup,
+} from "@/ui/settings-page.tsx";
 
 /**
  * Making a bot: its face first, as it will look, then its name and the pod it
@@ -40,7 +46,6 @@ export function NewAgentDialog({
 	const models = useModels();
 	const model = models.data?.models[0]?.modelId;
 	const trimmedName = name.trim();
-	const nameId = useId();
 	const chosenPod = pods.find((pod) => pod.id === podId);
 
 	async function submit(event: FormEvent) {
@@ -62,31 +67,23 @@ export function NewAgentDialog({
 				<div className="flex justify-center pt-1 pb-2">
 					<AgentAvatar color={color} face={face} size={88} />
 				</div>
-				<div className="overflow-hidden rounded-panel bg-list">
-					<div className="flex items-center gap-3 border-border border-b px-4 py-3">
-						<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Colour</span>
+				<SettingsGroup>
+					<SettingsControlRow label="Colour">
 						<ColourPicker value={color} onChange={setColor} />
-					</div>
-					<div className="flex items-center gap-3 px-4 py-2.5">
-						<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Eyes</span>
+					</SettingsControlRow>
+					<SettingsControlRow label="Eyes">
 						<EyesPicker color={color} value={face} onChange={setFace} variant="chips" />
-					</div>
-				</div>
+					</SettingsControlRow>
+				</SettingsGroup>
 
-				<div className="mt-2 overflow-hidden rounded-panel bg-list">
-					<div className="flex items-center gap-3 border-border border-b px-4 py-3">
-						<label htmlFor={nameId} className="w-[70px] shrink-0 text-[14px] text-muted-foreground">
-							Name
-						</label>
-						<input
-							id={nameId}
-							value={name}
-							onChange={(event) => setName(event.target.value)}
-							placeholder="e.g. Support Desk"
-							maxLength={64}
-							className="min-w-0 flex-1 bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground"
-						/>
-					</div>
+				<SettingsGroup className="mt-2">
+					<SettingsFieldRow
+						label="Name"
+						value={name}
+						onChange={setName}
+						placeholder="e.g. Support Desk"
+						maxLength={64}
+					/>
 					<PodRow
 						fixed={fixedPodId !== undefined}
 						pods={pods}
@@ -98,7 +95,7 @@ export function NewAgentDialog({
 							setChoosingPod(false);
 						}}
 					/>
-				</div>
+				</SettingsGroup>
 
 				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">
 					{models.isPending || model
@@ -146,11 +143,11 @@ function PodRow({
 	const { agents } = useAgents();
 	const botsIn = (pod: Pod) =>
 		agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
-	const label = <span className="w-[70px] shrink-0 text-[14px] text-muted-foreground">Pod</span>;
+	const label = <SettingsFieldLabel>Pod</SettingsFieldLabel>;
 
 	if (fixed || pods.length <= 1) {
 		return (
-			<div className="flex items-center gap-3 px-4 py-3">
+			<div className="flex min-h-[46px] items-center gap-3 px-4 py-2.5">
 				{label}
 				<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
 					{chosen?.name ?? (fixed ? "This pod" : "No pod to add to")}
@@ -165,7 +162,7 @@ function PodRow({
 				onClick={onToggle}
 				aria-expanded={open}
 				aria-label={`Pod: ${chosen?.name ?? "choose one"}`}
-				className="focus-ring flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel"
+				className="focus-ring flex min-h-[46px] w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-panel"
 			>
 				{label}
 				<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
@@ -188,7 +185,7 @@ function PodRow({
 								aria-pressed={pod.id === chosen?.id}
 								className="focus-ring flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-panel"
 							>
-								<PodTile bots={botsIn(pod)} size={28} />
+								<PodTile bots={botsIn(pod)} color={pod.color} size={28} />
 								<span className="min-w-0 flex-1 truncate text-[14.5px] text-foreground">
 									{pod.name}
 								</span>

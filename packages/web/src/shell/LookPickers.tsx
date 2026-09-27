@@ -1,41 +1,67 @@
 import { botColors, faceMarks } from "@sugabots/avatars";
-import { type AgentColor, type AgentFace, agentColors, agentFaces } from "@sugabots/contracts";
+import {
+	type AgentColor,
+	type AgentFace,
+	agentColors,
+	agentFaces,
+	type PodColor,
+	podColors,
+} from "@sugabots/contracts";
 import { cn } from "cn";
 import { useId } from "react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { podPalettes } from "@/shell/PodTile.tsx";
 
 /*
  * Choosing how a bot looks: one of the eight colours, and one of the eye
- * styles drawn in that colour. Each is a set of native radio buttons, so arrow
- * keys move the choice; the chosen one is ringed in its own colour.
+ * styles drawn in that colour; and a pod's colour, from its own eight. Each is
+ * a set of native radio buttons, so arrow keys move the choice; the chosen one
+ * is ringed in its own colour.
  */
 
-/** The ring round a chosen swatch or face: a gap in the surface's colour, then the bot's colour. */
-function ring(color: AgentColor, surface: string): string {
-	return `0 0 0 3px ${surface}, 0 0 0 5px ${botColors[color].face}`;
+/** The ring round a chosen swatch or face: a gap in the surface's colour, then the chosen colour. */
+function ring(color: string, surface: string): string {
+	return `0 0 0 3px ${surface}, 0 0 0 5px ${color}`;
 }
 
-export function ColourPicker({
+interface ColourPickerProps<Color extends string> {
+	value: Color;
+	onChange: (color: Color) => void;
+	/** The colour behind the picker, which the gap in the ring shows. */
+	surface?: string;
+}
+
+export function ColourPicker(props: ColourPickerProps<AgentColor>) {
+	return <Swatches colors={agentColors} swatch={(color) => botColors[color].face} {...props} />;
+}
+
+export function PodColourPicker(props: ColourPickerProps<PodColor>) {
+	return <Swatches colors={podColors} swatch={(color) => podPalettes[color].swatch} {...props} />;
+}
+
+function Swatches<Color extends string>({
+	colors,
+	swatch,
 	value,
 	onChange,
 	surface = "var(--list)",
-}: {
-	value: AgentColor;
-	onChange: (color: AgentColor) => void;
-	/** The colour behind the picker, which the gap in the ring shows. */
-	surface?: string;
+}: ColourPickerProps<Color> & {
+	colors: readonly Color[];
+	/** How a colour is drawn as its round swatch. */
+	swatch: (color: Color) => string;
 }) {
 	const name = useId();
 	return (
-		<fieldset className="m-0 flex flex-1 flex-wrap gap-2.5 border-0 p-0">
+		// An 8px gap, the widest that fits eight swatches beside a field's label in a settings page.
+		<fieldset className="m-0 flex flex-1 flex-wrap gap-2 border-0 p-0">
 			<legend className="sr-only">Colour</legend>
-			{agentColors.map((color) => (
+			{colors.map((color) => (
 				<label
 					key={color}
 					className="size-7 cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 					style={{
-						background: botColors[color].face,
-						boxShadow: value === color ? ring(color, surface) : undefined,
+						background: swatch(color),
+						boxShadow: value === color ? ring(swatch(color), surface) : undefined,
 					}}
 				>
 					<input
@@ -87,7 +113,9 @@ export function EyesPicker({
 							: "rounded-full",
 					)}
 					style={
-						variant === "faces" && value === face ? { boxShadow: ring(color, surface) } : undefined
+						variant === "faces" && value === face
+							? { boxShadow: ring(botColors[color].face, surface) }
+							: undefined
 					}
 				>
 					<input

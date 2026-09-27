@@ -85,11 +85,11 @@ export function RailView({
 			)}
 		>
 			<RailItem label="All" selected={selected === "all"}>
-				<PodTile bots={shared.flatMap(({ bots }) => bots.slice(0, 1))} size={46} />
+				<PodTile bots={shared.flatMap(({ bots }) => bots.slice(0, 1))} color={null} size={46} />
 			</RailItem>
 			{shared.map(({ pod, bots }) => (
 				<RailItem key={pod.id} label={pod.name} selected={selected === pod.slug} pod={pod}>
-					<PodTile bots={bots} size={46} />
+					<PodTile bots={bots} color={pod.color} size={46} />
 				</RailItem>
 			))}
 

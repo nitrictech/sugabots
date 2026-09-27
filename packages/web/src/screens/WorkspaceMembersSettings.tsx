@@ -407,7 +407,7 @@ function PodMembershipRow({
 
 	return (
 		<SettingsRow
-			icon={<PodTile bots={bots} size={30} />}
+			icon={<PodTile bots={bots} color={pod.color} size={30} />}
 			label={pod.name}
 			sub={place.error ? failureMessage(place.error) : counts.join(", ")}
 			trailing={

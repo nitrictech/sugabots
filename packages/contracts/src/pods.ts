@@ -40,6 +40,39 @@ export const sharedPodSlugSchema = podSlugSchema.check(
 	}),
 );
 
+/**
+ * The colours a shared pod's tile can be, in the order a colour picker shows
+ * them and new pods take them. Their own list rather than the bots' colours:
+ * a tile fills its whole square, so its hues are spread evenly round the
+ * wheel where the bots' have two blues a face can tell apart and a tile
+ * cannot. Each names a tile palette; see `podPalettes` in the web app's
+ * `PodTile`.
+ */
+export const podColors = [
+	"green",
+	"blue",
+	"plum",
+	"amber",
+	"teal",
+	"purple",
+	"rose",
+	"orange",
+] as const;
+
+export const podColorSchema = Schema.Literals(podColors);
+
+export type PodColor = typeof podColorSchema.Type;
+
+/**
+ * The palette's first colour that the fewest of `taken` have, so a
+ * workspace's pods go through every colour before any repeats. What a new pod
+ * is given when it names no colour, and what a form offers it first.
+ */
+export function leastUsedPodColor(taken: readonly (PodColor | null)[]): PodColor {
+	const uses = (color: PodColor) => taken.filter((one) => one === color).length;
+	return podColors.reduce((best, color) => (uses(color) < uses(best) ? color : best));
+}
+
 /** Whether the Facilitator chooses speakers in non-chat threads (ADR 004). */
 export const podRoutingSchema = Schema.Struct({
 	facilitator: Schema.Boolean,
@@ -62,7 +95,7 @@ export const DEFAULT_POD_ROUTING: PodRouting = { facilitator: false };
  * whether to draw something.
  */
 export const podPermissionsSchema = Schema.Struct({
-	/** Change the pod's name and address. Never on a Personal pod, which keeps both. */
+	/** Change the pod's name, address and colour. Never on a Personal pod, which keeps all three. */
 	rename: Schema.Boolean,
 	changeRouting: Schema.Boolean,
 	/** Add and remove members. Never on a Personal pod, which is one person's. */
@@ -86,6 +119,8 @@ export const podSchema = Schema.Struct({
 	kind: Schema.Literals(["personal", "shared"]),
 	name: Schema.String,
 	slug: podSlugSchema,
+	/** `null` on a Personal pod, which is drawn as its lock rather than a tile. */
+	color: Schema.NullOr(podColorSchema),
 	routing: podRoutingSchema,
 	permissions: podPermissionsSchema,
 	createdAt: isoTimestampSchema,
@@ -97,6 +132,8 @@ export const newPodSchema = Schema.Struct({
 	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 	/** Derived from the name when it is left out. */
 	slug: Schema.optional(sharedPodSlugSchema),
+	/** The colour fewest of the workspace's pods have when it is left out. */
+	color: Schema.optional(podColorSchema),
 });
 
 export type NewPod = typeof newPodSchema.Type;

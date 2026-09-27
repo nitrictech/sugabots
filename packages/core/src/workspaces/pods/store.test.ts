@@ -148,6 +148,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			const rows = await onDatabase((db) => db.select().from(pod));
 			expect(rows.filter((row) => row.workspaceId === workspaceId)).toHaveLength(2);
 		});
+
+		it("gives a pod with no colour chosen one no other pod in the workspace has yet", async () => {
+			await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga", color: "green" });
+			await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales", color: "plum" });
+
+			const made = await store.create(workspaceId, asAdmin(), { name: "Ops", slug: "ops" });
+
+			expect(made.color).toBe("blue");
+		});
 	});
 
 	describe("membership", () => {
@@ -286,13 +295,16 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).rejects.toThrow();
 		});
 
-		it("does not change its name or address", async () => {
+		it("does not change its name, address or colour", async () => {
 			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
 
 			await expect(store.update(workspaceId, personal.id, { name: "Mine" })).rejects.toThrow(
 				PersonalPodFixed,
 			);
 			await expect(store.update(workspaceId, personal.id, { slug: "mine" })).rejects.toThrow(
+				PersonalPodFixed,
+			);
+			await expect(store.update(workspaceId, personal.id, { color: "rose" })).rejects.toThrow(
 				PersonalPodFixed,
 			);
 		});

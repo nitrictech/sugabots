@@ -47,3 +47,13 @@ export const Named = meta.story({
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeEnabled();
 	},
 });
+
+/** Opens on the first colour a new pod takes, and another can be picked for the tile. */
+export const Recoloured = meta.story({
+	play: async ({ userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New pod" });
+		await expect(within(dialog).getByRole("radio", { name: "green" })).toBeChecked();
+		await userEvent.click(within(dialog).getByRole("radio", { name: "plum" }));
+		await expect(within(dialog).getByRole("radio", { name: "plum" })).toBeChecked();
+	},
+});

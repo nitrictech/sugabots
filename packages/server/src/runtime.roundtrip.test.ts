@@ -110,6 +110,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 					workspaceId: space.id,
 					ownerId: member.id,
 					kind: "shared",
+					color: "green",
 					name: "Room",
 					slug: `room-${suffix}`,
 					createdById: member.id,

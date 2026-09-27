@@ -21,6 +21,7 @@ import {
 import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { PodColourPicker } from "@/shell/LookPickers.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -38,6 +39,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import {
 	SettingsAddMark,
 	SettingsAddRow,
+	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsListColumn,
@@ -166,7 +168,7 @@ function PodPicture({ pod, bots, size }: { pod: Pod; bots: readonly Agent[]; siz
 			</span>
 		);
 	}
-	return <PodTile bots={bots} size={size} />;
+	return <PodTile bots={bots} color={pod.color} size={size} />;
 }
 
 function PodDetails({
@@ -217,6 +219,16 @@ function PodDetails({
 					/>
 				</SettingsGroup>
 			)}
+			{may.rename && pod.color !== null && (
+				<SettingsGroup label="Look">
+					<SettingsControlRow label="Colour">
+						<PodColourPicker
+							value={pod.color}
+							onChange={(color) => void update.mutateAsync({ color }).catch(() => {})}
+						/>
+					</SettingsControlRow>
+				</SettingsGroup>
+			)}
 			<ConnectionsSettings
 				podId={pod.id}
 				podName={pod.name}
@@ -264,10 +276,7 @@ function NameRow({
 	}
 
 	return (
-		<div className="flex items-center gap-3 px-4 py-3">
-			<label htmlFor={id} className="w-[110px] shrink-0 text-[14px] text-muted-foreground">
-				Name
-			</label>
+		<SettingsControlRow label="Name" htmlFor={id}>
 			<input
 				id={id}
 				value={draft}
@@ -280,7 +289,7 @@ function NameRow({
 				maxLength={64}
 				className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
 			/>
-		</div>
+		</SettingsControlRow>
 	);
 }
 

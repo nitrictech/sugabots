@@ -116,6 +116,7 @@ function podRow(workspaceId: string, pod: TestPod): schema.PodRow {
 		kind: pod.kind ?? "shared",
 		name: pod.name ?? "Suga-Team",
 		slug: pod.slug ?? "suga-team",
+		color: (pod.kind ?? "shared") === "shared" ? "green" : null,
 		routing: pod.routing ?? DEFAULT_POD_ROUTING,
 		createdById: null,
 		createdAt: CREATED_AT,
