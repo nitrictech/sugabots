@@ -1,5 +1,5 @@
-import { and, eq, ne, type SQL, sql } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
+import { Data, Duration, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import { type JobKind, type JobPayloadOf, job } from "../../database/schema.ts";
 
@@ -177,13 +177,31 @@ export const claimNextJob = <Kind extends JobKind>(
 	);
 
 /**
- * Puts back jobs left `running` by a process that stopped mid-way, so they are
- * claimed again. A job queued behind an interrupted one for the same work is
- * cancelled first, because two queued jobs may not share a key and the retry
- * covers whatever the later one was for.
+ * How long a running job's lease lasts without renewal. The worker holding it
+ * renews it well within this (see `workerLayer`), so a job whose lease has
+ * lapsed belongs to a process that stopped, not one that is still running it.
  */
-export const requeueInterruptedJobs = (kind: JobKind): Effect.Effect<void, never, Database> =>
-	transaction(
+export const JOB_LEASE = Duration.seconds(60);
+
+/** Extends the leases of the running jobs a worker holds. */
+export const renewJobLeases = (jobIds: readonly string[]): Effect.Effect<void, never, Database> =>
+	query((db) =>
+		db
+			.update(job)
+			.set({ lockedAt: sql`now()` })
+			.where(and(inArray(job.id, [...jobIds]), eq(job.status, "running"))),
+	).pipe(Effect.asVoid);
+
+/**
+ * Puts back jobs whose lease has lapsed, so they are claimed again. A job
+ * queued behind one of them for the same work is cancelled first, because two
+ * queued jobs may not share a key and the retry covers whatever the later one
+ * was for.
+ */
+export const requeueInterruptedJobs = (kind: JobKind): Effect.Effect<void, never, Database> => {
+	const lapsed = (alias: SQL) =>
+		sql`${alias}.status = 'running' and ${alias}.locked_at < now() - make_interval(secs => ${Duration.toSeconds(JOB_LEASE)})`;
+	return transaction(
 		Effect.gen(function* () {
 			yield* query((db) =>
 				db.execute(sql`
@@ -194,19 +212,21 @@ export const requeueInterruptedJobs = (kind: JobKind): Effect.Effect<void, never
 						and exists (
 							select 1 from ${job} active
 							where active.kind = ${kind}
-								and active.status = 'running'
+								and ${lapsed(sql`active`)}
 								and active.dedupe_key = queued.dedupe_key
 						)
 				`),
 			);
 			yield* query((db) =>
-				db
-					.update(job)
-					.set({ status: "queued", lockedAt: null, availableAt: new Date() })
-					.where(and(eq(job.kind, kind), eq(job.status, "running"))),
+				db.execute(sql`
+					update ${job} expired
+					set status = 'queued', locked_at = null, available_at = now(), updated_at = now()
+					where expired.kind = ${kind} and ${lapsed(sql`expired`)}
+				`),
 			);
 		}),
 	);
+};
 
 export const completeJob = (jobId: string): Effect.Effect<void, never, Database> =>
 	query((db) =>
