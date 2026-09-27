@@ -27,7 +27,12 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+} from "@/ui/dialog-form.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -451,13 +456,7 @@ function InviteDialog({ workspaceId, done }: { workspaceId: string; done: () => 
 
 	return (
 		<DialogForm onSubmit={submit}>
-			<DialogFormHeader
-				title="Invite people"
-				action="Send"
-				actionDisabled={sending || emails.length === 0}
-				cancelDisabled={sending}
-				onCancel={done}
-			/>
+			<DialogFormHeader title="Invite people" />
 			<DialogFormBody>
 				<label htmlFor={emailsId} className="sr-only">
 					Email addresses
@@ -494,6 +493,12 @@ function InviteDialog({ workspaceId, done }: { workspaceId: string; done: () => 
 					</Alert>
 				)}
 			</DialogFormBody>
+			<DialogFormFooter
+				action="Send"
+				actionDisabled={sending || emails.length === 0}
+				cancelDisabled={sending}
+				onCancel={done}
+			/>
 		</DialogForm>
 	);
 }

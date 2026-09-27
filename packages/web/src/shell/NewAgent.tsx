@@ -7,7 +7,12 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+} from "@/ui/dialog-form.tsx";
 
 /**
  * Making a bot: its face first, as it will look, then its name and the pod it
@@ -51,11 +56,7 @@ export function NewAgentDialog({
 
 	return (
 		<DialogForm onSubmit={submit}>
-			<DialogFormHeader
-				title="New bot"
-				action="Create"
-				actionDisabled={!trimmedName || !model || !podId || create.isPending}
-			/>
+			<DialogFormHeader title="New bot" />
 
 			<DialogFormBody gap="compact">
 				<div className="flex justify-center pt-1 pb-2">
@@ -115,6 +116,10 @@ export function NewAgentDialog({
 					</Alert>
 				)}
 			</DialogFormBody>
+			<DialogFormFooter
+				action="Create"
+				actionDisabled={!trimmedName || !model || !podId || create.isPending}
+			/>
 		</DialogForm>
 	);
 }

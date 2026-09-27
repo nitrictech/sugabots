@@ -3,6 +3,7 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
+	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
 	DialogFormStep,
@@ -67,7 +68,7 @@ export function AgentToolsDialog({
 						onOpenChange(false);
 					}}
 				>
-					<DialogFormHeader title={`${connection.name} tools`} action="Done" cancel={false} />
+					<DialogFormHeader title={`${connection.name} tools`} />
 					<DialogFormBody>
 						<div className="flex items-center gap-2.5 px-1">
 							<ConnectionMark presetId={presetId} name={connection.name} size="sm" />
@@ -99,6 +100,7 @@ export function AgentToolsDialog({
 							})}
 						</div>
 					</DialogFormBody>
+					<DialogFormFooter action="Done" cancel={false} />
 				</DialogFormStep>
 			</DialogFormFrame>
 		</Dialog>

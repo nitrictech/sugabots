@@ -4,7 +4,12 @@ import { failureMessage } from "@/lib/failure.ts";
 import { useCreatePod } from "@/lib/pods.ts";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+} from "@/ui/dialog-form.tsx";
 
 /** Making a pod: a name, over the empty tile it starts as. Its bots, people and connections come after. */
 export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<void> }) {
@@ -27,11 +32,7 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 
 	return (
 		<DialogForm width="compact" onSubmit={submit}>
-			<DialogFormHeader
-				title="New pod"
-				action="Create"
-				actionDisabled={!usable || create.isPending}
-			/>
+			<DialogFormHeader title="New pod" />
 
 			<DialogFormBody gap="compact">
 				<div className="flex justify-center pb-1">
@@ -58,6 +59,7 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 					</Alert>
 				)}
 			</DialogFormBody>
+			<DialogFormFooter action="Create" actionDisabled={!usable || create.isPending} />
 		</DialogForm>
 	);
 }
