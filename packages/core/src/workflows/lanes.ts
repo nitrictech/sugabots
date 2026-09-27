@@ -128,6 +128,18 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 								),
 						),
 					),
+					// An execution that had already finished is not run again, so it
+					// will never release the lane itself.
+					Effect.andThen(
+						engine.poll(general(workflow), executionId) as Effect.Effect<
+							Option.Option<Workflow.Result<unknown, unknown>>
+						>,
+					),
+					Effect.flatMap((result) =>
+						Option.isSome(result) && result.value._tag === "Complete"
+							? Effect.suspend(() => release({ key, executionId }))
+							: Effect.void,
+					),
 					provide,
 					Effect.asVoid,
 				),
@@ -190,13 +202,14 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 				}),
 			).pipe(provide);
 
-		const release: Interface["release"] = ({ key, executionId }) =>
-			transaction(
-				Effect.gen(function* () {
-					const [current] = yield* query((db) =>
-						db.select().from(lane).where(eq(lane.key, key)).for("update"),
-					);
-					if (current?.executionId !== executionId) return;
+		/**
+		 * The oldest request waiting in the lane. Requests for the execution
+		 * that is releasing it are dropped: starting that execution again would
+		 * only attach to it as it finishes, and nothing would free the lane.
+		 */
+		const nextRequest = (key: string, releasing: string) =>
+			Effect.gen(function* () {
+				while (true) {
 					const [next] = yield* query((db) =>
 						db
 							.select()
@@ -205,6 +218,22 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
 							.limit(1),
 					);
+					if (!next) return undefined;
+					const workflow = workflowNamed(next.workflow);
+					const executionId = yield* workflow.executionId(decodePayload(workflow, next.payload));
+					if (executionId !== releasing) return next;
+					yield* query((db) => db.delete(laneRequest).where(eq(laneRequest.id, next.id)));
+				}
+			});
+
+		const release: Interface["release"] = ({ key, executionId }) =>
+			transaction(
+				Effect.gen(function* () {
+					const [current] = yield* query((db) =>
+						db.select().from(lane).where(eq(lane.key, key)).for("update"),
+					);
+					if (current?.executionId !== executionId) return;
+					const next = yield* nextRequest(key, executionId);
 					if (!next) {
 						yield* query((db) =>
 							db

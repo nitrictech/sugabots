@@ -1,12 +1,15 @@
 import { chatStore } from "@sugabots/core/conversations/chats/store";
+import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
+import { queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
+import { turnSignals } from "@sugabots/core/conversations/turns/signals";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
-import { turnSignalsForTests } from "@sugabots/core/conversations/turns/testing";
+import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
+import { stepsLayer } from "@sugabots/core/conversations/turns/worker";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
@@ -23,25 +26,37 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
+import { Lanes } from "@sugabots/core/workflows/lanes";
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it } from "vitest";
 import { backgroundLayer } from "./runtime.ts";
 
 /**
- * The whole round trip through the real workers: the host's model calls the
- * collaborate tool, the helper's turn runs on the same worker, and the host's
- * turn should finish as soon as the helper's does, not when the wait expires.
+ * The whole round trip through the real turn workflow and workers: the host's
+ * model calls the collaborate tool, the helper's turn runs in its own
+ * workflow, and the host's turn should finish as soon as the helper's does,
+ * not when the wait expires.
  */
 const database = await databaseForTests.context();
 const eventStore = await databaseForTests.runPromise(postgresEventStore);
+const workflows = ManagedRuntime.make(
+	Lanes.layer([Turn]).pipe(
+		Layer.provideMerge(WorkflowEngine.layerMemory),
+		Layer.provide(Layer.succeedContext(database)),
+	),
+);
+const engine = await workflows.context();
 
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
 	const bus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(bus);
-	const turns = turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests);
-	const chats = chatStore(publishEvents, queueTurnAsJob);
-	const collaborations = collaborationStore(publishEvents, queueTurnAsJob);
+	const queueTurn = queueTurnInLane(Context.get(engine, Lanes.Service));
+	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
+	const turns = turnStore(publishEvents, queueTurn, signals);
+	const chats = chatStore(publishEvents, queueTurn);
+	const collaborations = collaborationStore(publishEvents, queueTurn);
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
 		stream: (input) =>
@@ -71,18 +86,34 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		turns,
 		// Summaries run as workflows now; this test is about turns.
 		queueSummary: () => Effect.void,
+		queueTurn,
 		collaborations,
 		calls: toolCallStore(publishEvents),
 		builtInTools: noBuiltInTools,
 		connectionTools: noConnectionTools,
 		publishEvents,
 	});
+	const turnWorkflows = Turn.toLayer(turnWorkflow).pipe(
+		Layer.provideMerge(
+			stepsLayer({
+				store: turns,
+				model,
+				events: bus,
+				collaborations,
+				calls: toolCallStore(publishEvents),
+				approvals: toolApprovalStore(publishEvents, signals),
+				queueSummary: () => Effect.void,
+			}),
+		),
+		Layer.provide(Layer.succeedContext(engine)),
+	);
 	const runtime = ManagedRuntime.make(
-		background.pipe(Layer.provideMerge(Layer.succeedContext(database))),
+		Layer.merge(background, turnWorkflows).pipe(Layer.provideMerge(Layer.succeedContext(database))),
 	);
 
 	afterAll(async () => {
 		await runtime.dispose();
+		await workflows.dispose();
 		await closeDatabase();
 	});
 
@@ -210,6 +241,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		);
 
 		expect(hostTurn?.status).toBe("done");
+		expect(
+			await onDatabase((db) => db.select().from(job).where(eq(job.threadId, opened.mainThreadId))),
+		).toEqual([]);
 		expect(made).toMatchObject({ status: "answered", answer: "A dog named Krypto." });
 		expect(reply?.content).toBe("Helper says: A dog named Krypto.");
 		// Well inside the tool's wait: the answer woke it, the timeout did not.

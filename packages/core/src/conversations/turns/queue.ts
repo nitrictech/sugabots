@@ -1,9 +1,9 @@
 import { type SQL, sql } from "drizzle-orm";
-import type { Effect } from "effect";
+import { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
-import { laneBusy } from "../../workflows/lanes.ts";
+import { type Lanes, laneBusy } from "../../workflows/lanes.ts";
 import { enqueueJob, hasPendingResponseJob } from "../jobs/queue.ts";
-import { Turn, type TurnRequest } from "./turn.workflow.ts";
+import { Turn, type TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**
  * Asks for an agent's turn, in the caller's transaction. A turn already asked
@@ -13,7 +13,21 @@ import { Turn, type TurnRequest } from "./turn.workflow.ts";
  */
 export type QueueTurn = (request: TurnRequest) => Effect.Effect<void, never, Database>;
 
-/** Turns as jobs on the job queue. */
+/** Turns as turn workflows, one at a time per agent per thread. */
+export const queueTurnInLane =
+	(lanes: Lanes.Interface): QueueTurn =>
+	(request) =>
+		lanes
+			.admit({
+				key: turnLane(request),
+				subject: request.threadId,
+				workflow: Turn,
+				payload: request,
+				whenBusy: "coalesce",
+			})
+			.pipe(Effect.asVoid);
+
+/** Turns as jobs on the job queue, before turns ran as workflows. */
 export const queueTurnAsJob: QueueTurn = (request) =>
 	enqueueJob({
 		kind: "turn",

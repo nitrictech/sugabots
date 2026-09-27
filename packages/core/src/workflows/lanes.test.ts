@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it } from "vitest";
 import { layer as databaseLayer, query } from "../database/database.ts";
@@ -15,9 +15,17 @@ const Held = Workflow.make("test/lane-held", {
 const Forever = DurableDeferred.make("forever");
 const HeldLive = Held.toLayer(() => DurableDeferred.await(Forever));
 
+// Finishes at once, without releasing its lane.
+const Done = Workflow.make("test/lane-done", {
+	payload: { key: Schema.String, request: Schema.String },
+	idempotencyKey: (payload) => `${payload.key}/${payload.request}`,
+});
+const DoneLive = Done.toLayer(() => Effect.void);
+
 const runtime = ManagedRuntime.make(
-	Lanes.layer([Held]).pipe(
+	Lanes.layer([Held, Done]).pipe(
 		Layer.provideMerge(HeldLive),
+		Layer.provideMerge(DoneLive),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),
@@ -92,6 +100,44 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(await waitingIn(key)).toEqual([]);
 
 		await run(service.release({ key, executionId: await executionIdOf(key, "b") }));
+		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+	});
+
+	it("drops a request for the execution that is releasing the lane", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const payload = { key, request: "same" };
+		await run(service.admit({ key, workflow: Held, payload, whenBusy: "queue" }));
+		expect(await run(service.admit({ key, workflow: Held, payload, whenBusy: "queue" }))).toBe(
+			"waiting",
+		);
+
+		await run(service.release({ key, executionId: await executionIdOf(key, "same") }));
+
+		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+		expect(await waitingIn(key)).toEqual([]);
+	});
+
+	it("frees the lane at once when asked to run an execution that has finished", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const payload = { key, request: "finished" };
+		await run(service.admit({ key, workflow: Done, payload, whenBusy: "queue" }));
+		const executionId = await run(Done.executionId(payload));
+		await run(
+			Done.poll(executionId).pipe(
+				Effect.flatMap((result) =>
+					Option.isSome(result) && result.value._tag === "Complete"
+						? Effect.void
+						: Effect.fail("running"),
+				),
+				Effect.retry({ times: 100, schedule: Schedule.spaced(Duration.millis(10)) }),
+			),
+		);
+		await run(service.release({ key, executionId }));
+
+		await run(service.admit({ key, workflow: Done, payload, whenBusy: "queue" }));
+
 		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
 	});
 

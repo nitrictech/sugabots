@@ -13,7 +13,7 @@ import { collaborationStore } from "@sugabots/core/conversations/tools/collabora
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
-import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
+import { queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
@@ -91,6 +91,7 @@ const main = Effect.gen(function* () {
 	);
 	const lanes = Context.get(engine, Lanes.Service);
 	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
+	const queueTurn = queueTurnInLane(lanes);
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -99,12 +100,12 @@ const main = Effect.gen(function* () {
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
-		chats: chatStore(publishEvents, queueTurnAsJob),
-		routines: routineStore(publishEvents, queueTurnAsJob, signals),
+		chats: chatStore(publishEvents, queueTurn),
+		routines: routineStore(publishEvents, queueTurn, signals),
 		threads: threadStore(),
-		turns: turnStore(publishEvents, queueTurnAsJob, signals),
+		turns: turnStore(publishEvents, queueTurn, signals),
 		summaries: summaryStore(publishEvents),
-		collaborations: collaborationStore(publishEvents, queueTurnAsJob),
+		collaborations: collaborationStore(publishEvents, queueTurn),
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents, signals),
 	};
@@ -131,8 +132,8 @@ const main = Effect.gen(function* () {
 		},
 	});
 
-	// Summaries are the first workflows to move from the job queue; turns are
-	// registered but still run as jobs until the code that starts them moves over.
+	// Summaries and turns run as workflows. The turn job worker in the
+	// background layer only drains turns queued as jobs before this release.
 	yield* Layer.build(
 		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turnWorkflow), Lanes.reconcileLayer).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
@@ -161,6 +162,7 @@ const main = Effect.gen(function* () {
 			model,
 			turns: stores.turns,
 			queueSummary: (request) => queueSummary(lanes, request),
+			queueTurn,
 			routines: stores.routines,
 			collaborations: stores.collaborations,
 			calls: stores.calls,
