@@ -1,0 +1,56 @@
+---
+title: Run, update, and reset
+description: Day-to-day commands for a local installation.
+---
+
+## Run it again
+
+After the first [setup](/docs/quickstart):
+
+```sh
+docker compose up -d
+bun run db:migrate
+bun run dev
+```
+
+Press `Ctrl-C` to stop the web app and API. Stop PostgreSQL separately with:
+
+```sh
+docker compose stop
+```
+
+## Update an installation
+
+<Tip>
+
+Back up your PostgreSQL volume and `.env` before updating an installation that
+contains data you care about.
+
+</Tip>
+
+Stop `bun run dev`, then run:
+
+```sh
+git pull --ff-only
+bun install
+docker compose up -d
+bun run db:migrate
+bun run dev
+```
+
+## Reset everything
+
+The following removes the database volume and all Sugabots data:
+
+```sh
+docker compose down -v
+docker compose up -d
+bun run db:migrate
+```
+
+<Careful>
+
+Do not run `docker compose down -v` unless you intend to delete every account,
+workspace, conversation, and saved credential.
+
+</Careful>

@@ -1,0 +1,42 @@
+---
+title: Deploy with Docker
+description: Run the API and the built web app from one image.
+---
+
+One image runs the whole application: the API, serving the built web app at
+every path outside `/api`. Any platform that builds a `Dockerfile` from a
+repository can run it, such as Railway, Render or Suga; point the service at
+the repository root and give it a PostgreSQL 18 database.
+
+```sh
+docker build -t sugabots .
+```
+
+## Configure the container
+
+The container takes the variables described in
+[Configuration](/docs/configuration). In production, at minimum set:
+
+- `DATABASE_URL`
+- `PUBLIC_URL`: the installation's public address, the one in the browser's
+  address bar
+- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`, each generated with
+  `openssl rand -base64 32`
+- `EMAIL_TRANSACTIONAL_FROM`
+
+Sign-up is closed unless `ALLOW_OPEN_SIGNUP=true`: the first account claims the
+installation and the rest arrive by invitation. `REQUIRE_EMAIL_VERIFICATION=true`
+additionally withholds a session until the address is proven, and then
+`EMAIL_PROVIDER=webhook` and `EMAIL_WEBHOOK_URL` must be set.
+
+## Migrations
+
+On start the container applies pending database migrations, then listens on
+`$PORT`. Set `SUGABOTS_SKIP_MIGRATIONS=true` to skip that, for example when a
+deploy step migrates or several instances share a database.
+
+## Host the web app separately
+
+To host the web app on an origin of its own, set its address in `WEB_APP_URL`
+and build the web app with `VITE_API_URL`. The image still serves its own copy
+at its own address.
