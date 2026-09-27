@@ -14,7 +14,7 @@ import { allLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
-import { PodTile } from "@/shell/PodTile.tsx";
+import { AllPodsTile, PodTile } from "@/shell/PodTile.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -85,7 +85,7 @@ export function RailView({
 			)}
 		>
 			<RailItem label="All" selected={selected === "all"}>
-				<PodTile bots={shared.flatMap(({ bots }) => bots.slice(0, 1))} color={null} size={46} />
+				<AllPodsTile colors={shared.flatMap(({ pod }) => pod.color ?? [])} size={46} />
 			</RailItem>
 			{shared.map(({ pod, bots }) => (
 				<RailItem key={pod.id} label={pod.name} selected={selected === pod.slug} pod={pod}>

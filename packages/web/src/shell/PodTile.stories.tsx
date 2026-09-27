@@ -1,7 +1,7 @@
 import type { BotLook } from "@sugabots/avatars";
 import { podColors } from "@sugabots/contracts";
 import preview from "#storybook/preview";
-import { PodTile, type PodTileSize } from "./PodTile.tsx";
+import { AllPodsTile, PodTile, type PodTileSize } from "./PodTile.tsx";
 
 const revenue: BotLook[] = [
 	{ color: "green", face: "pill" },
@@ -53,6 +53,17 @@ export const Colours = meta.story({
 						<PodTile key={color} bots={bots} color={color} size={46} />
 					))}
 				</div>
+			))}
+		</div>
+	),
+});
+
+/** AllPods is All on the rail with one to four pods: their colours, and faint squares where there is none. */
+export const AllPods = meta.story({
+	render: () => (
+		<div className="flex gap-3">
+			{[1, 2, 3, 4].map((count) => (
+				<AllPodsTile key={count} colors={podColors.slice(0, count)} size={46} />
 			))}
 		</div>
 	),

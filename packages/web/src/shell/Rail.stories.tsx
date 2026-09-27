@@ -34,7 +34,7 @@ export const Default = meta.story({
 	},
 });
 
-/** All is the virtual pod chosen; its tile shows the first bot of each pod. */
+/** All is the virtual pod chosen; its tile shows the first four pods' colours. */
 export const AllChosen = meta.story({ args: { selected: "all" } });
 
 /** Personal is chosen, below the divider. */
