@@ -27,6 +27,8 @@ import { modelProviderStore } from "@sugabots/core/providers/model-providers/sto
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import { Lanes } from "@sugabots/core/workflows/lanes";
+import { Outbox } from "@sugabots/core/workflows/outbox";
+import { reconcileLayer } from "@sugabots/core/workflows/reconcile";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
@@ -122,9 +124,9 @@ const main = Effect.gen(function* () {
 	// Durable workflows, on the engine WORKFLOW_ENGINE names. Summaries are the
 	// first to move from the job queue; the rest follow.
 	const workflows = yield* Layer.build(
-		Layer.mergeAll(Summary.toLayer(summary), Lanes.reconcileLayer).pipe(
+		Layer.mergeAll(Summary.toLayer(summary), reconcileLayer).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
-			Layer.provideMerge(Lanes.layer([Summary])),
+			Layer.provideMerge(Layer.mergeAll(Lanes.layer([Summary]), Outbox.layer([Summary]))),
 			Layer.provideMerge(Workflows.engine),
 		),
 	);

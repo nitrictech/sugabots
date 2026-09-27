@@ -41,3 +41,32 @@ export const laneRequest = pgTable(
 	},
 	(table) => [index("lane_request_order_idx").on(table.laneKey, table.createdAt, table.id)],
 );
+
+export type OutboxKind = "signal" | "interrupt";
+
+/**
+ * Messages for a workflow engine that follow a domain write: recorded in the
+ * write's transaction, sent once it commits, and removed when delivered. See
+ * `workflows/outbox.ts`.
+ */
+export const workflowOutbox = pgTable(
+	"workflow_outbox",
+	{
+		id: primaryKey(),
+		kind: text("kind").$type<OutboxKind>().notNull(),
+		workflow: text("workflow").notNull(),
+		executionId: text("execution_id").notNull(),
+		/** For a signal: the deferred's name, and its exit encoded with the deferred's own schema. */
+		deferred: text("deferred"),
+		exit: jsonb("exit").$type<unknown>(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		check("workflow_outbox_kind_check", sql`${table.kind} in ('signal', 'interrupt')`),
+		check(
+			"workflow_outbox_signal_check",
+			sql`(${table.kind} = 'signal') = (${table.deferred} is not null and ${table.exit} is not null)`,
+		),
+		index("workflow_outbox_age_idx").on(table.createdAt),
+	],
+);
