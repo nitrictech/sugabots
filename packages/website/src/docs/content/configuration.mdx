@@ -14,13 +14,13 @@ set them under `environment` in `compose.yml`.
 
 ## Server
 
-| Variable                   | Default                                            | Description                                                                                                                                               |
-| -------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                 | `development`, or `production` in the Docker image | `development` or `production`.                                                                                                                            |
-| `PORT`                     | `3000`                                             | Port the API binds.                                                                                                                                       |
-| `PUBLIC_URL`               | `http://localhost:` followed by `PORT`             | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
-| `WEB_APP_URL`              | `PUBLIC_URL`                                       | Where the web app is served, when it is hosted apart from the API. Invite links and connection sign-ins return here.                                      |
-| `SUGABOTS_SKIP_MIGRATIONS` | `false`                                            | Docker image only. Set to `true` to skip applying pending migrations on start.                                                                            |
+| Variable                   | Default                                | Description                                                                                                                                               |
+| -------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                 | `production`                           | `development` or `production`.                                                                                                                            |
+| `PORT`                     | `3000`                                 | Port the API binds.                                                                                                                                       |
+| `PUBLIC_URL`               | `http://localhost:` followed by `PORT` | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
+| `WEB_APP_URL`              | `PUBLIC_URL`                           | Where the web app is served, when it is hosted apart from the API. Invite links and connection sign-ins return here.                                      |
+| `SUGABOTS_SKIP_MIGRATIONS` | `false`                                | Docker image only. Set to `true` to skip applying pending migrations on start.                                                                            |
 
 ## Secrets
 
@@ -40,10 +40,10 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
 ## Network
 
-| Variable                               | Default                                      | Description                                                                                                                                                                                                                                                      |
-| -------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` | `true` in development, `false` in production | Whether model providers may be reached over plain HTTP or at private addresses such as localhost or your LAN. Turn it on for a self-hosted install using Ollama, LM Studio, vLLM and the like; keep it off on an installation serving other people's workspaces. |
-| `ALLOW_PRIVATE_WEB_FETCH_NETWORK`      | `false`                                      | Whether an agent's `web_fetch` tool may read pages at private addresses. Turn it on for a self-hosted install whose agents should read an intranet.                                                                                                              |
+| Variable                               | Default | Description                                                                                                                                                                                                                                                      |
+| -------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` | `false` | Whether model providers may be reached over plain HTTP or at private addresses such as localhost or your LAN. Turn it on for a self-hosted install using Ollama, LM Studio, vLLM and the like; keep it off on an installation serving other people's workspaces. |
+| `ALLOW_PRIVATE_WEB_FETCH_NETWORK`      | `false` | Whether an agent's `web_fetch` tool may read pages at private addresses. Turn it on for a self-hosted install whose agents should read an intranet.                                                                                                              |
 
 ## Email
 
