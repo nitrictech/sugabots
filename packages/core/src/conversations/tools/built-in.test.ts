@@ -9,13 +9,13 @@ const fetchPage = async () => ({ ok: false as const, reason: "unused" });
 const httpClients = { for: () => async () => new Response(null, { status: 503 }) };
 
 describe("the built-in tools for a workspace", () => {
-	it("offers web_fetch always and web_search only with a search provider to call", async () => {
+	it("offers web_fetch and web_search only with a search provider to call", async () => {
 		const without = builtInTools({
 			fetchPage,
 			searchProviders: { resolve: () => Effect.undefined },
 			httpClients,
 		});
-		expect(Object.keys(await run(without.forWorkspace("w1")))).toEqual(["web_fetch"]);
+		expect(Object.keys(await run(without.forWorkspace("w1")))).toEqual([]);
 
 		const withSearch = builtInTools({
 			fetchPage,

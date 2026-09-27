@@ -38,7 +38,7 @@ const exa: SearchProvider = {
 	enabled: true,
 };
 
-const searchSwitch = () => screen.findByRole("switch", { name: "Bots can search the web" });
+const searchSwitch = () => screen.findByRole("switch", { name: "Bots can use the web" });
 
 function openAdvanced() {
 	fireEvent.click(screen.getByRole("button", { name: "Show advanced" }));

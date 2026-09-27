@@ -5,6 +5,7 @@ import {
 	searchProviderSchema,
 	searchProviderTestResultSchema,
 	searchProviderUpdateSchema,
+	webAccessSchema,
 } from "../../search-providers.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest } from "../errors.ts";
@@ -17,6 +18,7 @@ const params = { workspace: workspaceIdOrSlugSchema };
 export class SearchProvidersApi extends HttpApiGroup.make("searchProviders")
 	.add(
 		HttpApiEndpoint.get("get", root, { params, success: searchProviderResponseSchema }),
+		HttpApiEndpoint.get("webAccess", `${root}/web-access`, { params, success: webAccessSchema }),
 		HttpApiEndpoint.put("replace", root, {
 			params,
 			payload: newSearchProviderSchema,

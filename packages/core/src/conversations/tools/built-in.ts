@@ -9,12 +9,15 @@ import { searchBackend, searchEndpoint } from "./web-search/backends.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 
 /**
- * The built-in tools a workspace's crew turns are offered.
+ * BuiltInTools supplies the built-in tools offered to a workspace's crew turns.
  *
- * `web_fetch` costs nothing and is always there. `web_search` is there while
- * the workspace has an enabled search provider with what it needs to be
- * called, since each search is a call the workspace pays for (ADR 005). Asked
- * per turn, so enabling a provider reaches the next turn without a restart.
+ * forWorkspace returns `web_fetch` and `web_search` while
+ * `searchProviders.resolve` finds an enabled search provider with every
+ * setting a search needs, and no tools otherwise. The provider's enabled flag
+ * is the workspace's one setting for whether bots may use the web, and each
+ * search is billed to the workspace (ADR 005). forWorkspace looks the provider
+ * up on every call, so a provider enabled between turns applies from the next
+ * turn without a restart.
  */
 export interface BuiltInTools {
 	forWorkspace(workspaceId: string): Effect.Effect<ToolSet, never, Database>;
@@ -35,19 +38,18 @@ export function builtInTools({
 	const webFetch = webFetchTool({ fetchPage });
 	return {
 		forWorkspace: (workspaceId) =>
-			Effect.map(searchProviders.resolve(workspaceId), (connection) => ({
-				[WEB_FETCH_TOOL]: webFetch,
-				...(connection
-					? {
-							[WEB_SEARCH_TOOL]: webSearchTool({
-								search: searchBackend(
-									connection,
-									httpClients.for({ baseUrl: searchEndpoint(connection) }),
-								),
-							}),
-						}
-					: {}),
-			})),
+			Effect.map(searchProviders.resolve(workspaceId), (connection): ToolSet => {
+				if (!connection) return {};
+				return {
+					[WEB_FETCH_TOOL]: webFetch,
+					[WEB_SEARCH_TOOL]: webSearchTool({
+						search: searchBackend(
+							connection,
+							httpClients.for({ baseUrl: searchEndpoint(connection) }),
+						),
+					}),
+				};
+			}),
 	};
 }
 

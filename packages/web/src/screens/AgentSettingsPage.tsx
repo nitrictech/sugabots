@@ -12,7 +12,9 @@ import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agen
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
+import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
+import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -355,9 +357,11 @@ function Instructions({
 }
 
 /**
- * What the bot can reach: the product's own tools, each of which can be
- * switched off for it, then the pod's connections, which every bot in the pod
- * shares and which are managed on the pod.
+ * Tools lists what `agent` can reach: the pod's connections, which every bot in
+ * `pod` shares and which are managed on the pod, then the built-in tools, each
+ * of which can be switched off for `agent`. Every built-in tool reaches the
+ * web, so while the workspace has web access off they show as off and
+ * disabled, and the group's note says how to turn web access on.
  */
 function Tools({
 	agent,
@@ -374,12 +378,36 @@ function Tools({
 	const connections = useConnections(pod.id);
 	const { agents } = useAgents();
 	const [openConnectionId, setOpenConnectionId] = useState<string>();
+	const webOff = useWebAccess().data?.enabled === false;
+	const mayManageWebSearch = useWorkspacePermissions().manageProviders;
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
 	const reachable = connections.data?.filter((connection) => connection.access !== "off") ?? [];
 
 	return (
-		<SettingsGroup label="Tools">
+		<SettingsGroup
+			label="Tools"
+			note={
+				webOff && (
+					<>
+						Bots can't read or search the web while it's off for the workspace.{" "}
+						{mayManageWebSearch ? (
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "search" }}
+								state={backToAgent}
+								className="focus-ring rounded-sm font-medium text-link"
+							>
+								Turn it on in Web search
+							</Link>
+						) : (
+							"Ask a workspace admin to turn it on."
+						)}
+					</>
+				)
+			}
+		>
 			<SettingsRow
 				icon={<PodTile bots={podBots} color={pod.color} size={30} />}
 				label={`Tools from ${pod.name}`}
@@ -417,7 +445,7 @@ function Tools({
 				);
 			})}
 			{builtInToolCatalog.map((entry) => {
-				const on = !agent.disabledTools.includes(entry.key);
+				const on = !webOff && !agent.disabledTools.includes(entry.key);
 				return (
 					<SettingsRow
 						key={entry.key}
@@ -427,7 +455,15 @@ function Tools({
 							canChange ? (
 								<Toggle
 									checked={on}
+									disabled={webOff}
 									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
+									tooltip={
+										webOff
+											? mayManageWebSearch
+												? "Disabled while web access is off for the workspace. Turn it on in Web search settings."
+												: "Disabled while web access is off for the workspace. Ask a workspace admin to enable it."
+											: `Toggle to ${on ? "disable" : "enable"} ${entry.name} for ${agent.name}`
+									}
 									onChange={(next) =>
 										save({
 											disabledTools: next

@@ -122,6 +122,15 @@ export const searchProviderResponseSchema = Schema.Struct({
 	provider: Schema.NullOr(searchProviderSchema),
 });
 
+/**
+ * webAccessSchema describes whether a workspace's bots are offered the web
+ * tools, `web_fetch` and `web_search`. `enabled` is true while the workspace
+ * has an enabled search provider with every setting a search needs, such as
+ * an API key for a provider that requires one.
+ */
+export const webAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
+export type WebAccess = typeof webAccessSchema.Type;
+
 export const searchProviderTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
 	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

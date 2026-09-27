@@ -22,6 +22,27 @@ export function useSearchProvider() {
 	});
 }
 
+/**
+ * useWebAccess fetches whether the current workspace's bots are offered the web
+ * tools. Any workspace member may read it, unlike the provider itself. Its query
+ * key starts with `["search-provider", workspaceId]`, the key that replacing,
+ * updating, or removing the provider through useSearchProviderActions
+ * invalidates, so each of those changes refetches it.
+ */
+export function useWebAccess() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["search-provider", workspaceId, "web-access"],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.searchProviders.webAccess({ params: { workspace: workspaceId } }),
+						{ signal },
+					)
+			: skipToken,
+	});
+}
+
 export function useSearchProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();

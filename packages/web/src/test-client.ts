@@ -80,6 +80,7 @@ export const client = {
 		},
 		searchProviders: {
 			get: vi.fn(),
+			webAccess: vi.fn(),
 			replace: vi.fn(),
 			update: vi.fn(),
 			remove: vi.fn(),
