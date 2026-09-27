@@ -1,80 +1,64 @@
 ---
 title: Configuration
-description: Every environment variable a Sugabots installation reads.
+description: The environment variables for hosting a Sugabots installation.
 ---
 
-Sugabots reads its settings from environment variables. For a local
-installation, put them in `.env` at the repository root: the API, the web app,
-the Drizzle CLI and the tests all read that one file. `.env.example` lists them
-with development defaults.
+Sugabots reads its settings from environment variables. With Docker Compose,
+set them under `environment` in `compose.yml`.
 
 ## Database
 
-| Variable            | Description                                                                                                                                                                            |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`      | PostgreSQL connection string. Required.                                                                                                                                                |
-| `TEST_DATABASE_URL` | Database the tests use. Optional. The tests empty whatever they are pointed at, so they never share `DATABASE_URL`: unset, `_test` is appended to its name and that database is created and migrated on the first run. |
+| Variable       | Default  | Description                   |
+| -------------- | -------- | ----------------------------- |
+| `DATABASE_URL` | Required | PostgreSQL connection string. |
 
 ## Server
 
-| Variable                   | Description                                                                                                                                         |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                 | `development` (the default), `production` or `test`.                                                                                                |
-| `PORT`                     | Port the API binds when started on its own. Under `bun run dev`, Portless assigns one.                                                              |
-| `PUBLIC_URL`               | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
-| `WEB_APP_URL`              | Where the web app is served, when it is hosted apart from the API. Invite links and connection sign-ins return here. Defaults to `PUBLIC_URL`.     |
-| `SUGABOTS_SKIP_MIGRATIONS` | Docker image only. Set to `true` to skip applying pending migrations on start.                                                                      |
+| Variable                   | Default                                            | Description                                                                                                                                               |
+| -------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                 | `development`, or `production` in the Docker image | `development` or `production`.                                                                                                                            |
+| `PORT`                     | `3000`                                             | Port the API binds.                                                                                                                                       |
+| `PUBLIC_URL`               | `http://localhost:` followed by `PORT`             | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
+| `WEB_APP_URL`              | `PUBLIC_URL`                                       | Where the web app is served, when it is hosted apart from the API. Invite links and connection sign-ins return here.                                      |
+| `SUGABOTS_SKIP_MIGRATIONS` | `false`                                            | Docker image only. Set to `true` to skip applying pending migrations on start.                                                                            |
 
 ## Secrets
 
 Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
-| Variable                     | Description                                                                                                                                   |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`         | Signing key for sessions and tokens. Changing it signs everybody out.                                                                         |
-| `CREDENTIALS_ENCRYPTION_KEY` | Seals every stored credential: model and search provider keys, connection secrets, and connection sign-ins. Losing it makes them unreadable. |
+| Variable                     | Default  | Description                                                                                                                                  |
+| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`         | Required | Signing key for sessions and tokens. Changing it signs everybody out.                                                                        |
+| `CREDENTIALS_ENCRYPTION_KEY` | Required | Seals every stored credential: model and search provider keys, connection secrets, and connection sign-ins. Losing it makes them unreadable. |
 
 ## Access
 
-| Variable                     | Description                                                                                                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ALLOW_OPEN_SIGNUP`          | Whether anybody may create an account. Off unless set: the first person to arrive owns the installation, and after that the only way in is an invitation from a member.          |
-| `REQUIRE_EMAIL_VERIFICATION` | Whether a new account must open a link in its inbox before it gets a session. Off unless set. With the console email provider, the link is printed to the server's console.       |
+| Variable                     | Default | Description                                                                                                                                                  |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ALLOW_OPEN_SIGNUP`          | `false` | Whether anybody may create an account. Off, the first person to arrive owns the installation, and after that the only way in is an invitation from a member. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | Whether a new account must open a link in its inbox before it gets a session. With the console email provider, the link is printed to the server's console.  |
 
 ## Network
 
-| Variable                               | Description                                                                                                                                                                                                                                             |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` | Whether model providers may be reached over plain HTTP or at private addresses such as localhost or your LAN. Unset, it is on in development and off in production. Turn it on for a self-hosted install using Ollama, LM Studio, vLLM and the like; keep it off on an installation serving other people's workspaces. |
-| `ALLOW_PRIVATE_WEB_FETCH_NETWORK`      | Whether an agent's `web_fetch` tool may read pages at private addresses. Off unless set. Turn it on for a self-hosted install whose agents should read an intranet.                                                                                    |
+| Variable                               | Default                                      | Description                                                                                                                                                                                                                                                      |
+| -------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` | `true` in development, `false` in production | Whether model providers may be reached over plain HTTP or at private addresses such as localhost or your LAN. Turn it on for a self-hosted install using Ollama, LM Studio, vLLM and the like; keep it off on an installation serving other people's workspaces. |
+| `ALLOW_PRIVATE_WEB_FETCH_NETWORK`      | `false`                                      | Whether an agent's `web_fetch` tool may read pages at private addresses. Turn it on for a self-hosted install whose agents should read an intranet.                                                                                                              |
 
 ## Email
 
-| Variable                   | Description                                                                                                                                                                         |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EMAIL_PROVIDER`           | `console` (the default, which prints each email to the server's log) or `webhook`.                                                                                                 |
-| `EMAIL_WEBHOOK_URL`        | For `webhook`. Receives each email as JSON: `from`, `to`, `cc`, `bcc` and `replyTo` as `{email, name}` addresses, `subject`, and `text` and/or `html`. Must use HTTPS in production. |
-| `EMAIL_WEBHOOK_TOKEN`      | For `webhook`. Optional. Sent as a bearer token with each delivery.                                                                                                                 |
-| `EMAIL_TRANSACTIONAL_FROM` | Sender of emails a user's own action triggers, such as verification and invitations, like `Sugabots <no-reply@example.com>`. Required in production.                              |
-
-## Tracing
-
-With an endpoint set, the API exports its traces and logs over OTLP/HTTP to any
-collector; without one it exports nothing. Every response carries a
-`Server-Timing` header with its duration and trace id either way.
-
-| Variable                      | Description                                                        |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector address, such as `http://127.0.0.1:4318`.                |
-| `OTEL_EXPORTER_OTLP_HEADERS`  | Headers sent to the collector, such as a hosted backend's API key. |
-| `OTEL_TRACES_EXPORTER`        | Set to `otlp` to export traces.                                    |
-| `OTEL_LOGS_EXPORTER`          | Set to `otlp` to export logs.                                      |
+| Variable                   | Default                | Description                                                                                                                                                           |
+| -------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EMAIL_PROVIDER`           | `console`              | `console`, which prints each email to the server's log, or `webhook`.                                                                                                 |
+| `EMAIL_WEBHOOK_URL`        | Required for `webhook` | Receives each email as JSON: `from`, `to`, `cc`, `bcc` and `replyTo` as `{email, name}` addresses, `subject`, and `text` and/or `html`. Must use HTTPS in production. |
+| `EMAIL_WEBHOOK_TOKEN`      | None                   | For `webhook`. Sent as a bearer token with each delivery.                                                                                                             |
+| `EMAIL_TRANSACTIONAL_FROM` | Required in production | Sender of emails a user's own action triggers, such as verification and invitations, like `Sugabots <no-reply@example.com>`.                                          |
 
 ## Web app
 
 Vite inlines anything prefixed `VITE_` into the bundle, so nothing secret goes
 here.
 
-| Variable       | Description                                                                                                                 |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `VITE_API_URL` | Where the API is, path included. Unset, `/api` of the page's own origin. Set it when the web app is hosted apart from the API. |
+| Variable       | Default                         | Description                                                                            |
+| -------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
+| `VITE_API_URL` | `/api` on the page's own origin | Where the API is, path included. Set it when the web app is hosted apart from the API. |
