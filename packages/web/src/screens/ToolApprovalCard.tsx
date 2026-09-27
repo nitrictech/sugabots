@@ -46,6 +46,9 @@ export function ToolApprovalCard({
 	outgoing?: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
+	// The turn records the decision a moment after it is accepted, and this
+	// card goes once it has; until then the answer stays given.
+	const sent = review.isPending || review.isSuccess;
 	const [requestOpen, setRequestOpen] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";
@@ -55,7 +58,7 @@ export function ToolApprovalCard({
 	// One answer, drawn on the card and again in the full request.
 	const answer = canApprove ? (
 		<Answer
-			pending={review.isPending}
+			pending={sent}
 			error={review.error}
 			onDeny={() => review.mutate({ toolCallId: call.id, decision: "deny" })}
 			onAllow={() => review.mutate({ toolCallId: call.id, decision: "allow_once" })}
@@ -123,6 +126,9 @@ export function PinnedApproval({
 	canApprove: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
+	// The turn records the decision a moment after it is accepted, and this
+	// card goes once it has; until then the answer stays given.
+	const sent = review.isPending || review.isSuccess;
 	const label = stepLabel(call.tool, splitToolKey(call.tool).name);
 	if (!canApprove) {
 		return (
@@ -137,7 +143,7 @@ export function PinnedApproval({
 				<Button
 					size="lg"
 					variant="secondary"
-					disabled={review.isPending}
+					disabled={sent}
 					aria-label={`Deny: ${label}`}
 					onClick={() => review.mutate({ toolCallId: call.id, decision: "deny" })}
 					className="bg-border-strong hover:bg-person-avatar"
@@ -146,7 +152,7 @@ export function PinnedApproval({
 				</Button>
 				<Button
 					size="lg"
-					disabled={review.isPending}
+					disabled={sent}
 					aria-label={`Allow: ${label}`}
 					onClick={() => review.mutate({ toolCallId: call.id, decision: "allow_once" })}
 				>

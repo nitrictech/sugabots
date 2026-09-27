@@ -23,13 +23,15 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { routineStore } from "../routines/store.ts";
+import { queueTurnAsJob } from "../turns/queue.ts";
+import { turnSignalsForTests } from "../turns/testing.ts";
 import { chatStore } from "./store.ts";
 
 const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: eventStore }));
-	const store = onPostgres(chatStore(publishEvents));
+	const store = onPostgres(chatStore(publishEvents, queueTurnAsJob));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -252,7 +254,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 
 	it("includes Routine runs in the main Chat timeline", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
-		const routines = onPostgres(routineStore(() => Effect.void));
+		const routines = onPostgres(
+			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
 			instructions: "Review overnight changes.",
@@ -285,7 +289,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 
 	it("paginates interleaved messages and Routine runs without gaps", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
-		const routines = onPostgres(routineStore(() => Effect.void));
+		const routines = onPostgres(
+			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
 			instructions: "Review overnight changes.",
@@ -458,7 +464,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
-		const routines = onPostgres(routineStore(() => Effect.void));
+		const routines = onPostgres(
+			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
 			instructions: "Review overnight changes.",

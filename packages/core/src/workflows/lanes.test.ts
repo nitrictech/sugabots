@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it } from "vitest";
 import { layer as databaseLayer, query } from "../database/database.ts";
@@ -15,9 +15,17 @@ const Held = Workflow.make("test/lane-held", {
 const Forever = DurableDeferred.make("forever");
 const HeldLive = Held.toLayer(() => DurableDeferred.await(Forever));
 
+// Finishes at once, without releasing its lane.
+const Done = Workflow.make("test/lane-done", {
+	payload: { key: Schema.String, request: Schema.String },
+	idempotencyKey: (payload) => `${payload.key}/${payload.request}`,
+});
+const DoneLive = Done.toLayer(() => Effect.void);
+
 const runtime = ManagedRuntime.make(
-	Lanes.layer([Held]).pipe(
+	Lanes.layer([Held, Done]).pipe(
 		Layer.provideMerge(HeldLive),
+		Layer.provideMerge(DoneLive),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),
@@ -95,6 +103,44 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
 	});
 
+	it("drops a request for the execution that is releasing the lane", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const payload = { key, request: "same" };
+		await run(service.admit({ key, workflow: Held, payload, whenBusy: "queue" }));
+		expect(await run(service.admit({ key, workflow: Held, payload, whenBusy: "queue" }))).toBe(
+			"waiting",
+		);
+
+		await run(service.release({ key, executionId: await executionIdOf(key, "same") }));
+
+		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+		expect(await waitingIn(key)).toEqual([]);
+	});
+
+	it("frees the lane at once when asked to run an execution that has finished", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const payload = { key, request: "finished" };
+		await run(service.admit({ key, workflow: Done, payload, whenBusy: "queue" }));
+		const executionId = await run(Done.executionId(payload));
+		await run(
+			Done.poll(executionId).pipe(
+				Effect.flatMap((result) =>
+					Option.isSome(result) && result.value._tag === "Complete"
+						? Effect.void
+						: Effect.fail("running"),
+				),
+				Effect.retry({ times: 100, schedule: Schedule.spaced(Duration.millis(10)) }),
+			),
+		);
+		await run(service.release({ key, executionId }));
+
+		await run(service.admit({ key, workflow: Done, payload, whenBusy: "queue" }));
+
+		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+	});
+
 	it("ignores a release from an execution that no longer holds the lane", async () => {
 		const key = crypto.randomUUID();
 		const service = await lanes();
@@ -108,6 +154,38 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 			state: "running",
 			executionId: await executionIdOf(key, "a"),
 		});
+	});
+
+	it("says whether work is under way about a subject", async () => {
+		const key = crypto.randomUUID();
+		const subject = crypto.randomUUID();
+		const service = await lanes();
+		const busy = () =>
+			runtime
+				.runPromise(
+					query((db) =>
+						db.execute<{ busy: boolean }>(
+							sql`select ${Lanes.laneBusy(sql`${subject}`, [Held._tag])} as busy`,
+							"objects",
+						),
+					),
+				)
+				.then(([row]) => row?.busy);
+
+		expect(await busy()).toBe(false);
+		await run(
+			service.admit({
+				key,
+				subject,
+				workflow: Held,
+				payload: { key, request: "a" },
+				whenBusy: "queue",
+			}),
+		);
+		expect(await busy()).toBe(true);
+
+		await run(service.release({ key, executionId: await executionIdOf(key, "a") }));
+		expect(await busy()).toBe(false);
 	});
 
 	it("starts again a lane a crash left starting", async () => {

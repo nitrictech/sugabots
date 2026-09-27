@@ -19,7 +19,7 @@ import {
 	threadParticipant,
 } from "../../../database/schema.ts";
 import { toCollaborationPart } from "../../threads/collaborations.ts";
-import { queueTurn } from "../../turns/store.ts";
+import type { QueueTurn } from "../../turns/queue.ts";
 
 /**
  * Collaboration: one crew agent asking another for help.
@@ -99,7 +99,10 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 	}
 }
 
-export function collaborationStore(publishEvents: PublishEvents): CollaborationStore {
+export function collaborationStore(
+	publishEvents: PublishEvents,
+	queueTurn: QueueTurn,
+): CollaborationStore {
 	/** Tells the parent thread's listeners how a collaboration now stands. */
 	const announce = (row: schema.CollaborationRow, collaboratorName: string) =>
 		publishEvents([

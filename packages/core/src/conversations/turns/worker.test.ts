@@ -6,13 +6,14 @@ import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { JobNotRunnable } from "../jobs/queue.ts";
+import { workerLayer } from "../jobs/worker.ts";
 import { ToolApprovalsIncomplete, ToolExecutionRefused } from "../tools/approvals/store.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
-import type { ClaimedTurn, PreparedTurn, TurnStore } from "./store.ts";
-import { runClaimedTurn, type TurnWorkerOptions, turnWorkerLayer } from "./worker.ts";
+import type { TurnOwner } from "./owner.ts";
+import { type ClaimedTurn, type PreparedTurn, TurnNotRunnable, type TurnStore } from "./store.ts";
+import { runClaimedTurn, type TurnExecution } from "./worker.ts";
 
 /**
  * The stores and models in these cases never query, so the database they run
@@ -21,18 +22,17 @@ import { runClaimedTurn, type TurnWorkerOptions, turnWorkerLayer } from "./worke
 const runWithServices: RunEffect = effectRunner(ManagedRuntime.make(noDatabase));
 
 const claimed: ClaimedTurn = {
-	id: "0199a3a0-0000-7000-8000-000000000010",
+	owner: "0199a3a0-0000-7000-8000-000000000010",
 	threadId: "0199a3a0-0000-7000-8000-000000000001",
 	payload: {
 		agentId: "0199a3a0-0000-7000-8000-000000000003",
 		triggerMessageId: "0199a3a0-0000-7000-8000-000000000006",
 	},
-	dedupeKey: "turn:0199a3a0-0000-7000-8000-000000000001:0199a3a0-0000-7000-8000-000000000003",
 	attempts: 1,
 };
 
 const prepared: PreparedTurn = {
-	job: claimed,
+	claim: claimed,
 	turnId: "0199a3a0-0000-7000-8000-000000000011",
 	responseMessage: {
 		id: "0199a3a0-0000-7000-8000-000000000012",
@@ -98,6 +98,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events,
@@ -165,6 +166,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -226,6 +228,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -261,6 +264,7 @@ describe("runClaimedTurn", () => {
 							mutating: true,
 						}),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -306,6 +310,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -339,6 +344,7 @@ describe("runClaimedTurn", () => {
 					beginExecution: () =>
 						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -389,6 +395,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -399,6 +406,7 @@ describe("runClaimedTurn", () => {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -434,6 +442,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -482,6 +491,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -495,12 +505,14 @@ describe("runClaimedTurn", () => {
 		expect(offered).toEqual([["other"]]);
 	});
 
-	it("releases a claim when preparing its database state fails", async () => {
+	it("hands a turn back to its owner when preparing its database state fails", async () => {
 		const store = turnStore();
+		const owner = turnOwner();
 		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner,
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -510,18 +522,20 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(store.releaseFailedClaim).toHaveBeenCalledWith(claimed, "database unavailable");
+		expect(owner.failed).toHaveBeenCalledWith(claimed, "database unavailable", true);
 	});
 
 	it("settles a Routine as cancelled when its turn is not runnable", async () => {
 		const store = turnStore();
+		const owner = turnOwner();
 		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(store.prepare).mockReturnValueOnce(
-			Effect.fail(new JobNotRunnable({ reason: "The agent left its pod" })),
+			Effect.fail(new TurnNotRunnable({ reason: "The agent left its pod" })),
 		);
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner,
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -532,18 +546,19 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(store.discard).toHaveBeenCalledWith(claimed, "The agent left its pod");
+		expect(owner.discarded).toHaveBeenCalledWith(claimed, "The agent left its pod");
 		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, { state: "cancelled" });
 	});
 
 	it("settles a Routine as failed when turn preparation exhausts its retries", async () => {
 		const store = turnStore();
+		const owner = turnOwner();
 		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
-		vi.mocked(store.releaseFailedClaim).mockReturnValueOnce(Effect.succeed(false));
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner,
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -554,6 +569,7 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
+		expect(store.abandon).toHaveBeenCalledWith(claimed, "database unavailable");
 		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, {
 			state: "failed",
 			error: "database unavailable",
@@ -567,6 +583,7 @@ describe("runClaimedTurn", () => {
 		try {
 			await runWithServices(
 				runClaimedTurn(claimed, {
+					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -597,6 +614,7 @@ describe("runClaimedTurn", () => {
 		try {
 			await runWithServices(
 				runClaimedTurn(claimed, {
+					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -621,7 +639,8 @@ describe("runClaimedTurn", () => {
 
 	it("marks a failed generation for retry without duplicating its response", async () => {
 		const store = turnStore();
-		vi.mocked(store.fail).mockReturnValueOnce(Effect.succeed(true));
+		const owner = turnOwner();
+		vi.mocked(owner.failed).mockReturnValueOnce(Effect.succeed(true));
 		const model: TurnModel = {
 			stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
 		};
@@ -629,6 +648,7 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
+				owner,
 				store,
 				model,
 				events,
@@ -638,7 +658,8 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(store.fail).toHaveBeenCalledWith(prepared, reply(""), "provider unavailable");
+		expect(owner.failed).toHaveBeenCalledWith(claimed, "provider unavailable", true);
+		expect(store.fail).toHaveBeenCalledWith(prepared, reply(""), "provider unavailable", true);
 		expect(eventTypes(events)).toEqual([]);
 	});
 
@@ -648,6 +669,7 @@ describe("runClaimedTurn", () => {
 			const store = turnStore();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
+					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -679,6 +701,7 @@ describe("runClaimedTurn", () => {
 			const events = liveEventBus();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
+					owner: turnOwner(),
 					store,
 					model: {
 						stream: (input) =>
@@ -714,6 +737,7 @@ describe("runClaimedTurn", () => {
 			const store = turnStore();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
+					owner: turnOwner(),
 					store,
 					model: {
 						stream: (input) =>
@@ -740,38 +764,62 @@ describe("runClaimedTurn", () => {
 	});
 });
 
+/** The job queue the turn worker claims from, faked so no case reaches a database. */
+function jobQueue() {
+	return {
+		requeueInterrupted: vi.fn((): Effect.Effect<void> => Effect.void),
+		claimNext: vi.fn(
+			(): Effect.Effect<(Omit<ClaimedTurn, "owner"> & { id: string }) | undefined> =>
+				Effect.undefined,
+		),
+	};
+}
+
 /**
  * Running the layer starts the worker; disposing the runtime interrupts it,
  * which is the whole of what shutting one down means now.
  */
-function running(store: TurnStore, options: Omit<TurnWorkerOptions, "store">) {
+function running(
+	queue: ReturnType<typeof jobQueue>,
+	execution: Omit<TurnExecution, "owner">,
+	pollIntervalMs: number,
+) {
 	return ManagedRuntime.make(
-		turnWorkerLayer({ store, ...options }).pipe(Layer.provide(noDatabase)),
+		workerLayer({
+			name: "Turn worker",
+			...queue,
+			run: (job) => runClaimedTurn({ ...job, owner: job.id }, { ...execution, owner: turnOwner() }),
+			concurrency: 1,
+			pollIntervalMs,
+		}).pipe(Layer.provide(noDatabase)),
 	);
 }
 
 describe("the turn worker", () => {
 	it("retries interrupted-job recovery before claiming work", async () => {
 		vi.useFakeTimers();
-		const store = turnStore();
-		vi.mocked(store.requeueInterrupted)
+		const queue = jobQueue();
+		queue.requeueInterrupted
 			.mockReturnValueOnce(Effect.die(new Error("database unavailable")))
 			.mockReturnValueOnce(Effect.void);
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		const worker = running(store, {
-			model: unusedModel(),
-			events: eventBus(),
-			collaborations: collaborations(),
-			calls: toolCalls(),
-			queueSummary: noSummary,
-			concurrency: 1,
-			pollIntervalMs: 10,
-		});
+		const worker = running(
+			queue,
+			{
+				store: turnStore(),
+				model: unusedModel(),
+				events: eventBus(),
+				collaborations: collaborations(),
+				calls: toolCalls(),
+				queueSummary: noSummary,
+			},
+			10,
+		);
 		try {
 			await worker.runPromise(Effect.void);
 			await vi.advanceTimersByTimeAsync(50);
-			expect(store.requeueInterrupted).toHaveBeenCalledTimes(2);
-			expect(store.claimNext).toHaveBeenCalled();
+			expect(queue.requeueInterrupted).toHaveBeenCalledTimes(2);
+			expect(queue.claimNext).toHaveBeenCalled();
 		} finally {
 			await worker.dispose();
 			error.mockRestore();
@@ -780,34 +828,37 @@ describe("the turn worker", () => {
 	});
 
 	it("waits for a turn in flight before shutdown continues", async () => {
+		const queue = jobQueue();
 		const store = turnStore();
 		let wroteAt: number | undefined;
-		vi.mocked(store.claimNext).mockReturnValueOnce(Effect.succeed(claimed));
+		queue.claimNext.mockReturnValueOnce(Effect.succeed({ ...claimed, id: claimed.owner }));
 		vi.mocked(store.prepare).mockReturnValueOnce(Effect.succeed(prepared));
 		vi.mocked(store.fail).mockImplementation(() =>
 			// The outcome write a turn does when its stream is torn down.
 			Effect.promise(async () => {
 				await new Promise((resolve) => setTimeout(resolve, 60));
 				wroteAt = Date.now();
-				return false;
 			}),
 		);
 
-		const worker = running(store, {
-			model: {
-				stream: (input) =>
-					Effect.sync(() => ({
-						text: chunksUntilAborted(input.signal),
-						accounting: Effect.succeed({ usage: {} }),
-					})),
+		const worker = running(
+			queue,
+			{
+				store,
+				model: {
+					stream: (input) =>
+						Effect.sync(() => ({
+							text: chunksUntilAborted(input.signal),
+							accounting: Effect.succeed({ usage: {} }),
+						})),
+				},
+				events: eventBus(),
+				collaborations: collaborations(),
+				calls: toolCalls(),
+				queueSummary: noSummary,
 			},
-			events: eventBus(),
-			collaborations: collaborations(),
-			calls: toolCalls(),
-			queueSummary: noSummary,
-			concurrency: 1,
-			pollIntervalMs: 10,
-		});
+			10,
+		);
 
 		await worker.runPromise(Effect.void);
 		await new Promise((resolve) => setTimeout(resolve, 40));
@@ -823,25 +874,26 @@ describe("the turn worker", () => {
 
 	it("stops while recovery is waiting to retry", async () => {
 		vi.useFakeTimers();
-		const store = turnStore();
-		vi.mocked(store.requeueInterrupted).mockReturnValue(
-			Effect.die(new Error("database unavailable")),
-		);
+		const queue = jobQueue();
+		queue.requeueInterrupted.mockReturnValue(Effect.die(new Error("database unavailable")));
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		const worker = running(store, {
-			model: unusedModel(),
-			events: eventBus(),
-			collaborations: collaborations(),
-			calls: toolCalls(),
-			queueSummary: noSummary,
-			concurrency: 1,
-			pollIntervalMs: 10_000,
-		});
+		const worker = running(
+			queue,
+			{
+				store: turnStore(),
+				model: unusedModel(),
+				events: eventBus(),
+				collaborations: collaborations(),
+				calls: toolCalls(),
+				queueSummary: noSummary,
+			},
+			10_000,
+		);
 		try {
 			await worker.runPromise(Effect.void);
 			await vi.advanceTimersByTimeAsync(0);
 			await worker.dispose();
-			expect(store.claimNext).not.toHaveBeenCalled();
+			expect(queue.claimNext).not.toHaveBeenCalled();
 		} finally {
 			error.mockRestore();
 			vi.useRealTimers();
@@ -851,9 +903,6 @@ describe("the turn worker", () => {
 
 function turnStore(): TurnStore {
 	return {
-		requeueInterrupted: vi.fn(() => Effect.void),
-		claimNext: vi.fn(() => Effect.undefined),
-		releaseFailedClaim: vi.fn(() => Effect.succeed(true)),
 		prepare: vi.fn(() => Effect.succeed(prepared)),
 		saveStreamingMessage: vi.fn(() => Effect.void),
 		complete: vi.fn(() => Effect.void),
@@ -861,11 +910,22 @@ function turnStore(): TurnStore {
 		giveFloor: vi.fn(() =>
 			Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
 		),
-		fail: vi.fn(() => Effect.succeed(false)),
+		fail: vi.fn(() => Effect.void),
 		cancel: vi.fn(() => Effect.void),
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
 		requestCancel: vi.fn(() => Effect.succeed(false)),
-		discard: vi.fn(() => Effect.void),
+		abandon: vi.fn(() => Effect.void),
+		stopWaiting: vi.fn(() => Effect.void),
+	};
+}
+
+function turnOwner(): TurnOwner {
+	return {
+		completed: vi.fn(() => Effect.void),
+		suspended: vi.fn(() => Effect.void),
+		failed: vi.fn(() => Effect.succeed(false)),
+		cancelled: vi.fn(() => Effect.void),
+		discarded: vi.fn(() => Effect.void),
 	};
 }
 

@@ -12,6 +12,7 @@ import type { CollaborationStore } from "@sugabots/core/conversations/tools/coll
 import type { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { facilitatorWorkerLayer } from "@sugabots/core/conversations/turns/facilitator";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import type { QueueTurn } from "@sugabots/core/conversations/turns/queue";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import { turnWorkerLayer } from "@sugabots/core/conversations/turns/worker";
 import type { Database } from "@sugabots/core/database/database";
@@ -36,6 +37,8 @@ export interface BackgroundOptions {
 	turns: TurnStore;
 	/** Asks the Scribe to catch up on a thread after a completed reply. */
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
+	/** How the facilitator asks for the turns it gives the floor to. */
+	queueTurn: QueueTurn;
 	routines?: RoutineStore;
 	collaborations: CollaborationStore;
 	/** Where built-in tool calls are written down. */
@@ -55,6 +58,7 @@ export function backgroundLayer({
 	model,
 	turns,
 	queueSummary,
+	queueTurn,
 	routines,
 	collaborations,
 	calls,
@@ -80,6 +84,6 @@ export function backgroundLayer({
 			routines,
 			queueSummary,
 		}),
-		facilitatorWorkerLayer({ model, publishEvents, routines }),
+		facilitatorWorkerLayer({ model, publishEvents, queueTurn, routines }),
 	);
 }

@@ -13,6 +13,8 @@ export const lane = pgTable(
 	"lane",
 	{
 		key: text("key").primaryKey(),
+		/** What the lane's work is about, such as a thread, for asking whether anything is under way there. */
+		subject: text("subject"),
 		state: text("state").$type<LaneState>().notNull().default("idle"),
 		/** The workflow starting or running in the lane, and what it was started with. */
 		workflow: text("workflow"),
@@ -24,6 +26,7 @@ export const lane = pgTable(
 		check("lane_state_check", sql`${table.state} in ('idle', 'starting', 'running')`),
 		check("lane_execution_check", sql`(${table.state} = 'idle') = (${table.executionId} is null)`),
 		index("lane_busy_idx").on(table.state, table.updatedAt).where(sql`${table.state} <> 'idle'`),
+		index("lane_subject_idx").on(table.subject).where(sql`${table.state} <> 'idle'`),
 	],
 );
 
