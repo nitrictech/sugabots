@@ -37,7 +37,7 @@
 	/* Light is a shade darker than the design's #646973 so it passes AA on a hover wash. */
 	--muted-foreground: light-dark(#5f646e, #9096a1);
 	/*
-	 * Names above bubbles, times, section labels. Light is a shade darker than
+	 * Times, section labels, hints. Light is a shade darker than
 	 * the design's #6f747e so it passes AA on the list column.
 	 */
 	--subtle-foreground: light-dark(#696e78, #7d838e);
@@ -50,9 +50,12 @@
 	--border: light-dark(#eaeaee, #1d1f25);
 	--border-strong: light-dark(#e8e8ec, #2a2c33);
 	--border-dashed: light-dark(#cfd0d6, #2f323a);
-	/* A pod tile, and a slot in one with no bot in it. */
-	--tile: light-dark(#eaeaee, #1d1f25);
-	--tile-empty: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
+	/*
+	 * A pod tile, and a slot in one with no bot in it. Light is a step darker
+	 * than the design's #eaeaee, which all but vanished on the rail's grey.
+	 */
+	--tile: light-dark(#dcdee3, #1d1f25);
+	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
 	/*
 	 * The accent is the same in both themes. Your bubbles and primary buttons
@@ -302,10 +305,16 @@
 	text-underline-offset: 2px;
 }
 
-/* An ID or a number inline in a bot's message, in the bot's brighter tint. */
+/*
+ * An ID or a number inline in a bot's message, in the bot's brighter tint. The
+ * mono colour alone is too close to the words around it to tell apart, so it
+ * also sits on a chip, lifted off the tint and edged in its own colour.
+ */
 .message-markdown :not(pre) > code {
-	padding: 0;
-	background: none;
+	padding: 0 0.3em;
+	border-radius: var(--radius-xs);
+	background: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bot-mono) 25%, transparent);
 	color: var(--bot-mono);
 	font: 500 13.5px var(--font-mono);
 }
