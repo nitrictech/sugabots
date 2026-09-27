@@ -63,7 +63,7 @@ export function ConnectionsSettings({
 	podId: string;
 	podName: string;
 	canManage: boolean;
-	/** Why the OAuth sign-in that just returned here did not finish. */
+	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
 }) {
 	const connections = useConnections(podId);

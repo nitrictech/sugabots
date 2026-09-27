@@ -12,6 +12,7 @@ export const providerStatusSchema = Schema.Literals([
 	"connected",
 	"error",
 ]);
+export type ProviderStatus = typeof providerStatusSchema.Type;
 export const providerModelCapabilitySchema = Schema.Literals([
 	"tools",
 	"vision",

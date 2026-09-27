@@ -74,16 +74,16 @@ describe("listing a server's tools", () => {
 	it("reports a refused secret as a sentence", async () => {
 		const found = await listServerTools({ url, headers: { "x-fixture-key": "nope" } }, fetch);
 
-		expect(found).toEqual({ ok: false, reason: "The server answered HTTP 401" });
+		expect(found).toMatchObject({ ok: false, reason: "The server answered HTTP 401" });
 	});
 
-	it("reports a server that is not there", async () => {
+	it("reports a server that is not there in its own words, keeping the network's for the logs", async () => {
 		const found = await listServerTools(
 			{ url: "http://127.0.0.1:9/mcp", headers: {} },
 			fetch,
 			2_000,
 		);
 
-		expect(found.ok).toBe(false);
+		expect(found).toMatchObject({ ok: false, reason: "The server could not be reached" });
 	});
 });

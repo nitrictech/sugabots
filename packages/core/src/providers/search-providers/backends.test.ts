@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { EgressRefused } from "../../../providers/network/egress.ts";
-import type { SearchConnection } from "../../../providers/search-providers/store.ts";
+import { EgressRefused } from "../network/egress.ts";
 import { parseExaText, searchBackend, searchEndpoint } from "./backends.ts";
+import type { SearchConnection } from "./search-connection.ts";
 
 type FakeFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 

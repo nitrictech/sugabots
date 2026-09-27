@@ -1,21 +1,6 @@
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { BadRequest, Conflict, CurrentUser, NotFound } from "@sugabots/contracts/http";
-import type { Database } from "@sugabots/core/database/database";
-import type { listServerTools } from "@sugabots/core/providers/connections/mcp";
-import {
-	beginAuthorization,
-	finishAuthorization,
-	type OAuthProviders,
-	oauthProviders,
-} from "@sugabots/core/providers/connections/oauth";
-import { connectionOperations } from "@sugabots/core/providers/connections/operations";
-import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
-import type {
-	EgressHttpClient,
-	EgressHttpClients,
-	EgressUrlValidator,
-} from "@sugabots/core/providers/network/egress";
-import type { Authorization } from "@sugabots/core/workspaces/access";
+import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -24,111 +9,72 @@ import { grantedPod } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
 export interface ConnectionRoutesOptions {
-	connections: ConnectionStore;
-	/** Asked again when a sign-in comes back, since authority can lapse while the caller is away. */
-	authorization: Authorization;
-	httpClients: EgressHttpClients;
-	validateProviderUrl: EgressUrlValidator;
-	listTools?: typeof listServerTools;
-	oauth: {
-		redirectUrl: string;
-		fetch: EgressHttpClient;
-		/**
-		 * Where the web app is served. A finished sign-in redirects to
-		 * `CONNECTION_SIGN_IN_RETURN_PATH` under it with ids, and the web app
-		 * turns those into its own URL, because only it knows its routes.
-		 */
-		webAppUrl: string;
-		begin?: typeof beginAuthorization;
-		finish?: typeof finishAuthorization;
-		providers?: OAuthProviders;
-	};
+	/**
+	 * Where the web app is served. A sign-in's callback redirects to
+	 * `CONNECTION_SIGN_IN_RETURN_PATH` under it with the pod's ids and, when it
+	 * did not finish, the code saying why, and the web app turns those into
+	 * its own page and words.
+	 */
+	webAppUrl: string;
 }
 
-export function connectionRoutes({
-	connections,
-	authorization,
-	httpClients,
-	validateProviderUrl,
-	listTools,
-	oauth,
-}: ConnectionRoutesOptions) {
+export function connectionRoutes({ webAppUrl }: ConnectionRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "connections", (handlers) =>
 		Effect.gen(function* () {
-			// The OAuth library calls back with promises, so the stored providers
-			// run their queries against the database the routes were built with.
-			const database = yield* Effect.context<Database>();
-			const providers =
-				oauth.providers ??
-				oauthProviders({
-					connections,
-					run: Effect.runPromiseWith(database),
-					redirectUrl: oauth.redirectUrl,
-				});
-			const operations = connectionOperations({
-				connections,
-				authorization,
-				httpClients,
-				validateProviderUrl,
-				listTools,
-				oauth: {
-					providers,
-					fetch: oauth.fetch,
-					begin: oauth.begin ?? beginAuthorization,
-					finish: oauth.finish ?? finishAuthorization,
-				},
+			const connections = yield* ConnectionSetup.Service;
+			const inPod = (pod: { workspaceId: string; id: string }) => ({
+				workspaceId: pod.workspaceId,
+				podId: pod.id,
 			});
 
 			return handlers
-				.handle("list", () =>
-					Effect.flatMap(grantedPod, ({ pod }) => operations.list(pod.workspaceId, pod.id)),
-				)
+				.handle("list", () => Effect.flatMap(grantedPod, ({ pod }) => connections.list(inPod(pod))))
 				.handle("create", ({ payload }) =>
 					Effect.flatMap(grantedPod, ({ pod, actor }) =>
-						operations
-							.create(pod.workspaceId, pod.id, actor.userId, payload)
+						connections
+							.create({ ...inPod(pod), createdById: actor.userId, connection: payload })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("get", ({ params }) =>
 					Effect.flatMap(grantedPod, ({ pod }) =>
-						operations
-							.get(pod.workspaceId, pod.id, params.connectionId)
+						connections
+							.get({ ...inPod(pod), connectionId: params.connectionId })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("update", ({ params, payload }) =>
 					Effect.flatMap(grantedPod, ({ pod }) =>
-						operations
-							.update(pod.workspaceId, pod.id, params.connectionId, payload)
+						connections
+							.update({ ...inPod(pod), connectionId: params.connectionId, changes: payload })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("remove", ({ params }) =>
 					Effect.flatMap(grantedPod, ({ pod }) =>
-						operations
-							.remove(pod.workspaceId, pod.id, params.connectionId)
+						connections
+							.remove({ ...inPod(pod), connectionId: params.connectionId })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("test", ({ params }) =>
 					Effect.flatMap(grantedPod, ({ pod }) =>
-						operations
-							.test(pod.workspaceId, pod.id, params.connectionId)
+						connections
+							.test({ ...inPod(pod), connectionId: params.connectionId })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("connectFromCatalog", ({ payload }) =>
 					Effect.flatMap(grantedPod, ({ pod, actor }) =>
-						operations
-							.connectFromCatalog(pod.workspaceId, pod.id, actor.userId, payload)
+						connections
+							.connectFromCatalog({ ...inPod(pod), createdById: actor.userId, server: payload })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
 				.handle("startOAuth", ({ params }) =>
 					Effect.flatMap(grantedPod, ({ pod }) =>
-						operations
-							.startOAuth(pod.workspaceId, pod.id, params.connectionId)
+						connections
+							.startOAuth({ ...inPod(pod), connectionId: params.connectionId })
 							.pipe(asHttpError(connectionErrors)),
 					),
 				)
@@ -139,22 +85,25 @@ export function connectionRoutes({
 							return HttpServerResponse.empty({ status: 405, headers: { allow: "GET" } });
 						}
 						const { id: userId } = yield* CurrentUser;
-						const outcome = yield* operations
-							.completeOAuth(userId, {
-								code: query.code,
-								state: query.state,
-								error: query.error,
-								errorDescription: query.error_description,
+						const outcome = yield* connections
+							.completeOAuth({
+								userId,
+								callback: {
+									code: query.code,
+									state: query.state,
+									error: query.error,
+									errorDescription: query.error_description,
+								},
 							})
 							.pipe(asHttpError(connectionErrors));
-						const back = new URL(oauth.webAppUrl);
+						const back = new URL(webAppUrl);
 						back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
 						if (outcome.pod) {
 							back.searchParams.set("workspace", outcome.pod.workspaceId);
 							back.searchParams.set("pod", outcome.pod.podId);
 						}
-						if ("failed" in outcome) {
-							back.searchParams.set("oauth_error", outcome.failed);
+						if ("failure" in outcome) {
+							back.searchParams.set("oauth_error", outcome.failure);
 						}
 						return HttpServerResponse.redirect(back.toString(), { status: 302 });
 					}),
@@ -166,7 +115,7 @@ export function connectionRoutes({
 const connectionErrors = {
 	ConnectionNameTaken: Conflict,
 	ConnectionNotFound: NotFound,
-	ConnectionUrlNotAllowed: BadRequest,
+	UrlNotAllowed: BadRequest,
 	ConnectionOAuthStartFailed: BadRequest,
 	ConnectionDoesNotUseOAuth: BadRequest,
 	ConnectionNeededNoSignIn: BadRequest,

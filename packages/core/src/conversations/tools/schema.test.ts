@@ -1,9 +1,12 @@
 import { asSchema, generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import {
+	MAX_SEARCH_RESULTS,
+	type SearchBackend,
+} from "../../providers/search-providers/backends.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
-import { MAX_SEARCH_RESULTS, type SearchBackend } from "./web-search/backends.ts";
 import { webSearchTool } from "./web-search/tool.ts";
 
 function unexpectedExecution(): never {

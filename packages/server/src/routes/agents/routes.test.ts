@@ -1,4 +1,5 @@
 import type { Agent } from "@sugabots/contracts";
+import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { unimplemented } from "@sugabots/core/testing";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
@@ -102,7 +103,7 @@ describe("agent routes", () => {
 	it("reports a model the workspace does not offer as a bad request", async () => {
 		const response = await app({
 			create: (input) =>
-				Effect.fail(new AgentAdministration.ModelNotEnabled({ model: input.agent.model })),
+				Effect.fail(new ModelProviderRepository.ModelNotEnabled({ model: input.agent.model })),
 		}).request(`/pods/${POD}/agents`, auth("member", { name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);

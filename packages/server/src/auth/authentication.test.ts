@@ -1,4 +1,5 @@
 import { sessionUserSchema, type WorkspaceMember } from "@sugabots/contracts";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { user } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
@@ -8,7 +9,6 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { API_BASE_PATH } from "../http/api.ts";
 import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
 import { Authentication } from "./authentication.ts";
 

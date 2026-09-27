@@ -2,7 +2,6 @@ export * as Onboarding from "./onboarding.ts";
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
-import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import {
 	agent,
@@ -12,9 +11,9 @@ import {
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { modelProviderStore } from "../../providers/model-providers/store.ts";
+import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
+import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { ModelNotEnabled } from "../agents/agent-administration.ts";
 import { rolesWith } from "../permissions.ts";
 import { PodAdministration } from "../pods/pod-administration.ts";
 
@@ -52,7 +51,7 @@ export interface Interface {
 	readonly completeAcceptedInvite: (input: {
 		userId: string;
 		invitationId: string;
-	}) => Effect.Effect<string, InvitationNotAccepted | ModelNotEnabled>;
+	}) => Effect.Effect<string, InvitationNotAccepted | ModelProviderRepository.ModelNotEnabled>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Onboarding") {}
@@ -60,7 +59,6 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Onboarding");
 	const pods = yield* PodAdministration.Service;
-	const modelProviders = modelProviderStore(yield* Credentials.Service);
 
 	return Service.of({
 		isCompleted: (userId) =>
@@ -146,7 +144,7 @@ export const make = Effect.gen(function* () {
 							return yield* new InvitationNotAccepted();
 						}
 						const workspaceId = accepted.workspaceId;
-						const [offered] = (yield* modelProviders.listEnabled(workspaceId)).models;
+						const [offered] = (yield* offeredModels(workspaceId)).models;
 						if (offered) {
 							yield* pods.provisionPersonalWithModel({
 								workspaceId,

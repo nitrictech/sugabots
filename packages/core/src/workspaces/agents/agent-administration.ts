@@ -8,9 +8,8 @@ import type {
 	SystemAgentKey,
 } from "@sugabots/contracts";
 import { Context, Data, Effect, Layer } from "effect";
-import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations, transaction } from "../../database/database.ts";
-import { modelProviderStore } from "../../providers/model-providers/store.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { PodRepository } from "../pods/pod-repository.ts";
 import { toAgent } from "./agent.ts";
@@ -31,7 +30,9 @@ export interface Interface {
 		agent: NewAgent;
 	}) => Effect.Effect<
 		Agent,
-		ModelNotEnabled | AgentRepository.AgentNameTaken | AgentRepository.PodOutsideWorkspace
+		| ModelProviderRepository.ModelNotEnabled
+		| AgentRepository.AgentNameTaken
+		| AgentRepository.PodOutsideWorkspace
 	>;
 	readonly update: (input: {
 		workspaceId: string;
@@ -40,7 +41,7 @@ export interface Interface {
 	}) => Effect.Effect<
 		Agent,
 		| EmptyAgentUpdate
-		| ModelNotEnabled
+		| ModelProviderRepository.ModelNotEnabled
 		| AgentRepository.AgentNameTaken
 		| AgentRepository.AgentGone
 		| AgentRepository.SystemAgentImmutable
@@ -62,7 +63,10 @@ export interface Interface {
 		workspaceId: string;
 		key: SystemAgentKey;
 		model: string | null;
-	}) => Effect.Effect<SystemAgent, ModelNotEnabled | AgentRepository.SystemAgentMissing>;
+	}) => Effect.Effect<
+		SystemAgent,
+		ModelProviderRepository.ModelNotEnabled | AgentRepository.SystemAgentMissing
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -73,14 +77,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AgentAdministration");
 	const agents = yield* AgentRepository.Service;
 	const pods = yield* PodRepository.Service;
-	const modelProviders = modelProviderStore(yield* Credentials.Service);
-
-	const requireEnabledModel = (workspaceId: string, model: string) =>
-		Effect.filterOrFail(
-			modelProviders.isEnabled(workspaceId, model),
-			(enabled) => enabled,
-			() => new ModelNotEnabled({ model }),
-		);
+	const modelProviders = yield* ModelProviderRepository.Service;
 
 	return Service.of({
 		list: ({ workspaceId, userId }) => operation("list", visibleCrewAgents(workspaceId, userId)),
@@ -89,7 +86,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					yield* requireEnabledModel(workspaceId, agent.model);
+					yield* modelProviders.requireEnabled(workspaceId, agent.model);
 					return toAgent(yield* agents.create(workspaceId, { createdById, agent }));
 				}),
 			),
@@ -103,7 +100,7 @@ export const make = Effect.gen(function* () {
 					}
 					// A cleared model names none to check.
 					if (changes.model != null) {
-						yield* requireEnabledModel(workspaceId, changes.model);
+						yield* modelProviders.requireEnabled(workspaceId, changes.model);
 					}
 					return toAgent(yield* agents.update(workspaceId, agentId, changes));
 				}),
@@ -118,7 +115,7 @@ export const make = Effect.gen(function* () {
 				"setSystemAgentModel",
 				Effect.gen(function* () {
 					if (model !== null) {
-						yield* requireEnabledModel(workspaceId, model);
+						yield* modelProviders.requireEnabled(workspaceId, model);
 					}
 					yield* transaction(
 						Effect.gen(function* () {
@@ -142,20 +139,9 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([AgentRepository.layer, PodRepository.layer]));
-
-/** The workspace does not offer the model an agent was asked to run on. */
-export class ModelNotEnabled
-	extends Data.TaggedError("ModelNotEnabled")<{ readonly model: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `This workspace does not offer the model "${this.model}"`;
-	}
-	get userMessage() {
-		return UserMessage.of`This workspace does not offer that model`;
-	}
-}
+export const layer = layerNoDeps.pipe(
+	Layer.provide([AgentRepository.layer, PodRepository.layer, ModelProviderRepository.layer]),
+);
 
 /** An agent update that names nothing to change. */
 export class EmptyAgentUpdate extends Data.TaggedError("EmptyAgentUpdate") implements UserFacing {

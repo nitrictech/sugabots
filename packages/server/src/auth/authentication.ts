@@ -1,6 +1,7 @@
 export * as Authentication from "./authentication.ts";
 
 import type { SessionUser } from "@sugabots/contracts";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import {
 	type Database,
@@ -17,7 +18,6 @@ import { bearer } from "better-auth/plugins/bearer";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
 import { Pool } from "pg";
-import { API_BASE_PATH } from "../http/api.ts";
 
 /**
  * How the HTTP API proves who is calling: better-auth's users, credentials,

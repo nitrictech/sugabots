@@ -215,7 +215,7 @@ function ProviderSettings({
 				label="API key"
 				secret
 				saved={hasKey ? "" : undefined}
-				savedDisplay={hasKey ? (provider?.apiKeyHint ?? "••••••••") : undefined}
+				savedDisplay={hasKey ? provider?.apiKeyHint || "••••••••" : undefined}
 				placeholder="Paste your key"
 				disabled={pending}
 				onSave={(apiKey) => onConfigure({ apiKey })}

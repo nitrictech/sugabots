@@ -1,4 +1,5 @@
 import { NodeRuntime } from "@effect/platform-node";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
@@ -13,7 +14,6 @@ import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { and, eq, type SQL } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { Authentication } from "./auth/authentication.ts";
-import { API_BASE_PATH } from "./http/api.ts";
 
 /**
  * Development seed: the smallest amount of data that makes the app worth

@@ -1,20 +1,41 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import type { NewConnection } from "@sugabots/contracts";
+import { Effect } from "effect";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../../credentials/credentials.ts";
 import { pod, user, workspace, workspaceMember } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
-import { ConnectionNameTaken, type ConnectionStore, connectionStore } from "./store.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { connectionIn } from "./connection-reads.ts";
+import { ConnectionRepository } from "./connection-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () => {
-	const cipher = Credentials.fromKey(Buffer.alloc(32, 9).toString("base64"));
-	const connections: Promised<ConnectionStore> = onPostgres(connectionStore(cipher));
+	let connections: Promised<ConnectionRepository.Interface>;
 	let workspaceId: string;
 	let userId: string;
 	let podId: string;
 	let otherPodId: string;
 
+	beforeAll(async () => {
+		connections = await servedOnPostgres(ConnectionRepository.Service, ConnectionRepository.layer);
+	});
+
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	const create = (input: NewConnection) => connections.create(workspaceId, podId, userId, input);
+	/** The connection as the settings page is shown it, through `inPod`. */
+	const shown = (connectionId: string, inPod = podId) =>
+		runOnPostgres(
+			Effect.flatMap(Credentials.Service, (cipher) =>
+				connectionIn(workspaceId, inPod, connectionId, cipher),
+			),
+		);
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -65,25 +86,25 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	});
 
 	it("refuses a second connection with the same name", async () => {
-		await connections.create(workspaceId, podId, userId, {
+		await create({
 			name: "Team Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
 
 		await expect(
-			connections.create(workspaceId, podId, userId, {
+			create({
 				name: "team wiki",
 				url: "https://other.example/mcp",
 			}),
-		).rejects.toThrow(ConnectionNameTaken);
+		).rejects.toThrow(ConnectionRepository.ConnectionNameTaken);
 	});
 
 	it("hands a turn every connection that is not off, with what it may do", async () => {
-		const wiki = await connections.create(workspaceId, podId, userId, {
+		const wiki = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
-		const off = await connections.create(workspaceId, podId, userId, {
+		const off = await create({
 			name: "Off",
 			url: "https://off.example.com/mcp",
 		});
@@ -98,11 +119,11 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	});
 
 	it("keeps a connection that signs in off until it has", async () => {
-		const pasted = await connections.create(workspaceId, podId, userId, {
+		const pasted = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
-		const signsIn = await connections.create(workspaceId, podId, userId, {
+		const signsIn = await create({
 			name: "Linear",
 			url: "https://mcp.linear.app/mcp",
 			auth: "oauth",
@@ -113,28 +134,32 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	});
 
 	it("does not expose a connection through another pod", async () => {
-		const made = await connections.create(workspaceId, podId, userId, {
+		const made = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
 
-		expect(await connections.get(workspaceId, otherPodId, made.id)).toBeUndefined();
+		expect(await shown(made.id, otherPodId)).toBeUndefined();
 		expect(await connections.target(workspaceId, otherPodId, made.id)).toBeUndefined();
 		expect(
 			await connections.update(workspaceId, otherPodId, made.id, { access: "ask" }),
 		).toBeUndefined();
 		expect(await connections.remove(workspaceId, otherPodId, made.id)).toBe(false);
-		expect(await connections.get(workspaceId, podId, made.id)).toEqual(made);
+		expect((await shown(made.id))?.id).toEqual(made.id);
 	});
 
 	it("keeps an OAuth connection's sealed record, and finds it again by the state of a sign-in", async () => {
-		const made = await connections.create(workspaceId, podId, userId, {
+		const made = await create({
 			name: "Linear",
 			url: "https://mcp.linear.app/mcp",
 			auth: "oauth",
 			secret: "ignored",
 		});
-		expect(made).toMatchObject({ auth: "oauth", signedIn: false, hasSecret: false });
+		expect(await shown(made.id)).toMatchObject({
+			auth: "oauth",
+			signedIn: false,
+			hasSecret: false,
+		});
 		expect(await connections.target(workspaceId, podId, made.id)).toMatchObject({
 			auth: "oauth",
 			headers: {},
@@ -150,7 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			podId,
 			connectionId: made.id,
 		});
-		expect((await connections.get(workspaceId, podId, made.id))?.signedIn).toBe(false);
+		expect((await shown(made.id))?.signedIn).toBe(false);
 
 		await connections.saveOauthRecord(workspaceId, made.id, {
 			clientInformation: { client_id: "client-1" },
@@ -161,11 +186,11 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			tokens: { access_token: "token-1" },
 		});
 		expect(await connections.byOauthState("state-1")).toBeUndefined();
-		expect((await connections.get(workspaceId, podId, made.id))?.signedIn).toBe(true);
+		expect((await shown(made.id))?.signedIn).toBe(true);
 	});
 
 	it("hands the caller the URL and the secret as a header", async () => {
-		const made = await connections.create(workspaceId, podId, userId, {
+		const made = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 			secretHeader: "authorization",
@@ -179,7 +204,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			headers: { authorization: "Bearer abc" },
 		});
 
-		const open = await connections.create(workspaceId, podId, userId, {
+		const open = await create({
 			name: "Open",
 			url: "https://open.example.com/mcp",
 		});
@@ -187,7 +212,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	});
 
 	it("records what a test found, and forgets it when the connection changes", async () => {
-		const made = await connections.create(workspaceId, podId, userId, {
+		const made = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
@@ -200,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 				{ name: "web_search_exa", description: "Search.", readOnly: true, destructive: null },
 			],
 		});
-		expect(await connections.get(workspaceId, podId, made.id)).toMatchObject({
+		expect(await shown(made.id)).toMatchObject({
 			status: "connected",
 			tools: [{ name: "web_search_exa" }],
 		});
@@ -208,7 +233,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 
 		await connections.update(workspaceId, podId, made.id, { secret: "exa-key" });
 		expect((await connections.target(workspaceId, podId, made.id))?.configurationRevision).toBe(2);
-		expect(await connections.get(workspaceId, podId, made.id)).toMatchObject({
+		expect(await shown(made.id)).toMatchObject({
 			status: "untested",
 			hasSecret: true,
 			// The tools stay: they are what the server offers, not what a key unlocks.

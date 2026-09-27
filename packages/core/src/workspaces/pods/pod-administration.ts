@@ -2,13 +2,11 @@ export * as PodAdministration from "./pod-administration.ts";
 
 import type { Pod, PodColor, PodMember, PodUpdate } from "@sugabots/contracts";
 import { Context, Data, Effect, Layer } from "effect";
-import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { modelProviderStore } from "../../providers/model-providers/store.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type PodStanding, podStanding } from "../access.ts";
-import { ModelNotEnabled } from "../agents/agent-administration.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
 import { FACILITATE_SYSTEM_AGENT } from "../agents/system-agents.ts";
 import type { Actor } from "../permissions.ts";
@@ -46,13 +44,13 @@ export interface Interface {
 		workspaceId: string;
 		userId: string;
 		model: string;
-	}) => Effect.Effect<schema.PodRow, ModelNotEnabled>;
+	}) => Effect.Effect<schema.PodRow, ModelProviderRepository.ModelNotEnabled>;
 	/** {@link Interface.provisionPersonalWithModel} for `owner`, as they see the pod. */
 	readonly ensurePersonal: (input: {
 		workspaceId: string;
 		owner: Actor;
 		model: string;
-	}) => Effect.Effect<Pod, ModelNotEnabled>;
+	}) => Effect.Effect<Pod, ModelProviderRepository.ModelNotEnabled>;
 	/** Changes the pod `standing` is towards, returning it as that caller sees it. */
 	readonly update: (input: {
 		standing: PodStanding;
@@ -91,7 +89,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("PodAdministration");
 	const pods = yield* PodRepository.Service;
 	const agents = yield* AgentRepository.Service;
-	const modelProviders = modelProviderStore(yield* Credentials.Service);
+	const modelProviders = yield* ModelProviderRepository.Service;
 
 	const isOffered = (workspaceId: string, model: string | null) =>
 		model === null ? Effect.succeed(false) : modelProviders.isEnabled(workspaceId, model);
@@ -112,7 +110,7 @@ export const make = Effect.gen(function* () {
 		transaction(
 			Effect.gen(function* () {
 				if (!(yield* isOffered(workspaceId, model))) {
-					return yield* new ModelNotEnabled({ model });
+					return yield* new ModelProviderRepository.ModelNotEnabled({ model });
 				}
 				const { personal, assistant } = yield* provisionPersonal(workspaceId, userId, model);
 				if (!(yield* isOffered(workspaceId, assistant.model))) {
@@ -212,7 +210,9 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([PodRepository.layer, AgentRepository.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([PodRepository.layer, AgentRepository.layer, ModelProviderRepository.layer]),
+);
 
 /**
  * A pod asked to route through the Facilitator before the workspace chose a

@@ -1,5 +1,10 @@
-import type { ConnectionAccess, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
-import { connectionPresetFor } from "@sugabots/contracts";
+import type {
+	ConnectionAccess,
+	ConnectionSignInFailure,
+	ConnectionUpdate,
+	NewConnection,
+} from "@sugabots/contracts";
+import { connectionPresetFor, connectionSignInFailures } from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo } from "react";
@@ -121,3 +126,24 @@ export function useConnectionActions(podId: string) {
 
 /** Leaving the page, behind one seam so a test can watch it. */
 export const browser = { go: (url: string) => window.location.assign(url) };
+
+/**
+ * Why a connection's sign-in did not finish, in words for the person, from
+ * the code the API put in the address. Anybody can write an address, so a
+ * code the API does not send gets the general sentence instead of being shown.
+ */
+export function signInFailureReason(code: string): string {
+	return isSignInFailure(code) ? SIGN_IN_FAILURE_REASONS[code] : "Something went wrong. Try again.";
+}
+
+const SIGN_IN_FAILURE_REASONS: Record<ConnectionSignInFailure, string> = {
+	missing_state: "The sign-in came back incomplete. Try again.",
+	unknown_state: "The sign-in does not match any connection.",
+	not_allowed: "You are not allowed to connect a server in this pod.",
+	refused: "The server's sign-in was refused or cancelled.",
+	not_completed: "The server did not accept the sign-in. Try again.",
+};
+
+function isSignInFailure(code: string): code is ConnectionSignInFailure {
+	return (connectionSignInFailures as readonly string[]).includes(code);
+}

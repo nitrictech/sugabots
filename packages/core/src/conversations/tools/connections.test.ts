@@ -7,7 +7,7 @@ import { Effect, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import type { ConnectionTarget } from "../../providers/connections/store.ts";
+import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
 import { connectionTools } from "./connections.ts";
 
 /**

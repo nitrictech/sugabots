@@ -14,6 +14,7 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
@@ -104,7 +105,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 					createdById: creatorId,
 					agent: { podId, name: "Triage", model },
 				}),
-			).rejects.toBeInstanceOf(AgentAdministration.ModelNotEnabled);
+			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 
 			expect(
 				await onDatabase((db) => db.select().from(agent).where(eq(agent.podId, podId))),
@@ -125,7 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 		await expect(
 			administration.update({ workspaceId, agentId: made.id, changes: { model: "switched-off" } }),
-		).rejects.toBeInstanceOf(AgentAdministration.ModelNotEnabled);
+		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 		expect(
 			(await administration.update({ workspaceId, agentId: made.id, changes: { model: null } }))
 				.model,
@@ -153,7 +154,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 		await expect(
 			administration.setSystemAgentModel({ workspaceId, key: "summarise", model: "unknown-model" }),
-		).rejects.toBeInstanceOf(AgentAdministration.ModelNotEnabled);
+		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 		expect(
 			(await administration.setSystemAgentModel({ workspaceId, key: "summarise", model: OFFERED }))
 				.model,

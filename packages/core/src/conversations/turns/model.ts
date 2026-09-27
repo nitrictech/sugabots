@@ -11,11 +11,12 @@ import {
 	type ToolModelMessage,
 	type ToolSet,
 } from "ai";
-import { Data, Effect } from "effect";
-import type { Database } from "../../database/database.ts";
+import { Context, Data, Effect, Layer } from "effect";
+import { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
-import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
-import type { EgressHttpClients } from "../../providers/network/egress.ts";
+import { ModelProbe } from "../../providers/model-providers/model-probe.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 
 export interface ModelAccounting {
@@ -118,7 +119,7 @@ const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
 };
 
 export interface TurnModelOptions {
-	modelProviders: Pick<ModelProviderStore, "resolve">;
+	modelProviders: Pick<ModelProviderRepository.Interface, "resolve">;
 	httpClients: EgressHttpClients;
 }
 
@@ -205,6 +206,34 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 			}),
 	};
 }
+
+/**
+ * The workspace model client as a service: the one turns, facilitation,
+ * summaries, trials and settings all ask a model through.
+ */
+export class Models extends Context.Service<Models, TurnModel>()("@sugabots/core/Models") {}
+
+export const modelsLayer = Layer.effect(
+	Models,
+	Effect.gen(function* () {
+		const modelProviders = yield* ModelProviderRepository.Service;
+		const egress = yield* Egress.Service;
+		return workspaceTurnModel({ modelProviders, httpClients: egress.providers });
+	}),
+);
+
+/** {@link probeModel} through {@link Models}, for settings to try a model the way a turn would. */
+export const modelProbeLayer = Layer.effect(
+	ModelProbe.Service,
+	Effect.gen(function* () {
+		const model = yield* Models;
+		const database = yield* Database;
+		return ModelProbe.Service.of({
+			probe: (workspaceId, modelId) =>
+				probeModel(model, workspaceId, modelId).pipe(Effect.provideService(Database, database)),
+		});
+	}),
+);
 
 /**
  * Asks a model for one word, to learn whether it will answer at all. What

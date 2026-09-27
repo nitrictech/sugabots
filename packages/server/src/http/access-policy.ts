@@ -110,7 +110,7 @@ export const accessPolicy: AccessPolicy = {
 		connectFromCatalog: { pod: "connection.manage" },
 		startOAuth: { pod: "connection.manage" },
 		oauthCallback: {
-			reach: "connections/operations.ts asks again on the way back from the provider",
+			reach: "ConnectionSetup.completeOAuth asks again on the way back from the provider",
 		},
 	},
 	events: {

@@ -1,22 +1,44 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { Credentials } from "../../credentials/credentials.ts";
+import type { NewSearchProvider } from "@sugabots/contracts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
-import { type SearchProviderStore, searchProviderStore } from "./store.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { UserMessage } from "../../user-message.ts";
+import { searchProviderOf, toSearchProvider } from "./search-provider-reads.ts";
+import { SearchProviderRepository } from "./search-provider-repository.ts";
 
 /**
- * The search provider store against Postgres: one per workspace, replaced
+ * The search provider repository against Postgres: one per workspace, replaced
  * rather than added to, and what a turn is given to search with.
  */
 describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres", () => {
-	const cipher = Credentials.fromKey(Buffer.alloc(32, 7).toString("base64"));
-	const providers: Promised<SearchProviderStore> = onPostgres(searchProviderStore(cipher));
-	const userId = null as unknown as string;
+	let providers: Promised<SearchProviderRepository.Interface>;
 	let workspaceId: string;
+
+	beforeAll(async () => {
+		providers = await servedOnPostgres(
+			SearchProviderRepository.Service,
+			SearchProviderRepository.layer,
+		);
+	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	const replace = async (provider: NewSearchProvider) =>
+		toSearchProvider(
+			await providers.replace(workspaceId, {
+				createdById: null as unknown as string,
+				provider,
+			}),
+		);
+	const shown = () => runOnPostgres(searchProviderOf(workspaceId));
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -31,7 +53,7 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 	});
 
 	it("lets Exa be switched on without a key, since its free endpoint answers then", async () => {
-		const set = await providers.replace(workspaceId, userId, { preset: "exa", enabled: true });
+		const set = await replace({ preset: "exa", enabled: true });
 
 		expect(set).toMatchObject({
 			preset: "exa",
@@ -48,10 +70,10 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 	});
 
 	it("replaces the provider rather than adding a second", async () => {
-		const first = await providers.replace(workspaceId, userId, { preset: "brave", apiKey: "k" });
+		const first = await replace({ preset: "brave", apiKey: "k" });
 		await providers.update(workspaceId, { enabled: true });
 
-		const second = await providers.replace(workspaceId, userId, {
+		const second = await replace({
 			preset: "searxng",
 			baseUrl: "http://searx.local:8080",
 		});
@@ -68,8 +90,8 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 	});
 
 	it("gives a turn the connection only while enabled and able to be called", async () => {
-		await providers.replace(workspaceId, userId, { preset: "brave" });
-		expect(await providers.get(workspaceId)).toMatchObject({ status: "missing_key" });
+		await replace({ preset: "brave" });
+		expect(await shown()).toMatchObject({ status: "missing_key" });
 		expect(await providers.connection(workspaceId)).toBeUndefined();
 		expect(await providers.resolve(workspaceId)).toBeUndefined();
 
@@ -86,26 +108,43 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 
 		await providers.update(workspaceId, { apiKey: null });
 		expect(await providers.resolve(workspaceId)).toBeUndefined();
+		expect(await shown()).toMatchObject({ enabled: false, status: "missing_key" });
+	});
+
+	it("refuses to switch search on for a preset that needs a key it does not have", async () => {
+		await replace({ preset: "brave" });
+
+		await expect(providers.update(workspaceId, { enabled: true })).rejects.toBeInstanceOf(
+			SearchProviderRepository.SearchProviderApiKeyRequired,
+		);
+		await expect(replace({ preset: "brave", enabled: true })).rejects.toBeInstanceOf(
+			SearchProviderRepository.SearchProviderApiKeyRequired,
+		);
+		expect(await shown()).toMatchObject({ enabled: false });
 	});
 
 	it("records a test against the configuration it tested, and forgets it when that changes", async () => {
-		await providers.replace(workspaceId, userId, { preset: "brave", apiKey: "k" });
+		await replace({ preset: "brave", apiKey: "k" });
 		const connection = await providers.connection(workspaceId);
 		if (!connection) throw new Error("no connection");
 
-		await providers.recordTest(workspaceId, connection.configurationUpdatedAt, "HTTP 401");
-		expect(await providers.get(workspaceId)).toMatchObject({
+		await providers.recordTest(
+			workspaceId,
+			connection.configurationUpdatedAt,
+			UserMessage.of`Brave Search answered HTTP ${401}`,
+		);
+		expect(await shown()).toMatchObject({
 			status: "error",
-			lastTestError: "HTTP 401",
+			lastTestError: "Brave Search answered HTTP 401",
 		});
 
 		await providers.update(workspaceId, { apiKey: "better-key" });
-		expect(await providers.get(workspaceId)).toMatchObject({
+		expect(await shown()).toMatchObject({
 			status: "untested",
 			lastTestError: null,
 		});
 		// The old test was of an old key; recording it now would mislabel the new one.
 		await providers.recordTest(workspaceId, connection.configurationUpdatedAt);
-		expect(await providers.get(workspaceId)).toMatchObject({ status: "untested" });
+		expect(await shown()).toMatchObject({ status: "untested" });
 	});
 });

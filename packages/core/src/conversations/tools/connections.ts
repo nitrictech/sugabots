@@ -2,9 +2,10 @@ import { connectionToolKey, connectionToolMutating } from "@sugabots/contracts";
 import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
+import type { ConnectionRepository } from "../../providers/connections/connection-repository.ts";
+import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
 import { connectServer, type ServerSession } from "../../providers/connections/mcp.ts";
 import type { OAuthProviders } from "../../providers/connections/oauth.ts";
-import type { ConnectionStore, ConnectionTarget } from "../../providers/connections/store.ts";
 import type { EgressHttpClient, EgressHttpClients } from "../../providers/network/egress.ts";
 
 /**
@@ -45,13 +46,16 @@ export interface ConnectionTools {
 }
 
 export interface ConnectionToolsOptions {
-	connections: Pick<ConnectionStore, "targetsForPod">;
+	connections: Pick<ConnectionRepository.Interface, "targetsForPod">;
 	/** Bound egress clients, so a session goes only to the connection's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
 	connect?: typeof connectServer;
-	/** Where a connection signed in with OAuth keeps its tokens, and the client its calls go through. */
-	oauth?: { providers: OAuthProviders; fetch: EgressHttpClient };
+	/**
+	 * The clients connections signed in with OAuth carry their tokens with,
+	 * read once per turn, and the client their calls go through.
+	 */
+	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
 }
 
 export function connectionTools({
@@ -60,16 +64,18 @@ export function connectionTools({
 	connect = connectServer,
 	oauth,
 }: ConnectionToolsOptions): ConnectionTools {
-	async function offer(target: ConnectionTarget, workspaceId: string): Promise<Opened | undefined> {
+	async function offer(
+		target: ConnectionTarget,
+		workspaceId: string,
+		providers: OAuthProviders | undefined,
+	): Promise<Opened | undefined> {
 		try {
 			const session = await connect(
 				{
 					url: target.url,
 					headers: target.headers,
 					authProvider:
-						target.auth === "oauth"
-							? oauth?.providers.for(workspaceId, target.connectionId)
-							: undefined,
+						target.auth === "oauth" ? providers?.for(workspaceId, target.connectionId) : undefined,
 				},
 				// An OAuth server's refresh goes to its authorization server, which
 				// may be elsewhere, so that client is not bound to the server's address.
@@ -104,8 +110,9 @@ export function connectionTools({
 			Effect.gen(function* () {
 				const targets = yield* connections.targetsForPod(workspaceId, podId);
 				if (targets.length === 0) return nothingOffered;
+				const providers = oauth ? yield* oauth.clients : undefined;
 				const opened = (yield* Effect.promise(() =>
-					Promise.all(targets.map((target) => offer(target, workspaceId))),
+					Promise.all(targets.map((target) => offer(target, workspaceId, providers))),
 				)).filter((one): one is Opened => one !== undefined);
 				return {
 					tools: Object.assign({}, ...opened.map((one) => one.tools)),

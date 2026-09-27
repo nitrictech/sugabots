@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
+	CONNECTION_SIGN_IN_CALLBACK_PATH,
 	connectFromCatalogResultSchema,
 	connectFromCatalogSchema,
 	connectionOauthStartSchema,
@@ -59,7 +60,7 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 		}),
 		// Where the authorization server sends the browser back. It answers with
 		// a redirect to the web app, success or not, since a browser is reading it.
-		HttpApiEndpoint.get("oauthCallback", "/connections/oauth/callback", {
+		HttpApiEndpoint.get("oauthCallback", CONNECTION_SIGN_IN_CALLBACK_PATH, {
 			query: {
 				code: Schema.optional(Schema.String),
 				state: Schema.optional(Schema.String),
