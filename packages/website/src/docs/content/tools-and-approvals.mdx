@@ -1,0 +1,55 @@
+---
+title: Tools and approvals
+description: What bots can do beyond talking, and when they check with you first.
+---
+
+Tools let a bot do things: read a web page, search, or work in your apps through
+a [connection](/docs/connections). You decide which tools each bot gets, and
+which ones need a person to say yes.
+
+## Built-in tools
+
+Every bot comes with these, unless someone turns them off for it.
+
+<BuiltInTools />
+
+- **Read web pages** reads public pages only. It can't sign in to anything, and
+  it can't reach your private network unless the installation allows it with
+  [`ALLOW_PRIVATE_WEB_FETCH_NETWORK`](/docs/configuration#network).
+- **Search the web** uses the workspace's search provider. New workspaces start
+  with Exa's free tier switched on. See [Models](/docs/models#web-search).
+
+To switch one off for a bot, open the bot's settings, go to **Tools**, and use
+**Turn off**.
+
+Bots can also [ask each other for help](/docs/conversations#bots-asking-bots).
+That's always on when a pod has more than one bot.
+
+## Tools from connections
+
+A connection's tools belong to the pod, and every bot in the pod can use them.
+Each connection has an **Approval** setting:
+
+| Approval | What happens |
+| --- | --- |
+| Off | Bots aren't offered its tools |
+| Ask | Every call waits for a person |
+| Allow | Tools that only read run straight away. Anything else waits |
+
+A tool counts as read-only only when the app says so. If it doesn't say, the
+tool is treated as one that makes changes, and it always waits.
+
+## Try it
+
+Set the approval, pick what the bot wants to do, and answer it.
+
+<ApprovalPlayground />
+
+## Who can answer
+
+A waiting call shows in the chat with **Allow** and **Deny**. Allow lets that
+one call run. There's no "always allow": the next call asks again.
+
+- **Admins and members** can answer approvals in chats.
+- **Viewers** see "Waiting for someone with permission to answer this."
+- **Only admins** can answer approvals raised by a [routine](/docs/routines) run.
