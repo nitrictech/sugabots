@@ -1,36 +1,20 @@
-import type {
-	AgentColor,
-	Message,
-	PodRouting,
-	ThreadParticipant,
-	ThreadType,
-} from "@sugabots/contracts";
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import {
-	type Database,
-	type Executor,
-	type QueryFailure,
-	query,
-	transaction,
-} from "../../database/database.ts";
+import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import {
-	type AgentRow,
-	agent,
-	message,
-	pod,
-	type TurnReason,
-	thread,
-	turn,
-	user,
-	workspace,
-} from "../../database/schema.ts";
+import { type TurnReason, turn } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import type { ConversationEvent } from "../events.ts";
-import { threadRejectsTurns } from "../routines/execution.ts";
-import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
-import { loadPlacedParts } from "../threads/placed-parts.ts";
+import { routineExecutionIdOf, routineRejectsTurns } from "../routines/execution.ts";
+import {
+	agentColumns,
+	authorRow,
+	messageFromRelations,
+	messageRelations,
+	personColumns,
+	toParticipant,
+} from "../threads/participants.ts";
 import { visibleThread } from "../threads/visibility.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import { ROUTINE_EXECUTION_ENDED, TURN_CANCELLED } from "./lifecycle.ts";
@@ -160,52 +144,45 @@ export function turnExecution(dependencies: {
 			transaction(
 				Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
 					const request = run.request;
-					if (yield* threadRejectsTurns(request.threadId)) {
+					const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
+					if (
+						loaded?.routineExecutionId &&
+						(yield* routineRejectsTurns(loaded.routineExecutionId))
+					) {
 						return yield* refuseRun(
 							run,
 							"The Routine execution has ended",
 							ROUTINE_EXECUTION_ENDED,
 						);
 					}
-					const scope = yield* query((db) => loadTurnScope(db, request));
-					if (!scope) {
+					// The agent has to be crew placed in the thread's pod, not the
+					// thread's host. A shared thread gives the floor to whoever the
+					// facilitator or a mention picks, and that is rarely the host.
+					// Pod membership is still a real check: it is what stops a turn
+					// request naming an agent from another pod or another workspace.
+					const speaker = loaded?.pod.agents.find(({ id }) => id === request.agentId);
+					if (!loaded || !speaker) {
 						return notRunnable("The thread is gone, or this agent is not a crew agent in its pod");
 					}
 					// An agent whose model has been cleared does not fall back to
 					// another one: it stops, and says so, until somebody chooses.
 					// Read out here so what opens the turn is handed a model rather
-					// than a scope that might not carry one.
-					const model = scope.agentModel;
-					if (model === null) return notRunnable(`${scope.agentName} has no model chosen`);
-					if (scope.threadType === "chat" && request.reason === "facilitator") {
+					// than an agent that might not carry one.
+					const model = speaker.model;
+					if (model === null) return notRunnable(`${speaker.name} has no model chosen`);
+					if (loaded.type === "chat" && request.reason === "facilitator") {
 						return yield* refuseRun(run, "The Facilitator does not route Chats", TURN_CANCELLED);
 					}
 					const opened = yield* turns.openReplyTurn({
-						threadId: scope.threadId,
-						agentId: scope.agentId,
+						threadId: loaded.id,
+						agentId: speaker.id,
 						triggerMessageId: request.triggerMessageId,
 						model,
 						reason: request.reason,
 						owner: run.executionId,
-						author: {
-							userId: null,
-							userName: null,
-							userImage: null,
-							agentId: scope.agentId,
-							agentName: scope.agentName,
-							agentHandle: scope.agentHandle,
-							agentColor: scope.agentColor,
-							agentFace: scope.agentFace,
-						},
+						author: authorRow(null, speaker),
 					});
 					if (opened._tag === "NotRunnable") return opened;
-					// One query at a time: inside a transaction the executor is a single
-					// connection, and queries sent concurrently down one are not run
-					// concurrently anyway. The driver queues them, and warns that it is
-					// about to stop accepting them at all.
-					const participants = yield* query((db) => loadParticipants(db, scope.threadId));
-					const crew = yield* query((db) => loadCrew(db, scope));
-					const messages = yield* query((db) => loadHistory(db, scope.threadId, opened.reply.id));
 					return {
 						_tag: "Prepared",
 						run,
@@ -213,28 +190,32 @@ export function turnExecution(dependencies: {
 						responseMessage: opened.reply,
 						context: {
 							thread: {
-								id: scope.threadId,
-								workspaceId: scope.workspaceId,
-								title: scope.threadTitle,
-								type: scope.threadType,
-								parentThreadId: scope.parentThreadId,
+								id: loaded.id,
+								workspaceId: loaded.workspaceId,
+								title: loaded.title,
+								type: loaded.type,
+								parentThreadId: loaded.parentThreadId,
 							},
 							agent: {
-								id: scope.agentId,
-								name: scope.agentName,
-								handle: scope.agentHandle,
+								id: speaker.id,
+								name: speaker.name,
+								handle: speaker.handle,
 								model,
-								prompt: scope.agentPrompt,
-								disabledTools: scope.agentDisabledTools,
-								podId: scope.podId,
+								prompt: speaker.prompt,
+								disabledTools: speaker.disabledTools,
+								podId: loaded.podId,
 							},
 							reason: request.reason,
-							routing: scope.routing,
-							podName: scope.podName,
-							workspaceName: scope.workspaceName,
-							crew,
-							participants,
-							messages,
+							routing: loaded.pod.routing,
+							podName: loaded.pod.name,
+							workspaceName: loaded.workspace.name,
+							crew: loaded.pod.agents
+								.filter(({ id }) => id !== speaker.id)
+								.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
+							participants: loaded.participants.map(({ user, agent }) =>
+								toParticipant(authorRow(user, agent)),
+							),
+							messages: loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
 						},
 						...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
 					};
@@ -280,122 +261,61 @@ function notRunnable(reason: string): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended: undefined };
 }
 
-/** The thread a turn happens in, with its pod, workspace and the agent taking it. */
-interface TurnScope {
-	threadId: string;
-	chatId: string | null;
-	workspaceId: string;
-	podId: string;
-	parentThreadId: string | null;
-	threadTitle: string;
-	threadType: ThreadType;
-	podName: string;
-	workspaceName: string;
-	routing: PodRouting;
-	agentId: string;
-	agentName: string;
-	agentHandle: string;
-	agentColor: AgentColor;
-	agentFace: AgentRow["face"];
-	/** Null when nobody has chosen one. The turn refuses rather than guessing. */
-	agentModel: string | null;
-	agentPrompt: string;
-	agentDisabledTools: string[];
-}
-
 /**
- * The thread and the agent about to speak in it, or nothing if the turn may
- * not run.
- *
- * The agent has to be crew placed in the thread's pod, not the thread's host.
- * A shared thread gives the floor to whoever the facilitator or a mention
- * picks, and that is rarely the host — requiring the host discarded
- * every routed turn, so the person watched a reply that was never coming.
- *
- * Pod membership is still a real check: it is what stops a turn request naming an agent
- * from another pod or another workspace.
+ * Everything the model is told about the thread, in one statement: the
+ * thread with its workspace, its pod and the crew placed there, the people and
+ * agents in it, and its last hundred completed messages with the parts placed
+ * in them. Also the routine run it belongs to, if any.
  */
-const loadTurnScope = Effect.fn("TurnExecution.loadTurnScope")(function* (
-	db: Executor,
-	request: TurnRequest,
-): Effect.fn.Return<TurnScope | undefined, QueryFailure> {
-	const [row] = yield* db
-		.select({
-			threadId: thread.id,
-			chatId: thread.chatId,
-			workspaceId: thread.workspaceId,
-			podId: thread.podId,
-			parentThreadId: thread.parentThreadId,
-			threadTitle: thread.title,
-			threadType: thread.type,
-			podName: pod.name,
-			routing: pod.routing,
-			workspaceName: workspace.name,
-			agentId: agent.id,
-			agentName: agent.name,
-			agentHandle: agent.handle,
-			agentColor: agent.color,
-			agentFace: agent.face,
-			agentModel: agent.model,
-			agentPrompt: agent.prompt,
-			agentDisabledTools: agent.disabledTools,
-		})
-		.from(thread)
-		.innerJoin(pod, eq(pod.id, thread.podId))
-		.innerJoin(workspace, eq(workspace.id, thread.workspaceId))
-		.innerJoin(agent, and(eq(agent.id, request.agentId), eq(agent.podId, thread.podId)))
-		.where(eq(thread.id, request.threadId))
-		.limit(1);
-	return row;
-});
-
-/** The other crew agents placed in the pod: who this agent may collaborate with. */
-const loadCrew = (db: Executor, scope: TurnScope) =>
-	db
-		.select({
-			id: agent.id,
-			name: agent.name,
-			handle: agent.handle,
-			description: agent.description,
-		})
-		.from(agent)
-		.where(
-			and(
-				eq(agent.podId, scope.podId),
-				eq(agent.workspaceId, scope.workspaceId),
-				isNull(agent.systemAgentKey),
-				ne(agent.id, scope.agentId),
-			),
-		)
-		.orderBy(agent.name);
-
-/**
- * loadHistory returns up to one hundred completed messages, excluding the
- * response currently being written.
- */
-const loadHistory = Effect.fn("TurnExecution.loadHistory")(function* (
+const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
 	threadId: string,
-	responseMessageId: string,
 ) {
-	const newestFirst = yield* db
-		.select({ message, ...participantColumns })
-		.from(message)
-		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		.where(
-			and(
-				eq(message.threadId, threadId),
-				ne(message.id, responseMessageId),
-				eq(message.status, "complete"),
-			),
-		)
-		.orderBy(desc(message.createdAt), desc(message.id))
-		.limit(MAX_HISTORY_MESSAGES);
-	const rows = newestFirst.reverse();
-	const placed = yield* loadPlacedParts(
-		db,
-		rows.map(({ message: row }) => row.id),
-	);
-	return rows.map(({ message: row, ...author }) => toMessage(row, author, placed(row.id)));
+	return yield* db.query.thread.findFirst({
+		where: { id: threadId },
+		columns: {
+			id: true,
+			workspaceId: true,
+			podId: true,
+			parentThreadId: true,
+			title: true,
+			type: true,
+		},
+		extras: { routineExecutionId: (row) => routineExecutionIdOf(row.id) },
+		with: {
+			workspace: { columns: { name: true } },
+			pod: {
+				columns: { name: true, routing: true },
+				with: {
+					// Every agent placed in a pod is crew: system agents are placed in none.
+					agents: {
+						columns: {
+							id: true,
+							name: true,
+							handle: true,
+							color: true,
+							face: true,
+							description: true,
+							model: true,
+							prompt: true,
+							disabledTools: true,
+						},
+						orderBy: { name: "asc" },
+					},
+				},
+			},
+			participants: {
+				columns: {},
+				orderBy: { createdAt: "asc", id: "asc" },
+				with: { user: personColumns, agent: agentColumns },
+			},
+			// The reply being written is `streaming`, so this leaves it out.
+			messages: {
+				where: { status: "complete" },
+				orderBy: { createdAt: "desc", id: "desc" },
+				limit: MAX_HISTORY_MESSAGES,
+				with: messageRelations,
+			},
+		},
+	});
 });
