@@ -21,7 +21,7 @@ import {
 import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { PodColourPicker } from "@/shell/LookPickers.tsx";
+import { PodColourPicker } from "@/shell/LookPicker.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";

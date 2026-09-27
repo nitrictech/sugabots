@@ -7,36 +7,68 @@ import {
 	type PodColor,
 	podColors,
 } from "@sugabots/contracts";
-import { cn } from "cn";
 import { useId } from "react";
-import { AgentAvatar } from "@/shell/Agent.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
+import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /*
  * Choosing how a bot looks: one of the eight colours, and one of the eye
- * styles drawn in that colour; and a pod's colour, from its own eight. Each is
- * a set of native radio buttons, so arrow keys move the choice; the chosen one
- * is ringed in its own colour.
+ * styles; and a pod's colour, from its own eight. Each is a set of native
+ * radio buttons, so arrow keys move the choice. The eyes are drawn alone on
+ * neutral chips, since the face shown above the picker already carries the
+ * colour. Both of a bot's sets span the full row so their edges line up.
  */
 
-/** The ring round a chosen swatch or face: a gap in the surface's colour, then the chosen colour. */
-function ring(color: string, surface: string): string {
-	return `0 0 0 3px ${surface}, 0 0 0 5px ${color}`;
+/** LookPicker renders a bot's Colour and Eyes rows, for a `SettingsGroup` under a preview of the face. */
+export function LookPicker({
+	color,
+	face,
+	onColorChange,
+	onFaceChange,
+}: {
+	color: AgentColor;
+	face: AgentFace;
+	onColorChange: (color: AgentColor) => void;
+	onFaceChange: (face: AgentFace) => void;
+}) {
+	return (
+		<>
+			<SettingsControlRow label="Colour">
+				<Swatches
+					colors={agentColors}
+					swatch={(one) => botColors[one].face}
+					value={color}
+					onChange={onColorChange}
+				/>
+			</SettingsControlRow>
+			<SettingsControlRow label="Eyes">
+				<EyesPicker value={face} onChange={onFaceChange} />
+			</SettingsControlRow>
+		</>
+	);
 }
 
-interface ColourPickerProps<Color extends string> {
-	value: Color;
-	onChange: (color: Color) => void;
-	/** The colour behind the picker, which the gap in the ring shows. */
-	surface?: string;
+/** PodColourPicker picks a pod's colour from the pod palette. */
+export function PodColourPicker({
+	value,
+	onChange,
+}: {
+	value: PodColor;
+	onChange: (color: PodColor) => void;
+}) {
+	return (
+		<Swatches
+			colors={podColors}
+			swatch={(color) => podPalettes[color].swatch}
+			value={value}
+			onChange={onChange}
+		/>
+	);
 }
 
-export function ColourPicker(props: ColourPickerProps<AgentColor>) {
-	return <Swatches colors={agentColors} swatch={(color) => botColors[color].face} {...props} />;
-}
-
-export function PodColourPicker(props: ColourPickerProps<PodColor>) {
-	return <Swatches colors={podColors} swatch={(color) => podPalettes[color].swatch} {...props} />;
+/** The ring round the chosen swatch: a gap in the panel's `--list` colour, then the swatch's colour. */
+function ring(color: string): string {
+	return `0 0 0 3px var(--list), 0 0 0 5px ${color}`;
 }
 
 function Swatches<Color extends string>({
@@ -44,16 +76,17 @@ function Swatches<Color extends string>({
 	swatch,
 	value,
 	onChange,
-	surface = "var(--list)",
-}: ColourPickerProps<Color> & {
+}: {
 	colors: readonly Color[];
 	/** How a colour is drawn as its round swatch. */
 	swatch: (color: Color) => string;
+	value: Color;
+	onChange: (color: Color) => void;
 }) {
 	const name = useId();
 	return (
-		// An 8px gap, the widest that fits eight swatches beside a field's label in a settings page.
-		<fieldset className="m-0 flex flex-1 flex-wrap gap-2 border-0 p-0">
+		// As many 28px columns as fit, spread across the row; on a row too narrow for all eight, the rest wrap into the same columns.
+		<fieldset className="m-0 grid flex-1 grid-cols-[repeat(auto-fit,1.75rem)] justify-between gap-1.5 border-0 p-0">
 			<legend className="sr-only">Colour</legend>
 			{colors.map((color) => (
 				<label
@@ -61,7 +94,7 @@ function Swatches<Color extends string>({
 					className="size-7 cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 					style={{
 						background: swatch(color),
-						boxShadow: value === color ? ring(swatch(color), surface) : undefined,
+						boxShadow: value === color ? ring(swatch(color)) : undefined,
 					}}
 				>
 					<input
@@ -79,44 +112,21 @@ function Swatches<Color extends string>({
 	);
 }
 
-export function EyesPicker({
-	color,
+function EyesPicker({
 	value,
 	onChange,
-	surface = "var(--list)",
-	size = 40,
-	variant = "faces",
 }: {
-	/** The colour the faces are drawn in. */
-	color: AgentColor;
 	value: AgentFace;
 	onChange: (face: AgentFace) => void;
-	surface?: string;
-	size?: number;
-	/**
-	 * `faces` draws each style on the bot's own face; `chips`, the eyes alone on
-	 * a neutral chip, as a form does where the face above already shows the colour.
-	 */
-	variant?: "faces" | "chips";
 }) {
 	const name = useId();
 	return (
-		<fieldset className="m-0 flex flex-1 flex-wrap gap-1.5 border-0 p-0">
+		<fieldset className="m-0 grid flex-1 grid-cols-5 gap-1.5 border-0 p-0">
 			<legend className="sr-only">Eyes</legend>
 			{agentFaces.map((face) => (
 				<label
 					key={face}
-					className={cn(
-						"cursor-pointer has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4",
-						variant === "chips"
-							? "grid h-8 w-11 place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground"
-							: "rounded-full",
-					)}
-					style={
-						variant === "faces" && value === face
-							? { boxShadow: ring(botColors[color].face, surface) }
-							: undefined
-					}
+					className="grid h-8 cursor-pointer place-items-center rounded-[10px] bg-chip text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
@@ -127,11 +137,7 @@ export function EyesPicker({
 						onChange={() => onChange(face)}
 						className="sr-only"
 					/>
-					{variant === "chips" ? (
-						<EyesGlyph face={face} />
-					) : (
-						<AgentAvatar color={color} face={face} size={size} />
-					)}
+					<EyesGlyph face={face} />
 				</label>
 			))}
 		</fieldset>

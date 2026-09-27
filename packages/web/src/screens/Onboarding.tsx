@@ -27,7 +27,7 @@ import {
 } from "@/lib/workspace.ts";
 import { isConnected } from "@/screens/ProviderSettings.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
+import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
@@ -448,14 +448,7 @@ function BotStep({
 				<AgentAvatar color={color} face={face} size={96} />
 			</div>
 			<div className="overflow-hidden rounded-panel bg-list">
-				<div className="flex items-center gap-3 border-border border-b px-4 py-3 max-md:flex-col max-md:items-start">
-					<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Colour</span>
-					<ColourPicker value={color} onChange={setColor} />
-				</div>
-				<div className="flex items-center gap-3 px-4 py-2.5 max-md:flex-col max-md:items-start">
-					<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Eyes</span>
-					<EyesPicker color={color} value={face} onChange={setFace} variant="chips" />
-				</div>
+				<LookPicker color={color} face={face} onColorChange={setColor} onFaceChange={setFace} />
 			</div>
 			<input
 				aria-label="Name"

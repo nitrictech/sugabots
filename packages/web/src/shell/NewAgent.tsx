@@ -4,7 +4,7 @@ import { type FormEvent, useState } from "react";
 import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
+import { LookPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {
@@ -13,12 +13,7 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
-import {
-	SettingsControlRow,
-	SettingsFieldLabel,
-	SettingsFieldRow,
-	SettingsGroup,
-} from "@/ui/settings-page.tsx";
+import { SettingsFieldLabel, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
  * Making a bot: its face first, as it will look, then its name and the pod it
@@ -68,12 +63,7 @@ export function NewAgentDialog({
 					<AgentAvatar color={color} face={face} size={88} />
 				</div>
 				<SettingsGroup>
-					<SettingsControlRow label="Colour">
-						<ColourPicker value={color} onChange={setColor} />
-					</SettingsControlRow>
-					<SettingsControlRow label="Eyes">
-						<EyesPicker color={color} value={face} onChange={setFace} variant="chips" />
-					</SettingsControlRow>
+					<LookPicker color={color} face={face} onColorChange={setColor} onFaceChange={setFace} />
 				</SettingsGroup>
 
 				<SettingsGroup className="mt-2">

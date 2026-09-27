@@ -14,7 +14,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
+import { LookPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -217,19 +217,12 @@ function ContactCard({
 function Look({ agent, save }: { agent: Agent; save: Save }) {
 	return (
 		<SettingsGroup label="Look">
-			<SettingsControlRow label="Colour">
-				<ColourPicker
-					value={agent.color}
-					onChange={(color) => void save({ color }).catch(() => {})}
-				/>
-			</SettingsControlRow>
-			<SettingsControlRow label="Eyes">
-				<EyesPicker
-					color={agent.color}
-					value={agent.face}
-					onChange={(face) => void save({ face }).catch(() => {})}
-				/>
-			</SettingsControlRow>
+			<LookPicker
+				color={agent.color}
+				face={agent.face}
+				onColorChange={(color) => void save({ color }).catch(() => {})}
+				onFaceChange={(face) => void save({ face }).catch(() => {})}
+			/>
 		</SettingsGroup>
 	);
 }
