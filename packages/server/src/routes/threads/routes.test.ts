@@ -1,5 +1,5 @@
 import type { ThreadDetails } from "@sugabots/contracts";
-import { threadDetailsSchema, threadSchema } from "@sugabots/contracts";
+import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect, Schema } from "effect";
@@ -42,18 +42,8 @@ const thread = {
 
 const details: ThreadDetails = {
 	thread,
-	activeTurnId: null,
 	routineExecution: null,
 	crew: [],
-	summary: null,
-	usage: {
-		modelCalls: 0,
-		inputTokens: null,
-		outputTokens: null,
-		totalTokens: null,
-		reportedCost: null,
-		latestContext: null,
-	},
 	participants: [
 		{ kind: "person", id: USER, name: "Sam", handle: "sam", image: null },
 		{
@@ -65,7 +55,6 @@ const details: ThreadDetails = {
 			face: "pill",
 		},
 	],
-	recentParticipants: [],
 	olderMessagesCursor: null,
 	messages: [
 		{
@@ -99,6 +88,12 @@ beforeEach(() => {
 				requestedHistory = history;
 				return threadId === THREAD && userId === USER ? details : undefined;
 			}),
+		activity: (threadId, userId) =>
+			Effect.succeed(
+				threadId === THREAD && userId === USER
+					? { summary: null, recentParticipants: details.participants }
+					: undefined,
+			),
 	};
 });
 
@@ -142,6 +137,17 @@ describe("thread routes", () => {
 		expect(requestedHistory).toEqual({ limit: 50 });
 
 		const hidden = await app().request(`/threads/${THREAD}`, as("outsider-token"));
+		expect(hidden.status).toBe(404);
+	});
+
+	it("returns a visible thread's activity and hides an unavailable id", async () => {
+		const response = await app().request(`/threads/${THREAD}/activity`, as("member-token"));
+		expect(Schema.decodeUnknownSync(threadActivitySchema)(await response.json())).toEqual({
+			summary: null,
+			recentParticipants: details.participants,
+		});
+
+		const hidden = await app().request(`/threads/${THREAD}/activity`, as("outsider-token"));
 		expect(hidden.status).toBe(404);
 	});
 

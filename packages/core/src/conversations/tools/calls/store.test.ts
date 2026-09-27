@@ -136,7 +136,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		});
 		await chats.sendMain({
 			chatId: opened.id,
-			userId: memberId,
+			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "What does example.com say?",
 		});

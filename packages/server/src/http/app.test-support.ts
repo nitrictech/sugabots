@@ -139,6 +139,7 @@ const emptyThreadStore: ThreadStore = {
 	listVisible: () => Effect.succeed([]),
 	visibleThreadId: () => Effect.undefined,
 	getVisible: () => Effect.undefined,
+	activity: () => Effect.undefined,
 };
 
 const emptyChatStore: ChatStore = {

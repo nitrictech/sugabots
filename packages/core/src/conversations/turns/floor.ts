@@ -5,7 +5,7 @@ import {
 	type ThreadType,
 	threadChannel,
 } from "@sugabots/contracts";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
 	type Database,
@@ -197,12 +197,35 @@ const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
 ): Effect.fn.Return<Omit<FloorInput, "content" | "author">, QueryFailure> {
+	// One round trip: the crew, the participants and the recent messages ride
+	// along as JSON beside the thread.
 	const [scope] = yield* db
 		.select({
 			hostAgentId: thread.hostAgentId,
-			podId: thread.podId,
 			routing: pod.routing,
 			threadType: thread.type,
+			crew: sql<Array<{ id: string; handle: string }>>`(
+				select coalesce(json_agg(json_build_object('id', ${agent.id}, 'handle', ${agent.handle})), '[]'::json)
+				from ${agent}
+				where ${agent.podId} = ${thread.podId} and ${agent.systemAgentKey} is null
+			)`,
+			participantAgentIds: sql<string[]>`(
+				select coalesce(json_agg(${threadParticipant.agentId}) filter (where ${threadParticipant.agentId} is not null), '[]'::json)
+				from ${threadParticipant}
+				where ${threadParticipant.threadId} = ${thread.id}
+			)`,
+			// Newest first, this message included: how long agents have been
+			// talking among themselves, and who among them spoke last.
+			recent: sql<Array<{ id: string; authorAgentId: string | null }>>`(
+				select coalesce(json_agg(json_build_object('id', recent.id, 'authorAgentId', recent.author_agent_id) order by recent.created_at desc, recent.id desc), '[]'::json)
+				from (
+					select ${message.id} as id, ${message.authorAgentId} as author_agent_id, ${message.createdAt} as created_at
+					from ${message}
+					where ${message.threadId} = ${thread.id} and ${message.status} = 'complete'
+					order by ${message.createdAt} desc, ${message.id} desc
+					limit ${MAX_AGENT_RUN + 1}
+				) as recent
+			)`,
 		})
 		.from(thread)
 		.innerJoin(pod, eq(pod.id, thread.podId))
@@ -211,26 +234,7 @@ const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	if (!scope) {
 		throw new Error("The thread this message is in no longer exists");
 	}
-	// One query at a time: inside a transaction the executor is a single
-	// connection, and queries sent concurrently down one are not run concurrently
-	// anyway. The driver queues them, and warns that it is about to stop accepting
-	// them at all.
-	const crew = yield* db
-		.select({ id: agent.id, handle: agent.handle })
-		.from(agent)
-		.where(and(eq(agent.podId, scope.podId), isNull(agent.systemAgentKey)));
-	const participants = yield* db
-		.select({ agentId: threadParticipant.agentId })
-		.from(threadParticipant)
-		.where(eq(threadParticipant.threadId, committed.threadId));
-	// Newest first, this message included: how long agents have been talking
-	// among themselves, and who among them spoke last.
-	const recent = yield* db
-		.select({ id: message.id, authorAgentId: message.authorAgentId })
-		.from(message)
-		.where(and(eq(message.threadId, committed.threadId), eq(message.status, "complete")))
-		.orderBy(desc(message.createdAt), desc(message.id))
-		.limit(MAX_AGENT_RUN + 1);
+	const recent = scope.recent;
 
 	let agentRun = 0;
 	for (const row of recent) {
@@ -243,8 +247,8 @@ const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		routing: scope.routing,
 		threadType: scope.threadType,
 		hostAgentId: scope.hostAgentId,
-		crew,
-		agentParticipantIds: new Set(participants.flatMap((row) => (row.agentId ? [row.agentId] : []))),
+		crew: scope.crew,
+		agentParticipantIds: new Set(scope.participantAgentIds),
 		lastAgentSpeakerId: previous?.authorAgentId ?? undefined,
 		agentRun,
 	};

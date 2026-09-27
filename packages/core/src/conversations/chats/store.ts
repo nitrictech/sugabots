@@ -11,35 +11,46 @@ import type {
 	Message,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_PAGE_LIMIT, streamEvent, threadChannel } from "@sugabots/contracts";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	type DBQueryConfig,
+	desc,
+	eq,
+	inArray,
+	isNull,
+	ne,
+	type SQLWrapper,
+	sql,
+} from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import { isUuid } from "../../database/ids.ts";
+import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
 	chat,
-	collaboration,
 	message,
 	pod,
-	routineExecution,
 	thread,
 	threadParticipant,
 	turn,
-	user,
 } from "../../database/schema.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
 import {
-	loadParticipantsByThread,
-	participantColumns,
+	agentColumns,
+	authorRow,
+	messageFromRelations,
+	messageRelations,
 	personAuthor,
+	personColumns,
 	toMessage,
 	toParticipant,
 } from "../threads/participants.ts";
-import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { giveFloor } from "../turns/floor.ts";
 
 export class ChatPlacementRejected extends Data.TaggedError("ChatPlacementRejected") {
@@ -85,7 +96,8 @@ interface ChatListRequest {
 
 interface SendMainMessage {
 	chatId: string;
-	userId: string;
+	/** Who is sending, as the caller already knows them. */
+	author: { id: string; name: string; image: string | null };
 	messageId: string;
 	content: string;
 }
@@ -186,10 +198,12 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 			page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT },
 		) {
 			yield* Effect.annotateCurrentSpan("chat.id", chatId);
-			const visible = yield* query((db) => visibleChat(db, chatId, userId));
-			if (!visible) return undefined;
+			if (!isUuid(chatId)) return undefined;
+			// Before the query, and whether or not the chat is there, so a bad cursor
+			// says nothing about the chat.
 			const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
-			return yield* query((db) => loadMainMessages(db, visible, page.limit, before));
+			const row = yield* query((db) => loadMainPage(db, chatId, userId, page.limit, before));
+			return row ? toMainPage(row, page.limit) : undefined;
 		}),
 
 		history: Effect.fn("ChatStore.history")(function* (
@@ -198,28 +212,28 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 			page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT },
 		) {
 			yield* Effect.annotateCurrentSpan("chat.id", chatId);
-			const visible = yield* query((db) => visibleChat(db, chatId, userId));
-			if (!visible) return undefined;
+			if (!isUuid(chatId)) return undefined;
 			const before = page.cursor ? yield* decodeCursor(page.cursor) : undefined;
-			return yield* query((db) => loadHistory(db, visible, page.limit, before));
+			const row = yield* query((db) => loadHistory(db, chatId, userId, page.limit, before));
+			return row ? toHistoryPage(row, page.limit) : undefined;
 		}),
 
 		sendMain: (input) =>
 			transaction(
 				Effect.gen(function* () {
-					const visible = yield* query((db) => visibleChat(db, input.chatId, input.userId));
+					const visible = yield* query((db) => visibleChat(db, input.chatId, input.author.id));
 					if (!visible) return undefined;
 					yield* lock(`chat-message:${input.messageId}`);
 					const existing = yield* query((db) => messageById(db, input.messageId));
 					if (existing) {
 						if (
 							existing.threadId !== visible.mainThreadId ||
-							existing.authorUserId !== input.userId ||
+							existing.authorUserId !== input.author.id ||
 							existing.content !== input.content
 						) {
 							return yield* new ChatMessageIdConflict();
 						}
-						return yield* query((db) => publicMessage(db, existing));
+						return toMessage(existing, messageAuthor(input.author));
 					}
 					const hostModel = yield* query((db) => agentModel(db, visible.hostAgentId));
 					if (hostModel === null) return yield* new ChatAgentHasNoModel();
@@ -228,7 +242,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 						db
 							.insert(message)
 							.values(
-								userMessage(input.messageId, visible.mainThreadId, input.userId, input.content),
+								userMessage(input.messageId, visible.mainThreadId, input.author.id, input.content),
 							)
 							.returning(),
 					);
@@ -242,7 +256,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 					yield* query((db) =>
 						db
 							.insert(threadParticipant)
-							.values({ threadId: visible.mainThreadId, userId: input.userId })
+							.values({ threadId: visible.mainThreadId, userId: input.author.id })
 							.onConflictDoNothing(),
 					);
 					yield* giveFloor(publishEvents, {
@@ -251,7 +265,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 						content: created.content,
 						author: { kind: "person" },
 					});
-					const result = yield* query((db) => publicMessage(db, created));
+					const result = toMessage(created, messageAuthor(input.author));
 					yield* publishEvents([
 						{
 							channel: threadChannel(visible.mainThreadId),
@@ -441,216 +455,204 @@ const messageById = Effect.fn("ChatStore.messageById")(function* (db: Executor, 
 	return row;
 });
 
-const publicMessage = Effect.fn("ChatStore.publicMessage")(function* (
-	db: Executor,
-	row: schema.MessageRow,
-) {
-	const [author] = yield* db
-		.select({ userId: user.id, userName: user.name, userImage: user.image })
-		.from(user)
-		.where(eq(user.id, row.authorUserId ?? ""))
-		.limit(1);
-	if (!author) throw new Error("Chat message author no longer exists");
-	return toMessage(row, personAuthor(author));
-});
+function messageAuthor(author: SendMainMessage["author"]) {
+	return personAuthor({ userId: author.id, userName: author.name, userImage: author.image });
+}
 
 interface CursorPoint {
 	createdAt: Date;
 	id: string;
 }
 
-const loadMainMessages = Effect.fn("ChatStore.loadMainMessages")(function* (
+/**
+ * A page of the chat's main conversation, one statement: its messages with their
+ * authors and parts, the collaborations its bot was asked into, and its routine
+ * runs, each newest first and one more than the page. Nothing when the caller
+ * does not reach the chat's pod.
+ */
+const loadMainPage = Effect.fn("ChatStore.loadMainPage")(function* (
 	db: Executor,
-	chatRow: schema.ChatRow,
+	chatId: string,
+	userId: string,
 	limit: number,
-	before?: CursorPoint,
+	before: CursorPoint | undefined,
 ) {
-	const messageRows = yield* db
-		.select({ message, ...participantColumns })
-		.from(message)
-		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		.where(
-			and(
-				eq(message.threadId, chatRow.mainThreadId),
-				before ? beforeCondition(message.createdAt, message.id, before) : undefined,
-			),
-		)
-		.orderBy(desc(message.createdAt), desc(message.id))
-		.limit(limit + 1);
-	const collaborationRows = yield* db
-		.select({ collaboration, ...participantColumns })
-		.from(collaboration)
-		.innerJoin(message, eq(message.id, collaboration.parentMessageId))
-		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		.where(
-			and(
-				eq(collaboration.collaboratorAgentId, chatRow.hostAgentId),
-				before
-					? or(
-							lt(collaboration.createdAt, before.createdAt),
-							and(eq(collaboration.createdAt, before.createdAt), lt(collaboration.id, before.id)),
-						)
-					: undefined,
-			),
-		)
-		.orderBy(desc(collaboration.createdAt), desc(collaboration.id))
-		.limit(limit + 1);
-	const routineRows = yield* db
-		.select({
-			id: routineExecution.id,
-			threadId: routineExecution.threadId,
-			routineName: routineExecution.routineName,
-			triggerKind: routineExecution.triggerKind,
-			acceptedAt: routineExecution.acceptedAt,
-		})
-		.from(routineExecution)
-		.innerJoin(thread, eq(thread.id, routineExecution.threadId))
-		.where(
-			and(
-				eq(thread.chatId, chatRow.id),
-				before
-					? or(
-							lt(routineExecution.acceptedAt, before.createdAt),
-							and(
-								eq(routineExecution.acceptedAt, before.createdAt),
-								lt(routineExecution.id, before.id),
-							),
-						)
-					: undefined,
-			),
-		)
-		.orderBy(desc(routineExecution.acceptedAt), desc(routineExecution.id))
-		.limit(limit + 1);
-	const messageCandidates = messageRows.map((row) => ({
-		kind: "message" as const,
-		id: row.message.id,
-		createdAt: row.message.createdAt,
-		row,
-	}));
-	const collaborationCandidates = collaborationRows.map((row) => {
-		const initiator = toParticipant(row);
-		if (initiator.kind !== "agent") {
-			throw new Error("Collaboration initiator is not an agent");
-		}
-		return {
-			kind: "collaboration" as const,
-			id: row.collaboration.id,
-			createdAt: row.collaboration.createdAt,
-			item: {
-				kind: "collaboration" as const,
-				id: row.collaboration.id,
-				threadId: row.collaboration.childThreadId,
-				initiator,
-				createdAt: row.collaboration.createdAt.toISOString(),
-			} satisfies ChatMessageItem,
-		};
+	return yield* db.query.chat.findFirst({
+		where: { id: chatId, RAW: (row) => reachesPod(row.podId, userId) },
+		columns: { id: true },
+		with: {
+			mainThread: {
+				columns: {},
+				with: {
+					messages: {
+						limit: limit + 1,
+						orderBy: { createdAt: "desc", id: "desc" },
+						...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
+						with: messageRelations,
+					},
+				},
+			},
+			hostCollaborations: {
+				limit: limit + 1,
+				orderBy: { createdAt: "desc", id: "desc" },
+				...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
+				columns: { id: true, childThreadId: true, createdAt: true },
+				with: {
+					parentMessage: {
+						columns: {},
+						with: { authorUser: personColumns, authorAgent: agentColumns },
+					},
+				},
+			},
+			routineExecutions: {
+				limit: limit + 1,
+				orderBy: { acceptedAt: "desc", id: "desc" },
+				...(before && { where: { RAW: (row) => earlierThan(row.acceptedAt, row.id, before) } }),
+				columns: {
+					id: true,
+					threadId: true,
+					routineName: true,
+					triggerKind: true,
+					acceptedAt: true,
+				},
+			},
+		},
 	});
-	const routineCandidates = routineRows.map((row) => ({
-		kind: "routine" as const,
-		id: row.id,
-		createdAt: row.acceptedAt,
-		item: {
-			kind: "routine" as const,
-			id: row.id,
-			threadId: row.threadId,
-			routineName: row.routineName,
-			triggerKind: row.triggerKind,
-			createdAt: row.acceptedAt.toISOString(),
-		} satisfies ChatMessageItem,
-	}));
-	const candidates = [...messageCandidates, ...collaborationCandidates, ...routineCandidates];
-	const page = candidates
-		.sort((left, right) =>
-			left.createdAt.getTime() === right.createdAt.getTime()
-				? right.id.localeCompare(left.id)
-				: right.createdAt.getTime() - left.createdAt.getTime(),
-		)
-		.slice(0, limit);
-	const placed = yield* loadPlacedParts(
-		db,
-		page.flatMap((candidate) => (candidate.kind === "message" ? [candidate.id] : [])),
-	);
-	const oldest = page.at(-1);
-	return {
-		items: page.reverse().map((candidate): ChatMessageItem => {
-			if (candidate.kind === "collaboration") return candidate.item;
-			if (candidate.kind === "routine") return candidate.item;
-			return {
-				kind: "message",
-				message: toMessage(candidate.row.message, candidate.row, placed(candidate.row.message.id)),
-			};
-		}),
-		nextCursor: candidates.length > limit && oldest ? encodeCursor(oldest) : null,
-	};
 });
 
+type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
+
+/** The three sources merged newest first, cut to the page, and put back in reading order. */
+function toMainPage(row: MainPage, limit: number) {
+	const candidates = [
+		...row.mainThread.messages.map((stored) => ({
+			id: stored.id,
+			createdAt: stored.createdAt,
+			item: (): ChatMessageItem => ({ kind: "message", message: messageFromRelations(stored) }),
+		})),
+		...row.hostCollaborations.map((made) => ({
+			id: made.id,
+			createdAt: made.createdAt,
+			item: (): ChatMessageItem => {
+				const initiator = toParticipant(
+					authorRow(made.parentMessage.authorUser, made.parentMessage.authorAgent),
+				);
+				if (initiator.kind !== "agent") {
+					throw new Error("Collaboration initiator is not an agent");
+				}
+				return {
+					kind: "collaboration",
+					id: made.id,
+					threadId: made.childThreadId,
+					initiator,
+					createdAt: made.createdAt.toISOString(),
+				};
+			},
+		})),
+		...row.routineExecutions.map((execution) => ({
+			id: execution.id,
+			createdAt: execution.acceptedAt,
+			item: (): ChatMessageItem => ({
+				kind: "routine",
+				id: execution.id,
+				threadId: execution.threadId,
+				routineName: execution.routineName,
+				triggerKind: execution.triggerKind,
+				createdAt: execution.acceptedAt.toISOString(),
+			}),
+		})),
+	].sort((left, right) =>
+		left.createdAt.getTime() === right.createdAt.getTime()
+			? right.id.localeCompare(left.id)
+			: right.createdAt.getTime() - left.createdAt.getTime(),
+	);
+	const page = candidates.slice(0, limit);
+	const oldest = page.at(-1);
+	return {
+		items: page.reverse().map((candidate) => candidate.item()),
+		nextCursor: candidates.length > limit && oldest ? encodeCursor(oldest) : null,
+	};
+}
+
+/**
+ * A page of the chat's side threads, one statement: its routine runs and
+ * collaborations, and those its bot was asked into from elsewhere, each newest
+ * activity first and one more than the page. Nothing when the caller does not
+ * reach the chat's pod.
+ */
 const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 	db: Executor,
-	chatRow: schema.ChatRow,
+	chatId: string,
+	userId: string,
 	limit: number,
-	before?: CursorPoint,
+	before: CursorPoint | undefined,
 ) {
-	const rows = yield* db
-		.select({
-			thread,
-			running: hasPendingResponseJob(sql`${thread.id}`),
-			latestTurnStatus: sql<schema.TurnRow["status"] | null>`(
+	const sideThreads = {
+		limit: limit + 1,
+		orderBy: { updatedAt: "desc", id: "desc" },
+		where: {
+			type: { in: ["collaboration", "routine"] },
+			...(before && { RAW: (row) => earlierThan(row.updatedAt, row.id, before) }),
+		},
+		extras: {
+			running: (row) => hasPendingResponseJob(sql`${row.id}`),
+			latestTurnStatus: (row) => sql<schema.TurnRow["status"] | null>`(
 				select ${turn.status} from ${turn}
-				where ${turn.threadId} = ${thread.id}
+				where ${turn.threadId} = ${row.id}
 				order by ${turn.startedAt} desc, ${turn.id} desc
 				limit 1
 			)`,
-			// At most one execution per thread (`routine_execution_thread_idx`).
-			execution: {
-				id: routineExecution.id,
-				routineId: routineExecution.routineId,
-				routineName: routineExecution.routineName,
-				trigger: routineExecution.trigger,
-				state: routineExecution.state,
+		},
+		with: {
+			participants: {
+				columns: {},
+				orderBy: { createdAt: "asc", id: "asc" },
+				with: { user: personColumns, agent: agentColumns },
 			},
-		})
-		.from(thread)
-		.leftJoin(
-			routineExecution,
-			and(eq(routineExecution.threadId, thread.id), eq(thread.type, "routine")),
-		)
-		.where(
-			and(
-				or(
-					eq(thread.chatId, chatRow.id),
-					sql`exists (
-						select 1 from ${collaboration}
-						where ${collaboration.childThreadId} = ${thread.id}
-						and ${collaboration.collaboratorAgentId} = ${chatRow.hostAgentId}
-					)`,
-				),
-				inArray(thread.type, ["collaboration", "routine"]),
-				before ? beforeCondition(thread.updatedAt, thread.id, before) : undefined,
-			),
-		)
-		.orderBy(desc(thread.updatedAt), desc(thread.id))
-		.limit(limit + 1);
-	const page = rows.slice(0, limit);
-	const participants = yield* loadParticipantsByThread(
-		db,
-		page.map((row) => row.thread.id),
+			routineExecution: {
+				columns: { id: true, routineId: true, routineName: true, trigger: true, state: true },
+			},
+		},
+	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["thread"]>;
+	return yield* db.query.chat.findFirst({
+		where: { id: chatId, RAW: (row) => reachesPod(row.podId, userId) },
+		columns: { id: true },
+		with: { threads: sideThreads, hostCollaborationThreads: sideThreads },
+	});
+});
+
+type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
+
+/** Both lists merged newest activity first, a thread in both counted once, cut to the page. */
+function toHistoryPage(row: HistoryRow, limit: number) {
+	const threads = [
+		...new Map(
+			[...row.threads, ...row.hostCollaborationThreads].map((side) => [side.id, side]),
+		).values(),
+	].sort((left, right) =>
+		left.updatedAt.getTime() === right.updatedAt.getTime()
+			? right.id.localeCompare(left.id)
+			: right.updatedAt.getTime() - left.updatedAt.getTime(),
 	);
-	const items = page.flatMap(({ thread: row, running, latestTurnStatus, execution }) => {
-		if (row.type !== "collaboration" && row.type !== "routine") return [];
+	const page = threads.slice(0, limit);
+	const items = page.flatMap((side): ChatHistoryEntry[] => {
+		if (side.type !== "collaboration" && side.type !== "routine") return [];
+		// A routine's execution row; a collaboration has none.
+		const execution = side.type === "routine" ? side.routineExecution : null;
 		return [
 			{
-				threadId: row.id,
-				parentThreadId: row.parentThreadId,
-				type: row.type,
-				title: row.title,
-				participants: participants.get(row.id) ?? [],
+				threadId: side.id,
+				parentThreadId: side.parentThreadId,
+				type: side.type,
+				title: side.title,
+				participants: side.participants.map(({ user: person, agent: participant }) =>
+					toParticipant(authorRow(person, participant)),
+				),
 				status: execution
 					? execution.state
-					: running
+					: side.running
 						? "running"
-						: latestTurnStatus === "failed"
+						: side.latestTurnStatus === "failed"
 							? "failed"
 							: "completed",
 				routineExecution: execution
@@ -667,25 +669,23 @@ const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 										: execution.trigger.requestedAt,
 						}
 					: null,
-				latestActivityAt: row.updatedAt.toISOString(),
-			} satisfies ChatHistoryEntry,
+				latestActivityAt: side.updatedAt.toISOString(),
+			},
 		];
 	});
-	const oldest = page.at(-1)?.thread;
+	const oldest = page.at(-1);
 	return {
 		items,
 		nextCursor:
-			rows.length > limit && oldest
+			threads.length > limit && oldest
 				? encodeCursor({ id: oldest.id, createdAt: oldest.updatedAt })
 				: null,
 	};
-});
+}
 
-const beforeCondition = (
-	date: typeof message.createdAt | typeof thread.updatedAt,
-	id: typeof message.id | typeof thread.id,
-	point: CursorPoint,
-) => or(lt(date, point.createdAt), and(eq(date, point.createdAt), lt(id, point.id)));
+/** Rows older than the cursor, by timestamp and then id: the order every page here is read in. */
+const earlierThan = (date: SQLWrapper, id: SQLWrapper, point: CursorPoint) =>
+	sql<boolean>`(${date}, ${id}) < (${point.createdAt}, ${point.id})`;
 
 function encodeCursor(point: CursorPoint): string {
 	return Buffer.from(`${point.createdAt.toISOString()}\n${point.id}`).toString("base64url");

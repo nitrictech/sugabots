@@ -250,7 +250,7 @@ export function AgentChat({
 					<DetailsSidebar
 						agent={agent}
 						pod={pod}
-						details={details}
+						threadId={details.thread.id}
 						user={user}
 						onClose={onDetailsClose}
 					/>

@@ -62,6 +62,27 @@ describe.skipIf(!process.env.DATABASE_URL)("eventPublisher", () => {
 		expect(await storedRows()).toEqual([{ seq: committed?.seq }]);
 	});
 
+	it("numbers the events of one publish in the order given, each with its own row", async () => {
+		await runOnPostgres(publish([marked(1), marked(2), marked(3)]));
+
+		const [committed = []] = deliveries();
+		expect(committed.map(({ event }) => event.n)).toEqual([1, 2, 3]);
+		const seqs = committed.map(({ seq }) => seq);
+		expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+		expect((await storedRows()).map(({ seq }) => seq).sort((a, b) => a - b)).toEqual(seqs);
+		const stored = await runOnPostgres(
+			query((db) =>
+				db
+					.select({ seq: event.seq, payload: event.payload })
+					.from(event)
+					.where(eq(event.channel, channel)),
+			),
+		);
+		for (const { seq, event: published } of committed) {
+			expect(stored.find((row) => row.seq === seq)?.payload).toMatchObject({ n: published.n });
+		}
+	});
+
 	it("neither delivers nor keeps what a rolled-back transaction published", async () => {
 		await expect(
 			runOnPostgres(

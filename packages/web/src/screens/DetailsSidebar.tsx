@@ -3,17 +3,19 @@ import type {
 	Agent,
 	Pod,
 	SessionUser,
-	ThreadDetails,
 	ThreadParticipant,
+	ThreadSummary,
 } from "@sugabots/contracts";
 import { connectionPresetFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Repeat, Settings } from "lucide-react";
 import { useState } from "react";
+import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRoutines } from "@/lib/routines.ts";
+import { useThreadActivity } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -35,16 +37,18 @@ const SUMMARY_FOLDED_OVER = 180;
 export function DetailsSidebar({
 	agent,
 	pod,
-	details,
+	threadId,
 	user,
 	onClose,
 }: {
 	agent: Agent;
 	pod: Pod;
-	details: ThreadDetails;
+	threadId: string;
 	user: SessionUser;
 	onClose: () => void;
 }) {
+	const activity = useThreadActivity(threadId).data;
+	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
 	return (
 		<ChatSidebar label="Details" onClose={onClose} closedFromHeader className="bg-list">
 			<div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-[18px] pb-6 md:pt-[22px]">
@@ -65,10 +69,10 @@ export function DetailsSidebar({
 						<span className="font-medium text-foreground text-sm">Settings</span>
 					</Link>
 				</div>
-				<Summary details={details} />
-				{details.recentParticipants.length > 0 && (
+				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
+				{activity && activity.recentParticipants.length > 0 && (
 					<SidebarSection title="Recent participants">
-						<Expandable items={details.recentParticipants} shown={PARTICIPANTS_SHOWN}>
+						<Expandable items={activity.recentParticipants} shown={PARTICIPANTS_SHOWN}>
 							{(participant) => (
 								<ParticipantRow key={participant.id} participant={participant} user={user} />
 							)}
@@ -82,18 +86,23 @@ export function DetailsSidebar({
 	);
 }
 
-function Summary({ details }: { details: ThreadDetails }) {
+function Summary({
+	summary,
+	scribeHasModel,
+}: {
+	summary: ThreadSummary | null | undefined;
+	/** `undefined` while the built-in agents load, so the unconfigured state is not flashed. */
+	scribeHasModel: boolean | undefined;
+}) {
 	const [open, setOpen] = useState(false);
-	// `=== false`, not `!`: the field is optional, and an absent one means the
-	// API did not say rather than that the Scribe is unset.
-	if (details.summaryEnabled === false) {
+	if (scribeHasModel === false) {
 		return (
 			<SidebarSection title="Summary" className="px-3.5 py-3">
 				<ScribeNotSetUp />
 			</SidebarSection>
 		);
 	}
-	const text = details.summary?.content;
+	const text = summary?.content;
 	const folds = text !== undefined && text.length > SUMMARY_FOLDED_OVER;
 	return (
 		<SidebarSection title="Summary">

@@ -1,8 +1,10 @@
+import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
-import type { EventBus } from "../../database/events/bus.ts";
+import { createEventBus, type EventBus } from "../../database/events/bus.ts";
+import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { JobNotRunnable } from "../jobs/queue.ts";
 import { ToolApprovalsIncomplete, ToolExecutionRefused } from "../tools/approvals/store.ts";
@@ -653,45 +655,11 @@ describe("runClaimedTurn", () => {
 		}
 	});
 
-	it("leaves a turn running while nobody has asked to cancel it", async () => {
+	it("leaves a turn running until its cancellation is requested", async () => {
 		vi.useFakeTimers();
 		try {
 			const store = turnStore();
-			const execution = runWithServices(
-				runClaimedTurn(claimed, {
-					store,
-					model: {
-						stream: (input) =>
-							Effect.sync(() => ({
-								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events: eventBus(),
-					collaborations: collaborations(),
-					calls: toolCalls(),
-				}),
-			);
-
-			// Long enough for the cancellation poller to have run several times.
-			await vi.advanceTimersByTimeAsync(5_000);
-			expect(store.isCancellationRequested).toHaveBeenCalled();
-			expect(store.cancel).not.toHaveBeenCalled();
-			expect(store.fail).not.toHaveBeenCalled();
-
-			vi.mocked(store.isCancellationRequested).mockReturnValue(Effect.succeed(true));
-			await vi.advanceTimersByTimeAsync(1_000);
-			await execution;
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	it("keeps partial text when cancellation aborts generation", async () => {
-		vi.useFakeTimers();
-		try {
-			const store = turnStore();
-			const events = eventBus();
+			const events = liveEventBus();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
 					store,
@@ -708,13 +676,45 @@ describe("runClaimedTurn", () => {
 				}),
 			);
 
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(store.cancel).not.toHaveBeenCalled();
+			expect(store.fail).not.toHaveBeenCalled();
+
+			await requestCancellation(events);
 			await vi.advanceTimersByTimeAsync(0);
-			expect(eventTypes(events)).toContain("message.delta");
-			vi.mocked(store.isCancellationRequested).mockReturnValue(Effect.succeed(true));
-			await vi.advanceTimersByTimeAsync(1_000);
 			await execution;
 			expect(store.cancel).toHaveBeenCalledWith(prepared, reply("partial"));
 			expect(store.fail).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("reads a cancellation it was not told about, while it runs", async () => {
+		vi.useFakeTimers();
+		try {
+			const store = turnStore();
+			const execution = runWithServices(
+				runClaimedTurn(claimed, {
+					store,
+					model: {
+						stream: (input) =>
+							Effect.sync(() => ({
+								text: chunksUntilAborted(input.signal),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events: liveEventBus(),
+					collaborations: collaborations(),
+					calls: toolCalls(),
+				}),
+			);
+
+			await vi.advanceTimersByTimeAsync(0);
+			vi.mocked(store.isCancellationRequested).mockReturnValue(Effect.succeed(true));
+			await vi.advanceTimersByTimeAsync(15_000);
+			await execution;
+			expect(store.cancel).toHaveBeenCalledWith(prepared, reply("partial"));
 		} finally {
 			vi.useRealTimers();
 		}
@@ -883,6 +883,18 @@ function eventBus(): EventBus {
 		publishCommitted: vi.fn(async () => {}),
 		subscribe: vi.fn(async function* () {}),
 	};
+}
+
+/** The real in-process bus, so a cancellation reaches the worker the way it does in production. */
+function liveEventBus(): EventBus {
+	return createEventBus({ store: memoryEventStore() });
+}
+
+function requestCancellation(events: EventBus) {
+	return events.publish(
+		threadChannel(claimed.threadId),
+		streamEvent("turn.cancel_requested", { threadId: claimed.threadId, turnId: prepared.turnId }),
+	);
 }
 
 function eventTypes(events: EventBus): string[] {

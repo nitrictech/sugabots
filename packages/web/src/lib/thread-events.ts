@@ -97,7 +97,10 @@ async function applyThreadEvent(
 		update.type === "turn.completed" ||
 		update.type === "thread.changed"
 	) {
-		await queries.invalidateQueries({ queryKey: ["thread", threadId] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+			queries.invalidateQueries({ queryKey: ["thread-activity", threadId] }),
+		]);
 		return;
 	}
 	if (update.type === "message.created") {

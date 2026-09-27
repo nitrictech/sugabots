@@ -753,7 +753,15 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 							)
 							.returning({ id: turn.id }),
 					);
-					return updated.length === 1;
+					if (updated.length === 0) return false;
+					// The worker running it waits for this rather than polling the flag.
+					yield* publishEvents([
+						{
+							channel: threadChannel(candidate.threadId),
+							event: streamEvent("turn.cancel_requested", { threadId: candidate.threadId, turnId }),
+						},
+					]);
+					return true;
 				}),
 			),
 

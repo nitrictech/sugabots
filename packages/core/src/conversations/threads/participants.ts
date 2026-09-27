@@ -1,11 +1,13 @@
 import type { AgentColor, Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, max, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, threadParticipant, user } from "../../database/schema.ts";
+import { toCollaborationPart } from "./collaborations.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
+import { toToolCallPart } from "./tool-calls.ts";
 
 /**
  * Turning joined rows into the API's people-and-agents shapes.
@@ -114,6 +116,72 @@ export function toMessage(
 	};
 }
 
+/** A person's columns, for a relational query that names who wrote or joined. */
+export const personColumns = { columns: { id: true, name: true, image: true } } as const;
+
+/** An agent's columns, for a relational query that names who wrote or joined. */
+export const agentColumns = {
+	columns: { id: true, name: true, handle: true, color: true, face: true },
+} as const;
+
+/** The relations a relational query follows to read a message as the API shows it. */
+export const messageRelations = {
+	authorUser: personColumns,
+	authorAgent: agentColumns,
+	toolCalls: {
+		orderBy: { startedAt: "asc", id: "asc" },
+		with: { decidedBy: { columns: { name: true } } },
+	},
+	collaborations: { with: { collaborator: { columns: { name: true } } } },
+} as const;
+
+type PersonIdentity = { id: string; name: string; image: string | null };
+type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face">;
+
+/** A message row read with `messageRelations`. */
+export interface MessageWithRelations extends schema.MessageRow {
+	authorUser: PersonIdentity | null;
+	authorAgent: AgentIdentity | null;
+	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
+	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
+}
+
+/** A message read with `messageRelations`, as the API shows it. */
+export function messageFromRelations(
+	stored: MessageWithRelations,
+	/** Why the turn behind a failed reply failed, in the provider's words. */
+	error?: string | null,
+): Message {
+	return toMessage(
+		stored,
+		authorRow(stored.authorUser, stored.authorAgent),
+		{
+			toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
+			collaborations: stored.collaborations.map((made) =>
+				toCollaborationPart(made, made.collaborator.name),
+			),
+		},
+		error,
+	);
+}
+
+/** Whoever a relational query found, as the row `toParticipant` reads. */
+export function authorRow(
+	person: PersonIdentity | null,
+	author: AgentIdentity | null,
+): ParticipantRow {
+	return {
+		userId: person?.id ?? null,
+		userName: person?.name ?? null,
+		userImage: person?.image ?? null,
+		agentId: author?.id ?? null,
+		agentName: author?.name ?? null,
+		agentHandle: author?.handle ?? null,
+		agentColor: author?.color ?? null,
+		agentFace: author?.face ?? null,
+	};
+}
+
 /** Everyone in a thread, in the order they joined. */
 export const loadParticipants = Effect.fn("Participants.loadParticipants")(function* (
 	db: Executor,
@@ -154,44 +222,39 @@ const RECENT_MESSAGE_COUNT = 100;
 const RECENT_ACTIVITY_WINDOW = sql`interval '7 days'`;
 
 /**
- * Who has written in a thread lately, most recently active first: the authors
- * of its last week of messages, or of its last 100 when that reaches further
- * back. A routine's trigger is not somebody, so its messages are not counted.
+ * Who has written in a thread lately, most recently active first, as a scalar
+ * subquery of participant rows: the authors of its last week of messages, or of
+ * its last 100 when that reaches further back. A routine's trigger is not
+ * somebody, so its messages are not counted.
  */
-export const loadRecentParticipants = Effect.fn("Participants.loadRecentParticipants")(function* (
-	db: Executor,
-	threadId: string,
-) {
-	const [oldestOfLatest] = yield* db
-		.select({ createdAt: message.createdAt })
-		.from(message)
-		.where(eq(message.threadId, threadId))
-		.orderBy(desc(message.createdAt), desc(message.id))
-		.offset(RECENT_MESSAGE_COUNT - 1)
-		.limit(1);
-	const lastActiveAt = max(message.createdAt);
-	const rows = yield* db
-		.select(participantColumns)
-		.from(message)
-		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		.where(
-			and(
-				eq(message.threadId, threadId),
-				or(isNotNull(message.authorUserId), isNotNull(message.authorAgentId)),
-				// Fewer messages than the count means every one of them is recent.
-				oldestOfLatest
-					? or(
-							gte(message.createdAt, oldestOfLatest.createdAt),
-							gte(message.createdAt, sql`now() - ${RECENT_ACTIVITY_WINDOW}`),
-						)
-					: undefined,
-			),
-		)
-		.groupBy(...Object.values(participantColumns))
-		.orderBy(desc(lastActiveAt));
-	return rows.map(toParticipant);
-});
+export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow[]>`(
+	select coalesce(json_agg(json_build_object(
+		'userId', recent.user_id, 'userName', recent.user_name, 'userImage', recent.user_image,
+		'agentId', recent.agent_id, 'agentName', recent.agent_name, 'agentHandle', recent.agent_handle,
+		'agentColor', recent.agent_color, 'agentFace', recent.agent_face
+	) order by recent.last_active_at desc), '[]'::json)
+	from (
+		select ${user.id} as user_id, ${user.name} as user_name, ${user.image} as user_image,
+			${agent.id} as agent_id, ${agent.name} as agent_name, ${agent.handle} as agent_handle,
+			${agent.color} as agent_color, ${agent.face} as agent_face,
+			max(${message.createdAt}) as last_active_at
+		from ${message}
+		left join ${user} on ${user.id} = ${message.authorUserId}
+		left join ${agent} on ${agent.id} = ${message.authorAgentId}
+		where ${message.threadId} = ${threadId}
+			and (${message.authorUserId} is not null or ${message.authorAgentId} is not null)
+			and ${message.createdAt} >= least(
+				coalesce((
+					select latest.created_at from ${message} as latest
+					where latest.thread_id = ${threadId}
+					order by latest.created_at desc, latest.id desc
+					offset ${RECENT_MESSAGE_COUNT - 1} limit 1
+				), '-infinity'::timestamptz),
+				now() - ${RECENT_ACTIVITY_WINDOW}
+			)
+		group by 1, 2, 3, 4, 5, 6, 7, 8
+	) as recent
+)`;
 
 /**
  * The agents a thread may mention or collaborate with: its pod's crew, whether

@@ -33,6 +33,13 @@ export function threadRoutes({ threads, turns }: ThreadRoutesOptions) {
 					return details ?? (yield* new NotFound({ message: "No such thread" }));
 				}),
 			)
+			.handle("activity", ({ params }) =>
+				Effect.gen(function* () {
+					const user = yield* CurrentUser;
+					const activity = yield* threads.activity(params.threadId, user.id);
+					return activity ?? (yield* new NotFound({ message: "No such thread" }));
+				}),
+			)
 			.handle("cancelTurn", ({ params }) =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;

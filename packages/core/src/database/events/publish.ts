@@ -54,20 +54,21 @@ const appendEvents = Effect.fn("EventPublisher.appendEvents")(function* (
 		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${channel}, 0))`);
 	}
 
-	const committed: CommittedEvent[] = [];
-	for (const pendingEvent of pending) {
-		const [row] = yield* db
-			.insert(event)
-			.values({
+	if (pending.length === 0) return [];
+	// Postgres numbers and returns the rows of one insert in the order given.
+	const rows = yield* db
+		.insert(event)
+		.values(
+			pending.map((pendingEvent) => ({
 				channel: pendingEvent.channel,
 				type: pendingEvent.event.type,
 				payload: pendingEvent.event,
-			})
-			.returning({ seq: event.seq });
-		if (!row) {
-			throw new Error(`Storing a ${pendingEvent.event.type} returned no row`);
-		}
-		committed.push({ ...pendingEvent, seq: row.seq });
-	}
-	return committed;
+			})),
+		)
+		.returning({ seq: event.seq });
+	return pending.map((pendingEvent, index): CommittedEvent => {
+		const row = rows[index];
+		if (!row) throw new Error(`Storing a ${pendingEvent.event.type} returned no row`);
+		return { ...pendingEvent, seq: row.seq };
+	});
 });

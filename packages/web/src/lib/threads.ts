@@ -10,8 +10,6 @@ import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { mergeThreadMessages } from "@/lib/thread-events.ts";
 
-const RUNNING_THREAD_REFETCH_INTERVAL_MS = 1_000;
-
 /**
  * A message fetched while it streams is behind the deltas already applied: the
  * row is flushed about once a second. Taking the fetched text would make the
@@ -32,13 +30,23 @@ function keepStreamedText(current: ThreadDetails): (fetched: Message) => Message
 	};
 }
 
+/** What a thread's sidebar shows. Asked for only while the sidebar is open, and refreshed by the thread's events. */
+export function useThreadActivity(threadId: string | undefined) {
+	return useQuery({
+		queryKey: ["thread-activity", threadId],
+		queryFn: threadId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.threads.activity({ params: { threadId } }), { signal })
+			: skipToken,
+	});
+}
+
+/** A thread and a page of its messages. The thread's events keep it current once loaded. */
 export function useThread(threadId: string | undefined) {
 	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
 	const query = useQuery<ThreadDetails>({
 		queryKey,
-		refetchInterval: (current) =>
-			current.state.data?.thread.status === "running" ? RUNNING_THREAD_REFETCH_INTERVAL_MS : false,
 		queryFn: threadId
 			? async ({ signal }): Promise<ThreadDetails> => {
 					const latest = await Effect.runPromise(

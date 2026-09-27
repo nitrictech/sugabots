@@ -7,6 +7,7 @@ import { eventPublisher } from "../../database/events/publish.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
 import {
 	agent,
+	event,
 	job,
 	message,
 	pod,
@@ -43,6 +44,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	let podId: string;
 	let agentId: string;
 	let memberId: string;
+	let authors: Map<string, { id: string; name: string; image: string | null }>;
+	/** A message author, as the route would pass them. */
+	const author = (id: string) => {
+		const person = authors.get(id);
+		if (!person) throw new Error(`No test person ${id}`);
+		return person;
+	};
 	let outsiderId: string;
 
 	async function createThread(input: {
@@ -60,7 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 		await chats.sendMain({
 			chatId: opened.id,
-			userId: input.initiatorUserId,
+			author: author(input.initiatorUserId),
 			messageId: crypto.randomUUID(),
 			content: input.message,
 		});
@@ -101,6 +109,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		workspaceId = workspaceRow.id;
 		memberId = member.id;
 		outsiderId = outsider.id;
+		authors = new Map(people.map((person) => [person.id, person]));
 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
@@ -387,26 +396,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(scope).toBeUndefined();
 	});
 
-	it("reports summaries as off until the workspace has chosen a Scribe model", async () => {
-		await onDatabase((db) =>
-			db
-				.update(agent)
-				.set({ model: null })
-				.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "summarise"))),
-		);
-		const created = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Anything to summarise?",
-		});
-
-		const details = await store.getVisible(created.thread.id, memberId);
-
-		expect(details?.summaryEnabled).toBe(false);
-	});
-
 	it("loads a Chat thread with its participants and first message", async () => {
 		const details = await createThread({
 			workspaceId,
@@ -531,7 +520,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: memberId,
+			author: author(memberId),
 			messageId,
 			content: "Second",
 		});
@@ -647,7 +636,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: outsiderId,
+			author: author(outsiderId),
 			messageId: crypto.randomUUID(),
 			content: "I can help",
 		});
@@ -684,7 +673,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				]),
 		);
 		const recentIds = async () =>
-			(await store.getVisible(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
+			(await store.activity(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
 
 		expect(await recentIds()).toEqual([memberId, agentId, outsiderId]);
 
@@ -694,47 +683,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				.values(Array.from({ length: 100 }, () => written({ authorUserId: memberId }, daysAgo(1)))),
 		);
 		expect(await recentIds()).toEqual([memberId, agentId]);
-	});
-
-	it("aggregates measured turn usage without inventing unavailable values", async () => {
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Measure this thread",
-		});
-		const triggerMessageId = details.messages[0]?.id;
-		if (!triggerMessageId) {
-			throw new Error("Thread test has no trigger message");
-		}
-
-		await onDatabase((db) =>
-			db.insert(turn).values([
-				{
-					threadId: details.thread.id,
-					agentId,
-					triggerMessageId,
-					status: "done",
-					model: "claude-opus-4-1-20250805",
-					usage: { modelCalls: 2, inputTokens: 1_200, outputTokens: 300, totalTokens: 1_500 },
-					reportedCost: "0.0125",
-					contextTokens: 1_200,
-					contextCapacity: 200_000,
-					startedAt: new Date("2026-09-10T04:00:00.000Z"),
-					finishedAt: new Date("2026-09-10T04:00:03.000Z"),
-				},
-			]),
-		);
-
-		expect((await store.getVisible(details.thread.id, memberId))?.usage).toEqual({
-			modelCalls: 2,
-			inputTokens: 1_200,
-			outputTokens: 300,
-			totalTokens: 1_500,
-			reportedCost: 0.0125,
-			latestContext: { usedTokens: 1_200, capacityTokens: 200_000 },
-		});
 	});
 
 	it("queues and persists a fresh summary after a completed exchange", async () => {
@@ -840,22 +788,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				),
 		);
 		expect(summariesThread?.title).toBe("Summaries of Verify the release");
-		expect(refreshed?.summary).toMatchObject({
+		expect((await store.activity(details.thread.id, memberId))?.summary).toMatchObject({
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
-		});
-		expect(refreshed?.usage).toMatchObject({
-			modelCalls: 2,
-			inputTokens: 70,
-			outputTokens: 11,
-			totalTokens: 81,
-			latestContext: { usedTokens: 30, capacityTokens: 200_000 },
 		});
 
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: memberId,
+			author: author(memberId),
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
@@ -960,6 +901,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(true);
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(false);
 		expect(await turns.requestCancel(prepared.turnId, outsiderId)).toBe(false);
+		// Announced once, for the worker waiting on it.
+		const announced = await onDatabase((db) =>
+			db
+				.select({ payload: event.payload })
+				.from(event)
+				.where(eq(event.type, "turn.cancel_requested")),
+		);
+		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
 
 	it("claims queued work once and puts interrupted work back", async () => {

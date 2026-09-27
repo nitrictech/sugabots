@@ -52,7 +52,7 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 					const message = yield* chats
 						.sendMain({
 							chatId: params.chatId,
-							userId: user.id,
+							author: { id: user.id, name: user.name, image: user.image },
 							messageId: payload.id,
 							content: payload.message,
 						})

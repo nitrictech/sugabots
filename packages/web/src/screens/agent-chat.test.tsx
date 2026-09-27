@@ -6,15 +6,17 @@ import {
 	type Message,
 	type RoutineExecution,
 	streamEvent,
+	type ThreadActivity,
 	type ThreadDetails,
 } from "@sugabots/contracts";
-import { Forbidden, InternalServerError } from "@sugabots/contracts/http";
+import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	agents,
 	apiAnswers,
+	builtInAgents,
 	controlledEventStream,
 	linear,
 	mount,
@@ -206,6 +208,16 @@ const routineCollaborationEntry: ChatHistoryEntry = {
 	latestActivityAt: "2026-09-18T08:20:00.000Z",
 };
 
+/** What the Chat's sidebar shows: a summary, and who has written lately. */
+const chatActivity: ThreadActivity = {
+	summary: {
+		content: "Chat is complete.",
+		sourceMessageId: "0199a3a0-0000-7000-8000-0000000000a2",
+		updatedAt: "2026-09-18T09:22:00.000Z",
+	},
+	recentParticipants: [host, person],
+};
+
 function details(
 	id: string,
 	title: string,
@@ -227,26 +239,11 @@ function details(
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T09:22:00.000Z",
 		},
-		activeTurnId: null,
 		routineExecution: type === "routine" ? routineExecution : null,
 		participants: type === "collaboration" ? [host, collaborator] : [person, host],
-		recentParticipants: type === "collaboration" ? [collaborator, host] : [host, person],
 		crew: [host, collaborator],
 		messages,
 		olderMessagesCursor: null,
-		summary: {
-			content: `${title} is complete.`,
-			sourceMessageId: messages.at(-1)?.id ?? mainMessage.id,
-			updatedAt: "2026-09-18T09:22:00.000Z",
-		},
-		usage: {
-			modelCalls: 2,
-			inputTokens: 100,
-			outputTokens: 50,
-			totalTokens: 150,
-			reportedCost: 0.01,
-			latestContext: { usedTokens: 1_000, capacityTokens: 10_000 },
-		},
 	};
 }
 
@@ -266,6 +263,11 @@ function chatAnswers() {
 			items: [collaborationEntry, routineEntry, routineCollaborationEntry],
 			nextCursor: null,
 		}),
+	);
+	client.api.threads.activity.mockImplementation(({ params }: { params: { threadId: string } }) =>
+		params.threadId === chat.mainThreadId
+			? Effect.succeed(chatActivity)
+			: Effect.fail(new NotFound({ message: "No such thread" })),
 	);
 	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
 		switch (params.threadId) {
@@ -685,9 +687,9 @@ describe("ongoing agent Chat", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 
 		const rail = await screen.findByRole("complementary", { name: "Details" });
-		const recent = within(rail)
-			.getByRole("heading", { name: "Recent participants" })
-			.closest("section");
+		const recent = (
+			await within(rail).findByRole("heading", { name: "Recent participants" })
+		).closest("section");
 		if (!recent) throw new Error("Recent participants has no section");
 		const [first, second, ...rest] = within(recent).getAllByRole("listitem");
 		expect(first?.textContent).toContain(linear.name);
@@ -1036,14 +1038,17 @@ describe("a thread open beside the Chat", () => {
 describe("the Chat's summary", () => {
 	const chatPage = `/suga/pods/suga-team/agents/${linear.handle}`;
 
-	function answerChatThread(change: (chatThread: ThreadDetails) => ThreadDetails) {
-		const others = client.api.threads.get.getMockImplementation();
-		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
-			request.params.threadId === chat.mainThreadId
-				? Effect.succeed(
-						change(details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage])),
-					)
-				: others?.(request),
+	function answerChatActivity(activity: () => ThreadActivity) {
+		client.api.threads.activity.mockImplementation(() => Effect.sync(activity));
+	}
+
+	function scribeWithoutModel() {
+		client.api.systemAgents.list.mockReturnValue(
+			Effect.succeed(
+				builtInAgents.map((agent) =>
+					agent.key === "summarise" ? { ...agent, model: null } : agent,
+				),
+			),
 		);
 	}
 
@@ -1053,7 +1058,8 @@ describe("the Chat's summary", () => {
 	}
 
 	it("says the Scribe has no model, and where to set it up", async () => {
-		answerChatThread((thread) => ({ ...thread, summary: null, summaryEnabled: false }));
+		scribeWithoutModel();
+		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 
@@ -1066,7 +1072,8 @@ describe("the Chat's summary", () => {
 	it("tells a member why there is no summary without a link they cannot follow", async () => {
 		apiAnswers({ role: "member" });
 		chatAnswers();
-		answerChatThread((thread) => ({ ...thread, summary: null, summaryEnabled: false }));
+		scribeWithoutModel();
+		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 
@@ -1074,10 +1081,9 @@ describe("the Chat's summary", () => {
 		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
 	});
 
-	it("says nothing about setting the Scribe up when the API did not answer that", async () => {
-		// `summaryEnabled` is optional: absent means the API did not say, which
-		// must not read as "the Scribe is unset".
-		answerChatThread(({ summaryEnabled: _omitted, ...thread }) => ({ ...thread, summary: null }));
+	it("says nothing about setting the Scribe up before the built-in agents have loaded", async () => {
+		client.api.systemAgents.list.mockReturnValue(Effect.never);
+		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 
@@ -1093,7 +1099,7 @@ describe("the Chat's summary", () => {
 			threadId === chat.mainThreadId ? updates.stream : controlledEventStream().stream,
 		);
 		let summarised = false;
-		answerChatThread((thread) => (summarised ? thread : { ...thread, summary: null }));
+		answerChatActivity(() => (summarised ? chatActivity : { ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 		expect(

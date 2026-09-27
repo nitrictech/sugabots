@@ -1,6 +1,11 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
-import { threadDetailsSchema, threadHistoryQuerySchema, threadSchema } from "../../threads.ts";
+import {
+	threadActivitySchema,
+	threadDetailsSchema,
+	threadHistoryQuerySchema,
+	threadSchema,
+} from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Authorise, Session } from "../middleware.ts";
 
@@ -16,6 +21,10 @@ export class ThreadsApi extends HttpApiGroup.make("threads")
 			params: { threadId: Schema.String },
 			query: threadHistoryQuerySchema,
 			success: threadDetailsSchema,
+		}),
+		HttpApiEndpoint.get("activity", "/threads/:threadId/activity", {
+			params: { threadId: Schema.String },
+			success: threadActivitySchema,
 		}),
 		HttpApiEndpoint.post("cancelTurn", "/turns/:turnId/cancel", {
 			params: { turnId: Schema.String },
