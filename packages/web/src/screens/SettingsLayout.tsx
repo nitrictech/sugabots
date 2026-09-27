@@ -1,16 +1,16 @@
-import { useRender } from "@base-ui/react/use-render";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
-import { startSettingsTrail, useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
+import { useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { type SettingSection, workspaceSettingGroups } from "@/lib/workspace-settings.ts";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import {
+	CompactBackBar,
 	SettingsGroup,
 	SettingsReturnBar,
 	SettingsRow,
@@ -65,7 +65,7 @@ export function SettingsLayout({
 						className="group-has-[[data-page-back]]/settings:hidden max-lg:hidden"
 					/>
 				)}
-				{(atSection || pathname === "/settings/general") && <CompactBackBar />}
+				{(atSection || pathname === "/settings/general") && <SectionBackBar />}
 				{/*
 				 * Nothing rather than a skeleton: the navigation has already answered
 				 * the click, and a shape that flashes beside it reads as a fault.
@@ -77,29 +77,12 @@ export function SettingsLayout({
 }
 
 /** On a phone or tablet, the bar above a section with its Back: where you came from, or else Settings. */
-function CompactBackBar() {
+function SectionBackBar() {
 	const back = useBackTarget({
 		label: "Settings",
 		render: <Link from="/$workspace" to="./settings" />,
 	});
-	const link = useRender({
-		render: back.render,
-		props: {
-			className:
-				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link",
-			children: (
-				<>
-					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} />
-					{back.label}
-				</>
-			),
-		},
-	});
-	return (
-		<div className="sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur lg:hidden">
-			{link}
-		</div>
-	);
+	return <CompactBackBar {...back} className="lg:hidden" />;
 }
 
 /** The sections the viewer may open, grouped as the navigation lists them, with what each holds. */
@@ -220,12 +203,7 @@ function CompactSettingsList() {
 						sub={session.user.email}
 						chevron
 						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "profile" }}
-								state={startSettingsTrail}
-							/>
+							<Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />
 						}
 					/>
 				</div>
@@ -251,7 +229,6 @@ function CompactSettingsList() {
 										from="/$workspace"
 										to="./settings/$section"
 										params={{ section: section.id }}
-										state={startSettingsTrail}
 									/>
 								}
 							/>
@@ -315,7 +292,6 @@ function SectionLink({
 		<Link
 			from="/$workspace"
 			to="./settings"
-			state={startSettingsTrail}
 			activeOptions={{ exact: true }}
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
@@ -328,7 +304,6 @@ function SectionLink({
 			from="/$workspace"
 			to="./settings/$section"
 			params={{ section: section.id }}
-			state={startSettingsTrail}
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
 			className={className}

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Button } from "@/ui/button.tsx";
 
@@ -30,7 +31,9 @@ function SystemModelLink({ children }: { children: ReactNode }) {
 		<Button
 			size="bare"
 			variant="link"
-			render={<Link from="/$workspace" to="./settings/providers/system" />}
+			render={
+				<Link from="/$workspace" to="./settings/providers/system" state={continueSettingsTrail} />
+			}
 		>
 			{children}
 		</Button>

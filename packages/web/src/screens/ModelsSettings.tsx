@@ -15,6 +15,7 @@ import {
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -95,6 +96,7 @@ export function ModelsSettings() {
 									from="/$workspace"
 									to="./settings/providers/$provider"
 									params={{ provider: provider.id }}
+									state={continueSettingsTrail}
 								/>
 							}
 						/>
@@ -113,6 +115,7 @@ export function ModelsSettings() {
 								from: "/$workspace",
 								to: "./settings/providers/$provider",
 								params: { provider: provider.id },
+								state: continueSettingsTrail,
 							});
 						}}
 					/>
@@ -138,7 +141,9 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 				</SettingsValue>
 			}
 			chevron
-			render={<Link from="/$workspace" to="./settings/providers/system" />}
+			render={
+				<Link from="/$workspace" to="./settings/providers/system" state={continueSettingsTrail} />
+			}
 		/>
 	);
 }

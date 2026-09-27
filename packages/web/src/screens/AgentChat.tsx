@@ -17,6 +17,7 @@ import {
 } from "@/lib/chats.ts";
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
+import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -374,7 +375,7 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 					<Button
 						size="bare"
 						variant="link"
-						render={<Link {...agentSettingsLink({ pod, agent })} />}
+						render={<Link {...agentSettingsLink({ pod, agent })} state={continueSettingsTrail} />}
 					>
 						Choose a model
 					</Button>{" "}

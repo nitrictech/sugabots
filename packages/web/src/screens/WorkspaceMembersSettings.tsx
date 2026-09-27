@@ -11,7 +11,7 @@ import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
-import { useBackTarget } from "@/lib/settings-trail.tsx";
+import { continueSettingsTrail, useBackTarget } from "@/lib/settings-trail.tsx";
 import {
 	useCancelWorkspaceInvitation,
 	useInviteWorkspaceMember,
@@ -146,6 +146,7 @@ function Roster({
 									from="/$workspace"
 									to="./settings/members/$member"
 									params={{ member: member.id }}
+									state={continueSettingsTrail}
 								/>
 							}
 						/>

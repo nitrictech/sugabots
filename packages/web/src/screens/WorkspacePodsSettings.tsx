@@ -18,7 +18,7 @@ import {
 	usePods,
 	useUpdatePod,
 } from "@/lib/pods.ts";
-import { startSettingsTrail, useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
+import { continueSettingsTrail, useSettingsBack } from "@/lib/settings-trail.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -68,10 +68,6 @@ export function WorkspacePodsSettings({
 	const { agents } = useAgents();
 	const navigate = useNavigate();
 	const returnTo = useSettingsBack();
-	const back = useBackTarget({
-		label: "Pods",
-		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
-	});
 	const [search, setSearch] = useState("");
 	const [creating, setCreating] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
@@ -91,7 +87,10 @@ export function WorkspacePodsSettings({
 		<>
 			<SettingsListDetail
 				detailOpen={selectedPodId !== undefined}
-				back={back}
+				listLink={{
+					label: "Pods",
+					render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
+				}}
 				returnTo={returnTo}
 				list={
 					<SettingsListColumn
@@ -110,7 +109,7 @@ export function WorkspacePodsSettings({
 									label={pod.name}
 									sub={`${bots} ${bots === 1 ? "bot" : "bots"}`}
 									selected={pod.id === selected?.id && (selectedPodId ? true : "wide")}
-									render={<Link {...podSettingsLink(pod)} state={startSettingsTrail} />}
+									render={<Link {...podSettingsLink(pod)} />}
 								/>
 							);
 						})}
@@ -303,7 +302,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 					icon={<AgentAvatar color={agent.color} face={agent.face} size={30} />}
 					label={agent.name}
 					chevron
-					render={<Link {...agentSettingsLink({ pod, agent })} />}
+					render={<Link {...agentSettingsLink({ pod, agent })} state={continueSettingsTrail} />}
 				/>
 			))}
 			{pod.permissions.createAgents && (
@@ -314,7 +313,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 					podId={pod.id}
 					onCreated={async (agent) => {
 						setCreating(false);
-						await navigate(agentSettingsLink({ pod, agent }));
+						await navigate({ ...agentSettingsLink({ pod, agent }), state: continueSettingsTrail });
 					}}
 				/>
 			</Dialog>

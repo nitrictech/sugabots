@@ -315,17 +315,17 @@ export function SettingsListDetail({
 	list,
 	detail,
 	detailOpen,
-	back,
+	listLink,
 	returnTo,
 }: {
 	list: ReactNode;
 	detail: ReactNode;
 	/** Whether an item is open, which on a phone hides the list. */
 	detailOpen: boolean;
-	/** On a phone, the way from an open item back to the list: `render={<Link … />}`. */
-	back?: { label: string; render: useRender.RenderProp };
-	/** Beside the list, the way back to where the open item was reached from, if not the list. */
-	returnTo?: { label: string; render: useRender.RenderProp };
+	/** The list's own page, which on a phone an open item goes back to when there is no `returnTo`. */
+	listLink: BackTarget;
+	/** The page the open item was reached from, when that is not the list beside it. */
+	returnTo: BackTarget | undefined;
 }) {
 	return (
 		<div className="flex min-h-full min-w-0 flex-1">
@@ -338,7 +338,7 @@ export function SettingsListDetail({
 				{list}
 			</div>
 			<div className={cn("group/detail min-w-0 flex-1", !detailOpen && "max-md:hidden")}>
-				{back && <BackToList {...back} />}
+				<CompactBackBar {...(returnTo ?? listLink)} className="md:hidden" />
 				{returnTo && (
 					<SettingsReturnBar
 						{...returnTo}
@@ -351,6 +351,12 @@ export function SettingsListDetail({
 	);
 }
 
+/** Where a Back link goes and what it says, as the element it renders: `render={<Link … />}`. */
+export interface BackTarget {
+	label: string;
+	render: useRender.RenderProp;
+}
+
 /**
  * The bar across the top of a panel with the way back to the page you came
  * from, for a step that jumped between sections (a pod to one of its bots, a
@@ -360,28 +366,16 @@ export function SettingsReturnBar({
 	label,
 	render,
 	className,
-}: {
-	label: string;
-	render: useRender.RenderProp;
-	className?: string;
-}) {
-	const link = useRender({
-		render,
-		props: {
-			className: PANEL_BACK_LINK,
-			children: (
-				<>
-					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
-					<span className="min-w-0 truncate">Back to {label}</span>
-				</>
-			),
-		},
-	});
-	return <div className={cn(PANEL_BACK_BAR, className)}>{link}</div>;
+}: BackTarget & { className?: string }) {
+	return (
+		<div className={cn(PANEL_BACK_BAR, className)}>
+			<PageBackLink label={`Back to ${label}`} render={render} />
+		</div>
+	);
 }
 
 /** The small Back link above a page's title, for `SettingsPage`'s `back`. */
-export function PageBackLink({ label, render }: { label: string; render: useRender.RenderProp }) {
+export function PageBackLink({ label, render }: BackTarget) {
 	return useRender({
 		render,
 		props: {
@@ -396,7 +390,12 @@ export function PageBackLink({ label, render }: { label: string; render: useRend
 	});
 }
 
-function BackToList({ label, render }: { label: string; render: useRender.RenderProp }) {
+/**
+ * The bar across the top of a page on a narrow screen, with its Back in the
+ * larger size a phone's is. `className` hides it where the page is wide enough
+ * for its own: `md:hidden`.
+ */
+export function CompactBackBar({ label, render, className }: BackTarget & { className: string }) {
 	const link = useRender({
 		render,
 		props: {
@@ -411,7 +410,12 @@ function BackToList({ label, render }: { label: string; render: useRender.Render
 		},
 	});
 	return (
-		<div className="sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur md:hidden">
+		<div
+			className={cn(
+				"sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur",
+				className,
+			)}
+		>
 			{link}
 		</div>
 	);
