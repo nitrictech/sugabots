@@ -28,7 +28,12 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { DialogTitle } from "@/ui/dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+} from "@/ui/dialog-form.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsDanger, SettingsGroup } from "@/ui/settings-page.tsx";
 import { Textarea } from "@/ui/textarea.tsx";
@@ -185,13 +190,7 @@ export function RoutineDialog({
 				void save();
 			}}
 		>
-			<DialogFormHeader
-				title={routine ? "Edit routine" : "New routine"}
-				action={routine ? "Save" : "Create"}
-				actionDisabled={pending || !ready}
-				cancelDisabled={pending}
-				onCancel={onClose}
-			/>
+			<DialogFormHeader title={routine ? "Edit routine" : "New routine"} />
 			<DialogFormBody>
 				{error && <Alert>{failureMessage(error)}</Alert>}
 				<SettingsGroup>
@@ -256,6 +255,12 @@ export function RoutineDialog({
 					</>
 				)}
 			</DialogFormBody>
+			<DialogFormFooter
+				action={routine ? "Save" : "Create"}
+				actionDisabled={pending || !ready}
+				cancelDisabled={pending}
+				onCancel={onClose}
+			/>
 		</DialogForm>
 	);
 }
@@ -593,7 +598,7 @@ function WebhookCreated({
 				onDone();
 			}}
 		>
-			<DialogFormHeader title="Webhook ready" action="Done" cancel={false} />
+			<DialogFormHeader title="Webhook ready" />
 			<DialogFormBody>
 				<SettingsGroup
 					note={`Copy the secret now: it isn't shown again. Calls to the address with it post into ${bot.agent.name}'s chat.`}
@@ -602,6 +607,7 @@ function WebhookCreated({
 					<SecretRow secret={credential.secret} />
 				</SettingsGroup>
 			</DialogFormBody>
+			<DialogFormFooter action="Done" cancel={false} />
 		</DialogForm>
 	);
 }

@@ -35,7 +35,12 @@ import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "@/ui/dialog-form.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+} from "@/ui/dialog-form.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -847,12 +852,7 @@ function CapabilitiesDialog({
 
 	return (
 		<DialogForm width="compact" onSubmit={submit}>
-			<DialogFormHeader
-				title="What it can do"
-				action="Save"
-				actionDisabled={actions.updateModel.isPending}
-				onCancel={done}
-			/>
+			<DialogFormHeader title="What it can do" />
 			<DialogFormBody>
 				<DialogDescription className="font-mono">{model.modelId}</DialogDescription>
 				{offered.length === 0 ? (
@@ -890,6 +890,11 @@ function CapabilitiesDialog({
 				)}
 				{actions.updateModel.error && <Alert>{failureMessage(actions.updateModel.error)}</Alert>}
 			</DialogFormBody>
+			<DialogFormFooter
+				action="Save"
+				actionDisabled={actions.updateModel.isPending}
+				onCancel={done}
+			/>
 		</DialogForm>
 	);
 }

@@ -3,7 +3,7 @@ import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Button } from "./button.tsx";
 import { Dialog, DialogDescription, DialogTrigger } from "./dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormHeader } from "./dialog-form.tsx";
+import { DialogForm, DialogFormBody, DialogFormFooter, DialogFormHeader } from "./dialog-form.tsx";
 import { SettingsFieldRow, SettingsGroup } from "./settings-page.tsx";
 
 function NewPodForm({ onSubmit }: { onSubmit: () => void }) {
@@ -18,7 +18,7 @@ function NewPodForm({ onSubmit }: { onSubmit: () => void }) {
 					onSubmit();
 				}}
 			>
-				<DialogFormHeader title="New pod" action="Create" actionDisabled={name.trim() === ""} />
+				<DialogFormHeader title="New pod" />
 				<DialogFormBody>
 					<DialogDescription>You'll add bots, people and connections next.</DialogDescription>
 					<SettingsGroup>
@@ -30,6 +30,7 @@ function NewPodForm({ onSubmit }: { onSubmit: () => void }) {
 						/>
 					</SettingsGroup>
 				</DialogFormBody>
+				<DialogFormFooter action="Create" actionDisabled={name.trim() === ""} />
 			</DialogForm>
 		</Dialog>
 	);
@@ -43,7 +44,7 @@ const meta = preview.meta({
 	render: (args) => <NewPodForm onSubmit={() => args.onSubmit({} as never)} />,
 });
 
-/** CreateWhenValid shows the header action faded until the form can be submitted. */
+/** CreateWhenValid shows the footer action disabled until the form can be submitted. */
 export const CreateWhenValid = meta.story({
 	play: async ({ args, canvas, canvasElement, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "New pod" }));
@@ -57,7 +58,7 @@ export const CreateWhenValid = meta.story({
 	},
 });
 
-/** CancelCloses shows Cancel in the header dismissing the dialog and returning focus. */
+/** CancelCloses shows Cancel in the footer dismissing the dialog and returning focus. */
 export const CancelCloses = meta.story({
 	play: async ({ canvas, canvasElement, userEvent }) => {
 		const trigger = canvas.getByRole("button", { name: "New pod" });

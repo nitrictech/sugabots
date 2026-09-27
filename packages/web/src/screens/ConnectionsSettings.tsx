@@ -18,6 +18,7 @@ import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
+	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
 	DialogFormStep,
@@ -284,7 +285,7 @@ function ConnectionDialog({
 					done();
 				}}
 			>
-				<DialogFormHeader title={connection.name} action="Done" cancel={false} />
+				<DialogFormHeader title={connection.name} />
 				<DialogFormBody>
 					<div className="max-h-[min(620px,70vh)] -mx-1 flex flex-col gap-5 overflow-y-auto px-1">
 						<div className="flex flex-col items-center gap-1.5 text-center">
@@ -412,6 +413,7 @@ function ConnectionDialog({
 						)}
 					</div>
 				</DialogFormBody>
+				<DialogFormFooter action="Done" cancel={false} />
 			</DialogFormStep>
 			<DeleteDialog
 				open={removing}
@@ -484,7 +486,7 @@ function AppList({
 	);
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
-			<DialogFormHeader title={`Add to ${podName}`} onCancel={done} />
+			<DialogFormHeader title={`Add to ${podName}`} />
 			<DialogFormBody>
 				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
 					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
@@ -532,6 +534,7 @@ function AppList({
 					</SettingsGroup>
 				</div>
 			</DialogFormBody>
+			<DialogFormFooter onCancel={done} />
 		</DialogFormStep>
 	);
 }
@@ -568,7 +571,7 @@ function AppStep({
 			<DialogFormHeader
 				title={preset.name}
 				onBack={onBack}
-				cancelDisabled={actions.connect.isPending}
+				backDisabled={actions.connect.isPending}
 			/>
 			<DialogFormBody>
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
@@ -648,13 +651,7 @@ function ByUrlStep({
 	const error = actions.create.error ?? actions.update.error;
 	return (
 		<DialogFormStep onSubmit={submit}>
-			<DialogFormHeader
-				title="Connect by URL"
-				action="Add"
-				actionDisabled={!ready || pending}
-				cancelDisabled={pending}
-				onBack={onBack}
-			/>
+			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup>
 					<SettingsFieldRow
@@ -701,6 +698,7 @@ function ByUrlStep({
 				</SettingsGroup>
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
+			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
 		</DialogFormStep>
 	);
 }

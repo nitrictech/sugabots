@@ -21,6 +21,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
+	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
 	DialogFormStep,
@@ -281,7 +282,7 @@ function AddProviderSteps({
 
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
-			<DialogFormHeader title="Add provider" onCancel={done} />
+			<DialogFormHeader title="Add provider" />
 			<DialogFormBody>
 				{/* The catalog runs longer than a short window, so the list scrolls inside the dialog. */}
 				<div className="-mx-1 flex max-h-[min(560px,65vh)] flex-col gap-5 overflow-y-auto px-1">
@@ -314,6 +315,7 @@ function AddProviderSteps({
 					</SettingsGroup>
 				</div>
 			</DialogFormBody>
+			<DialogFormFooter onCancel={done} />
 		</DialogFormStep>
 	);
 }
@@ -366,13 +368,7 @@ function PresetStep({
 
 	return (
 		<DialogFormStep onSubmit={submit}>
-			<DialogFormHeader
-				title={preset.name}
-				action="Add"
-				actionDisabled={!ready || pending}
-				cancelDisabled={pending}
-				onBack={onBack}
-			/>
+			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup note={preset.hint}>
 					{local && (
@@ -400,6 +396,7 @@ function PresetStep({
 				)}
 				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
+			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
 		</DialogFormStep>
 	);
 }
@@ -443,10 +440,8 @@ function CustomProviderStep({
 		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader
 				title="Custom provider"
-				action="Add"
-				actionDisabled={!ready || actions.create.isPending}
-				cancelDisabled={actions.create.isPending}
 				onBack={onBack}
+				backDisabled={actions.create.isPending}
 			/>
 			<DialogFormBody>
 				<SettingsGroup>
@@ -483,6 +478,11 @@ function CustomProviderStep({
 				</SettingsGroup>
 				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
+			<DialogFormFooter
+				action="Add"
+				actionDisabled={!ready || actions.create.isPending}
+				cancel={false}
+			/>
 		</DialogFormStep>
 	);
 }
