@@ -55,6 +55,9 @@ function describe(failure: ProviderFailure): string {
 		case "ConnectionMissing":
 			return "Add an API key before connecting";
 		case "ProviderRejected":
+			if (failure.status === 401) {
+				return "The provider rejected the API key. Replace it with a valid key and try again.";
+			}
 			return `Provider returned ${failure.status} ${failure.statusText}`;
 		case "InvalidModelList":
 			return failure.reason;

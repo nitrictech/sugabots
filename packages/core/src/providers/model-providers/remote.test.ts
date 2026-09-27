@@ -271,9 +271,11 @@ it("rejects invalid OpenRouter keys even when the public model list is accessibl
 	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
 	expect(result).toMatchObject({
 		reachable: false,
-		error: "Provider returned 401 Unauthorized",
+		error: "The provider rejected the API key. Replace it with a valid key and try again.",
 	});
-	await expect(discover(models, found, httpClient).result).rejects.toThrow("401 Unauthorized");
+	await expect(discover(models, found, httpClient).result).rejects.toThrow(
+		"The provider rejected the API key. Replace it with a valid key and try again.",
+	);
 	expect(models.synced).toEqual([]);
 });
 
