@@ -29,7 +29,7 @@ import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
-import { useBackTarget } from "@/lib/settings-trail.tsx";
+import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";

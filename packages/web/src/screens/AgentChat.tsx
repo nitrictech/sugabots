@@ -17,7 +17,7 @@ import {
 } from "@/lib/chats.ts";
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
-import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -367,6 +367,7 @@ function chatItemRevision(item: ChatMessageItem | undefined): string {
  * Only somebody who may edit the agent is offered the way to fix it.
  */
 function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
+	const backToChat = useBackToHere("Chat");
 	return (
 		<p className="mx-auto m-0 w-full max-w-[760px] rounded-2xl border border-border-strong px-4 py-3.5 text-base text-muted-foreground leading-relaxed">
 			{agent.name} has no model yet, so it cannot answer.{" "}
@@ -375,7 +376,7 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 					<Button
 						size="bare"
 						variant="link"
-						render={<Link {...agentSettingsLink({ pod, agent })} state={continueSettingsTrail} />}
+						render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
 					>
 						Choose a model
 					</Button>{" "}

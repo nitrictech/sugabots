@@ -10,7 +10,7 @@ import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, Repeat } from "lucide-r
 import { useEffect, useRef } from "react";
 import { useAgentWithPod } from "@/lib/agents.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
-import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -241,6 +241,7 @@ export function ChatThreadPanel({
 }
 
 function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
+	const backToChat = useBackToHere("Chat");
 	const placed = useAgentWithPod(execution.agentId);
 	return (
 		<div className="flex items-center gap-1 pt-1">
@@ -271,7 +272,7 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 			{placed && (
 				<Link
 					{...agentSettingsLink(placed)}
-					state={continueSettingsTrail}
+					state={backToChat}
 					search={{ tab: "routines" }}
 					aria-label="View routine definition"
 					className="focus-ring grid size-[30px] place-items-center rounded-lg text-muted-foreground hover:bg-list hover:text-link"

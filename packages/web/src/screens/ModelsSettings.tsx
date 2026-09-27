@@ -15,7 +15,7 @@ import {
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
-import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -50,6 +50,7 @@ import {
  * provider with how many of its models are switched on, and adding another.
  */
 export function ModelsSettings() {
+	const backToModels = useBackToHere("Models");
 	const providers = useModelProviders();
 	const may = useWorkspacePermissions();
 	const botsOn = useBotsByModel();
@@ -96,7 +97,7 @@ export function ModelsSettings() {
 									from="/$workspace"
 									to="./settings/providers/$provider"
 									params={{ provider: provider.id }}
-									state={continueSettingsTrail}
+									state={backToModels}
 								/>
 							}
 						/>
@@ -115,7 +116,7 @@ export function ModelsSettings() {
 								from: "/$workspace",
 								to: "./settings/providers/$provider",
 								params: { provider: provider.id },
-								state: continueSettingsTrail,
+								state: backToModels,
 							});
 						}}
 					/>
@@ -127,6 +128,7 @@ export function ModelsSettings() {
 
 /** The Scribe's model stands for the system bots', since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
+	const backToModels = useBackToHere("Models");
 	const systemAgents = useBuiltInAgents();
 	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
 	const model = providers
@@ -141,9 +143,7 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 				</SettingsValue>
 			}
 			chevron
-			render={
-				<Link from="/$workspace" to="./settings/providers/system" state={continueSettingsTrail} />
-			}
+			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
 	);
 }

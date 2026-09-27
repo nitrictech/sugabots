@@ -28,18 +28,9 @@ export function useWorkspaces() {
 }
 
 /** The people in a workspace. Asks for nobody's roster until there is a workspace. */
-/**
- * With `enabled: false`, returns only what is already cached and never fetches.
- * It is not `skipToken`, which would take the fetch away from every other
- * reader of the same list.
- */
-export function useWorkspaceMembers(
-	workspaceId: string | undefined,
-	{ enabled = true }: { enabled?: boolean } = {},
-) {
+export function useWorkspaceMembers(workspaceId: string | undefined) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "members"],
-		enabled,
 		queryFn: workspaceId
 			? ({ signal }) =>
 					Effect.runPromise(client.api.workspaces.members({ params: { workspace: workspaceId } }), {

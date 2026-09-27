@@ -9,16 +9,10 @@ import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
-/**
- * With `enabled: false`, returns only what is already cached and never fetches.
- * It is not `skipToken`, which would take the fetch away from every other
- * reader of the same list.
- */
-export function useModelProviders({ enabled = true }: { enabled?: boolean } = {}) {
+export function useModelProviders() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["model-providers", workspaceId],
-		enabled,
 		queryFn: workspaceId
 			? ({ signal }) =>
 					Effect.runPromise(

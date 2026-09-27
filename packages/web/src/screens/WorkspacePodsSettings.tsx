@@ -18,7 +18,7 @@ import {
 	usePods,
 	useUpdatePod,
 } from "@/lib/pods.ts";
-import { continueSettingsTrail, useSettingsBack } from "@/lib/settings-trail.tsx";
+import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -285,6 +285,7 @@ function NameRow({
 }
 
 function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
+	const backToPod = useBackToHere(`${pod.name} pod`);
 	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();
 	if (bots.length === 0 && !pod.permissions.createAgents) {
@@ -302,7 +303,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 					icon={<AgentAvatar color={agent.color} face={agent.face} size={30} />}
 					label={agent.name}
 					chevron
-					render={<Link {...agentSettingsLink({ pod, agent })} state={continueSettingsTrail} />}
+					render={<Link {...agentSettingsLink({ pod, agent })} state={backToPod} />}
 				/>
 			))}
 			{pod.permissions.createAgents && (
@@ -313,7 +314,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 					podId={pod.id}
 					onCreated={async (agent) => {
 						setCreating(false);
-						await navigate({ ...agentSettingsLink({ pod, agent }), state: continueSettingsTrail });
+						await navigate({ ...agentSettingsLink({ pod, agent }), state: backToPod });
 					}}
 				/>
 			</Dialog>

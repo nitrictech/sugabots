@@ -4,7 +4,7 @@ import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
-import { useSettingsBack } from "@/lib/settings-trail.tsx";
+import { useSettingsBack } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { Alert } from "@/ui/alert.tsx";

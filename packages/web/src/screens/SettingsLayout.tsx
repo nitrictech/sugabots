@@ -5,7 +5,7 @@ import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
-import { useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
+import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { type SettingSection, workspaceSettingGroups } from "@/lib/workspace-settings.ts";
 import { PersonAvatar } from "@/ui/avatar.tsx";

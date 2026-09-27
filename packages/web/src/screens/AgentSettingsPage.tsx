@@ -12,7 +12,7 @@ import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agen
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
-import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -373,6 +373,7 @@ function Tools({
 	canChange: boolean;
 	save: Save;
 }) {
+	const backToAgent = useBackToHere(agent.name);
 	const connections = useConnections(pod.id);
 	const { agents } = useAgents();
 	const [openConnectionId, setOpenConnectionId] = useState<string>();
@@ -387,7 +388,7 @@ function Tools({
 				label={`Tools from ${pod.name}`}
 				sub="Every bot in the pod shares these"
 				trailing={<span className="shrink-0 font-medium text-[13.5px] text-link">Edit</span>}
-				render={<Link {...podSettingsLink(pod)} state={continueSettingsTrail} />}
+				render={<Link {...podSettingsLink(pod)} state={backToAgent} />}
 			/>
 			{connections.isError && (
 				<div className="border-border border-b px-4 py-3">

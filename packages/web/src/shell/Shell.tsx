@@ -1,7 +1,6 @@
 import { Outlet } from "@tanstack/react-router";
 import { cn } from "cn";
 import type { ReactNode } from "react";
-import { SettingsTrailProvider } from "@/lib/settings-trail.tsx";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { Rail } from "@/shell/Rail.tsx";
 
@@ -12,9 +11,7 @@ export function Shell() {
 	return (
 		<div className="flex h-dvh min-w-0 overflow-hidden bg-background">
 			<Rail />
-			<SettingsTrailProvider>
-				<Outlet />
-			</SettingsTrailProvider>
+			<Outlet />
 		</div>
 	);
 }

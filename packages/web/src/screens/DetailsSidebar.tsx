@@ -15,7 +15,7 @@ import { useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRoutines } from "@/lib/routines.ts";
-import { continueSettingsTrail } from "@/lib/settings-trail.tsx";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadActivity } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -48,6 +48,7 @@ export function DetailsSidebar({
 	user: SessionUser;
 	onClose: () => void;
 }) {
+	const backToChat = useBackToHere("Chat");
 	const activity = useThreadActivity(threadId).data;
 	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
 	return (
@@ -64,7 +65,7 @@ export function DetailsSidebar({
 				<div className="flex gap-2">
 					<Link
 						{...agentSettingsLink({ pod, agent })}
-						state={continueSettingsTrail}
+						state={backToChat}
 						className="focus-ring flex flex-1 flex-col items-center gap-1.5 rounded-tile bg-chip px-1.5 py-3 text-soft-foreground transition-colors hover:bg-hover"
 					>
 						<Settings aria-hidden size={18} strokeWidth={2} />
@@ -172,6 +173,7 @@ function Routines({ agent }: { agent: Agent }) {
 
 /** The apps the bot can reach, which are its pod's connections. */
 function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
+	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(pod.id);
 	const list = connections.data?.filter((connection) => connection.access !== "off") ?? [];
 	if (list.length === 0) return null;
@@ -181,7 +183,7 @@ function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 				<Tooltip key={connection.id} label={connection.name} side="top">
 					<Link
 						{...agentSettingsLink({ pod, agent })}
-						state={continueSettingsTrail}
+						state={backToChat}
 						aria-label={connection.name}
 						className="focus-ring rounded-[10px] transition-opacity hover:opacity-80"
 					>
