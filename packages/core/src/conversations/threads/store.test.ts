@@ -1,5 +1,5 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
@@ -23,6 +23,7 @@ import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { chatStore } from "../chats/store.ts";
+import { renewJobLeases } from "../jobs/queue.ts";
 import { queueSummary, summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurn, turnStore } from "../turns/store.ts";
@@ -911,7 +912,16 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
 
-	it("claims queued work once and puts interrupted work back", async () => {
+	/** Ages a job's lease past `JOB_LEASE`, as if the process holding it had stopped. */
+	const lapseLease = (jobId: string | undefined) =>
+		onDatabase((db) =>
+			db
+				.update(job)
+				.set({ lockedAt: sql`now() - interval '2 minutes'` })
+				.where(eq(job.id, jobId ?? "")),
+		);
+
+	it("claims queued work once and puts back only work whose lease has lapsed", async () => {
 		const details = await createThread({
 			workspaceId,
 			podId,
@@ -935,6 +945,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			attempts: 1,
 		});
 		expect(await turns.claimNext()).toBeUndefined();
+		// Another process may still be running it.
+		await turns.requeueInterrupted();
+		expect(
+			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
+		).toMatchObject([{ id: claimed?.id, status: "running" }]);
+		await lapseLease(claimed?.id);
 		await turns.requeueInterrupted();
 		expect(
 			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
@@ -948,12 +964,37 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			threadId: details.thread.id,
 			payload: { agentId, sourceMessageId: triggerMessageId },
 		});
+		await lapseLease(claimedSummary?.id);
 		await summaries.requeueInterrupted();
 		expect(
 			(await onDatabase((db) => db.select().from(job))).filter(
 				(row) => row.kind === "thread_summary",
 			),
 		).toMatchObject([{ id: claimedSummary?.id, status: "queued" }]);
+	});
+
+	it("keeps a job whose worker renewed its lease", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Long-running work",
+		});
+		const claimed = await turns.claimNext();
+		expect(claimed?.threadId).toBe(details.thread.id);
+		await lapseLease(claimed?.id);
+
+		await runOnPostgres(renewJobLeases([claimed?.id ?? ""]));
+		await turns.requeueInterrupted();
+
+		const [row] = await onDatabase((db) =>
+			db
+				.select()
+				.from(job)
+				.where(eq(job.id, claimed?.id ?? "")),
+		);
+		expect(row?.status).toBe("running");
 	});
 
 	it("does not expose a thread to another workspace member outside its pod", async () => {
