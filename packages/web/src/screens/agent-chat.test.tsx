@@ -674,6 +674,19 @@ describe("ongoing agent Chat", () => {
 		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
 	});
 
+	it("leads from its bot's settings back to the Chat they were opened from", async () => {
+		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
+		const router = mount(chat);
+		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+		const details = await screen.findByRole("complementary", { name: "Details" });
+
+		fireEvent.click(within(details).getByRole("link", { name: "Settings" }));
+		await screen.findByRole("heading", { name: linear.name });
+		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+	});
+
 	it("leads back to All from a chat opened there", async () => {
 		mount(`/suga/all/pods/suga-team/agents/${linear.handle}`);
 

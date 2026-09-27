@@ -6,11 +6,12 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
+import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	useCancelWorkspaceInvitation,
 	useInviteWorkspaceMember,
@@ -31,6 +32,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
+	PageBackLink,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -112,6 +114,7 @@ function Roster({
 	currentUserId?: string;
 	members: ReturnType<typeof useWorkspaceMembers>;
 }) {
+	const backToMembers = useBackToHere("Members");
 	const invitations = useWorkspaceInvitations(workspaceId);
 	const [inviting, setInviting] = useState(false);
 
@@ -144,6 +147,7 @@ function Roster({
 									from="/$workspace"
 									to="./settings/members/$member"
 									params={{ member: member.id }}
+									state={backToMembers}
 								/>
 							}
 						/>
@@ -258,6 +262,10 @@ function MemberPage({
 	const pods = usePods();
 	const navigate = useNavigate();
 	const [confirming, setConfirming] = useState(false);
+	const back = useBackTarget({
+		label: "Members",
+		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "members" }} />,
+	});
 	const role = member.role;
 	const sharedPods = pods.data?.filter((pod) => pod.kind === "shared") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
@@ -284,17 +292,7 @@ function MemberPage({
 
 	return (
 		<SettingsPage
-			back={
-				<Link
-					from="/$workspace"
-					to="./settings/$section"
-					params={{ section: "members" }}
-					className="focus-ring inline-flex items-center gap-1 rounded-md font-medium text-link text-sm"
-				>
-					<ChevronLeft aria-hidden size={14} strokeWidth={2.4} />
-					Members
-				</Link>
-			}
+			back={<PageBackLink {...back} />}
 			hero={<PersonAvatar name={member.user.name} image={member.user.image} size={88} />}
 			title={member.user.name}
 			description={member.user.email}

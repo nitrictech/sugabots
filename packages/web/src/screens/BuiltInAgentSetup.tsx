@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Button } from "@/ui/button.tsx";
 
@@ -26,11 +27,12 @@ function useCanConfigureBuiltInAgents(): boolean {
 
 /** A link to where the system bots' model is chosen, one for all of them. Administrators only. */
 function SystemModelLink({ children }: { children: ReactNode }) {
+	const backToChat = useBackToHere("Chat");
 	return (
 		<Button
 			size="bare"
 			variant="link"
-			render={<Link from="/$workspace" to="./settings/providers/system" />}
+			render={<Link from="/$workspace" to="./settings/providers/system" state={backToChat} />}
 		>
 			{children}
 		</Button>

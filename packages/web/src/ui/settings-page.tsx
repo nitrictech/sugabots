@@ -10,13 +10,22 @@ import { type ReactNode, useId } from "react";
  * page reads as part of one app rather than as a form of its own.
  */
 
+/**
+ * The bar at a panel's top left with its Back, padded as a list's title row
+ * is, so Back lines up with the list's + beside it.
+ */
+const PANEL_BACK_BAR =
+	"sticky top-0 z-10 flex shrink-0 items-center bg-background/90 px-4 pt-5 pb-3 backdrop-blur";
+
+const PANEL_BACK_LINK =
+	"focus-ring inline-flex min-h-[30px] min-w-0 items-center gap-1 rounded-md font-medium text-[14px] text-link";
+
 /** A settings page: its title and what it is for, then its groups. */
 export function SettingsPage({
 	title,
 	description,
 	hero,
 	back,
-	action,
 	headerAction,
 	children,
 	className,
@@ -25,56 +34,56 @@ export function SettingsPage({
 	description?: ReactNode;
 	/** A picture above the title, such as a bot's face or your avatar, which centres the heading. */
 	hero?: ReactNode;
-	/** The link back to where this page was opened from, above everything else. */
+	/** The link back to where this page was opened from, at the panel's top left: a `PageBackLink`. */
 	back?: ReactNode;
-	/** A control level with `back`, such as Save. */
-	action?: ReactNode;
 	/** A control beside the title, such as Invite people. Not shown with `hero`. */
 	headerAction?: ReactNode;
 	children: ReactNode;
 	className?: string;
 }) {
 	return (
-		<div
-			className={cn(
-				"mx-auto flex w-full max-w-[620px] flex-col gap-7 px-4 pt-9 pb-12 md:px-8",
-				className,
-			)}
-		>
-			{(back || action) && (
-				<div className="-mt-3 flex items-center gap-3">
+		<>
+			{back && (
+				// Marked, so the settings frame leaves out its own Back beside this one.
+				<div data-page-back="" className={PANEL_BACK_BAR}>
 					{back}
-					<span className="flex-1" />
-					{action}
 				</div>
 			)}
-			{hero ? (
-				<div className="flex flex-col items-center gap-2.5 text-center">
-					{hero}
-					{title && <h2 className="m-0 pt-1 font-bold text-2xl text-foreground">{title}</h2>}
-					{description && <p className="m-0 text-[14px] text-muted-foreground">{description}</p>}
-				</div>
-			) : (
-				(title || description) && (
-					<div className="flex items-end gap-4">
-						<div className="flex min-w-0 flex-1 flex-col gap-1.5">
-							{title && (
-								<h2 className="m-0 font-bold text-[24px] text-foreground tracking-[-0.01em]">
-									{title}
-								</h2>
-							)}
-							{description && (
-								<p className="m-0 text-[14px] text-muted-foreground leading-normal">
-									{description}
-								</p>
-							)}
-						</div>
-						{headerAction && <div className="shrink-0">{headerAction}</div>}
+			<div
+				className={cn(
+					"mx-auto flex w-full max-w-[620px] flex-col gap-7 px-4 pb-12 md:px-8",
+					back ? "pt-3" : "pt-9",
+					className,
+				)}
+			>
+				{hero ? (
+					<div className="flex flex-col items-center gap-2.5 text-center">
+						{hero}
+						{title && <h2 className="m-0 pt-1 font-bold text-2xl text-foreground">{title}</h2>}
+						{description && <p className="m-0 text-[14px] text-muted-foreground">{description}</p>}
 					</div>
-				)
-			)}
-			{children}
-		</div>
+				) : (
+					(title || description) && (
+						<div className="flex items-end gap-4">
+							<div className="flex min-w-0 flex-1 flex-col gap-1.5">
+								{title && (
+									<h2 className="m-0 font-bold text-[24px] text-foreground tracking-[-0.01em]">
+										{title}
+									</h2>
+								)}
+								{description && (
+									<p className="m-0 text-[14px] text-muted-foreground leading-normal">
+										{description}
+									</p>
+								)}
+							</div>
+							{headerAction && <div className="shrink-0">{headerAction}</div>}
+						</div>
+					)
+				)}
+				{children}
+			</div>
+		</>
 	);
 }
 
@@ -306,14 +315,17 @@ export function SettingsListDetail({
 	list,
 	detail,
 	detailOpen,
-	back,
+	listLink,
+	returnTo,
 }: {
 	list: ReactNode;
 	detail: ReactNode;
 	/** Whether an item is open, which on a phone hides the list. */
 	detailOpen: boolean;
-	/** On a phone, the way from an open item back to the list: `render={<Link … />}`. */
-	back?: { label: string; render: useRender.RenderProp };
+	/** The list's own page, which on a phone an open item goes back to when there is no `returnTo`. */
+	listLink: BackTarget;
+	/** The page the open item was reached from, when that is not the list beside it. */
+	returnTo: BackTarget | undefined;
 }) {
 	return (
 		<div className="flex min-h-full min-w-0 flex-1">
@@ -325,15 +337,65 @@ export function SettingsListDetail({
 			>
 				{list}
 			</div>
-			<div className={cn("min-w-0 flex-1", !detailOpen && "max-md:hidden")}>
-				{back && <BackToList {...back} />}
+			<div className={cn("group/detail min-w-0 flex-1", !detailOpen && "max-md:hidden")}>
+				<CompactBackBar {...(returnTo ?? listLink)} className="md:hidden" />
+				{returnTo && (
+					<SettingsReturnBar
+						{...returnTo}
+						className="group-has-[[data-page-back]]/detail:hidden max-md:hidden"
+					/>
+				)}
 				{detail}
 			</div>
 		</div>
 	);
 }
 
-function BackToList({ label, render }: { label: string; render: useRender.RenderProp }) {
+/** Where a Back link goes and what it says, as the element it renders: `render={<Link … />}`. */
+export interface BackTarget {
+	label: string;
+	render: useRender.RenderProp;
+}
+
+/**
+ * The bar across the top of a panel with the way back to the page you came
+ * from, for a step that jumped between sections (a pod to one of its bots, a
+ * chat to its bot's settings) and so left no Back of its own.
+ */
+export function SettingsReturnBar({
+	label,
+	render,
+	className,
+}: BackTarget & { className?: string }) {
+	return (
+		<div className={cn(PANEL_BACK_BAR, className)}>
+			<PageBackLink label={`Back to ${label}`} render={render} />
+		</div>
+	);
+}
+
+/** The small Back link above a page's title, for `SettingsPage`'s `back`. */
+export function PageBackLink({ label, render }: BackTarget) {
+	return useRender({
+		render,
+		props: {
+			className: PANEL_BACK_LINK,
+			children: (
+				<>
+					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
+					<span className="min-w-0 truncate">{label}</span>
+				</>
+			),
+		},
+	});
+}
+
+/**
+ * The bar across the top of a page on a narrow screen, with its Back in the
+ * larger size a phone's is. `className` hides it where the page is wide enough
+ * for its own: `md:hidden`.
+ */
+export function CompactBackBar({ label, render, className }: BackTarget & { className: string }) {
 	const link = useRender({
 		render,
 		props: {
@@ -348,7 +410,12 @@ function BackToList({ label, render }: { label: string; render: useRender.Render
 		},
 	});
 	return (
-		<div className="sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur md:hidden">
+		<div
+			className={cn(
+				"sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur",
+				className,
+			)}
+		>
 			{link}
 		</div>
 	);
