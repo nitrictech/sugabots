@@ -557,6 +557,61 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		},
 	);
 
+	it("settles without waiting on the Scribe summarising the run's thread", async () => {
+		const created = await store.create(workspaceId, agentId, userId, {
+			name: "Summarised run",
+			instructions: "Do the work.",
+			trigger: { kind: "webhook" },
+		});
+		const requestId = crypto.randomUUID();
+		const accepted = await store.acceptTrigger({
+			workspaceId,
+			agentId,
+			routineId: created.routine.id,
+			triggerIdentity: requestId,
+			trigger: {
+				kind: "manual",
+				requestId,
+				requestedAt: new Date().toISOString(),
+				requestedByUserId: userId,
+			},
+		});
+		await store.claimNext();
+		await onDatabase((db) =>
+			db.update(job).set({ status: "done" }).where(eq(job.threadId, accepted.threadId)),
+		);
+		const [triggerMessage] = await onDatabase((db) =>
+			db.select({ id: message.id }).from(message).where(eq(message.threadId, accepted.threadId)),
+		);
+		const [summaryThread] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId,
+					podId,
+					hostAgentId: agentId,
+					type: "system_agent",
+					systemAgentKey: "summarise",
+					title: "Summary",
+					parentThreadId: accepted.threadId,
+				})
+				.returning(),
+		);
+		if (!triggerMessage || !summaryThread) throw new Error("Could not create summary thread");
+		await onDatabase((db) =>
+			db.insert(turn).values({
+				threadId: summaryThread.id,
+				agentId,
+				triggerMessageId: triggerMessage.id,
+				status: "running",
+				model: "test/model",
+				startedAt: new Date(),
+			}),
+		);
+
+		expect(await store.settleThread(accepted.threadId)).toBe(true);
+	});
+
 	it("does not settle normally while execution work remains active", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
 

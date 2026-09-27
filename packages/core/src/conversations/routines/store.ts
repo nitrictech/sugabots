@@ -824,6 +824,14 @@ function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigg
 	);
 }
 
+/**
+ * The child threads of `tree` that belong to a routine run's work: its
+ * collaborations. A system agent's thread (the Scribe's summaries) hangs off
+ * the thread it serves but is not part of the run, so its turns neither keep
+ * the run open nor decide how it ended.
+ */
+const workingChildThreads = sql`select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id and child.type <> 'system_agent'`;
+
 function settleRoutineThread(
 	threadId: string,
 	outcome: { state: "failed" | "cancelled"; error?: string } | undefined,
@@ -877,7 +885,7 @@ function settleRoutineThread(
 						join ${routineExecution} root_execution on root_execution.thread_id = root.id
 						where root_execution.id = ${target.id} and root_execution.state = 'running'
 						union all
-						select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+						${workingChildThreads}
 					)
 					select execution.id, execution.thread_id, execution.workspace_id,
 						execution.pending_terminal_state, execution.pending_terminal_error,
@@ -927,7 +935,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						select id from tree
 					`,
@@ -956,7 +964,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						update ${collaboration}
 						set status = 'failed', updated_at = now()
@@ -974,7 +982,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						), cancelled_turns as (
 							update ${turn}
 							set status = 'cancelled', cancel_requested = true, checkpoint = null,
@@ -997,7 +1005,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						update ${message}
 						set status = 'cancelled'
@@ -1014,7 +1022,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						update ${turn}
 						set cancel_requested = true, updated_at = now()
@@ -1032,7 +1040,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						update ${job}
 						set status = 'cancelled', last_error = 'Routine execution ended', updated_at = now()
@@ -1049,7 +1057,7 @@ function settleRoutineThread(
 						with recursive tree as (
 							select id from ${thread} where id = ${status.thread_id}
 							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+							${workingChildThreads}
 						)
 						select exists (
 							select 1 from ${job} active_job
