@@ -27,6 +27,7 @@ import { searchProviderStore } from "@sugabots/core/providers/search-providers/s
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { Config, Duration, Effect, Layer } from "effect";
@@ -59,6 +60,7 @@ const main = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
 
 	const authentication = yield* Authentication.Service;
+	const membership = yield* Membership.Service;
 
 	const eventStore = yield* postgresEventStore;
 	// Every process runs a worker, so what one writes the others must hear about.
@@ -133,6 +135,7 @@ const main = Effect.gen(function* () {
 		installation,
 		oauthFetch: egress.oauth,
 		authorization,
+		membership,
 		stores,
 		events: { bus, access: channelAccess(authorization, stores.threads) },
 		httpClients,
@@ -170,6 +173,7 @@ main.pipe(
 			Installation.layer,
 			Egress.layer,
 			Authentication.layer,
+			Membership.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,

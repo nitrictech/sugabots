@@ -40,6 +40,8 @@ import {
 export type WorkspacePermission =
 	/** Belong to the workspace: see its roster, its enabled models, its own personal pod. */
 	| "workspace.read"
+	/** Rename the workspace and change its address. */
+	| "workspace.update"
 	/** Configure the model and search providers the workspace runs on. */
 	| "workspace.providers.manage"
 	/** Invite, remove and set the access of the people in the workspace. */
@@ -109,6 +111,7 @@ type PodGrantScope = "shared-pods" | "joined-pods";
 const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
 	admin: new Set<WorkspacePermission>([
 		"workspace.read",
+		"workspace.update",
 		"workspace.providers.manage",
 		"workspace.members.manage",
 		"workspace.builtInAgents.configure",
@@ -167,16 +170,9 @@ function isPersonalPodOwner(actor: Actor, pod: PodFacts): boolean {
 	return pod.kind === "personal" && pod.ownerId !== null && pod.ownerId === actor.userId;
 }
 
-/**
- * The grants a role holds, or nothing at all.
- *
- * The role arrives from a text column better-auth writes, so a value outside
- * the supported roles is reachable at run time however the type reads. The
- * tables are checked rather than the names, so adding a role means adding a
- * row to each table and nothing else.
- */
+/** The grants a role holds, or nothing at all for somebody outside the workspace. */
 function grantsFor(role: WorkspaceRole | undefined) {
-	if (!role || !(role in POD_GRANTS) || !(role in WORKSPACE_GRANTS)) return undefined;
+	if (!role) return undefined;
 	return { workspace: WORKSPACE_GRANTS[role], pod: POD_GRANTS[role] };
 }
 

@@ -19,6 +19,7 @@ import type { SearchProviderStore } from "@sugabots/core/providers/search-provid
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Clock, Effect, Layer, type Types } from "effect";
@@ -48,6 +49,7 @@ import { systemRoutes } from "../routes/system/routes.ts";
 import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
 import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
+import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { API_BASE_PATH, ServerApi } from "./api.ts";
 import { authoriseLayer } from "./authorisation.ts";
 import { failureResponse } from "./errors.ts";
@@ -84,12 +86,14 @@ export interface Stores {
 }
 
 export interface AppOptions {
-	/** better-auth. Mounted under `/auth`, and asked who a token belongs to. */
+	/** Mounted under `/auth`, and asked who a token belongs to. */
 	authentication: Authentication.Interface;
 	/** Where the API and web app are reached, and which origins may send a cookie. */
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
+	/** Workspaces, the people in them, and invitations. */
+	membership: Membership.Interface;
 	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
@@ -106,6 +110,7 @@ export function apiLayer({
 	authentication,
 	installation,
 	authorization,
+	membership,
 	stores,
 	events,
 	httpClients,
@@ -117,6 +122,7 @@ export function apiLayer({
 
 	const groups = Layer.mergeAll(
 		systemRoutes,
+		workspaceRoutes({ membership }),
 		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
 		onboardingRoutes({ onboarding: stores.onboarding }),
 		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),

@@ -4,7 +4,6 @@ import {
 	type PodMember,
 	type WorkspaceRole,
 	workspaceRoleLabel,
-	workspaceRoleOf,
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
@@ -349,10 +348,10 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	const { session } = useRouteContext({ from: "__root__" });
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
-		workspaceRoleOf(workspaceMembers.data?.find((member) => member.userId === userId)?.role);
+		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
 	const leaving = removing !== undefined && isYou(removing.userId);
-	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.userId)) ?? [];
+	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
 
 	let rows: ReactNode;
 	if (members.isError) {
@@ -416,8 +415,8 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 						) : (
 							invitable.map((member) => (
 								<DropdownMenuItem
-									key={member.userId}
-									onClick={() => invite.mutate({ userId: member.userId, member: true })}
+									key={member.user.id}
+									onClick={() => invite.mutate({ userId: member.user.id, member: true })}
 								>
 									{/* Hidden from the name, or the initials would read as part of it. */}
 									<span aria-hidden>

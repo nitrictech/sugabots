@@ -17,6 +17,9 @@ import { createTestApp } from "./app.test-support.ts";
 /** Public by intent. Anything else reaching here without credentials is a bug. */
 const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
 
+/** Groups whose service checks every action itself: behind `Session` only, with no rule in `accessPolicy`. */
+const CHECKED_BY_THEIR_SERVICE = new Set(["workspaces"]);
+
 const STRANGER = "0199a3a0-0000-7000-8000-0000000000ee";
 
 const PLACEHOLDERS: Record<string, string> = {
@@ -36,6 +39,8 @@ const PLACEHOLDERS: Record<string, string> = {
 	// A system agent is addressed by its key, not by an id.
 	key: "summarise",
 	id: "0199a3a0-0000-7000-8000-000000000008",
+	memberId: "0199a3a0-0000-7000-8000-00000000000c",
+	invitationId: "0199a3a0-0000-7000-8000-00000000000d",
 };
 
 function fill(pattern: string): string {
@@ -50,6 +55,7 @@ function fill(pattern: string): string {
 
 interface Endpoint {
 	name: string;
+	group: string;
 	method: string;
 	path: string;
 	behindSession: boolean;
@@ -64,6 +70,7 @@ function declaredEndpoints(): Endpoint[] {
 		onEndpoint: ({ group, endpoint, middleware }) => {
 			endpoints.push({
 				name: `${endpoint.method} ${endpoint.path}`,
+				group: group.identifier,
 				method: endpoint.method,
 				path: endpoint.path,
 				behindSession: [...middleware].some(({ key }) => key === Session.key),
@@ -78,6 +85,13 @@ function declaredEndpoints(): Endpoint[] {
 const protectedEndpoints = declaredEndpoints()
 	.filter((endpoint) => !OPEN_ENDPOINTS.has(endpoint.name))
 	.map((endpoint) => [endpoint.name, endpoint] as const);
+
+const authorisedAtTheEdge = protectedEndpoints.filter(
+	([, { group }]) => !CHECKED_BY_THEIR_SERVICE.has(group),
+);
+const checkedByTheirService = protectedEndpoints.filter(([, { group }]) =>
+	CHECKED_BY_THEIR_SERVICE.has(group),
+);
 
 /** An endpoint whose rule names a permission, checked against an id in its path. */
 const idAddressed = protectedEndpoints.filter(([, { rule }]) => rule && !("reach" in rule));
@@ -96,9 +110,14 @@ describe("every endpoint requires a session", () => {
 		expect(protectedEndpoints.length).toBeGreaterThan(20);
 	});
 
-	it.each(protectedEndpoints)("%s is behind Session and Authorise", (_name, endpoint) => {
+	it.each(authorisedAtTheEdge)("%s is behind Session and Authorise", (_name, endpoint) => {
 		expect(endpoint.behindSession).toBe(true);
 		expect(endpoint.behindAuthorise).toBe(true);
+	});
+
+	it.each(checkedByTheirService)("%s is behind Session", (_name, endpoint) => {
+		expect(endpoint.behindSession).toBe(true);
+		expect(endpoint.rule).toBeUndefined();
 	});
 
 	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
@@ -117,7 +136,7 @@ describe("every endpoint requires a session", () => {
 });
 
 describe("every endpoint says what it lets somebody do", () => {
-	it.each(protectedEndpoints)("%s has a rule in accessPolicy", (_name, { rule }) => {
+	it.each(authorisedAtTheEdge)("%s has a rule in accessPolicy", (_name, { rule }) => {
 		expect(rule).toBeDefined();
 		if (rule && "reach" in rule) {
 			expect(rule.reach, "a reach rule names where the endpoint is scoped").not.toBe("");

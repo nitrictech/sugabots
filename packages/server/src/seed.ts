@@ -1,5 +1,6 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { handleFromName, PERSONAL_POD_SLUG } from "@sugabots/contracts";
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import {
 	agent,
@@ -9,12 +10,14 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
+import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
 import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { ConfigProvider, Effect, Layer } from "effect";
 import { Authentication } from "./auth/authentication.ts";
+import { API_BASE_PATH } from "./http/api.ts";
 
 /**
  * Development seed: the smallest amount of data that makes the app worth
@@ -36,24 +39,18 @@ const seed = Effect.gen(function* () {
 	if (installation.isProduction) {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
-	const authentication = yield* Authentication.Service;
-	// The password has to be hashed the way sign-in will hash it, so the account
-	// is created through better-auth rather than inserted.
-	const signUp = authentication.createAccount({
-		name: "Development",
-		email: EMAIL,
-		password: PASSWORD,
-	});
+	const [existingAccount] = yield* query((db) =>
+		db.select({ id: user.id }).from(user).where(eq(user.email, EMAIL)),
+	);
+	if (!existingAccount) {
+		yield* signUp;
+	}
 
 	yield* query((db) =>
 		Effect.gen(function* () {
-			let [person] = yield* db.select().from(user).where(eq(user.email, EMAIL));
+			const [person] = yield* db.select().from(user).where(eq(user.email, EMAIL));
 			if (!person) {
-				yield* signUp;
-				[person] = yield* db.select().from(user).where(eq(user.email, EMAIL));
-			}
-			if (!person) {
-				throw new Error(`could not create ${EMAIL}`);
+				return yield* Effect.die(new Error(`could not create ${EMAIL}`));
 			}
 			if (!person.emailVerified) {
 				yield* db.update(user).set({ emailVerified: true }).where(eq(user.id, person.id));
@@ -188,8 +185,47 @@ const seed = Effect.gen(function* () {
 	);
 });
 
+/** Through the same route the web app signs up with. */
+const signUp = Effect.gen(function* () {
+	const installation = yield* Installation.Service;
+	const authentication = yield* Authentication.Service;
+	const response = yield* authentication.handler(
+		new Request(`${installation.publicUrl}${API_BASE_PATH}/auth/sign-up/email`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: new URL(installation.publicUrl).origin,
+			},
+			body: JSON.stringify({ name: "Development", email: EMAIL, password: PASSWORD }),
+		}),
+	);
+	if (!response.ok) {
+		const reason = yield* Effect.promise(() => response.text());
+		return yield* Effect.die(new Error(`could not sign up ${EMAIL}: ${reason}`));
+	}
+});
+
+/** Whoever may sign up and whether they must verify is the installation's to configure, so the seed configures its own. */
+const seedAccounts = Accounts.layerNoDeps.pipe(
+	Layer.provide(
+		ConfigProvider.layer(
+			ConfigProvider.fromEnv({
+				env: { ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" },
+			}),
+		),
+	),
+);
+
 seed.pipe(
 	Effect.scoped,
-	Effect.provide(Layer.mergeAll(databaseLayer, Installation.layer, Authentication.layer)),
+	Effect.provide(
+		Authentication.layerNoDeps.pipe(
+			Layer.provide([
+				seedAccounts,
+				Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+			]),
+			Layer.provideMerge(Layer.mergeAll(databaseLayer, Installation.layer)),
+		),
+	),
 	NodeRuntime.runMain,
 );

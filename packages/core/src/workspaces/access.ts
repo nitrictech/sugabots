@@ -1,4 +1,4 @@
-import { WORKSPACE_ROLES, type WorkspaceRole, workspaceRoleOf } from "@sugabots/contracts";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Database, Executor } from "../database/database.ts";
@@ -67,7 +67,7 @@ export interface AgentStanding extends PodStanding {
  * ids.
  */
 export class ResourceHidden extends Data.TaggedError("ResourceHidden")<{
-	readonly resource: "workspace" | "pod" | "agent";
+	readonly resource: "workspace" | "pod" | "agent" | "member" | "invitation";
 }> {
 	override get message() {
 		return `No such ${this.resource}`;
@@ -130,10 +130,10 @@ export const authorization: Authorization = {
 					.limit(1),
 			);
 
-			const actor: Actor = { userId, workspaceRole: workspaceRoleOf(row?.role) };
-			if (!row || !actor.workspaceRole) {
+			if (!row) {
 				return yield* new ResourceHidden({ resource: "workspace" });
 			}
+			const actor: Actor = { userId, workspaceRole: row.role };
 			if (!mayInWorkspace(actor, permission)) {
 				return yield* new ActionForbidden({ permission });
 			}
@@ -218,12 +218,16 @@ const standingColumns = {
 	membershipId: podMember.id,
 };
 
-type StandingRow = { pod: schema.PodRow; role: string | null; membershipId: string | null };
+type StandingRow = {
+	pod: schema.PodRow;
+	role: WorkspaceRole | null;
+	membershipId: string | null;
+};
 
 function standingFromRow(row: StandingRow, userId: string): PodStanding {
 	return podStanding(
 		row.pod,
-		{ userId, workspaceRole: workspaceRoleOf(row.role) },
+		{ userId, workspaceRole: row.role ?? undefined },
 		row.membershipId !== null,
 	);
 }

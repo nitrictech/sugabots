@@ -46,9 +46,9 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 
 		void (async () => {
 			if (await resumeAcceptance()) return;
-			client.auth.workspaces.invitation(id).then(
+			Effect.runPromise(client.api.workspaces.invitation({ params: { invitationId: id } })).then(
 				(invitation) => {
-					if (current) setWorkspace(invitation.organizationName);
+					if (current) setWorkspace(invitation.workspaceName);
 				},
 				(failure: unknown) => {
 					if (current) setError(invitationFailureMessage(failure));
@@ -65,7 +65,9 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 		setBusy(true);
 		setError(undefined);
 		try {
-			await client.auth.workspaces.acceptInvite(id);
+			await Effect.runPromise(
+				client.api.workspaces.acceptInvitation({ params: { invitationId: id } }),
+			);
 		} catch (failure) {
 			setError(invitationFailureMessage(failure));
 			setBusy(false);

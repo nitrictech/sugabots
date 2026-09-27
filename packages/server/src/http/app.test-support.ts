@@ -17,6 +17,7 @@ import type { SearchProviderStore } from "@sugabots/core/providers/search-provid
 import { type Authorization, closedAuthorization } from "@sugabots/core/workspaces/access";
 import { type AgentStore, crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/store";
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Effect, Layer } from "effect";
@@ -37,6 +38,7 @@ type TestAppOptions = TestIdentity & {
 	webAppUrl?: string;
 	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
 	authorization?: Authorization;
+	membership?: Membership.Interface;
 	/** The stores a case is about. Anything left out answers nothing. */
 	stores?: Partial<Stores>;
 	httpClients?: EgressHttpClients;
@@ -71,6 +73,7 @@ export function createTestApp(options: TestAppOptions): TestApp {
 			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
 		}),
 		authorization: options.authorization ?? closedAuthorization(),
+		membership: options.membership ?? noMembership,
 		stores: { ...emptyStores, ...options.stores },
 		events: {
 			bus,
@@ -100,7 +103,6 @@ function authenticationForSessionResolver(
 	return {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
 		identify: identifyFromResolver(resolveSession),
-		createAccount: () => Effect.die(new Error("This test app creates no accounts")),
 	};
 }
 
@@ -233,6 +235,24 @@ const emptyStores: Stores = {
 	routines: emptyRoutineStore,
 	turns: { requestCancel: () => Effect.succeed(false) },
 	approvals: noToolApprovalStore,
+};
+
+const unused = () => Effect.die(new Error("This test app has no membership"));
+
+/** Belongs to no workspace, and fails any case that reaches further. */
+const noMembership: Membership.Interface = {
+	workspaces: () => Effect.succeed([]),
+	create: unused,
+	update: unused,
+	members: unused,
+	changeRole: unused,
+	remove: unused,
+	leave: unused,
+	invitations: unused,
+	invite: unused,
+	cancelInvitation: unused,
+	invitation: unused,
+	accept: unused,
 };
 
 /** The `Authentication.identify` a test's resolver stands in for. */

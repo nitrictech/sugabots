@@ -1,7 +1,14 @@
-import type { AgentColor, AgentFace, PodRouting, SystemAgentKey } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING } from "@sugabots/contracts";
+import type {
+	AgentColor,
+	AgentFace,
+	PodRouting,
+	SystemAgentKey,
+	WorkspaceRole,
+} from "@sugabots/contracts";
+import { DEFAULT_POD_ROUTING, WORKSPACE_ROLES } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
+	type AnyPgColumn,
 	boolean,
 	check,
 	foreignKey,
@@ -14,6 +21,16 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
+
+/** Text with a check constraint rather than a Postgres enum, so adding a role needs no type migration. */
+const workspaceRole = (name: string) => text(name).$type<WorkspaceRole>();
+
+function supportedRole(column: AnyPgColumn) {
+	return sql`${column} in (${sql.join(
+		WORKSPACE_ROLES.map((role) => sql.raw(`'${role}'`)),
+		sql`, `,
+	)})`;
+}
 
 /** A person. One row per human, across every workspace they belong to. */
 export const user = pgTable(
@@ -43,11 +60,6 @@ export const session = pgTable(
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		// Which workspace this client is looking at. better-auth keeps it here
-		// so it survives a page reload without the client having to say.
-		activeOrganizationId: uuid("active_workspace_id").references(() => workspace.id, {
-			onDelete: "set null",
-		}),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 		ipAddress: text("ip_address"),
 		userAgent: text("user_agent"),
@@ -103,9 +115,6 @@ export const verification = pgTable(
 /**
  * The tenant. Every other table carries a `workspace_id`, directly or through
  * its parent, and every query is scoped by it.
- *
- * This is better-auth's `organization` model under our name; `logo` and
- * `metadata` are its columns, unused so far.
  */
 export const workspace = pgTable(
 	"workspace",
@@ -114,8 +123,8 @@ export const workspace = pgTable(
 		name: text("name").notNull(),
 		// URL-facing identifier: `/w/acme`. Unique across the installation.
 		slug: text("slug").notNull(),
+		// Not yet settable.
 		logo: text("logo"),
-		metadata: text("metadata"),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -133,20 +142,17 @@ export const workspaceMember = pgTable(
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		// One of `WORKSPACE_ROLES`, and nothing else: `auth.ts` refuses any other
-		// value on every path that writes one. Text rather than an enum because
-		// better-auth writes it, and a role added later should not need a
-		// migration to a Postgres type. Anything unrecognised grants nothing.
-		role: text("role").notNull().default("member"),
+		role: workspaceRole("role").notNull().default("member"),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		uniqueIndex("workspace_member_idx").on(table.workspaceId, table.userId),
 		index("workspace_member_user_id_idx").on(table.userId),
+		check("workspace_member_role_check", supportedRole(table.role)),
 	],
 );
 
-/** An outstanding invitation to join a workspace, addressed to an email. */
+/** An invitation to join a workspace, addressed to an email. */
 export const workspaceInvite = pgTable(
 	"workspace_invite",
 	{
@@ -154,10 +160,13 @@ export const workspaceInvite = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
+		// Stored lower-cased, and compared with the account's address lower-cased.
 		email: text("email").notNull(),
-		role: text("role"),
-		// pending, accepted, rejected or canceled.
-		status: text("status").notNull().default("pending"),
+		role: workspaceRole("role").notNull().default("member"),
+		status: text("status")
+			.$type<"pending" | "accepted" | "canceled">()
+			.notNull()
+			.default("pending"),
 		inviterId: uuid("inviter_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
@@ -167,6 +176,11 @@ export const workspaceInvite = pgTable(
 	(table) => [
 		index("workspace_invite_workspace_id_idx").on(table.workspaceId),
 		index("workspace_invite_email_idx").on(table.email),
+		check("workspace_invite_role_check", supportedRole(table.role)),
+		check(
+			"workspace_invite_status_check",
+			sql`${table.status} in ('pending', 'accepted', 'canceled')`,
+		),
 	],
 );
 
@@ -205,11 +219,7 @@ export const pod = pgTable(
 		),
 		// Composite foreign keys are not enforced when a column is null, so this
 		// binds a Personal pod to its owner's membership and leaves shared pods
-		// alone. The cascade is what makes a departure clean up the private pod
-		// on every path: better-auth runs its remove-member hooks when an
-		// administrator removes somebody, but not when somebody leaves of their
-		// own accord, and a Personal pod left behind would hold the membership
-		// row and fail the departure.
+		// alone. Leaving or being removed takes the Personal pod with it.
 		foreignKey({
 			columns: [table.workspaceId, table.ownerId],
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],

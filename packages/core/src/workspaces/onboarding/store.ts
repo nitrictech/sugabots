@@ -1,4 +1,3 @@
-import { workspaceRoleOf } from "@sugabots/contracts";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Database, query, transaction } from "../../database/database.ts";
@@ -142,7 +141,7 @@ const completeAcceptedInvite: OnboardingStore["completeAcceptedInvite"] = (userI
 			}
 			yield* podStore.ensurePersonal(
 				accepted.workspaceId,
-				{ userId, workspaceRole: workspaceRoleOf(accepted.role) },
+				{ userId, workspaceRole: accepted.role },
 				configured.model,
 			);
 			yield* markCompleted(userId);

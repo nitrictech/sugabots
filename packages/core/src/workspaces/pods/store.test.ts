@@ -451,20 +451,6 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(await store.listVisible(workspaceId, actor(adminId, "member"))).toEqual([]);
 		});
 
-		it("grants nothing for a role it does not recognise", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await onDatabase((db) =>
-				db
-					.update(workspaceMember)
-					.set({ role: "admin,member" })
-					.where(
-						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
-					),
-			);
-
-			await expect(authorization.pod(adminId, made.id, "pod.read")).rejects.toThrow(ResourceHidden);
-		});
-
 		it("does not carry an administrator's reach into another workspace", async () => {
 			// Ada administers both, so the only thing keeping her out of the other
 			// one's pods would be the id — which is exactly what must not be true.

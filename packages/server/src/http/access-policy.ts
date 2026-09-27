@@ -29,10 +29,15 @@ type BehindAuthorise<Endpoint> = Endpoint extends { readonly "~Middleware": infe
 
 /**
  * A rule for every endpoint behind `Authorise`, by group then endpoint, so an
- * endpoint added without one does not compile. Public endpoints have no entry.
+ * endpoint added without one does not compile. Public endpoints have no entry,
+ * and neither does a group none of whose endpoints are behind `Authorise`.
  */
 type AccessPolicy = {
-	readonly [Group in GroupsOf<typeof Api> as Group["identifier"]]: {
+	readonly [Group in GroupsOf<typeof Api> as [
+		BehindAuthorise<HttpApiGroup.Endpoints<Group>>,
+	] extends [never]
+		? never
+		: Group["identifier"]]: {
 		readonly [Endpoint in BehindAuthorise<
 			HttpApiGroup.Endpoints<Group>
 		> as Endpoint["identifier"]]: AccessRule;

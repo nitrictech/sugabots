@@ -65,18 +65,15 @@ const connections = [
 /** The Revenue pod's people and apps, which the example workspace has none of by default. */
 const revenueHandlers = [
 	// The pod's people are the workspace's too, with the roles the pod's rows show.
-	http.get(`${API}/auth/organization/list-members`, () =>
-		HttpResponse.json({
-			members: people.map((person, index) => ({
+	http.get(`${API}/workspaces/:workspace/members`, () =>
+		HttpResponse.json(
+			people.map((person, index) => ({
 				id: `0199a3a0-0000-7000-8000-0000000007${index}0`,
-				organizationId: storyWorkspace.id,
-				userId: person.userId,
 				role: index === 0 ? "admin" : index === 1 ? "admin" : "member",
-				createdAt: person.addedAt,
 				user: { id: person.userId, name: person.name, email: person.email, image: null },
+				joinedAt: person.addedAt,
 			})),
-			total: people.length,
-		}),
+		),
 	),
 	http.get(`${API}/pods/:podId/members`, ({ params }) =>
 		HttpResponse.json(params.podId === revenue.id ? people : people.slice(0, 1)),
