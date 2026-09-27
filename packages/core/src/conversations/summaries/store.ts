@@ -1,41 +1,36 @@
 import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import { and, asc, eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import { agent, message, thread, threadSummary, turn, user } from "../../database/schema.ts";
+import type { Lanes } from "../../workflows/lanes.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
 } from "../../workspaces/agents/system-agents.ts";
-import {
-	type ClaimedJob,
-	cancelJob,
-	claimNextJob,
-	completeJob,
-	enqueueJob,
-	JobNotRunnable,
-	requeueInterruptedJobs,
-	retryUnlessSuperseded,
-} from "../jobs/queue.ts";
 import { participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { messageTextWithPlacedParts } from "../turns/context.ts";
 import type { ModelAccounting } from "../turns/model.ts";
+import { Summary, type SummaryRequest, summaryLane } from "./summary.workflow.ts";
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
 
 /**
  * Thread summaries, written by the `summarise` system agent.
  *
- * After an agent completes a turn, a summary job is queued for the thread. The
+ * After an agent completes a turn, a summary is requested for the thread. The
  * system agent reads what was said since the last summary and rewrites it, and on
  * the first pass also titles the thread. Its turns live in a child thread of
  * the one being summarised, so a person can read back what the system agent did
  * without it appearing in their conversation.
  */
 
-export type ClaimedSummary = ClaimedJob<"thread_summary">;
+/** A summary that has nothing to do: its thread or source is gone, or it is already written. */
+export class SummarySkipped extends Data.TaggedError("SummarySkipped")<{
+	readonly reason: string;
+}> {}
 
 export interface TranscriptEntry {
 	author: string;
@@ -43,9 +38,9 @@ export interface TranscriptEntry {
 	content: string;
 }
 
-/** A claimed summary with its turn opened and its input loaded. */
+/** A requested summary with its turn opened and its input loaded. */
 export interface PreparedSummary {
-	job: ClaimedSummary;
+	request: SummaryRequest;
 	turnId: string;
 	threadId: string;
 	workspaceId: string;
@@ -59,66 +54,45 @@ export interface PreparedSummary {
 }
 
 export interface SummaryStore {
-	requeueInterrupted(): Effect.Effect<void, never, Database>;
-	claimNext(): Effect.Effect<ClaimedSummary | undefined, never, Database>;
-	/**
-	 * Records that preparing failed. Retries unless a newer summary for the
-	 * same thread is already queued, which supersedes this one.
-	 */
-	releaseFailedClaim(claimed: ClaimedSummary, error: string): Effect.Effect<void, never, Database>;
 	/**
 	 * Opens the system agent's turn and loads the transcript. Fails when the thread
 	 * is gone, has no summariser, or is already summarised this far.
 	 */
-	prepare(claimed: ClaimedSummary): Effect.Effect<PreparedSummary, JobNotRunnable, Database>;
+	prepare(request: SummaryRequest): Effect.Effect<PreparedSummary, SummarySkipped, Database>;
 	complete(
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
 		accounting: ModelAccounting,
 	): Effect.Effect<void, never, Database>;
 	fail(prepared: PreparedSummary, error: string): Effect.Effect<void, never, Database>;
-	/** Ends a claim that cannot run, recording why. */
-	discard(
-		claimed: Pick<ClaimedSummary, "id">,
-		reason: string,
-	): Effect.Effect<void, never, Database>;
 }
 
 /**
- * Queues a summary that covers the thread up to `sourceMessageId`. A summary
- * already queued for the thread is pointed at this newer message instead.
+ * Requests a summary that covers the thread up to `sourceMessageId`. A request
+ * already waiting for the thread is pointed at this newer message instead.
  */
-export const queueSummary = (input: {
-	threadId: string;
-	agentId: string;
-	sourceMessageId: string;
-}): Effect.Effect<void, never, Database> =>
-	enqueueJob({
-		kind: "thread_summary",
-		threadId: input.threadId,
-		payload: { agentId: input.agentId, sourceMessageId: input.sourceMessageId },
-		dedupeKey: `thread-summary:${input.threadId}`,
-		ifAlreadyQueued: "replacePayload",
-	});
+export const queueSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
+	lanes
+		.admit({
+			key: summaryLane(request.threadId),
+			workflow: Summary,
+			payload: request,
+			whenBusy: "replace",
+		})
+		.pipe(Effect.asVoid);
 
 export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 	return {
-		requeueInterrupted: () => requeueInterruptedJobs("thread_summary"),
-
-		claimNext: () => claimNextJob("thread_summary"),
-
-		releaseFailedClaim: retryUnlessSuperseded,
-
-		prepare: (claimed) =>
+		prepare: (request) =>
 			// One transaction, so the system-agent thread and its turn are created
 			// together or not at all.
 			transaction(
 				Effect.filterOrElse(
 					query((db) =>
 						Effect.gen(function* () {
-							const scope = yield* loadSummarisedThread(db, claimed);
+							const scope = yield* loadSummarisedThread(db, request);
 							if (!scope) {
-								return new JobNotRunnable({
+								return new SummarySkipped({
 									reason: "The thread, the agent that triggered it, or its message is gone",
 								});
 							}
@@ -128,7 +102,7 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 								SUMMARISE_SYSTEM_AGENT,
 							);
 							if (!summariser) {
-								return new JobNotRunnable({
+								return new SummarySkipped({
 									reason: "This workspace has chosen no model for the Scribe",
 								});
 							}
@@ -140,7 +114,7 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							const previous = yield* loadThreadSummary(db, scope.threadId);
 							const transcriptRows = yield* loadTranscript(db, scope.threadId);
 							const sourceIndex = transcriptRows.findIndex(
-								(row) => row.id === claimed.payload.sourceMessageId,
+								(row) => row.id === request.sourceMessageId,
 							);
 							if (sourceIndex === -1) {
 								throw new Error("Thread summary source message disappeared during preparation");
@@ -149,7 +123,7 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 								? transcriptRows.findIndex((row) => row.id === previous.sourceMessageId)
 								: -1;
 							if (previousSourceIndex >= sourceIndex) {
-								return new JobNotRunnable({
+								return new SummarySkipped({
 									reason: "The thread is already summarised to this message",
 								});
 							}
@@ -157,17 +131,17 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							const systemAgentThreadId = yield* systemAgentThreadFor(db, scope, summariser.id);
 							const turnId = yield* openSystemAgentTurn(
 								db,
-								claimed,
+								request,
 								systemAgentThreadId,
 								summariser,
 							);
 
 							return {
-								job: claimed,
+								request,
 								turnId,
 								threadId: scope.threadId,
 								workspaceId: scope.workspaceId,
-								sourceMessageId: claimed.payload.sourceMessageId,
+								sourceMessageId: request.sourceMessageId,
 								threadTitle: scope.threadTitle,
 								model: summariser.model,
 								previousContent: previous?.content,
@@ -180,8 +154,8 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							};
 						}),
 					),
-					(outcome): outcome is Exclude<typeof outcome, JobNotRunnable> =>
-						!(outcome instanceof JobNotRunnable),
+					(outcome): outcome is Exclude<typeof outcome, SummarySkipped> =>
+						!(outcome instanceof SummarySkipped),
 					Effect.fail,
 				),
 			),
@@ -243,7 +217,6 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							})
 							.where(eq(turn.id, prepared.turnId)),
 					);
-					yield* completeJob(prepared.job.id);
 					yield* publishEvents([
 						{
 							channel: workspaceChannel(prepared.workspaceId),
@@ -258,19 +231,12 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 			),
 
 		fail: (prepared, error) =>
-			transaction(
-				Effect.andThen(
-					query((db) =>
-						db
-							.update(turn)
-							.set({ status: "failed", error, finishedAt: new Date() })
-							.where(eq(turn.id, prepared.turnId)),
-					),
-					retryUnlessSuperseded(prepared.job, error),
-				),
-			),
-
-		discard: (claimed, reason) => cancelJob(claimed.id, reason),
+			query((db) =>
+				db
+					.update(turn)
+					.set({ status: "failed", error, finishedAt: new Date() })
+					.where(eq(turn.id, prepared.turnId)),
+			).pipe(Effect.asVoid),
 	};
 }
 
@@ -286,7 +252,7 @@ interface SummarisedThread {
 /** The thread, if it still exists with this host and this source message. */
 const loadSummarisedThread = Effect.fn("SummaryStore.loadSummarisedThread")(function* (
 	db: Executor,
-	claimed: ClaimedSummary,
+	request: SummaryRequest,
 ) {
 	const [row] = yield* db
 		.select({
@@ -301,12 +267,12 @@ const loadSummarisedThread = Effect.fn("SummaryStore.loadSummarisedThread")(func
 		// writes the summary: that is the pod's summarise system agent, found below.
 		// Requiring it to be the thread's host meant a shared thread stopped being
 		// summarised the moment anyone but the host replied.
-		.innerJoin(agent, eq(agent.id, claimed.payload.agentId))
+		.innerJoin(agent, eq(agent.id, request.agentId))
 		.innerJoin(
 			message,
-			and(eq(message.id, claimed.payload.sourceMessageId), eq(message.threadId, thread.id)),
+			and(eq(message.id, request.sourceMessageId), eq(message.threadId, thread.id)),
 		)
-		.where(eq(thread.id, claimed.threadId))
+		.where(eq(thread.id, request.threadId))
 		.limit(1);
 	return row;
 });
@@ -415,19 +381,14 @@ const systemAgentThreadFor = Effect.fn("SummaryStore.systemAgentThreadFor")(func
 /** The system agent's turn for this source message: reopened on a retry, created otherwise. */
 const openSystemAgentTurn = Effect.fn("SummaryStore.openSystemAgentTurn")(function* (
 	db: Executor,
-	claimed: ClaimedSummary,
+	request: SummaryRequest,
 	systemAgentThreadId: string,
 	summariser: { id: string; model: string },
 ) {
 	const [existing] = yield* db
 		.select({ id: turn.id })
 		.from(turn)
-		.where(
-			and(
-				eq(turn.triggerMessageId, claimed.payload.sourceMessageId),
-				eq(turn.agentId, summariser.id),
-			),
-		)
+		.where(and(eq(turn.triggerMessageId, request.sourceMessageId), eq(turn.agentId, summariser.id)))
 		.limit(1);
 	if (existing) {
 		yield* db
@@ -441,7 +402,7 @@ const openSystemAgentTurn = Effect.fn("SummaryStore.openSystemAgentTurn")(functi
 		.values({
 			threadId: systemAgentThreadId,
 			agentId: summariser.id,
-			triggerMessageId: claimed.payload.sourceMessageId,
+			triggerMessageId: request.sourceMessageId,
 			status: "running",
 			model: summariser.model,
 			startedAt: new Date(),

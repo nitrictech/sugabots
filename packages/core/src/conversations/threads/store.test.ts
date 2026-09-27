@@ -24,7 +24,7 @@ import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { chatStore } from "../chats/store.ts";
 import { renewJobLeases } from "../jobs/queue.ts";
-import { queueSummary, summaryStore } from "../summaries/store.ts";
+import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurn, turnStore } from "../turns/store.ts";
 import { threadStore } from "./store.ts";
@@ -269,22 +269,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 		const sourceMessageId = details.messages[0]?.id;
 		if (!sourceMessageId) throw new Error("The thread has no first message");
-		await runOnPostgres(
-			queueSummary({ threadId: details.thread.id, agentId: otherRow.id, sourceMessageId }),
-		);
-		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "thread_summary" && row.threadId === details.thread.id,
-		);
-		if (!queued || !("sourceMessageId" in queued.payload)) {
-			throw new Error("The summary was not queued");
-		}
-
 		const prepared = await summaries.prepare({
-			id: queued.id,
-			threadId: queued.threadId,
-			payload: queued.payload,
-			dedupeKey: queued.dedupeKey,
-			attempts: 1,
+			threadId: details.thread.id,
+			agentId: otherRow.id,
+			sourceMessageId,
 		});
 
 		expect(prepared.threadId).toBe(details.thread.id);
@@ -722,23 +710,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				contextCapacity: 200_000,
 			},
 		);
-		await turns.queueSummary(preparedTurn);
-
-		const [summaryJob] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "thread_summary" && row.threadId === details.thread.id,
-		);
-		if (!summaryJob || !("sourceMessageId" in summaryJob.payload)) {
-			throw new Error("Completed turn did not queue a thread summary");
-		}
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, summaryJob.id)),
-		);
 		const preparedSummary = await summaries.prepare({
-			id: summaryJob.id,
-			threadId: summaryJob.threadId,
-			payload: summaryJob.payload,
-			dedupeKey: summaryJob.dedupeKey,
-			attempts: 1,
+			threadId: details.thread.id,
+			agentId: preparedTurn.context.agent.id,
+			sourceMessageId: preparedTurn.responseMessage.id,
 		});
 		if (!preparedSummary) {
 			throw new Error("Thread test could not prepare its summary");
@@ -834,25 +809,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
 			{ usage: {} },
 		);
-		await turns.queueSummary(nextTurn);
-		const [nextSummaryJob] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) =>
-				row.kind === "thread_summary" &&
-				row.status === "queued" &&
-				row.threadId === details.thread.id,
-		);
-		if (!nextSummaryJob || !("sourceMessageId" in nextSummaryJob.payload)) {
-			throw new Error("Thread test has no follow-up summary job");
-		}
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextSummaryJob.id)),
-		);
 		const nextSummary = await summaries.prepare({
-			id: nextSummaryJob.id,
-			threadId: nextSummaryJob.threadId,
-			payload: nextSummaryJob.payload,
-			dedupeKey: nextSummaryJob.dedupeKey,
-			attempts: 1,
+			threadId: details.thread.id,
+			agentId: nextTurn.context.agent.id,
+			sourceMessageId: nextTurn.responseMessage.id,
 		});
 		expect(nextSummary).toMatchObject({
 			previousContent: "The release work is complete.",
@@ -955,22 +915,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(
 			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
 		).toMatchObject([{ id: claimed?.id, status: "queued" }]);
-
-		await runOnPostgres(
-			queueSummary({ threadId: details.thread.id, agentId, sourceMessageId: triggerMessageId }),
-		);
-		const claimedSummary = await summaries.claimNext();
-		expect(claimedSummary).toMatchObject({
-			threadId: details.thread.id,
-			payload: { agentId, sourceMessageId: triggerMessageId },
-		});
-		await lapseLease(claimedSummary?.id);
-		await summaries.requeueInterrupted();
-		expect(
-			(await onDatabase((db) => db.select().from(job))).filter(
-				(row) => row.kind === "thread_summary",
-			),
-		).toMatchObject([{ id: claimedSummary?.id, status: "queued" }]);
 	});
 
 	it("keeps a job whose worker renewed its lease", async () => {

@@ -16,6 +16,7 @@ import { type Database, effectRunner, transaction } from "../../database/databas
 import type { EventBus } from "../../database/events/bus.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
+import type { SummaryRequest } from "../summaries/summary.workflow.ts";
 import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";
 import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
@@ -57,6 +58,8 @@ export interface TurnExecution {
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
+	/** Asks the Scribe to catch up on the thread after a completed reply. */
+	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
 }
 
 export interface TurnWorkerOptions extends TurnExecution {
@@ -222,8 +225,12 @@ const generateReply = (
 				// who speaks next here as well left the two of them talking to each
 				// other in the child thread, which nobody was reading.
 				void answeredABrief;
-				yield* store
-					.queueSummary(prepared)
+				yield* execution
+					.queueSummary({
+						threadId: prepared.context.thread.id,
+						agentId: prepared.context.agent.id,
+						sourceMessageId: prepared.responseMessage.id,
+					})
 					.pipe(
 						Effect.catchCause((cause) =>
 							Effect.sync(() => console.error("Queueing a thread summary failed", cause)),

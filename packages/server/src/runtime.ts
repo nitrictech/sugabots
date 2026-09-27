@@ -1,8 +1,7 @@
 import { routineDispatcherLayer } from "@sugabots/core/conversations/routines/dispatcher";
 import { routineSchedulerLayer } from "@sugabots/core/conversations/routines/scheduler";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
-import type { SummaryStore } from "@sugabots/core/conversations/summaries/store";
-import { summaryWorkerLayer } from "@sugabots/core/conversations/summaries/worker";
+import type { SummaryRequest } from "@sugabots/core/conversations/summaries/summary.workflow";
 import {
 	noToolApprovalStore,
 	type ToolApprovalStore,
@@ -20,7 +19,7 @@ import type { EventBus } from "@sugabots/core/database/events/bus";
 import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import type { PublishEvents } from "@sugabots/core/database/events/publish";
 import type { EventStore } from "@sugabots/core/database/events/store";
-import { Layer } from "effect";
+import { type Effect, Layer } from "effect";
 
 /**
  * The background loops that run for as long as the process does.
@@ -35,7 +34,8 @@ export interface BackgroundOptions {
 	bus: Pick<EventBus, "publish" | "subscribe">;
 	model: TurnModel;
 	turns: TurnStore;
-	summaries: SummaryStore;
+	/** Asks the Scribe to catch up on a thread after a completed reply. */
+	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
 	routines?: RoutineStore;
 	collaborations: CollaborationStore;
 	/** Where built-in tool calls are written down. */
@@ -54,7 +54,7 @@ export function backgroundLayer({
 	bus,
 	model,
 	turns,
-	summaries,
+	queueSummary,
 	routines,
 	collaborations,
 	calls,
@@ -78,8 +78,8 @@ export function backgroundLayer({
 			builtInTools,
 			connectionTools,
 			routines,
+			queueSummary,
 		}),
-		summaryWorkerLayer({ store: summaries, model }),
 		facilitatorWorkerLayer({ model, publishEvents, routines }),
 	);
 }

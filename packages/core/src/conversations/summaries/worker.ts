@@ -1,13 +1,14 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { Cause, Duration, Effect, Exit, type Layer, Ref, Schema } from "effect";
-import type { Database } from "../../database/database.ts";
-import { describeFailure, workerLayer } from "../jobs/worker.ts";
+import { Cause, Duration, Effect, Exit, Layer, Ref, Schema } from "effect";
+import { Database } from "../../database/database.ts";
+import { Lanes } from "../../workflows/lanes.ts";
+import { describeFailure } from "../jobs/worker.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "../turns/model.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
-import type { ClaimedSummary, PreparedSummary, SummaryStore } from "./store.ts";
+import type { PreparedSummary, SummaryStore } from "./store.ts";
+import { Summary, type SummaryRequest, SummarySteps, summaryLane } from "./summary.workflow.ts";
 
-const DEFAULT_POLL_INTERVAL_MS = 500;
 const SUMMARY_TIMEOUT = Duration.minutes(2);
 /** Room for the JSON around a title and a summary; anything longer is the model rambling. */
 const MAX_GENERATED_CHARACTERS = MAX_THREAD_SUMMARY_CHARACTERS + MAX_THREAD_TITLE_CHARACTERS + 100;
@@ -26,39 +27,40 @@ export interface SummaryExecution {
 	model: TurnModel;
 }
 
-export interface SummaryWorkerOptions extends SummaryExecution {
-	pollIntervalMs?: number;
-}
+/**
+ * The summary workflow's steps: summarising, and freeing the thread's lane
+ * afterwards. Activities reach them through `SummarySteps`.
+ */
+export const stepsLayer = (execution: SummaryExecution) =>
+	Layer.effect(
+		SummarySteps,
+		Effect.gen(function* () {
+			const database = yield* Database;
+			const lanes = yield* Lanes.Service;
+			return SummarySteps.of({
+				summarise: (request) =>
+					summarise(request, execution).pipe(Effect.provideService(Database, database)),
+				release: (request) =>
+					Effect.flatMap(Summary.executionId(request), (executionId) =>
+						lanes.release({ key: summaryLane(request.threadId), executionId }),
+					),
+			});
+		}),
+	);
 
 /**
- * Claims summary jobs and runs them one at a time while the runtime lives. One
- * fibre is enough: a summary is cheap and there is at most one queued per thread.
+ * Prepares, generates and records one summary. Nothing to do (the thread is
+ * gone, or already summarised this far) is not an error. A failed generation
+ * is recorded on the Scribe's turn and not retried: the thread's next turn
+ * asks for a summary again.
  */
-export const summaryWorkerLayer = ({
-	store,
-	model,
-	pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-}: SummaryWorkerOptions): Layer.Layer<never, never, Database> =>
-	workerLayer({
-		name: "Thread summary worker",
-		requeueInterrupted: () => store.requeueInterrupted(),
-		claimNext: () => store.claimNext(),
-		run: (claimed) => runClaimedSummary(claimed, { store, model }),
-		concurrency: 1,
-		pollIntervalMs,
-	});
-
-/** Runs one claimed summary from preparation to recorded outcome. */
-export const runClaimedSummary = (
-	claimed: ClaimedSummary,
+export const summarise = (
+	request: SummaryRequest,
 	execution: SummaryExecution,
 ): Effect.Effect<void, never, Database> =>
-	execution.store.prepare(claimed).pipe(
+	execution.store.prepare(request).pipe(
 		Effect.flatMap((prepared) => generateSummary(prepared, execution)),
-		Effect.catchTag("JobNotRunnable", (why) => execution.store.discard(claimed, why.reason)),
-		Effect.catchDefect((defect) =>
-			execution.store.releaseFailedClaim(claimed, describeFailure(defect)),
-		),
+		Effect.catchTag("SummarySkipped", () => Effect.void),
 	);
 
 /**
