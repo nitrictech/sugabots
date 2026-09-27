@@ -4,9 +4,8 @@ import { Database } from "../../database/database.ts";
 import { ModelRequestFailed } from "./model.ts";
 
 const mocks = vi.hoisted(() => ({
-	completeJob: vi.fn(),
-	retryOrFailJob: vi.fn(),
 	queueTurn: vi.fn(),
+	settleThread: vi.fn(),
 	scope: undefined as unknown,
 }));
 
@@ -19,104 +18,111 @@ vi.mock("../../database/database.ts", async (importOriginal) => {
 	};
 });
 
-vi.mock("../jobs/queue.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../jobs/queue.ts")>();
-	return {
-		...actual,
-		completeJob: mocks.completeJob,
-		retryOrFailJob: mocks.retryOrFailJob,
-	};
-});
-
+import type { FacilitateRequest } from "./facilitate.workflow.ts";
 import {
-	type ClaimedFacilitation,
+	attemptFacilitation,
+	type FacilitatorExecution,
 	type FacilitatorScope,
-	runClaimedFacilitation,
 } from "./facilitator.ts";
 
-const claimed: ClaimedFacilitation = {
-	id: "0199a3a0-0000-7000-8000-000000000020",
+const request: FacilitateRequest = {
 	threadId: "0199a3a0-0000-7000-8000-000000000001",
-	payload: { triggerMessageId: "0199a3a0-0000-7000-8000-000000000006" },
-	dedupeKey: "facilitate:0199a3a0-0000-7000-8000-000000000001",
-	attempts: 3,
+	triggerMessageId: "0199a3a0-0000-7000-8000-000000000006",
 };
 
+const hostAgentId = "0199a3a0-0000-7000-8000-000000000003";
+
 const scope: FacilitatorScope = {
-	threadId: claimed.threadId,
+	threadId: request.threadId,
 	threadType: "routine",
 	workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 	model: "small-model",
 	hostHandle: "host-agent",
 	routerEnabled: true,
-	crew: [],
+	crew: [
+		{ id: hostAgentId, name: "Host", handle: "host-agent", description: null, inThread: true },
+	],
 	people: [],
 	recent: [],
 };
 
-describe("runClaimedFacilitation", () => {
+const answering = (answer: string): FacilitatorExecution["model"] => ({
+	stream: () => Effect.succeed({ text: chunks(answer), accounting: Effect.succeed({ usage: {} }) }),
+});
+
+const unavailable: FacilitatorExecution["model"] = {
+	stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+};
+
+const execution = (model: FacilitatorExecution["model"]): FacilitatorExecution => ({
+	model,
+	publishEvents: () => Effect.void,
+	queueTurn: mocks.queueTurn,
+	routines: { settleThread: mocks.settleThread },
+});
+
+describe("an attempt at facilitation", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.scope = scope;
-		mocks.completeJob.mockReturnValue(Effect.void);
-		mocks.retryOrFailJob.mockReturnValue(Effect.succeed(false));
 		mocks.queueTurn.mockReturnValue(Effect.void);
+		mocks.settleThread.mockReturnValue(Effect.succeed(true));
 	});
 
-	it("settles a Routine when the facilitator completes with nobody", async () => {
-		const settleThread = vi.fn(() => Effect.succeed(true));
-
-		await runWithoutDatabase(
-			runClaimedFacilitation(claimed, {
-				model: {
-					stream: () =>
-						Effect.succeed({ text: chunks("nobody"), accounting: Effect.succeed({ usage: {} }) }),
-				},
-				publishEvents: () => Effect.void,
-				queueTurn: mocks.queueTurn,
-				routines: { settleThread },
-			}),
+	it("queues the chosen agent's turn and settles the Routine", async () => {
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 1, execution(answering("@host-agent"))),
 		);
 
-		expect(mocks.completeJob).toHaveBeenCalledWith(claimed.id);
-		expect(settleThread).toHaveBeenCalledWith(claimed.threadId);
+		expect(outcome).toBe("finished");
+		expect(mocks.queueTurn).toHaveBeenCalledWith({
+			threadId: request.threadId,
+			agentId: hostAgentId,
+			triggerMessageId: request.triggerMessageId,
+			reason: "facilitator",
+		});
+		expect(mocks.settleThread).toHaveBeenCalledWith(request.threadId);
 	});
 
-	it("does not run an already queued facilitator job for a Chat", async () => {
+	it("settles a Routine when the facilitator answers nobody", async () => {
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 1, execution(answering("nobody"))),
+		);
+
+		expect(outcome).toBe("finished");
+		expect(mocks.queueTurn).not.toHaveBeenCalled();
+		expect(mocks.settleThread).toHaveBeenCalledWith(request.threadId);
+	});
+
+	it("does not ask the model for a Chat", async () => {
 		mocks.scope = { ...scope, threadType: "chat" };
-		const stream = vi.fn(() =>
-			Effect.succeed({ text: chunks("host-agent"), accounting: Effect.succeed({ usage: {} }) }),
+		const stream = vi.fn(answering("host-agent").stream);
+
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 1, execution({ stream })),
 		);
 
-		await runWithoutDatabase(
-			runClaimedFacilitation(claimed, {
-				model: { stream },
-				publishEvents: () => Effect.void,
-				queueTurn: mocks.queueTurn,
-			}),
-		);
-
+		expect(outcome).toBe("finished");
 		expect(stream).not.toHaveBeenCalled();
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
-		expect(mocks.completeJob).toHaveBeenCalledWith(claimed.id);
 	});
 
-	it("settles a Routine as failed when the facilitator exhausts its retries", async () => {
-		const settleThread = vi.fn(() => Effect.succeed(true));
-
-		await runWithoutDatabase(
-			runClaimedFacilitation(claimed, {
-				model: {
-					stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
-				},
-				publishEvents: () => Effect.void,
-				queueTurn: mocks.queueTurn,
-				routines: { settleThread },
-			}),
+	it("asks to run again when an attempt before the last fails", async () => {
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 2, execution(unavailable)),
 		);
 
-		expect(mocks.retryOrFailJob).toHaveBeenCalledWith(claimed, "provider unavailable");
-		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, {
+		expect(outcome).toBe("retry");
+		expect(mocks.settleThread).not.toHaveBeenCalled();
+	});
+
+	it("settles a Routine as failed when the last attempt fails", async () => {
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 3, execution(unavailable)),
+		);
+
+		expect(outcome).toBe("finished");
+		expect(mocks.settleThread).toHaveBeenCalledWith(request.threadId, {
 			state: "failed",
 			error: "provider unavailable",
 		});

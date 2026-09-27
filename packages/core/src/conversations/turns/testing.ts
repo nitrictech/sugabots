@@ -3,15 +3,22 @@ import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { engineForTests, lanesForTests } from "../../workflows/testing.ts";
-import { type QueueTurn, queueTurnInLane } from "./queue.ts";
+import { Facilitate, FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
+import {
+	type QueueFacilitation,
+	type QueueTurn,
+	queueFacilitationInLane,
+	queueTurnInLane,
+} from "./queue.ts";
 import { turnSignals } from "./signals.ts";
 import type { ClaimedTurn } from "./store.ts";
 import { Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**
- * Turns for the Postgres cases. They are asked for through real lanes, but a
- * turn's workflow here only holds its lane: a case runs the turn's steps
- * itself, with `runningTurns`, and frees the lane with `releaseTurn`.
+ * Turns and facilitations for the Postgres cases. They are asked for through
+ * real lanes, but their workflows here only hold their lanes: a case runs a
+ * turn's steps itself, with `runningTurns`, and frees the lane with
+ * `releaseTurn` or `releaseFacilitation`.
  */
 const lanes = lanesForTests;
 
@@ -19,6 +26,9 @@ export const turnSignalsForTests = turnSignals(engineForTests);
 
 export const queueTurnForTests: QueueTurn = (request) =>
 	Effect.flatMap(lanes, (service) => queueTurnInLane(service)(request));
+
+export const queueFacilitationForTests: QueueFacilitation = (request) =>
+	Effect.flatMap(lanes, (service) => queueFacilitationInLane(service)(request));
 
 /** The turns running in the thread, each claimed as its workflow claims its first run. */
 export const runningTurns = (threadId: string) =>
@@ -67,4 +77,24 @@ export const releaseTurn = (claim: ClaimedTurn) =>
 			key: turnLane({ threadId: claim.threadId, agentId: claim.payload.agentId }),
 			executionId: claim.owner,
 		}),
+	);
+
+/** The facilitation asked for while the thread's facilitation runs, if any. */
+export const waitingFacilitation = (threadId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select()
+				.from(laneRequest)
+				.where(eq(laneRequest.laneKey, facilitateLane(threadId))),
+		),
+		([row]) => row && Schema.decodeUnknownSync(FacilitateRequest)(row.payload),
+	);
+
+/** Frees the thread's facilitation lane, as its workflow's last step does. */
+export const releaseFacilitation = (request: FacilitateRequest) =>
+	Effect.flatMap(Facilitate.executionId(request), (executionId) =>
+		Effect.flatMap(lanes, (service) =>
+			service.release({ key: facilitateLane(request.threadId), executionId }),
+		),
 	);

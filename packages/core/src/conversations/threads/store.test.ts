@@ -28,6 +28,7 @@ import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { turnStore } from "../turns/store.ts";
 import {
+	queueFacilitationForTests,
 	queueTurnForTests,
 	releaseTurn,
 	runningTurns,
@@ -44,8 +45,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const eventBus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(eventBus);
 	const store = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests));
-	const turns = onPostgres(turnStore(publishEvents, queueTurnForTests, turnSignalsForTests));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
+	const turns = onPostgres(
+		turnStore(publishEvents, queueTurnForTests, queueFacilitationForTests, turnSignalsForTests),
+	);
 	const summaries = onPostgres(summaryStore(publishEvents));
 	let workspaceId: string;
 	let podId: string;

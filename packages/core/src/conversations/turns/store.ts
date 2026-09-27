@@ -43,7 +43,7 @@ import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
-import type { QueueTurn } from "./queue.ts";
+import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 import type { TurnSignals } from "./signals.ts";
 import type { TurnRequest } from "./turn.workflow.ts";
 
@@ -224,6 +224,7 @@ export const retryable = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
 export function turnStore(
 	publishEvents: PublishEvents,
 	queueTurn: QueueTurn,
+	queueFacilitation: QueueFacilitation,
 	signals: TurnSignals,
 ): TurnStore {
 	/** Records a waiting turn as cancelled and says so; `false` if it had stopped waiting. */
@@ -572,7 +573,7 @@ export function turnStore(
 
 		giveFloor: (prepared, reply) =>
 			giveFloor(
-				{ publishEvents, queueTurn },
+				{ publishEvents, queueTurn, queueFacilitation },
 				{
 					id: prepared.responseMessage.id,
 					threadId: prepared.context.thread.id,

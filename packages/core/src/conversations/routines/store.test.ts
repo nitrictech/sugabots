@@ -23,10 +23,13 @@ import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../data
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { turnStore as createTurnStore } from "../turns/store.ts";
 import {
+	queueFacilitationForTests,
 	queueTurnForTests,
+	releaseFacilitation,
 	releaseTurn,
 	runningTurns,
 	turnSignalsForTests,
+	waitingFacilitation,
 } from "../turns/testing.ts";
 import { Turn, turnLane } from "../turns/turn.workflow.ts";
 import {
@@ -218,22 +221,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				})
 				.returning(),
 		);
-		const [facilitateJob] = await onDatabase((db) =>
-			db
-				.insert(job)
-				.values({
-					kind: "facilitate",
-					threadId: childThread.id,
-					payload: { triggerMessageId: triggerMessage.id },
-					dedupeKey: `facilitate:${childThread.id}`,
-				})
-				.returning(),
-		);
 		const [runningTurn] = await runOnPostgres(runningTurns(accepted.threadId));
-		if (!activeCollaboration || !facilitateJob || !runningTurn) {
+		if (!activeCollaboration || !runningTurn) {
 			throw new Error("Could not create settlement test active work");
 		}
-		return { accepted, childThread, activeCollaboration, runningTurn, facilitateJob };
+		return { accepted, childThread, activeCollaboration, runningTurn };
 	}
 
 	it("lists the workspace's routines on bots in pods the person reaches, by name", async () => {
@@ -569,9 +561,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			const [settledCollaboration] = await onDatabase((db) =>
 				db.select().from(collaboration).where(eq(collaboration.id, fixture.activeCollaboration.id)),
 			);
-			const [settledJob] = await onDatabase((db) =>
-				db.select().from(job).where(eq(job.id, fixture.facilitateJob.id)),
-			);
 			const waitingTurns = await onDatabase((db) =>
 				db
 					.select()
@@ -586,11 +575,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				finishedAt: expect.any(Date),
 			});
 			expect(settledCollaboration?.status).toBe("failed");
-			expect(settledJob).toMatchObject({
-				kind: "facilitate",
-				status: "cancelled",
-				lastError: "Routine execution ended",
-			});
 			expect(waitingTurns).toEqual([]);
 		},
 	);
@@ -668,7 +652,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 	it("keeps an execution running while a turn lane in its thread is busy", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
-		await onDatabase((db) => db.delete(job));
 		await runOnPostgres(releaseTurn(fixture.runningTurn));
 		await onDatabase((db) =>
 			db
@@ -694,6 +677,41 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				.where(eq(lane.key, busy.key)),
 		);
 		expect(await store.settleThread(fixture.childThread.id)).toBe(true);
+	});
+
+	it("drops a waiting facilitation and waits for the running one when an execution ends", async () => {
+		const fixture = await createRunningExecutionWithCollaboration("waiting");
+		await runOnPostgres(releaseTurn(fixture.runningTurn));
+		await onDatabase((db) =>
+			db
+				.update(collaboration)
+				.set({ status: "answered" })
+				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
+		);
+		const running = { threadId: fixture.childThread.id, triggerMessageId: crypto.randomUUID() };
+		await runOnPostgres(queueFacilitationForTests(running));
+		await runOnPostgres(
+			queueFacilitationForTests({
+				threadId: fixture.childThread.id,
+				triggerMessageId: crypto.randomUUID(),
+			}),
+		);
+
+		expect(await store.settleThread(fixture.childThread.id)).toBe(false);
+		expect(
+			await store.settleThread(fixture.childThread.id, { state: "failed", error: "Model failed" }),
+		).toBe(false);
+		expect(await runOnPostgres(waitingFacilitation(fixture.childThread.id))).toBeUndefined();
+
+		await runOnPostgres(releaseFacilitation(running));
+		expect(await store.settleThread(fixture.childThread.id)).toBe(true);
+		const [execution] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, fixture.accepted.executionId)),
+		);
+		expect(execution).toMatchObject({ state: "failed", error: "Model failed" });
 	});
 
 	it("tells the workflows of waiting turns to stop when an execution ends", async () => {
@@ -824,7 +842,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			}),
 		).toBe(false);
 		const turns = onPostgres(
-			createTurnStore(() => Effect.void, queueTurnForTests, turnSignalsForTests),
+			createTurnStore(
+				() => Effect.void,
+				queueTurnForTests,
+				queueFacilitationForTests,
+				turnSignalsForTests,
+			),
 		);
 		await expect(turns.prepare(claimedChild)).rejects.toThrow("The Routine execution has ended");
 
@@ -879,14 +902,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				.set({ status: "running", finishedAt: null })
 				.where(eq(turn.id, parentTurn.id)),
 		);
+		const childFacilitation = {
+			threadId: fixture.childThread.id,
+			triggerMessageId: childTrigger.id,
+		};
+		await runOnPostgres(queueFacilitationForTests(childFacilitation));
 		await onDatabase((db) =>
-			Effect.all([
-				db.update(job).set({ status: "running" }).where(eq(job.id, fixture.facilitateJob.id)),
-				db
-					.update(collaboration)
-					.set({ status: "failed" })
-					.where(eq(collaboration.id, fixture.activeCollaboration.id)),
-			]),
+			db
+				.update(collaboration)
+				.set({ status: "failed" })
+				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
 		);
 
 		let arrivals = 0;
@@ -919,13 +944,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 		const results = await Promise.all([
 			finish(parentTurn.id, releaseTurn(fixture.runningTurn), fixture.accepted.threadId),
-			finish(
-				childTurn.id,
-				query((executor) =>
-					executor.update(job).set({ status: "done" }).where(eq(job.id, fixture.facilitateJob.id)),
-				),
-				fixture.childThread.id,
-			),
+			finish(childTurn.id, releaseFacilitation(childFacilitation), fixture.childThread.id),
 		]);
 		expect(results.sort()).toEqual([false, true]);
 		const [execution] = await onDatabase((db) =>

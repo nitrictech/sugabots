@@ -25,14 +25,19 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { routineStore } from "../routines/store.ts";
 import { routineRunsForTests } from "../routines/testing.ts";
-import { queueTurnForTests, runningTurns, turnSignalsForTests } from "../turns/testing.ts";
+import {
+	queueFacilitationForTests,
+	queueTurnForTests,
+	runningTurns,
+	turnSignalsForTests,
+} from "../turns/testing.ts";
 import { chatStore } from "./store.ts";
 
 const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: eventStore }));
-	const store = onPostgres(chatStore(publishEvents, queueTurnForTests));
+	const store = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -539,13 +544,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 				reason: "default",
 			}),
 		);
-		await onDatabase((db) =>
-			db.insert(job).values({
-				kind: "facilitate",
-				threadId: running.id,
-				payload: { triggerMessageId: crypto.randomUUID() },
-				dedupeKey: `facilitate:${running.id}`,
-			}),
+		await runOnPostgres(
+			queueFacilitationForTests({ threadId: running.id, triggerMessageId: crypto.randomUUID() }),
 		);
 
 		const items = (await store.history(current.id, userId))?.items ?? [];

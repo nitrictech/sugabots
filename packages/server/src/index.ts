@@ -15,8 +15,10 @@ import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
+import { Facilitate, facilitate } from "@sugabots/core/conversations/turns/facilitate.workflow";
+import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
-import { queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
+import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
@@ -90,12 +92,13 @@ const main = Effect.gen(function* () {
 	// Durable workflows, on the engine WORKFLOW_ENGINE names. The engine and
 	// lanes come first, because the stores start and wake workflows.
 	const engine = yield* Layer.build(
-		Lanes.layer([Summary, Turn, Routine]).pipe(Layer.provideMerge(Workflows.engine)),
+		Lanes.layer([Summary, Turn, Facilitate, Routine]).pipe(Layer.provideMerge(Workflows.engine)),
 	);
 	const lanes = Context.get(engine, Lanes.Service);
 	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
 	const signals = turnSignals(workflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
+	const queueFacilitation = queueFacilitationInLane(lanes);
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -104,7 +107,7 @@ const main = Effect.gen(function* () {
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
-		chats: chatStore(publishEvents, queueTurn),
+		chats: chatStore(publishEvents, queueTurn, queueFacilitation),
 		routines: routineStore(
 			publishEvents,
 			queueTurn,
@@ -112,7 +115,7 @@ const main = Effect.gen(function* () {
 			routineRunsInLanes(lanes, workflowEngine),
 		),
 		threads: threadStore(),
-		turns: turnStore(publishEvents, queueTurn, signals),
+		turns: turnStore(publishEvents, queueTurn, queueFacilitation, signals),
 		summaries: summaryStore(publishEvents),
 		collaborations: collaborationStore(publishEvents, queueTurn),
 		calls: toolCallStore(publishEvents),
@@ -141,16 +144,20 @@ const main = Effect.gen(function* () {
 		},
 	});
 
-	// Summaries, turns and routine runs are workflows.
+	// Summaries, turns, facilitation and routine runs are workflows.
 	yield* Layer.build(
 		Layer.mergeAll(
 			Summary.toLayer(summary),
 			Turn.toLayer(turnWorkflow),
+			Facilitate.toLayer(facilitate),
 			Routine.toLayer(routineWorkflow),
 			Lanes.reconcileLayer,
 		).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
 			Layer.provideMerge(routineSteps(stores.routines)),
+			Layer.provideMerge(
+				facilitateSteps({ model, publishEvents, queueTurn, routines: stores.routines }),
+			),
 			Layer.provideMerge(
 				turnSteps({
 					store: stores.turns,
@@ -169,9 +176,7 @@ const main = Effect.gen(function* () {
 		),
 	);
 
-	yield* Layer.build(
-		backgroundLayer({ eventStore, model, queueTurn, routines: stores.routines, publishEvents }),
-	);
+	yield* Layer.build(backgroundLayer({ eventStore, routines: stores.routines }));
 	const api = apiLayer({
 		authentication,
 		installation,

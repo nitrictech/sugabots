@@ -28,7 +28,6 @@ import {
 	agent,
 	chat,
 	collaboration,
-	job,
 	message,
 	pod,
 	routine,
@@ -41,6 +40,7 @@ import {
 import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { Facilitate } from "../turns/facilitate.workflow.ts";
 import type { QueueTurn } from "../turns/queue.ts";
 import type { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
@@ -866,13 +866,8 @@ function settleRoutineThread(
 					select execution.id, execution.routine_id, execution.thread_id, execution.workspace_id,
 						execution.pending_terminal_state, execution.pending_terminal_error,
 							exists (
-							select 1 from ${job} active_job
-							join tree on tree.id = active_job.thread_id
-							where active_job.kind = 'facilitate'
-								and active_job.status in ('queued', 'running')
-						) or exists (
 							select 1 from tree busy_thread
-							where ${laneBusy(sql`busy_thread.id`, [Turn._tag])}
+							where ${laneBusy(sql`busy_thread.id`, [Turn._tag, Facilitate._tag])}
 						) or exists (
 							select 1 from ${turn} active_turn
 							join tree on tree.id = active_turn.thread_id
@@ -1033,6 +1028,7 @@ function settleRoutineThread(
 						)
 					`),
 				);
+				// Turns and facilitations asked for but not yet started never start.
 				yield* query((db) =>
 					db.execute(sql`
 						with recursive tree as (
@@ -1040,23 +1036,7 @@ function settleRoutineThread(
 							union all
 							${workingChildThreads}
 						)
-						update ${job}
-						set status = 'cancelled', last_error = 'Routine execution ended', updated_at = now()
-						from tree
-						where ${job.threadId} = tree.id
-							and ${job.kind} = 'facilitate'
-							and ${job.status} = 'queued'
-					`),
-				);
-				// Turns asked for but not yet started are dropped with the jobs.
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						${dropWaiting(sql`select id from tree`, [Turn._tag])}
+						${dropWaiting(sql`select id from tree`, [Turn._tag, Facilitate._tag])}
 					`),
 				);
 				active = yield* query((db) =>
@@ -1069,9 +1049,8 @@ function settleRoutineThread(
 							${workingChildThreads}
 						)
 						select exists (
-							select 1 from ${job} active_job
-							join tree on tree.id = active_job.thread_id
-							where active_job.kind = 'facilitate' and active_job.status = 'running'
+							select 1 from tree busy_thread
+							where ${laneBusy(sql`busy_thread.id`, [Facilitate._tag])}
 						) or exists (
 							select 1 from ${turn} active_turn
 							join tree on tree.id = active_turn.thread_id

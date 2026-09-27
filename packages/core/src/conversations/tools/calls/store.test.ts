@@ -34,7 +34,12 @@ import {
 	type TurnCheckpoint,
 	turnStore,
 } from "../../turns/store.ts";
-import { queueTurnForTests, runningTurns, turnSignalsForTests } from "../../turns/testing.ts";
+import {
+	queueFacilitationForTests,
+	queueTurnForTests,
+	runningTurns,
+	turnSignalsForTests,
+} from "../../turns/testing.ts";
 import {
 	type SegmentOutcome,
 	Turn,
@@ -68,8 +73,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		toolApprovalStore(publishEvents, turnSignalsForTests),
 	);
 	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests));
-	const store = turnStore(publishEvents, queueTurnForTests, turnSignalsForTests);
+	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
+	const store = turnStore(
+		publishEvents,
+		queueTurnForTests,
+		queueFacilitationForTests,
+		turnSignalsForTests,
+	);
 	const turns = onPostgres(store);
 	let workspaceId: string;
 	let podId: string;
@@ -451,10 +461,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			const signals = await parkInWorkflow(pendingCall());
 
 			expect(
-				await onPostgres(turnStore(publishEvents, queueTurnForTests, signals)).requestCancel(
-					prepared.turnId,
-					memberId,
-				),
+				await onPostgres(
+					turnStore(publishEvents, queueTurnForTests, queueFacilitationForTests, signals),
+				).requestCancel(prepared.turnId, memberId),
 			).toBe(true);
 
 			// Marked at once, so a segment starting as the signal lands stops too.

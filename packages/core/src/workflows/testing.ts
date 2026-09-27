@@ -1,6 +1,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { Routine } from "../conversations/routines/routine.workflow.ts";
+import { Facilitate } from "../conversations/turns/facilitate.workflow.ts";
 import { Turn } from "../conversations/turns/turn.workflow.ts";
 import { Lanes } from "./lanes.ts";
 
@@ -12,12 +13,12 @@ import { Lanes } from "./lanes.ts";
 const held = () => DurableDeferred.await(DurableDeferred.make("released"));
 
 export const engineForTests = ManagedRuntime.make(
-	Layer.mergeAll(Turn.toLayer(held), Routine.toLayer(held)).pipe(
+	Layer.mergeAll(Turn.toLayer(held), Facilitate.toLayer(held), Routine.toLayer(held)).pipe(
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 	),
 ).runSync(Effect.service(WorkflowEngine.WorkflowEngine));
 
 /** Lanes over the test engine, in the caller's database. */
-export const lanesForTests = Lanes.make([Turn, Routine]).pipe(
+export const lanesForTests = Lanes.make([Turn, Facilitate, Routine]).pipe(
 	Effect.provideService(WorkflowEngine.WorkflowEngine, engineForTests),
 );
