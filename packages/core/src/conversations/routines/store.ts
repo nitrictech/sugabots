@@ -40,9 +40,13 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import { laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { cancelWaitingJob, ownedByJob } from "../turns/owner.ts";
 import type { QueueTurn } from "../turns/queue.ts";
+import type { TurnSignals } from "../turns/signals.ts";
+import { Turn } from "../turns/turn.workflow.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
 import {
 	type InvalidRoutineSchedule,
@@ -163,7 +167,11 @@ export interface RoutineStore {
 	>;
 }
 
-export function routineStore(publishEvents: PublishEvents, queueTurn: QueueTurn): RoutineStore {
+export function routineStore(
+	publishEvents: PublishEvents,
+	queueTurn: QueueTurn,
+	signals: TurnSignals,
+): RoutineStore {
 	const store: RoutineStore = {
 		listInWorkspace: (workspaceId, userId) =>
 			query((db) =>
@@ -612,7 +620,8 @@ export function routineStore(publishEvents: PublishEvents, queueTurn: QueueTurn)
 				}),
 			),
 
-		settleThread: (threadId, outcome) => settleRoutineThread(threadId, outcome, publishEvents),
+		settleThread: (threadId, outcome) =>
+			settleRoutineThread(threadId, outcome, publishEvents, signals),
 
 		reconcileRunning: () =>
 			Effect.gen(function* () {
@@ -624,7 +633,7 @@ export function routineStore(publishEvents: PublishEvents, queueTurn: QueueTurn)
 				);
 				yield* Effect.forEach(
 					running,
-					({ threadId }) => settleRoutineThread(threadId, undefined, publishEvents),
+					({ threadId }) => settleRoutineThread(threadId, undefined, publishEvents, signals),
 					{
 						discard: true,
 					},
@@ -658,7 +667,7 @@ export function routineStore(publishEvents: PublishEvents, queueTurn: QueueTurn)
 					}
 					const occurrence = yield* latestMissedAndNextOccurrence(expression, timezone, now);
 					const scheduledAt = occurrence.latest.toISOString();
-					const accepted = yield* routineStore(publishEvents, queueTurn).acceptTrigger({
+					const accepted = yield* store.acceptTrigger({
 						workspaceId: due.workspaceId,
 						agentId: due.agentId,
 						routineId: due.id,
@@ -836,6 +845,7 @@ function settleRoutineThread(
 	threadId: string,
 	outcome: { state: "failed" | "cancelled"; error?: string } | undefined,
 	publishEvents: PublishEvents,
+	signals: TurnSignals,
 ) {
 	return transaction(
 		Effect.gen(function* () {
@@ -894,6 +904,9 @@ function settleRoutineThread(
 							join tree on tree.id = active_job.thread_id
 							where active_job.kind in ('turn', 'facilitate')
 								and active_job.status in ('queued', 'running', 'waiting')
+						) or exists (
+							select 1 from tree busy_thread
+							where ${laneBusy(sql`busy_thread.id`, [Turn._tag])}
 						) or exists (
 							select 1 from ${turn} active_turn
 							join tree on tree.id = active_turn.thread_id
@@ -976,6 +989,29 @@ function settleRoutineThread(
 							for update of active_collaboration skip locked
 						)
 					`),
+				);
+				// Each waiting turn's owner is told to stop first: a workflow records
+				// the cancellation itself, which finds the turn already cancelled here.
+				const waitingOwners = yield* query((db) =>
+					db.execute<{ owner: string | null }>(
+						sql`
+						with recursive tree as (
+							select id from ${thread} where id = ${status.thread_id}
+							union all
+							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
+						)
+						select ${turn.owner} as owner from ${turn}
+						where ${turn.threadId} in (select id from tree) and ${turn.status} = 'waiting'
+					`,
+						"objects",
+					),
+				);
+				yield* Effect.forEach(waitingOwners, ({ owner }) =>
+					owner
+						? Effect.flatMap(ownedByJob(owner), (job) =>
+								job ? cancelWaitingJob(owner) : signals.cancel(owner),
+							)
+						: Effect.void,
 				);
 				yield* query((db) =>
 					db.execute(sql`

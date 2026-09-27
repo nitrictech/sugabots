@@ -19,6 +19,7 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { lane } from "../../workflows/sql.ts";
 import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
@@ -29,6 +30,7 @@ import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurnAsJob } from "../turns/queue.ts";
 import { turnStore } from "../turns/store.ts";
 import { turnSignalsForTests } from "../turns/testing.ts";
+import { Turn, turnLane } from "../turns/turn.workflow.ts";
 import { threadStore } from "./store.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -383,6 +385,34 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		);
 
 		expect(scope).toBeUndefined();
+	});
+
+	it("shows a thread as running while its turn lane is busy", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Run as a workflow",
+		});
+		await onDatabase((db) =>
+			db.update(job).set({ status: "cancelled" }).where(eq(job.threadId, details.thread.id)),
+		);
+		const statusNow = async () =>
+			(await store.getVisible(details.thread.id, memberId))?.thread.status;
+		expect(await statusNow()).toBe("done");
+
+		await onDatabase((db) =>
+			db.insert(lane).values({
+				key: turnLane({ threadId: details.thread.id, agentId }),
+				subject: details.thread.id,
+				workflow: Turn._tag,
+				state: "running",
+				executionId: crypto.randomUUID(),
+			}),
+		);
+
+		expect(await statusNow()).toBe("running");
 	});
 
 	it("loads a Chat thread with its participants and first message", async () => {

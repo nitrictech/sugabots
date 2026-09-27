@@ -1,7 +1,7 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { query, transaction } from "../../database/database.ts";
 import {
 	agent,
@@ -19,9 +19,11 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { lane } from "../../workflows/sql.ts";
 import { queueTurnAsJob } from "../turns/queue.ts";
 import { type ClaimedTurn, turnStore as createTurnStore } from "../turns/store.ts";
 import { turnSignalsForTests } from "../turns/testing.ts";
+import { Turn, turnLane } from "../turns/turn.workflow.ts";
 import {
 	InvalidRoutineExecutionCursor,
 	RoutineRequiresCrewAgent,
@@ -30,7 +32,7 @@ import {
 } from "./store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
-	const routineEffects = routineStore(() => Effect.void, queueTurnAsJob);
+	const routineEffects = routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests);
 	const store = onPostgres(routineEffects);
 	let workspaceId: string;
 	let podId: string;
@@ -630,6 +632,53 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		);
 		expect(execution).toMatchObject({ state: "running", finishedAt: null });
 		expect(activeCollaboration?.status).toBe("waiting");
+	});
+
+	it("keeps an execution running while a turn lane in its thread is busy", async () => {
+		const fixture = await createRunningExecutionWithCollaboration("waiting");
+		await onDatabase((db) => db.delete(job));
+		await onDatabase((db) =>
+			db
+				.update(collaboration)
+				.set({ status: "answered" })
+				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
+		);
+		const busy = {
+			key: turnLane({ threadId: fixture.childThread.id, agentId }),
+			subject: fixture.childThread.id,
+			workflow: Turn._tag,
+			state: "running" as const,
+			executionId: crypto.randomUUID(),
+		};
+		await onDatabase((db) => db.insert(lane).values(busy));
+
+		expect(await store.settleThread(fixture.childThread.id)).toBe(false);
+
+		await onDatabase((db) =>
+			db
+				.update(lane)
+				.set({ state: "idle", workflow: null, executionId: null })
+				.where(eq(lane.key, busy.key)),
+		);
+		expect(await store.settleThread(fixture.childThread.id)).toBe(true);
+	});
+
+	it("tells the workflows of waiting turns to stop when an execution ends", async () => {
+		const fixture = await createRunningExecutionWithCollaboration("waiting");
+		await onDatabase((db) =>
+			db
+				.update(turn)
+				.set({ status: "waiting", owner: "workflow-execution" })
+				.where(eq(turn.threadId, fixture.accepted.threadId)),
+		);
+		const cancel = vi.fn(() => Effect.void);
+		const ending = onPostgres(
+			routineStore(() => Effect.void, queueTurnAsJob, { decide: () => Effect.void, cancel }),
+		);
+
+		expect(await ending.settleThread(fixture.childThread.id, { state: "cancelled" })).toBe(true);
+
+		expect(cancel).toHaveBeenCalledWith("workflow-execution");
 	});
 
 	it("waits for a running parent turn before finalizing a child failure", async () => {

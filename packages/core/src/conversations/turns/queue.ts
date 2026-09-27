@@ -1,7 +1,9 @@
+import { type SQL, sql } from "drizzle-orm";
 import type { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
-import { enqueueJob } from "../jobs/queue.ts";
-import type { TurnRequest } from "./turn.workflow.ts";
+import { laneBusy } from "../../workflows/lanes.ts";
+import { enqueueJob, hasPendingResponseJob } from "../jobs/queue.ts";
+import { Turn, type TurnRequest } from "./turn.workflow.ts";
 
 /**
  * Asks for an agent's turn, in the caller's transaction. A turn already asked
@@ -24,3 +26,10 @@ export const queueTurnAsJob: QueueTurn = (request) =>
 		dedupeKey: `turn:${request.threadId}:${request.agentId}`,
 		ifAlreadyQueued: "keep",
 	});
+
+/**
+ * Whether an agent is answering in the thread or about to, as a condition for
+ * a query: a turn or facilitation job, or a turn workflow's lane.
+ */
+export const respondingIn = (threadId: SQL) =>
+	sql<boolean>`(${hasPendingResponseJob(threadId)} or ${laneBusy(threadId, [Turn._tag])})`;

@@ -100,7 +100,7 @@ const main = Effect.gen(function* () {
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurnAsJob),
-		routines: routineStore(publishEvents, queueTurnAsJob),
+		routines: routineStore(publishEvents, queueTurnAsJob, signals),
 		threads: threadStore(),
 		turns: turnStore(publishEvents, queueTurnAsJob, signals),
 		summaries: summaryStore(publishEvents),

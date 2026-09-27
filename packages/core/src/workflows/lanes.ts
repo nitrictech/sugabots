@@ -72,7 +72,7 @@ const general = (workflow: Workflow.Any) =>
 export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) =>
 	sql<boolean>`exists (
 		select 1 from ${lane}
-		where ${lane.subject} = ${subject}
+		where ${lane.subject} = (${subject})::text
 			and ${lane.state} <> 'idle'
 			and ${lane.workflow} in (${sql.join(
 				workflows.map((name) => sql`${name}`),
