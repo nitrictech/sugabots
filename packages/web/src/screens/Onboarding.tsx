@@ -655,7 +655,9 @@ function ReadyStep({
 				className="flex flex-col gap-[3px] rounded-[20px] bg-list px-4 py-[18px]"
 				style={botColorVariables(bot.color)}
 			>
-				<span className="pb-1 pl-[42px] text-[11.5px] text-subtle-foreground">{bot.name}</span>
+				<span className="pb-1 pl-[42px] font-medium text-[11.5px] text-muted-foreground">
+					{bot.name}
+				</span>
 				<div className="flex items-end gap-2">
 					<AgentAvatar color={bot.color} face={bot.face} size={34} />
 					<div className="flex min-w-0 flex-col gap-[3px]">
