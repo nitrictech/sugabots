@@ -1,0 +1,261 @@
+export * as Lanes from "./lanes.ts";
+
+import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { Context, Duration, Effect, Layer, Option, Schema } from "effect";
+import { type Workflow, WorkflowEngine } from "effect/unstable/workflow";
+import { afterCommit, Database, query, transaction } from "../database/database.ts";
+import { lane, laneRequest } from "./sql.ts";
+
+/**
+ * Lanes run one workflow execution at a time per key, whichever engine runs
+ * it, and hold the requests that arrive while one is running.
+ *
+ * A workflow is started only once the caller's transaction commits, so no
+ * execution runs for a write that rolled back. Admitting a request records it
+ * in the caller's transaction as `starting`; the workflow starts after commit.
+ * Starting is idempotent, since the execution id comes from the payload, so
+ * `reconcile` can safely start again any lane left `starting` by a crash.
+ */
+export interface Interface {
+	/** Starts the workflow now if the lane is idle; otherwise leaves it to wait, by `whenBusy`. */
+	readonly admit: <W extends Workflow.Any>(request: {
+		readonly key: string;
+		readonly workflow: W;
+		readonly payload: W["payloadSchema"]["Type"];
+		readonly whenBusy: WhenBusy;
+	}) => Effect.Effect<Admission>;
+	/**
+	 * Frees the lane an execution holds and starts the next request waiting in
+	 * it. Called from the execution's last activity; doing nothing when the lane
+	 * has already moved on makes it safe to repeat.
+	 */
+	readonly release: (execution: {
+		readonly key: string;
+		readonly executionId: string;
+	}) => Effect.Effect<void>;
+	/** Repairs lanes a crash left behind. Run periodically, by one process at a time. */
+	readonly reconcile: Effect.Effect<void>;
+}
+
+/**
+ * What a request does when its lane is busy:
+ * - `coalesce`: joins a request already waiting (which keeps its payload), or waits.
+ * - `replace`: gives a request already waiting its payload, or waits.
+ * - `queue`: waits behind every request already waiting.
+ */
+export type WhenBusy = "coalesce" | "replace" | "queue";
+
+export type Admission = "started" | "waiting" | "coalesced" | "replaced";
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Lanes") {}
+
+/**
+ * The engine's methods take a fully typed workflow, but a lane only knows
+ * workflows by name. Lane workflows' schemas must work without services, so
+ * treating one as the general workflow type is safe.
+ */
+const general = (workflow: Workflow.Any) =>
+	workflow as unknown as Workflow.Workflow<
+		string,
+		Workflow.AnyStructSchema,
+		Schema.Top,
+		Schema.Top
+	>;
+
+/** How long a lane may stay `starting` before `reconcile` starts its workflow again. */
+const STARTING_TIMEOUT = Duration.seconds(30);
+/** How long a lane may be `running` before `reconcile` asks the engine whether it has finished. */
+const RUNNING_CHECK_AFTER = Duration.minutes(10);
+
+/** Lanes for these workflows: the ones whose requests may wait, and so must be started later by name. */
+export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
+	Effect.gen(function* () {
+		const database = yield* Database;
+		const engine = yield* WorkflowEngine.WorkflowEngine;
+		const byName = new Map(workflows.map((workflow) => [workflow._tag, workflow]));
+		const provide = Effect.provideService(Database, database);
+
+		const workflowNamed = (name: string) => {
+			const workflow = byName.get(name);
+			if (!workflow) throw new Error(`No lanes are registered for workflow "${name}"`);
+			return workflow;
+		};
+
+		/** Starts the lane's workflow after the enclosing transaction commits. */
+		const startAfterCommit = (
+			key: string,
+			workflow: Workflow.Any,
+			executionId: string,
+			payload: unknown,
+		) =>
+			afterCommit(
+				(
+					engine.execute(general(workflow), {
+						executionId,
+						payload: decodePayload(workflow, payload),
+						discard: true,
+					}) as Effect.Effect<unknown>
+				).pipe(
+					Effect.andThen(
+						query((db) =>
+							db
+								.update(lane)
+								.set({ state: "running" })
+								.where(
+									and(
+										eq(lane.key, key),
+										eq(lane.executionId, executionId),
+										eq(lane.state, "starting"),
+									),
+								),
+						),
+					),
+					provide,
+					Effect.asVoid,
+				),
+			);
+
+		/** Hands the lane to a workflow; the caller holds the lane's row lock. */
+		const occupy = (key: string, workflow: Workflow.Any, payload: unknown) =>
+			Effect.gen(function* () {
+				const executionId = yield* workflow.executionId(decodePayload(workflow, payload));
+				yield* query((db) =>
+					db
+						.update(lane)
+						.set({ state: "starting", workflow: workflow._tag, executionId, payload })
+						.where(eq(lane.key, key)),
+				);
+				yield* startAfterCommit(key, workflow, executionId, payload);
+			});
+
+		const admit: Interface["admit"] = ({ key, workflow, payload, whenBusy }) =>
+			transaction(
+				Effect.gen(function* () {
+					const encoded = encodePayload(workflow, payload);
+					yield* query((db) => db.insert(lane).values({ key }).onConflictDoNothing());
+					const [current] = yield* query((db) =>
+						db.select().from(lane).where(eq(lane.key, key)).for("update"),
+					);
+					if (current?.state === "idle") {
+						yield* occupy(key, workflow, encoded);
+						return "started" as const;
+					}
+					const [waiting] = yield* query((db) =>
+						db
+							.select({ id: laneRequest.id })
+							.from(laneRequest)
+							.where(eq(laneRequest.laneKey, key))
+							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
+							.limit(1),
+					);
+					if (waiting && whenBusy === "coalesce") return "coalesced" as const;
+					if (waiting && whenBusy === "replace") {
+						yield* query((db) =>
+							db
+								.update(laneRequest)
+								.set({ payload: encoded })
+								.where(eq(laneRequest.id, waiting.id)),
+						);
+						return "replaced" as const;
+					}
+					yield* query((db) =>
+						db
+							.insert(laneRequest)
+							.values({ laneKey: key, workflow: workflow._tag, payload: encoded }),
+					);
+					return "waiting" as const;
+				}),
+			).pipe(provide);
+
+		const release: Interface["release"] = ({ key, executionId }) =>
+			transaction(
+				Effect.gen(function* () {
+					const [current] = yield* query((db) =>
+						db.select().from(lane).where(eq(lane.key, key)).for("update"),
+					);
+					if (current?.executionId !== executionId) return;
+					const [next] = yield* query((db) =>
+						db
+							.select()
+							.from(laneRequest)
+							.where(eq(laneRequest.laneKey, key))
+							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
+							.limit(1),
+					);
+					if (!next) {
+						yield* query((db) =>
+							db
+								.update(lane)
+								.set({ state: "idle", workflow: null, executionId: null, payload: null })
+								.where(eq(lane.key, key)),
+						);
+						return;
+					}
+					yield* query((db) => db.delete(laneRequest).where(eq(laneRequest.id, next.id)));
+					yield* occupy(key, workflowNamed(next.workflow), next.payload);
+				}),
+			).pipe(provide);
+
+		const reconcile: Interface["reconcile"] = Effect.gen(function* () {
+			const stale = yield* query((db) =>
+				db
+					.select()
+					.from(lane)
+					.where(
+						and(
+							eq(lane.state, "starting"),
+							lt(
+								lane.updatedAt,
+								sql`now() - make_interval(secs => ${Duration.toSeconds(STARTING_TIMEOUT)})`,
+							),
+						),
+					),
+			);
+			for (const row of stale) {
+				if (!row.workflow || !row.executionId) continue;
+				yield* startAfterCommit(row.key, workflowNamed(row.workflow), row.executionId, row.payload);
+			}
+			const long = yield* query((db) =>
+				db
+					.select()
+					.from(lane)
+					.where(
+						and(
+							eq(lane.state, "running"),
+							lt(
+								lane.updatedAt,
+								sql`now() - make_interval(secs => ${Duration.toSeconds(RUNNING_CHECK_AFTER)})`,
+							),
+						),
+					),
+			);
+			for (const row of long) {
+				if (!row.workflow || !row.executionId) continue;
+				const result = yield* engine.poll(
+					general(workflowNamed(row.workflow)),
+					row.executionId,
+				) as Effect.Effect<Option.Option<Workflow.Result<unknown, unknown>>>;
+				// Only a finished execution is released. One the engine cannot see yet
+				// may still be starting, and is left to a later pass.
+				if (Option.isSome(result) && result.value._tag === "Complete") {
+					yield* release({ key: row.key, executionId: row.executionId });
+				}
+			}
+		}).pipe(provide);
+
+		return Service.of({ admit, release, reconcile });
+	});
+
+export const layer = (workflows: ReadonlyArray<Workflow.Any>) =>
+	Layer.effect(Service, make(workflows));
+
+/** Payloads are stored as their JSON encoding, so a waiting request can be decoded by name later. */
+const encodePayload = (workflow: Workflow.Any, payload: unknown): unknown =>
+	Schema.encodeUnknownSync(
+		Schema.toCodecJson(workflow.payloadSchema) as unknown as Schema.Codec<unknown, unknown>,
+	)(payload);
+
+const decodePayload = (workflow: Workflow.Any, payload: unknown): object =>
+	Schema.decodeUnknownSync(
+		Schema.toCodecJson(workflow.payloadSchema) as unknown as Schema.Codec<object, unknown>,
+	)(payload);
