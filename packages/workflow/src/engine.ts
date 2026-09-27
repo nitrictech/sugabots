@@ -19,34 +19,50 @@ export const memory: Layer.Layer<WorkflowEngine.WorkflowEngine> = WorkflowEngine
  * the `SqlClient` it is given (the app's). Only one process may run it, so it
  * first takes a lock that says so, and refuses to start without it.
  */
-export const singleRunner = ClusterWorkflowEngine.layer.pipe(
-	Layer.provide(SingleRunner.layer({ runnerStorage: "sql" })),
-	Layer.provide(NodeCrypto.layer),
-	Layer.provide(Layer.effectDiscard(holdHostLock())),
-);
+export const singleRunnerWith = (options: {
+	/** How long to keep trying for the host lock before refusing to start. */
+	readonly hostLockWait: Duration.Duration;
+}) =>
+	ClusterWorkflowEngine.layer.pipe(
+		Layer.provide(SingleRunner.layer({ runnerStorage: "sql" })),
+		Layer.provide(NodeCrypto.layer),
+		Layer.provide(Layer.effectDiscard(holdHostLock(options.hostLockWait))),
+	);
+
+/** The single runner, waiting up to 30 seconds for a predecessor to let go of the host lock. */
+export const singleRunner = singleRunnerWith({ hostLockWait: Duration.seconds(30) });
 
 /** The two keys of the host lock; the two-key form cannot collide with the cluster's own shard locks. */
 const HOST_LOCK = [0x5ab0_7a1c, 1] as const;
 
+/** How often to try for the lock while waiting. */
+const HOST_LOCK_RETRY = Duration.seconds(1);
+
 /** How often the lock is checked: a session lock vanishes silently with its connection. */
 const HOST_LOCK_CHECK = Duration.seconds(5);
 
-function holdHostLock() {
+function holdHostLock(wait: Duration.Duration) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const connection = yield* sql.reserve;
-		const [taken] = yield* connection.execute(
-			"select pg_try_advisory_lock($1, $2) as held",
-			HOST_LOCK,
-			undefined,
-		);
-		if (!taken?.held) {
-			return yield* Effect.die(
-				new Error(
-					"Another process is already running the single-runner workflow engine. It supports one server process.",
+		// A process restarting can find its predecessor's connection not yet
+		// closed, so the lock is tried for a while before giving up.
+		yield* connection
+			.execute("select pg_try_advisory_lock($1, $2) as held", HOST_LOCK, undefined)
+			.pipe(
+				Effect.flatMap(([taken]) =>
+					taken?.held ? Effect.void : Effect.fail("held elsewhere" as const),
+				),
+				Effect.retry(Schedule.spaced(HOST_LOCK_RETRY).pipe(Schedule.upTo({ duration: wait }))),
+				Effect.catchTag("SqlError", Effect.die),
+				Effect.catch(() =>
+					Effect.die(
+						new Error(
+							"Another process is already running the single-runner workflow engine. It supports one server process.",
+						),
+					),
 				),
 			);
-		}
 		// Released explicitly: the connection goes back to the pool, not away.
 		yield* Effect.addFinalizer(() =>
 			connection

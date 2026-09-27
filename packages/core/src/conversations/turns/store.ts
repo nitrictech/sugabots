@@ -45,7 +45,6 @@ import {
 	retryOrFailJob,
 } from "../jobs/queue.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../routines/execution.ts";
-import { queueSummary } from "../summaries/store.ts";
 import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
@@ -178,8 +177,6 @@ export interface TurnStore {
 		checkpoint: TurnCheckpoint,
 		approvals: readonly PendingToolApproval[],
 	): Effect.Effect<boolean, never, Database>;
-	/** Asks the summarise system agent to catch up on this thread. */
-	queueSummary(prepared: PreparedTurn): Effect.Effect<void, never, Database>;
 	/** Decides who speaks after this completed reply, and queues them (ADR 004). */
 	giveFloor(
 		prepared: PreparedTurn,
@@ -548,13 +545,6 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 					agentId: prepared.context.agent.id,
 					spokeBecause: prepared.job.payload.reason,
 				},
-			}),
-
-		queueSummary: (prepared) =>
-			queueSummary({
-				threadId: prepared.context.thread.id,
-				agentId: prepared.context.agent.id,
-				sourceMessageId: prepared.responseMessage.id,
 			}),
 
 		fail: (prepared, reply, error) =>

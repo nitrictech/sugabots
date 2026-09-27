@@ -1,5 +1,4 @@
 import { chatStore } from "@sugabots/core/conversations/chats/store";
-import { summaryStore } from "@sugabots/core/conversations/summaries/store";
 import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
@@ -68,7 +67,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		bus,
 		model,
 		turns,
-		summaries: summaryStore(publishEvents),
+		// Summaries run as workflows now; this test is about turns.
+		queueSummary: () => Effect.void,
 		collaborations,
 		calls: toolCallStore(publishEvents),
 		builtInTools: noBuiltInTools,

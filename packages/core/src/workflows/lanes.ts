@@ -259,3 +259,35 @@ const decodePayload = (workflow: Workflow.Any, payload: unknown): object =>
 	Schema.decodeUnknownSync(
 		Schema.toCodecJson(workflow.payloadSchema) as unknown as Schema.Codec<object, unknown>,
 	)(payload);
+
+/** How often `reconcileLayer` repairs lanes. */
+const RECONCILE_INTERVAL = Duration.minutes(1);
+
+/**
+ * Runs `reconcile` every minute for as long as the layer's scope is open. Every
+ * process runs it; a transaction-scoped advisory lock lets one at a time do the
+ * work, and a failed pass is logged and tried again next time.
+ */
+export const reconcileLayer = Layer.effectDiscard(
+	Effect.gen(function* () {
+		const lanes = yield* Service;
+		const database = yield* Database;
+		const pass = transaction(
+			Effect.gen(function* () {
+				const [lock] = yield* query((db) =>
+					db.execute<{ taken: boolean }>(
+						sql`select pg_try_advisory_xact_lock(hashtextextended('lanes:reconcile', 0)) as taken`,
+						"objects",
+					),
+				);
+				if (lock?.taken) yield* lanes.reconcile;
+			}),
+		).pipe(
+			Effect.provideService(Database, database),
+			Effect.catchCause((cause) => Effect.logError("Reconciling lanes failed", cause)),
+		);
+		yield* Effect.forkScoped(
+			pass.pipe(Effect.delay(RECONCILE_INTERVAL), Effect.forever, Effect.withTracerEnabled(false)),
+		);
+	}),
+);

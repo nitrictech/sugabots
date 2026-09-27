@@ -83,6 +83,7 @@ const reply = (content: string) => ({ content, collaborations: [], toolCalls: []
 describe("runClaimedTurn", () => {
 	it("persists a streamed reply and publishes only ephemeral deltas", async () => {
 		const store = turnStore();
+		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
 		const model: TurnModel = {
 			stream: () =>
@@ -102,6 +103,7 @@ describe("runClaimedTurn", () => {
 				events,
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary,
 			}),
 		);
 
@@ -110,7 +112,11 @@ describe("runClaimedTurn", () => {
 			reportedCost: 0.001,
 		});
 		expect(store.fail).not.toHaveBeenCalled();
-		expect(store.queueSummary).toHaveBeenCalledWith(prepared);
+		expect(queueSummary).toHaveBeenCalledWith({
+			threadId: prepared.context.thread.id,
+			agentId: prepared.context.agent.id,
+			sourceMessageId: prepared.responseMessage.id,
+		});
 		expect(eventTypes(events)).toEqual(["message.delta", "message.delta"]);
 	});
 
@@ -164,6 +170,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls,
+				queueSummary: noSummary,
 				builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
 			}).pipe(Effect.provideService(toolContext, "turn-context")),
 		);
@@ -224,6 +231,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls,
+				queueSummary: noSummary,
 				connectionTools: {
 					forPod: () =>
 						Effect.succeed({
@@ -303,6 +311,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				connectionTools: {
 					forPod: () =>
 						Effect.succeed({
@@ -385,6 +394,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				approvals: {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
@@ -429,6 +439,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				connectionTools: {
 					forPod: () =>
 						Effect.succeed({
@@ -476,6 +487,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
 			}),
 		);
@@ -494,6 +506,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 			}),
 		);
 
@@ -514,6 +527,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				routines: { settleThread },
 			}),
 		);
@@ -535,6 +549,7 @@ describe("runClaimedTurn", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 				routines: { settleThread },
 			}),
 		);
@@ -547,9 +562,7 @@ describe("runClaimedTurn", () => {
 
 	it("keeps a completed turn successful when its summary cannot be queued", async () => {
 		const store = turnStore();
-		vi.mocked(store.queueSummary).mockReturnValueOnce(
-			Effect.die(new Error("database unavailable")),
-		);
+		const queueSummary = () => Effect.die(new Error("database unavailable"));
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			await runWithServices(
@@ -565,6 +578,7 @@ describe("runClaimedTurn", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					calls: toolCalls(),
+					queueSummary,
 				}),
 			);
 		} finally {
@@ -594,6 +608,7 @@ describe("runClaimedTurn", () => {
 					events,
 					collaborations: collaborations(),
 					calls: toolCalls(),
+					queueSummary: noSummary,
 				}),
 			);
 		} finally {
@@ -619,6 +634,7 @@ describe("runClaimedTurn", () => {
 				events,
 				collaborations: collaborations(),
 				calls: toolCalls(),
+				queueSummary: noSummary,
 			}),
 		);
 
@@ -643,6 +659,7 @@ describe("runClaimedTurn", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					calls: toolCalls(),
+					queueSummary: noSummary,
 				}),
 			);
 
@@ -673,6 +690,7 @@ describe("runClaimedTurn", () => {
 					events,
 					collaborations: collaborations(),
 					calls: toolCalls(),
+					queueSummary: noSummary,
 				}),
 			);
 
@@ -707,6 +725,7 @@ describe("runClaimedTurn", () => {
 					events: liveEventBus(),
 					collaborations: collaborations(),
 					calls: toolCalls(),
+					queueSummary: noSummary,
 				}),
 			);
 
@@ -744,6 +763,7 @@ describe("the turn worker", () => {
 			events: eventBus(),
 			collaborations: collaborations(),
 			calls: toolCalls(),
+			queueSummary: noSummary,
 			concurrency: 1,
 			pollIntervalMs: 10,
 		});
@@ -784,6 +804,7 @@ describe("the turn worker", () => {
 			events: eventBus(),
 			collaborations: collaborations(),
 			calls: toolCalls(),
+			queueSummary: noSummary,
 			concurrency: 1,
 			pollIntervalMs: 10,
 		});
@@ -812,6 +833,7 @@ describe("the turn worker", () => {
 			events: eventBus(),
 			collaborations: collaborations(),
 			calls: toolCalls(),
+			queueSummary: noSummary,
 			concurrency: 1,
 			pollIntervalMs: 10_000,
 		});
@@ -839,7 +861,6 @@ function turnStore(): TurnStore {
 		giveFloor: vi.fn(() =>
 			Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
 		),
-		queueSummary: vi.fn(() => Effect.void),
 		fail: vi.fn(() => Effect.succeed(false)),
 		cancel: vi.fn(() => Effect.void),
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
@@ -900,6 +921,8 @@ function requestCancellation(events: EventBus) {
 function eventTypes(events: EventBus): string[] {
 	return vi.mocked(events.publish).mock.calls.map(([, event]) => event.type);
 }
+
+const noSummary = () => Effect.void;
 
 async function* chunks(...values: string[]): AsyncIterable<string> {
 	for (const value of values) {

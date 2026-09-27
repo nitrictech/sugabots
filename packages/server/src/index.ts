@@ -2,7 +2,9 @@ import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { routineStore } from "@sugabots/core/conversations/routines/store";
-import { summaryStore } from "@sugabots/core/conversations/summaries/store";
+import { queueSummary, summaryStore } from "@sugabots/core/conversations/summaries/store";
+import { Summary, summary } from "@sugabots/core/conversations/summaries/summary.workflow";
+import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/worker";
 import { threadStore } from "@sugabots/core/conversations/threads/store";
 import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
@@ -24,13 +26,14 @@ import { connectionStore } from "@sugabots/core/providers/connections/store";
 import { modelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { Lanes } from "@sugabots/core/workflows/lanes";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
-import { Config, Duration, Effect, Layer } from "effect";
+import { Config, Context, Duration, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { API_BASE_PATH } from "./http/api.ts";
@@ -41,6 +44,7 @@ import { observabilityLayer } from "./observability.ts";
 import { channelAccess } from "./routes/events/access.ts";
 import { backgroundLayer } from "./runtime.ts";
 import { VERSION } from "./version.ts";
+import { Workflows } from "./workflows.ts";
 
 /**
  * The process. Builds every part of the API and binds a port. This is the only
@@ -115,13 +119,24 @@ const main = Effect.gen(function* () {
 		},
 	});
 
+	// Durable workflows, on the engine WORKFLOW_ENGINE names. Summaries are the
+	// first to move from the job queue; the rest follow.
+	const workflows = yield* Layer.build(
+		Layer.mergeAll(Summary.toLayer(summary), Lanes.reconcileLayer).pipe(
+			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
+			Layer.provideMerge(Lanes.layer([Summary])),
+			Layer.provideMerge(Workflows.engine),
+		),
+	);
+	const lanes = Context.get(workflows, Lanes.Service);
+
 	yield* Layer.build(
 		backgroundLayer({
 			eventStore,
 			bus,
 			model,
 			turns: stores.turns,
-			summaries: stores.summaries,
+			queueSummary: (request) => queueSummary(lanes, request),
 			routines: stores.routines,
 			collaborations: stores.collaborations,
 			calls: stores.calls,
