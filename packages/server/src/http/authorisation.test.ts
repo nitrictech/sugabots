@@ -121,7 +121,7 @@ describe("every endpoint requires a session", () => {
 	});
 
 	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
-		const app = createTestApp({ resolveSession: async () => null });
+		const app = createTestApp({ resolveUser: async () => null });
 		const { path, ...init } = requestTo(endpoint);
 
 		const response = await app.request(path, init);
@@ -147,8 +147,11 @@ describe("every endpoint says what it lets somebody do", () => {
 		"%s refuses a signed-in stranger before reading the request",
 		async (_name, endpoint) => {
 			const app = createTestApp({
-				resolveSession: async () => ({
-					user: { id: STRANGER, email: "stranger@example.com", name: "Stranger", image: null },
+				resolveUser: async () => ({
+					id: STRANGER,
+					email: "stranger@example.com",
+					name: "Stranger",
+					image: null,
 				}),
 			});
 			const { path, ...init } = requestTo(endpoint);

@@ -1,3 +1,4 @@
+import type { SessionUser } from "@sugabots/contracts";
 import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
@@ -23,15 +24,14 @@ import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import type { Authentication } from "../auth/authentication.ts";
-import type { SessionResolver } from "../auth/session.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
 import { API_BASE_PATH } from "./api.ts";
 import { apiLayer, type Stores } from "./app.ts";
 
 type TestIdentity =
-	| { authentication: Authentication.Interface; resolveSession?: never }
-	| { authentication?: never; resolveSession: SessionResolver };
+	| { authentication: Authentication.Interface; resolveUser?: never }
+	| { authentication?: never; resolveUser: UserResolver };
 
 type TestAppOptions = TestIdentity & {
 	/** Where the web app is served, when a case needs it apart from the API. */
@@ -65,8 +65,7 @@ export interface TestApp {
 export function createTestApp(options: TestAppOptions): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
 	const routes = apiLayer({
-		authentication:
-			options.authentication ?? authenticationForSessionResolver(options.resolveSession),
+		authentication: options.authentication ?? authenticationForResolver(options.resolveUser),
 		installation: Installation.fromUrls({
 			isProduction: false,
 			publicUrl: BASE_URL,
@@ -97,12 +96,10 @@ export function createTestApp(options: TestAppOptions): TestApp {
 	};
 }
 
-function authenticationForSessionResolver(
-	resolveSession: SessionResolver,
-): Authentication.Interface {
+function authenticationForResolver(resolveUser: UserResolver): Authentication.Interface {
 	return {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
-		identify: identifyFromResolver(resolveSession),
+		identify: identifyFromResolver(resolveUser),
 	};
 }
 
@@ -255,11 +252,14 @@ const noMembership: Membership.Interface = {
 	accept: unused,
 };
 
+/** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
+export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
+
 /** The `Authentication.identify` a test's resolver stands in for. */
-export function identifyFromResolver(resolveSession: SessionResolver) {
+export function identifyFromResolver(resolveUser: UserResolver) {
 	return (headers: Headers) =>
 		Effect.map(
-			Effect.promise(() => resolveSession(headers)),
-			(session) => session?.user,
+			Effect.promise(() => resolveUser(headers)),
+			(user) => user ?? undefined,
 		);
 }

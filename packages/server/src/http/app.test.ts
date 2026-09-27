@@ -1,7 +1,7 @@
 import { healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import type { SessionResolver } from "../auth/session.ts";
+import type { UserResolver } from "./app.test-support.ts";
 import { createTestApp } from "./app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "./validation.ts";
 
@@ -12,10 +12,10 @@ const user = {
 	image: null,
 };
 
-const resolveSession: SessionResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? { user } : null;
+const resolveUser: UserResolver = async (headers) =>
+	headers.get("authorization") === "Bearer good-token" ? user : null;
 
-const app = createTestApp({ resolveSession });
+const app = createTestApp({ resolveUser });
 
 describe("GET /health", () => {
 	it("answers without a token", async () => {
@@ -47,8 +47,8 @@ describe("GET /me", () => {
 
 	it("returns the user behind a Better Auth cookie when Authorization is absent", async () => {
 		const cookieApp = createTestApp({
-			resolveSession: async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? { user } : null,
+			resolveUser: async (headers) =>
+				headers.get("cookie") === "better-auth.session_token=cookie-token" ? user : null,
 		});
 
 		const response = await cookieApp.request("/me", {
@@ -61,8 +61,8 @@ describe("GET /me", () => {
 
 	it("does not fall back to a cookie when an invalid bearer token is present", async () => {
 		const cookieApp = createTestApp({
-			resolveSession: async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? { user } : null,
+			resolveUser: async (headers) =>
+				headers.get("cookie") === "better-auth.session_token=cookie-token" ? user : null,
 		});
 
 		const response = await cookieApp.request("/me", {
@@ -145,7 +145,7 @@ describe("JSON body limit", () => {
 
 describe("cors", () => {
 	it("allows the web origin to authenticate and resume an event stream", async () => {
-		const app = createTestApp({ resolveSession, webAppUrl: "http://localhost:5173" });
+		const app = createTestApp({ resolveUser, webAppUrl: "http://localhost:5173" });
 
 		const response = await app.request("/workspaces/example/events", {
 			method: "OPTIONS",
@@ -172,10 +172,10 @@ describe("cookie request origins", () => {
 	const trustedOrigin = "https://app.example.com";
 	const cookieApp = createTestApp({
 		webAppUrl: trustedOrigin,
-		resolveSession: async (headers) =>
+		resolveUser: async (headers) =>
 			headers.get("cookie") === "better-auth.session_token=cookie-token" ||
 			headers.get("authorization") === "Bearer good-token"
-				? { user }
+				? user
 				: null,
 		stores: { turns: { requestCancel: () => Effect.succeed(true) } },
 	});

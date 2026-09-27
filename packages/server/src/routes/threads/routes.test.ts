@@ -4,7 +4,7 @@ import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
@@ -19,10 +19,10 @@ const people = {
 	"outsider-token": { id: OUTSIDER, name: "Kim", email: "kim@example.com", image: null },
 };
 
-const resolveSession: SessionResolver = async (headers) => {
+const resolveUser: UserResolver = async (headers) => {
 	const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 	const user = people[token as keyof typeof people];
-	return user ? { user } : null;
+	return user ?? null;
 };
 
 const thread = {
@@ -104,7 +104,7 @@ beforeEach(() => {
 
 const app = () =>
 	createTestApp({
-		resolveSession,
+		resolveUser,
 		authorization,
 		stores: {
 			threads: store,

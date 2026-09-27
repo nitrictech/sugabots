@@ -2,7 +2,7 @@ import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
@@ -13,8 +13,8 @@ const user = {
 	image: null,
 };
 
-const resolveSession: SessionResolver = async (headers) =>
-	headers.get("authorization") === "Bearer admin-token" ? { user } : null;
+const resolveUser: UserResolver = async (headers) =>
+	headers.get("authorization") === "Bearer admin-token" ? user : null;
 
 const asRole = (role: "admin" | "member") =>
 	testAuthorization({ id: WORKSPACE, roles: { [user.id]: role } });
@@ -39,7 +39,7 @@ const trial = (app: ReturnType<typeof createTestApp>, body: unknown) =>
 describe("trying a model on a system agent", () => {
 	it("reports how often the model did what the system agent needs", async () => {
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			authorization: asRole("admin"),
 			model: answering("nobody"),
 		});
@@ -60,7 +60,7 @@ describe("trying a model on a system agent", () => {
 
 	it("refuses a member, since choosing a system agent's model is an admin's decision", async () => {
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			authorization: asRole("member"),
 			model: answering("nobody"),
 		});
@@ -72,7 +72,7 @@ describe("trying a model on a system agent", () => {
 
 	it("refuses a system agent it does not have cases for", async () => {
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			authorization: asRole("admin"),
 			model: answering("nobody"),
 		});

@@ -14,8 +14,8 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
 import { describe, expect, it, vi } from "vitest";
 import { sessionLayer } from "../../auth/middleware.ts";
-import type { SessionResolver } from "../../auth/session.ts";
 import { API_BASE_PATH } from "../../http/api.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { BASE_URL, identifyFromResolver } from "../../http/app.test-support.ts";
 import { authoriseLayer } from "../../http/authorisation.ts";
 import { validateRequestLayer } from "../../http/validation.ts";
@@ -31,13 +31,13 @@ const root = `/pods/${POD_ID}/connections`;
 const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
 const memberHeaders = { ...headers, authorization: "Bearer member-token" };
 
-const resolveSession: SessionResolver = async (requestHeaders) => {
+const resolveUser: UserResolver = async (requestHeaders) => {
 	const token = requestHeaders.get("authorization");
 	if (token === "Bearer good-token") {
-		return { user: { id: USER_ID, name: "Sam", email: "sam@example.com", image: null } };
+		return { id: USER_ID, name: "Sam", email: "sam@example.com", image: null };
 	}
 	if (token === "Bearer member-token") {
-		return { user: { id: MEMBER_ID, name: "Kim", email: "kim@example.com", image: null } };
+		return { id: MEMBER_ID, name: "Kim", email: "kim@example.com", image: null };
 	}
 	return null;
 };
@@ -62,7 +62,7 @@ function serve(options: ConnectionRoutesOptions) {
 		Layer.provide(
 			connectionRoutes(options).pipe(
 				Layer.provide([
-					sessionLayer(identifyFromResolver(resolveSession)),
+					sessionLayer(identifyFromResolver(resolveUser)),
 					authoriseLayer(authorization),
 					validateRequestLayer,
 				]),

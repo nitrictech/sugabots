@@ -9,7 +9,7 @@ import {
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000101";
@@ -40,10 +40,10 @@ const agent: Agent = {
 
 const people: Record<string, string> = { admin: ADMIN, member: MEMBER, viewer: VIEWER };
 
-const resolveSession: SessionResolver = async (headers) => {
+const resolveUser: UserResolver = async (headers) => {
 	const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? "member";
 	const id = people[token] ?? MEMBER;
-	return { user: { id, name: token, email: `${id}@example.com`, image: null } };
+	return { id, name: token, email: `${id}@example.com`, image: null };
 };
 
 /**
@@ -88,7 +88,7 @@ const modelProviders = {
 } as unknown as ModelProviderStore;
 
 const app = () =>
-	createTestApp({ resolveSession, authorization, stores: { agents: store, modelProviders } });
+	createTestApp({ resolveUser, authorization, stores: { agents: store, modelProviders } });
 const auth = (token: string, body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",
 	headers: {

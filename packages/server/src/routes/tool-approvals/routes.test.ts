@@ -6,7 +6,7 @@ import {
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -15,15 +15,13 @@ const MEMBER_ID = "0199a3a0-0000-7000-8000-000000000003";
 const POD_ID = "0199a3a0-0000-7000-8000-000000000004";
 const CALL_ID = "0199a3a0-0000-7000-8000-000000000005";
 
-const resolveSession: SessionResolver = async (headers) => {
+const resolveUser: UserResolver = async (headers) => {
 	const admin = headers.get("authorization") === "Bearer admin";
 	return {
-		user: {
-			id: admin ? ADMIN_ID : MEMBER_ID,
-			name: admin ? "Ada" : "Sam",
-			email: admin ? "ada@example.com" : "sam@example.com",
-			image: null,
-		},
+		id: admin ? ADMIN_ID : MEMBER_ID,
+		name: admin ? "Ada" : "Sam",
+		email: admin ? "ada@example.com" : "sam@example.com",
+		image: null,
 	};
 };
 
@@ -54,7 +52,7 @@ function app() {
 	return {
 		decide,
 		app: createTestApp({
-			resolveSession,
+			resolveUser,
 			authorization,
 			stores: { approvals: { ...noToolApprovalStore, decide } },
 		}),
