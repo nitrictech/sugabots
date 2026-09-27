@@ -18,14 +18,15 @@ import { reachesPod } from "../../workspaces/access.ts";
 import { mayInPod } from "../../workspaces/permissions.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
-import { toCollaborationPart } from "./collaborations.ts";
 import {
-	type ParticipantRow,
+	agentColumns,
+	authorRow,
+	messageFromRelations,
+	messageRelations,
+	personColumns,
 	recentParticipantsOf,
-	toMessage,
 	toParticipant,
 } from "./participants.ts";
-import { toToolCallPart } from "./tool-calls.ts";
 import { visibleThread } from "./visibility.ts";
 
 export interface ThreadStore {
@@ -133,10 +134,6 @@ const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 	limit: number,
 	before: HistoryPoint | undefined,
 ) {
-	const person = { columns: { id: true, name: true, image: true } } as const;
-	const agentIdentity = {
-		columns: { id: true, name: true, handle: true, color: true, face: true },
-	} as const;
 	return yield* db.query.thread.findFirst({
 		where: { id: threadId, RAW: (row) => reachesPod(row.podId, userId) },
 		extras: {
@@ -156,7 +153,7 @@ const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 				columns: { kind: true, ownerId: true },
 				with: {
 					agents: {
-						...agentIdentity,
+						...agentColumns,
 						where: { systemAgentKey: { isNull: true } },
 						orderBy: { name: "asc" },
 					},
@@ -165,7 +162,7 @@ const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 			participants: {
 				columns: {},
 				orderBy: { createdAt: "asc", id: "asc" },
-				with: { user: person, agent: agentIdentity },
+				with: { user: personColumns, agent: agentColumns },
 			},
 			routineExecution: true,
 			messages: {
@@ -178,15 +175,9 @@ const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 					},
 				}),
 				with: {
-					authorUser: person,
-					authorAgent: agentIdentity,
+					...messageRelations,
 					// A failed reply's reason lives on its turn.
 					turn: { columns: { error: true } },
-					toolCalls: {
-						orderBy: { startedAt: "asc", id: "asc" },
-						with: { decidedBy: { columns: { name: true } } },
-					},
-					collaborations: { with: { collaborator: { columns: { name: true } } } },
 				},
 			},
 		},
@@ -216,36 +207,8 @@ function toThreadDetails(row: Conversation, userId: string, limit: number): Thre
 			toParticipant(authorRow(person, participant)),
 		),
 		crew: row.pod.agents.map((crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent })),
-		messages: page.map((stored) =>
-			toMessage(
-				stored,
-				authorRow(stored.authorUser, stored.authorAgent),
-				{
-					toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
-					collaborations: stored.collaborations.map((made) =>
-						toCollaborationPart(made, made.collaborator.name),
-					),
-				},
-				stored.turn?.error,
-			),
-		),
+		messages: page.map((stored) => messageFromRelations(stored, stored.turn?.error)),
 		olderMessagesCursor: row.messages.length > limit && oldest ? encodeHistoryCursor(oldest) : null,
-	};
-}
-
-function authorRow(
-	person: { id: string; name: string; image: string | null } | null,
-	author: Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face"> | null,
-): ParticipantRow {
-	return {
-		userId: person?.id ?? null,
-		userName: person?.name ?? null,
-		userImage: person?.image ?? null,
-		agentId: author?.id ?? null,
-		agentName: author?.name ?? null,
-		agentHandle: author?.handle ?? null,
-		agentColor: author?.color ?? null,
-		agentFace: author?.face ?? null,
 	};
 }
 

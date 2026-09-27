@@ -15,6 +15,24 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.routineExecution.threadId,
 		}),
 	},
+	chat: {
+		mainThread: r.one.thread({ from: r.chat.mainThreadId, to: r.thread.id, optional: false }),
+		// Collaborations the chat's bot was asked to help with, from any thread.
+		hostCollaborations: r.many.collaboration({
+			from: r.chat.hostAgentId,
+			to: r.collaboration.collaboratorAgentId,
+		}),
+		threads: r.many.thread({ from: r.chat.id, to: r.thread.chatId }),
+		// The threads of collaborations the chat's bot was asked to help with.
+		hostCollaborationThreads: r.many.thread({
+			from: r.chat.hostAgentId.through(r.collaboration.collaboratorAgentId),
+			to: r.thread.id.through(r.collaboration.childThreadId),
+		}),
+		routineExecutions: r.many.routineExecution({
+			from: r.chat.id.through(r.thread.chatId),
+			to: r.routineExecution.threadId.through(r.thread.id),
+		}),
+	},
 	pod: {
 		agents: r.many.agent({ from: r.pod.id, to: r.agent.podId }),
 	},
@@ -36,6 +54,11 @@ export const relations = defineRelations(schema, (r) => ({
 		decidedBy: r.one.user({ from: r.toolCall.decidedById, to: r.user.id }),
 	},
 	collaboration: {
+		parentMessage: r.one.message({
+			from: r.collaboration.parentMessageId,
+			to: r.message.id,
+			optional: false,
+		}),
 		collaborator: r.one.agent({
 			from: r.collaboration.collaboratorAgentId,
 			to: r.agent.id,

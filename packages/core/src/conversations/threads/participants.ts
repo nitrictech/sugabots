@@ -5,7 +5,9 @@ import { Effect, Schema } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, threadParticipant, user } from "../../database/schema.ts";
+import { toCollaborationPart } from "./collaborations.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
+import { toToolCallPart } from "./tool-calls.ts";
 
 /**
  * Turning joined rows into the API's people-and-agents shapes.
@@ -111,6 +113,72 @@ export function toMessage(
 		content: row.content,
 		...(row.status === "failed" && error ? { error } : {}),
 		createdAt: row.createdAt.toISOString(),
+	};
+}
+
+/** A person's columns, for a relational query that names who wrote or joined. */
+export const personColumns = { columns: { id: true, name: true, image: true } } as const;
+
+/** An agent's columns, for a relational query that names who wrote or joined. */
+export const agentColumns = {
+	columns: { id: true, name: true, handle: true, color: true, face: true },
+} as const;
+
+/** The relations a relational query follows to read a message as the API shows it. */
+export const messageRelations = {
+	authorUser: personColumns,
+	authorAgent: agentColumns,
+	toolCalls: {
+		orderBy: { startedAt: "asc", id: "asc" },
+		with: { decidedBy: { columns: { name: true } } },
+	},
+	collaborations: { with: { collaborator: { columns: { name: true } } } },
+} as const;
+
+type PersonIdentity = { id: string; name: string; image: string | null };
+type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face">;
+
+/** A message row read with `messageRelations`. */
+export interface MessageWithRelations extends schema.MessageRow {
+	authorUser: PersonIdentity | null;
+	authorAgent: AgentIdentity | null;
+	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
+	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
+}
+
+/** A message read with `messageRelations`, as the API shows it. */
+export function messageFromRelations(
+	stored: MessageWithRelations,
+	/** Why the turn behind a failed reply failed, in the provider's words. */
+	error?: string | null,
+): Message {
+	return toMessage(
+		stored,
+		authorRow(stored.authorUser, stored.authorAgent),
+		{
+			toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
+			collaborations: stored.collaborations.map((made) =>
+				toCollaborationPart(made, made.collaborator.name),
+			),
+		},
+		error,
+	);
+}
+
+/** Whoever a relational query found, as the row `toParticipant` reads. */
+export function authorRow(
+	person: PersonIdentity | null,
+	author: AgentIdentity | null,
+): ParticipantRow {
+	return {
+		userId: person?.id ?? null,
+		userName: person?.name ?? null,
+		userImage: person?.image ?? null,
+		agentId: author?.id ?? null,
+		agentName: author?.name ?? null,
+		agentHandle: author?.handle ?? null,
+		agentColor: author?.color ?? null,
+		agentFace: author?.face ?? null,
 	};
 }
 
