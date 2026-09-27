@@ -1,25 +1,18 @@
 ---
 title: Quickstart
-description: Run Sugabots on your own computer in about ten minutes.
+description: Run Sugabots on your own computer with one command.
 ---
 
-This guide runs PostgreSQL in Docker, and the web app and API straight on your
-machine. It's the simplest way to try Sugabots, or to run it for yourself on one
-computer.
+This guide runs Sugabots and its PostgreSQL database in Docker, with nothing
+else to install. It's the simplest way to try Sugabots, or to run it for
+yourself on one computer.
 
 ## Before you start
 
-You need three things installed:
-
-- [Node.js](https://nodejs.org/) 26 or newer (`.nvmrc` has the exact version)
-- [Bun](https://bun.sh/) 1.4.2 or newer
-- [Docker](https://docs.docker.com/get-docker/) with Docker Compose
-
-Check they're all there:
+You need [Docker](https://docs.docker.com/get-docker/) with Docker Compose.
+Check it's there:
 
 ```sh
-node --version
-bun --version
 docker compose version
 ```
 
@@ -27,57 +20,30 @@ docker compose version
 
 <Steps>
 
-1. Get the code
+1. Install and start Sugabots
 
    ```sh
-   git clone https://github.com/nitrictech/sugabots.git
+   curl -fsSL https://sugabots.ai/install.sh | sh
+   ```
+
+   This makes a `sugabots` folder in the current directory and puts two files
+   in it: [`compose.yml`](https://sugabots.ai/compose.yml), which runs
+   Sugabots and its database, and `.env`, with two freshly made secret keys.
+   Then it starts both, and waits until Sugabots answers. The first start
+   downloads the images, so give it a minute.
+
+   Running it again is safe: it keeps the files that are already there.
+
+2. Say hello
+
+   Open [http://localhost:3000](http://localhost:3000) and create your account.
+   You're the first one in, so the installation is yours. Emails, such as your
+   verification link, are printed in the logs:
+
+   ```sh
    cd sugabots
-   bun install
+   docker compose logs sugabots
    ```
-
-2. Make your settings file
-
-   ```sh
-   cp .env.example .env
-   ```
-
-   Open `.env` and replace the two development keys with fresh ones. Run this
-   once for each key, and paste in what it prints:
-
-   ```sh
-   openssl rand -base64 32
-   ```
-
-   ```dotenv title=".env"
-   BETTER_AUTH_SECRET=<the first value>
-   CREDENTIALS_ENCRYPTION_KEY=<the second value>
-   ```
-
-   Everything else is already set up for your own computer.
-
-3. Start the database
-
-   ```sh
-   docker compose up -d
-   bun run db:migrate
-   ```
-
-   `docker compose ps` should show `postgres` as `healthy` before you migrate.
-
-4. Start Sugabots
-
-   ```sh
-   bun run dev
-   ```
-
-   Keep this terminal open. The first time, Portless sets up HTTPS for local
-   addresses and may ask for your password.
-
-5. Say hello
-
-   Open [https://sugabots.localhost](https://sugabots.localhost) and create your
-   account. You're the first one in, so the installation is yours. Emails, such
-   as your verification link, are printed in the terminal.
 
 </Steps>
 
@@ -90,21 +56,23 @@ saved API key unreadable. Changing `BETTER_AUTH_SECRET` signs everybody out.
 
 ## What's running
 
-| Service          | Address                                 |
-| ---------------- | --------------------------------------- |
-| Web app          | https://sugabots.localhost              |
-| API              | https://sugabots.localhost/api          |
-| API health check | https://sugabots.localhost/api/health   |
-| PostgreSQL       | `localhost:5436`                        |
+| Service          | Address                            |
+| ---------------- | ---------------------------------- |
+| Web app          | http://localhost:3000              |
+| API              | http://localhost:3000/api          |
+| API health check | http://localhost:3000/api/health   |
 
 The web app and the API share one address: the API answers under `/api`. Your
 data lives in the `sugabots_postgres_data` Docker volume, so it survives
-restarts.
+restarts. In the `sugabots` folder, `docker compose down` stops Sugabots and
+`docker compose up -d` starts it again.
 
 <Tip title="Something not loading?">
 
-Portless gives the app its local names and HTTPS. `bunx portless list` shows
-what it's serving, and `bunx portless doctor` checks its setup.
+`docker compose logs sugabots` shows what Sugabots printed as it started. If
+another program already uses port 3000, open `compose.yml`, change the first
+`3000` in `127.0.0.1:3000:3000` and the port in `PUBLIC_URL` to a free one, and
+run `docker compose up -d`.
 
 </Tip>
 
