@@ -9,7 +9,13 @@ import {
 	Schedule,
 	Schema,
 } from "effect";
-import { Activity, DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
+import {
+	Activity,
+	DurableClock,
+	DurableDeferred,
+	Workflow,
+	WorkflowEngine,
+} from "effect/unstable/workflow";
 import { expect, it } from "vitest";
 import { Activities } from "./activities.ts";
 
@@ -126,6 +132,30 @@ export function conformance(options: {
 		expect(runs(key)).toEqual(["second", "first", "cleanup"]);
 	});
 
+	it("wakes for a deferred or a timer, whichever comes first", async () => {
+		await using harness = start(options.engine());
+		const signalled = await harness.run(
+			Waiting.execute({ key: crypto.randomUUID(), millis: 30_000 }, { discard: true }),
+		);
+		// A timer this short is kept in memory, so the execution never shows as
+		// suspended; the deferred is sent while it is still running.
+		await harness.run(
+			DurableDeferred.succeed(Wake, {
+				token: DurableDeferred.tokenFromExecutionId(Wake, {
+					workflow: Waiting,
+					executionId: signalled,
+				}),
+				value: undefined,
+			}),
+		);
+		expect(await harness.result(signalled, Waiting)).toBe("woken");
+
+		const timedOut = await harness.run(
+			Waiting.execute({ key: crypto.randomUUID(), millis: 50 }, { discard: true }),
+		);
+		expect(await harness.result(timedOut, Waiting)).toBe("timed out");
+	});
+
 	it("retries a failing activity within its budget", async () => {
 		await using harness = start(options.engine());
 		const key = crypto.randomUUID();
@@ -197,6 +227,14 @@ const Racing = Workflow.make("conformance/racing", {
 	success: Schema.String,
 	idempotencyKey: (payload) => payload.key,
 });
+
+const Waiting = Workflow.make("conformance/waiting", {
+	payload: { key: Schema.String, millis: Schema.Finite },
+	success: Schema.String,
+	idempotencyKey: (payload) => payload.key,
+});
+
+const Wake = DurableDeferred.make("wake");
 
 const First = DurableDeferred.make("first", { success: Schema.String });
 const Second = DurableDeferred.make("second", { success: Schema.String });
@@ -279,6 +317,20 @@ const race = (payload: typeof Racing.payloadSchema.Type) =>
 
 const workflows = Layer.mergeAll(
 	Racing.toLayer(racing),
+	Waiting.toLayer(({ millis }) =>
+		DurableDeferred.raceAll({
+			name: "waiting",
+			success: Schema.String,
+			error: Schema.Never,
+			effects: [
+				Effect.as(DurableDeferred.await(Wake), "woken"),
+				Effect.as(
+					DurableClock.sleep({ name: "timeout", duration: Duration.millis(millis) }),
+					"timed out",
+				),
+			],
+		}),
+	),
 	Suspending.toLayer((payload) =>
 		Effect.gen(function* () {
 			yield* suspendingActivities.activity("step", payload, "before");
@@ -304,7 +356,7 @@ function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
 			),
 		);
 	const pollUntil = <A>(
-		workflow: typeof Suspending | typeof Racing,
+		workflow: typeof Suspending | typeof Racing | typeof Waiting,
 		executionId: string,
 		done: (result: Workflow.Result<string, never>) => A | undefined,
 	) =>
@@ -321,7 +373,7 @@ function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
 		);
 	const completion = (
 		executionId: string,
-		workflow: typeof Suspending | typeof Racing = Suspending,
+		workflow: typeof Suspending | typeof Racing | typeof Waiting = Suspending,
 	) =>
 		pollUntil(workflow, executionId, (result) =>
 			result._tag === "Complete" ? result.exit : undefined,
@@ -330,7 +382,7 @@ function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
 		run,
 		untilSuspended: (
 			executionId: string,
-			workflow: typeof Suspending | typeof Racing = Suspending,
+			workflow: typeof Suspending | typeof Racing | typeof Waiting = Suspending,
 		) =>
 			pollUntil(workflow, executionId, (result) =>
 				result._tag === "Suspended" ? true : undefined,
@@ -341,7 +393,7 @@ function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
 		completion,
 		result: async (
 			executionId: string,
-			workflow: typeof Suspending | typeof Racing = Suspending,
+			workflow: typeof Suspending | typeof Racing | typeof Waiting = Suspending,
 		) => {
 			const exit = await completion(executionId, workflow);
 			if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
