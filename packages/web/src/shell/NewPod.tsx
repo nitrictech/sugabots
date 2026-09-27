@@ -2,7 +2,7 @@ import { leastUsedPodColor, type Pod, type PodColor, slugify } from "@sugabots/c
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useCreatePod, usePods } from "@/lib/pods.ts";
-import { PodColourPicker } from "@/shell/LookPickers.tsx";
+import { PodColourPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {

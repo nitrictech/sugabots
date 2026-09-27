@@ -3,30 +3,36 @@ import { useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { AgentAvatar } from "./Agent.tsx";
-import { ColourPicker, EyesPicker, PodColourPicker } from "./LookPickers.tsx";
+import { LookPicker, PodColourPicker } from "./LookPicker.tsx";
 import { PodTile } from "./PodTile.tsx";
 
 function Look() {
 	const [color, setColor] = useState<AgentColor>("green");
 	const [face, setFace] = useState<AgentFace>("pill");
 	return (
-		<div className="flex max-w-[420px] flex-col items-center gap-4 rounded-panel bg-list p-4">
+		<div className="flex max-w-[420px] flex-col items-center gap-4 p-4">
 			<AgentAvatar color={color} face={face} size={96} />
-			<ColourPicker value={color} onChange={setColor} />
-			<EyesPicker color={color} value={face} onChange={setFace} />
+			<div className="w-full overflow-hidden rounded-panel bg-list">
+				<LookPicker color={color} face={face} onColorChange={setColor} onFaceChange={setFace} />
+			</div>
 		</div>
 	);
 }
 
 const meta = preview.meta({
-	title: "Product/LookPickers",
-	component: ColourPicker,
+	title: "Product/LookPicker",
+	component: LookPicker,
 	tags: ["ai-generated"],
-	args: { value: "green" as const, onChange: () => {} },
+	args: {
+		color: "green" as const,
+		face: "pill" as const,
+		onColorChange: () => {},
+		onFaceChange: () => {},
+	},
 	render: () => <Look />,
 });
 
-/** Pick chooses a colour, then eyes drawn in it; the face above follows both. */
+/** Pick chooses a colour, then eyes; the face above follows both. */
 export const Pick = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("radio", { name: "purple" }));
