@@ -127,7 +127,7 @@ export function ThreadConversation({
 					return (
 						<div
 							className={cn(
-								"pb-[3px] text-[11.5px] text-subtle-foreground",
+								"pb-[3px] font-medium text-[11.5px] text-muted-foreground",
 								outgoing ? "pr-[50px] text-right" : "pl-[50px]",
 							)}
 						>
