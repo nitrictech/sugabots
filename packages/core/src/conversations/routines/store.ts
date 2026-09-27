@@ -42,7 +42,7 @@ import {
 } from "../../database/schema.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
-import { queueTurn } from "../turns/queue.ts";
+import type { QueueTurn } from "../turns/queue.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
 import {
 	type InvalidRoutineSchedule,
@@ -163,7 +163,7 @@ export interface RoutineStore {
 	>;
 }
 
-export function routineStore(publishEvents: PublishEvents): RoutineStore {
+export function routineStore(publishEvents: PublishEvents, queueTurn: QueueTurn): RoutineStore {
 	const store: RoutineStore = {
 		listInWorkspace: (workspaceId, userId) =>
 			query((db) =>
@@ -658,7 +658,7 @@ export function routineStore(publishEvents: PublishEvents): RoutineStore {
 					}
 					const occurrence = yield* latestMissedAndNextOccurrence(expression, timezone, now);
 					const scheduledAt = occurrence.latest.toISOString();
-					const accepted = yield* routineStore(publishEvents).acceptTrigger({
+					const accepted = yield* routineStore(publishEvents, queueTurn).acceptTrigger({
 						workspaceId: due.workspaceId,
 						agentId: due.agentId,
 						routineId: due.id,

@@ -26,7 +26,8 @@ import { chatStore } from "../chats/store.ts";
 import { renewJobLeases } from "../jobs/queue.ts";
 import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
-import { queueTurn, turnStore } from "../turns/store.ts";
+import { queueTurnAsJob } from "../turns/queue.ts";
+import { turnStore } from "../turns/store.ts";
 import { threadStore } from "./store.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -38,8 +39,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const eventBus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(eventBus);
 	const store = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents));
-	const turns = onPostgres(turnStore(publishEvents));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob));
 	const summaries = onPostgres(summaryStore(publishEvents));
 	let workspaceId: string;
 	let podId: string;
@@ -209,7 +210,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			message: "Who should answer this?",
 		});
 		await runOnPostgres(
-			queueTurn({
+			queueTurnAsJob({
 				threadId: details.thread.id,
 				agentId: otherRow.id,
 				triggerMessageId: details.messages[0]?.id ?? "",
@@ -895,7 +896,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		}
 		// Asking again for a turn that is already queued keeps the one there.
 		await runOnPostgres(
-			queueTurn({ threadId: details.thread.id, agentId, triggerMessageId, reason: "default" }),
+			queueTurnAsJob({ threadId: details.thread.id, agentId, triggerMessageId, reason: "default" }),
 		);
 
 		const claimed = await turns.claimNext();

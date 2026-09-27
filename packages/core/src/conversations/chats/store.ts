@@ -52,6 +52,7 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { giveFloor } from "../turns/floor.ts";
+import type { QueueTurn } from "../turns/queue.ts";
 
 export class ChatPlacementRejected extends Data.TaggedError("ChatPlacementRejected") {
 	override get message() {
@@ -121,7 +122,7 @@ export interface ChatStore {
 	): Effect.Effect<Message | undefined, ChatMessageIdConflict | ChatAgentHasNoModel, Database>;
 }
 
-export function chatStore(publishEvents: PublishEvents): ChatStore {
+export function chatStore(publishEvents: PublishEvents, queueTurn: QueueTurn): ChatStore {
 	return {
 		list: Effect.fn("ChatStore.list")(function* (input) {
 			yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
@@ -259,12 +260,15 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 							.values({ threadId: visible.mainThreadId, userId: input.author.id })
 							.onConflictDoNothing(),
 					);
-					yield* giveFloor(publishEvents, {
-						id: created.id,
-						threadId: visible.mainThreadId,
-						content: created.content,
-						author: { kind: "person" },
-					});
+					yield* giveFloor(
+						{ publishEvents, queueTurn },
+						{
+							id: created.id,
+							threadId: visible.mainThreadId,
+							content: created.content,
+							author: { kind: "person" },
+						},
+					);
 					const result = toMessage(created, messageAuthor(input.author));
 					yield* publishEvents([
 						{

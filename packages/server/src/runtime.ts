@@ -12,6 +12,7 @@ import type { CollaborationStore } from "@sugabots/core/conversations/tools/coll
 import type { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { facilitatorWorkerLayer } from "@sugabots/core/conversations/turns/facilitator";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
 import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import { turnWorkerLayer } from "@sugabots/core/conversations/turns/worker";
 import type { Database } from "@sugabots/core/database/database";
@@ -80,6 +81,6 @@ export function backgroundLayer({
 			routines,
 			queueSummary,
 		}),
-		facilitatorWorkerLayer({ model, publishEvents, routines }),
+		facilitatorWorkerLayer({ model, publishEvents, queueTurn: queueTurnAsJob, routines }),
 	);
 }

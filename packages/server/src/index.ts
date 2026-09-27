@@ -13,6 +13,7 @@ import { collaborationStore } from "@sugabots/core/conversations/tools/collabora
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
+import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
@@ -87,12 +88,12 @@ const main = Effect.gen(function* () {
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
-		chats: chatStore(publishEvents),
-		routines: routineStore(publishEvents),
+		chats: chatStore(publishEvents, queueTurnAsJob),
+		routines: routineStore(publishEvents, queueTurnAsJob),
 		threads: threadStore(),
-		turns: turnStore(publishEvents),
+		turns: turnStore(publishEvents, queueTurnAsJob),
 		summaries: summaryStore(publishEvents),
-		collaborations: collaborationStore(publishEvents),
+		collaborations: collaborationStore(publishEvents, queueTurnAsJob),
 		calls: toolCallStore(publishEvents),
 		approvals: toolApprovalStore(publishEvents),
 	};

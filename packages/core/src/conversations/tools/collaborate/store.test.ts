@@ -22,6 +22,7 @@ import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../d
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { modelPrompt } from "../../turns/context.ts";
+import { queueTurnAsJob } from "../../turns/queue.ts";
 import { turnStore } from "../../turns/store.ts";
 import { CollaborationRefused, type CollaborationStore, collaborationStore } from "./store.ts";
 
@@ -32,11 +33,11 @@ import { CollaborationRefused, type CollaborationStore, collaborationStore } fro
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const collaborations: Promised<CollaborationStore> = onPostgres(
-		collaborationStore(publishEvents),
+		collaborationStore(publishEvents, queueTurnAsJob),
 	);
 	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents));
-	const turns = onPostgres(turnStore(publishEvents));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;

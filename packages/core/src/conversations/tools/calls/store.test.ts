@@ -19,6 +19,7 @@ import {
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
+import { queueTurnAsJob } from "../../turns/queue.ts";
 import { type PreparedTurn, type TurnCheckpoint, turnStore } from "../../turns/store.ts";
 import {
 	type PendingToolApproval,
@@ -43,8 +44,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 	const calls: Promised<ToolCallStore> = onPostgres(toolCallStore(publishEvents));
 	const approvals: Promised<ToolApprovalStore> = onPostgres(toolApprovalStore(publishEvents));
 	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents));
-	const turns = onPostgres(turnStore(publishEvents));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;

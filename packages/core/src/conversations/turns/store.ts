@@ -7,6 +7,7 @@ import {
 	threadChannel,
 	workspaceChannel,
 } from "@sugabots/contracts";
+import type { ModelMessage } from "ai";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
@@ -53,11 +54,8 @@ import type { PendingToolApproval } from "../tools/approvals/store.ts";
 import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
-
-export { queueTurn } from "./queue.ts";
-
-import type { ModelMessage } from "ai";
 import type { ModelAccounting } from "./model.ts";
+import type { QueueTurn } from "./queue.ts";
 
 /**
  * Turns: one agent answering one message in a thread.
@@ -198,7 +196,7 @@ export interface TurnStore {
 	discard(claimed: Pick<ClaimedTurn, "id">, reason: string): Effect.Effect<void, never, Database>;
 }
 
-export function turnStore(publishEvents: PublishEvents): TurnStore {
+export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): TurnStore {
 	return {
 		requeueInterrupted: () => requeueInterruptedJobs("turn"),
 
@@ -536,16 +534,19 @@ export function turnStore(publishEvents: PublishEvents): TurnStore {
 			),
 
 		giveFloor: (prepared, reply) =>
-			giveFloor(publishEvents, {
-				id: prepared.responseMessage.id,
-				threadId: prepared.context.thread.id,
-				content: reply.content,
-				author: {
-					kind: "agent",
-					agentId: prepared.context.agent.id,
-					spokeBecause: prepared.job.payload.reason,
+			giveFloor(
+				{ publishEvents, queueTurn },
+				{
+					id: prepared.responseMessage.id,
+					threadId: prepared.context.thread.id,
+					content: reply.content,
+					author: {
+						kind: "agent",
+						agentId: prepared.context.agent.id,
+						spokeBecause: prepared.job.payload.reason,
+					},
 				},
-			}),
+			),
 
 		fail: (prepared, reply, error) =>
 			transaction(

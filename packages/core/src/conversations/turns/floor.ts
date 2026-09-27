@@ -24,7 +24,7 @@ import {
 	threadParticipant,
 } from "../../database/schema.ts";
 import { enqueueJob } from "../jobs/queue.ts";
-import { queueTurn } from "./queue.ts";
+import type { QueueTurn } from "./queue.ts";
 
 /**
  * Who has the floor: which agent, if any, speaks after a message (ADR 004).
@@ -137,7 +137,7 @@ export interface FloorMessage {
  * participant. Runs in the caller's transaction, so it commits with the message.
  */
 export const giveFloor = (
-	publishEvents: PublishEvents,
+	effects: { readonly publishEvents: PublishEvents; readonly queueTurn: QueueTurn },
 	committed: FloorMessage,
 ): Effect.Effect<FloorDecision, never, Database> =>
 	transaction(
@@ -173,7 +173,7 @@ export const giveFloor = (
 						.values(joining.map(({ agentId }) => ({ threadId: committed.threadId, agentId })))
 						.onConflictDoNothing(),
 				);
-				yield* publishEvents([
+				yield* effects.publishEvents([
 					{
 						channel: threadChannel(committed.threadId),
 						event: streamEvent("thread.changed", { threadId: committed.threadId }),
@@ -181,7 +181,7 @@ export const giveFloor = (
 				]);
 			}
 			for (const { agentId, reason } of decision.agents) {
-				yield* queueTurn({
+				yield* effects.queueTurn({
 					threadId: committed.threadId,
 					agentId,
 					triggerMessageId: committed.id,

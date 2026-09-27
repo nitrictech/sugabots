@@ -4,6 +4,7 @@ import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
@@ -37,9 +38,9 @@ const eventStore = await databaseForTests.runPromise(postgresEventStore);
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
 	const bus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(bus);
-	const turns = turnStore(publishEvents);
-	const chats = chatStore(publishEvents);
-	const collaborations = collaborationStore(publishEvents);
+	const turns = turnStore(publishEvents, queueTurnAsJob);
+	const chats = chatStore(publishEvents, queueTurnAsJob);
+	const collaborations = collaborationStore(publishEvents, queueTurnAsJob);
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
 		stream: (input) =>
