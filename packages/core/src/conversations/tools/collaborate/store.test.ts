@@ -159,10 +159,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
 		);
 		const prepared = await turns.prepare({
-			id: queued.id,
+			owner: queued.id,
 			threadId,
 			payload: queued.payload,
-			dedupeKey: queued.dedupeKey,
 			attempts: 1,
 		});
 		return {

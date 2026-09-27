@@ -267,7 +267,7 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 								call: toolCall,
 								threadId: thread.id,
 								agentId: turn.agentId,
-								jobId: turn.jobId,
+								owner: turn.owner,
 							})
 							.from(toolCall)
 							.innerJoin(turn, eq(turn.id, toolCall.turnId))
@@ -344,11 +344,11 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 								.set({ status: "queued", availableAt: new Date(), lockedAt: null })
 								.where(
 									and(
-										eq(job.id, candidate.jobId ?? "00000000-0000-0000-0000-000000000000"),
+										eq(job.id, candidate.owner ?? "00000000-0000-0000-0000-000000000000"),
 										eq(job.status, "waiting"),
 										sql`exists (
 											select 1 from ${turn}
-											where ${turn.jobId} = ${job.id}
+											where ${turn.owner} = ${job.id}::text
 												and ${turn.status} = 'waiting'
 												and ${turn.cancelRequested} = false
 										)`,

@@ -389,8 +389,11 @@ export const turn = pgTable(
 		triggerMessageId: uuid("trigger_message_id")
 			.notNull()
 			.references((): AnyPgColumn => message.id, { onDelete: "cascade" }),
-		/** The queue row that owns this turn, including while it is suspended. */
-		jobId: uuid("job_id").references(() => job.id, { onDelete: "set null" }),
+		/**
+		 * What runs this turn, including while it is suspended: the job or the
+		 * workflow execution. A resumed turn must be resumed by its owner.
+		 */
+		owner: text("owner"),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
 		usage: jsonb("usage").$type<TurnUsage>(),
@@ -398,6 +401,12 @@ export const turn = pgTable(
 		contextTokens: integer("context_tokens"),
 		contextCapacity: integer("context_capacity"),
 		cancelRequested: boolean("cancel_requested").notNull().default(false),
+		/**
+		 * Runs since the turn last got anywhere: started, retried or resumed, and
+		 * back to zero when it stops to wait for approvals. A turn that keeps
+		 * stopping its process is given up on rather than run forever.
+		 */
+		runs: integer("runs").notNull().default(0),
 		/** A mutating operation crossed its durable dispatch boundary. */
 		mutationStarted: boolean("mutation_started").notNull().default(false),
 		/** Server-owned AI SDK messages needed to continue after tool approval. */

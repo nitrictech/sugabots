@@ -23,7 +23,7 @@ import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { chatStore } from "../chats/store.ts";
-import { renewJobLeases } from "../jobs/queue.ts";
+import { claimNextJob, renewJobLeases, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurnAsJob } from "../turns/queue.ts";
@@ -230,10 +230,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		const payload = queued.payload;
 
 		const prepared = await turns.prepare({
-			id: queued.id,
+			owner: queued.id,
 			threadId: queued.threadId,
 			payload,
-			dedupeKey: queued.dedupeKey,
 			attempts: 1,
 		});
 
@@ -351,10 +350,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		// names the agent so somebody can go and fix it.
 		await expect(
 			turns.prepare({
-				id: queued.id,
+				owner: queued.id,
 				threadId: queued.threadId,
 				payload: queued.payload,
-				dedupeKey: queued.dedupeKey,
 				attempts: 1,
 			}),
 		).rejects.toThrow("has no model chosen");
@@ -693,10 +691,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
 		);
 		const preparedTurn = await turns.prepare({
-			id: turnJob.id,
+			owner: turnJob.id,
 			threadId: turnJob.threadId,
 			payload: turnJob.payload,
-			dedupeKey: turnJob.dedupeKey,
 			attempts: 1,
 		});
 		if (!preparedTurn) {
@@ -790,10 +787,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextTurnJob.id)),
 		);
 		const nextTurn = await turns.prepare({
-			id: nextTurnJob.id,
+			owner: nextTurnJob.id,
 			threadId: nextTurnJob.threadId,
 			payload: nextTurnJob.payload,
-			dedupeKey: nextTurnJob.dedupeKey,
 			attempts: 1,
 		});
 		if (!nextTurn) {
@@ -850,10 +846,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
 		);
 		const prepared = await turns.prepare({
-			id: turnJob.id,
+			owner: turnJob.id,
 			threadId: turnJob.threadId,
 			payload: turnJob.payload,
-			dedupeKey: turnJob.dedupeKey,
 			attempts: 1,
 		});
 		if (!prepared) {
@@ -899,20 +894,20 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			queueTurnAsJob({ threadId: details.thread.id, agentId, triggerMessageId, reason: "default" }),
 		);
 
-		const claimed = await turns.claimNext();
+		const claimed = await runOnPostgres(claimNextJob("turn"));
 		expect(claimed).toMatchObject({
 			threadId: details.thread.id,
 			payload: { agentId, triggerMessageId },
 			attempts: 1,
 		});
-		expect(await turns.claimNext()).toBeUndefined();
+		expect(await runOnPostgres(claimNextJob("turn"))).toBeUndefined();
 		// Another process may still be running it.
-		await turns.requeueInterrupted();
+		await runOnPostgres(requeueInterruptedJobs("turn"));
 		expect(
 			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
 		).toMatchObject([{ id: claimed?.id, status: "running" }]);
 		await lapseLease(claimed?.id);
-		await turns.requeueInterrupted();
+		await runOnPostgres(requeueInterruptedJobs("turn"));
 		expect(
 			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
 		).toMatchObject([{ id: claimed?.id, status: "queued" }]);
@@ -926,12 +921,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Long-running work",
 		});
-		const claimed = await turns.claimNext();
+		const claimed = await runOnPostgres(claimNextJob("turn"));
 		expect(claimed?.threadId).toBe(details.thread.id);
 		await lapseLease(claimed?.id);
 
 		await runOnPostgres(renewJobLeases([claimed?.id ?? ""]));
-		await turns.requeueInterrupted();
+		await runOnPostgres(requeueInterruptedJobs("turn"));
 
 		const [row] = await onDatabase((db) =>
 			db

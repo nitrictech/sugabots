@@ -9,7 +9,7 @@ import {
 } from "@sugabots/contracts";
 import type { ModelMessage } from "ai";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
 	type Database,
 	type Executor,
@@ -27,6 +27,7 @@ import {
 	pod,
 	routineExecution,
 	type StoredMessagePart,
+	type TurnJobPayload,
 	type TurnReason,
 	thread,
 	toolCall,
@@ -34,17 +35,7 @@ import {
 	user,
 	workspace,
 } from "../../database/schema.ts";
-import {
-	type ClaimedJob,
-	cancelJob,
-	claimNextJob,
-	completeJob,
-	failJob,
-	JobNotRunnable,
-	queueDeferredJob,
-	requeueInterruptedJobs,
-	retryOrFailJob,
-} from "../jobs/queue.ts";
+import { queueDeferredJob } from "../jobs/queue.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../routines/execution.ts";
 import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
@@ -60,16 +51,44 @@ import type { QueueTurn } from "./queue.ts";
 /**
  * Turns: one agent answering one message in a thread.
  *
- * A turn is queued as a job when a person posts, claimed by the worker, and
- * recorded as a `turn` row plus the agent's reply as a `message` that starts
- * out `streaming`. The worker drives it from there through the methods below,
- * each of which writes the outcome and publishes it in one transaction.
+ * A turn is asked for when a person posts, claimed by whatever runs turns (see
+ * `owner.ts`), and recorded as a `turn` row plus the agent's reply as a
+ * `message` that starts out `streaming`. The worker drives it from there
+ * through the methods below, each of which writes the outcome and publishes it
+ * in one transaction.
  */
 
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
 
-export type ClaimedTurn = ClaimedJob<"turn">;
+/** Runs of a turn, without it getting anywhere, before it is given up on. */
+export const MAX_TURN_RUNS = 3;
+
+/**
+ * One run of a turn. `owner` is what runs it (a job, or a workflow
+ * execution): a suspended turn is resumed only by its owner. `attempts`
+ * counts runs, this one included.
+ */
+export interface ClaimedTurn {
+	readonly owner: string;
+	readonly threadId: string;
+	readonly payload: TurnJobPayload;
+	readonly attempts: number;
+}
+
+/**
+ * A claimed turn that cannot run and ends here: its thread or agent is gone,
+ * or newer work made it pointless. `terminalOutcome` is how a routine run it
+ * belonged to should settle.
+ */
+export class TurnNotRunnable extends Data.TaggedError("TurnNotRunnable")<{
+	readonly reason: string;
+	readonly terminalOutcome?: { state: "failed" | "cancelled"; error?: string };
+}> {
+	override get message() {
+		return this.reason;
+	}
+}
 
 /** What the model is told about where it is and what has been said. */
 export interface TurnContext {
@@ -121,7 +140,7 @@ export interface ReplyDraft {
 
 /** A claimed turn with its rows written and its context loaded, ready to run. */
 export interface PreparedTurn {
-	job: ClaimedTurn;
+	claim: ClaimedTurn;
 	turnId: string;
 	/** The agent's reply, `streaming` and empty until the worker fills it. */
 	responseMessage: Message;
@@ -148,17 +167,14 @@ export interface TurnCheckpoint {
 }
 
 export interface TurnStore {
-	/** Puts turns left `running` by a stopped process back in the queue. */
-	requeueInterrupted(): Effect.Effect<void, never, Database>;
-	claimNext(): Effect.Effect<ClaimedTurn | undefined, never, Database>;
-	/** Records that preparing the turn failed and returns whether it will be retried. */
-	releaseFailedClaim(claimed: ClaimedTurn, error: string): Effect.Effect<boolean, never, Database>;
+	/** Ends as failed a turn its owner will not run again after preparing it failed. */
+	abandon(claimed: ClaimedTurn, error: string): Effect.Effect<void, never, Database>;
 	/**
 	 * Opens the turn: creates or reopens its `turn` row and reply message and
 	 * loads what the model needs. Fails when the thread is gone, or the agent is
 	 * no longer in its pod.
 	 */
-	prepare(claimed: ClaimedTurn): Effect.Effect<PreparedTurn, JobNotRunnable, Database>;
+	prepare(claimed: ClaimedTurn): Effect.Effect<PreparedTurn, TurnNotRunnable, Database>;
 	/** Persists the reply so far, so a crash loses at most a second of text. */
 	saveStreamingMessage(
 		prepared: Pick<PreparedTurn, "responseMessage">,
@@ -180,47 +196,43 @@ export interface TurnStore {
 		prepared: PreparedTurn,
 		reply: ReplyDraft,
 	): Effect.Effect<FloorDecision, never, Database>;
-	/** Returns whether the turn will be retried. */
+	/** `willRetry` is the owner's decision, which the failure event carries to the client. */
 	fail(
 		prepared: PreparedTurn,
 		reply: ReplyDraft,
 		error: string,
-	): Effect.Effect<boolean, never, Database>;
+		willRetry: boolean,
+	): Effect.Effect<void, never, Database>;
 	cancel(prepared: PreparedTurn, reply: ReplyDraft): Effect.Effect<void, never, Database>;
 	isCancellationRequested(
 		prepared: Pick<PreparedTurn, "turnId">,
 	): Effect.Effect<boolean, never, Database>;
 	/** `false` when there is no running turn this person may see. */
 	requestCancel(turnId: string, userId: string): Effect.Effect<boolean, never, Database>;
-	/** Ends a claim that cannot run, recording why. */
-	discard(claimed: Pick<ClaimedTurn, "id">, reason: string): Effect.Effect<void, never, Database>;
 }
+
+/**
+ * Whether a failed turn may be tried again: not once it has a checkpoint or a
+ * tool that changes things has run, since a retry could do it again (ADR 002).
+ */
+export const retryable = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
+	!prepared.checkpoint && !reply.acted;
 
 export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): TurnStore {
 	return {
-		requeueInterrupted: () => requeueInterruptedJobs("turn"),
-
-		claimNext: () => claimNextJob("turn"),
-
-		releaseFailedClaim: (claimed, error) =>
-			transaction(
-				Effect.gen(function* () {
-					const willRetry = yield* retryOrFailJob(claimed, error);
-					if (!willRetry) {
-						const [active] = yield* query((db) =>
-							db
-								.select({ id: turn.id })
-								.from(turn)
-								.where(
-									and(eq(turn.jobId, claimed.id), inArray(turn.status, ["running", "waiting"])),
-								)
-								.limit(1),
-						);
-						if (active) yield* query((db) => finishInterruptedTurn(db, active.id, "failed", error));
-						yield* query((db) => queueDeferredJob(db, claimed.id));
-					}
-					return willRetry;
-				}),
+		abandon: (claimed, error) =>
+			query((db) =>
+				db
+					.select({ id: turn.id })
+					.from(turn)
+					.where(and(eq(turn.owner, claimed.owner), inArray(turn.status, ["running", "waiting"])))
+					.limit(1),
+			).pipe(
+				Effect.flatMap(([active]) =>
+					active
+						? query((db) => finishInterruptedTurn(db, active.id, "failed", error))
+						: Effect.void,
+				),
 			),
 
 		prepare: (claimed) =>
@@ -237,15 +249,15 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 						executionId &&
 						(yield* query((db) => routineExecutionRejectsNewTurns(db, executionId)))
 					) {
-						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.id));
-						return new JobNotRunnable({
+						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.owner));
+						return new TurnNotRunnable({
 							reason: "The Routine execution has ended",
 							...(outcome ? { terminalOutcome: outcome } : {}),
 						});
 					}
 					const scope = yield* query((db) => loadTurnScope(db, claimed));
 					if (!scope) {
-						return new JobNotRunnable({
+						return new TurnNotRunnable({
 							reason: "The thread is gone, or this agent is not a crew agent in its pod",
 						});
 					}
@@ -255,20 +267,20 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					// than a scope that might not carry one.
 					const model = scope.agentModel;
 					if (model === null) {
-						return new JobNotRunnable({
+						return new TurnNotRunnable({
 							reason: `${scope.agentName} has no model chosen`,
 						});
 					}
 					if (scope.threadType === "chat" && claimed.payload.reason === "facilitator") {
-						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.id));
-						return new JobNotRunnable({
+						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.owner));
+						return new TurnNotRunnable({
 							reason: "The Facilitator does not route Chats",
 							...(outcome ? { terminalOutcome: outcome } : {}),
 						});
 					}
 					const opened = yield* query((db) => openTurn(db, claimed, scope, model));
 					if ("notRunnableReason" in opened) {
-						return new JobNotRunnable({
+						return new TurnNotRunnable({
 							reason: opened.notRunnableReason,
 							...(opened.terminalOutcome ? { terminalOutcome: opened.terminalOutcome } : {}),
 						});
@@ -283,7 +295,7 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					const messages = yield* query((db) => loadHistory(db, scope.threadId, response.id));
 
 					const prepared: PreparedTurn = {
-						job: claimed,
+						claim: claimed,
 						turnId,
 						responseMessage: toMessage(response, {
 							userId: null,
@@ -344,7 +356,7 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 				}),
 			).pipe(
 				Effect.filterOrElse(
-					(result): result is PreparedTurn => !(result instanceof JobNotRunnable),
+					(result): result is PreparedTurn => !(result instanceof TurnNotRunnable),
 					Effect.fail,
 				),
 			),
@@ -382,8 +394,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 							})
 							.where(eq(turn.id, prepared.turnId)),
 					);
-					yield* completeJob(prepared.job.id);
-					yield* query((db) => queueDeferredJob(db, prepared.job.id));
 					yield* publishEvents([
 						replyFinished(prepared, content, "complete"),
 						{
@@ -416,11 +426,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 							return false;
 						}
 					}
-					yield* query((db) =>
-						db.execute(
-							sql`select pg_advisory_xact_lock(hashtextextended(${prepared.job.dedupeKey}, 0))`,
-						),
-					);
 					const [suspendable] = yield* query((db) =>
 						db
 							.select({ id: turn.id })
@@ -436,23 +441,10 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 							.for("update"),
 					);
 					if (!suspendable) return false;
-					const [deferred] = yield* query((db) =>
-						db
-							.update(job)
-							.set({ status: "cancelled", lastError: "Deferred until approval completes" })
-							.where(
-								and(
-									eq(job.dedupeKey, prepared.job.dedupeKey),
-									eq(job.status, "queued"),
-									ne(job.id, prepared.job.id),
-								),
-							)
-							.returning({ payload: job.payload }),
-					);
 					const [suspended] = yield* query((db) =>
 						db
 							.update(turn)
-							.set({ status: "waiting", checkpoint })
+							.set({ status: "waiting", checkpoint, runs: 0 })
 							.where(
 								and(
 									eq(turn.id, prepared.turnId),
@@ -503,21 +495,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 							.set({ content: checkpoint.reply.content, parts: replyParts(checkpoint.reply) })
 							.where(eq(message.id, prepared.responseMessage.id)),
 					);
-					const parkedJob = yield* query((db) =>
-						db
-							.update(job)
-							.set({
-								status: "waiting",
-								lockedAt: null,
-								attempts: sql`greatest(${job.attempts} - 1, 0)`,
-								...(deferred ? { deferredPayload: deferred.payload } : {}),
-							})
-							.where(and(eq(job.id, prepared.job.id), eq(job.status, "running")))
-							.returning({ id: job.id }),
-					);
-					if (parkedJob.length !== 1) {
-						return yield* Effect.die(new Error("Suspended turn's job is not running"));
-					}
 					yield* publishEvents([
 						...parked.map((row) => ({
 							channel: threadChannel(row.threadId),
@@ -543,12 +520,12 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					author: {
 						kind: "agent",
 						agentId: prepared.context.agent.id,
-						spokeBecause: prepared.job.payload.reason,
+						spokeBecause: prepared.claim.payload.reason,
 					},
 				},
 			),
 
-		fail: (prepared, reply, error) =>
+		fail: (prepared, reply, error, willRetry) =>
 			transaction(
 				Effect.gen(function* () {
 					yield* query((db) =>
@@ -566,14 +543,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					const abandoned = yield* query((db) =>
 						abandonRunningToolCalls(db, prepared.turnId, error),
 					);
-					// After a tool that changes things has run, a retry could run it
-					// again, so the job stops here and a person decides (ADR 002).
-					const willRetry = prepared.checkpoint
-						? yield* Effect.as(failJob(prepared.job.id, error), false)
-						: reply.acted
-							? yield* Effect.as(failJob(prepared.job.id, error), false)
-							: yield* retryOrFailJob(prepared.job, error);
-					if (!willRetry) yield* query((db) => queueDeferredJob(db, prepared.job.id));
 					yield* publishEvents([
 						...abandoned,
 						{
@@ -587,7 +556,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 							}),
 						},
 					]);
-					return willRetry;
 				}),
 			),
 
@@ -610,8 +578,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					const abandoned = yield* query((db) =>
 						abandonRunningToolCalls(db, prepared.turnId, "Turn cancelled"),
 					);
-					yield* cancelJob(prepared.job.id, "Cancelled by a person");
-					yield* query((db) => queueDeferredJob(db, prepared.job.id));
 					yield* publishEvents([
 						...abandoned,
 						replyFinished(prepared, content, "cancelled"),
@@ -648,7 +614,7 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 						db
 							.select({
 								threadId: turn.threadId,
-								jobId: turn.jobId,
+								owner: turn.owner,
 								status: turn.status,
 								workspaceId: thread.workspaceId,
 								messageId: message.id,
@@ -694,13 +660,13 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 								.set({ status: "cancelled", lastError: "Cancelled by a person", lockedAt: null })
 								.where(
 									and(
-										eq(job.id, candidate.jobId ?? "00000000-0000-0000-0000-000000000000"),
+										eq(job.id, candidate.owner ?? "00000000-0000-0000-0000-000000000000"),
 										inArray(job.status, ["waiting", "queued"]),
 									),
 								),
 						);
-						if (candidate.jobId) {
-							yield* query((db) => queueDeferredJob(db, candidate.jobId as string));
+						if (candidate.owner) {
+							yield* query((db) => queueDeferredJob(db, candidate.owner as string));
 						}
 						const abandoned = yield* query((db) =>
 							abandonRunningToolCalls(db, turnId, "Turn cancelled"),
@@ -755,8 +721,6 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 					return true;
 				}),
 			),
-
-		discard: (claimed, reason) => cancelJob(claimed.id, reason),
 	};
 }
 
@@ -870,12 +834,12 @@ const finishInterruptedTurn = Effect.fn("TurnStore.finishInterruptedTurn")(funct
 
 const terminateClaimedTurn = Effect.fn("TurnStore.terminateClaimedTurn")(function* (
 	db: Executor,
-	jobId: string,
+	owner: string,
 ): Effect.fn.Return<{ state: "failed" | "cancelled"; error?: string } | undefined, QueryFailure> {
 	const [active] = yield* db
 		.select({ id: turn.id, status: turn.status, error: turn.error })
 		.from(turn)
-		.where(and(eq(turn.jobId, jobId), inArray(turn.status, ["running", "waiting"])))
+		.where(and(eq(turn.owner, owner), inArray(turn.status, ["running", "waiting"])))
 		.limit(1);
 	if (!active) return undefined;
 	yield* finishInterruptedTurn(db, active.id, "cancelled", "Routine execution ended");
@@ -928,11 +892,12 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 	const [existing] = yield* db
 		.select({
 			id: turn.id,
-			jobId: turn.jobId,
+			owner: turn.owner,
 			status: turn.status,
 			checkpoint: turn.checkpoint,
 			mutationStarted: turn.mutationStarted,
 			cancelRequested: turn.cancelRequested,
+			runs: turn.runs,
 		})
 		.from(turn)
 		.where(
@@ -975,22 +940,30 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 				terminalOutcome: { state: "failed", error },
 			};
 		}
+		if (existing.runs >= MAX_TURN_RUNS) {
+			const error = `The turn stopped ${existing.runs} times before it could finish`;
+			yield* finishInterruptedTurn(db, existing.id, "failed", error);
+			return {
+				notRunnableReason: error,
+				terminalOutcome: { state: "failed", error },
+			};
+		}
 		if (existing.checkpoint) {
 			if (
 				(existing.status !== "waiting" && existing.status !== "running") ||
-				existing.jobId !== claimed.id
+				existing.owner !== claimed.owner
 			) {
 				return { notRunnableReason: "The suspended turn no longer belongs to this job" };
 			}
 			const [resumed] = yield* db
 				.update(turn)
-				.set({ status: "running" })
+				.set({ status: "running", runs: sql`${turn.runs} + 1` })
 				.where(
 					and(
 						eq(turn.id, existing.id),
 						inArray(turn.status, ["waiting", "running"]),
 						eq(turn.cancelRequested, false),
-						eq(turn.jobId, claimed.id),
+						eq(turn.owner, claimed.owner),
 					),
 				)
 				.returning({ id: turn.id });
@@ -1015,7 +988,8 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 				error: null,
 				finishedAt: null,
 				checkpoint: null,
-				jobId: claimed.id,
+				owner: claimed.owner,
+				runs: sql`${turn.runs} + 1`,
 			})
 			.where(eq(turn.id, existing.id));
 		const [response] = yield* db
@@ -1037,7 +1011,8 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			threadId: scope.threadId,
 			agentId: scope.agentId,
 			triggerMessageId: claimed.payload.triggerMessageId,
-			jobId: claimed.id,
+			owner: claimed.owner,
+			runs: 1,
 			status: "running",
 			reason: claimed.payload.reason ?? null,
 			model,

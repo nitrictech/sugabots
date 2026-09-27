@@ -14,6 +14,7 @@ import {
 } from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
@@ -25,7 +26,15 @@ import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
-import type { ClaimedTurn, PreparedTurn, ReplyDraft, TurnCheckpoint, TurnStore } from "./store.ts";
+import { jobTurnOwner, type TurnOwner } from "./owner.ts";
+import {
+	type ClaimedTurn,
+	type PreparedTurn,
+	type ReplyDraft,
+	retryable,
+	type TurnCheckpoint,
+	type TurnStore,
+} from "./store.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
 const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
@@ -60,9 +69,11 @@ export interface TurnExecution {
 	routines?: Pick<RoutineStore, "settleThread">;
 	/** Asks the Scribe to catch up on the thread after a completed reply. */
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
+	/** What runs the turn, told of each outcome in the transaction that records it. */
+	owner: TurnOwner;
 }
 
-export interface TurnWorkerOptions extends TurnExecution {
+export interface TurnWorkerOptions extends Omit<TurnExecution, "owner"> {
 	concurrency?: number;
 	pollIntervalMs?: number;
 }
@@ -75,9 +86,13 @@ export const turnWorkerLayer = ({
 }: TurnWorkerOptions): Layer.Layer<never, never, Database> =>
 	workerLayer({
 		name: "Turn worker",
-		requeueInterrupted: () => execution.store.requeueInterrupted(),
-		claimNext: () => execution.store.claimNext(),
-		run: (claimed) => runClaimedTurn(claimed, execution),
+		requeueInterrupted: () => requeueInterruptedJobs("turn"),
+		claimNext: () => claimNextJob("turn"),
+		run: (job) =>
+			runClaimedTurn(
+				{ owner: job.id, threadId: job.threadId, payload: job.payload, attempts: job.attempts },
+				{ ...execution, owner: jobTurnOwner },
+			),
 		concurrency,
 		pollIntervalMs,
 	});
@@ -96,10 +111,10 @@ export const runClaimedTurn = (
 ): Effect.Effect<void, never, Database> =>
 	execution.store.prepare(claimed).pipe(
 		Effect.flatMap((prepared) => generateReply(prepared, execution)),
-		Effect.catchTag("JobNotRunnable", (why) =>
+		Effect.catchTag("TurnNotRunnable", (why) =>
 			transaction(
-				execution.store
-					.discard(claimed, why.reason)
+				execution.owner
+					.discarded(claimed, why.reason)
 					.pipe(
 						Effect.andThen(
 							execution.routines?.settleThread(
@@ -114,7 +129,8 @@ export const runClaimedTurn = (
 			transaction(
 				Effect.gen(function* () {
 					const error = describeFailure(defect);
-					const willRetry = yield* execution.store.releaseFailedClaim(claimed, error);
+					const willRetry = yield* execution.owner.failed(claimed, error, true);
+					if (!willRetry) yield* execution.store.abandon(claimed, error);
 					if (!willRetry && execution.routines) {
 						yield* execution.routines.settleThread(claimed.threadId, { state: "failed", error });
 					}
@@ -174,24 +190,27 @@ const generateReply = (
 ): Effect.Effect<void, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { store, collaborations, routines } = execution;
+			const { store, collaborations, routines, owner } = execution;
+			const claim = prepared.claim;
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, execution, reply)));
 			const draft = yield* Ref.get(reply);
 
 			if (Exit.isSuccess(streamed)) {
 				if (streamed.value.kind === "suspended") {
-					const suspended = yield* store.suspend(
-						prepared,
-						streamed.value.checkpoint,
-						streamed.value.approvals,
+					const { checkpoint, approvals } = streamed.value;
+					yield* transaction(
+						Effect.gen(function* () {
+							if (yield* store.suspend(prepared, checkpoint, approvals)) {
+								return yield* owner.suspended(claim);
+							}
+							yield* store.cancel(prepared, draft);
+							yield* owner.cancelled(claim, "Cancelled by a person");
+							if (routines) {
+								yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
+							}
+						}),
 					);
-					if (!suspended) {
-						yield* store.cancel(prepared, draft);
-						if (routines) {
-							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
-						}
-					}
 					return;
 				}
 				const accounting = streamed.value.accounting;
@@ -213,6 +232,7 @@ const generateReply = (
 									)
 							: false;
 						yield* store.complete(prepared, draft, accounting);
+						yield* owner.completed(claim);
 						if (!answered) {
 							yield* store.giveFloor(prepared, draft);
 						}
@@ -243,7 +263,12 @@ const generateReply = (
 			if (Cause.hasInterruptsOnly(cause)) {
 				yield* transaction(
 					Effect.gen(function* () {
-						const willRetry = yield* store.fail(prepared, draft, "Worker stopped");
+						const willRetry = yield* owner.failed(
+							claim,
+							"Worker stopped",
+							retryable(prepared, draft),
+						);
+						yield* store.fail(prepared, draft, "Worker stopped", willRetry);
 						if (!willRetry && routines) {
 							yield* routines.settleThread(prepared.context.thread.id, {
 								state: "failed",
@@ -257,14 +282,13 @@ const generateReply = (
 			const failure = Cause.squash(cause);
 			if (failure instanceof TurnCancelled) {
 				yield* transaction(
-					store
-						.cancel(prepared, draft)
-						.pipe(
-							Effect.andThen(
-								routines?.settleThread(prepared.context.thread.id, { state: "cancelled" }) ??
-									Effect.void,
-							),
-						),
+					Effect.gen(function* () {
+						yield* store.cancel(prepared, draft);
+						yield* owner.cancelled(claim, "Cancelled by a person");
+						if (routines) {
+							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
+						}
+					}),
 				);
 				return;
 			}
@@ -272,7 +296,8 @@ const generateReply = (
 			yield* logTurnFailure(prepared, error);
 			yield* transaction(
 				Effect.gen(function* () {
-					const willRetry = yield* store.fail(prepared, draft, error);
+					const willRetry = yield* owner.failed(claim, error, retryable(prepared, draft));
+					yield* store.fail(prepared, draft, error, willRetry);
 					if (!willRetry && routines) {
 						yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
 					}

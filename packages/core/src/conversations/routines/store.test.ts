@@ -753,10 +753,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		).toBe(false);
 		const turns = onPostgres(createTurnStore(() => Effect.void, queueTurnAsJob));
 		const claimedChild: ClaimedTurn = {
-			id: childJob.id,
+			owner: childJob.id,
 			threadId: childJob.threadId,
 			payload: childPayload,
-			dedupeKey: childJob.dedupeKey,
 			attempts: childJob.attempts,
 		};
 		await expect(turns.prepare(claimedChild)).rejects.toThrow("The Routine execution has ended");
