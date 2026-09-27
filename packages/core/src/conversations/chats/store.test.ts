@@ -111,7 +111,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		await store.sendMain({
 			chatId: current.id,
-			userId,
+			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "\n  Budget   review is Friday\nand bring the numbers",
 		});
@@ -195,7 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 
 		const sent = await store.sendMain({
 			chatId: first.id,
-			userId,
+			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Investigate this over several steps",
 		});
@@ -215,7 +215,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		const messageId = crypto.randomUUID();
 
 		await expect(
-			store.sendMain({ chatId: current.id, userId, messageId, content: "Anyone there?" }),
+			store.sendMain({
+				chatId: current.id,
+				author: { id: userId, name: "Chat member", image: null },
+				messageId,
+				content: "Anyone there?",
+			}),
 		).rejects.toThrow("has no model chosen");
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
@@ -228,13 +233,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		const messageId = crypto.randomUUID();
 		const first = await store.sendMain({
 			chatId: current.id,
-			userId,
+			author: { id: userId, name: "Chat member", image: null },
 			messageId,
 			content: "A simple question",
 		});
 		const retried = await store.sendMain({
 			chatId: current.id,
-			userId,
+			author: { id: userId, name: "Chat member", image: null },
 			messageId,
 			content: "A simple question",
 		});
@@ -360,7 +365,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		});
 		const trigger = await store.sendMain({
 			chatId: initiatorChat.id,
-			userId,
+			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Ask Impersonal Agent",
 		});

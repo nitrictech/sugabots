@@ -32,7 +32,12 @@ const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
 const MESSAGE_FLUSH_INTERVAL = Duration.seconds(1);
 /** ...and also whenever this much new text has arrived. */
 const MESSAGE_FLUSH_CHARACTERS = 500;
-const CANCELLATION_POLL_INTERVAL = Duration.seconds(1);
+/**
+ * A running turn stops on `turn.cancel_requested`. The flag is also read this
+ * often, from the start, for a request made before the worker subscribed or
+ * relayed from a process whose relay is down.
+ */
+const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_CONCURRENCY = 8;
@@ -466,12 +471,14 @@ const streamReply = (
 				};
 			});
 
-			// Suspended so each poll asks the store again rather than replaying one answer.
-			const cancelWatch = Effect.suspend(() => store.isCancellationRequested(prepared)).pipe(
+			// Suspended so each check asks the store again rather than replaying one answer.
+			const cancelChecks = Effect.suspend(() => store.isCancellationRequested(prepared)).pipe(
 				Effect.repeat({
-					schedule: Schedule.spaced(CANCELLATION_POLL_INTERVAL),
+					schedule: Schedule.spaced(CANCELLATION_CHECK_INTERVAL),
 					until: (requested) => requested,
 				}),
+			);
+			const cancelWatch = Effect.raceFirst(cancelRequested(events, prepared), cancelChecks).pipe(
 				Effect.andThen(Effect.fail(new TurnCancelled())),
 			);
 			const periodicSave = saveReply.pipe(
@@ -562,6 +569,17 @@ const consumeDeltas = (
 		);
 		yield* publishPending;
 	});
+
+/** Waits for `turn.cancel_requested` on this turn. Never succeeds if the bus closes first. */
+function cancelRequested(events: Pick<EventBus, "subscribe">, prepared: PreparedTurn) {
+	return Effect.promise(async (signal) => {
+		const channel = threadChannel(prepared.context.thread.id);
+		for await (const { event } of events.subscribe(channel, { signal })) {
+			if (event.type === "turn.cancel_requested" && event.turnId === prepared.turnId) return true;
+		}
+		return false;
+	}).pipe(Effect.flatMap((requested) => (requested ? Effect.void : Effect.never)));
+}
 
 /** A delta a subscriber does not get is not worth failing the turn for. */
 const publishDelta = (

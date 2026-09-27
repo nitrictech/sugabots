@@ -85,7 +85,8 @@ interface ChatListRequest {
 
 interface SendMainMessage {
 	chatId: string;
-	userId: string;
+	/** Who is sending, as the caller already knows them. */
+	author: { id: string; name: string; image: string | null };
 	messageId: string;
 	content: string;
 }
@@ -207,19 +208,19 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 		sendMain: (input) =>
 			transaction(
 				Effect.gen(function* () {
-					const visible = yield* query((db) => visibleChat(db, input.chatId, input.userId));
+					const visible = yield* query((db) => visibleChat(db, input.chatId, input.author.id));
 					if (!visible) return undefined;
 					yield* lock(`chat-message:${input.messageId}`);
 					const existing = yield* query((db) => messageById(db, input.messageId));
 					if (existing) {
 						if (
 							existing.threadId !== visible.mainThreadId ||
-							existing.authorUserId !== input.userId ||
+							existing.authorUserId !== input.author.id ||
 							existing.content !== input.content
 						) {
 							return yield* new ChatMessageIdConflict();
 						}
-						return yield* query((db) => publicMessage(db, existing));
+						return toMessage(existing, messageAuthor(input.author));
 					}
 					const hostModel = yield* query((db) => agentModel(db, visible.hostAgentId));
 					if (hostModel === null) return yield* new ChatAgentHasNoModel();
@@ -228,7 +229,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 						db
 							.insert(message)
 							.values(
-								userMessage(input.messageId, visible.mainThreadId, input.userId, input.content),
+								userMessage(input.messageId, visible.mainThreadId, input.author.id, input.content),
 							)
 							.returning(),
 					);
@@ -242,7 +243,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 					yield* query((db) =>
 						db
 							.insert(threadParticipant)
-							.values({ threadId: visible.mainThreadId, userId: input.userId })
+							.values({ threadId: visible.mainThreadId, userId: input.author.id })
 							.onConflictDoNothing(),
 					);
 					yield* giveFloor(publishEvents, {
@@ -251,7 +252,7 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 						content: created.content,
 						author: { kind: "person" },
 					});
-					const result = yield* query((db) => publicMessage(db, created));
+					const result = toMessage(created, messageAuthor(input.author));
 					yield* publishEvents([
 						{
 							channel: threadChannel(visible.mainThreadId),
@@ -441,18 +442,9 @@ const messageById = Effect.fn("ChatStore.messageById")(function* (db: Executor, 
 	return row;
 });
 
-const publicMessage = Effect.fn("ChatStore.publicMessage")(function* (
-	db: Executor,
-	row: schema.MessageRow,
-) {
-	const [author] = yield* db
-		.select({ userId: user.id, userName: user.name, userImage: user.image })
-		.from(user)
-		.where(eq(user.id, row.authorUserId ?? ""))
-		.limit(1);
-	if (!author) throw new Error("Chat message author no longer exists");
-	return toMessage(row, personAuthor(author));
-});
+function messageAuthor(author: SendMainMessage["author"]) {
+	return personAuthor({ userId: author.id, userName: author.name, userImage: author.image });
+}
 
 interface CursorPoint {
 	createdAt: Date;

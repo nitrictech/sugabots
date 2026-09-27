@@ -165,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		await runtime.runPromise(
 			chats.sendMain({
 				chatId: opened.id,
-				userId: input.userId,
+				author: { id: input.userId, name: "Sam", image: null },
 				messageId: crypto.randomUUID(),
 				content: input.content,
 			}),

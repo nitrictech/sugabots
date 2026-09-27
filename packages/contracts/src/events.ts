@@ -65,6 +65,8 @@ export const eventPayloadSchemas = {
 		turnId: uuidSchema,
 		agentId: uuidSchema,
 	}),
+	/** Somebody asked a running turn to stop; `turn.completed` follows once it has. */
+	"turn.cancel_requested": Schema.Struct({ threadId, turnId: uuidSchema }),
 	"turn.completed": Schema.Struct({
 		threadId,
 		turnId: uuidSchema,
@@ -115,6 +117,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"tool_call.completed",
 	"tool_call.updated",
 	"turn.started",
+	"turn.cancel_requested",
 	"turn.completed",
 	"thread.created",
 	"thread.changed",
@@ -228,6 +231,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("tool_call.completed", P["tool_call.completed"]),
 	withEnvelope("tool_call.updated", P["tool_call.updated"]),
 	withEnvelope("turn.started", P["turn.started"]),
+	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),
 	withEnvelope("thread.changed", P["thread.changed"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),

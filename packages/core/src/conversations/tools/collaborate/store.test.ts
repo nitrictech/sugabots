@@ -128,7 +128,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		hostChatId = opened.id;
 		await chats.sendMain({
 			chatId: opened.id,
-			userId: memberId,
+			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
@@ -364,7 +364,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		);
 		await chats.sendMain({
 			chatId: hostChatId,
-			userId: memberId,
+			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});

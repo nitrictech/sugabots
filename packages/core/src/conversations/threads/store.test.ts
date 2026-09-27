@@ -7,6 +7,7 @@ import { eventPublisher } from "../../database/events/publish.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
 import {
 	agent,
+	event,
 	job,
 	message,
 	pod,
@@ -43,6 +44,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	let podId: string;
 	let agentId: string;
 	let memberId: string;
+	let authors: Map<string, { id: string; name: string; image: string | null }>;
+	/** A message author, as the route would pass them. */
+	const author = (id: string) => {
+		const person = authors.get(id);
+		if (!person) throw new Error(`No test person ${id}`);
+		return person;
+	};
 	let outsiderId: string;
 
 	async function createThread(input: {
@@ -60,7 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		});
 		await chats.sendMain({
 			chatId: opened.id,
-			userId: input.initiatorUserId,
+			author: author(input.initiatorUserId),
 			messageId: crypto.randomUUID(),
 			content: input.message,
 		});
@@ -101,6 +109,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		workspaceId = workspaceRow.id;
 		memberId = member.id;
 		outsiderId = outsider.id;
+		authors = new Map(people.map((person) => [person.id, person]));
 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
@@ -511,7 +520,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: memberId,
+			author: author(memberId),
 			messageId,
 			content: "Second",
 		});
@@ -627,7 +636,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: outsiderId,
+			author: author(outsiderId),
 			messageId: crypto.randomUUID(),
 			content: "I can help",
 		});
@@ -787,7 +796,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chats.sendMain({
 			chatId: details.thread.chatId,
-			userId: memberId,
+			author: author(memberId),
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
@@ -892,6 +901,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(true);
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(false);
 		expect(await turns.requestCancel(prepared.turnId, outsiderId)).toBe(false);
+		// Announced once, for the worker waiting on it.
+		const announced = await onDatabase((db) =>
+			db
+				.select({ payload: event.payload })
+				.from(event)
+				.where(eq(event.type, "turn.cancel_requested")),
+		);
+		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
 
 	it("claims queued work once and puts interrupted work back", async () => {
