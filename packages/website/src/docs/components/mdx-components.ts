@@ -16,6 +16,7 @@ import { WhoReplies } from "@/docs/components/who-replies";
 export const docsComponents: MDXComponents = {
 	...proseComponents,
 	Activity,
+	ApprovalPlayground,
 	Careful,
 	Chat,
 	PodGallery,
