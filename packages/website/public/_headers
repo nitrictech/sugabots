@@ -1,0 +1,8 @@
+# Plain text, so the install scripts and compose.yml open in a browser instead of downloading,
+# and `irm` in Windows PowerShell reads install.ps1 as text.
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+/compose.yml
+  Content-Type: text/plain; charset=utf-8

@@ -3,7 +3,7 @@ import { type ComponentProps, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 /** Languages that are commands to type, framed as a terminal. */
-const SHELL_LANGUAGES = new Set(["sh", "bash", "shell", "zsh"]);
+const SHELL_LANGUAGES = new Set(["sh", "bash", "shell", "zsh", "powershell"]);
 
 /** How long the copy button shows its tick. */
 const COPIED_FEEDBACK_MS = 1600;
