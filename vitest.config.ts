@@ -39,7 +39,7 @@ export default defineConfig({
 					name: "backend",
 					root: ".",
 					environment: "node",
-					include: ["packages/{core,server}/src/**/*.test.ts"],
+					include: ["packages/{core,server,workflow}/src/**/*.test.ts"],
 					// The store tests share one Postgres and one job table; files that
 					// clear or claim from it cannot run beside each other.
 					fileParallelism: false,

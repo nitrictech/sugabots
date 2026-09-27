@@ -188,6 +188,17 @@
         "wrangler": "^4.140.0",
       },
     },
+    "packages/workflow": {
+      "name": "@sugabots/workflow",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/platform-node": "catalog:",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/sql-pg": "catalog:",
+      },
+    },
   },
   "catalog": {
     "@effect/platform-node": "4.0.0-rc.117",
@@ -774,6 +785,8 @@
     "@sugabots/web": ["@sugabots/web@workspace:packages/web"],
 
     "@sugabots/website": ["@sugabots/website@workspace:packages/website"],
+
+    "@sugabots/workflow": ["@sugabots/workflow@workspace:packages/workflow"],
 
     "@tailwindcss/node": ["@tailwindcss/node@4.3.3", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "enhanced-resolve": "^5.24.1", "jiti": "^2.7.0", "lightningcss": "1.32.0", "magic-string": "^0.30.21", "source-map-js": "^1.2.1", "tailwindcss": "4.3.3" } }, "sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg=="],
 

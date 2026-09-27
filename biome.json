@@ -46,6 +46,32 @@
 	},
 	"overrides": [
 		{
+			"includes": ["packages/**/src/**/*.workflow.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"node:*",
+											"pg",
+											"@effect/sql-pg",
+											"@effect/platform-node",
+											"**/database/**"
+										],
+										"message": "Workflow modules run inside Temporal's sandbox: import only schemas and step-service tags, and reach the database, the network or Node through a step service."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"includes": [
 				"packages/web/src/ui/dialog.tsx",
 				"packages/web/src/ui/dropdown-menu.tsx",
