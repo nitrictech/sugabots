@@ -15,7 +15,7 @@ import {
 	sleep,
 	workflowInfo,
 } from "@temporalio/workflow";
-import { Cause, Duration, Effect, Exit, type Fiber, Option } from "effect";
+import { Cause, Duration, Effect, Exit, Fiber, Option } from "effect";
 import { type Activity, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import {
 	type ActivityInput,
@@ -60,7 +60,7 @@ interface Run {
 
 /**
  * The Temporal workflow function for an Effect workflow. Export it from the
- * worker's workflows module under the workflow's name. `execute` is the same
+ * worker's workflows module under `workflowTypeFor(workflow._tag)`. `execute` is the same
  * body given to `toLayer` for Effect's own engines; `provide` supplies what
  * it needs inside the sandbox (only step-service stubs: activities run on the
  * worker, never here).
@@ -115,14 +115,21 @@ export const makeWorkflow = <W extends Workflow.Any, R>(options: {
 				instance = WorkflowEngine.WorkflowInstance.initial(options.workflow, executionId);
 				instance.interrupted = run.interrupted;
 				const engine = engineFor(run, options.workflow, encodedPayload);
-				const body = options
-					.execute(payload, executionId)
-					.pipe(
-						Workflow.intoResult,
-						options.provide,
-						Effect.provideService(WorkflowEngine.WorkflowEngine, engine),
-						Effect.provideService(WorkflowEngine.WorkflowInstance, instance),
-					);
+				const pass = instance;
+				const body = options.execute(payload, executionId).pipe(
+					// An interrupted execution ends as interrupted rather than
+					// suspending again: finalisers run and the run completes.
+					Effect.onExit(() => {
+						if (!run.interrupted) return Effect.void;
+						pass.interrupted = true;
+						pass.suspended = false;
+						return Effect.withFiber((fiber) => Effect.interruptible(Fiber.interrupt(fiber)));
+					}),
+					Workflow.intoResult,
+					options.provide,
+					Effect.provideService(WorkflowEngine.WorkflowEngine, engine),
+					Effect.provideService(WorkflowEngine.WorkflowInstance, instance),
+				);
 				fiber = Effect.runFork(body, { scheduler });
 				const exit = await new Promise<Exit.Exit<Workflow.Result<unknown, unknown>>>((resolve) =>
 					fiber?.addObserver(resolve),

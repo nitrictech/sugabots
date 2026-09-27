@@ -20,6 +20,7 @@ import {
 	type State,
 	stateQueryName,
 	workflowIdFor,
+	workflowTypeFor,
 } from "./protocol.ts";
 import { codecsFor, encodeExit, resultOfFailure } from "./wire.ts";
 
@@ -53,7 +54,7 @@ export const make = Effect.gen(function* () {
 		execute: (workflow, options) =>
 			Effect.gen(function* () {
 				yield* Effect.tryPromise(() =>
-					temporal.client.workflow.start(workflow._tag, {
+					temporal.client.workflow.start(workflowTypeFor(workflow._tag), {
 						workflowId: workflowIdFor(workflow._tag, options.executionId),
 						taskQueue: temporal.taskQueue,
 						args: [codecsFor(workflow).encodePayload(options.payload)],

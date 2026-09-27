@@ -42,6 +42,14 @@ export interface ActivityInput {
 	readonly attempt: number;
 }
 
+/**
+ * The Temporal workflow type for an Effect workflow. A worker finds a
+ * workflow's function by its export name, so the type must be a valid
+ * identifier: export each `makeWorkflow` result under this name.
+ */
+export const workflowTypeFor = (workflow: string): string =>
+	workflow.replace(/[^A-Za-z0-9_$]/g, "_");
+
 /** A Temporal workflow id carries the workflow's name so ids stay readable in Temporal's UI. */
 export const workflowIdFor = (workflow: string, executionId: string): string =>
 	`${workflow}/${executionId}`;
