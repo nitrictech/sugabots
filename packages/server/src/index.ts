@@ -15,6 +15,8 @@ import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
+import { Turn, turn } from "@sugabots/core/conversations/turns/turn.workflow";
+import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/worker";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
@@ -121,11 +123,30 @@ const main = Effect.gen(function* () {
 	});
 
 	// Durable workflows, on the engine WORKFLOW_ENGINE names. Summaries are the
-	// first to move from the job queue; the rest follow.
+	// first to move from the job queue; turns are registered but still run as
+	// jobs until the code that starts them moves over.
 	const workflows = yield* Layer.build(
-		Layer.mergeAll(Summary.toLayer(summary), Lanes.reconcileLayer).pipe(
+		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turn), Lanes.reconcileLayer).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
-			Layer.provideMerge(Lanes.layer([Summary])),
+			Layer.provideMerge(
+				Layer.unwrap(
+					Effect.map(Effect.service(Lanes.Service), (lanes) =>
+						turnSteps({
+							store: stores.turns,
+							model,
+							events: bus,
+							collaborations: stores.collaborations,
+							calls: stores.calls,
+							approvals: stores.approvals,
+							builtInTools,
+							connectionTools,
+							routines: stores.routines,
+							queueSummary: (request) => queueSummary(lanes, request),
+						}),
+					),
+				),
+			),
+			Layer.provideMerge(Lanes.layer([Summary, Turn])),
 			Layer.provideMerge(Workflows.engine),
 		),
 	);

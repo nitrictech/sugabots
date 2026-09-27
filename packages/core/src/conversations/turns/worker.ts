@@ -7,13 +7,14 @@ import {
 	Duration,
 	Effect,
 	Exit,
-	type Layer,
+	Layer,
 	Ref,
 	Schedule,
 	Semaphore,
 } from "effect";
-import { type Database, effectRunner, transaction } from "../../database/database.ts";
+import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
@@ -26,7 +27,7 @@ import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
-import { jobTurnOwner, type TurnOwner } from "./owner.ts";
+import { jobTurnOwner, segmentTurnOwner, type TurnOwner } from "./owner.ts";
 import {
 	type ClaimedTurn,
 	type PreparedTurn,
@@ -35,6 +36,13 @@ import {
 	type TurnCheckpoint,
 	type TurnStore,
 } from "./store.ts";
+import {
+	type SegmentOutcome,
+	Turn,
+	type TurnRequest,
+	TurnSteps,
+	turnLane,
+} from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
 const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
@@ -96,6 +104,61 @@ export const turnWorkerLayer = ({
 		concurrency,
 		pollIntervalMs,
 	});
+
+/** A turn workflow's run of its turn, owned by the execution. */
+const claimFor = (request: TurnRequest, attempt: number) =>
+	Effect.map(
+		Turn.executionId(request),
+		(owner): ClaimedTurn => ({
+			owner,
+			threadId: request.threadId,
+			payload: {
+				agentId: request.agentId,
+				triggerMessageId: request.triggerMessageId,
+				reason: request.reason,
+			},
+			attempts: attempt,
+		}),
+	);
+
+/**
+ * The turn workflow's steps: running a segment of the turn, and freeing its
+ * lane afterwards. Activities reach them through `TurnSteps`.
+ */
+export const stepsLayer = (execution: Omit<TurnExecution, "owner">) =>
+	Layer.effect(
+		TurnSteps,
+		Effect.gen(function* () {
+			const database = yield* Database;
+			const lanes = yield* Lanes.Service;
+			return TurnSteps.of({
+				segment: (request, attempt) =>
+					Effect.gen(function* () {
+						const outcome = yield* Ref.make<SegmentOutcome>({ _tag: "Finished" });
+						const claimed = yield* claimFor(request, attempt);
+						yield* runClaimedTurn(claimed, { ...execution, owner: segmentTurnOwner(outcome) });
+						return yield* Ref.get(outcome);
+					}).pipe(Effect.provideService(Database, database)),
+				abandon: (request) =>
+					transaction(
+						Effect.gen(function* () {
+							const error = "The turn stopped unexpectedly";
+							yield* execution.store.abandon(yield* claimFor(request, 1), error);
+							if (execution.routines) {
+								yield* execution.routines.settleThread(request.threadId, {
+									state: "failed",
+									error,
+								});
+							}
+						}),
+					).pipe(Effect.provideService(Database, database)),
+				release: (request) =>
+					Effect.flatMap(Turn.executionId(request), (executionId) =>
+						lanes.release({ key: turnLane(request), executionId }),
+					),
+			});
+		}),
+	);
 
 /**
  * Runs one claimed turn from preparation to recorded outcome.
@@ -202,7 +265,7 @@ const generateReply = (
 					yield* transaction(
 						Effect.gen(function* () {
 							if (yield* store.suspend(prepared, checkpoint, approvals)) {
-								return yield* owner.suspended(claim);
+								return yield* owner.suspended(claim, checkpoint);
 							}
 							yield* store.cancel(prepared, draft);
 							yield* owner.cancelled(claim, "Cancelled by a person");

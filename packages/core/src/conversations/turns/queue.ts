@@ -1,15 +1,7 @@
 import type { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
-import type { TurnReason } from "../../database/schema.ts";
 import { enqueueJob } from "../jobs/queue.ts";
-
-/** An agent's turn, asked for because of a message. */
-export interface TurnRequest {
-	readonly threadId: string;
-	readonly agentId: string;
-	readonly triggerMessageId: string;
-	readonly reason: TurnReason;
-}
+import type { TurnRequest } from "./turn.workflow.ts";
 
 /**
  * Asks for an agent's turn, in the caller's transaction. A turn already asked

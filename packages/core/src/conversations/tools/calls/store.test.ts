@@ -77,7 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		runOnPostgres(
 			transaction(
 				Effect.tap(store.suspend(...args), (suspended) =>
-					suspended ? jobTurnOwner.suspended(args[0].claim) : Effect.void,
+					suspended ? jobTurnOwner.suspended(args[0].claim, args[1]) : Effect.void,
 				),
 			),
 		);

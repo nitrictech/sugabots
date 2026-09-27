@@ -1,5 +1,5 @@
 import { and, eq, ne, sql } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import type { Database } from "../../database/database.ts";
 import { query } from "../../database/database.ts";
 import { job } from "../../database/schema.ts";
@@ -10,17 +10,21 @@ import {
 	queueDeferredJob,
 	retryOrFailJob,
 } from "../jobs/queue.ts";
-import type { ClaimedTurn } from "./store.ts";
+import { type ClaimedTurn, MAX_TURN_RUNS, type TurnCheckpoint } from "./store.ts";
+import type { SegmentOutcome } from "./turn.workflow.ts";
 
 /**
- * Whatever runs a turn: the job queue now, a workflow later. The turn worker
+ * Whatever runs a turn: the job queue, or the turn workflow. The turn worker
  * writes each outcome to the turn's rows and tells the owner in the same
  * transaction, so the owner's bookkeeping never disagrees with the turn.
  */
 export interface TurnOwner {
 	readonly completed: (claim: ClaimedTurn) => Effect.Effect<void, never, Database>;
 	/** The turn is waiting for tool approvals and holds nothing until they are decided. */
-	readonly suspended: (claim: ClaimedTurn) => Effect.Effect<void, never, Database>;
+	readonly suspended: (
+		claim: ClaimedTurn,
+		checkpoint: TurnCheckpoint,
+	) => Effect.Effect<void, never, Database>;
 	/**
 	 * Returns whether the turn will be tried again. `retryable` is false once
 	 * the turn has a checkpoint or a tool that changes things has run, since a
@@ -102,3 +106,25 @@ export const jobTurnOwner: TurnOwner = {
 
 	discarded: (claim, reason) => cancelJob(claim.owner, reason),
 };
+
+/** The batch of approvals a checkpoint waits for, named by its first approval. */
+export const approvalBatchOf = (checkpoint: TurnCheckpoint) =>
+	checkpoint.approvals[0]?.approvalId ?? "none";
+
+/**
+ * A segment of the turn workflow. The workflow does the bookkeeping itself,
+ * so this only records how the segment ended, for the segment to return.
+ */
+export const segmentTurnOwner = (outcome: Ref.Ref<SegmentOutcome>): TurnOwner => ({
+	completed: () => Effect.void,
+	suspended: (_claim, checkpoint) =>
+		Ref.set(outcome, { _tag: "Suspended", approvals: approvalBatchOf(checkpoint) }),
+	failed: (claim, _error, retryable) => {
+		const willRetry = retryable && claim.attempts < MAX_TURN_RUNS;
+		return Ref.set(outcome, willRetry ? { _tag: "Retry" } : { _tag: "Finished" }).pipe(
+			Effect.as(willRetry),
+		);
+	},
+	cancelled: () => Effect.void,
+	discarded: () => Effect.void,
+});
