@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { BotAvatar } from "@/components/bot-avatar";
-import { EarlyAccessLink } from "@/components/early-access-link";
+import { JoinDiscordLink } from "@/components/join-discord-link";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
@@ -24,11 +24,13 @@ export function GetStartedSection() {
 					variants={riseIn}
 					className="text-5xl font-black leading-none tracking-tighter sm:text-6xl"
 				>
-					Start a pod.
+					{launched ? "Start a pod." : "Releasing soon."}
 				</motion.h2>
-				<motion.p variants={riseIn} className="max-w-md text-muted-foreground">
-					Set it up in a few minutes, invite your people, and add your first bot.
-				</motion.p>
+				{launched && (
+					<motion.p variants={riseIn} className="max-w-md text-muted-foreground">
+						Set it up in a few minutes, invite your people, and add your first bot.
+					</motion.p>
+				)}
 				<RevealItem className="flex flex-wrap justify-center gap-3">
 					{launched ? (
 						<>
@@ -43,7 +45,7 @@ export function GetStartedSection() {
 							</a>
 						</>
 					) : (
-						<EarlyAccessLink size="lg" />
+						<JoinDiscordLink size="lg" />
 					)}
 				</RevealItem>
 			</Reveal>

@@ -3,8 +3,8 @@ import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { accentText } from "@/components/accent";
 import { BotAvatar } from "@/components/bot-avatar";
-import { EarlyAccessLink } from "@/components/early-access-link";
 import { Emphasis } from "@/components/emphasis";
+import { JoinDiscordLink } from "@/components/join-discord-link";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
@@ -57,12 +57,12 @@ export function Hero() {
 					work together. Give each group its own agents, on the models you choose. It's also{" "}
 					<Emphasis>open-source</Emphasis>.
 				</motion.p>
-				<RevealItem className="flex flex-wrap items-center gap-3">
-					<a href={siteLinks.getStarted} className={buttonVariants({ size: "lg" })}>
-						Start a pod
-						<ArrowRightIcon data-icon="inline-end" />
-					</a>
-					{launched ? (
+				{launched ? (
+					<RevealItem className="flex flex-wrap items-center gap-3">
+						<a href={siteLinks.getStarted} className={buttonVariants({ size: "lg" })}>
+							Start a pod
+							<ArrowRightIcon data-icon="inline-end" />
+						</a>
 						<a
 							href={siteLinks.github}
 							className={buttonVariants({ variant: "outline", size: "lg" })}
@@ -70,10 +70,13 @@ export function Hero() {
 							View on GitHub
 							<ArrowUpRightIcon data-icon="inline-end" />
 						</a>
-					) : (
-						<EarlyAccessLink size="lg" variant="outline" />
-					)}
-				</RevealItem>
+					</RevealItem>
+				) : (
+					<RevealItem className="flex flex-wrap items-center gap-x-4 gap-y-3">
+						<JoinDiscordLink size="lg" />
+						<span className="text-sm text-muted-foreground">Releasing soon.</span>
+					</RevealItem>
+				)}
 			</Reveal>
 		</section>
 	);
