@@ -83,6 +83,10 @@ data lives in the `sugabots_postgres_data` Docker volume, so it survives
 restarts. In the `sugabots` folder, `docker compose down` stops Sugabots and
 `docker compose up -d` starts it again.
 
+To change a setting, add it under `environment` in `compose.yml` and run
+`docker compose up -d`. The [configuration reference](/docs/configuration) lists
+every setting.
+
 <Tip title="Something not loading?">
 
 `docker compose logs sugabots` shows what Sugabots printed as it started. If
