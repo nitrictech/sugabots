@@ -14,7 +14,7 @@ import { Context, Data, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
 	afterCommit,
-	type Database,
+	Database,
 	layer as databaseLayer,
 	query,
 	queryCatching,
@@ -90,14 +90,14 @@ export interface ForInvitation {
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Membership") {}
 
 export const make = Effect.gen(function* () {
-	const database = yield* Effect.context<Database>();
+	const database = yield* Database;
 	const accounts = yield* Accounts.Service;
 	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
 
 	const operation = <A, E>(name: keyof Interface, effect: Effect.Effect<A, E, Database>) =>
-		Effect.provide(effect, database).pipe(Effect.withSpan(`Membership.${name}`));
+		Effect.provideService(effect, Database, database).pipe(Effect.withSpan(`Membership.${name}`));
 
 	const sendInvitation = (
 		invitationId: string,
