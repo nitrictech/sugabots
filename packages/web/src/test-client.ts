@@ -105,6 +105,7 @@ export const client = {
 		threads: {
 			list: vi.fn(),
 			get: vi.fn(),
+			activity: vi.fn(),
 			cancelTurn: vi.fn(),
 		},
 		toolApprovals: {

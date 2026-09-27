@@ -371,6 +371,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.threads.get.mockReturnValue(Effect.fail(new NotFound({ message: "No such thread" })));
+	client.api.threads.activity.mockReturnValue(
+		Effect.fail(new NotFound({ message: "No such thread" })),
+	);
 	client.api.workspaceAccess.mockReturnValue(
 		Effect.succeed({
 			role,

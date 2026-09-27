@@ -3,6 +3,7 @@ import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
 import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime } from "effect";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
+import { relations } from "./relations.ts";
 
 /**
  * The database, as a service.
@@ -20,7 +21,7 @@ import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
  */
 
 /** The drizzle handle every query is built on. */
-export type Executor = EffectPgDatabase;
+export type Executor = EffectPgDatabase<typeof relations>;
 
 /** How a query run through drizzle's effect driver can fail. */
 export type QueryFailure = EffectDrizzleQueryError | SqlError;
@@ -107,7 +108,7 @@ export const clientLayer = PgClient.layerConfig({ url: Config.Redacted("DATABASE
 /** Drizzle on whichever pool `PgClient` provides. */
 export const make = Effect.gen(function* () {
 	const client = yield* PgClient.PgClient;
-	const root = yield* makeWithDefaults();
+	const root = yield* makeWithDefaults({ relations });
 	return Database.of({
 		execute: (run) => run(root),
 		transaction: transactional(client),

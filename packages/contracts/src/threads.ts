@@ -286,24 +286,6 @@ export const messageSchema = Schema.Struct({
 
 export type Message = typeof messageSchema.Type;
 
-const measuredCountSchema = Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)));
-
-export const threadUsageSchema = Schema.Struct({
-	modelCalls: measuredCountSchema,
-	inputTokens: measuredCountSchema,
-	outputTokens: measuredCountSchema,
-	totalTokens: measuredCountSchema,
-	reportedCost: Schema.NullOr(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
-	latestContext: Schema.NullOr(
-		Schema.Struct({
-			usedTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-			capacityTokens: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
-		}),
-	),
-});
-
-export type ThreadUsage = typeof threadUsageSchema.Type;
-
 export const MAX_THREAD_SUMMARY_CHARACTERS = 4_000;
 
 export const threadSummarySchema = Schema.Struct({
@@ -317,6 +299,7 @@ export const threadSummarySchema = Schema.Struct({
 
 export type ThreadSummary = typeof threadSummarySchema.Type;
 
+/** A conversation as it is read: the thread, a page of its messages, and who is in it. */
 export const threadDetailsSchema = Schema.Struct({
 	thread: threadSchema,
 	capabilities: Schema.optional(
@@ -324,14 +307,8 @@ export const threadDetailsSchema = Schema.Struct({
 			approveToolCalls: Schema.Boolean,
 		}),
 	),
-	activeTurnId: Schema.NullOr(uuidSchema),
 	routineExecution: Schema.NullOr(routineExecutionSchema),
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),
-	/**
-	 * Who has written in the thread in the last week, or in its last 100
-	 * messages when that reaches further back, most recently active first.
-	 */
-	recentParticipants: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	/**
 	 * The pod's agents, whether or not they have spoken. Who a mention can name,
 	 * which is wider than who has joined.
@@ -339,17 +316,21 @@ export const threadDetailsSchema = Schema.Struct({
 	crew: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),
-	summary: Schema.NullOr(threadSummarySchema),
-	/**
-	 * Whether the workspace has chosen a model for its Scribe, and so whether
-	 * summaries happen. Absent rather than false when the caller did not ask
-	 * for it, so a client must test for `false` to show the unconfigured state.
-	 */
-	summaryEnabled: Schema.optional(Schema.Boolean),
-	usage: threadUsageSchema,
 });
 
 export type ThreadDetails = typeof threadDetailsSchema.Type;
+
+/** What a thread's sidebar shows about it. */
+export const threadActivitySchema = Schema.Struct({
+	summary: Schema.NullOr(threadSummarySchema),
+	/**
+	 * Who has written in the thread in the last week, or in its last 100
+	 * messages when that reaches further back, most recently active first.
+	 */
+	recentParticipants: Schema.mutable(Schema.Array(threadParticipantSchema)),
+});
+
+export type ThreadActivity = typeof threadActivitySchema.Type;
 
 export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,

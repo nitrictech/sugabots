@@ -65,21 +65,10 @@ const collaboration: ThreadDetails = {
 		updatedAt: "2026-09-18T06:05:00.000Z",
 	},
 	capabilities: { approveToolCalls: true },
-	activeTurnId: null,
 	routineExecution: null,
 	participants: [answerer, asker],
-	recentParticipants: [],
 	crew: [asker, answerer],
 	olderMessagesCursor: null,
-	summary: null,
-	usage: {
-		modelCalls: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		totalTokens: 0,
-		reportedCost: null,
-		latestContext: null,
-	},
 	messages: [
 		message(
 			"1",

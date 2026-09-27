@@ -7,6 +7,7 @@ import type {
 	Pod,
 	SessionUser,
 	SystemAgent,
+	ThreadActivity,
 	ThreadDetails,
 	WorkspaceRole,
 } from "@sugabots/contracts";
@@ -90,7 +91,7 @@ const ADMIN_PERMISSIONS = {
 	configureBuiltInAgents: true,
 };
 
-/** What a chat's thread holds: its messages, and who has written in it. */
+/** What a chat's thread holds: its messages, and who is in it. */
 export function storyChatDetails(agent: Agent, messages: Message[] = []): ThreadDetails {
 	const chat = storyChatFor(agent);
 	const bot = {
@@ -124,27 +125,25 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 			updatedAt: chat.updatedAt,
 		},
 		capabilities: { approveToolCalls: true },
-		activeTurnId: null,
 		routineExecution: null,
 		participants: [person, bot],
-		recentParticipants: [bot, person],
 		crew: [bot],
 		olderMessagesCursor: null,
+		messages,
+	};
+}
+
+/** What a chat's sidebar shows: a summary, and who has written lately. */
+export function storyChatActivity(agent: Agent, messages: Message[] = []): ThreadActivity {
+	const chat = storyChatFor(agent);
+	const details = storyChatDetails(agent, messages);
+	return {
 		summary: {
 			content: `${agent.name} has been keeping things moving.`,
 			sourceMessageId: messages.at(-1)?.id ?? chat.mainThreadId,
 			updatedAt: chat.updatedAt,
 		},
-		summaryEnabled: true,
-		usage: {
-			modelCalls: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			totalTokens: 0,
-			reportedCost: null,
-			latestContext: null,
-		},
-		messages,
+		recentParticipants: [...details.participants].reverse(),
 	};
 }
 
@@ -261,6 +260,12 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 		http.get(api("/threads/:threadId/events"), quietStream),
+		http.get(api("/threads/:threadId/activity"), ({ params }) => {
+			const bot = botForThread(String(params.threadId));
+			return bot
+				? HttpResponse.json(storyChatActivity(bot, messages[bot.id]))
+				: new HttpResponse(null, { status: 404 });
+		}),
 		http.get(api("/threads/:threadId"), ({ params }) => {
 			const bot = botForThread(String(params.threadId));
 			return bot

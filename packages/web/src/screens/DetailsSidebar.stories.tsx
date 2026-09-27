@@ -2,7 +2,8 @@ import type {
 	Connection,
 	Routine,
 	SessionUser,
-	ThreadDetails,
+	SystemAgent,
+	ThreadActivity,
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -35,44 +36,26 @@ const people: ThreadParticipant[] = [
 	image: null,
 }));
 
-const details: ThreadDetails = {
-	thread: {
-		id: "0199a3a0-0000-7000-8000-000000000510",
-		workspaceId: WORKSPACE,
-		podId: revenue.id,
-		hostAgentId: growthDesk.id,
-		chatId: "0199a3a0-0000-7000-8000-000000000511",
-		type: "chat",
-		title: "Chat",
-		status: "done",
-		parentThreadId: null,
-		initiatorUserId: user.id,
-		createdAt: "2026-09-25T06:00:00.000Z",
-		updatedAt: "2026-09-25T06:12:00.000Z",
-	},
-	activeTurnId: null,
-	routineExecution: null,
-	participants: people,
-	recentParticipants: people,
-	crew: [],
-	messages: [],
-	olderMessagesCursor: null,
+const threadId = "0199a3a0-0000-7000-8000-000000000510";
+
+const activity: ThreadActivity = {
 	summary: {
 		content:
 			"Overnight outbound queued 38 leads and six have replied, including both Northwind accounts asking about pricing. Jay wants short replies drafted. Checkout timeouts are back; Linear Handler found 41 events and is waiting on approval to open an issue. Nothing else is outstanding from this week.",
 		sourceMessageId: "0199a3a0-0000-7000-8000-000000000512",
 		updatedAt: "2026-09-25T06:12:00.000Z",
 	},
-	summaryEnabled: true,
-	usage: {
-		modelCalls: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		totalTokens: 0,
-		reportedCost: null,
-		latestContext: null,
-	},
-} as ThreadDetails;
+	recentParticipants: people,
+};
+
+const scribe: SystemAgent = {
+	key: "summarise",
+	name: "Scribe",
+	description: null,
+	color: "orange",
+	face: "arc",
+	model: "claude-sonnet-4-5",
+} as SystemAgent;
 
 function routine(id: string, name: string, expression: string): Routine {
 	return {
@@ -127,13 +110,23 @@ const meta = preview.meta({
 	component: DetailsSidebar,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { agent: growthDesk, pod: revenue, details, user, onClose: fn() },
+	args: { agent: growthDesk, pod: revenue, threadId, user, onClose: fn() },
 	decorators: [
-		function WithQueries(Story) {
+		function WithQueries(Story, context) {
+			const scribeHasModel = context.parameters.scribeHasModel !== false;
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
 				client.setQueryData(["connections", revenue.id], connections);
+				client.setQueryData(["workspaces"], [{ id: WORKSPACE, name: "Nitric", slug: "nitric" }]);
+				client.setQueryData(
+					["built-in-agents", WORKSPACE],
+					[scribeHasModel ? scribe : { ...scribe, model: null }],
+				);
+				client.setQueryData(
+					["thread-activity", threadId],
+					scribeHasModel ? activity : { ...activity, summary: null },
+				);
 				return client;
 			});
 			useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -186,7 +179,7 @@ export const CloseOnAPhone = meta.story({
 
 /** Before the Scribe has a model there is no summary, and it says so rather than staying blank. */
 export const ScribeNotSetUp = meta.story({
-	args: { details: { ...details, summary: null, summaryEnabled: false } },
+	parameters: { scribeHasModel: false },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(/The Scribe writes these/)).toBeVisible();
 	},

@@ -387,26 +387,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(scope).toBeUndefined();
 	});
 
-	it("reports summaries as off until the workspace has chosen a Scribe model", async () => {
-		await onDatabase((db) =>
-			db
-				.update(agent)
-				.set({ model: null })
-				.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, "summarise"))),
-		);
-		const created = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Anything to summarise?",
-		});
-
-		const details = await store.getVisible(created.thread.id, memberId);
-
-		expect(details?.summaryEnabled).toBe(false);
-	});
-
 	it("loads a Chat thread with its participants and first message", async () => {
 		const details = await createThread({
 			workspaceId,
@@ -684,7 +664,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				]),
 		);
 		const recentIds = async () =>
-			(await store.getVisible(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
+			(await store.activity(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
 
 		expect(await recentIds()).toEqual([memberId, agentId, outsiderId]);
 
@@ -694,47 +674,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				.values(Array.from({ length: 100 }, () => written({ authorUserId: memberId }, daysAgo(1)))),
 		);
 		expect(await recentIds()).toEqual([memberId, agentId]);
-	});
-
-	it("aggregates measured turn usage without inventing unavailable values", async () => {
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Measure this thread",
-		});
-		const triggerMessageId = details.messages[0]?.id;
-		if (!triggerMessageId) {
-			throw new Error("Thread test has no trigger message");
-		}
-
-		await onDatabase((db) =>
-			db.insert(turn).values([
-				{
-					threadId: details.thread.id,
-					agentId,
-					triggerMessageId,
-					status: "done",
-					model: "claude-opus-4-1-20250805",
-					usage: { modelCalls: 2, inputTokens: 1_200, outputTokens: 300, totalTokens: 1_500 },
-					reportedCost: "0.0125",
-					contextTokens: 1_200,
-					contextCapacity: 200_000,
-					startedAt: new Date("2026-09-10T04:00:00.000Z"),
-					finishedAt: new Date("2026-09-10T04:00:03.000Z"),
-				},
-			]),
-		);
-
-		expect((await store.getVisible(details.thread.id, memberId))?.usage).toEqual({
-			modelCalls: 2,
-			inputTokens: 1_200,
-			outputTokens: 300,
-			totalTokens: 1_500,
-			reportedCost: 0.0125,
-			latestContext: { usedTokens: 1_200, capacityTokens: 200_000 },
-		});
 	});
 
 	it("queues and persists a fresh summary after a completed exchange", async () => {
@@ -840,16 +779,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				),
 		);
 		expect(summariesThread?.title).toBe("Summaries of Verify the release");
-		expect(refreshed?.summary).toMatchObject({
+		expect((await store.activity(details.thread.id, memberId))?.summary).toMatchObject({
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
-		});
-		expect(refreshed?.usage).toMatchObject({
-			modelCalls: 2,
-			inputTokens: 70,
-			outputTokens: 11,
-			totalTokens: 81,
-			latestContext: { usedTokens: 30, capacityTokens: 200_000 },
 		});
 
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");

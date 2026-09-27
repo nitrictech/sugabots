@@ -1,41 +1,31 @@
 import type {
 	Thread,
+	ThreadActivity,
 	ThreadDetails,
 	ThreadHistoryQuery,
+	ThreadParticipant,
 	ThreadSummary,
-	ThreadUsage,
+	WorkspaceRole,
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query } from "../../database/database.ts";
 import { isUuid } from "../../database/ids.ts";
 import type * as schema from "../../database/schema.ts";
-import {
-	agent,
-	message,
-	routineExecution,
-	thread,
-	threadSummary,
-	turn,
-	user,
-} from "../../database/schema.ts";
-import { podStandingFor, reachesPod } from "../../workspaces/access.ts";
-import {
-	findRunnableSystemAgent,
-	SUMMARISE_SYSTEM_AGENT,
-} from "../../workspaces/agents/system-agents.ts";
-import type { PodPermission } from "../../workspaces/permissions.ts";
+import { podMember, thread, threadSummary, workspaceMember } from "../../database/schema.ts";
+import { reachesPod } from "../../workspaces/access.ts";
+import { mayInPod } from "../../workspaces/permissions.ts";
 import { hasPendingResponseJob } from "../jobs/queue.ts";
-import { findRoutineExecutionId, toRoutineExecution } from "../routines/execution.ts";
+import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
+import { toCollaborationPart } from "./collaborations.ts";
 import {
-	loadCrew,
-	loadParticipants,
-	loadRecentParticipants,
-	participantColumns,
+	type ParticipantRow,
+	recentParticipantsOf,
 	toMessage,
+	toParticipant,
 } from "./participants.ts";
-import { loadPlacedParts } from "./placed-parts.ts";
+import { toToolCallPart } from "./tool-calls.ts";
 import { visibleThread } from "./visibility.ts";
 
 export interface ThreadStore {
@@ -51,6 +41,11 @@ export interface ThreadStore {
 		userId: string,
 		history?: ThreadHistoryQuery,
 	): Effect.Effect<ThreadDetails | undefined, InvalidThreadHistoryCursor, Database>;
+	/** What the thread's sidebar shows, if this person may see the thread. */
+	activity(
+		threadId: string,
+		userId: string,
+	): Effect.Effect<ThreadActivity | undefined, never, Database>;
 }
 
 export class InvalidThreadHistoryCursor extends Data.TaggedError("InvalidThreadHistoryCursor") {
@@ -91,16 +86,30 @@ export function threadStore(): ThreadStore {
 			history: ThreadHistoryQuery = { limit: DEFAULT_THREAD_HISTORY_LIMIT },
 		) {
 			yield* Effect.annotateCurrentSpan("thread.id", threadId);
-			const visible = yield* query((db) => visibleThread(db, threadId, userId));
-			if (!visible) {
-				return undefined;
-			}
-			// Decoded after the visibility check, so a bad cursor cannot be used
-			// to tell a hidden thread from a missing one.
+			if (!isUuid(threadId)) return undefined;
+			// Before the query, and whether or not the thread is there, so a bad cursor
+			// says nothing about the thread.
 			const before = history.cursor ? yield* decodeHistoryCursor(history.cursor) : undefined;
-			return yield* query((db) =>
-				loadDetails(db, visible, userId, { limit: history.limit, before }),
+			const row = yield* query((db) =>
+				loadConversation(db, threadId, userId, history.limit, before),
 			);
+			return row ? toThreadDetails(row, userId, history.limit) : undefined;
+		}),
+
+		activity: Effect.fn("ThreadStore.activity")(function* (threadId: string, userId: string) {
+			if (!isUuid(threadId)) return undefined;
+			const [row] = yield* query((db) =>
+				db
+					.select({ summary: threadSummary, recentParticipants: recentParticipantsOf(thread.id) })
+					.from(thread)
+					.leftJoin(threadSummary, eq(threadSummary.threadId, thread.id))
+					.where(and(eq(thread.id, threadId), reachesPod(thread.podId, userId))),
+			);
+			if (!row) return undefined;
+			return {
+				summary: row.summary ? toThreadSummary(row.summary) : null,
+				recentParticipants: row.recentParticipants.map(toParticipant),
+			};
 		}),
 	};
 }
@@ -111,181 +120,134 @@ interface HistoryPoint {
 	id: string;
 }
 
-const loadDetails = Effect.fn("ThreadStore.loadDetails")(function* (
+/**
+ * The thread, a page of its messages with their authors and the parts placed in
+ * them, its participants, its pod's crew, and the facts deciding what the
+ * caller may approve: one statement. Nothing when the caller does not reach
+ * the thread's pod.
+ */
+const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 	db: Executor,
-	threadRow: schema.ThreadRow,
+	threadId: string,
 	userId: string,
-	history: { limit: number; before?: HistoryPoint } = { limit: DEFAULT_THREAD_HISTORY_LIMIT },
+	limit: number,
+	before: HistoryPoint | undefined,
 ) {
-	const participants = yield* loadParticipants(db, threadRow.id);
-	const crew = yield* loadCrew(db, { id: threadRow.podId, workspaceId: threadRow.workspaceId });
+	const person = { columns: { id: true, name: true, image: true } } as const;
+	const agentIdentity = {
+		columns: { id: true, name: true, handle: true, color: true, face: true },
+	} as const;
+	return yield* db.query.thread.findFirst({
+		where: { id: threadId, RAW: (row) => reachesPod(row.podId, userId) },
+		extras: {
+			running: (row) => hasPendingResponseJob(sql`${row.id}`),
+			routineExecutionId: (row) => routineExecutionIdOf(row.id),
+			workspaceRole: (row) => sql<WorkspaceRole | null>`(
+				select ${workspaceMember.role} from ${workspaceMember}
+				where ${workspaceMember.workspaceId} = ${row.workspaceId} and ${workspaceMember.userId} = ${userId}
+			)`,
+			isPodMember: (row) => sql<boolean>`exists (
+				select 1 from ${podMember}
+				where ${podMember.podId} = ${row.podId} and ${podMember.userId} = ${userId}
+			)`,
+		},
+		with: {
+			pod: {
+				columns: { kind: true, ownerId: true },
+				with: {
+					agents: {
+						...agentIdentity,
+						where: { systemAgentKey: { isNull: true } },
+						orderBy: { name: "asc" },
+					},
+				},
+			},
+			participants: {
+				columns: {},
+				orderBy: { createdAt: "asc", id: "asc" },
+				with: { user: person, agent: agentIdentity },
+			},
+			routineExecution: true,
+			messages: {
+				// One more than the page, so an older page is known to exist without a count.
+				limit: limit + 1,
+				orderBy: { createdAt: "desc", id: "desc" },
+				...(before && {
+					where: {
+						RAW: (row) => sql`(${row.createdAt}, ${row.id}) < (${before.createdAt}, ${before.id})`,
+					},
+				}),
+				with: {
+					authorUser: person,
+					authorAgent: agentIdentity,
+					// A failed reply's reason lives on its turn.
+					turn: { columns: { error: true } },
+					toolCalls: {
+						orderBy: { startedAt: "asc", id: "asc" },
+						with: { decidedBy: { columns: { name: true } } },
+					},
+					collaborations: { with: { collaborator: { columns: { name: true } } } },
+				},
+			},
+		},
+	});
+});
 
-	// One more than the page, so we know whether an older page exists without
-	// a second count query.
-	const { before } = history;
-	const page = yield* db
-		.select({
-			message,
-			failure: turn.error,
-			...participantColumns,
-		})
-		.from(message)
-		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		// A failed reply's reason lives on its turn.
-		.leftJoin(turn, eq(turn.id, message.turnId))
-		.where(
-			and(
-				eq(message.threadId, threadRow.id),
-				before
-					? or(
-							lt(message.createdAt, before.createdAt),
-							and(eq(message.createdAt, before.createdAt), lt(message.id, before.id)),
-						)
-					: undefined,
-			),
-		)
-		.orderBy(desc(message.createdAt), desc(message.id))
-		.limit(history.limit + 1);
-	const hasOlder = page.length > history.limit;
-	const messages = page.slice(0, history.limit).reverse();
-	const oldest = messages[0]?.message;
-	const placed = yield* loadPlacedParts(
-		db,
-		messages.map(({ message: row }) => row.id),
-	);
+type Conversation = NonNullable<Effect.Success<ReturnType<typeof loadConversation>>>;
 
-	const [activeTurn] = yield* db
-		.select({ id: turn.id })
-		.from(turn)
-		.where(and(eq(turn.threadId, threadRow.id), inArray(turn.status, ["running", "waiting"])))
-		.orderBy(desc(turn.startedAt), desc(turn.id))
-		.limit(1);
-	const [summaryRow] = yield* db
-		.select()
-		.from(threadSummary)
-		.where(eq(threadSummary.threadId, threadRow.id))
-		.limit(1);
-	const [pending] = yield* db
-		.select({ running: hasPendingResponseJob(sql`${threadRow.id}::uuid`) })
-		.from(thread)
-		.where(eq(thread.id, threadRow.id));
-	const [execution] =
-		threadRow.type === "routine"
-			? yield* db
-					.select()
-					.from(routineExecution)
-					.where(eq(routineExecution.threadId, threadRow.id))
-					.limit(1)
-			: [];
-
-	const routineExecutionId = yield* findRoutineExecutionId(db, threadRow.id);
-	// A thread whose pod has gone is a thread nobody may decide anything in,
-	// which is what a standing nobody holds says.
-	const standing = yield* podStandingFor(db, threadRow.podId, userId);
-	const may = (permission: PodPermission) => standing?.may(permission) ?? false;
-
+function toThreadDetails(row: Conversation, userId: string, limit: number): ThreadDetails {
+	const actor = { userId, workspaceRole: row.workspaceRole ?? undefined };
+	const pod = { kind: row.pod.kind, ownerId: row.pod.ownerId, isExplicitMember: row.isPodMember };
+	const page = row.messages.slice(0, limit).reverse();
+	const oldest = page[0];
 	return {
-		thread: toThread(threadRow, pending?.running ?? false),
+		thread: toThread(row, row.running),
 		// What this person may do with the approvals this thread raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: may(routineExecutionId ? "approval.routine.decide" : "approval.decide"),
-		},
-		activeTurnId: activeTurn?.id ?? null,
-		routineExecution: execution ? toRoutineExecution(execution) : null,
-		participants,
-		recentParticipants: yield* loadRecentParticipants(db, threadRow.id),
-		crew,
-		messages: messages.map(({ message: row, failure, ...author }) =>
-			toMessage(row, author, placed(row.id), failure),
-		),
-		olderMessagesCursor: hasOlder && oldest ? encodeHistoryCursor(oldest) : null,
-		summary: summaryRow ? toThreadSummary(summaryRow) : null,
-		summaryEnabled: yield* scribeIsSetUp(db, threadRow.workspaceId),
-		usage: yield* loadUsage(db, threadRow),
-	};
-});
-
-/**
- * Whether the workspace has chosen a model for its Scribe, which is what
- * decides whether summaries happen at all.
- */
-const scribeIsSetUp = Effect.fn("ThreadStore.scribeIsSetUp")(function* (
-	db: Executor,
-	workspaceId: string,
-) {
-	return (yield* findRunnableSystemAgent(db, workspaceId, SUMMARISE_SYSTEM_AGENT)) !== undefined;
-});
-
-/**
- * What the thread has cost, summed over its own turns and its system agents' turns
- * in child threads, since those tokens were spent because of this conversation.
- *
- * A total is reported only when every accounted turn measured it. A partial
- * sum would look like a smaller number rather than an unknown one, and the
- * product rule is that an unknown cost is shown as unavailable, never invented.
- */
-const loadUsage = Effect.fn("ThreadStore.loadUsage")(function* (
-	db: Executor,
-	threadRow: schema.ThreadRow,
-) {
-	const measured = (field: string) =>
-		sql<number>`count(${turn.usage} ->> ${field}) filter (where ${turn.usage} is not null)`.mapWith(
-			Number,
-		);
-	const summed = (field: string) => sql<string | null>`sum((${turn.usage} ->> ${field})::numeric)`;
-
-	const [totals] = yield* db
-		.select({
-			accountedTurns: sql<number>`count(*) filter (where ${turn.usage} is not null)`.mapWith(
-				Number,
+			approveToolCalls: mayInPod(
+				actor,
+				row.routineExecutionId ? "approval.routine.decide" : "approval.decide",
+				pod,
 			),
-			modelCallsMeasured: measured("modelCalls"),
-			modelCalls: summed("modelCalls"),
-			inputTokensMeasured: measured("inputTokens"),
-			inputTokens: summed("inputTokens"),
-			outputTokensMeasured: measured("outputTokens"),
-			outputTokens: summed("outputTokens"),
-			totalTokensMeasured: measured("totalTokens"),
-			totalTokens: summed("totalTokens"),
-			reportedCostMeasured:
-				sql<number>`count(${turn.reportedCost}) filter (where ${turn.usage} is not null)`.mapWith(
-					Number,
-				),
-			reportedCost: sql<
-				string | null
-			>`sum(${turn.reportedCost}) filter (where ${turn.usage} is not null)`,
-		})
-		.from(turn)
-		.innerJoin(thread, eq(thread.id, turn.threadId))
-		.where(or(eq(thread.id, threadRow.id), eq(thread.parentThreadId, threadRow.id)));
+		},
+		routineExecution: row.routineExecution ? toRoutineExecution(row.routineExecution) : null,
+		participants: row.participants.map(({ user: person, agent: participant }) =>
+			toParticipant(authorRow(person, participant)),
+		),
+		crew: row.pod.agents.map((crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent })),
+		messages: page.map((stored) =>
+			toMessage(
+				stored,
+				authorRow(stored.authorUser, stored.authorAgent),
+				{
+					toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
+					collaborations: stored.collaborations.map((made) =>
+						toCollaborationPart(made, made.collaborator.name),
+					),
+				},
+				stored.turn?.error,
+			),
+		),
+		olderMessagesCursor: row.messages.length > limit && oldest ? encodeHistoryCursor(oldest) : null,
+	};
+}
 
-	const [latest] = yield* db
-		.select({ usedTokens: turn.contextTokens, capacityTokens: turn.contextCapacity })
-		.from(turn)
-		.where(and(eq(turn.threadId, threadRow.id), isNotNull(turn.contextTokens)))
-		.orderBy(desc(turn.startedAt), desc(turn.id))
-		.limit(1);
-
-	const accounted = totals?.accountedTurns ?? 0;
-	const whenAllMeasured = (total: string | null | undefined, measuredCount: number | undefined) =>
-		accounted === 0 || measuredCount !== accounted || total == null ? null : Number(total);
-
+function authorRow(
+	person: { id: string; name: string; image: string | null } | null,
+	author: Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face"> | null,
+): ParticipantRow {
 	return {
-		modelCalls:
-			whenAllMeasured(totals?.modelCalls, totals?.modelCallsMeasured) ??
-			(accounted === 0 ? 0 : null),
-		inputTokens: whenAllMeasured(totals?.inputTokens, totals?.inputTokensMeasured),
-		outputTokens: whenAllMeasured(totals?.outputTokens, totals?.outputTokensMeasured),
-		totalTokens: whenAllMeasured(totals?.totalTokens, totals?.totalTokensMeasured),
-		reportedCost: whenAllMeasured(totals?.reportedCost, totals?.reportedCostMeasured),
-		latestContext:
-			latest?.usedTokens != null
-				? { usedTokens: latest.usedTokens, capacityTokens: latest.capacityTokens }
-				: null,
-	} satisfies ThreadUsage;
-});
+		userId: person?.id ?? null,
+		userName: person?.name ?? null,
+		userImage: person?.image ?? null,
+		agentId: author?.id ?? null,
+		agentName: author?.name ?? null,
+		agentHandle: author?.handle ?? null,
+		agentColor: author?.color ?? null,
+		agentFace: author?.face ?? null,
+	};
+}
 
 function toThreadSummary(row: schema.ThreadSummaryRow): ThreadSummary {
 	return {
