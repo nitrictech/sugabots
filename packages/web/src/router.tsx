@@ -6,7 +6,6 @@ import {
 	createRoute,
 	createRouter,
 	Link,
-	lazyRouteComponent,
 	Navigate,
 	Outlet,
 	redirect,
@@ -14,7 +13,7 @@ import {
 	useParams,
 	useRouteContext,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { type ComponentType, lazy, useEffect, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
@@ -29,19 +28,39 @@ import { ConversationList, type ListScope } from "@/shell/ConversationList.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
-const AgentPage = lazyRouteComponent(() => import("@/screens/AgentPage.tsx"), "AgentPage");
-const Invite = lazyRouteComponent(() => import("@/screens/Invite.tsx"), "Invite");
-const Login = lazyRouteComponent(() => import("@/screens/Login.tsx"), "Login");
-const Onboarding = lazyRouteComponent(() => import("@/screens/Onboarding.tsx"), "Onboarding");
+const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
+const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
+const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
+const Onboarding = lazyNamed(() => import("@/screens/Onboarding.tsx"), "Onboarding");
 /*
  * The settings sections are a chunk of their own; the window they open in is
  * not. `SettingsDialog` is imported eagerly so the click opens something, and
  * its `Suspense` holds the space the sections land in.
  */
-const WorkspaceSettings = lazyRouteComponent(
+const WorkspaceSettings = lazyNamed(
 	() => import("@/screens/WorkspaceSettings.tsx"),
 	"WorkspaceSettings",
 );
+
+/**
+ * A screen's named export as a component that loads its module on first render,
+ * with `preload` to start the load sooner. The load happens once and both share it.
+ *
+ * TanStack Router's `lazyRouteComponent` is not used because it calls `use()`
+ * only while the module is still loading, and React 19.3 reports a render that
+ * suspends on `use()` and then finishes without calling it as an error.
+ */
+function lazyNamed<Name extends string, Props>(
+	load: () => Promise<Record<Name, ComponentType<Props>>>,
+	name: Name,
+) {
+	let loading: Promise<{ default: ComponentType<Props> }> | undefined;
+	const preload = () => {
+		loading ??= load().then((module) => ({ default: module[name] }));
+		return loading;
+	};
+	return Object.assign(lazy(preload), { preload });
+}
 
 /*
  * The routes, declared rather than generated.
@@ -364,7 +383,7 @@ const settingsSectionRoute = createRoute({
 const settingsMemberRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/members/$member",
-	loader: () => void WorkspaceSettings.preload?.(),
+	loader: () => void WorkspaceSettings.preload(),
 	component: SettingsMemberRoute,
 });
 
@@ -383,7 +402,7 @@ const settingsPodAgentRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
 		search.tab === "routines" ? { tab: "routines" } : {},
 	// The dialog waits for the rosters, so its code downloads alongside rather than after.
-	loader: () => void WorkspaceSettings.preload?.(),
+	loader: () => void WorkspaceSettings.preload(),
 	component: SettingsPodAgentRoute,
 });
 
@@ -395,7 +414,7 @@ const settingsPodRoute = createRoute({
 	}),
 	// A sign-in error shown for one pod must not follow you to the next.
 	remountDeps: ({ params }) => [params.workspace, params.pod],
-	loader: () => void WorkspaceSettings.preload?.(),
+	loader: () => void WorkspaceSettings.preload(),
 	component: SettingsPodRoute,
 });
 
@@ -403,7 +422,7 @@ const settingsPodRoute = createRoute({
 const settingsProviderRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/$provider",
-	loader: () => void WorkspaceSettings.preload?.(),
+	loader: () => void WorkspaceSettings.preload(),
 	component: SettingsProviderRoute,
 });
 
@@ -420,7 +439,7 @@ function SettingsProviderRoute() {
 const settingsSystemModelRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/system",
-	loader: () => void WorkspaceSettings.preload?.(),
+	loader: () => void WorkspaceSettings.preload(),
 	component: () => (
 		<SettingsLayout>
 			<WorkspaceSettings section="providers" systemModel />
