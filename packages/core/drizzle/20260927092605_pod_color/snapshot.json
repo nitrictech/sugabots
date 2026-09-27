@@ -7163,13 +7163,6 @@
       "table": "pod"
     },
     {
-      "value": "(\"kind\" = 'shared') = (\"color\" is not null)",
-      "name": "pod_shared_color_check",
-      "entityType": "checks",
-      "schema": "public",
-      "table": "pod"
-    },
-    {
       "value": "(\"kind\" = 'personal') = (\"slug\" = 'personal')",
       "name": "pod_personal_slug_check",
       "entityType": "checks",

@@ -153,7 +153,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 				.values({
 					workspaceId,
 					kind: "shared",
-					color: "green",
 					name: slug,
 					slug: `${slug}-${crypto.randomUUID()}`,
 					routing,

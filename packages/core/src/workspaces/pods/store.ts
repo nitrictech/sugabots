@@ -1,4 +1,5 @@
 import {
+	DEFAULT_POD_COLOR,
 	leastUsedPodColor,
 	PERSONAL_POD_SLUG,
 	type Pod,
@@ -162,7 +163,7 @@ const create: PodStore["create"] = (workspaceId, creator, { name, slug, color })
 						kind: "shared",
 						name,
 						slug,
-						color: color ?? leastUsedPodColor(taken.map((one) => one.color)),
+						color: color ?? leastUsedPodColor(taken.map((one) => podColorOf(one.color))),
 						createdById: creator.userId,
 					})
 					.onConflictDoNothing({
@@ -452,7 +453,7 @@ export function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
 		kind: row.kind,
 		name: row.name,
 		slug: row.slug,
-		color: row.color,
+		color: row.kind === "shared" ? podColorOf(row.color) : null,
 		routing: row.routing,
 		permissions,
 		createdAt: row.createdAt.toISOString(),
@@ -467,4 +468,9 @@ export function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
  */
 export function podSeenBy({ pod: row, actor, facts }: PodStanding): Pod {
 	return toPod(row, podPermissions(actor, facts));
+}
+
+/** A shared pod's stored colour, or the default when it has none. */
+function podColorOf(stored: PodColor | null): PodColor {
+	return stored ?? DEFAULT_POD_COLOR;
 }

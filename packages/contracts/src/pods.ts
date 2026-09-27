@@ -61,6 +61,9 @@ export const podColors = [
 
 export const podColorSchema = Schema.Literals(podColors);
 
+/** What a shared pod is drawn in when it has no colour of its own stored. */
+export const DEFAULT_POD_COLOR = podColors[0];
+
 export type PodColor = typeof podColorSchema.Type;
 
 /**

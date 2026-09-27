@@ -78,7 +78,6 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 					workspaceId,
 					ownerId: memberId,
 					kind: "shared",
-					color: "green",
 					name: "Room",
 					slug: `room-${suffix}`,
 					createdById: memberId,

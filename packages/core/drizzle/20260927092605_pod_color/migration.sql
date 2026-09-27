@@ -6,5 +6,4 @@ FROM (
 	FROM "pod"
 	WHERE "kind" = 'shared'
 ) AS "ranked"
-WHERE "pod"."id" = "ranked"."id";--> statement-breakpoint
-ALTER TABLE "pod" ADD CONSTRAINT "pod_shared_color_check" CHECK (("kind" = 'shared') = ("color" is not null));
+WHERE "pod"."id" = "ranked"."id";

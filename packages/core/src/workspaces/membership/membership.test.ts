@@ -458,7 +458,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.values({
 					workspaceId: workspace.id,
 					kind: "shared",
-					color: "green",
 					name: "Private",
 					slug: `private-${unique()}`,
 				})
@@ -500,7 +499,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.values({
 					workspaceId: workspace.id,
 					kind: "shared",
-					color: "green",
 					name: "Launch",
 					slug: `launch-${unique()}`,
 					createdById: bob.id,

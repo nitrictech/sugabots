@@ -94,7 +94,6 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				.values({
 					workspaceId: space.id,
 					kind: "shared",
-					color: "green",
 					name: "Room",
 					slug: `room-${suffix}`,
 					createdById: member.id,

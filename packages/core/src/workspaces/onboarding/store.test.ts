@@ -65,7 +65,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					workspaceId,
 					ownerId: adminId,
 					kind: "shared",
-					color: "green",
 					name: "Product",
 					slug: "product",
 					createdById: adminId,

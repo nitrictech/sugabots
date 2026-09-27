@@ -199,7 +199,8 @@ export const pod = pgTable(
 		name: text("name").notNull(),
 		slug: text("slug").notNull(),
 		// One of the contract's pod colour names, as `agent.color` is a bot's.
-		// Null on a Personal pod, which is drawn as its lock rather than a tile.
+		// Null reads as the default colour; a Personal pod is drawn as its lock
+		// rather than a tile, so its colour is never shown.
 		color: text("color").$type<PodColor>(),
 		// Whether non-chat threads use the Facilitator to choose speakers (ADR 004).
 		routing: jsonb("routing").$type<PodRouting>().notNull().default(DEFAULT_POD_ROUTING),
@@ -217,7 +218,6 @@ export const pod = pgTable(
 			"pod_personal_owner_check",
 			sql`${table.kind} = 'shared' or ${table.ownerId} is not null`,
 		),
-		check("pod_shared_color_check", sql`(${table.kind} = 'shared') = (${table.color} is not null)`),
 		check(
 			"pod_personal_slug_check",
 			sql`(${table.kind} = 'personal') = (${table.slug} = 'personal')`,
