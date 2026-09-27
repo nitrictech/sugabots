@@ -1,20 +1,16 @@
 import { NodeRuntime } from "@effect/platform-node";
-import { handleFromName, PERSONAL_POD_SLUG } from "@sugabots/contracts";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import {
-	agent,
-	pod,
-	podMember,
-	user,
-	workspace,
-	workspaceMember,
-} from "@sugabots/core/database/schema";
+import { pod, user, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
+import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
-import { provisionDefaultSearchProvider } from "@sugabots/core/providers/search-providers/store";
-import { ensureSystemAgents } from "@sugabots/core/workspaces/agents/system-agents";
-import { and, eq } from "drizzle-orm";
+import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
+import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
+import { and, eq, type SQL } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { Authentication } from "./auth/authentication.ts";
 import { API_BASE_PATH } from "./http/api.ts";
@@ -39,151 +35,86 @@ const seed = Effect.gen(function* () {
 	if (installation.isProduction) {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
+	const membership = yield* Membership.Service;
+	const administration = yield* PodAdministration.Service;
+	const pods = yield* PodRepository.Service;
+	const agents = yield* AgentRepository.Service;
 	const [existingAccount] = yield* query((db) =>
 		db.select({ id: user.id }).from(user).where(eq(user.email, EMAIL)),
 	);
 	if (!existingAccount) {
 		yield* signUp;
 	}
+	const [person] = yield* query((db) => db.select().from(user).where(eq(user.email, EMAIL)));
+	if (!person) {
+		return yield* Effect.die(new Error(`could not create ${EMAIL}`));
+	}
+	if (!person.emailVerified) {
+		yield* query((db) =>
+			db.update(user).set({ emailVerified: true }).where(eq(user.id, person.id)),
+		);
+	}
 
-	yield* query((db) =>
-		Effect.gen(function* () {
-			const [person] = yield* db.select().from(user).where(eq(user.email, EMAIL));
-			if (!person) {
-				return yield* Effect.die(new Error(`could not create ${EMAIL}`));
-			}
-			if (!person.emailVerified) {
-				yield* db.update(user).set({ emailVerified: true }).where(eq(user.id, person.id));
-			}
+	// Made the way the app makes one, so it has its system agents, search
+	// provider and the person's Personal pod. The system agents are left unset:
+	// the seed provisions no model provider, so naming a model would only make
+	// them look ready while nothing they need is configured.
+	const workspaceId = yield* membership
+		.create({ userId: person.id, details: { name: "Development", slug: "dev" } })
+		.pipe(
+			Effect.map((created) => created.id),
+			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
+		);
 
-			const [inserted] = yield* db
-				.insert(workspace)
-				.values({ name: "Development", slug: "dev" })
-				.onConflictDoNothing({ target: workspace.slug })
-				.returning();
-			const [existing] = inserted
-				? [inserted]
-				: yield* db.select().from(workspace).where(eq(workspace.slug, "dev"));
-			if (!existing) {
-				throw new Error("could not create the dev workspace");
-			}
+	const personal = yield* administration.provisionPersonal({ workspaceId, userId: person.id });
+	const supportId = yield* pods
+		.create(workspaceId, { creatorId: person.id, name: "Support", slug: "support" })
+		.pipe(
+			Effect.map((created) => created.id),
+			Effect.catchTag("PodSlugTaken", () =>
+				idOf(pod, and(eq(pod.workspaceId, workspaceId), eq(pod.slug, "support"))),
+			),
+		);
 
-			yield* db
-				.insert(workspaceMember)
-				.values({ workspaceId: existing.id, userId: person.id, role: "admin" })
-				.onConflictDoNothing({ target: [workspaceMember.workspaceId, workspaceMember.userId] });
+	const model = "claude-sonnet-4-20250514";
+	for (const seedling of [
+		{
+			name: "Linear Handler",
+			color: "green" as const,
+			face: "pill" as const,
+			description: "Reads and writes Linear on the team's behalf.",
+			podId: personal.id,
+		},
+		{
+			name: "Issue Triager",
+			color: "purple" as const,
+			face: "dot" as const,
+			description: "Sorts incoming issues every weekday morning.",
+			podId: personal.id,
+		},
+		{
+			name: "Customer Research",
+			color: "orange" as const,
+			face: "arc" as const,
+			description: "Digs through calls and notes for what customers asked for.",
+			podId: supportId,
+		},
+	]) {
+		yield* agents
+			.create(workspaceId, { createdById: person.id, agent: { ...seedling, model } })
+			.pipe(Effect.catchTag("AgentNameTaken", () => Effect.void));
+	}
 
-			yield* provisionDefaultSearchProvider(db, existing.id, person.id);
-
-			const pods = new Map<string, string>();
-			for (const [name, slug, kind] of [
-				["Personal", PERSONAL_POD_SLUG, "personal"],
-				["Support", "support", "shared"],
-			] as const) {
-				const [made] = yield* db
-					.insert(pod)
-					.values({
-						workspaceId: existing.id,
-						// A shared pod has no owner; a Personal one is its owner's alone.
-						ownerId: kind === "personal" ? person.id : null,
-						kind,
-						name,
-						slug,
-						createdById: person.id,
-					})
-					// A shared pod conflicts on its slug, a Personal one on its owner.
-					.onConflictDoNothing()
-					.returning();
-
-				const [row] = made
-					? [made]
-					: yield* db
-							.select()
-							.from(pod)
-							.where(
-								and(
-									eq(pod.workspaceId, existing.id),
-									eq(pod.slug, slug),
-									// Every Personal pod is `personal`; this person's is the one they own.
-									kind === "personal" ? eq(pod.ownerId, person.id) : undefined,
-								),
-							);
-				if (!row) {
-					throw new Error(`could not create #${slug}`);
-				}
-				pods.set(slug, row.id);
-
-				yield* db
-					.insert(podMember)
-					.values({ workspaceId: existing.id, podId: row.id, userId: person.id })
-					.onConflictDoNothing({ target: [podMember.podId, podMember.userId] });
-			}
-
-			const model = "claude-sonnet-4-20250514";
-
-			// One pair for the workspace, serving every pod above, and left unset: the
-			// seed provisions no model provider, so naming a model here would only make
-			// them look ready while nothing they need is configured. Choosing one is
-			// what the Built-in agents screen is for.
-			yield* ensureSystemAgents(db, { workspaceId: existing.id, createdById: person.id });
-
-			for (const seedling of [
-				{
-					name: "Linear Handler",
-					color: "green" as const,
-					face: "pill" as const,
-					description: "Reads and writes Linear on the team's behalf.",
-					pod: PERSONAL_POD_SLUG,
-				},
-				{
-					name: "Issue Triager",
-					color: "purple" as const,
-					face: "dot" as const,
-					description: "Sorts incoming issues every weekday morning.",
-					pod: PERSONAL_POD_SLUG,
-				},
-				{
-					name: "Customer Research",
-					color: "orange" as const,
-					face: "arc" as const,
-					description: "Digs through calls and notes for what customers asked for.",
-					pod: "support",
-				},
-			]) {
-				const podId = pods.get(seedling.pod);
-				if (!podId) throw new Error(`could not find #${seedling.pod}`);
-				const [made] = yield* db
-					.insert(agent)
-					.values({
-						workspaceId: existing.id,
-						podId,
-						createdById: person.id,
-						name: seedling.name,
-						handle: handleFromName(seedling.name),
-						description: seedling.description,
-						color: seedling.color,
-						face: seedling.face,
-						model,
-					})
-					.onConflictDoNothing({ target: [agent.podId, agent.name] })
-					.returning();
-
-				const [row] = made
-					? [made]
-					: yield* db
-							.select()
-							.from(agent)
-							.where(and(eq(agent.podId, podId), eq(agent.name, seedling.name)));
-				if (!row) {
-					throw new Error(`could not create ${seedling.name}`);
-				}
-			}
-
-			console.log(`workspace ${existing.slug}, administered by ${EMAIL} (password: ${PASSWORD})`);
-			console.log("pods Personal and Support, three agents between them");
-		}),
-	);
+	console.log(`workspace dev, administered by ${EMAIL} (password: ${PASSWORD})`);
+	console.log("pods Personal and Support, three agents between them");
 });
+
+/** The id of the one row of `table` matching `where`, which a previous run made. */
+const idOf = (table: typeof workspace | typeof pod, where: SQL | undefined) =>
+	Effect.flatMap(
+		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
+		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
+	);
 
 /** Through the same route the web app signs up with. */
 const signUp = Effect.gen(function* () {
@@ -219,12 +150,22 @@ const seedAccounts = Accounts.layerNoDeps.pipe(
 seed.pipe(
 	Effect.scoped,
 	Effect.provide(
-		Authentication.layerNoDeps.pipe(
-			Layer.provide([
-				seedAccounts,
-				Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
-			]),
-			Layer.provideMerge(Layer.mergeAll(databaseLayer, Installation.layer)),
+		Layer.mergeAll(
+			Authentication.layerNoDeps,
+			Membership.layer,
+			PodAdministration.layer,
+			PodRepository.layer,
+			AgentRepository.layer,
+		).pipe(
+			Layer.provideMerge(
+				Layer.mergeAll(
+					Ids.layer,
+					Credentials.layer,
+					Installation.layer,
+					seedAccounts,
+					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+				).pipe(Layer.provideMerge(databaseLayer)),
+			),
 		),
 	),
 	NodeRuntime.runMain,

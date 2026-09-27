@@ -3,9 +3,9 @@ import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Database, Executor } from "../database/database.ts";
 import { query } from "../database/database.ts";
-import { isUuid } from "../database/ids.ts";
 import type * as schema from "../database/schema.ts";
 import { agent, pod, podMember, workspace, workspaceMember } from "../database/schema.ts";
+import { isUuid } from "../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
 import {
 	type Actor,

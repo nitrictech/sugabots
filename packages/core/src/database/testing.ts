@@ -1,4 +1,6 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { type Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Credentials } from "../credentials/credentials.ts";
+import { Ids } from "../ids/ids.ts";
 import {
 	Database,
 	type Executor,
@@ -22,13 +24,24 @@ import {
  * One runtime for the process, so every test file shares one pool.
  */
 
-export const databaseForTests = ManagedRuntime.make(layer);
+/**
+ * What the process provides every service once, as `index.ts` does: here the
+ * test database, real ids, and credentials sealed under a fixed test key.
+ */
+export const testInfrastructure = Layer.mergeAll(
+	Ids.layer,
+	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
+).pipe(Layer.provideMerge(layer));
+
+export type TestInfrastructure = Layer.Success<typeof testInfrastructure>;
+
+export const databaseForTests = ManagedRuntime.make(testInfrastructure);
 
 /** Closes the pool. Call from `afterAll` in any file that uses `onPostgres`. */
 export const closeDatabase = (): Promise<void> => databaseForTests.dispose();
 
 /** Runs one Effect against the test database. */
-export const runOnPostgres = effectRunner(databaseForTests);
+export const runOnPostgres = effectRunner<TestInfrastructure>(databaseForTests);
 
 /** Runs one query against the test database, for a case's fixtures and checks. */
 export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailure>): Promise<A> =>
@@ -63,6 +76,21 @@ export function promising<R>(run: RunEffect<R>) {
 }
 
 export const onPostgres = promising(runOnPostgres);
+
+/**
+ * `service`, built by `layer` over the test infrastructure, with its methods
+ * returning promises. Call it from `beforeAll`, so a file whose cases skip
+ * without a database never connects.
+ */
+export async function servedOnPostgres<
+	Identifier,
+	Shape extends Record<keyof Shape, (...args: never[]) => Effect.Effect<unknown, unknown>>,
+>(
+	service: Context.Key<Identifier, Shape>,
+	layer: Layer.Layer<Identifier, never, TestInfrastructure>,
+): Promise<Promised<Shape>> {
+	return onPostgres(await runOnPostgres(Effect.provide(service, layer)));
+}
 
 /**
  * A database nothing is expected to reach.

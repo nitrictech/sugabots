@@ -1,60 +1,63 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import { agentOperations } from "@sugabots/core/workspaces/agents/operations";
-import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
+import { crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/agent";
+import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedAgent, grantedPod, grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface AgentRoutesOptions {
-	agents: AgentStore;
-	modelProviders: Pick<ModelProviderStore, "isEnabled">;
-}
-
-export function agentRoutes({ agents, modelProviders }: AgentRoutesOptions) {
-	const operations = agentOperations(agents, modelProviders);
-
-	return HttpApiBuilder.group(ServerApi, "agents", (handlers) =>
-		handlers
+export const agentRoutes = HttpApiBuilder.group(ServerApi, "agents", (handlers) =>
+	Effect.gen(function* () {
+		const agents = yield* AgentAdministration.Service;
+		return handlers
 			.handle("list", () =>
-				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* grantedWorkspace;
-					return yield* operations.listVisible(workspaceId, actor.userId);
-				}),
+				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
+					agents.list({ workspaceId, userId: actor.userId }),
+				),
 			)
 			.handle("create", ({ payload }) =>
-				Effect.gen(function* () {
-					const { pod, actor } = yield* grantedPod;
-					return yield* operations
-						.create(pod.workspaceId, actor.userId, { ...payload, podId: pod.id })
-						.pipe(asHttpError(agentErrors));
-				}),
+				Effect.flatMap(grantedPod, ({ pod, actor }) =>
+					agents
+						.create({
+							workspaceId: pod.workspaceId,
+							createdById: actor.userId,
+							agent: { ...payload, podId: pod.id },
+						})
+						.pipe(asHttpError(agentErrors)),
+				),
 			)
 			.handle("get", () =>
-				Effect.flatMap(grantedAgent, ({ agent }) =>
-					operations.get(agent).pipe(asHttpError(agentErrors)),
-				),
+				Effect.flatMap(grantedAgent, ({ agent }) => {
+					// A system agent belongs to the workspace and is read through the
+					// system agents' own endpoints, not this one.
+					const crew = crewAgentRow(agent);
+					return crew
+						? Effect.succeed(toAgent(crew))
+						: Effect.fail(new NotFound({ message: "No such agent" }));
+				}),
 			)
 			.handle("update", ({ payload }) =>
 				Effect.flatMap(grantedAgent, ({ agent }) =>
-					operations.update(agent.workspaceId, agent.id, payload).pipe(asHttpError(agentErrors)),
+					agents
+						.update({ workspaceId: agent.workspaceId, agentId: agent.id, changes: payload })
+						.pipe(asHttpError(agentErrors)),
 				),
 			)
 			.handle("remove", () =>
 				Effect.flatMap(grantedAgent, ({ agent }) =>
-					operations.remove(agent.workspaceId, agent.id).pipe(asHttpError(agentErrors)),
+					agents
+						.remove({ workspaceId: agent.workspaceId, agentId: agent.id })
+						.pipe(asHttpError(agentErrors)),
 				),
-			),
-	);
-}
+			);
+	}),
+);
 
 const agentErrors = {
-	AgentModelNotEnabled: BadRequest,
+	ModelNotEnabled: BadRequest,
 	EmptyAgentUpdate: BadRequest,
-	AgentNotFound: NotFound,
-	NameTaken: Conflict,
+	AgentNameTaken: Conflict,
 	AgentGone: NotFound,
 	SystemAgentImmutable: BadRequest,
 	PodOutsideWorkspace: BadRequest,

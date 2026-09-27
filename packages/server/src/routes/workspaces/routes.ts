@@ -1,18 +1,15 @@
 import { BadRequest, Conflict, CurrentUser, Forbidden, NotFound } from "@sugabots/contracts/http";
-import type { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface WorkspaceRoutesOptions {
-	membership: Membership.Interface;
-}
-
 /** `Membership` decides who may do what; these map its refusals to HTTP. */
-export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "workspaces", (handlers) =>
-		handlers
+export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (handlers) =>
+	Effect.gen(function* () {
+		const membership = yield* Membership.Service;
+		return handlers
 			.handle("list", () =>
 				Effect.flatMap(CurrentUser, (user) => membership.workspaces({ userId: user.id })),
 			)
@@ -86,9 +83,9 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 					),
 					asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden }),
 				),
-			),
-	);
-}
+			);
+	}),
+);
 
 /**
  * The code a client reads to tell "verify your address first" from the other

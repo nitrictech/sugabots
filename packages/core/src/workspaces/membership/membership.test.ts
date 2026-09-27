@@ -2,7 +2,6 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
-import { layer as databaseLayer } from "../../database/database.ts";
 import {
 	agent,
 	pod,
@@ -11,7 +10,7 @@ import {
 	user,
 	workspaceInvite,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
 import { Membership } from "./membership.ts";
@@ -29,9 +28,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	function membershipWith(requireEmailVerification: boolean) {
 		const runtime = ManagedRuntime.make(
-			Membership.layerNoDeps.pipe(
+			Membership.layer.pipe(
 				Layer.provide([
-					databaseLayer,
+					testInfrastructure,
 					Installation.layer,
 					Layer.succeed(
 						Accounts.Service,
@@ -50,7 +49,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				Layer.provide(
 					ConfigProvider.layer(
 						ConfigProvider.fromEnv({
-							env: { DATABASE_URL: process.env.DATABASE_URL ?? "", WEB_APP_URL },
+							env: {
+								DATABASE_URL: process.env.DATABASE_URL ?? "",
+								WEB_APP_URL,
+							},
 						}),
 					),
 				),

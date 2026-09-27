@@ -207,6 +207,23 @@ export const queryCatching = <A, Failure>(
 		),
 	);
 
+/**
+ * Returns `operation`, which runs one method's database work on the
+ * `Database` the calling service was built with, in a span named
+ * `${service}.${method}`. A service whose methods go through it keeps
+ * `Database` out of their types, so its callers need not provide one.
+ */
+export const serviceOperations = <Methods>(service: string) =>
+	Effect.map(
+		Database,
+		(database) =>
+			<A, E>(method: keyof Methods & string, work: Effect.Effect<A, E, Database>) =>
+				work.pipe(
+					Effect.provideService(Database, database),
+					Effect.withSpan(`${service}.${method}`),
+				),
+	);
+
 /** Runs an Effect on a runtime that has the database, resolving with its value. */
 export type RunEffect<R = Database> = <A, E>(effect: Effect.Effect<A, E, R>) => Promise<A>;
 

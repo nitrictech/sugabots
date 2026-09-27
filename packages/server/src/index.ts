@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import { composeConversations } from "@sugabots/core/conversations/composition";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
@@ -25,6 +26,8 @@ import { createEventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
+import { Email } from "@sugabots/core/email/email";
+import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
@@ -33,11 +36,10 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { searchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import { Lanes } from "@sugabots/core/workflows/lanes";
 import { authorization } from "@sugabots/core/workspaces/access";
-import { agentStore } from "@sugabots/core/workspaces/agents/store";
-import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
-import { podStore } from "@sugabots/core/workspaces/pods/store";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Config, Duration, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
@@ -66,7 +68,6 @@ const main = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
 
 	const authentication = yield* Authentication.Service;
-	const membership = yield* Membership.Service;
 
 	const eventStore = yield* postgresEventStore;
 	// Every process runs a worker, so what one writes the others must hear about.
@@ -91,10 +92,6 @@ const main = Effect.gen(function* () {
 	);
 	const conversations = yield* composeConversations.pipe(Effect.provide(conversationServices));
 	const stores = {
-		pods: podStore,
-		agents: agentStore,
-		systemAgents: systemAgentStore,
-		onboarding: onboardingStore,
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
@@ -161,7 +158,6 @@ const main = Effect.gen(function* () {
 		installation,
 		oauthFetch: egress.oauth,
 		authorization,
-		membership,
 		stores,
 		events: { bus, access: channelAccess(authorization, stores.threads) },
 		httpClients,
@@ -189,19 +185,34 @@ const main = Effect.gen(function* () {
 	return yield* Effect.never;
 });
 
+/**
+ * What the process owns once and every service below builds on. A service's
+ * `layer` provides the services it is built from, but never these, so there
+ * is one pool, one cipher and one egress policy however many services use
+ * them.
+ */
+const infrastructure = Layer.mergeAll(
+	databaseLayer,
+	Ids.layer,
+	Credentials.layer,
+	Installation.layer,
+	Egress.layer,
+	Email.layer,
+	Accounts.layer,
+);
+
 main.pipe(
 	Effect.scoped,
 	// The tracer goes in with the database so that everything is traced: routes,
 	// better-auth's hooks, the background loops, and the statements they all send.
 	Effect.provide(
 		Layer.mergeAll(
-			databaseLayer,
-			Credentials.layer,
-			Installation.layer,
-			Egress.layer,
 			Authentication.layer,
 			Membership.layer,
-		).pipe(Layer.provideMerge(observabilityLayer)),
+			Onboarding.layer,
+			PodAdministration.layer,
+			AgentAdministration.layer,
+		).pipe(Layer.provideMerge(infrastructure), Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,
 );

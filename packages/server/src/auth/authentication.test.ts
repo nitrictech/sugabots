@@ -1,8 +1,7 @@
 import { sessionUserSchema, type WorkspaceMember } from "@sugabots/contracts";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { layer as databaseLayer } from "@sugabots/core/database/database";
 import { user } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
@@ -40,9 +39,9 @@ async function appWith(
 	sent: Email.Message[],
 ) {
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layerNoDeps, Membership.layerNoDeps).pipe(
+		Layer.mergeAll(Authentication.layerNoDeps, Membership.layer).pipe(
 			Layer.provide([
-				databaseLayer,
+				testInfrastructure,
 				Installation.layer,
 				Accounts.layer,
 				Layer.succeed(
@@ -75,7 +74,13 @@ async function appWith(
 	const services = await runtime.runPromise(
 		Effect.all({ authentication: Authentication.Service, membership: Membership.Service }),
 	);
-	return atServerRoot(createTestApp({ ...services, webAppUrl: ORIGIN }));
+	return atServerRoot(
+		createTestApp({
+			authentication: services.authentication,
+			services: Layer.succeed(Membership.Service, services.membership),
+			webAppUrl: ORIGIN,
+		}),
+	);
 }
 
 type App = Awaited<ReturnType<typeof appWith>>;

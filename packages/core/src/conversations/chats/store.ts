@@ -26,7 +26,6 @@ import {
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { isUuid } from "../../database/ids.ts";
 import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
@@ -38,9 +37,10 @@ import {
 	threadParticipant,
 	turn,
 } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
-import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { ConversationEvent } from "../events.ts";
 import {
 	agentColumns,

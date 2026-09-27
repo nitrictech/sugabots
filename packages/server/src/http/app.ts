@@ -17,11 +17,6 @@ import type {
 } from "@sugabots/core/providers/network/egress";
 import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import type { Authorization } from "@sugabots/core/workspaces/access";
-import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
-import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
-import type { Membership } from "@sugabots/core/workspaces/membership/membership";
-import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
-import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -65,16 +60,13 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * `apiLayer` takes every dependency explicitly. `createTestApp` in
+ * The workspace routes take their services from the layer's context; the
+ * rest take their dependencies here. `createTestApp` in
  * `app.test-support.ts` drives the same routes with fakes.
  */
 
 /** What the route table reads and writes. */
 export interface Stores {
-	pods: PodStore;
-	agents: AgentStore;
-	systemAgents: SystemAgentStore;
-	onboarding: OnboardingStore;
 	modelProviders: ModelProviderStore;
 	searchProviders: SearchProviderStore;
 	connections: ConnectionStore;
@@ -92,8 +84,6 @@ export interface AppOptions {
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
-	/** Workspaces, the people in them, and invitations. */
-	membership: Membership.Interface;
 	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
@@ -110,7 +100,6 @@ export function apiLayer({
 	authentication,
 	installation,
 	authorization,
-	membership,
 	stores,
 	events,
 	httpClients,
@@ -122,14 +111,11 @@ export function apiLayer({
 
 	const groups = Layer.mergeAll(
 		systemRoutes,
-		workspaceRoutes({ membership }),
+		workspaceRoutes,
 		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
-		onboardingRoutes({ onboarding: stores.onboarding }),
-		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),
-		systemAgentRoutes({
-			systemAgents: stores.systemAgents,
-			modelProviders: stores.modelProviders,
-		}),
+		onboardingRoutes,
+		podRoutes,
+		systemAgentRoutes,
 		modelTrialRoutes({ model }),
 		modelProviderRoutes({
 			modelProviders: stores.modelProviders,
@@ -153,7 +139,7 @@ export function apiLayer({
 				fetch: oauthFetch,
 			},
 		}),
-		agentRoutes({ agents: stores.agents, modelProviders: stores.modelProviders }),
+		agentRoutes,
 		chatRoutes({ chats: stores.chats }),
 		routineRoutes({ routines: stores.routines }),
 		toolApprovalRoutes({ approvals: stores.approvals }),

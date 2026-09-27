@@ -1,14 +1,10 @@
 import type { Agent } from "@sugabots/contracts";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import {
-	type AgentStore,
-	crewAgentRow,
-	PodOutsideWorkspace,
-	toAgent,
-} from "@sugabots/core/workspaces/agents/store";
+import { unimplemented } from "@sugabots/core/testing";
+import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
@@ -63,32 +59,14 @@ const authorization = testAuthorization({
 	],
 });
 
-let createdName: string | undefined;
-const store: AgentStore = {
-	listVisible: () => Effect.succeed([agent]),
-	get: () => Effect.succeed(agent),
-	fromRow: (row) => {
-		const crew = crewAgentRow(row);
-		return Effect.succeed(crew ? toAgent(crew) : undefined);
-	},
-	create: (_workspaceId, _userId, input) =>
-		Effect.suspend(() => {
-			createdName = input.name;
-			return input.podId === POD
-				? Effect.succeed({ ...agent, ...input, description: input.description ?? null })
-				: Effect.fail(new PodOutsideWorkspace());
-		}),
-	update: (_workspaceId, _agentId, input) =>
-		Effect.succeed({ ...agent, ...input, description: input.description ?? null }),
-	remove: () => Effect.void,
-};
+/** The app with `agents` as the only agent methods it has. */
+const app = (agents: Partial<AgentAdministration.Interface> = {}) =>
+	createTestApp({
+		resolveUser,
+		authorization,
+		services: unimplemented(AgentAdministration.Service, agents),
+	});
 
-const modelProviders = {
-	isEnabled: (_workspaceId: string, model: string) => Effect.succeed(model === MODEL),
-} as unknown as ModelProviderStore;
-
-const app = () =>
-	createTestApp({ resolveUser, authorization, stores: { agents: store, modelProviders } });
 const auth = (token: string, body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",
 	headers: {
@@ -98,33 +76,53 @@ const auth = (token: string, body?: unknown): RequestInit => ({
 	body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-beforeEach(() => {
-	createdName = undefined;
-});
-
 describe("agent routes", () => {
 	it("lists visible agents", async () => {
-		const response = await app().request(`/workspaces/${WORKSPACE}/agents`, auth("member"));
+		const response = await app({ list: () => Effect.succeed([agent]) }).request(
+			`/workspaces/${WORKSPACE}/agents`,
+			auth("member"),
+		);
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual([agent]);
 	});
 
-	it("creates an agent only through its pod", async () => {
-		const response = await app().request(
-			`/pods/${POD}/agents`,
-			auth("member", { name: "Writer", model: MODEL }),
-		);
+	it("creates an agent in the pod it is posted to", async () => {
+		let created: unknown;
+		const response = await app({
+			create: (input) => {
+				created = input.agent;
+				return Effect.succeed(agent);
+			},
+		}).request(`/pods/${POD}/agents`, auth("member", { name: "Writer", model: MODEL }));
+
 		expect(response.status).toBe(201);
-		expect(createdName).toBe("Writer");
+		expect(created).toEqual({ name: "Writer", model: MODEL, podId: POD });
 	});
 
-	it("rejects a disabled model before creating", async () => {
-		const response = await app().request(
-			`/pods/${POD}/agents`,
-			auth("member", { name: "Writer", model: "disabled" }),
-		);
+	it("reports a model the workspace does not offer as a bad request", async () => {
+		const response = await app({
+			create: (input) =>
+				Effect.fail(new AgentAdministration.ModelNotEnabled({ model: input.agent.model })),
+		}).request(`/pods/${POD}/agents`, auth("member", { name: "Writer", model: "disabled" }));
+
 		expect(response.status).toBe(400);
-		expect(createdName).toBeUndefined();
+		expect(await response.json()).toEqual({
+			_tag: "BadRequest",
+			message: "This workspace does not offer that model",
+		});
+	});
+
+	it("reports a name another agent in the pod has as a conflict", async () => {
+		const response = await app({
+			create: (input) =>
+				Effect.fail(new AgentRepository.AgentNameTaken({ field: "name", value: input.agent.name })),
+		}).request(`/pods/${POD}/agents`, auth("member", { name: "Triage", model: MODEL }));
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			_tag: "Conflict",
+			message: "Another agent in this pod already has that name",
+		});
 	});
 
 	it("has no placement endpoint", async () => {
@@ -136,10 +134,13 @@ describe("agent routes", () => {
 	});
 
 	it("lets a member of the pod edit an agent in it", async () => {
-		const response = await app().request(`/agents/${AGENT}`, {
-			...auth("member", { description: "Sorts the inbox" }),
-			method: "PATCH",
-		});
+		const response = await app({ update: () => Effect.succeed(agent) }).request(
+			`/agents/${AGENT}`,
+			{
+				...auth("member", { description: "Sorts the inbox" }),
+				method: "PATCH",
+			},
+		);
 
 		expect(response.status).toBe(200);
 	});
@@ -154,7 +155,7 @@ describe("agent routes", () => {
 	});
 
 	it("lets an admin delete a shared-pod agent they are not a member of", async () => {
-		const response = await app().request(`/agents/${AGENT}`, {
+		const response = await app({ remove: () => Effect.void }).request(`/agents/${AGENT}`, {
 			...auth("admin"),
 			method: "DELETE",
 		});
@@ -190,11 +191,10 @@ describe("agent routes", () => {
 		);
 
 		expect(response.status).toBe(403);
-		expect(createdName).toBeUndefined();
 	});
 
 	it("lets the owner delete an agent in their own Personal pod", async () => {
-		const response = await app().request(`/agents/${PERSONAL_AGENT}`, {
+		const response = await app({ remove: () => Effect.void }).request(`/agents/${PERSONAL_AGENT}`, {
 			...auth("member"),
 			method: "DELETE",
 		});

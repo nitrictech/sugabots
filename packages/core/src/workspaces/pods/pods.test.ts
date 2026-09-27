@@ -1,25 +1,38 @@
-import { PERSONAL_POD_SLUG, type WorkspaceRole } from "@sugabots/contracts";
+import { PERSONAL_POD_SLUG, type PodColor, type WorkspaceRole } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	agent,
+	modelProvider,
+	pod,
+	podMember,
+	providerModel,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
 import {
 	ActionForbidden,
 	authorization as databaseAuthorization,
 	ResourceHidden,
 } from "../access.ts";
-import { agentStore } from "../agents/store.ts";
-import {
-	FacilitatorNotSetUp,
-	PERSONAL_ASSISTANT_PROMPT,
-	PersonalPodFixed,
-	PodGone,
-	podStore,
-	SlugTaken,
-} from "./store.ts";
+import { visibleCrewAgents } from "../agents/agent-reads.ts";
+import { AgentRepository } from "../agents/agent-repository.ts";
+import type { Actor } from "../permissions.ts";
+import { PodAdministration } from "./pod-administration.ts";
+import { PodRepository } from "./pod-repository.ts";
 
 /**
- * The store and the authorisation queries against real SQL.
+ * The repository, the administration over it, and the authorisation queries
+ * against real SQL.
  *
  * The route tests run the real policy over stated facts, which proves the
  * rules but not the queries — the joins behind `authorization.pod`, the
@@ -29,8 +42,8 @@ import {
  * one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
-	const store = onPostgres(podStore);
-	const agents = onPostgres(agentStore);
+	let store: Promised<PodRepository.Interface>;
+	let administration: Promised<PodAdministration.Interface>;
 	const authorization = onPostgres(databaseAuthorization);
 
 	let workspaceId: string;
@@ -44,9 +57,23 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	const asAdmin = () => actor(adminId, "admin");
 	const asMember = () => actor(memberId, "member");
 
+	beforeAll(async () => {
+		store = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
+		administration = await servedOnPostgres(PodAdministration.Service, PodAdministration.layer);
+	});
+
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	const create = (creator: Actor, input: { name: string; slug: string; color?: PodColor }) =>
+		administration.create({ workspaceId, creator, ...input });
+	const createIn = (inWorkspace: string, creator: Actor, input: { name: string; slug: string }) =>
+		administration.create({ workspaceId: inWorkspace, creator, ...input });
+	const visibleTo = (actor: Actor, inWorkspace = workspaceId) =>
+		administration.list({ workspaceId: inWorkspace, actor });
+	const ensurePersonal = (owner: Actor, model: string) =>
+		administration.ensurePersonal({ workspaceId, owner, model });
 
 	beforeEach(async () => {
 		// A fresh workspace per test rather than a truncate, so these can run
@@ -100,20 +127,48 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				{ workspaceId: otherWorkspaceId, userId: outsiderId, role: "member" },
 			]),
 		);
+
+		// The models the cases provision Personal Assistants on.
+		const [provider] = await onDatabase((db) =>
+			db
+				.insert(modelProvider)
+				.values({
+					workspaceId,
+					name: "Models",
+					baseUrl: "https://models.example/v1",
+					apiFormat: "openai",
+					active: true,
+				})
+				.returning(),
+		);
+		if (!provider) {
+			throw new Error("could not create the test model provider");
+		}
+		await onDatabase((db) =>
+			db.insert(providerModel).values(
+				["first-model", "second-model", "test-model"].map((modelId) => ({
+					workspaceId,
+					providerId: provider.id,
+					modelId,
+					enabled: true,
+					source: "manual" as const,
+				})),
+			),
+		);
 	});
 
 	describe("creating", () => {
 		it("puts the creator in the pod, so an admin is not locked out of it", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
-			expect(await store.listVisible(workspaceId, asAdmin())).toEqual([made]);
-			expect(await store.listVisible(workspaceId, asMember())).toEqual([]);
+			expect(await visibleTo(asAdmin())).toEqual([made]);
+			expect(await visibleTo(asMember())).toEqual([]);
 		});
 
 		it("puts no system agent in a new pod, since the workspace owns them", async () => {
 			// A pod has nothing to place: the workspace's Scribe and Facilitator
 			// serve every pod in it, and are set up once for all of them.
-			const made = await store.create(workspaceId, asAdmin(), { name: "Product", slug: "product" });
+			const made = await create(asAdmin(), { name: "Product", slug: "product" });
 
 			const placed = await onDatabase((db) =>
 				db
@@ -125,35 +180,35 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("refuses a slug already used in the same workspace", async () => {
-			await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			await create(asAdmin(), { name: "Suga", slug: "suga" });
 
-			await expect(
-				store.create(workspaceId, asAdmin(), { name: "Suga again", slug: "suga" }),
-			).rejects.toThrow(SlugTaken);
+			await expect(create(asAdmin(), { name: "Suga again", slug: "suga" })).rejects.toThrow(
+				PodRepository.PodSlugTaken,
+			);
 		});
 
 		it("allows the same slug in another workspace", async () => {
-			await store.create(workspaceId, asAdmin(), { name: "General", slug: "general" });
+			await create(asAdmin(), { name: "General", slug: "general" });
 
 			await expect(
-				store.create(otherWorkspaceId, asAdmin(), { name: "General", slug: "general" }),
+				createIn(otherWorkspaceId, asAdmin(), { name: "General", slug: "general" }),
 			).resolves.toMatchObject({ slug: "general" });
 		});
 
 		it("leaves nothing behind when the slug is taken", async () => {
-			await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
-			await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" }).catch(() => {});
-			await store.create(workspaceId, asAdmin(), { name: "Dup", slug: "suga" }).catch(() => {});
+			await create(asAdmin(), { name: "Suga", slug: "suga" });
+			await create(asAdmin(), { name: "Sales", slug: "sales" }).catch(() => {});
+			await create(asAdmin(), { name: "Dup", slug: "suga" }).catch(() => {});
 
 			const rows = await onDatabase((db) => db.select().from(pod));
 			expect(rows.filter((row) => row.workspaceId === workspaceId)).toHaveLength(2);
 		});
 
 		it("gives a pod with no colour chosen one no other pod in the workspace has yet", async () => {
-			await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga", color: "green" });
-			await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales", color: "plum" });
+			await create(asAdmin(), { name: "Suga", slug: "suga", color: "green" });
+			await create(asAdmin(), { name: "Sales", slug: "sales", color: "plum" });
 
-			const made = await store.create(workspaceId, asAdmin(), { name: "Ops", slug: "ops" });
+			const made = await create(asAdmin(), { name: "Ops", slug: "ops" });
 
 			expect(made.color).toBe("blue");
 		});
@@ -161,32 +216,35 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 	describe("membership", () => {
 		it("adds, lists and removes people", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
 			await store.addMember(workspaceId, made.id, memberId);
-			expect((await store.listMembers(made.id)).map((row) => row.name)).toEqual(["Ada", "Sam"]);
+			expect((await administration.members(made.id)).map((row) => row.name)).toEqual([
+				"Ada",
+				"Sam",
+			]);
 
 			expect(await store.removeMember(workspaceId, made.id, memberId)).toBe("removed");
-			expect((await store.listMembers(made.id)).map((row) => row.name)).toEqual(["Ada"]);
+			expect((await administration.members(made.id)).map((row) => row.name)).toEqual(["Ada"]);
 		});
 
 		it("is idempotent, so adding twice is not an error", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
 			await store.addMember(workspaceId, made.id, memberId);
 			await store.addMember(workspaceId, made.id, memberId);
 
-			expect(await store.listMembers(made.id)).toHaveLength(2);
+			expect(await administration.members(made.id)).toHaveLength(2);
 		});
 
 		it("does not add somebody from another workspace", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
 			expect(await store.addMember(workspaceId, made.id, outsiderId)).toBe("not_workspace_member");
 		});
 
 		it("rejects a cross-workspace membership at the database boundary", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
 			await expect(
 				onDatabase((db) =>
@@ -196,7 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("revokes pod grants when a workspace member leaves and does not restore them", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 			await store.addMember(workspaceId, made.id, memberId);
 
 			await onDatabase((db) =>
@@ -210,8 +268,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				db.insert(workspaceMember).values({ workspaceId, userId: memberId }),
 			);
 
-			expect(await store.listVisible(workspaceId, asMember())).toEqual([]);
-			expect((await store.listMembers(made.id)).map(({ userId }) => userId)).not.toContain(
+			expect(await visibleTo(asMember())).toEqual([]);
+			expect((await administration.members(made.id)).map(({ userId }) => userId)).not.toContain(
 				memberId,
 			);
 			await expect(authorization.pod(memberId, made.id, "pod.read")).rejects.toThrow(
@@ -221,8 +279,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	});
 
 	describe("personal pods", () => {
-		it("provisions one private pod and a customizable default assistant", async () => {
-			const personal = await store.ensurePersonal(workspaceId, asMember(), "first-model");
+		it("provisions one private pod and an assistant that keeps what its owner changes", async () => {
+			const personal = await ensurePersonal(asMember(), "first-model");
 			const [assistant] = await onDatabase((db) =>
 				db
 					.select()
@@ -235,7 +293,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(assistant).toMatchObject({
 				name: "Personal Assistant",
 				model: "first-model",
-				prompt: PERSONAL_ASSISTANT_PROMPT,
+				prompt: AgentRepository.PERSONAL_ASSISTANT_PROMPT,
 			});
 
 			await onDatabase((db) =>
@@ -244,7 +302,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 					.set({ name: "Friday", prompt: "Keep this customization." })
 					.where(eq(agent.id, assistant.id)),
 			);
-			await store.ensurePersonal(workspaceId, asMember(), "second-model");
+			await ensurePersonal(asMember(), "second-model");
 
 			const provisioned = await onDatabase((db) =>
 				db
@@ -255,13 +313,35 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(provisioned).toHaveLength(1);
 			expect(provisioned[0]).toMatchObject({
 				name: "Friday",
-				model: "second-model",
+				model: "first-model",
 				prompt: "Keep this customization.",
 			});
 		});
 
+		it("moves an assistant to the model named when the workspace does not offer its own", async () => {
+			// Provisioned without a model, as somebody joining is, so it runs on the
+			// fallback, which this workspace does not offer.
+			const personal = await administration.provisionPersonal({ workspaceId, userId: memberId });
+
+			await ensurePersonal(asMember(), "second-model");
+
+			const [assistant] = await onDatabase((db) =>
+				db
+					.select({ model: agent.model })
+					.from(agent)
+					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
+			);
+			expect(assistant?.model).toBe("second-model");
+		});
+
+		it("refuses a model the workspace does not offer", async () => {
+			await expect(ensurePersonal(asMember(), "unknown-model")).rejects.toMatchObject({
+				_tag: "ModelNotEnabled",
+			});
+		});
+
 		it("is invisible to other members and workspace administrators", async () => {
-			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
+			const personal = await ensurePersonal(asMember(), "test-model");
 			const [assistant] = await onDatabase((db) =>
 				db
 					.select({ id: agent.id })
@@ -279,13 +359,13 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await expect(authorization.agent(adminId, assistant.id, "agent.read")).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect((await agents.listVisible(workspaceId, adminId)).map(({ id }) => id)).not.toContain(
-				assistant.id,
-			);
+			expect(
+				(await runOnPostgres(visibleCrewAgents(workspaceId, adminId))).map(({ id }) => id),
+			).not.toContain(assistant.id);
 		});
 
 		it("rejects adding another workspace member", async () => {
-			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
+			const personal = await ensurePersonal(asMember(), "test-model");
 
 			expect(await store.addMember(workspaceId, personal.id, adminId)).toBe("personal_pod");
 			await expect(
@@ -296,39 +376,37 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("does not change its name, address or colour", async () => {
-			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
+			const personal = await ensurePersonal(asMember(), "test-model");
 
 			await expect(store.update(workspaceId, personal.id, { name: "Mine" })).rejects.toThrow(
-				PersonalPodFixed,
+				PodRepository.PersonalPodFixed,
 			);
 			await expect(store.update(workspaceId, personal.id, { slug: "mine" })).rejects.toThrow(
-				PersonalPodFixed,
+				PodRepository.PersonalPodFixed,
 			);
 			await expect(store.update(workspaceId, personal.id, { color: "rose" })).rejects.toThrow(
-				PersonalPodFixed,
+				PodRepository.PersonalPodFixed,
 			);
 		});
 	});
 
 	describe("renaming", () => {
 		it("refuses a slug another pod in the workspace holds", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
-			await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
+			await create(asAdmin(), { name: "Sales", slug: "sales" });
 
 			await expect(store.update(workspaceId, made.id, { slug: "sales" })).rejects.toThrow(
-				SlugTaken,
+				PodRepository.PodSlugTaken,
 			);
 		});
 
 		it("says the pod is gone, not that its slug is taken", async () => {
-			// Renaming a pod somebody else deleted in between. This used to
-			// raise SlugTaken with an empty slug, so the route answered 409
-			// about a conflict that had not happened.
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			// Renaming a pod somebody else deleted in between.
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 			await store.remove(workspaceId, made.id);
 
 			await expect(store.update(workspaceId, made.id, { name: "Platform" })).rejects.toThrow(
-				PodGone,
+				PodRepository.PodGone,
 			);
 		});
 	});
@@ -347,7 +425,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("gives an admin every shared pod without a membership row", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			const made = await create(asAdmin(), { name: "Sales", slug: "sales" });
 			await store.removeMember(workspaceId, made.id, adminId);
 
 			const standing = await authorization.pod(adminId, made.id, "pod.delete");
@@ -357,8 +435,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("gives a member the pods they have joined, and nothing else", async () => {
-			const joined = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			const apart = await store.create(workspaceId, asAdmin(), { name: "Legal", slug: "legal" });
+			const joined = await create(asAdmin(), { name: "Sales", slug: "sales" });
+			const apart = await create(asAdmin(), { name: "Legal", slug: "legal" });
 			await store.addMember(workspaceId, joined.id, memberId);
 
 			expect(await authorization.pod(memberId, joined.id, "agent.create")).toMatchObject({
@@ -373,13 +451,13 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("agrees with what a list shows", async () => {
-			const joined = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			const apart = await store.create(workspaceId, asAdmin(), { name: "Legal", slug: "legal" });
+			const joined = await create(asAdmin(), { name: "Sales", slug: "sales" });
+			const apart = await create(asAdmin(), { name: "Legal", slug: "legal" });
 			await store.addMember(workspaceId, joined.id, memberId);
-			const personal = await store.ensurePersonal(workspaceId, asMember(), "test-model");
+			const personal = await ensurePersonal(asMember(), "test-model");
 
-			const forAdmin = (await store.listVisible(workspaceId, asAdmin())).map(({ id }) => id);
-			const forMember = (await store.listVisible(workspaceId, asMember())).map(({ id }) => id);
+			const forAdmin = (await visibleTo(asAdmin())).map(({ id }) => id);
+			const forMember = (await visibleTo(asMember())).map(({ id }) => id);
 
 			expect(forAdmin).toEqual(expect.arrayContaining([joined.id, apart.id]));
 			expect(forAdmin).not.toContain(personal.id);
@@ -387,12 +465,10 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("carries the resolved permissions on each pod it lists", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			const made = await create(asAdmin(), { name: "Sales", slug: "sales" });
 			await store.addMember(workspaceId, made.id, memberId);
 
-			const [seen] = (await store.listVisible(workspaceId, asMember())).filter(
-				({ id }) => id === made.id,
-			);
+			const [seen] = (await visibleTo(asMember())).filter(({ id }) => id === made.id);
 
 			expect(seen?.permissions).toMatchObject({
 				createAgents: true,
@@ -403,8 +479,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("gives a viewer the pods they have joined, to read and take part in", async () => {
-			const joined = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			const apart = await store.create(workspaceId, asAdmin(), { name: "Legal", slug: "legal" });
+			const joined = await create(asAdmin(), { name: "Sales", slug: "sales" });
+			const apart = await create(asAdmin(), { name: "Legal", slug: "legal" });
 			await store.addMember(workspaceId, joined.id, viewerId);
 
 			const standing = await authorization.pod(viewerId, joined.id, "pod.read");
@@ -417,26 +493,20 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await expect(authorization.pod(viewerId, apart.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect(
-				(await store.listVisible(workspaceId, actor(viewerId, "viewer"))).map(({ id }) => id),
-			).toEqual([joined.id]);
+			expect((await visibleTo(actor(viewerId, "viewer"))).map(({ id }) => id)).toEqual([joined.id]);
 		});
 
 		it("carries a viewer's permissions on the pods it lists, all of them closed", async () => {
-			const joined = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			const joined = await create(asAdmin(), { name: "Sales", slug: "sales" });
 			await store.addMember(workspaceId, joined.id, viewerId);
 
-			const [seen] = await store.listVisible(workspaceId, actor(viewerId, "viewer"));
+			const [seen] = await visibleTo(actor(viewerId, "viewer"));
 
 			expect(Object.values(seen?.permissions ?? {})).not.toContain(true);
 		});
 
 		it("leaves a viewer in charge of their own Personal pod", async () => {
-			const personal = await store.ensurePersonal(
-				workspaceId,
-				actor(viewerId, "viewer"),
-				"test-model",
-			);
+			const personal = await ensurePersonal(actor(viewerId, "viewer"), "test-model");
 
 			expect(personal.permissions).toMatchObject({
 				createAgents: true,
@@ -446,7 +516,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("stops reaching a shared pod once somebody is demoted", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			const made = await create(asAdmin(), { name: "Sales", slug: "sales" });
 			await store.removeMember(workspaceId, made.id, adminId);
 			expect(await authorization.pod(adminId, made.id, "pod.read")).toBeDefined();
 
@@ -460,32 +530,28 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			);
 
 			await expect(authorization.pod(adminId, made.id, "pod.read")).rejects.toThrow(ResourceHidden);
-			expect(await store.listVisible(workspaceId, actor(adminId, "member"))).toEqual([]);
+			expect(await visibleTo(actor(adminId, "member"))).toEqual([]);
 		});
 
 		it("does not carry an administrator's reach into another workspace", async () => {
 			// Ada administers both, so the only thing keeping her out of the other
 			// one's pods would be the id — which is exactly what must not be true.
-			const here = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			const there = await store.create(otherWorkspaceId, asAdmin(), {
+			const here = await create(asAdmin(), { name: "Sales", slug: "sales" });
+			const there = await createIn(otherWorkspaceId, asAdmin(), {
 				name: "Sales",
 				slug: "sales",
 			});
 
-			expect(await store.listVisible(workspaceId, asAdmin())).toEqual([
-				expect.objectContaining({ id: here.id }),
-			]);
+			expect(await visibleTo(asAdmin())).toEqual([expect.objectContaining({ id: here.id })]);
 			await expect(authorization.pod(outsiderId, here.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect((await store.listVisible(otherWorkspaceId, actor(outsiderId, "member"))).length).toBe(
-				0,
-			);
+			expect((await visibleTo(actor(outsiderId, "member"), otherWorkspaceId)).length).toBe(0);
 			expect(there.workspaceId).toBe(otherWorkspaceId);
 		});
 
 		it("gives nothing to somebody outside the workspace", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 
 			await expect(authorization.pod(outsiderId, made.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
@@ -504,8 +570,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 	describe("workspace membership lifecycle", () => {
 		it("lets somebody who created a shared pod leave the workspace", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await store.ensurePersonal(workspaceId, asAdmin(), "test-model");
+			const made = await create(asAdmin(), { name: "Sales", slug: "sales" });
+			await ensurePersonal(asAdmin(), "test-model");
 
 			// What better-auth's beforeRemoveMember hook does, then the removal.
 			await onDatabase((db) =>
@@ -549,31 +615,43 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 	describe("routing through the Facilitator", () => {
 		it("refuses while the workspace has chosen no model for it", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 			await placeFacilitator(null);
 
 			await expect(
-				store.update(workspaceId, made.id, { routing: { facilitator: true } }),
-			).rejects.toThrow(FacilitatorNotSetUp);
+				administration.update({
+					standing: await standingOf(made.id),
+					changes: { routing: { facilitator: true } },
+				}),
+			).rejects.toThrow(PodAdministration.FacilitatorNotSetUp);
 		});
 
 		it("allows it once a model has been chosen", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 			await placeFacilitator("test-model");
 
-			const updated = await store.update(workspaceId, made.id, { routing: { facilitator: true } });
+			const updated = await administration.update({
+				standing: await standingOf(made.id),
+				changes: { routing: { facilitator: true } },
+			});
 
 			expect(updated.routing).toEqual({ facilitator: true });
 		});
 
 		it("still lets a pod switch routing off when there is no model", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Suga", slug: "suga" });
+			const made = await create(asAdmin(), { name: "Suga", slug: "suga" });
 			await placeFacilitator(null);
 
-			const updated = await store.update(workspaceId, made.id, { routing: { facilitator: false } });
+			const updated = await administration.update({
+				standing: await standingOf(made.id),
+				changes: { routing: { facilitator: false } },
+			});
 
 			expect(updated.routing).toEqual({ facilitator: false });
 		});
+
+		/** The administrator's standing towards the pod, as the route would pass it. */
+		const standingOf = (podId: string) => authorization.pod(adminId, podId, "pod.update");
 
 		/** The workspace's Facilitator, set up or not. */
 		async function placeFacilitator(model: string | null) {

@@ -1,4 +1,5 @@
-import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
+import { unimplemented } from "@sugabots/core/testing";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -15,39 +16,32 @@ const resolveUser: UserResolver = async (headers) =>
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
-/** A store that says nobody has finished, apart from what a case overrides. */
-function onboardingStoreWith(overrides: Partial<OnboardingStore> = {}): OnboardingStore {
-	return {
-		isCompleted: () => Effect.succeed(false),
-		complete: () => Effect.succeed(false),
-		completeAcceptedInvite: () => Effect.undefined,
-		...overrides,
-	};
-}
+const app = (onboarding: Partial<Onboarding.Interface>) =>
+	createTestApp({ resolveUser, services: unimplemented(Onboarding.Service, onboarding) });
 
 const authorization = { authorization: "Bearer good-token", "content-type": "application/json" };
 
 describe("onboarding routes", () => {
-	it("does not complete when the resources do not form a valid setup", async () => {
-		const app = createTestApp({ resolveUser, stores: { onboarding: onboardingStoreWith() } });
-
-		const response = await app.request("/onboarding/complete", {
+	it("reports resources that do not form a valid setup as a bad request", async () => {
+		const response = await app({
+			complete: () => Effect.fail(new Onboarding.NotReadyToFinish()),
+		}).request("/onboarding/complete", {
 			method: "POST",
 			headers: authorization,
 			body: JSON.stringify({ workspaceId: WORKSPACE_ID, podId: POD_ID, agentId: AGENT_ID }),
 		});
 
 		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			_tag: "BadRequest",
+			message: "Finish creating your pod and agent first",
+		});
 	});
 
 	it("returns the workspace belonging to an accepted invitation", async () => {
 		const completeAcceptedInvite = vi.fn(() => Effect.succeed(WORKSPACE_ID));
-		const app = createTestApp({
-			resolveUser,
-			stores: { onboarding: onboardingStoreWith({ completeAcceptedInvite }) },
-		});
 
-		const response = await app.request("/onboarding/complete-invite", {
+		const response = await app({ completeAcceptedInvite }).request("/onboarding/complete-invite", {
 			method: "POST",
 			headers: authorization,
 			body: JSON.stringify({ invitationId: INVITATION_ID }),
@@ -55,6 +49,9 @@ describe("onboarding routes", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ workspaceId: WORKSPACE_ID });
-		expect(completeAcceptedInvite).toHaveBeenCalledWith(USER_ID, INVITATION_ID);
+		expect(completeAcceptedInvite).toHaveBeenCalledWith({
+			userId: USER_ID,
+			invitationId: INVITATION_ID,
+		});
 	});
 });

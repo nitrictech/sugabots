@@ -1,15 +1,26 @@
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, pod, user, workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
-import { systemAgentStore } from "./system-agent-store.ts";
-import { ensureSystemAgents } from "./system-agents.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { AgentAdministration } from "./agent-administration.ts";
+import { AgentRepository } from "./agent-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () => {
-	const store = onPostgres(systemAgentStore);
+	let agents: Promised<AgentRepository.Interface>;
+	let administration: Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let otherWorkspaceId: string;
 	let creatorId: string;
+
+	beforeAll(async () => {
+		agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+		administration = await servedOnPostgres(AgentAdministration.Service, AgentAdministration.layer);
+	});
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -49,7 +60,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		);
 
 	it("gives a workspace one of each, in no pod and with no model", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		expect(await placed()).toEqual([
 			{ key: "facilitate", podId: null, model: null },
@@ -58,17 +69,17 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("creates nothing more when run again", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		expect(await placed()).toHaveLength(2);
 	});
 
 	it("does not put a chosen model back to unset when run again", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await store.setModel(workspaceId, "summarise", "chosen-model");
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
 
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		const [scribe] = await onDatabase((db) =>
 			db
@@ -80,13 +91,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("gives each workspace its own pair", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await onDatabase((db) =>
-			ensureSystemAgents(db, { workspaceId: otherWorkspaceId, createdById: creatorId }),
-		);
-		await store.setModel(workspaceId, "facilitate", "one-workspace-only");
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.ensureSystemAgents({ workspaceId: otherWorkspaceId, createdById: creatorId });
+		await agents.setSystemAgentModel(workspaceId, "facilitate", "one-workspace-only");
 
-		const listed = await store.list(otherWorkspaceId);
+		const listed = await administration.systemAgents(otherWorkspaceId);
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
 			{ key: "facilitate", model: null },
@@ -94,7 +103,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("reports a workspace with no rows as one that is not set up", async () => {
-		const listed = await store.list(workspaceId);
+		const listed = await administration.systemAgents(workspaceId);
 
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
@@ -103,21 +112,25 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("turns one off by taking its model away", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await store.setModel(workspaceId, "summarise", "chosen-model");
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
 
-		const turnedOff = await store.setModel(workspaceId, "summarise", null);
+		const turnedOff = await administration.setSystemAgentModel({
+			workspaceId,
+			key: "summarise",
+			model: null,
+		});
 
 		expect(turnedOff.model).toBeNull();
 	});
 
 	it("stops every pod routing through the Facilitator when it is turned off", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await store.setModel(workspaceId, "facilitate", "chosen-model");
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.setSystemAgentModel(workspaceId, "facilitate", "chosen-model");
 		const routed = await placePod("routed", { facilitator: true });
 		const quiet = await placePod("quiet", { facilitator: false });
 
-		await store.setModel(workspaceId, "facilitate", null);
+		await administration.setSystemAgentModel({ workspaceId, key: "facilitate", model: null });
 
 		const after = await onDatabase((db) =>
 			db
@@ -133,12 +146,12 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("leaves pod routing alone when the Scribe is turned off", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
-		await store.setModel(workspaceId, "summarise", "chosen-model");
-		await store.setModel(workspaceId, "facilitate", "chosen-model");
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
+		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
+		await agents.setSystemAgentModel(workspaceId, "facilitate", "chosen-model");
 		const routed = await placePod("routed", { facilitator: true });
 
-		await store.setModel(workspaceId, "summarise", null);
+		await administration.setSystemAgentModel({ workspaceId, key: "summarise", model: null });
 
 		const [after] = await onDatabase((db) =>
 			db.select({ routing: pod.routing }).from(pod).where(eq(pod.id, routed.id)),
@@ -164,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	}
 
 	it("refuses a second Scribe in the same workspace", async () => {
-		await onDatabase((db) => ensureSystemAgents(db, { workspaceId, createdById: creatorId }));
+		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		await expect(
 			onDatabase((db) =>

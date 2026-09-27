@@ -1,8 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { isUuid } from "../../database/ids.ts";
 import { thread } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 
 /**
