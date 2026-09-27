@@ -1,11 +1,44 @@
+import { Tooltip } from "./tooltip.tsx";
+
 export function Toggle({
+	checked,
+	disabled,
+	disabledReason,
+	label,
+	onChange,
+}: {
+	checked: boolean;
+	disabled?: boolean;
+	/** Why the switch cannot be changed. Disables it, and hovering it says why. */
+	disabledReason?: string;
+	label: string;
+	onChange: (checked: boolean) => void;
+}) {
+	const toggle = (
+		<ToggleButton
+			checked={checked}
+			disabled={disabled || disabledReason !== undefined}
+			label={label}
+			onChange={onChange}
+		/>
+	);
+	if (disabledReason === undefined) return toggle;
+	// A disabled button gets no pointer events, so the tooltip hangs on a wrapper.
+	return (
+		<Tooltip label={disabledReason} side="top">
+			<span className="inline-flex shrink-0">{toggle}</span>
+		</Tooltip>
+	);
+}
+
+function ToggleButton({
 	checked,
 	disabled,
 	label,
 	onChange,
 }: {
 	checked: boolean;
-	disabled?: boolean;
+	disabled: boolean | undefined;
 	label: string;
 	onChange: (checked: boolean) => void;
 }) {

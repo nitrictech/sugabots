@@ -11,10 +11,11 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 /**
  * The built-in tools a workspace's crew turns are offered.
  *
- * `web_fetch` costs nothing and is always there. `web_search` is there while
- * the workspace has an enabled search provider with what it needs to be
- * called, since each search is a call the workspace pays for (ADR 005). Asked
- * per turn, so enabling a provider reaches the next turn without a restart.
+ * Both reach the web, so both are there only while the workspace has an
+ * enabled search provider with what it needs to be called: its switch is the
+ * workspace's one switch for web access, and each search is a call the
+ * workspace pays for (ADR 005). Asked per turn, so enabling a provider reaches
+ * the next turn without a restart.
  */
 export interface BuiltInTools {
 	forWorkspace(workspaceId: string): Effect.Effect<ToolSet, never, Database>;
@@ -35,19 +36,18 @@ export function builtInTools({
 	const webFetch = webFetchTool({ fetchPage });
 	return {
 		forWorkspace: (workspaceId) =>
-			Effect.map(searchProviders.resolve(workspaceId), (connection) => ({
-				[WEB_FETCH_TOOL]: webFetch,
-				...(connection
-					? {
-							[WEB_SEARCH_TOOL]: webSearchTool({
-								search: searchBackend(
-									connection,
-									httpClients.for({ baseUrl: searchEndpoint(connection) }),
-								),
-							}),
-						}
-					: {}),
-			})),
+			Effect.map(searchProviders.resolve(workspaceId), (connection): ToolSet => {
+				if (!connection) return {};
+				return {
+					[WEB_FETCH_TOOL]: webFetch,
+					[WEB_SEARCH_TOOL]: webSearchTool({
+						search: searchBackend(
+							connection,
+							httpClients.for({ baseUrl: searchEndpoint(connection) }),
+						),
+					}),
+				};
+			}),
 	};
 }
 

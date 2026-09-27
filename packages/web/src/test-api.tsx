@@ -386,6 +386,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		}),
 	);
 	client.api.modelProviders.list.mockReturnValue(Effect.succeed(modelProviders));
+	client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: true }));
 	client.api.modelProviders.listEnabledModels.mockReturnValue(
 		Effect.succeed({
 			models: MODELS.map((modelId) => ({

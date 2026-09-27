@@ -122,6 +122,14 @@ export const searchProviderResponseSchema = Schema.Struct({
 	provider: Schema.NullOr(searchProviderSchema),
 });
 
+/**
+ * Whether bots may use the web: `web_search` and `web_fetch` are offered only
+ * while the workspace's search provider is enabled. Anyone in the workspace
+ * may read it, so a bot's settings can show those tools as off.
+ */
+export const webAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
+export type WebAccess = typeof webAccessSchema.Type;
+
 export const searchProviderTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
 	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

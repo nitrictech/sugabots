@@ -22,6 +22,24 @@ export function useSearchProvider() {
 	});
 }
 
+/**
+ * Whether bots may use the web, which anyone in the workspace may ask. Keyed
+ * under the provider, so changing the provider refreshes it too.
+ */
+export function useWebAccess() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["search-provider", workspaceId, "web-access"],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.searchProviders.webAccess({ params: { workspace: workspaceId } }),
+						{ signal },
+					)
+			: skipToken,
+	});
+}
+
 export function useSearchProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();

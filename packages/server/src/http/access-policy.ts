@@ -94,6 +94,7 @@ export const accessPolicy: AccessPolicy = {
 	},
 	searchProviders: {
 		get: { workspace: "workspace.providers.manage" },
+		webAccess: { workspace: "workspace.read" },
 		replace: { workspace: "workspace.providers.manage" },
 		update: { workspace: "workspace.providers.manage" },
 		remove: { workspace: "workspace.providers.manage" },

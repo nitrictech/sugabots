@@ -33,6 +33,9 @@ export function searchProviderRoutes({
 			.handle("get", () =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => operations.get(workspaceId)),
 			)
+			.handle("webAccess", () =>
+				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => operations.webAccess(workspaceId)),
+			)
 			.handle("replace", ({ payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
 					operations

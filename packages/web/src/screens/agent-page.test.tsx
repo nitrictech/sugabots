@@ -133,6 +133,15 @@ describe("a member", () => {
 		apiAnswers({ role: "member" });
 	});
 
+	it("says to ask an admin while the workspace has no web access", async () => {
+		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
+		mount(page);
+
+		expect(
+			await screen.findAllByText("Off for the workspace. Ask an admin to turn on web search."),
+		).toHaveLength(2);
+	});
+
 	it("edits the model and the instructions, which a member of the pod may do", async () => {
 		mount(page);
 
@@ -571,6 +580,20 @@ describe("an admin", () => {
 				payload: { disabledTools: [] },
 			});
 		});
+	});
+
+	it("shows the built-in tools off, and holds them off, while the workspace has no web access", async () => {
+		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
+		mount(page);
+
+		for (const name of ["Search the web", "Read web pages"]) {
+			const tool = await screen.findByRole("switch", { name: `Turn on ${name}` });
+			expect(tool.getAttribute("aria-checked")).toBe("false");
+			expect(tool.hasAttribute("disabled")).toBe(true);
+		}
+		expect(
+			screen.getAllByText("Off for the workspace. Turn on web search in settings."),
+		).toHaveLength(2);
 	});
 
 	it("deletes the bot after asking, and returns to the list", async () => {

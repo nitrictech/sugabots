@@ -82,7 +82,7 @@ const meta = preview.meta({
 /** A fresh workspace: search is off, and who answers is tucked under Advanced. */
 export const Off = meta.story({
 	play: async ({ canvas }) => {
-		const power = await canvas.findByRole("switch", { name: "Bots can search the web" });
+		const power = await canvas.findByRole("switch", { name: "Bots can use the web" });
 		await expect(power).toHaveAttribute("aria-checked", "false");
 		await expect(canvas.getByRole("button", { name: "Show advanced" })).toHaveAttribute(
 			"aria-expanded",
@@ -122,7 +122,7 @@ export const NeedsKey = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("switch", { name: "Bots can search the web" }),
+			await canvas.findByRole("switch", { name: "Bots can use the web" }),
 		).toBeDisabled();
 		await expect(canvas.getByPlaceholderText("Paste your key")).toBeInTheDocument();
 	},

@@ -18,8 +18,8 @@ import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.
 import { Toggle } from "@/ui/toggle.tsx";
 
 /*
- * Whether bots may search the web, and, under Advanced, who answers. The
- * switch gives every bot the `web_search` tool. Exa answers until another
+ * Whether bots may use the web, and, under Advanced, who answers searches.
+ * The switch gives every bot the `web_search` and `web_fetch` tools. Exa answers until another
  * provider is chosen, and its key is optional, so the switch works on a fresh
  * workspace; a provider that needs a key holds the switch off until it has one.
  */
@@ -84,12 +84,13 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 				note={needsKey ? `${preset.name} needs an API key first. Add it below.` : undefined}
 			>
 				<SettingsRow
-					label="Bots can search the web"
+					label="Bots can use the web"
+					sub="Search the web and read web pages"
 					trailing={
 						<Toggle
 							checked={enabled}
 							disabled={needsKey || pending}
-							label="Bots can search the web"
+							label="Bots can use the web"
 							onChange={(next) => configure({ enabled: next })}
 						/>
 					}
@@ -231,7 +232,7 @@ function ProviderSettings({
 				title={`Remove the ${preset.name} key?`}
 				description={
 					preset.requiresApiKey
-						? "Bots stop searching the web until another key is added."
+						? "Bots stop using the web until another key is added."
 						: "Searches carry on without a key, within the provider's free limits."
 				}
 				confirmLabel="Remove"

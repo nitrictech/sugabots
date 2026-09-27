@@ -12,7 +12,9 @@ import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agen
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
+import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
+import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -360,7 +362,9 @@ function Instructions({
 /**
  * What the bot can reach: the product's own tools, each of which can be
  * switched off for it, then the pod's connections, which every bot in the pod
- * shares and which are managed on the pod.
+ * shares and which are managed on the pod. The built-in tools all reach the
+ * web, so while web search is off for the workspace they are off for every bot
+ * and cannot be switched on here.
  */
 function Tools({
 	agent,
@@ -377,6 +381,10 @@ function Tools({
 	const connections = useConnections(pod.id);
 	const { agents } = useAgents();
 	const [openConnectionId, setOpenConnectionId] = useState<string>();
+	const webOff = useWebAccess().data?.enabled === false;
+	const webOffReason = useWorkspacePermissions().manageProviders
+		? "Off for the workspace. Turn on web search in settings."
+		: "Off for the workspace. Ask an admin to turn on web search.";
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
 	const reachable = connections.data?.filter((connection) => connection.access !== "off") ?? [];
@@ -420,16 +428,17 @@ function Tools({
 				);
 			})}
 			{builtInToolCatalog.map((entry) => {
-				const on = !agent.disabledTools.includes(entry.key);
+				const on = !webOff && !agent.disabledTools.includes(entry.key);
 				return (
 					<SettingsRow
 						key={entry.key}
 						label={entry.name}
-						sub={entry.description}
+						sub={webOff ? webOffReason : entry.description}
 						trailing={
 							canChange ? (
 								<Toggle
 									checked={on}
+									disabledReason={webOff ? webOffReason : undefined}
 									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
 									onChange={(next) =>
 										save({

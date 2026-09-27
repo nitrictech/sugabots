@@ -56,6 +56,11 @@ export function searchProviderOperations({
 		get: (workspaceId: string) =>
 			Effect.map(providers.get(workspaceId), (provider) => ({ provider: provider ?? null })),
 
+		webAccess: (workspaceId: string) =>
+			Effect.map(providers.resolve(workspaceId), (connection) => ({
+				enabled: connection !== undefined,
+			})),
+
 		replace: (workspaceId: string, userId: string, input: NewSearchProvider) =>
 			Effect.andThen(
 				requireAllowedUrl(input.baseUrl ?? searchProviderPreset(input.preset).baseUrl),

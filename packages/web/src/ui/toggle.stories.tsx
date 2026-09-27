@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fn, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { Toggle } from "./toggle.tsx";
 
@@ -39,6 +39,26 @@ export const Disabled = meta.story({
 	args: { checked: true, disabled: true },
 	play: async ({ canvas, args, userEvent }) => {
 		await userEvent.click(canvas.getByRole("switch"));
+		await expect(args.onChange).not.toHaveBeenCalled();
+	},
+});
+
+/** Held off for a reason outside it: hovering says why it cannot be switched on. */
+export const HeldOff = meta.story({
+	args: {
+		checked: false,
+		disabledReason: "Off for the workspace. Ask an admin to turn on web search.",
+	},
+	play: async ({ canvas, args, userEvent }) => {
+		const toggle = canvas.getByRole("switch");
+		await expect(toggle).toBeDisabled();
+		await userEvent.hover(toggle);
+		await waitFor(() =>
+			expect(
+				screen.getByText("Off for the workspace. Ask an admin to turn on web search."),
+			).toBeVisible(),
+		);
+		await userEvent.click(toggle);
 		await expect(args.onChange).not.toHaveBeenCalled();
 	},
 });
