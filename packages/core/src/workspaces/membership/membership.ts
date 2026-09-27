@@ -96,8 +96,8 @@ export const make = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
 
-	const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>) =>
-		Effect.provide(effect, database);
+	const operation = <A, E>(name: keyof Interface, effect: Effect.Effect<A, E, Database>) =>
+		Effect.provide(effect, database).pipe(Effect.withSpan(`Membership.${name}`));
 
 	const sendInvitation = (
 		invitationId: string,
@@ -134,7 +134,8 @@ export const make = Effect.gen(function* () {
 
 	return Service.of({
 		workspaces: (input) =>
-			withDatabase(
+			operation(
+				"workspaces",
 				query((db) =>
 					db
 						.select({ id: workspace.id, name: workspace.name, slug: workspace.slug })
@@ -146,7 +147,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		create: (input) =>
-			withDatabase(
+			operation(
+				"create",
 				Effect.gen(function* () {
 					yield* requireSlugUnlikeUuid(input.details.slug);
 					return yield* transaction(
@@ -180,7 +182,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		update: (input) =>
-			withDatabase(
+			operation(
+				"update",
 				Effect.gen(function* () {
 					const standing = yield* authorization.workspace(
 						input.userId,
@@ -203,7 +206,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		members: (input) =>
-			withDatabase(
+			operation(
+				"members",
 				Effect.gen(function* () {
 					const standing = yield* authorization.workspace(
 						input.userId,
@@ -228,7 +232,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		changeRole: (input) =>
-			withDatabase(
+			operation(
+				"changeRole",
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
@@ -252,7 +257,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		remove: (input) =>
-			withDatabase(
+			operation(
+				"remove",
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
@@ -271,7 +277,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		leave: (input) =>
-			withDatabase(
+			operation(
+				"leave",
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
@@ -301,7 +308,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		invitations: (input) =>
-			withDatabase(
+			operation(
+				"invitations",
 				Effect.gen(function* () {
 					const standing = yield* authorization.workspace(
 						input.userId,
@@ -330,7 +338,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		invite: (input) =>
-			withDatabase(
+			operation(
+				"invite",
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
@@ -402,7 +411,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		cancelInvitation: (input) =>
-			withDatabase(
+			operation(
+				"cancelInvitation",
 				Effect.gen(function* () {
 					const [invitation] = yield* query((db) =>
 						db
@@ -431,7 +441,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		invitation: (input) =>
-			withDatabase(
+			operation(
+				"invitation",
 				Effect.gen(function* () {
 					const invitation = yield* invitationFor(input.userId, input.invitationId);
 					return { workspaceName: invitation.workspaceName, inviterName: invitation.inviterName };
@@ -439,7 +450,8 @@ export const make = Effect.gen(function* () {
 			),
 
 		accept: (input) =>
-			withDatabase(
+			operation(
+				"accept",
 				transaction(
 					Effect.gen(function* () {
 						const invitation = yield* invitationFor(input.userId, input.invitationId);

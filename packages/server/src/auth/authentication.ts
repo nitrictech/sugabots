@@ -116,7 +116,8 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		handler: (request) => Effect.promise(() => auth.handler(request)),
+		handler: (request) =>
+			Effect.promise(() => auth.handler(request)).pipe(Effect.withSpan("Authentication.handler")),
 		identify: (headers) =>
 			Effect.map(
 				Effect.promise(() => auth.api.getSession({ headers })),
@@ -129,7 +130,7 @@ export const make = Effect.gen(function* () {
 								image: result.user.image ?? null,
 							}
 						: undefined,
-			),
+			).pipe(Effect.withSpan("Authentication.identify")),
 	});
 });
 
