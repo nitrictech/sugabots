@@ -11,6 +11,7 @@ import {
 } from "effect";
 import { Activity, DurableDeferred, Workflow, type WorkflowEngine } from "effect/unstable/workflow";
 import { expect, it } from "vitest";
+import { Activities } from "./activities.ts";
 
 /**
  * The behaviour every engine must share, so that swapping engines is only
@@ -133,15 +134,6 @@ const probe = Layer.succeed(Probe, {
 		}),
 });
 
-const step = (key: string, name: string) =>
-	Activity.make({
-		name,
-		execute: Effect.gen(function* () {
-			const recorder = yield* Probe;
-			yield* recorder.record(key, name);
-		}),
-	});
-
 const Go = DurableDeferred.make("go", { success: Schema.String });
 
 const Suspending = Workflow.make("conformance/suspending", {
@@ -160,25 +152,40 @@ const Flaky = Workflow.make("conformance/flaky", {
 const goToken = (executionId: string) =>
 	DurableDeferred.tokenFromExecutionId(Go, { workflow: Suspending, executionId });
 
-const workflows = Layer.mergeAll(
-	Suspending.toLayer(({ key }) =>
-		Effect.gen(function* () {
-			yield* step(key, "before");
-			const go = yield* DurableDeferred.await(Go);
-			yield* step(key, "after");
-			return `before:${go}:after`;
-		}),
-	),
-	Flaky.toLayer(({ key, failures }) =>
-		Activity.make({
-			name: "flaky",
-			success: Schema.Finite,
-			error: Schema.String,
-			execute: Effect.gen(function* () {
+/** The conformance workflows' activities, defined once so any engine can rebuild them by name. */
+export const suspendingActivities = Activities.make<typeof Suspending.payloadSchema.Type>()({
+	step: {
+		execute: ({ key }, name) =>
+			Effect.gen(function* () {
+				const recorder = yield* Probe;
+				yield* recorder.record(key, name);
+			}),
+	},
+});
+
+export const flakyActivities = Activities.make<typeof Flaky.payloadSchema.Type>()({
+	flaky: {
+		success: Schema.Finite,
+		error: Schema.String,
+		execute: ({ key, failures }) =>
+			Effect.gen(function* () {
 				const attempts = yield* Probe;
 				return yield* attempts.attempt(key, failures);
 			}),
-		}).pipe(Activity.retry({ times: 3 })),
+	},
+});
+
+const workflows = Layer.mergeAll(
+	Suspending.toLayer((payload) =>
+		Effect.gen(function* () {
+			yield* suspendingActivities.activity("step", payload, "before");
+			const go = yield* DurableDeferred.await(Go);
+			yield* suspendingActivities.activity("step", payload, "after");
+			return `before:${go}:after`;
+		}),
+	),
+	Flaky.toLayer((payload) =>
+		flakyActivities.activity("flaky", payload).pipe(Activity.retry({ times: 3 })),
 	),
 ).pipe(Layer.provide(probe));
 
