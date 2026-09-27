@@ -9,8 +9,8 @@ import { renewJobLeases } from "./queue.ts";
  * Stopping the worker is interrupting its fibres, which the runtime does when
  * it is disposed. A job's `run` is therefore interrupted mid-way on shutdown,
  * and must record its own outcome inside `Effect.uninterruptibleMask` so the
- * database sees a finished job rather than one left `running`. Both runners
- * do that; see `turns/worker.ts` and `summaries/worker.ts`.
+ * database sees a finished job rather than one left `running`, as the
+ * Facilitator's does (`turns/facilitator.ts`).
  */
 export interface WorkerOptions<Claimed extends { id: string }> {
 	/** For log lines, and the name of the span each claimed job runs in. Startup recovery is `${name} recovery`. */

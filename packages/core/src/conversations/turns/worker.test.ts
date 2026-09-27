@@ -1,19 +1,23 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
-import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { Context, Effect, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { workerLayer } from "../jobs/worker.ts";
 import { ToolApprovalsIncomplete, ToolExecutionRefused } from "../tools/approvals/store.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
-import type { TurnOwner } from "./owner.ts";
-import { type ClaimedTurn, type PreparedTurn, TurnNotRunnable, type TurnStore } from "./store.ts";
-import { runClaimedTurn, type TurnExecution } from "./worker.ts";
+import {
+	type ClaimedTurn,
+	MAX_TURN_RUNS,
+	type PreparedTurn,
+	TurnNotRunnable,
+	type TurnStore,
+} from "./store.ts";
+import { runClaimedTurn } from "./worker.ts";
 
 /**
  * The stores and models in these cases never query, so the database they run
@@ -27,6 +31,7 @@ const claimed: ClaimedTurn = {
 	payload: {
 		agentId: "0199a3a0-0000-7000-8000-000000000003",
 		triggerMessageId: "0199a3a0-0000-7000-8000-000000000006",
+		reason: "default",
 	},
 	attempts: 1,
 };
@@ -77,6 +82,9 @@ const prepared: PreparedTurn = {
 	},
 };
 
+/** The claim's last run, after which a failure is not tried again. */
+const lastRun: ClaimedTurn = { ...claimed, attempts: MAX_TURN_RUNS };
+
 /** A reply draft with no collaborations or tool calls, which is most replies in these cases. */
 const reply = (content: string) => ({ content, collaborations: [], toolCalls: [] });
 
@@ -98,7 +106,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events,
@@ -166,7 +173,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -228,7 +234,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -308,9 +313,8 @@ describe("runClaimedTurn", () => {
 				}),
 		};
 
-		await runWithServices(
+		const outcome = await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -362,6 +366,7 @@ describe("runClaimedTurn", () => {
 			}),
 			[expect.objectContaining({ approvalId: "approval-1", sdkToolCallId: "sdk-1" })],
 		);
+		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["approval-1"] });
 	});
 
 	it("resumes with the checkpointed model input instead of changed turn context", async () => {
@@ -395,7 +400,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -442,7 +446,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -491,7 +494,6 @@ describe("runClaimedTurn", () => {
 
 		await runWithServices(
 			runClaimedTurn(claimed, {
-				owner: turnOwner(),
 				store,
 				model,
 				events: eventBus(),
@@ -505,14 +507,12 @@ describe("runClaimedTurn", () => {
 		expect(offered).toEqual([["other"]]);
 	});
 
-	it("hands a turn back to its owner when preparing its database state fails", async () => {
+	it("runs a segment again when preparing its database state fails", async () => {
 		const store = turnStore();
-		const owner = turnOwner();
 		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
-		await runWithServices(
+		const outcome = await runWithServices(
 			runClaimedTurn(claimed, {
-				owner,
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -522,20 +522,19 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(owner.failed).toHaveBeenCalledWith(claimed, "database unavailable", true);
+		expect(outcome).toEqual({ _tag: "Retry" });
+		expect(store.abandon).not.toHaveBeenCalled();
 	});
 
 	it("settles a Routine as cancelled when its turn is not runnable", async () => {
 		const store = turnStore();
-		const owner = turnOwner();
 		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(store.prepare).mockReturnValueOnce(
 			Effect.fail(new TurnNotRunnable({ reason: "The agent left its pod" })),
 		);
 
-		await runWithServices(
+		const outcome = await runWithServices(
 			runClaimedTurn(claimed, {
-				owner,
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -546,19 +545,17 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(owner.discarded).toHaveBeenCalledWith(claimed, "The agent left its pod");
+		expect(outcome).toEqual({ _tag: "Finished" });
 		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, { state: "cancelled" });
 	});
 
 	it("settles a Routine as failed when turn preparation exhausts its retries", async () => {
 		const store = turnStore();
-		const owner = turnOwner();
 		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
-		await runWithServices(
-			runClaimedTurn(claimed, {
-				owner,
+		const outcome = await runWithServices(
+			runClaimedTurn(lastRun, {
 				store,
 				model: unusedModel(),
 				events: eventBus(),
@@ -569,7 +566,8 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(store.abandon).toHaveBeenCalledWith(claimed, "database unavailable");
+		expect(outcome).toEqual({ _tag: "Finished" });
+		expect(store.abandon).toHaveBeenCalledWith(lastRun, "database unavailable");
 		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, {
 			state: "failed",
 			error: "database unavailable",
@@ -583,7 +581,6 @@ describe("runClaimedTurn", () => {
 		try {
 			await runWithServices(
 				runClaimedTurn(claimed, {
-					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -614,7 +611,6 @@ describe("runClaimedTurn", () => {
 		try {
 			await runWithServices(
 				runClaimedTurn(claimed, {
-					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -639,16 +635,13 @@ describe("runClaimedTurn", () => {
 
 	it("marks a failed generation for retry without duplicating its response", async () => {
 		const store = turnStore();
-		const owner = turnOwner();
-		vi.mocked(owner.failed).mockReturnValueOnce(Effect.succeed(true));
 		const model: TurnModel = {
 			stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
 		};
 		const events = eventBus();
 
-		await runWithServices(
+		const outcome = await runWithServices(
 			runClaimedTurn(claimed, {
-				owner,
 				store,
 				model,
 				events,
@@ -658,7 +651,7 @@ describe("runClaimedTurn", () => {
 			}),
 		);
 
-		expect(owner.failed).toHaveBeenCalledWith(claimed, "provider unavailable", true);
+		expect(outcome).toEqual({ _tag: "Retry" });
 		expect(store.fail).toHaveBeenCalledWith(prepared, reply(""), "provider unavailable", true);
 		expect(eventTypes(events)).toEqual([]);
 	});
@@ -669,7 +662,6 @@ describe("runClaimedTurn", () => {
 			const store = turnStore();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
-					owner: turnOwner(),
 					store,
 					model: {
 						stream: () =>
@@ -701,7 +693,6 @@ describe("runClaimedTurn", () => {
 			const events = liveEventBus();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
-					owner: turnOwner(),
 					store,
 					model: {
 						stream: (input) =>
@@ -737,7 +728,6 @@ describe("runClaimedTurn", () => {
 			const store = turnStore();
 			const execution = runWithServices(
 				runClaimedTurn(claimed, {
-					owner: turnOwner(),
 					store,
 					model: {
 						stream: (input) =>
@@ -764,143 +754,6 @@ describe("runClaimedTurn", () => {
 	});
 });
 
-/** The job queue the turn worker claims from, faked so no case reaches a database. */
-function jobQueue() {
-	return {
-		requeueInterrupted: vi.fn((): Effect.Effect<void> => Effect.void),
-		claimNext: vi.fn(
-			(): Effect.Effect<(Omit<ClaimedTurn, "owner"> & { id: string }) | undefined> =>
-				Effect.undefined,
-		),
-	};
-}
-
-/**
- * Running the layer starts the worker; disposing the runtime interrupts it,
- * which is the whole of what shutting one down means now.
- */
-function running(
-	queue: ReturnType<typeof jobQueue>,
-	execution: Omit<TurnExecution, "owner">,
-	pollIntervalMs: number,
-) {
-	return ManagedRuntime.make(
-		workerLayer({
-			name: "Turn worker",
-			...queue,
-			run: (job) => runClaimedTurn({ ...job, owner: job.id }, { ...execution, owner: turnOwner() }),
-			concurrency: 1,
-			pollIntervalMs,
-		}).pipe(Layer.provide(noDatabase)),
-	);
-}
-
-describe("the turn worker", () => {
-	it("retries interrupted-job recovery before claiming work", async () => {
-		vi.useFakeTimers();
-		const queue = jobQueue();
-		queue.requeueInterrupted
-			.mockReturnValueOnce(Effect.die(new Error("database unavailable")))
-			.mockReturnValueOnce(Effect.void);
-		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		const worker = running(
-			queue,
-			{
-				store: turnStore(),
-				model: unusedModel(),
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-			},
-			10,
-		);
-		try {
-			await worker.runPromise(Effect.void);
-			await vi.advanceTimersByTimeAsync(50);
-			expect(queue.requeueInterrupted).toHaveBeenCalledTimes(2);
-			expect(queue.claimNext).toHaveBeenCalled();
-		} finally {
-			await worker.dispose();
-			error.mockRestore();
-			vi.useRealTimers();
-		}
-	});
-
-	it("waits for a turn in flight before shutdown continues", async () => {
-		const queue = jobQueue();
-		const store = turnStore();
-		let wroteAt: number | undefined;
-		queue.claimNext.mockReturnValueOnce(Effect.succeed({ ...claimed, id: claimed.owner }));
-		vi.mocked(store.prepare).mockReturnValueOnce(Effect.succeed(prepared));
-		vi.mocked(store.fail).mockImplementation(() =>
-			// The outcome write a turn does when its stream is torn down.
-			Effect.promise(async () => {
-				await new Promise((resolve) => setTimeout(resolve, 60));
-				wroteAt = Date.now();
-			}),
-		);
-
-		const worker = running(
-			queue,
-			{
-				store,
-				model: {
-					stream: (input) =>
-						Effect.sync(() => ({
-							text: chunksUntilAborted(input.signal),
-							accounting: Effect.succeed({ usage: {} }),
-						})),
-				},
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-			},
-			10,
-		);
-
-		await worker.runPromise(Effect.void);
-		await new Promise((resolve) => setTimeout(resolve, 40));
-
-		await worker.dispose();
-		const disposedAt = Date.now();
-
-		// Without this the pool closes while the turn is still writing, and the
-		// rejection goes nowhere: the turn stays running and the text is lost.
-		expect(wroteAt).toBeDefined();
-		expect(disposedAt).toBeGreaterThanOrEqual(wroteAt ?? Number.POSITIVE_INFINITY);
-	});
-
-	it("stops while recovery is waiting to retry", async () => {
-		vi.useFakeTimers();
-		const queue = jobQueue();
-		queue.requeueInterrupted.mockReturnValue(Effect.die(new Error("database unavailable")));
-		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		const worker = running(
-			queue,
-			{
-				store: turnStore(),
-				model: unusedModel(),
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-			},
-			10_000,
-		);
-		try {
-			await worker.runPromise(Effect.void);
-			await vi.advanceTimersByTimeAsync(0);
-			await worker.dispose();
-			expect(queue.claimNext).not.toHaveBeenCalled();
-		} finally {
-			error.mockRestore();
-			vi.useRealTimers();
-		}
-	});
-});
-
 function turnStore(): TurnStore {
 	return {
 		prepare: vi.fn(() => Effect.succeed(prepared)),
@@ -916,16 +769,6 @@ function turnStore(): TurnStore {
 		requestCancel: vi.fn(() => Effect.succeed(false)),
 		abandon: vi.fn(() => Effect.void),
 		stopWaiting: vi.fn(() => Effect.void),
-	};
-}
-
-function turnOwner(): TurnOwner {
-	return {
-		completed: vi.fn(() => Effect.void),
-		suspended: vi.fn(() => Effect.void),
-		failed: vi.fn(() => Effect.succeed(false)),
-		cancelled: vi.fn(() => Effect.void),
-		discarded: vi.fn(() => Effect.void),
 	};
 }
 

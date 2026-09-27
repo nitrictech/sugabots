@@ -132,8 +132,7 @@ const main = Effect.gen(function* () {
 		},
 	});
 
-	// Summaries and turns run as workflows. The turn job worker in the
-	// background layer only drains turns queued as jobs before this release.
+	// Summaries and turns run as workflows.
 	yield* Layer.build(
 		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turnWorkflow), Lanes.reconcileLayer).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
@@ -156,21 +155,7 @@ const main = Effect.gen(function* () {
 	);
 
 	yield* Layer.build(
-		backgroundLayer({
-			eventStore,
-			bus,
-			model,
-			turns: stores.turns,
-			queueSummary: (request) => queueSummary(lanes, request),
-			queueTurn,
-			routines: stores.routines,
-			collaborations: stores.collaborations,
-			calls: stores.calls,
-			approvals: stores.approvals,
-			builtInTools,
-			connectionTools,
-			publishEvents,
-		}),
+		backgroundLayer({ eventStore, model, queueTurn, routines: stores.routines, publishEvents }),
 	);
 	const api = apiLayer({
 		authentication,

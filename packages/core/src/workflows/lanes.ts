@@ -80,6 +80,22 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 			)})
 	)`;
 
+/**
+ * A statement dropping the requests waiting in lanes about any of `subjects`
+ * (a subquery of ids) for `workflows`, so they never start. What is already
+ * running is left alone.
+ */
+export const dropWaiting = (subjects: SQLWrapper, workflows: ReadonlyArray<string>) =>
+	sql`delete from ${laneRequest}
+		where ${laneRequest.laneKey} in (
+			select ${lane.key} from ${lane}
+			where ${lane.subject} in (select (id)::text from (${subjects}) as subject(id))
+				and ${lane.workflow} in (${sql.join(
+					workflows.map((name) => sql`${name}`),
+					sql`, `,
+				)})
+		)`;
+
 /** How long a lane may stay `starting` before `reconcile` starts its workflow again. */
 const STARTING_TIMEOUT = Duration.seconds(30);
 /** How long a lane may be `running` before `reconcile` asks the engine whether it has finished. */

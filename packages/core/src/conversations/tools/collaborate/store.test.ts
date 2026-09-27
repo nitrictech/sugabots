@@ -1,5 +1,5 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { eventPublisher } from "../../../database/events/publish.ts";
@@ -7,7 +7,6 @@ import { memoryEventStore } from "../../../database/events/store.ts";
 import {
 	agent,
 	event,
-	job,
 	message,
 	pod,
 	podMember,
@@ -18,13 +17,24 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../../../database/testing.ts";
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { modelPrompt } from "../../turns/context.ts";
-import { queueTurnAsJob } from "../../turns/queue.ts";
 import { turnStore } from "../../turns/store.ts";
-import { turnSignalsForTests } from "../../turns/testing.ts";
+import {
+	queueTurnForTests,
+	releaseTurn,
+	runningTurns,
+	turnSignalsForTests,
+	waitingTurns,
+} from "../../turns/testing.ts";
 import { CollaborationRefused, type CollaborationStore, collaborationStore } from "./store.ts";
 
 /**
@@ -34,11 +44,11 @@ import { CollaborationRefused, type CollaborationStore, collaborationStore } fro
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const collaborations: Promised<CollaborationStore> = onPostgres(
-		collaborationStore(publishEvents, queueTurnAsJob),
+		collaborationStore(publishEvents, queueTurnForTests),
 	);
 	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
-	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnForTests, turnSignalsForTests));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -49,7 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 	let helperChatId: string;
 	let helperMainThreadId: string;
 	/** The host's reply in the root thread, which its collaborations hang off. */
-	let reply: { turnId: string; messageId: string };
+	let reply: Awaited<ReturnType<typeof openReply>>;
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -146,26 +156,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		reply = await openReply(rootThreadId, host.id);
 	});
 
-	/** Claims the queued turn for a thread's host and prepares it, so a reply message exists. */
+	/** Prepares the turn running for a thread's host, so a reply message exists. */
 	async function openReply(threadId: string, agentId: string) {
-		const [queued] = await onDatabase((db) =>
-			db
-				.select()
-				.from(job)
-				.where(and(eq(job.threadId, threadId), eq(job.status, "queued"))),
-		);
-		if (!queued || !("agentId" in queued.payload && "triggerMessageId" in queued.payload))
-			throw new Error("no turn queued");
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
-		);
-		const prepared = await turns.prepare({
-			owner: queued.id,
-			threadId,
-			payload: queued.payload,
-			attempts: 1,
-		});
+		const [claim] = await runOnPostgres(runningTurns(threadId));
+		if (!claim) throw new Error("no turn running");
+		const prepared = await turns.prepare(claim);
 		return {
+			claim,
 			turnId: prepared.turnId,
 			messageId: prepared.responseMessage.id,
 			agentId,
@@ -215,11 +212,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		const visibleThreadIds = (await threads.listVisible(workspaceId, memberId)).map(({ id }) => id);
 		expect(visibleThreadIds).toEqual(expect.arrayContaining([rootThreadId, helperMainThreadId]));
 		expect(visibleThreadIds).toHaveLength(2);
-		const queued = await onDatabase((db) =>
-			db.select().from(job).where(eq(job.threadId, opened.collaboration.threadId)),
-		);
-		expect(queued).toMatchObject([
-			{ kind: "turn", status: "queued", payload: { agentId: helper.id } },
+		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
+			{ payload: { agentId: helper.id } },
 		]);
 		expect((await chats.messages(helperChatId, memberId))?.items).toEqual([
 			expect.objectContaining({
@@ -315,13 +309,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 		expect(await collaborations.readAnswer(opened.collaboration.id)).toBe("Nothing alarming.");
 		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe(false);
-		const resumes = await onDatabase((db) =>
-			db
-				.select()
-				.from(job)
-				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued"))),
-		);
-		expect(resumes).toHaveLength(0);
+		expect(
+			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
+		).toHaveLength(0);
 	});
 
 	it("keeps a collaboration in model history when the thread has a summary", async () => {
@@ -350,12 +340,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 				.set({ status: "done", finishedAt: new Date() })
 				.where(eq(turn.id, reply.turnId)),
 		);
-		await onDatabase((db) =>
-			db
-				.update(job)
-				.set({ status: "done" })
-				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "running"))),
-		);
+		await runOnPostgres(releaseTurn(reply.claim));
 		await onDatabase((db) =>
 			db.insert(threadSummary).values({
 				threadId: rootThreadId,
@@ -414,15 +399,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			answer: "Late, but fine.",
 		});
 
-		const resumes = await onDatabase((db) =>
-			db
-				.select()
-				.from(job)
-				.where(and(eq(job.threadId, rootThreadId), eq(job.status, "queued"))),
-		);
-		expect(resumes).toMatchObject([
-			{ kind: "turn", payload: { agentId: host.id, triggerMessageId: reply.messageId } },
-		]);
+		expect(
+			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
+		).toMatchObject([{ agentId: host.id, triggerMessageId: reply.messageId }]);
 		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
 	});

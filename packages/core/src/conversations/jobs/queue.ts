@@ -1,19 +1,19 @@
 import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import { Data, Duration, Effect } from "effect";
-import { type Database, type Executor, query, transaction } from "../../database/database.ts";
+import { type Database, query, transaction } from "../../database/database.ts";
 import { type JobKind, type JobPayloadOf, job } from "../../database/schema.ts";
 
 /**
  * The job queue: a Postgres table that background workers claim work from.
  *
  * One row is one piece of work about one thread. A `dedupeKey` names the work
- * so that asking for it twice while it is queued or waiting does not queue it twice.
+ * so that asking for it twice while it is queued does not queue it twice.
  * A job may be `queued`, `running`, or finished as
  * `done`, `failed` or `cancelled`.
  *
- * Two workers use this, for turns and for thread summaries. Each decides what
- * a job means; this file only knows how to hand one out and record how it
- * ended.
+ * Only the Facilitator's worker uses this; everything else runs as a
+ * workflow. The worker decides what a job means; this file only knows how to
+ * hand one out and record how it ended.
  */
 
 /** Give up on a job after this many attempts. */
@@ -22,8 +22,8 @@ const MAX_ATTEMPTS = 3;
 export const hasPendingResponseJob = (threadId: SQL) => sql<boolean>`exists (
 	select 1 from ${job}
 	where ${job.threadId} = ${threadId}
-		and ${job.kind} in ('turn', 'facilitate')
-		and ${job.status} in ('queued', 'running', 'waiting')
+		and ${job.kind} = 'facilitate'
+		and ${job.status} in ('queued', 'running')
 )`;
 
 /**
@@ -70,29 +70,13 @@ export const enqueueJob = <Kind extends JobKind>(
 			yield* lockDedupeKey(input.dedupeKey);
 			const [existing] = yield* query((db) =>
 				db
-					.select({ id: job.id, status: job.status })
+					.select({ id: job.id })
 					.from(job)
-					.where(
-						and(eq(job.dedupeKey, input.dedupeKey), sql`${job.status} in ('queued', 'waiting')`),
-					)
+					.where(and(eq(job.dedupeKey, input.dedupeKey), eq(job.status, "queued")))
 					.limit(1),
 			);
 			if (existing) {
-				if (existing.status === "waiting") {
-					yield* query((db) =>
-						db
-							.update(job)
-							.set({ deferredPayload: input.payload, updatedAt: new Date() })
-							.where(
-								and(
-									eq(job.id, existing.id),
-									eq(job.status, "waiting"),
-									sql`${job.deferredPayload} is null`,
-								),
-							),
-					);
-				}
-				if (existing.status === "queued" && input.ifAlreadyQueued === "replacePayload") {
+				if (input.ifAlreadyQueued === "replacePayload") {
 					yield* query((db) =>
 						db
 							.update(job)
@@ -150,7 +134,7 @@ export const claimNextJob = <Kind extends JobKind>(
 					and not exists (
 						select 1 from ${job} active
 						where active.dedupe_key = queued.dedupe_key
-							and active.status in ('running', 'waiting')
+							and active.status = 'running'
 					)
 				order by queued.available_at, queued.created_at, queued.id
 				for update skip locked
@@ -239,52 +223,6 @@ export const completeJob = (jobId: string): Effect.Effect<void, never, Database>
 			.where(eq(job.id, jobId)),
 	).pipe(Effect.asVoid);
 
-/** Ends a job that will never run: its subject is gone, or newer work replaces it. */
-export const cancelJob = (jobId: string, reason: string): Effect.Effect<void, never, Database> =>
-	query((db) =>
-		db
-			.update(job)
-			.set({ status: "cancelled", lastError: reason, lockedAt: null })
-			.where(eq(job.id, jobId)),
-	).pipe(Effect.asVoid);
-
-export const failJob = (jobId: string, error: string): Effect.Effect<void, never, Database> =>
-	query((db) =>
-		db
-			.update(job)
-			.set({ status: "failed", lastError: error, lockedAt: null })
-			.where(eq(job.id, jobId)),
-	).pipe(Effect.asVoid);
-
-/** Queues work coalesced while an approval was waiting, after its owning job ends. */
-export const queueDeferredJob = Effect.fn("JobQueue.queueDeferredJob")(function* (
-	db: Executor,
-	jobId: string,
-) {
-	const [ended] = yield* db
-		.select({
-			kind: job.kind,
-			threadId: job.threadId,
-			dedupeKey: job.dedupeKey,
-			payload: job.deferredPayload,
-		})
-		.from(job)
-		.where(eq(job.id, jobId))
-		.limit(1);
-	if (!ended?.payload) return;
-	yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ended.dedupeKey}, 0))`);
-	yield* db.update(job).set({ deferredPayload: null }).where(eq(job.id, jobId));
-	yield* db
-		.insert(job)
-		.values({
-			kind: ended.kind,
-			threadId: ended.threadId,
-			dedupeKey: ended.dedupeKey,
-			payload: ended.payload,
-		})
-		.onConflictDoNothing();
-});
-
 /**
  * Records a failed attempt. The job is queued again with a growing delay, or
  * marked `failed` once it has used its attempts. Returns whether it will retry.
@@ -317,33 +255,6 @@ export const retryOrFailJob = (
 			return willRetry;
 		}),
 	);
-
-/**
- * For work where the newest request supersedes the older: retries the job
- * unless a newer one with the same key is already queued, in which case this
- * one is failed and the newer one runs.
- */
-export const retryUnlessSuperseded = (
-	claimed: Pick<ClaimedJob<JobKind>, "id" | "dedupeKey" | "attempts">,
-	error: string,
-): Effect.Effect<void, never, Database> =>
-	Effect.flatMap(hasQueuedDuplicate(claimed), (superseded) =>
-		superseded ? failJob(claimed.id, error) : Effect.asVoid(retryOrFailJob(claimed, error)),
-	);
-
-/** Whether newer work with the same key is waiting behind this job. */
-export const hasQueuedDuplicate = (
-	claimed: Pick<ClaimedJob<JobKind>, "id" | "dedupeKey">,
-): Effect.Effect<boolean, never, Database> =>
-	query((db) =>
-		db
-			.select({ id: job.id })
-			.from(job)
-			.where(
-				and(eq(job.dedupeKey, claimed.dedupeKey), eq(job.status, "queued"), ne(job.id, claimed.id)),
-			)
-			.limit(1),
-	).pipe(Effect.map((newer) => newer.length > 0));
 
 const cancelQueuedDuplicates = (claimed: Pick<ClaimedJob<JobKind>, "id" | "dedupeKey">) =>
 	query((db) =>

@@ -15,8 +15,7 @@ import {
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { Lanes } from "../../workflows/lanes.ts";
-import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
-import { describeFailure, workerLayer } from "../jobs/worker.ts";
+import { describeFailure } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
 import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";
@@ -27,9 +26,9 @@ import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
-import { jobTurnOwner, segmentTurnOwner, type TurnOwner } from "./owner.ts";
 import {
 	type ClaimedTurn,
+	MAX_TURN_RUNS,
 	type PreparedTurn,
 	type ReplyDraft,
 	retryable,
@@ -57,8 +56,6 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
-const DEFAULT_POLL_INTERVAL_MS = 250;
-const DEFAULT_CONCURRENCY = 8;
 
 export interface TurnExecution {
 	store: TurnStore;
@@ -77,33 +74,7 @@ export interface TurnExecution {
 	routines?: Pick<RoutineStore, "settleThread">;
 	/** Asks the Scribe to catch up on the thread after a completed reply. */
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
-	/** What runs the turn, told of each outcome in the transaction that records it. */
-	owner: TurnOwner;
 }
-
-export interface TurnWorkerOptions extends Omit<TurnExecution, "owner"> {
-	concurrency?: number;
-	pollIntervalMs?: number;
-}
-
-/** Claims turns and runs them, `concurrency` at a time, while the runtime lives. */
-export const turnWorkerLayer = ({
-	concurrency = DEFAULT_CONCURRENCY,
-	pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-	...execution
-}: TurnWorkerOptions): Layer.Layer<never, never, Database> =>
-	workerLayer({
-		name: "Turn worker",
-		requeueInterrupted: () => requeueInterruptedJobs("turn"),
-		claimNext: () => claimNextJob("turn"),
-		run: (job) =>
-			runClaimedTurn(
-				{ owner: job.id, threadId: job.threadId, payload: job.payload, attempts: job.attempts },
-				{ ...execution, owner: jobTurnOwner },
-			),
-		concurrency,
-		pollIntervalMs,
-	});
 
 /** A turn workflow's run of its turn, owned by the execution. */
 const claimFor = (request: TurnRequest, attempt: number) =>
@@ -125,9 +96,7 @@ const claimFor = (request: TurnRequest, attempt: number) =>
  * The turn workflow's steps: running a segment of the turn, and freeing its
  * lane afterwards. Activities reach them through `TurnSteps`.
  */
-export const stepsLayer = (
-	execution: Omit<TurnExecution, "owner"> & { approvals: ToolApprovalStore },
-) =>
+export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalStore }) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
@@ -135,12 +104,9 @@ export const stepsLayer = (
 			const lanes = yield* Lanes.Service;
 			return TurnSteps.of({
 				segment: (request, attempt) =>
-					Effect.gen(function* () {
-						const outcome = yield* Ref.make<SegmentOutcome>({ _tag: "Finished" });
-						const claimed = yield* claimFor(request, attempt);
-						yield* runClaimedTurn(claimed, { ...execution, owner: segmentTurnOwner(outcome) });
-						return yield* Ref.get(outcome);
-					}).pipe(Effect.provideService(Database, database)),
+					Effect.flatMap(claimFor(request, attempt), (claimed) =>
+						runClaimedTurn(claimed, execution),
+					).pipe(Effect.provideService(Database, database)),
 				abandon: (request) =>
 					transaction(
 						Effect.gen(function* () {
@@ -169,46 +135,54 @@ export const stepsLayer = (
 	);
 
 /**
- * Runs one claimed turn from preparation to recorded outcome.
+ * Runs one segment of a claimed turn, from preparation to recorded outcome,
+ * and says how it ended for the workflow.
  *
- * Preparing can end before there is anything to show for it: the claim is
- * discarded if the turn cannot run, or released for a retry if the database
- * failed. After that the reply is streamed, and whatever ends the stream is
- * written back as the turn's outcome.
+ * Preparing can end before there is anything to show for it: the turn ends if
+ * it cannot run, or runs again if the database failed. After that the reply
+ * is streamed, and whatever ends the stream is written back as the turn's
+ * outcome.
  */
 export const runClaimedTurn = (
 	claimed: ClaimedTurn,
 	execution: TurnExecution,
-): Effect.Effect<void, never, Database> =>
+): Effect.Effect<SegmentOutcome, never, Database> =>
 	execution.store.prepare(claimed).pipe(
 		Effect.flatMap((prepared) => generateReply(prepared, execution)),
 		Effect.catchTag("TurnNotRunnable", (why) =>
-			transaction(
-				execution.owner
-					.discarded(claimed, why.reason)
-					.pipe(
-						Effect.andThen(
-							execution.routines?.settleThread(
-								claimed.threadId,
-								why.terminalOutcome ?? { state: "cancelled" },
-							) ?? Effect.void,
-						),
-					),
+			Effect.as(
+				execution.routines?.settleThread(
+					claimed.threadId,
+					why.terminalOutcome ?? { state: "cancelled" },
+				) ?? Effect.void,
+				finished,
 			),
 		),
-		Effect.catchDefect((defect) =>
-			transaction(
+		Effect.catchDefect((defect) => {
+			if (runsAgain(claimed, true)) return Effect.succeed(retry);
+			const error = describeFailure(defect);
+			return transaction(
 				Effect.gen(function* () {
-					const error = describeFailure(defect);
-					const willRetry = yield* execution.owner.failed(claimed, error, true);
-					if (!willRetry) yield* execution.store.abandon(claimed, error);
-					if (!willRetry && execution.routines) {
+					yield* execution.store.abandon(claimed, error);
+					if (execution.routines) {
 						yield* execution.routines.settleThread(claimed.threadId, { state: "failed", error });
 					}
+					return finished;
 				}),
-			),
-		),
+			);
+		}),
 	);
+
+const finished: SegmentOutcome = { _tag: "Finished" };
+const retry: SegmentOutcome = { _tag: "Retry" };
+
+/**
+ * Whether a failed segment runs again. `retryable` is false once the turn has
+ * a checkpoint or a tool that changes things has run, since a retry could do
+ * it again (ADR 002).
+ */
+const runsAgain = (claim: ClaimedTurn, retryable: boolean) =>
+	retryable && claim.attempts < MAX_TURN_RUNS;
 
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
@@ -258,31 +232,45 @@ class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<
 const generateReply = (
 	prepared: PreparedTurn,
 	execution: TurnExecution,
-): Effect.Effect<void, never, Database> =>
+): Effect.Effect<SegmentOutcome, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { store, collaborations, routines, owner } = execution;
-			const claim = prepared.claim;
+			const { store, collaborations, routines } = execution;
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, execution, reply)));
 			const draft = yield* Ref.get(reply);
 
+			/** Records the failure; the segment runs again only while that is safe. */
+			const failed = (error: string) =>
+				transaction(
+					Effect.gen(function* () {
+						const willRetry = runsAgain(prepared.claim, retryable(prepared, draft));
+						yield* store.fail(prepared, draft, error, willRetry);
+						if (!willRetry && routines) {
+							yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
+						}
+						return willRetry ? retry : finished;
+					}),
+				);
+
 			if (Exit.isSuccess(streamed)) {
 				if (streamed.value.kind === "suspended") {
 					const { checkpoint, approvals } = streamed.value;
-					yield* transaction(
+					return yield* transaction(
 						Effect.gen(function* () {
 							if (yield* store.suspend(prepared, checkpoint, approvals)) {
-								return yield* owner.suspended(claim, checkpoint);
+								return {
+									_tag: "Suspended",
+									approvals: checkpoint.approvals.map((approval) => approval.approvalId),
+								} satisfies SegmentOutcome;
 							}
 							yield* store.cancel(prepared, draft);
-							yield* owner.cancelled(claim, "Cancelled by a person");
 							if (routines) {
 								yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 							}
+							return finished;
 						}),
 					);
-					return;
 				}
 				const accounting = streamed.value.accounting;
 				// One transaction: the answer must be readable by the time anyone
@@ -303,7 +291,6 @@ const generateReply = (
 									)
 							: false;
 						yield* store.complete(prepared, draft, accounting);
-						yield* owner.completed(claim);
 						if (!answered) {
 							yield* store.giveFloor(prepared, draft);
 						}
@@ -327,53 +314,26 @@ const generateReply = (
 							Effect.sync(() => console.error("Queueing a thread summary failed", cause)),
 						),
 					);
-				return;
+				return finished;
 			}
 
 			const cause = streamed.cause;
-			if (Cause.hasInterruptsOnly(cause)) {
-				yield* transaction(
-					Effect.gen(function* () {
-						const willRetry = yield* owner.failed(
-							claim,
-							"Worker stopped",
-							retryable(prepared, draft),
-						);
-						yield* store.fail(prepared, draft, "Worker stopped", willRetry);
-						if (!willRetry && routines) {
-							yield* routines.settleThread(prepared.context.thread.id, {
-								state: "failed",
-								error: "Worker stopped",
-							});
-						}
-					}),
-				);
-				return;
-			}
+			if (Cause.hasInterruptsOnly(cause)) return yield* failed("Worker stopped");
 			const failure = Cause.squash(cause);
 			if (failure instanceof TurnCancelled) {
-				yield* transaction(
+				return yield* transaction(
 					Effect.gen(function* () {
 						yield* store.cancel(prepared, draft);
-						yield* owner.cancelled(claim, "Cancelled by a person");
 						if (routines) {
 							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 						}
+						return finished;
 					}),
 				);
-				return;
 			}
 			const error = describeFailure(failure);
 			yield* logTurnFailure(prepared, error);
-			yield* transaction(
-				Effect.gen(function* () {
-					const willRetry = yield* owner.failed(claim, error, retryable(prepared, draft));
-					yield* store.fail(prepared, draft, error, willRetry);
-					if (!willRetry && routines) {
-						yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
-					}
-				}),
-			);
+			return yield* failed(error);
 		}),
 	);
 

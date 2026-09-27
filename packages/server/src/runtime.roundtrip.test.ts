@@ -1,9 +1,7 @@
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
-import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
-import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
@@ -79,20 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			})),
 	};
 
-	const background = backgroundLayer({
-		eventStore,
-		bus,
-		model,
-		turns,
-		// Summaries run as workflows now; this test is about turns.
-		queueSummary: () => Effect.void,
-		queueTurn,
-		collaborations,
-		calls: toolCallStore(publishEvents),
-		builtInTools: noBuiltInTools,
-		connectionTools: noConnectionTools,
-		publishEvents,
-	});
+	const background = backgroundLayer({ eventStore, model, queueTurn, publishEvents });
 	const turnWorkflows = Turn.toLayer(turnWorkflow).pipe(
 		Layer.provideMerge(
 			stepsLayer({

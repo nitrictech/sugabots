@@ -26,7 +26,6 @@ import {
 	pod,
 	routineExecution,
 	type StoredMessagePart,
-	type TurnJobPayload,
 	type TurnReason,
 	thread,
 	toolCall,
@@ -44,7 +43,6 @@ import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
-import { cancelWaitingJob, ownedByJob } from "./owner.ts";
 import type { QueueTurn } from "./queue.ts";
 import type { TurnSignals } from "./signals.ts";
 import type { TurnRequest } from "./turn.workflow.ts";
@@ -52,8 +50,8 @@ import type { TurnRequest } from "./turn.workflow.ts";
 /**
  * Turns: one agent answering one message in a thread.
  *
- * A turn is asked for when a person posts, claimed by whatever runs turns (see
- * `owner.ts`), and recorded as a `turn` row plus the agent's reply as a
+ * A turn is asked for when a person posts, run by the turn workflow (see
+ * `turn.workflow.ts`), and recorded as a `turn` row plus the agent's reply as a
  * `message` that starts out `streaming`. The worker drives it from there
  * through the methods below, each of which writes the outcome and publishes it
  * in one transaction.
@@ -66,14 +64,14 @@ const MAX_HISTORY_MESSAGES = 100;
 export const MAX_TURN_RUNS = 3;
 
 /**
- * One run of a turn. `owner` is what runs it (a job, or a workflow
- * execution): a suspended turn is resumed only by its owner. `attempts`
- * counts runs, this one included.
+ * One run of a turn. `owner` is the workflow execution running it: a
+ * suspended turn is resumed only by its owner. `attempts` counts runs, this
+ * one included.
  */
 export interface ClaimedTurn {
 	readonly owner: string;
 	readonly threadId: string;
-	readonly payload: TurnJobPayload;
+	readonly payload: Omit<TurnRequest, "threadId">;
 	readonly attempts: number;
 }
 
@@ -725,20 +723,15 @@ export function turnStore(
 					if (!visible) {
 						return false;
 					}
-					if (candidate.status === "waiting") {
-						if (candidate.owner && !(yield* ownedByJob(candidate.owner))) {
-							// Telling the workflow is the cancellation; it records it. The
-							// flag stops the next segment instead if the workflow has just
-							// stopped waiting, since the signal would then go unheard.
-							yield* query((db) =>
-								db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, turnId)),
-							);
-							yield* signals.cancel(candidate.owner);
-							return true;
-						}
-						const stopped = yield* stopWaitingTurn(turnId, candidate);
-						if (stopped && candidate.owner) yield* cancelWaitingJob(candidate.owner);
-						return stopped;
+					if (candidate.status === "waiting" && candidate.owner) {
+						// Telling the workflow is the cancellation; it records it. The
+						// flag stops the next segment instead if the workflow has just
+						// stopped waiting, since the signal would then go unheard.
+						yield* query((db) =>
+							db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, turnId)),
+						);
+						yield* signals.cancel(candidate.owner);
+						return true;
 					}
 					const updated = yield* query((db) =>
 						db
@@ -1057,7 +1050,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			owner: claimed.owner,
 			runs: 1,
 			status: "running",
-			reason: claimed.payload.reason ?? null,
+			reason: claimed.payload.reason,
 			model,
 			startedAt: new Date(),
 		})

@@ -19,18 +19,20 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { lane } from "../../workflows/sql.ts";
 import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { chatStore } from "../chats/store.ts";
-import { claimNextJob, renewJobLeases, requeueInterruptedJobs } from "../jobs/queue.ts";
+import { claimNextJob, enqueueJob, renewJobLeases, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
-import { queueTurnAsJob } from "../turns/queue.ts";
 import { turnStore } from "../turns/store.ts";
-import { turnSignalsForTests } from "../turns/testing.ts";
-import { Turn, turnLane } from "../turns/turn.workflow.ts";
+import {
+	queueTurnForTests,
+	releaseTurn,
+	runningTurns,
+	turnSignalsForTests,
+} from "../turns/testing.ts";
 import { threadStore } from "./store.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -42,8 +44,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const eventBus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(eventBus);
 	const store = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
-	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnForTests, turnSignalsForTests));
 	const summaries = onPostgres(summaryStore(publishEvents));
 	let workspaceId: string;
 	let podId: string;
@@ -80,6 +82,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		const details = await store.getVisible(opened.mainThreadId, input.initiatorUserId);
 		if (!details) throw new Error("Created Chat thread is not visible");
 		return details;
+	}
+
+	/** The agent's turn running in the thread, as its workflow claims it. */
+	async function runningTurn(threadId: string, agent = agentId) {
+		const claim = (await runOnPostgres(runningTurns(threadId))).find(
+			(running) => running.payload.agentId === agent,
+		);
+		if (!claim) throw new Error("No turn is running in the thread");
+		return claim;
 	}
 
 	afterAll(async () => {
@@ -213,31 +224,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			message: "Who should answer this?",
 		});
 		await runOnPostgres(
-			queueTurnAsJob({
+			queueTurnForTests({
 				threadId: details.thread.id,
 				agentId: otherRow.id,
 				triggerMessageId: details.messages[0]?.id ?? "",
 				reason: "mention",
 			}),
 		);
-		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) =>
-				row.kind === "turn" &&
-				row.threadId === details.thread.id &&
-				"agentId" in row.payload &&
-				row.payload.agentId === otherRow.id,
-		);
-		if (!queued || !("triggerMessageId" in queued.payload) || !("reason" in queued.payload)) {
-			throw new Error("The turn for the second agent was not queued");
-		}
-		const payload = queued.payload;
-
-		const prepared = await turns.prepare({
-			owner: queued.id,
-			threadId: queued.threadId,
-			payload,
-			attempts: 1,
-		});
+		const prepared = await turns.prepare(await runningTurn(details.thread.id, otherRow.id));
 
 		expect(prepared.context.agent.id).toBe(otherRow.id);
 	});
@@ -342,23 +336,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			message: "Anyone there?",
 		});
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
-		const [queued] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "turn" && row.threadId === details.thread.id,
-		);
-		if (!queued || !("triggerMessageId" in queued.payload) || !("reason" in queued.payload)) {
-			throw new Error("The turn was not queued");
-		}
+		const claim = await runningTurn(details.thread.id);
 
 		// It stops rather than falling back to some other model, and the reason
 		// names the agent so somebody can go and fix it.
-		await expect(
-			turns.prepare({
-				owner: queued.id,
-				threadId: queued.threadId,
-				payload: queued.payload,
-				attempts: 1,
-			}),
-		).rejects.toThrow("has no model chosen");
+		await expect(turns.prepare(claim)).rejects.toThrow("has no model chosen");
 	});
 
 	it("does not facilitate at all until the workspace has chosen a Facilitator model", async () => {
@@ -395,24 +377,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Run as a workflow",
 		});
-		await onDatabase((db) =>
-			db.update(job).set({ status: "cancelled" }).where(eq(job.threadId, details.thread.id)),
-		);
 		const statusNow = async () =>
 			(await store.getVisible(details.thread.id, memberId))?.thread.status;
-		expect(await statusNow()).toBe("done");
-
-		await onDatabase((db) =>
-			db.insert(lane).values({
-				key: turnLane({ threadId: details.thread.id, agentId }),
-				subject: details.thread.id,
-				workflow: Turn._tag,
-				state: "running",
-				executionId: crypto.randomUUID(),
-			}),
-		);
-
 		expect(await statusNow()).toBe("running");
+
+		await runOnPostgres(releaseTurn(await runningTurn(details.thread.id)));
+
+		expect(await statusNow()).toBe("done");
 	});
 
 	it("loads a Chat thread with its participants and first message", async () => {
@@ -433,13 +404,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				parts: [{ type: "text", text: "Check the release\nPay attention to migrations." }],
 			},
 		]);
-		const queuedTurns = (await onDatabase((db) => db.select().from(job))).filter(
-			(queued) => queued.threadId === details.thread.id,
-		);
-		expect(queuedTurns).toMatchObject([
+		expect(await runOnPostgres(runningTurns(details.thread.id))).toMatchObject([
 			{
-				kind: "turn",
-				status: "queued",
 				threadId: details.thread.id,
 				payload: { agentId, triggerMessageId: details.messages[0]?.id },
 			},
@@ -712,21 +678,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
 		});
-		const [turnJob] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "turn" && row.threadId === details.thread.id,
-		);
-		if (!turnJob || !("agentId" in turnJob.payload && "triggerMessageId" in turnJob.payload)) {
-			throw new Error("Thread test has no turn job");
-		}
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
-		);
-		const preparedTurn = await turns.prepare({
-			owner: turnJob.id,
-			threadId: turnJob.threadId,
-			payload: turnJob.payload,
-			attempts: 1,
-		});
+		const firstClaim = await runningTurn(details.thread.id);
+		const preparedTurn = await turns.prepare(firstClaim);
 		if (!preparedTurn) {
 			throw new Error("Thread test could not prepare its turn");
 		}
@@ -739,6 +692,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				contextCapacity: 200_000,
 			},
 		);
+		await runOnPostgres(releaseTurn(firstClaim));
 		const preparedSummary = await summaries.prepare({
 			threadId: details.thread.id,
 			agentId: preparedTurn.context.agent.id,
@@ -805,24 +759,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
-		const [nextTurnJob] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "turn" && row.status === "queued" && row.threadId === details.thread.id,
-		);
-		if (
-			!nextTurnJob ||
-			!("agentId" in nextTurnJob.payload && "triggerMessageId" in nextTurnJob.payload)
-		) {
-			throw new Error("Thread test has no follow-up turn job");
-		}
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, nextTurnJob.id)),
-		);
-		const nextTurn = await turns.prepare({
-			owner: nextTurnJob.id,
-			threadId: nextTurnJob.threadId,
-			payload: nextTurnJob.payload,
-			attempts: 1,
-		});
+		const nextTurn = await turns.prepare(await runningTurn(details.thread.id));
 		if (!nextTurn) {
 			throw new Error("Thread test could not prepare its follow-up turn");
 		}
@@ -867,21 +804,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Wait for review",
 		});
-		const [turnJob] = (await onDatabase((db) => db.select().from(job))).filter(
-			(row) => row.kind === "turn" && row.threadId === details.thread.id,
-		);
-		if (!turnJob || !("agentId" in turnJob.payload && "triggerMessageId" in turnJob.payload)) {
-			throw new Error("Thread test has no turn job");
-		}
-		await onDatabase((db) =>
-			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, turnJob.id)),
-		);
-		const prepared = await turns.prepare({
-			owner: turnJob.id,
-			threadId: turnJob.threadId,
-			payload: turnJob.payload,
-			attempts: 1,
-		});
+		const prepared = await turns.prepare(await runningTurn(details.thread.id));
 		if (!prepared) {
 			throw new Error("Thread test could not prepare its turn");
 		}
@@ -898,6 +821,17 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		);
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
+
+	const queueFacilitation = (threadId: string, triggerMessageId: string) =>
+		runOnPostgres(
+			enqueueJob({
+				kind: "facilitate",
+				threadId,
+				payload: { triggerMessageId },
+				dedupeKey: `facilitate:${threadId}`,
+				ifAlreadyQueued: "keep",
+			}),
+		);
 
 	/** Ages a job's lease past `JOB_LEASE`, as if the process holding it had stopped. */
 	const lapseLease = (jobId: string | undefined) =>
@@ -920,28 +854,27 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		if (!triggerMessageId) {
 			throw new Error("Thread test has no trigger message");
 		}
-		// Asking again for a turn that is already queued keeps the one there.
-		await runOnPostgres(
-			queueTurnAsJob({ threadId: details.thread.id, agentId, triggerMessageId, reason: "default" }),
-		);
+		// Asking again for work that is already queued keeps the one there.
+		await queueFacilitation(details.thread.id, triggerMessageId);
+		await queueFacilitation(details.thread.id, triggerMessageId);
 
-		const claimed = await runOnPostgres(claimNextJob("turn"));
+		const claimed = await runOnPostgres(claimNextJob("facilitate"));
 		expect(claimed).toMatchObject({
 			threadId: details.thread.id,
-			payload: { agentId, triggerMessageId },
+			payload: { triggerMessageId },
 			attempts: 1,
 		});
-		expect(await runOnPostgres(claimNextJob("turn"))).toBeUndefined();
+		expect(await runOnPostgres(claimNextJob("facilitate"))).toBeUndefined();
 		// Another process may still be running it.
-		await runOnPostgres(requeueInterruptedJobs("turn"));
-		expect(
-			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
-		).toMatchObject([{ id: claimed?.id, status: "running" }]);
+		await runOnPostgres(requeueInterruptedJobs("facilitate"));
+		expect(await onDatabase((db) => db.select().from(job))).toMatchObject([
+			{ id: claimed?.id, status: "running" },
+		]);
 		await lapseLease(claimed?.id);
-		await runOnPostgres(requeueInterruptedJobs("turn"));
-		expect(
-			(await onDatabase((db) => db.select().from(job))).filter((row) => row.kind === "turn"),
-		).toMatchObject([{ id: claimed?.id, status: "queued" }]);
+		await runOnPostgres(requeueInterruptedJobs("facilitate"));
+		expect(await onDatabase((db) => db.select().from(job))).toMatchObject([
+			{ id: claimed?.id, status: "queued" },
+		]);
 	});
 
 	it("keeps a job whose worker renewed its lease", async () => {
@@ -952,12 +885,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Long-running work",
 		});
-		const claimed = await runOnPostgres(claimNextJob("turn"));
+		await queueFacilitation(details.thread.id, details.messages[0]?.id ?? "");
+		const claimed = await runOnPostgres(claimNextJob("facilitate"));
 		expect(claimed?.threadId).toBe(details.thread.id);
 		await lapseLease(claimed?.id);
 
 		await runOnPostgres(renewJobLeases([claimed?.id ?? ""]));
-		await runOnPostgres(requeueInterruptedJobs("turn"));
+		await runOnPostgres(requeueInterruptedJobs("facilitate"));
 
 		const [row] = await onDatabase((db) =>
 			db
