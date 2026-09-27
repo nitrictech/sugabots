@@ -1,8 +1,9 @@
 export * as Lanes from "./lanes.ts";
 
+import type { Activities } from "@sugabots/workflow/activities";
 import { and, asc, eq, lt, type SQLWrapper, sql } from "drizzle-orm";
-import { Context, Duration, Effect, Layer, Option, Schema } from "effect";
-import { type Workflow, WorkflowEngine } from "effect/unstable/workflow";
+import { Context, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
+import { Activity, type Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterCommit, Database, query, transaction } from "../database/database.ts";
 import { lane, laneRequest } from "./sql.ts";
 
@@ -79,6 +80,22 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 				sql`, `,
 			)})
 	)`;
+
+/**
+ * A statement dropping the requests waiting in lanes about any of `subjects`
+ * (a subquery of ids) for `workflows`, so they never start. What is already
+ * running is left alone.
+ */
+export const dropWaiting = (subjects: SQLWrapper, workflows: ReadonlyArray<string>) =>
+	sql`delete from ${laneRequest}
+		where ${laneRequest.laneKey} in (
+			select ${lane.key} from ${lane}
+			where ${lane.subject} in (select (id)::text from (${subjects}) as subject(id))
+				and ${lane.workflow} in (${sql.join(
+					workflows.map((name) => sql`${name}`),
+					sql`, `,
+				)})
+		)`;
 
 /** How long a lane may stay `starting` before `reconcile` starts its workflow again. */
 const STARTING_TIMEOUT = Duration.seconds(30);
@@ -300,6 +317,93 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 
 export const layer = (workflows: ReadonlyArray<Workflow.Any>) =>
 	Layer.effect(Service, make(workflows));
+
+/**
+ * `definition`'s implementation, run in the lane `lane(payload)`. However the
+ * body ends, the execution then releases the lane, as an activity of its own,
+ * and the next request waiting in it starts.
+ *
+ * - A body that fails is logged, and `onFailure` runs before the lane is
+ *   released, so the failure is recorded before newer work runs in the lane.
+ * - `onReleased` runs once the lane is free, for what cannot happen while the
+ *   execution holds it.
+ * - A suspended body is not over: its execution keeps the lane until it
+ *   resumes and ends.
+ *
+ * `onFailure` and `onReleased` name activities of `activities`, so `resolve`
+ * can rebuild every activity the workflow runs, the lane's release included,
+ * from its full name and the payload.
+ */
+export const workflow = <
+	Name extends string,
+	Payload extends Workflow.AnyStructSchema,
+	R,
+	Id,
+	Shape,
+	Definitions,
+	Failure extends Activities.RecordingName<Shape, Definitions> = never,
+	Released extends Activities.RecordingName<Shape, Definitions> = never,
+>(
+	definition: Workflow.Workflow<Name, Payload, typeof Schema.Void, typeof Schema.Never>,
+	options: {
+		readonly lane: (payload: Payload["Type"]) => string;
+		readonly activities: Activities.Set<Payload["Type"], Id, Shape, Definitions>;
+		readonly body: (payload: Payload["Type"]) => Effect.Effect<void, unknown, R>;
+		/** The activity that records the body's failure. */
+		readonly onFailure?: Failure;
+		/** The activity to run once the lane is free. */
+		readonly onReleased?: Released;
+	},
+) => {
+	// `RecordingName` limits `name` to activities without an input that return
+	// nothing and cannot fail, which is what this signature says.
+	const ending = options.activities.activity as unknown as (
+		name: Failure | Released,
+		payload: Payload["Type"],
+	) => Activity.Activity<
+		typeof Schema.Void,
+		typeof Schema.Never,
+		Id | Activities.ServicesOf<Shape[Failure | Released]>
+	>;
+	const releaseLane = (payload: Payload["Type"]) =>
+		Activity.make({
+			name: RELEASE_LANE,
+			execute: Effect.gen(function* () {
+				const lanes = yield* Service;
+				const executionId = yield* definition.executionId(payload);
+				yield* lanes.release({ key: options.lane(payload), executionId });
+			}),
+		});
+	return {
+		layer: definition.toLayer((payload) =>
+			Effect.gen(function* () {
+				const ended = yield* Effect.exit(options.body(payload));
+				// A suspension interrupts the body, and the engine records the
+				// execution as suspended only if it ends interrupted.
+				const instance = yield* WorkflowEngine.WorkflowInstance;
+				if (instance.suspended) return yield* Effect.interrupt;
+				if (Exit.isFailure(ended)) {
+					yield* Effect.logError(`The ${definition._tag} workflow failed`, ended.cause);
+					if (options.onFailure) yield* ending(options.onFailure, payload);
+				}
+				yield* releaseLane(payload);
+				if (options.onReleased) yield* ending(options.onReleased, payload);
+			}),
+		),
+		/** The activity of this workflow with this full name, rebuilt from the payload; `undefined` if none. */
+		resolve: (
+			fullName: string,
+			payload: Payload["Type"],
+		): Activity.Activity<Schema.Constraint, Schema.Constraint, unknown> | undefined =>
+			fullName === RELEASE_LANE
+				? // A specific activity is one of the general type; the schemas only narrow it.
+					(releaseLane(payload) as never)
+				: options.activities.resolve(fullName, payload),
+	};
+};
+
+/** The name of the activity that releases a lane workflow's lane. */
+const RELEASE_LANE = "releaseLane";
 
 /** Payloads are stored as their JSON encoding, so a waiting request can be decoded by name later. */
 const encodePayload = (workflow: Workflow.Any, payload: unknown): unknown =>

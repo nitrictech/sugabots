@@ -17,7 +17,6 @@ import {
 import { podStandingFor } from "../../../workspaces/access.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
-import { ownedByJob, resumeWaitingJob } from "../../turns/owner.ts";
 import type { TurnSignals } from "../../turns/signals.ts";
 import type { ApprovalDecision } from "../../turns/turn.workflow.ts";
 import { boundedJson } from "../calls/store.ts";
@@ -56,7 +55,7 @@ export interface ToolApprovalStore {
 	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
 	/**
 	 * Checks a person may make the decision, then sends it to the turn's
-	 * workflow, which records it. A turn run as a job records it here.
+	 * workflow, which records it through `record`.
 	 */
 	decide(input: {
 		workspaceId: string;
@@ -91,52 +90,6 @@ export function toolApprovalStore(
 	publishEvents: PublishEvents,
 	signals: TurnSignals,
 ): ToolApprovalStore {
-	/** Writes a decision still pending and announces it; `undefined` if it was already decided. */
-	const recordDecision = (threadId: string, approvalId: string, decision: ApprovalDecision) =>
-		Effect.gen(function* () {
-			const allowed = decision.decision !== "deny";
-			const [updated] = yield* query((db) =>
-				db
-					.update(toolCall)
-					.set({
-						approvalStatus: allowed ? "allowed" : "denied",
-						decidedById: decision.userId,
-						decidedAt: new Date(),
-						...(allowed
-							? {}
-							: {
-									status: "completed" as const,
-									output: boundedJson({
-										status: "denied",
-										reason: "A person denied this action",
-									}),
-									finishedAt: new Date(),
-								}),
-					})
-					.where(
-						and(
-							eq(toolCall.threadId, threadId),
-							eq(toolCall.approvalId, approvalId),
-							eq(toolCall.approvalStatus, "pending"),
-						),
-					)
-					.returning(),
-			);
-			if (!updated) return undefined;
-			const [deciderName] = yield* query((db) =>
-				db.select({ name: user.name }).from(user).where(eq(user.id, decision.userId)).limit(1),
-			);
-			yield* publishEvents([
-				callEvent(
-					"tool_call.updated",
-					toToolCallPart(updated, deciderName?.name ?? null),
-					updated.threadId,
-					updated.messageId,
-				),
-			]);
-			return updated;
-		});
-
 	return {
 		responsesForTurn: (turnId, approvalIds) =>
 			Effect.flatMap(
@@ -326,8 +279,6 @@ export function toolApprovalStore(
 						db
 							.select({
 								call: toolCall,
-								threadId: thread.id,
-								agentId: turn.agentId,
 								owner: turn.owner,
 							})
 							.from(toolCall)
@@ -362,43 +313,75 @@ export function toolApprovalStore(
 					const approvalId = candidate.call.approvalId;
 					const decision = { decision: input.decision, userId: input.userId };
 					if (!candidate.owner) return yield* new ToolApprovalNotFound();
-					if (!(yield* ownedByJob(candidate.owner))) {
-						// Only one person's decision reaches the workflow, so the first to
-						// claim the call decides it and anyone after is told it is taken.
-						// The claim is undone with this transaction if the send fails.
-						const claimed = yield* query((db) =>
-							db
-								.update(toolCall)
-								.set({ decidedById: input.userId })
-								.where(
-									and(
-										eq(toolCall.id, input.toolCallId),
-										eq(toolCall.approvalStatus, "pending"),
-										isNull(toolCall.decidedById),
-									),
-								)
-								.returning({ id: toolCall.id }),
-						);
-						if (claimed.length === 0) return yield* new ToolApprovalConflict();
-						return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
-					}
-					const recorded = yield* recordDecision(candidate.threadId, approvalId, decision);
-					if (!recorded) return yield* new ToolApprovalConflict();
-					const [count] = yield* query((db) =>
+					// Only one person's decision reaches the workflow, so the first to
+					// claim the call decides it and anyone after is told it is taken.
+					// The claim is undone with this transaction if the send fails.
+					const claimed = yield* query((db) =>
 						db
-							.select({ unresolved: sql<number>`count(*)`.mapWith(Number) })
-							.from(toolCall)
+							.update(toolCall)
+							.set({ decidedById: input.userId })
 							.where(
-								and(eq(toolCall.turnId, recorded.turnId), eq(toolCall.approvalStatus, "pending")),
-							),
+								and(
+									eq(toolCall.id, input.toolCallId),
+									eq(toolCall.approvalStatus, "pending"),
+									isNull(toolCall.decidedById),
+								),
+							)
+							.returning({ id: toolCall.id }),
 					);
-					if ((count?.unresolved ?? 0) === 0) yield* resumeWaitingJob(candidate.owner);
+					if (claimed.length === 0) return yield* new ToolApprovalConflict();
+					return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
 				}),
 			),
 
 		record: (input) =>
-			transaction(recordDecision(input.threadId, input.approvalId, input.decision)).pipe(
-				Effect.asVoid,
+			transaction(
+				Effect.gen(function* () {
+					const allowed = input.decision.decision !== "deny";
+					const [updated] = yield* query((db) =>
+						db
+							.update(toolCall)
+							.set({
+								approvalStatus: allowed ? "allowed" : "denied",
+								decidedById: input.decision.userId,
+								decidedAt: new Date(),
+								...(allowed
+									? {}
+									: {
+											status: "completed" as const,
+											output: boundedJson({
+												status: "denied",
+												reason: "A person denied this action",
+											}),
+											finishedAt: new Date(),
+										}),
+							})
+							.where(
+								and(
+									eq(toolCall.threadId, input.threadId),
+									eq(toolCall.approvalId, input.approvalId),
+									eq(toolCall.approvalStatus, "pending"),
+								),
+							)
+							.returning(),
+					);
+					if (!updated) return;
+					const [deciderName] = yield* query((db) =>
+						db
+							.select({ name: user.name })
+							.from(user)
+							.where(eq(user.id, input.decision.userId))
+							.limit(1),
+					);
+					yield* publishEvents([
+						callEvent(
+							"tool_call.updated",
+							toToolCallPart(updated, deciderName?.name ?? null),
+							updated.threadId,
+							updated.messageId,
+						),
+					]);
+				}),
 			),
 	};
 }

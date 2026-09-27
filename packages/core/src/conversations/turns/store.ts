@@ -26,7 +26,6 @@ import {
 	pod,
 	routineExecution,
 	type StoredMessagePart,
-	type TurnJobPayload,
 	type TurnReason,
 	thread,
 	toolCall,
@@ -44,16 +43,15 @@ import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
-import { cancelWaitingJob, ownedByJob } from "./owner.ts";
-import type { QueueTurn } from "./queue.ts";
+import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 import type { TurnSignals } from "./signals.ts";
 import type { TurnRequest } from "./turn.workflow.ts";
 
 /**
  * Turns: one agent answering one message in a thread.
  *
- * A turn is asked for when a person posts, claimed by whatever runs turns (see
- * `owner.ts`), and recorded as a `turn` row plus the agent's reply as a
+ * A turn is asked for when a person posts, run by the turn workflow (see
+ * `turn.workflow.ts`), and recorded as a `turn` row plus the agent's reply as a
  * `message` that starts out `streaming`. The worker drives it from there
  * through the methods below, each of which writes the outcome and publishes it
  * in one transaction.
@@ -62,19 +60,21 @@ import type { TurnRequest } from "./turn.workflow.ts";
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
 
-/** Runs of a turn, without it getting anywhere, before it is given up on. */
+/**
+ * How many times a turn may run without getting anywhere before it is given
+ * up on. A turn's `runs` counts every run that opens it, including one a crash
+ * cut short, and restarts from zero when the turn suspends.
+ */
 export const MAX_TURN_RUNS = 3;
 
 /**
- * One run of a turn. `owner` is what runs it (a job, or a workflow
- * execution): a suspended turn is resumed only by its owner. `attempts`
- * counts runs, this one included.
+ * One run of a turn. `owner` is the workflow execution running it: a
+ * suspended turn is resumed only by its owner.
  */
 export interface ClaimedTurn {
 	readonly owner: string;
 	readonly threadId: string;
-	readonly payload: TurnJobPayload;
-	readonly attempts: number;
+	readonly payload: Omit<TurnRequest, "threadId">;
 }
 
 /**
@@ -143,6 +143,8 @@ export interface ReplyDraft {
 export interface PreparedTurn {
 	claim: ClaimedTurn;
 	turnId: string;
+	/** The turn's runs since it began or last suspended, this one included. */
+	runs: number;
 	/** The agent's reply, `streaming` and empty until the worker fills it. */
 	responseMessage: Message;
 	context: TurnContext;
@@ -217,15 +219,18 @@ export interface TurnStore {
 }
 
 /**
- * Whether a failed turn may be tried again: not once it has a checkpoint or a
- * tool that changes things has run, since a retry could do it again (ADR 002).
+ * runsAgainAfterFailure reports whether a turn whose run failed may run again:
+ * not once it has a checkpoint or a tool that changes things has run, since
+ * running again could do it again (ADR 002), and not once it has run
+ * `MAX_TURN_RUNS` times.
  */
-export const retryable = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
-	!prepared.checkpoint && !reply.acted;
+export const runsAgainAfterFailure = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
+	!prepared.checkpoint && !reply.acted && prepared.runs < MAX_TURN_RUNS;
 
 export function turnStore(
 	publishEvents: PublishEvents,
 	queueTurn: QueueTurn,
+	queueFacilitation: QueueFacilitation,
 	signals: TurnSignals,
 ): TurnStore {
 	/** Records a waiting turn as cancelled and says so; `false` if it had stopped waiting. */
@@ -347,7 +352,7 @@ export function turnStore(
 							...(opened.terminalOutcome ? { terminalOutcome: opened.terminalOutcome } : {}),
 						});
 					}
-					const { turnId, response, checkpoint, resumed } = opened;
+					const { turnId, runs, response, checkpoint, resumed } = opened;
 					// One query at a time: inside a transaction the executor is a single
 					// connection, and queries sent concurrently down one are not run
 					// concurrently anyway. The driver queues them, and warns that it is
@@ -359,6 +364,7 @@ export function turnStore(
 					const prepared: PreparedTurn = {
 						claim: claimed,
 						turnId,
+						runs,
 						responseMessage: toMessage(response, {
 							userId: null,
 							userName: null,
@@ -574,7 +580,7 @@ export function turnStore(
 
 		giveFloor: (prepared, reply) =>
 			giveFloor(
-				{ publishEvents, queueTurn },
+				{ publishEvents, queueTurn, queueFacilitation },
 				{
 					id: prepared.responseMessage.id,
 					threadId: prepared.context.thread.id,
@@ -725,20 +731,15 @@ export function turnStore(
 					if (!visible) {
 						return false;
 					}
-					if (candidate.status === "waiting") {
-						if (candidate.owner && !(yield* ownedByJob(candidate.owner))) {
-							// Telling the workflow is the cancellation; it records it. The
-							// flag stops the next segment instead if the workflow has just
-							// stopped waiting, since the signal would then go unheard.
-							yield* query((db) =>
-								db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, turnId)),
-							);
-							yield* signals.cancel(candidate.owner);
-							return true;
-						}
-						const stopped = yield* stopWaitingTurn(turnId, candidate);
-						if (stopped && candidate.owner) yield* cancelWaitingJob(candidate.owner);
-						return stopped;
+					if (candidate.status === "waiting" && candidate.owner) {
+						// Telling the workflow is the cancellation; it records it. The
+						// flag stops the next segment instead if the workflow has just
+						// stopped waiting, since the signal would then go unheard.
+						yield* query((db) =>
+							db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, turnId)),
+						);
+						yield* signals.cancel(candidate.owner);
+						return true;
 					}
 					const updated = yield* query((db) =>
 						db
@@ -799,7 +800,7 @@ interface TurnScope {
  * picks, and that is rarely the host — requiring the host discarded
  * every routed turn, so the person watched a reply that was never coming.
  *
- * Pod membership is still a real check: it is what stops a job naming an agent
+ * Pod membership is still a real check: it is what stops a turn request naming an agent
  * from another pod or another workspace.
  */
 const loadTurnScope = Effect.fn("TurnStore.loadTurnScope")(function* (
@@ -922,6 +923,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 ): Effect.fn.Return<
 	| {
 			turnId: string;
+			runs: number;
 			response: MessageRow;
 			checkpoint?: TurnCheckpoint;
 			resumed: boolean;
@@ -996,7 +998,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 				(existing.status !== "waiting" && existing.status !== "running") ||
 				existing.owner !== claimed.owner
 			) {
-				return { notRunnableReason: "The suspended turn no longer belongs to this job" };
+				return { notRunnableReason: "The suspended turn no longer belongs to this workflow" };
 			}
 			const [resumed] = yield* db
 				.update(turn)
@@ -1019,6 +1021,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			if (!response) throw new Error("A suspended turn has no reply message");
 			return {
 				turnId: existing.id,
+				runs: existing.runs + 1,
 				response,
 				checkpoint: existing.checkpoint as TurnCheckpoint,
 				resumed: true,
@@ -1045,7 +1048,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 		}
 		// The reply starts again, so the calls its first attempt made go with its parts.
 		yield* deleteToolCallsOf(db, response.id);
-		return { turnId: existing.id, response, resumed: false };
+		return { turnId: existing.id, runs: existing.runs + 1, response, resumed: false };
 	}
 
 	const [created] = yield* db
@@ -1057,7 +1060,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			owner: claimed.owner,
 			runs: 1,
 			status: "running",
-			reason: claimed.payload.reason ?? null,
+			reason: claimed.payload.reason,
 			model,
 			startedAt: new Date(),
 		})
@@ -1080,7 +1083,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 	if (!response) {
 		throw new Error("Reply message insert returned no row");
 	}
-	return { turnId: created.id, response, resumed: false };
+	return { turnId: created.id, runs: 1, response, resumed: false };
 });
 
 /**

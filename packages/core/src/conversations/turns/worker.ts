@@ -14,9 +14,7 @@ import {
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import { Lanes } from "../../workflows/lanes.ts";
-import { claimNextJob, requeueInterruptedJobs } from "../jobs/queue.ts";
-import { describeFailure, workerLayer } from "../jobs/worker.ts";
+import { describeFailure } from "../failure.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
 import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";
@@ -27,22 +25,15 @@ import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
-import { jobTurnOwner, segmentTurnOwner, type TurnOwner } from "./owner.ts";
 import {
 	type ClaimedTurn,
 	type PreparedTurn,
 	type ReplyDraft,
-	retryable,
+	runsAgainAfterFailure,
 	type TurnCheckpoint,
 	type TurnStore,
 } from "./store.ts";
-import {
-	type SegmentOutcome,
-	Turn,
-	type TurnRequest,
-	TurnSteps,
-	turnLane,
-} from "./turn.workflow.ts";
+import { type SegmentOutcome, Turn, type TurnRequest, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
 const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
@@ -57,8 +48,6 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
-const DEFAULT_POLL_INTERVAL_MS = 250;
-const DEFAULT_CONCURRENCY = 8;
 
 export interface TurnExecution {
 	store: TurnStore;
@@ -77,36 +66,13 @@ export interface TurnExecution {
 	routines?: Pick<RoutineStore, "settleThread">;
 	/** Asks the Scribe to catch up on the thread after a completed reply. */
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
-	/** What runs the turn, told of each outcome in the transaction that records it. */
-	owner: TurnOwner;
 }
 
-export interface TurnWorkerOptions extends Omit<TurnExecution, "owner"> {
-	concurrency?: number;
-	pollIntervalMs?: number;
-}
+/** What people are told about a turn that ended because its workflow failed; the cause goes only to the logs. */
+const TURN_STOPPED_UNEXPECTEDLY = "The turn stopped unexpectedly";
 
-/** Claims turns and runs them, `concurrency` at a time, while the runtime lives. */
-export const turnWorkerLayer = ({
-	concurrency = DEFAULT_CONCURRENCY,
-	pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-	...execution
-}: TurnWorkerOptions): Layer.Layer<never, never, Database> =>
-	workerLayer({
-		name: "Turn worker",
-		requeueInterrupted: () => requeueInterruptedJobs("turn"),
-		claimNext: () => claimNextJob("turn"),
-		run: (job) =>
-			runClaimedTurn(
-				{ owner: job.id, threadId: job.threadId, payload: job.payload, attempts: job.attempts },
-				{ ...execution, owner: jobTurnOwner },
-			),
-		concurrency,
-		pollIntervalMs,
-	});
-
-/** A turn workflow's run of its turn, owned by the execution. */
-const claimFor = (request: TurnRequest, attempt: number) =>
+/** The turn workflow's run of its turn: the workflow execution owns the turn. */
+export const claimFor = (request: TurnRequest) =>
 	Effect.map(
 		Turn.executionId(request),
 		(owner): ClaimedTurn => ({
@@ -117,98 +83,72 @@ const claimFor = (request: TurnRequest, attempt: number) =>
 				triggerMessageId: request.triggerMessageId,
 				reason: request.reason,
 			},
-			attempts: attempt,
 		}),
 	);
 
-/**
- * The turn workflow's steps: running a segment of the turn, and freeing its
- * lane afterwards. Activities reach them through `TurnSteps`.
- */
-export const stepsLayer = (
-	execution: Omit<TurnExecution, "owner"> & { approvals: ToolApprovalStore },
-) =>
+/** The turn workflow's steps, which its activities reach through `TurnSteps`. */
+export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalStore }) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
-			const lanes = yield* Lanes.Service;
+			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: string }) =>
+				(execution.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
 			return TurnSteps.of({
-				segment: (request, attempt) =>
-					Effect.gen(function* () {
-						const outcome = yield* Ref.make<SegmentOutcome>({ _tag: "Finished" });
-						const claimed = yield* claimFor(request, attempt);
-						yield* runClaimedTurn(claimed, { ...execution, owner: segmentTurnOwner(outcome) });
-						return yield* Ref.get(outcome);
-					}).pipe(Effect.provideService(Database, database)),
+				segment: (request) =>
+					Effect.flatMap(claimFor(request), (claimed) => runClaimedTurn(claimed, execution)).pipe(
+						Effect.provideService(Database, database),
+					),
 				abandon: (request) =>
 					transaction(
 						Effect.gen(function* () {
-							const error = "The turn stopped unexpectedly";
-							yield* execution.store.abandon(yield* claimFor(request, 1), error);
-							if (execution.routines) {
-								yield* execution.routines.settleThread(request.threadId, {
-									state: "failed",
-									error,
-								});
-							}
+							yield* execution.store.abandon(yield* claimFor(request), TURN_STOPPED_UNEXPECTEDLY);
+							yield* settleRoutine(request.threadId, {
+								state: "failed",
+								error: TURN_STOPPED_UNEXPECTEDLY,
+							});
 						}),
 					).pipe(Effect.provideService(Database, database)),
-				decide: (request, approvalId, decision) =>
+				decide: (request, decided) =>
 					execution.approvals
-						.record({ threadId: request.threadId, approvalId, decision })
+						.record({ threadId: request.threadId, ...decided })
 						.pipe(Effect.provideService(Database, database)),
 				stopWaiting: (request) =>
 					execution.store.stopWaiting(request).pipe(Effect.provideService(Database, database)),
-				release: (request) =>
-					Effect.flatMap(Turn.executionId(request), (executionId) =>
-						lanes.release({ key: turnLane(request), executionId }),
-					),
+				settleRoutine: (request) =>
+					settleRoutine(request.threadId).pipe(Effect.provideService(Database, database)),
 			});
 		}),
 	);
 
 /**
- * Runs one claimed turn from preparation to recorded outcome.
+ * Runs one segment of a claimed turn, from preparation to recorded outcome,
+ * and says how it ended for the workflow.
  *
- * Preparing can end before there is anything to show for it: the claim is
- * discarded if the turn cannot run, or released for a retry if the database
- * failed. After that the reply is streamed, and whatever ends the stream is
- * written back as the turn's outcome.
+ * A turn that cannot run ends before anything is streamed. Otherwise the reply
+ * is streamed, and whatever ends the stream is written back as the turn's
+ * outcome. A defect while preparing or recording escapes, and the workflow
+ * then ends the turn as failed.
  */
 export const runClaimedTurn = (
 	claimed: ClaimedTurn,
 	execution: TurnExecution,
-): Effect.Effect<void, never, Database> =>
+): Effect.Effect<SegmentOutcome, never, Database> =>
 	execution.store.prepare(claimed).pipe(
 		Effect.flatMap((prepared) => generateReply(prepared, execution)),
 		Effect.catchTag("TurnNotRunnable", (why) =>
-			transaction(
-				execution.owner
-					.discarded(claimed, why.reason)
-					.pipe(
-						Effect.andThen(
-							execution.routines?.settleThread(
-								claimed.threadId,
-								why.terminalOutcome ?? { state: "cancelled" },
-							) ?? Effect.void,
-						),
-					),
-			),
-		),
-		Effect.catchDefect((defect) =>
-			transaction(
-				Effect.gen(function* () {
-					const error = describeFailure(defect);
-					const willRetry = yield* execution.owner.failed(claimed, error, true);
-					if (!willRetry) yield* execution.store.abandon(claimed, error);
-					if (!willRetry && execution.routines) {
-						yield* execution.routines.settleThread(claimed.threadId, { state: "failed", error });
-					}
-				}),
+			Effect.as(
+				execution.routines?.settleThread(
+					claimed.threadId,
+					why.terminalOutcome ?? { state: "cancelled" },
+				) ?? Effect.void,
+				finished,
 			),
 		),
 	);
+
+const finished: SegmentOutcome = { _tag: "Finished" };
+const retry: SegmentOutcome = { _tag: "Retry" };
 
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
@@ -258,64 +198,72 @@ class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<
 const generateReply = (
 	prepared: PreparedTurn,
 	execution: TurnExecution,
-): Effect.Effect<void, never, Database> =>
+): Effect.Effect<SegmentOutcome, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { store, collaborations, routines, owner } = execution;
-			const claim = prepared.claim;
+			const { store, collaborations, routines } = execution;
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, execution, reply)));
 			const draft = yield* Ref.get(reply);
 
+			/** Records the failure; the turn runs again only while that is safe. */
+			const failed = (error: string) =>
+				transaction(
+					Effect.gen(function* () {
+						const willRetry = runsAgainAfterFailure(prepared, draft);
+						yield* store.fail(prepared, draft, error, willRetry);
+						if (!willRetry && routines) {
+							yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
+						}
+						return willRetry ? retry : finished;
+					}),
+				);
+
 			if (Exit.isSuccess(streamed)) {
 				if (streamed.value.kind === "suspended") {
 					const { checkpoint, approvals } = streamed.value;
-					yield* transaction(
+					return yield* transaction(
 						Effect.gen(function* () {
 							if (yield* store.suspend(prepared, checkpoint, approvals)) {
-								return yield* owner.suspended(claim, checkpoint);
+								return {
+									_tag: "Suspended",
+									approvals: checkpoint.approvals.map((approval) => approval.approvalId),
+								} satisfies SegmentOutcome;
 							}
 							yield* store.cancel(prepared, draft);
-							yield* owner.cancelled(claim, "Cancelled by a person");
 							if (routines) {
 								yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 							}
+							return finished;
 						}),
 					);
-					return;
 				}
 				const accounting = streamed.value.accounting;
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
 				// and gives up waiting for an answer that lands a moment later.
-				const answeredABrief = yield* transaction(
+				yield* transaction(
 					Effect.gen(function* () {
 						const answered = prepared.context.thread.parentThreadId
 							? yield* collaborations
 									.deliverAnswer({ threadId: prepared.context.thread.id, answer: draft.content })
 									.pipe(
 										Effect.catchCause((cause) =>
-											Effect.sync(() => {
-												console.error("Delivering a collaboration answer failed", cause);
-												return false;
-											}),
+											Effect.logError("Delivering a collaboration answer failed", cause).pipe(
+												Effect.as(false),
+											),
 										),
 									)
 							: false;
 						yield* store.complete(prepared, draft, accounting);
-						yield* owner.completed(claim);
+						// An answer to a brief goes back to the agent that asked, which
+						// carries on in the parent thread, so nobody speaks next here.
 						if (!answered) {
 							yield* store.giveFloor(prepared, draft);
 						}
 						if (routines) yield* routines.settleThread(prepared.context.thread.id);
-						return answered;
 					}),
 				);
-				// Answering a brief concludes that exchange: the answer has gone back
-				// to the agent that asked, and it carries on in the parent. Deciding
-				// who speaks next here as well left the two of them talking to each
-				// other in the child thread, which nobody was reading.
-				void answeredABrief;
 				yield* execution
 					.queueSummary({
 						threadId: prepared.context.thread.id,
@@ -324,66 +272,37 @@ const generateReply = (
 					})
 					.pipe(
 						Effect.catchCause((cause) =>
-							Effect.sync(() => console.error("Queueing a thread summary failed", cause)),
+							Effect.logError("Queueing a thread summary failed", cause),
 						),
 					);
-				return;
+				return finished;
 			}
 
 			const cause = streamed.cause;
-			if (Cause.hasInterruptsOnly(cause)) {
-				yield* transaction(
-					Effect.gen(function* () {
-						const willRetry = yield* owner.failed(
-							claim,
-							"Worker stopped",
-							retryable(prepared, draft),
-						);
-						yield* store.fail(prepared, draft, "Worker stopped", willRetry);
-						if (!willRetry && routines) {
-							yield* routines.settleThread(prepared.context.thread.id, {
-								state: "failed",
-								error: "Worker stopped",
-							});
-						}
-					}),
-				);
-				return;
-			}
+			if (Cause.hasInterruptsOnly(cause)) return yield* failed("Worker stopped");
 			const failure = Cause.squash(cause);
 			if (failure instanceof TurnCancelled) {
-				yield* transaction(
+				return yield* transaction(
 					Effect.gen(function* () {
 						yield* store.cancel(prepared, draft);
-						yield* owner.cancelled(claim, "Cancelled by a person");
 						if (routines) {
 							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
 						}
+						return finished;
 					}),
 				);
-				return;
 			}
 			const error = describeFailure(failure);
 			yield* logTurnFailure(prepared, error);
-			yield* transaction(
-				Effect.gen(function* () {
-					const willRetry = yield* owner.failed(claim, error, retryable(prepared, draft));
-					yield* store.fail(prepared, draft, error, willRetry);
-					if (!willRetry && routines) {
-						yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
-					}
-				}),
-			);
+			return yield* failed(error);
 		}),
 	);
 
 /** Enough in the server log to find the turn and the provider it used. */
 const logTurnFailure = (prepared: PreparedTurn, error: string) =>
-	Effect.sync(() =>
-		console.error(
-			`Turn ${prepared.turnId} failed: ${error}`,
-			`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, model ${prepared.context.agent.model})`,
-		),
+	Effect.logError(
+		`Turn ${prepared.turnId} failed: ${error}`,
+		`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, model ${prepared.context.agent.model})`,
 	);
 
 /**
@@ -659,7 +578,7 @@ const consumeDeltas = (
 					content: draft.content + delta,
 				}));
 				pendingDelta += delta;
-				const now = Date.now();
+				const now = yield* Clock.currentTimeMillis;
 				if (now - lastPublishedAt >= Duration.toMillis(DELTA_PUBLISH_INTERVAL)) {
 					lastPublishedAt = now;
 					yield* publishPending;
@@ -701,11 +620,7 @@ const publishDelta = (
 				text,
 			}),
 		),
-	).pipe(
-		Effect.catchCause((cause) =>
-			Effect.sync(() => console.error("Publishing a message delta failed", cause)),
-		),
-	);
+	).pipe(Effect.catchCause((cause) => Effect.logError("Publishing a message delta failed", cause)));
 
 function addAccounting(
 	checkpoint: TurnCheckpoint | undefined,

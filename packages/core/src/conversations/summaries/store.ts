@@ -74,7 +74,7 @@ export interface SummaryStore {
 export const queueSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
 	lanes
 		.admit({
-			key: summaryLane(request.threadId),
+			key: summaryLane(request),
 			workflow: Summary,
 			payload: request,
 			whenBusy: "replace",

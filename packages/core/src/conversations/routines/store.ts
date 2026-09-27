@@ -4,7 +4,6 @@ import type {
 	AcceptedRoutineExecution,
 	NewRoutine,
 	Routine,
-	RoutineExecution,
 	RoutineExecutionPage,
 	RoutineExecutionPageQuery,
 	RoutineExecutionTrigger,
@@ -18,8 +17,7 @@ import {
 	threadChannel,
 	workspaceChannel,
 } from "@sugabots/contracts";
-import { and, asc, desc, eq, isNull, lt, notExists, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
@@ -30,7 +28,6 @@ import {
 	agent,
 	chat,
 	collaboration,
-	job,
 	message,
 	pod,
 	routine,
@@ -40,22 +37,26 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
-import { laneBusy } from "../../workflows/lanes.ts";
+import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
-import { cancelWaitingJob, ownedByJob } from "../turns/owner.ts";
+import { Facilitate } from "../turns/facilitate.workflow.ts";
 import type { QueueTurn } from "../turns/queue.ts";
 import type { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
+import type { RoutineRun } from "./routine.workflow.ts";
+import type { RoutineRuns } from "./runs.ts";
 import {
 	type InvalidRoutineSchedule,
 	latestMissedAndNextOccurrence,
 	nextOccurrence,
 } from "./schedule.ts";
 
-const runningExecution = alias(routineExecution, "running_routine_execution");
 const deriveKey = promisify(scrypt);
+
+/** What people are told about a run whose workflow failed; the cause goes only to the logs. */
+const RUN_STOPPED_UNEXPECTEDLY = "The routine run stopped unexpectedly";
 
 interface ExecutionCursor {
 	acceptedAt: Date;
@@ -138,12 +139,20 @@ export interface RoutineStore {
 		routineId: string,
 		page?: RoutineExecutionPageQuery,
 	): Effect.Effect<RoutineExecutionPage | undefined, InvalidRoutineExecutionCursor, Database>;
-	claimNext(): Effect.Effect<RoutineExecution | undefined, never, Database>;
+	/** Marks a queued run started and asks for its turn. Does nothing once the run has ended. */
+	startRun(run: RoutineRun): Effect.Effect<void, never, Database>;
 	settleThread(
 		threadId: string,
 		outcome?: { state: "failed" | "cancelled"; error?: string },
 	): Effect.Effect<boolean, never, Database>;
-	reconcileRunning(): Effect.Effect<void, never, Database>;
+	/** Settles the run if its work is done. Returns whether it has ended. */
+	settleRun(run: RoutineRun): Effect.Effect<boolean, never, Database>;
+	/**
+	 * Records a run that has not ended as failed, at once, and stops its work.
+	 * People are told only that it stopped unexpectedly. Does nothing once the
+	 * run has ended.
+	 */
+	failRun(run: RoutineRun): Effect.Effect<void, never, Database>;
 	processNextDue(
 		now?: Date,
 	): Effect.Effect<
@@ -171,6 +180,7 @@ export function routineStore(
 	publishEvents: PublishEvents,
 	queueTurn: QueueTurn,
 	signals: TurnSignals,
+	runs: RoutineRuns,
 ): RoutineStore {
 	const store: RoutineStore = {
 		listInWorkspace: (workspaceId, userId) =>
@@ -468,6 +478,7 @@ export function routineStore(
 					);
 					if (!triggerMessage)
 						return yield* Effect.die(new Error("Routine message insert returned no row"));
+					yield* runs.queue({ routineId: input.routineId, executionId: execution.id });
 					yield* publishEvents([
 						{
 							channel: workspaceChannel(input.workspaceId),
@@ -533,68 +544,25 @@ export function routineStore(
 				);
 			}),
 
-		claimNext: () =>
+		startRun: (run) =>
 			transaction(
 				Effect.gen(function* () {
-					const [candidate] = yield* query((db) =>
-						db
-							.select({ routineId: routineExecution.routineId })
-							.from(routineExecution)
-							.where(
-								and(
-									eq(routineExecution.state, "queued"),
-									notExists(
-										db
-											.select({ id: runningExecution.id })
-											.from(runningExecution)
-											.where(
-												and(
-													eq(runningExecution.routineId, routineExecution.routineId),
-													eq(runningExecution.state, "running"),
-												),
-											),
-									),
-								),
-							)
-							.orderBy(asc(routineExecution.acceptedAt), asc(routineExecution.id))
-							.limit(1),
-					);
-					if (!candidate) return undefined;
-					yield* lock(`routine-dispatch:${candidate.routineId}`);
-					const [running] = yield* query((db) =>
-						db
-							.select({ id: routineExecution.id })
-							.from(routineExecution)
-							.where(
-								and(
-									eq(routineExecution.routineId, candidate.routineId),
-									eq(routineExecution.state, "running"),
-								),
-							)
-							.limit(1),
-					);
-					if (running) return undefined;
-					const [oldest] = yield* query((db) =>
+					const [execution] = yield* query((db) =>
 						db
 							.select()
 							.from(routineExecution)
-							.where(
-								and(
-									eq(routineExecution.routineId, candidate.routineId),
-									eq(routineExecution.state, "queued"),
-								),
-							)
-							.orderBy(asc(routineExecution.acceptedAt), asc(routineExecution.id))
-							.limit(1),
+							.where(eq(routineExecution.id, run.executionId))
+							.limit(1)
+							.for("update"),
 					);
-					if (!oldest) return undefined;
+					if (execution?.state !== "queued" && execution?.state !== "running") return;
 					const [triggerMessage] = yield* query((db) =>
 						db
 							.select({ id: message.id })
 							.from(message)
 							.where(
 								and(
-									eq(message.threadId, oldest.threadId),
+									eq(message.threadId, execution.threadId),
 									sql`${message.routineTrigger} is not null`,
 								),
 							)
@@ -602,42 +570,96 @@ export function routineStore(
 					);
 					if (!triggerMessage)
 						return yield* Effect.die(new Error("Routine trigger message is missing"));
-					const [claimed] = yield* query((db) =>
-						db
-							.update(routineExecution)
-							.set({ state: "running", startedAt: new Date() })
-							.where(and(eq(routineExecution.id, oldest.id), eq(routineExecution.state, "queued")))
-							.returning(),
-					);
-					if (!claimed) return undefined;
+					if (execution.state === "queued") {
+						yield* query((db) =>
+							db
+								.update(routineExecution)
+								.set({ state: "running", startedAt: new Date() })
+								.where(eq(routineExecution.id, execution.id)),
+						);
+					}
+					// Asking again for a turn already asked for joins it, so a start
+					// repeated after a crash does not run the turn twice.
 					yield* queueTurn({
-						threadId: claimed.threadId,
-						agentId: claimed.agentId,
+						threadId: execution.threadId,
+						agentId: execution.agentId,
 						triggerMessageId: triggerMessage.id,
 						reason: "routine",
 					});
-					return toRoutineExecution(claimed);
 				}),
 			),
 
 		settleThread: (threadId, outcome) =>
-			settleRoutineThread(threadId, outcome, publishEvents, signals),
+			settleRoutineThread(threadId, outcome, publishEvents, signals, runs),
 
-		reconcileRunning: () =>
+		failRun: (run) =>
+			transaction(
+				Effect.gen(function* () {
+					// The settlement lock comes before the execution row, in the order
+					// settlement takes them.
+					const lockKey = routineSettlementLockKey(run.executionId);
+					yield* query((db) =>
+						db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
+					);
+					const [execution] = yield* query((db) =>
+						db
+							.select()
+							.from(routineExecution)
+							.where(eq(routineExecution.id, run.executionId))
+							.limit(1),
+					);
+					if (execution?.state === "running") {
+						yield* settleRoutineThread(
+							execution.threadId,
+							{ state: "failed", error: RUN_STOPPED_UNEXPECTEDLY },
+							publishEvents,
+							signals,
+							runs,
+						);
+					}
+					// Settling waits for work that is still stopping, but the run ends
+					// now: its routine's next run cannot start while it is running.
+					const [failed] = yield* query((db) =>
+						db
+							.update(routineExecution)
+							.set({
+								state: "failed",
+								error: RUN_STOPPED_UNEXPECTEDLY,
+								finishedAt: new Date(),
+								pendingTerminalState: null,
+								pendingTerminalError: null,
+							})
+							.where(
+								and(
+									eq(routineExecution.id, run.executionId),
+									inArray(routineExecution.state, ["queued", "running"]),
+								),
+							)
+							.returning(),
+					);
+					if (failed) yield* announceRunEnded(publishEvents, failed);
+				}),
+			),
+
+		settleRun: (run) =>
 			Effect.gen(function* () {
-				const running = yield* query((db) =>
+				const [execution] = yield* query((db) =>
 					db
 						.select({ threadId: routineExecution.threadId })
 						.from(routineExecution)
-						.where(eq(routineExecution.state, "running")),
+						.where(eq(routineExecution.id, run.executionId))
+						.limit(1),
 				);
-				yield* Effect.forEach(
-					running,
-					({ threadId }) => settleRoutineThread(threadId, undefined, publishEvents, signals),
-					{
-						discard: true,
-					},
+				if (!execution) return true;
+				yield* settleRoutineThread(execution.threadId, undefined, publishEvents, signals, runs);
+				const [settled] = yield* query((db) =>
+					db
+						.select({ state: routineExecution.state })
+						.from(routineExecution)
+						.where(eq(routineExecution.id, run.executionId))
+						.limit(1),
 				);
+				return settled?.state !== "running";
 			}),
 
 		processNextDue: (now = new Date()) =>
@@ -846,6 +868,7 @@ function settleRoutineThread(
 	outcome: { state: "failed" | "cancelled"; error?: string } | undefined,
 	publishEvents: PublishEvents,
 	signals: TurnSignals,
+	runs: RoutineRuns,
 ) {
 	return transaction(
 		Effect.gen(function* () {
@@ -880,6 +903,7 @@ function settleRoutineThread(
 				Effect.gen(function* () {
 					const rows = yield* db.execute<{
 						id: string;
+						routine_id: string;
 						thread_id: string;
 						workspace_id: string;
 						active: boolean;
@@ -897,16 +921,11 @@ function settleRoutineThread(
 						union all
 						${workingChildThreads}
 					)
-					select execution.id, execution.thread_id, execution.workspace_id,
+					select execution.id, execution.routine_id, execution.thread_id, execution.workspace_id,
 						execution.pending_terminal_state, execution.pending_terminal_error,
 							exists (
-							select 1 from ${job} active_job
-							join tree on tree.id = active_job.thread_id
-							where active_job.kind in ('turn', 'facilitate')
-								and active_job.status in ('queued', 'running', 'waiting')
-						) or exists (
 							select 1 from tree busy_thread
-							where ${laneBusy(sql`busy_thread.id`, [Turn._tag])}
+							where ${laneBusy(sql`busy_thread.id`, [Turn._tag, Facilitate._tag])}
 						) or exists (
 							select 1 from ${turn} active_turn
 							join tree on tree.id = active_turn.thread_id
@@ -1007,11 +1026,7 @@ function settleRoutineThread(
 					),
 				);
 				yield* Effect.forEach(waitingOwners, ({ owner }) =>
-					owner
-						? Effect.flatMap(ownedByJob(owner), (job) =>
-								job ? cancelWaitingJob(owner) : signals.cancel(owner),
-							)
-						: Effect.void,
+					owner ? signals.cancel(owner) : Effect.void,
 				);
 				yield* query((db) =>
 					db.execute(sql`
@@ -1071,6 +1086,7 @@ function settleRoutineThread(
 						)
 					`),
 				);
+				// Turns and facilitations asked for but not yet started never start.
 				yield* query((db) =>
 					db.execute(sql`
 						with recursive tree as (
@@ -1078,12 +1094,7 @@ function settleRoutineThread(
 							union all
 							${workingChildThreads}
 						)
-						update ${job}
-						set status = 'cancelled', last_error = 'Routine execution ended', updated_at = now()
-						from tree
-						where ${job.threadId} = tree.id
-							and ${job.kind} in ('turn', 'facilitate')
-							and ${job.status} in ('queued', 'waiting')
+						${dropWaiting(sql`select id from tree`, [Turn._tag, Facilitate._tag])}
 					`),
 				);
 				active = yield* query((db) =>
@@ -1096,9 +1107,8 @@ function settleRoutineThread(
 							${workingChildThreads}
 						)
 						select exists (
-							select 1 from ${job} active_job
-							join tree on tree.id = active_job.thread_id
-							where active_job.kind in ('turn', 'facilitate') and active_job.status = 'running'
+							select 1 from tree busy_thread
+							where ${laneBusy(sql`busy_thread.id`, [Facilitate._tag])}
 						) or exists (
 							select 1 from ${turn} active_turn
 							join tree on tree.id = active_turn.thread_id
@@ -1141,31 +1151,44 @@ function settleRoutineThread(
 					.returning({ id: routineExecution.id }),
 			);
 			if (!settled) return false;
-			const chatId = yield* query((db) =>
-				Effect.gen(function* () {
-					const [root] = yield* db
-						.select({ chatId: thread.chatId })
-						.from(thread)
-						.where(eq(thread.id, status.thread_id))
-						.limit(1);
-					if (!root?.chatId) throw new Error("Routine thread has no Chat");
-					return root.chatId;
-				}),
-			);
-			yield* publishEvents([
-				{
-					channel: workspaceChannel(status.workspace_id),
-					event: streamEvent("chat.thread_changed", {
-						chatId,
-						threadId: status.thread_id,
-						threadType: "routine",
-					}),
-				},
-			]);
+			yield* runs.settled({ routineId: status.routine_id, executionId: status.id });
+			yield* announceRunEnded(publishEvents, {
+				workspaceId: status.workspace_id,
+				threadId: status.thread_id,
+			});
 			return true;
 		}),
 	);
 }
+
+/** Tells the workspace that a routine run's thread changed because the run ended. */
+const announceRunEnded = (
+	publishEvents: PublishEvents,
+	run: { readonly workspaceId: string; readonly threadId: string },
+) =>
+	Effect.gen(function* () {
+		const chatId = yield* query((db) =>
+			Effect.gen(function* () {
+				const [root] = yield* db
+					.select({ chatId: thread.chatId })
+					.from(thread)
+					.where(eq(thread.id, run.threadId))
+					.limit(1);
+				if (!root?.chatId) throw new Error("Routine thread has no Chat");
+				return root.chatId;
+			}),
+		);
+		yield* publishEvents([
+			{
+				channel: workspaceChannel(run.workspaceId),
+				event: streamEvent("chat.thread_changed", {
+					chatId,
+					threadId: run.threadId,
+					threadType: "routine",
+				}),
+			},
+		]);
+	});
 
 function generateSecret() {
 	return randomBytes(32).toString("base64url");

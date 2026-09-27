@@ -1,5 +1,5 @@
 import { type ChatMessageItem, handleFromName } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
@@ -9,7 +9,7 @@ import {
 	agent,
 	chat,
 	collaboration,
-	job,
+	laneRequest,
 	message,
 	pod,
 	podMember,
@@ -23,15 +23,20 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { routineStore } from "../routines/store.ts";
-import { queueTurnAsJob } from "../turns/queue.ts";
-import { turnSignalsForTests } from "../turns/testing.ts";
+import { routineRunsForTests } from "../routines/testing.ts";
+import {
+	queueFacilitationForTests,
+	queueTurnForTests,
+	runningTurns,
+	turnSignalsForTests,
+} from "../turns/testing.ts";
 import { chatStore } from "./store.ts";
 
 const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: eventStore }));
-	const store = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const store = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -43,7 +48,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	});
 
 	beforeEach(async () => {
-		await onDatabase((db) => db.delete(job));
 		const suffix = crypto.randomUUID();
 		const [person] = await onDatabase((db) =>
 			db
@@ -202,9 +206,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 			content: "Investigate this over several steps",
 		});
 		expect(sent?.threadId).toBe(first.mainThreadId);
-		expect(
-			await onDatabase((db) => db.select().from(job).where(eq(job.threadId, first.mainThreadId))),
-		).toHaveLength(1);
+		expect(await runOnPostgres(runningTurns(first.mainThreadId))).toHaveLength(1);
 		expect((await store.history(first.id, userId))?.items).toHaveLength(0);
 		expect((await store.messages(first.id, userId))?.items.map((item) => item.kind)).toEqual([
 			"message",
@@ -227,10 +229,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
 		).toHaveLength(0);
-		expect(await onDatabase((db) => db.select().from(job))).toHaveLength(0);
+		expect(await runOnPostgres(runningTurns(current.mainThreadId))).toHaveLength(0);
 	});
 
-	it("retries the same message without creating another message or job", async () => {
+	it("retries the same message without creating another message or turn", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const messageId = crypto.randomUUID();
 		const first = await store.sendMain({
@@ -249,13 +251,21 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
 		).toHaveLength(1);
-		expect(await onDatabase((db) => db.select().from(job))).toHaveLength(1);
+		expect(await runOnPostgres(runningTurns(current.mainThreadId))).toHaveLength(1);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(laneRequest)
+					.where(like(laneRequest.laneKey, `turn:${current.mainThreadId}:%`)),
+			),
+		).toHaveLength(0);
 	});
 
 	it("includes Routine runs in the main Chat timeline", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
@@ -290,7 +300,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	it("paginates interleaved messages and Routine runs without gaps", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
@@ -465,7 +475,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	it("reports each history thread's own status, participants, and Routine run", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
@@ -532,13 +542,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 				reason: "default",
 			}),
 		);
-		await onDatabase((db) =>
-			db.insert(job).values({
-				kind: "facilitate",
-				threadId: running.id,
-				payload: { triggerMessageId: crypto.randomUUID() },
-				dedupeKey: `facilitate:${running.id}`,
-			}),
+		await runOnPostgres(
+			queueFacilitationForTests({ threadId: running.id, triggerMessageId: crypto.randomUUID() }),
 		);
 
 		const items = (await store.history(current.id, userId))?.items ?? [];

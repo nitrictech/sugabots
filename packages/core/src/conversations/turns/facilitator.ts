@@ -1,8 +1,8 @@
 import { streamEvent, type ThreadType, threadChannel } from "@sugabots/contracts";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { Cause, Duration, Effect, Exit, type Layer, Ref } from "effect";
+import { Duration, Effect, Layer, Ref } from "effect";
 import {
-	type Database,
+	Database,
 	type Executor,
 	type QueryFailure,
 	query,
@@ -14,36 +14,30 @@ import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
 } from "../../workspaces/agents/system-agents.ts";
-import {
-	type ClaimedJob,
-	claimNextJob,
-	completeJob,
-	requeueInterruptedJobs,
-	retryOrFailJob,
-} from "../jobs/queue.ts";
-import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
+import {
+	type AttemptOutcome,
+	type FacilitateRequest,
+	FacilitateSteps,
+} from "./facilitate.workflow.ts";
 import { forEachDelta, type TurnModel, type TurnModelInput } from "./model.ts";
 import type { QueueTurn } from "./queue.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
- * message when nothing else did (ADR 004). Runs as a job so the request that
- * committed the message does not wait on a model.
+ * message when nothing else did (ADR 004). Runs as a workflow so the request
+ * that committed the message does not wait on a model.
  *
  * It answers one of the handles in the thread, or `nobody`. A person being
  * addressed, or an exchange that is plainly over, is `nobody`; the people get
  * the floor by nothing happening.
  */
 
-const DEFAULT_POLL_INTERVAL_MS = 250;
 const FACILITATOR_TIMEOUT = Duration.seconds(20);
 /** The most recent messages the facilitator reads. Enough to see who is talking to whom. */
 const CONTEXT_MESSAGES = 8;
 const MAX_ANSWER_CHARACTERS = 200;
-
-export type ClaimedFacilitation = ClaimedJob<"facilitate">;
 
 export interface FacilitatorExecution {
 	model: TurnModel;
@@ -53,26 +47,34 @@ export interface FacilitatorExecution {
 	routines?: Pick<RoutineStore, "settleThread">;
 }
 
-export interface FacilitatorWorkerOptions extends FacilitatorExecution {
-	pollIntervalMs?: number;
-}
+/** What people are told when facilitation fails; the cause goes only to the logs. */
+const FACILITATION_FAILED = "The Facilitator could not choose who speaks next";
 
-export const facilitatorWorkerLayer = ({
-	model,
-	publishEvents,
-	queueTurn,
-	routines,
-	pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-}: FacilitatorWorkerOptions): Layer.Layer<never, never, Database> =>
-	workerLayer({
-		name: "Facilitator",
-		requeueInterrupted: () => requeueInterruptedJobs("facilitate"),
-		claimNext: () => claimNextJob("facilitate"),
-		run: (claimed) =>
-			runClaimedFacilitation(claimed, { model, publishEvents, queueTurn, routines }),
-		concurrency: 2,
-		pollIntervalMs,
-	});
+/** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
+export const stepsLayer = (execution: FacilitatorExecution) =>
+	Layer.effect(
+		FacilitateSteps,
+		Effect.gen(function* () {
+			const database = yield* Database;
+			const settleRoutine = (
+				request: FacilitateRequest,
+				outcome?: { state: "failed"; error: string },
+			) =>
+				(execution.routines?.settleThread(request.threadId, outcome) ?? Effect.void).pipe(
+					Effect.asVoid,
+					Effect.provideService(Database, database),
+				);
+			return FacilitateSteps.of({
+				attempt: (request, attempt) =>
+					attemptFacilitation(request, attempt, execution).pipe(
+						Effect.provideService(Database, database),
+					),
+				abandon: (request) =>
+					settleRoutine(request, { state: "failed", error: FACILITATION_FAILED }),
+				settleRoutine: (request) => settleRoutine(request),
+			});
+		}),
+	);
 
 /** What the facilitator sees: who is here, and what was last said. */
 export interface FacilitatorScope {
@@ -98,53 +100,55 @@ export interface FacilitatorScope {
 
 export type FacilitatorDecision = { kind: "agent"; agentId: string } | { kind: "nobody" };
 
-export const runClaimedFacilitation = (
-	claimed: ClaimedFacilitation,
+/**
+ * One attempt at deciding who speaks next, applied and settled. A failure is
+ * logged and reported as `failed`, having changed nothing. An interruption is
+ * left to the workflow, which runs the attempt again when it resumes.
+ */
+export const attemptFacilitation = (
+	request: FacilitateRequest,
+	attempt: number,
 	execution: FacilitatorExecution,
-): Effect.Effect<void, never, Database> =>
-	Effect.uninterruptibleMask((restore) =>
-		Effect.gen(function* () {
-			const scope = yield* query((db) =>
-				loadFacilitatorScope(db, claimed.threadId, claimed.payload.triggerMessageId),
-			);
-			// No scope is a thread that has gone, or a workspace that has chosen no
-			// model for its Facilitator. Neither becomes true by waiting, so the
-			// job is completed rather than retried.
-			if (!scope?.routerEnabled || scope.threadType === "chat") {
-				return yield* completeFacilitation(claimed, execution);
-			}
-			const decided = yield* Effect.exit(
-				restore(
-					decide(scope, execution.model).pipe(
-						// After the last ask, nobody speaks. A facilitator that cannot be
-						// understood should not hold up the thread, and a person can
-						// always address someone by name.
-						Effect.catchTag("UnusableAnswer", (why) =>
-							Effect.logInfo(`Facilitator fell back to nobody: ${why.reason}`).pipe(
-								Effect.as({ kind: "nobody" } as const),
-							),
-						),
-					),
+): Effect.Effect<AttemptOutcome, never, Database> =>
+	Effect.gen(function* () {
+		const scope = yield* query((db) =>
+			loadFacilitatorScope(db, request.threadId, request.triggerMessageId),
+		);
+		// No scope is a thread that has gone, or a workspace that has chosen no
+		// model for its Facilitator. Neither becomes true by waiting, so the
+		// facilitation is done rather than failed.
+		if (!scope?.routerEnabled || scope.threadType === "chat") {
+			if (execution.routines) yield* execution.routines.settleThread(request.threadId);
+			return decided;
+		}
+		const decision = yield* decide(scope, execution.model).pipe(
+			// After the last ask, nobody speaks. A facilitator that cannot be
+			// understood should not hold up the thread, and a person can always
+			// address someone by name.
+			Effect.catchTag("UnusableAnswer", (why) =>
+				Effect.logInfo(`Facilitator fell back to nobody: ${why.reason}`).pipe(
+					Effect.as({ kind: "nobody" } as const),
 				),
-			);
-			if (Exit.isFailure(decided)) {
-				const reason = Cause.hasInterruptsOnly(decided.cause)
-					? "Worker stopped"
-					: describeFailure(Cause.squash(decided.cause));
-				return yield* retryOrSettleFacilitation(claimed, reason, execution);
-			}
-			yield* applyDecision(execution, claimed, scope, decided.value);
-		}).pipe(
-			Effect.catchDefect((defect) =>
-				retryOrSettleFacilitation(claimed, describeFailure(defect), execution),
 			),
-		),
+		);
+		yield* applyDecision(execution, request, scope, decision);
+		return decided;
+	}).pipe(
+		Effect.catch((failure) => attemptFailed(attempt, failure)),
+		Effect.catchDefect((defect) => attemptFailed(attempt, defect)),
+	);
+
+const decided: AttemptOutcome = "decided";
+
+const attemptFailed = (attempt: number, failure: unknown) =>
+	Effect.logWarning(`Facilitation attempt ${attempt} failed`, failure).pipe(
+		Effect.as<AttemptOutcome>("failed"),
 	);
 
 /** Queues the chosen agent's turn, inviting it into the thread first if it is not there yet. */
 const applyDecision = (
 	execution: FacilitatorExecution,
-	claimed: ClaimedFacilitation,
+	request: FacilitateRequest,
 	scope: FacilitatorScope,
 	decision: FacilitatorDecision,
 ) =>
@@ -169,33 +173,11 @@ const applyDecision = (
 				yield* execution.queueTurn({
 					threadId: scope.threadId,
 					agentId: decision.agentId,
-					triggerMessageId: claimed.payload.triggerMessageId,
+					triggerMessageId: request.triggerMessageId,
 					reason: "facilitator",
 				});
 			}
-			yield* completeJob(claimed.id);
-			if (execution.routines) yield* execution.routines.settleThread(claimed.threadId);
-		}),
-	);
-
-const completeFacilitation = (claimed: ClaimedFacilitation, execution: FacilitatorExecution) =>
-	transaction(
-		completeJob(claimed.id).pipe(
-			Effect.andThen(execution.routines?.settleThread(claimed.threadId) ?? Effect.void),
-		),
-	);
-
-const retryOrSettleFacilitation = (
-	claimed: ClaimedFacilitation,
-	error: string,
-	execution: FacilitatorExecution,
-) =>
-	transaction(
-		Effect.gen(function* () {
-			const willRetry = yield* retryOrFailJob(claimed, error);
-			if (!willRetry && execution.routines) {
-				yield* execution.routines.settleThread(claimed.threadId, { state: "failed", error });
-			}
+			if (execution.routines) yield* execution.routines.settleThread(request.threadId);
 		}),
 	);
 

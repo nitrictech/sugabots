@@ -23,8 +23,7 @@ import {
 	thread,
 	threadParticipant,
 } from "../../database/schema.ts";
-import { enqueueJob } from "../jobs/queue.ts";
-import type { QueueTurn } from "./queue.ts";
+import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 
 /**
  * Who has the floor: which agent, if any, speaks after a message (ADR 004).
@@ -133,11 +132,15 @@ export interface FloorMessage {
 
 /**
  * Applies the decision for a committed message: queues the turns or the
- * router job, and brings any newly addressed crew agent into the thread as a
+ * facilitation, and brings any newly addressed crew agent into the thread as a
  * participant. Runs in the caller's transaction, so it commits with the message.
  */
 export const giveFloor = (
-	effects: { readonly publishEvents: PublishEvents; readonly queueTurn: QueueTurn },
+	effects: {
+		readonly publishEvents: PublishEvents;
+		readonly queueTurn: QueueTurn;
+		readonly queueFacilitation: QueueFacilitation;
+	},
 	committed: FloorMessage,
 ): Effect.Effect<FloorDecision, never, Database> =>
 	transaction(
@@ -150,12 +153,9 @@ export const giveFloor = (
 			});
 
 			if (decision.kind === "facilitate") {
-				yield* enqueueJob({
-					kind: "facilitate",
+				yield* effects.queueFacilitation({
 					threadId: committed.threadId,
-					payload: { triggerMessageId: committed.id },
-					dedupeKey: `route:${committed.threadId}`,
-					ifAlreadyQueued: "replacePayload",
+					triggerMessageId: committed.id,
 				});
 				return decision;
 			}

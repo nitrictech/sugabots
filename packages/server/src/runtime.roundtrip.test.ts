@@ -1,11 +1,15 @@
 import { chatStore } from "@sugabots/core/conversations/chats/store";
 import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
-import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
 import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
-import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import {
+	Facilitate,
+	facilitateLane,
+	facilitateWorkflow,
+} from "@sugabots/core/conversations/turns/facilitate.workflow";
+import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
+import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
@@ -16,7 +20,6 @@ import { postgresEventStore } from "@sugabots/core/database/events/store";
 import {
 	agent,
 	collaboration,
-	job,
 	message,
 	pod,
 	podMember,
@@ -27,6 +30,7 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
 import { Lanes } from "@sugabots/core/workflows/lanes";
+import { lane } from "@sugabots/core/workflows/sql";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -42,7 +46,7 @@ import { backgroundLayer } from "./runtime.ts";
 const database = await databaseForTests.context();
 const eventStore = await databaseForTests.runPromise(postgresEventStore);
 const workflows = ManagedRuntime.make(
-	Lanes.layer([Turn]).pipe(
+	Lanes.layer([Turn, Facilitate]).pipe(
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provide(Layer.succeedContext(database)),
 	),
@@ -53,9 +57,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 	const bus = createEventBus({ store: eventStore });
 	const publishEvents = eventPublisher(bus);
 	const queueTurn = queueTurnInLane(Context.get(engine, Lanes.Service));
+	const queueFacilitation = queueFacilitationInLane(Context.get(engine, Lanes.Service));
 	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
-	const turns = turnStore(publishEvents, queueTurn, signals);
-	const chats = chatStore(publishEvents, queueTurn);
+	const turns = turnStore(publishEvents, queueTurn, queueFacilitation, signals);
+	const chats = chatStore(publishEvents, queueTurn, queueFacilitation);
 	const collaborations = collaborationStore(publishEvents, queueTurn);
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
@@ -79,21 +84,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			})),
 	};
 
-	const background = backgroundLayer({
-		eventStore,
-		bus,
-		model,
-		turns,
-		// Summaries run as workflows now; this test is about turns.
-		queueSummary: () => Effect.void,
-		queueTurn,
-		collaborations,
-		calls: toolCallStore(publishEvents),
-		builtInTools: noBuiltInTools,
-		connectionTools: noConnectionTools,
-		publishEvents,
-	});
-	const turnWorkflows = Turn.toLayer(turnWorkflow).pipe(
+	const background = backgroundLayer({ eventStore });
+	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
+		Layer.provideMerge(facilitateSteps({ model, publishEvents, queueTurn })),
 		Layer.provideMerge(
 			stepsLayer({
 				store: turns,
@@ -108,7 +101,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		Layer.provide(Layer.succeedContext(engine)),
 	);
 	const runtime = ManagedRuntime.make(
-		Layer.merge(background, turnWorkflows).pipe(Layer.provideMerge(Layer.succeedContext(database))),
+		Layer.merge(background, workflowLayers).pipe(
+			Layer.provideMerge(Layer.succeedContext(database)),
+		),
 	);
 
 	afterAll(async () => {
@@ -116,6 +111,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		await workflows.dispose();
 		await closeDatabase();
 	});
+
+	/** The thread's facilitation lane, which exists once a facilitation has been asked for. */
+	const facilitationLanes = (threadId: string) =>
+		onDatabase((db) =>
+			db
+				.select()
+				.from(lane)
+				.where(eq(lane.key, facilitateLane({ threadId }))),
+		);
 
 	/** A workspace with a pod, a host agent and a helper the host can collaborate with. */
 	async function aRoom(routing?: { facilitator: boolean }) {
@@ -241,9 +245,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		);
 
 		expect(hostTurn?.status).toBe("done");
-		expect(
-			await onDatabase((db) => db.select().from(job).where(eq(job.threadId, opened.mainThreadId))),
-		).toEqual([]);
+		expect(await facilitationLanes(opened.mainThreadId)).toEqual([]);
 		expect(made).toMatchObject({ status: "answered", answer: "A dog named Krypto." });
 		expect(reply?.content).toBe("Helper says: A dog named Krypto.");
 		// Well inside the tool's wait: the answer woke it, the timeout did not.
@@ -278,12 +280,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 		if (!answered) throw new Error("The collaboration was never opened");
-		// Long enough for a route job to have been claimed and run if one existed.
+		// Long enough for a facilitation to have run if one had been asked for.
 		await new Promise((resolve) => setTimeout(resolve, 1_500));
 
-		const childJobs = await onDatabase((db) =>
-			db.select({ kind: job.kind }).from(job).where(eq(job.threadId, answered.childThreadId)),
-		);
 		const childMessages = await onDatabase((db) =>
 			db
 				.select({ id: message.id })
@@ -291,16 +290,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 				.where(eq(message.threadId, answered.childThreadId)),
 		);
 
-		const parentJobs = await onDatabase((db) =>
-			db
-				.select({ kind: job.kind, status: job.status })
-				.from(job)
-				.where(and(eq(job.threadId, opened.mainThreadId), eq(job.kind, "facilitate"))),
-		);
-		expect(parentJobs).toHaveLength(0);
-
+		expect(await facilitationLanes(opened.mainThreadId)).toEqual([]);
 		expect(answered.status).toBe("answered");
-		expect(childJobs.filter((one) => one.kind === "facilitate")).toHaveLength(0);
+		expect(await facilitationLanes(answered.childThreadId)).toEqual([]);
 		expect(childMessages).toHaveLength(2);
 	}, 25_000);
 });
