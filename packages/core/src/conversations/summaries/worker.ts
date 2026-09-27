@@ -1,13 +1,12 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { Cause, Duration, Effect, Exit, Layer, Ref, Schema } from "effect";
 import { Database } from "../../database/database.ts";
-import { Lanes } from "../../workflows/lanes.ts";
-import { describeFailure } from "../jobs/worker.ts";
+import { describeFailure } from "../failure.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "../turns/model.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
 import type { PreparedSummary, SummaryStore } from "./store.ts";
-import { Summary, type SummaryRequest, SummarySteps, summaryLane } from "./summary.workflow.ts";
+import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
 
 const SUMMARY_TIMEOUT = Duration.minutes(2);
 /** Room for the JSON around a title and a summary; anything longer is the model rambling. */
@@ -27,23 +26,15 @@ export interface SummaryExecution {
 	model: TurnModel;
 }
 
-/**
- * The summary workflow's steps: summarising, and freeing the thread's lane
- * afterwards. Activities reach them through `SummarySteps`.
- */
+/** The summary workflow's step, which its activity reaches through `SummarySteps`. */
 export const stepsLayer = (execution: SummaryExecution) =>
 	Layer.effect(
 		SummarySteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
-			const lanes = yield* Lanes.Service;
 			return SummarySteps.of({
 				summarise: (request) =>
 					summarise(request, execution).pipe(Effect.provideService(Database, database)),
-				release: (request) =>
-					Effect.flatMap(Summary.executionId(request), (executionId) =>
-						lanes.release({ key: summaryLane(request.threadId), executionId }),
-					),
 			});
 		}),
 	);

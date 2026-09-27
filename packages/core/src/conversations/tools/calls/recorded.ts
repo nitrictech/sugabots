@@ -1,7 +1,7 @@
 import type { Tool } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
-import { describeFailure } from "../../jobs/worker.ts";
+import { describeFailure } from "../../failure.ts";
 import type { ToolApprovalStore } from "../approvals/store.ts";
 import type { ToolCallStore } from "./store.ts";
 

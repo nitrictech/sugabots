@@ -1,8 +1,9 @@
+import { Activities } from "@sugabots/workflow/activities";
 import { eq, sql } from "drizzle-orm";
-import { Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
+import { Context, Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
-import { afterAll, describe, expect, it } from "vitest";
-import { layer as databaseLayer, query } from "../database/database.ts";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { type Database, layer as databaseLayer, query } from "../database/database.ts";
 import { Lanes } from "./lanes.ts";
 import { lane, laneRequest } from "./sql.ts";
 
@@ -22,10 +23,64 @@ const Done = Workflow.make("test/lane-done", {
 });
 const DoneLive = Done.toLayer(() => Effect.void);
 
+// Waits to be told to go, then ends as its payload says, recording its ending.
+const Ending = Workflow.make("test/lane-ending", {
+	payload: { key: Schema.String, fails: Schema.Boolean },
+	idempotencyKey: (payload) => payload.key,
+});
+const Go = DurableDeferred.make("go");
+const endings: string[] = [];
+
+class EndingSteps extends Context.Service<
+	EndingSteps,
+	{
+		readonly recordFailure: (payload: typeof Ending.payloadSchema.Type) => Effect.Effect<void>;
+		readonly recordReleased: (payload: typeof Ending.payloadSchema.Type) => Effect.Effect<void>;
+	}
+>()("test/EndingSteps") {}
+
+const endingActivities = Activities.fromService<typeof Ending.payloadSchema.Type>()(EndingSteps, {
+	recordFailure: {},
+	recordReleased: {},
+});
+
+/** Records `event` with the state its lane is in at that moment. */
+const recordEnding = (key: string, event: string) =>
+	query((db) => db.select({ state: lane.state }).from(lane).where(eq(lane.key, key))).pipe(
+		Effect.flatMap(([row]) =>
+			Effect.sync(() => {
+				endings.push(`${event}:${row?.state}`);
+			}),
+		),
+	);
+
+const EndingWorkflow = Lanes.workflow(Ending, {
+	lane: (payload) => payload.key,
+	activities: endingActivities,
+	body: (payload) =>
+		DurableDeferred.await(Go).pipe(
+			Effect.andThen(payload.fails ? Effect.die(new Error("failed")) : Effect.void),
+		),
+	onFailure: "recordFailure",
+	onReleased: "recordReleased",
+});
+
+const endingSteps = Layer.effect(
+	EndingSteps,
+	Effect.map(Effect.context<Database>(), (database) =>
+		EndingSteps.of({
+			recordFailure: ({ key }) =>
+				recordEnding(key, "failure").pipe(Effect.provideContext(database)),
+			recordReleased: ({ key }) =>
+				recordEnding(key, "released").pipe(Effect.provideContext(database)),
+		}),
+	),
+);
+
 const runtime = ManagedRuntime.make(
-	Lanes.layer([Held, Done]).pipe(
-		Layer.provideMerge(HeldLive),
-		Layer.provideMerge(DoneLive),
+	Layer.mergeAll(HeldLive, DoneLive, EndingWorkflow.layer).pipe(
+		Layer.provideMerge(endingSteps),
+		Layer.provideMerge(Lanes.layer([Held, Done, Ending])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),
@@ -209,5 +264,69 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(await laneOf(key)).toMatchObject({ state: "running", executionId });
 		const polled = await run(Held.poll(executionId));
 		expect(Option.isSome(polled)).toBe(true);
+	});
+
+	describe("a lane workflow", () => {
+		/** Starts an `Ending` execution in its lane, waiting until it suspends to wait for `Go`. */
+		const startEnding = async (payload: typeof Ending.payloadSchema.Type) => {
+			await run(
+				(await lanes()).admit({ key: payload.key, workflow: Ending, payload, whenBusy: "queue" }),
+			);
+			const executionId = await run(Ending.executionId(payload));
+			await vi.waitFor(async () => {
+				const polled = await run(Ending.poll(executionId));
+				expect(Option.isSome(polled) && polled.value._tag).toBe("Suspended");
+			});
+			return executionId;
+		};
+		const go = (executionId: string) =>
+			run(
+				DurableDeferred.succeed(Go, {
+					token: DurableDeferred.tokenFromExecutionId(Go, { workflow: Ending, executionId }),
+					value: undefined,
+				}),
+			);
+
+		it("keeps its lane while suspended, and releases it when it ends", async () => {
+			const key = crypto.randomUUID();
+			endings.length = 0;
+			const executionId = await startEnding({ key, fails: false });
+
+			expect(await laneOf(key)).toMatchObject({ state: "running", executionId });
+
+			await go(executionId);
+			await vi.waitFor(() => expect(endings).toEqual(["released:idle"]));
+			expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+		});
+
+		it("rebuilds each of its activities, the lane's release included, from its full name", async () => {
+			const key = crypto.randomUUID();
+			const payload = { key, fails: false };
+			const executionId = await startEnding(payload);
+			expect(EndingWorkflow.resolve("recordFailure", payload)?.name).toBe("recordFailure");
+			const release = EndingWorkflow.resolve("releaseLane", payload);
+			expect(release?.name).toBe("releaseLane");
+
+			await run(
+				(release?.execute ?? Effect.die("unresolved")).pipe(
+					Effect.provideService(
+						WorkflowEngine.WorkflowInstance,
+						WorkflowEngine.WorkflowInstance.initial(Ending, executionId),
+					),
+					Effect.scoped,
+				) as Effect.Effect<unknown, unknown, Lanes.Service>,
+			);
+
+			expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
+			expect(EndingWorkflow.resolve("unknown", payload)).toBeUndefined();
+		});
+
+		it("records a failure while it still holds its lane, then releases it", async () => {
+			const key = crypto.randomUUID();
+			endings.length = 0;
+			await go(await startEnding({ key, fails: true }));
+
+			await vi.waitFor(() => expect(endings).toEqual(["failure:running", "released:idle"]));
+		});
 	});
 });

@@ -1,8 +1,8 @@
-import { type SQL, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import { type Lanes, laneBusy } from "../../workflows/lanes.ts";
-import { enqueueJob, hasPendingResponseJob } from "../jobs/queue.ts";
+import { Facilitate, type FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
 import { Turn, type TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**
@@ -13,7 +13,7 @@ import { Turn, type TurnRequest, turnLane } from "./turn.workflow.ts";
  */
 export type QueueTurn = (request: TurnRequest) => Effect.Effect<void, never, Database>;
 
-/** Turns as turn workflows, one at a time per agent per thread. */
+/** One turn at a time per agent per thread. */
 export const queueTurnInLane =
 	(lanes: Lanes.Interface): QueueTurn =>
 	(request) =>
@@ -27,23 +27,33 @@ export const queueTurnInLane =
 			})
 			.pipe(Effect.asVoid);
 
-/** Turns as jobs on the job queue, before turns ran as workflows. */
-export const queueTurnAsJob: QueueTurn = (request) =>
-	enqueueJob({
-		kind: "turn",
-		threadId: request.threadId,
-		payload: {
-			agentId: request.agentId,
-			triggerMessageId: request.triggerMessageId,
-			reason: request.reason,
-		},
-		dedupeKey: `turn:${request.threadId}:${request.agentId}`,
-		ifAlreadyQueued: "keep",
-	});
+/**
+ * Asks the facilitator who speaks after a message, in the caller's
+ * transaction. Given to the code that gives the floor, like `QueueTurn`.
+ */
+export type QueueFacilitation = (
+	request: FacilitateRequest,
+) => Effect.Effect<void, never, Database>;
+
+/**
+ * One facilitation at a time per thread. A request for a newer message
+ * replaces one still waiting, since only the latest message needs a speaker.
+ */
+export const queueFacilitationInLane =
+	(lanes: Lanes.Interface): QueueFacilitation =>
+	(request) =>
+		lanes
+			.admit({
+				key: facilitateLane(request),
+				subject: request.threadId,
+				workflow: Facilitate,
+				payload: request,
+				whenBusy: "replace",
+			})
+			.pipe(Effect.asVoid);
 
 /**
  * Whether an agent is answering in the thread or about to, as a condition for
- * a query: a turn or facilitation job, or a turn workflow's lane.
+ * a query: a turn or facilitation workflow's lane.
  */
-export const respondingIn = (threadId: SQL) =>
-	sql<boolean>`(${hasPendingResponseJob(threadId)} or ${laneBusy(threadId, [Turn._tag])})`;
+export const respondingIn = (threadId: SQL) => laneBusy(threadId, [Turn._tag, Facilitate._tag]);

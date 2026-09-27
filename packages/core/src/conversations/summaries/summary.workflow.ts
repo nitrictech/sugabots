@@ -1,10 +1,11 @@
 /**
- * Summarising a thread, as a durable workflow. It holds only the definition:
- * what each step does lives behind `SummarySteps`, implemented in `worker.ts`.
+ * Summarising a thread, as a durable workflow: its definition and its step.
+ * What the step does lives behind `SummarySteps`, implemented in `worker.ts`.
  */
 import { Activities } from "@sugabots/workflow/activities";
-import { Context, Effect, Schema } from "effect";
+import { Context, type Effect, Schema } from "effect";
 import { Workflow } from "effect/unstable/workflow";
+import { Lanes } from "../../workflows/lanes.ts";
 
 export const SummaryRequest = Schema.Struct({
 	threadId: Schema.String,
@@ -21,32 +22,23 @@ export const Summary = Workflow.make("summary", {
 });
 
 /** One summary per thread at a time; a newer request replaces one still waiting. */
-export const summaryLane = (threadId: string) => `summary:${threadId}`;
+export const summaryLane = (request: Pick<SummaryRequest, "threadId">) =>
+	`summary:${request.threadId}`;
 
 export class SummarySteps extends Context.Service<
 	SummarySteps,
 	{
 		/** Prepares, generates and records the summary, or does nothing if it is no longer needed. */
 		readonly summarise: (request: SummaryRequest) => Effect.Effect<void>;
-		/** Frees the thread's summary lane for the next request. */
-		readonly release: (request: SummaryRequest) => Effect.Effect<void>;
 	}
 >()("@sugabots/core/SummarySteps") {}
 
-export const summaryActivities = Activities.make<SummaryRequest>()({
-	summarise: {
-		execute: (request) =>
-			Effect.flatMap(Effect.service(SummarySteps), (steps) => steps.summarise(request)),
-	},
-	release: {
-		execute: (request) =>
-			Effect.flatMap(Effect.service(SummarySteps), (steps) => steps.release(request)),
-	},
+export const summaryActivities = Activities.fromService<SummaryRequest>()(SummarySteps, {
+	summarise: {},
 });
 
-/** Whatever happens to the summary, the lane is released so the next one can run. */
-export const summary = (request: SummaryRequest) =>
-	Effect.andThen(
-		Effect.exit(summaryActivities.activity("summarise", request)),
-		summaryActivities.activity("release", request),
-	);
+export const summaryWorkflow = Lanes.workflow(Summary, {
+	lane: summaryLane,
+	activities: summaryActivities,
+	body: (request) => summaryActivities.activity("summarise", request),
+});
