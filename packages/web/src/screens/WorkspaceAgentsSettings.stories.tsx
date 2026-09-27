@@ -150,6 +150,45 @@ export const ModelPage = meta.story({
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 		// The model in use is checked, with nothing to press.
 		await expect(canvas.queryByRole("button", { name: "Claude Sonnet" })).toBeNull();
+		await expect(
+			within(canvas.getByRole("main")).getByRole("link", { name: "Models" }),
+		).toHaveAttribute("href", "/nitric/settings/providers");
+	},
+});
+
+/** A member of the workspace who may not change its bots or its models. */
+function memberHandlers() {
+	return appHandlers({
+		models,
+		bots,
+		role: "member",
+		pods: storyPods.map((pod) => ({
+			...pod,
+			permissions: {
+				...pod.permissions,
+				createAgents: false,
+				updateAgents: false,
+				deleteAgents: false,
+				manageRoutines: false,
+				manageConnections: false,
+			},
+		})),
+	});
+}
+
+/** The Model page for a member: the models stated, and a workspace admin named as who adds more. */
+export const MemberModelPage = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...memberHandlers());
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Model/ }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByText(/ask a workspace admin/)).toBeInTheDocument();
+		await expect(
+			within(canvas.getByRole("main")).queryByRole("link", { name: "Models" }),
+		).toBeNull();
 	},
 });
 
@@ -184,24 +223,7 @@ export const ToolsAndRoutines = meta.story({
 /** A member who may not change the bot: its settings stated rather than editable. */
 export const Member = meta.story({
 	beforeEach({ msw }) {
-		msw.use(
-			...appHandlers({
-				models,
-				bots,
-				role: "member",
-				pods: storyPods.map((pod) => ({
-					...pod,
-					permissions: {
-						...pod.permissions,
-						createAgents: false,
-						updateAgents: false,
-						deleteAgents: false,
-						manageRoutines: false,
-						manageConnections: false,
-					},
-				})),
-			}),
-		);
+		msw.use(...memberHandlers());
 	},
 	play: async ({ canvas }) => {
 		await expect(
