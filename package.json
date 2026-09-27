@@ -7,12 +7,12 @@
 		"packages/*"
 	],
 	"catalog": {
-		"@effect/platform-node": "4.0.0-rc.115",
-		"@effect/sql-pg": "4.0.0-rc.115",
+		"@effect/platform-node": "4.0.0-rc.117",
+		"@effect/sql-pg": "4.0.0-rc.117",
 		"@types/pg": "^8.23.1",
 		"better-auth": "^1.7.3",
 		"drizzle-orm": "1.0.0-rc.5-5935859",
-		"effect": "4.0.0-rc.115",
+		"effect": "4.0.0-rc.117",
 		"vite": "^8.2.2"
 	},
 	"engines": {
