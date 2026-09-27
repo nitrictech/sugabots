@@ -28,8 +28,6 @@ vi.mock("../jobs/queue.ts", async (importOriginal) => {
 	};
 });
 
-vi.mock("./queue.ts", () => ({ queueTurn: mocks.queueTurn }));
-
 import {
 	type ClaimedFacilitation,
 	type FacilitatorScope,
@@ -75,6 +73,7 @@ describe("runClaimedFacilitation", () => {
 						Effect.succeed({ text: chunks("nobody"), accounting: Effect.succeed({ usage: {} }) }),
 				},
 				publishEvents: () => Effect.void,
+				queueTurn: mocks.queueTurn,
 				routines: { settleThread },
 			}),
 		);
@@ -93,6 +92,7 @@ describe("runClaimedFacilitation", () => {
 			runClaimedFacilitation(claimed, {
 				model: { stream },
 				publishEvents: () => Effect.void,
+				queueTurn: mocks.queueTurn,
 			}),
 		);
 
@@ -110,6 +110,7 @@ describe("runClaimedFacilitation", () => {
 					stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
 				},
 				publishEvents: () => Effect.void,
+				queueTurn: mocks.queueTurn,
 				routines: { settleThread },
 			}),
 		);

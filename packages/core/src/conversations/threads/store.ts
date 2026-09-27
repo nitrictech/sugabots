@@ -16,8 +16,8 @@ import type * as schema from "../../database/schema.ts";
 import { podMember, thread, threadSummary, workspaceMember } from "../../database/schema.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { mayInPod } from "../../workspaces/permissions.ts";
-import { hasPendingResponseJob } from "../jobs/queue.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
+import { respondingIn } from "../turns/queue.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -61,7 +61,7 @@ export function threadStore(): ThreadStore {
 			query((db) =>
 				Effect.gen(function* () {
 					const rows = yield* db
-						.select({ thread, running: hasPendingResponseJob(sql`${thread.id}`) })
+						.select({ thread, running: respondingIn(sql`${thread.id}`) })
 						.from(thread)
 						// Child threads, whether a system agent's or a collaboration's, are reached
 						// from the thread they hang off rather than listed beside it.
@@ -137,7 +137,7 @@ const loadConversation = Effect.fn("ThreadStore.loadConversation")(function* (
 	return yield* db.query.thread.findFirst({
 		where: { id: threadId, RAW: (row) => reachesPod(row.podId, userId) },
 		extras: {
-			running: (row) => hasPendingResponseJob(sql`${row.id}`),
+			running: (row) => respondingIn(sql`${row.id}`),
 			routineExecutionId: (row) => routineExecutionIdOf(row.id),
 			workspaceRole: (row) => sql<WorkspaceRole | null>`(
 				select ${workspaceMember.role} from ${workspaceMember}

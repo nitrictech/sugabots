@@ -9,7 +9,7 @@ import {
 	Schedule,
 	Schema,
 } from "effect";
-import { Activity, DurableDeferred, Workflow, type WorkflowEngine } from "effect/unstable/workflow";
+import { Activity, DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { expect, it } from "vitest";
 import { Activities } from "./activities.ts";
 
@@ -83,6 +83,49 @@ export function conformance(options: {
 		expect(Exit.hasInterrupts(ended)).toBe(true);
 	});
 
+	it("wakes for whichever of several deferreds completes first", async () => {
+		await using harness = start(options.engine());
+		const key = crypto.randomUUID();
+		const executionId = await harness.run(Racing.execute({ key }, { discard: true }));
+		await harness.untilSuspended(executionId, Racing);
+
+		// B before A: the execution records B while still waiting for A.
+		await harness.run(
+			DurableDeferred.succeed(Second, { token: racingToken(Second, executionId), value: "b" }),
+		);
+		await harness.until(() => runs(key).includes("second"));
+		expect(runs(key)).toEqual(["second"]);
+
+		await harness.run(
+			DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
+		);
+		expect(await harness.result(executionId, Racing)).toBe("second:b,first:a");
+		expect(runs(key)).toEqual(["second", "first", "cleanup"]);
+	});
+
+	it.runIf(options.durable)("keeps a race's winner across an engine restart", async () => {
+		const key = crypto.randomUUID();
+		const executionId = await (async () => {
+			await using harness = start(options.engine());
+			const id = await harness.run(Racing.execute({ key }, { discard: true }));
+			await harness.untilSuspended(id, Racing);
+			await harness.run(
+				DurableDeferred.succeed(Second, { token: racingToken(Second, id), value: "b" }),
+			);
+			await harness.until(() => runs(key).includes("second"));
+			await harness.untilSuspended(id, Racing);
+			return id;
+		})();
+
+		await using restarted = start(options.engine());
+		await restarted.run(
+			DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
+		);
+
+		expect(await restarted.result(executionId, Racing)).toBe("second:b,first:a");
+		expect(runs(key)).toEqual(["second", "first", "cleanup"]);
+	});
+
 	it("retries a failing activity within its budget", async () => {
 		await using harness = start(options.engine());
 		const key = crypto.randomUUID();
@@ -149,6 +192,18 @@ const Flaky = Workflow.make("conformance/flaky", {
 	idempotencyKey: (payload) => payload.key,
 });
 
+const Racing = Workflow.make("conformance/racing", {
+	payload: { key: Schema.String },
+	success: Schema.String,
+	idempotencyKey: (payload) => payload.key,
+});
+
+const First = DurableDeferred.make("first", { success: Schema.String });
+const Second = DurableDeferred.make("second", { success: Schema.String });
+
+const racingToken = (deferred: typeof First, executionId: string) =>
+	DurableDeferred.tokenFromExecutionId(deferred, { workflow: Racing, executionId });
+
 const goToken = (executionId: string) =>
 	DurableDeferred.tokenFromExecutionId(Go, { workflow: Suspending, executionId });
 
@@ -175,7 +230,55 @@ export const flakyActivities = Activities.make<typeof Flaky.payloadSchema.Type>(
 	},
 });
 
+export const racingActivities = Activities.make<typeof Racing.payloadSchema.Type>()({
+	step: {
+		execute: ({ key }, name) =>
+			Effect.gen(function* () {
+				const recorder = yield* Probe;
+				yield* recorder.record(key, name);
+			}),
+	},
+});
+
+/**
+ * Waits for several deferreds by racing the ones still outstanding, so the
+ * execution records each as it completes, in whatever order they arrive.
+ */
+const racing = (payload: typeof Racing.payloadSchema.Type) =>
+	Effect.gen(function* () {
+		// A suspension inside the race surfaces as an interruption the body can
+		// catch; clean-up must run only once the execution has really ended.
+		const ended = yield* Effect.exit(race(payload));
+		const instance = yield* WorkflowEngine.WorkflowInstance;
+		if (instance.suspended) return yield* ended;
+		yield* racingActivities.activity("step", payload, "cleanup");
+		return yield* ended;
+	});
+
+const race = (payload: typeof Racing.payloadSchema.Type) =>
+	Effect.gen(function* () {
+		const decided: string[] = [];
+		let outstanding = [First, Second];
+		for (let round = 0; outstanding.length > 0; round++) {
+			const [first, ...rest] = outstanding.map((deferred) =>
+				Effect.map(DurableDeferred.await(deferred), (value) => `${deferred.name}:${value}`),
+			);
+			const winner = yield* DurableDeferred.raceAll({
+				name: `racing/${round}`,
+				success: Schema.String,
+				error: Schema.Never,
+				effects: [first as Effect.Effect<string, never, never>, ...rest],
+			});
+			const name = winner.slice(0, winner.indexOf(":"));
+			yield* racingActivities.activity("step", payload, name);
+			decided.push(winner);
+			outstanding = outstanding.filter((deferred) => deferred.name !== name);
+		}
+		return decided.join(",");
+	});
+
 const workflows = Layer.mergeAll(
+	Racing.toLayer(racing),
 	Suspending.toLayer((payload) =>
 		Effect.gen(function* () {
 			yield* suspendingActivities.activity("step", payload, "before");
@@ -193,28 +296,54 @@ function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
 	const runtime = ManagedRuntime.make(workflows.pipe(Layer.provideMerge(engine)));
 	const run = <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>) =>
 		runtime.runPromise(effect);
-	const pollUntil = <A>(
-		executionId: string,
-		done: (result: Workflow.Result<string, never>) => A | undefined,
-	) =>
+	const retried = <A>(attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>) =>
 		run(
-			Suspending.poll(executionId).pipe(
-				Effect.flatMap((result) =>
-					Effect.fromOption(Option.flatMap(result, (value) => Option.fromUndefinedOr(done(value)))),
-				),
+			attempt.pipe(
 				Effect.retry({ times: 250, schedule: Schedule.spaced(Duration.millis(20)) }),
 				Effect.orDie,
 			),
 		);
-	const completion = (executionId: string) =>
-		pollUntil(executionId, (result) => (result._tag === "Complete" ? result.exit : undefined));
+	const pollUntil = <A>(
+		workflow: typeof Suspending | typeof Racing,
+		executionId: string,
+		done: (result: Workflow.Result<string, never>) => A | undefined,
+	) =>
+		retried(
+			workflow
+				.poll(executionId)
+				.pipe(
+					Effect.flatMap((result) =>
+						Effect.fromOption(
+							Option.flatMap(result, (value) => Option.fromUndefinedOr(done(value))),
+						),
+					),
+				),
+		);
+	const completion = (
+		executionId: string,
+		workflow: typeof Suspending | typeof Racing = Suspending,
+	) =>
+		pollUntil(workflow, executionId, (result) =>
+			result._tag === "Complete" ? result.exit : undefined,
+		);
 	return {
 		run,
-		untilSuspended: (executionId: string) =>
-			pollUntil(executionId, (result) => (result._tag === "Suspended" ? true : undefined)),
+		untilSuspended: (
+			executionId: string,
+			workflow: typeof Suspending | typeof Racing = Suspending,
+		) =>
+			pollUntil(workflow, executionId, (result) =>
+				result._tag === "Suspended" ? true : undefined,
+			),
+		/** Waits, briefly, for something the execution does to become true. */
+		until: (check: () => boolean) =>
+			retried(Effect.suspend(() => (check() ? Effect.void : Effect.fail("not yet")))),
 		completion,
-		result: async (executionId: string) => {
-			const exit = await completion(executionId);
+		result: async (
+			executionId: string,
+			workflow: typeof Suspending | typeof Racing = Suspending,
+		) => {
+			const exit = await completion(executionId, workflow);
 			if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
 			return exit.value;
 		},

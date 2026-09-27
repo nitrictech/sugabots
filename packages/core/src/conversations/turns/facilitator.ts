@@ -25,7 +25,7 @@ import { describeFailure, workerLayer } from "../jobs/worker.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import { forEachDelta, type TurnModel, type TurnModelInput } from "./model.ts";
-import { queueTurn } from "./queue.ts";
+import type { QueueTurn } from "./queue.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
@@ -48,6 +48,8 @@ export type ClaimedFacilitation = ClaimedJob<"facilitate">;
 export interface FacilitatorExecution {
 	model: TurnModel;
 	publishEvents: PublishEvents;
+	/** How the chosen agent's turn is asked for. */
+	queueTurn: QueueTurn;
 	routines?: Pick<RoutineStore, "settleThread">;
 }
 
@@ -58,6 +60,7 @@ export interface FacilitatorWorkerOptions extends FacilitatorExecution {
 export const facilitatorWorkerLayer = ({
 	model,
 	publishEvents,
+	queueTurn,
 	routines,
 	pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }: FacilitatorWorkerOptions): Layer.Layer<never, never, Database> =>
@@ -65,7 +68,8 @@ export const facilitatorWorkerLayer = ({
 		name: "Facilitator",
 		requeueInterrupted: () => requeueInterruptedJobs("facilitate"),
 		claimNext: () => claimNextJob("facilitate"),
-		run: (claimed) => runClaimedFacilitation(claimed, { model, publishEvents, routines }),
+		run: (claimed) =>
+			runClaimedFacilitation(claimed, { model, publishEvents, queueTurn, routines }),
 		concurrency: 2,
 		pollIntervalMs,
 	});
@@ -162,7 +166,7 @@ const applyDecision = (
 						},
 					]);
 				}
-				yield* queueTurn({
+				yield* execution.queueTurn({
 					threadId: scope.threadId,
 					agentId: decision.agentId,
 					triggerMessageId: claimed.payload.triggerMessageId,

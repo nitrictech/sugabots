@@ -1,4 +1,5 @@
 import type { ToolCallPart } from "@sugabots/contracts";
+import { Conflict } from "@sugabots/contracts/http";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -63,6 +64,32 @@ describe("an approval request", () => {
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+	});
+
+	it("keeps the answer given once it is accepted, until the turn records it", async () => {
+		const approval = client.api.toolApprovals.decide;
+		show({ team: "Platform" });
+
+		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+
+		await waitFor(() => expect(approval).toHaveBeenCalled());
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(true),
+		);
+		expect(screen.getByRole("button", { name: "Deny" }).hasAttribute("disabled")).toBe(true);
+	});
+
+	it("lets the answer be given again if sending it failed", async () => {
+		const approval = client.api.toolApprovals.decide;
+		approval.mockReturnValue(
+			Effect.fail(new Conflict({ message: "That tool approval has already been decided" })),
+		);
+		show({ team: "Platform" });
+
+		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+
+		await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
+		expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(false);
 	});
 
 	it("denies it", async () => {

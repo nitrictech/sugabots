@@ -40,7 +40,6 @@ import {
 } from "../../database/schema.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
-import { hasPendingResponseJob } from "../jobs/queue.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -52,6 +51,7 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { giveFloor } from "../turns/floor.ts";
+import { type QueueTurn, respondingIn } from "../turns/queue.ts";
 
 export class ChatPlacementRejected extends Data.TaggedError("ChatPlacementRejected") {
 	override get message() {
@@ -121,7 +121,7 @@ export interface ChatStore {
 	): Effect.Effect<Message | undefined, ChatMessageIdConflict | ChatAgentHasNoModel, Database>;
 }
 
-export function chatStore(publishEvents: PublishEvents): ChatStore {
+export function chatStore(publishEvents: PublishEvents, queueTurn: QueueTurn): ChatStore {
 	return {
 		list: Effect.fn("ChatStore.list")(function* (input) {
 			yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
@@ -259,12 +259,15 @@ export function chatStore(publishEvents: PublishEvents): ChatStore {
 							.values({ threadId: visible.mainThreadId, userId: input.author.id })
 							.onConflictDoNothing(),
 					);
-					yield* giveFloor(publishEvents, {
-						id: created.id,
-						threadId: visible.mainThreadId,
-						content: created.content,
-						author: { kind: "person" },
-					});
+					yield* giveFloor(
+						{ publishEvents, queueTurn },
+						{
+							id: created.id,
+							threadId: visible.mainThreadId,
+							content: created.content,
+							author: { kind: "person" },
+						},
+					);
 					const result = toMessage(created, messageAuthor(input.author));
 					yield* publishEvents([
 						{
@@ -595,7 +598,7 @@ const loadHistory = Effect.fn("ChatStore.loadHistory")(function* (
 			...(before && { RAW: (row) => earlierThan(row.updatedAt, row.id, before) }),
 		},
 		extras: {
-			running: (row) => hasPendingResponseJob(sql`${row.id}`),
+			running: (row) => respondingIn(sql`${row.id}`),
 			latestTurnStatus: (row) => sql<schema.TurnRow["status"] | null>`(
 				select ${turn.status} from ${turn}
 				where ${turn.threadId} = ${row.id}

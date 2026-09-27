@@ -1,6 +1,6 @@
 export * as Lanes from "./lanes.ts";
 
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, lt, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Option, Schema } from "effect";
 import { type Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterCommit, Database, query, transaction } from "../database/database.ts";
@@ -20,6 +20,8 @@ export interface Interface {
 	/** Starts the workflow now if the lane is idle; otherwise leaves it to wait, by `whenBusy`. */
 	readonly admit: <W extends Workflow.Any>(request: {
 		readonly key: string;
+		/** What the lane's work is about (a thread, say), for `laneBusy`. */
+		readonly subject?: string;
 		readonly workflow: W;
 		readonly payload: W["payloadSchema"]["Type"];
 		readonly whenBusy: WhenBusy;
@@ -61,6 +63,22 @@ const general = (workflow: Workflow.Any) =>
 		Schema.Top,
 		Schema.Top
 	>;
+
+/**
+ * Whether any lane about `subject` is running one of `workflows`, as a
+ * condition for a query: "is an agent answering in this thread". A lane holds
+ * waiting requests only while it runs, so a running lane covers those too.
+ */
+export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) =>
+	sql<boolean>`exists (
+		select 1 from ${lane}
+		where ${lane.subject} = (${subject})::text
+			and ${lane.state} <> 'idle'
+			and ${lane.workflow} in (${sql.join(
+				workflows.map((name) => sql`${name}`),
+				sql`, `,
+			)})
+	)`;
 
 /** How long a lane may stay `starting` before `reconcile` starts its workflow again. */
 const STARTING_TIMEOUT = Duration.seconds(30);
@@ -110,6 +128,18 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 								),
 						),
 					),
+					// An execution that had already finished is not run again, so it
+					// will never release the lane itself.
+					Effect.andThen(
+						engine.poll(general(workflow), executionId) as Effect.Effect<
+							Option.Option<Workflow.Result<unknown, unknown>>
+						>,
+					),
+					Effect.flatMap((result) =>
+						Option.isSome(result) && result.value._tag === "Complete"
+							? Effect.suspend(() => release({ key, executionId }))
+							: Effect.void,
+					),
 					provide,
 					Effect.asVoid,
 				),
@@ -128,11 +158,16 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 				yield* startAfterCommit(key, workflow, executionId, payload);
 			});
 
-		const admit: Interface["admit"] = ({ key, workflow, payload, whenBusy }) =>
+		const admit: Interface["admit"] = ({ key, subject, workflow, payload, whenBusy }) =>
 			transaction(
 				Effect.gen(function* () {
 					const encoded = encodePayload(workflow, payload);
-					yield* query((db) => db.insert(lane).values({ key }).onConflictDoNothing());
+					yield* query((db) =>
+						db
+							.insert(lane)
+							.values({ key, subject })
+							.onConflictDoUpdate({ target: lane.key, set: { subject: subject ?? null } }),
+					);
 					const [current] = yield* query((db) =>
 						db.select().from(lane).where(eq(lane.key, key)).for("update"),
 					);
@@ -167,13 +202,14 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 				}),
 			).pipe(provide);
 
-		const release: Interface["release"] = ({ key, executionId }) =>
-			transaction(
-				Effect.gen(function* () {
-					const [current] = yield* query((db) =>
-						db.select().from(lane).where(eq(lane.key, key)).for("update"),
-					);
-					if (current?.executionId !== executionId) return;
+		/**
+		 * The oldest request waiting in the lane. Requests for the execution
+		 * that is releasing it are dropped: starting that execution again would
+		 * only attach to it as it finishes, and nothing would free the lane.
+		 */
+		const nextRequest = (key: string, releasing: string) =>
+			Effect.gen(function* () {
+				while (true) {
 					const [next] = yield* query((db) =>
 						db
 							.select()
@@ -182,6 +218,22 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
 							.limit(1),
 					);
+					if (!next) return undefined;
+					const workflow = workflowNamed(next.workflow);
+					const executionId = yield* workflow.executionId(decodePayload(workflow, next.payload));
+					if (executionId !== releasing) return next;
+					yield* query((db) => db.delete(laneRequest).where(eq(laneRequest.id, next.id)));
+				}
+			});
+
+		const release: Interface["release"] = ({ key, executionId }) =>
+			transaction(
+				Effect.gen(function* () {
+					const [current] = yield* query((db) =>
+						db.select().from(lane).where(eq(lane.key, key)).for("update"),
+					);
+					if (current?.executionId !== executionId) return;
+					const next = yield* nextRequest(key, executionId);
 					if (!next) {
 						yield* query((db) =>
 							db

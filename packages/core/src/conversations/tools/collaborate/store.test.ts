@@ -22,7 +22,9 @@ import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../../d
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { modelPrompt } from "../../turns/context.ts";
+import { queueTurnAsJob } from "../../turns/queue.ts";
 import { turnStore } from "../../turns/store.ts";
+import { turnSignalsForTests } from "../../turns/testing.ts";
 import { CollaborationRefused, type CollaborationStore, collaborationStore } from "./store.ts";
 
 /**
@@ -32,11 +34,11 @@ import { CollaborationRefused, type CollaborationStore, collaborationStore } fro
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const collaborations: Promised<CollaborationStore> = onPostgres(
-		collaborationStore(publishEvents),
+		collaborationStore(publishEvents, queueTurnAsJob),
 	);
 	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents));
-	const turns = onPostgres(turnStore(publishEvents));
+	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -158,10 +160,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 			db.update(job).set({ status: "running", attempts: 1 }).where(eq(job.id, queued.id)),
 		);
 		const prepared = await turns.prepare({
-			id: queued.id,
+			owner: queued.id,
 			threadId,
 			payload: queued.payload,
-			dedupeKey: queued.dedupeKey,
 			attempts: 1,
 		});
 		return {
