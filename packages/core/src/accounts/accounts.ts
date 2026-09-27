@@ -2,7 +2,7 @@ export * as Accounts from "./accounts.ts";
 
 import { and, eq, gt } from "drizzle-orm";
 import { Config, Context, Data, Effect, Layer } from "effect";
-import { type Database, layer as databaseLayer, query } from "../database/database.ts";
+import { Database, layer as databaseLayer, query } from "../database/database.ts";
 import { user, workspaceInvite } from "../database/schema.ts";
 
 /** Who may have an account here. */
@@ -17,7 +17,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 /** Sign-up is invite-only unless `ALLOW_OPEN_SIGNUP` is set. Verification is off by default, so a self-hoster needs no mail service to sign in. */
 export const make = Effect.gen(function* () {
-	const database = yield* Effect.context<Database>();
+	const database = yield* Database;
 	const allowOpenSignUp = yield* Config.Boolean("ALLOW_OPEN_SIGNUP").pipe(
 		Config.withDefault(false),
 	);
@@ -30,7 +30,7 @@ export const make = Effect.gen(function* () {
 				if (allowOpenSignUp || (yield* isEmpty)) return;
 				if (yield* hasPendingInvitation(email)) return;
 				return yield* new SignUpClosed();
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provideService(Database, database)),
 		requireEmailVerification,
 	});
 });
