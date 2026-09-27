@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { chatStore } from "@sugabots/core/conversations/chats/store";
+import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
+import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
+import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
 import { routineStore } from "@sugabots/core/conversations/routines/store";
 import { queueSummary, summaryStore } from "@sugabots/core/conversations/summaries/store";
 import { Summary, summary } from "@sugabots/core/conversations/summaries/summary.workflow";
@@ -87,10 +90,11 @@ const main = Effect.gen(function* () {
 	// Durable workflows, on the engine WORKFLOW_ENGINE names. The engine and
 	// lanes come first, because the stores start and wake workflows.
 	const engine = yield* Layer.build(
-		Lanes.layer([Summary, Turn]).pipe(Layer.provideMerge(Workflows.engine)),
+		Lanes.layer([Summary, Turn, Routine]).pipe(Layer.provideMerge(Workflows.engine)),
 	);
 	const lanes = Context.get(engine, Lanes.Service);
-	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
+	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
+	const signals = turnSignals(workflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
 	const stores = {
 		pods: podStore,
@@ -101,7 +105,12 @@ const main = Effect.gen(function* () {
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
 		chats: chatStore(publishEvents, queueTurn),
-		routines: routineStore(publishEvents, queueTurn, signals),
+		routines: routineStore(
+			publishEvents,
+			queueTurn,
+			signals,
+			routineRunsInLanes(lanes, workflowEngine),
+		),
 		threads: threadStore(),
 		turns: turnStore(publishEvents, queueTurn, signals),
 		summaries: summaryStore(publishEvents),
@@ -132,10 +141,16 @@ const main = Effect.gen(function* () {
 		},
 	});
 
-	// Summaries and turns run as workflows.
+	// Summaries, turns and routine runs are workflows.
 	yield* Layer.build(
-		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turnWorkflow), Lanes.reconcileLayer).pipe(
+		Layer.mergeAll(
+			Summary.toLayer(summary),
+			Turn.toLayer(turnWorkflow),
+			Routine.toLayer(routineWorkflow),
+			Lanes.reconcileLayer,
+		).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
+			Layer.provideMerge(routineSteps(stores.routines)),
 			Layer.provideMerge(
 				turnSteps({
 					store: stores.turns,

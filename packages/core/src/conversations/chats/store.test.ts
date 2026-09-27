@@ -24,6 +24,7 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { routineStore } from "../routines/store.ts";
+import { routineRunsForTests } from "../routines/testing.ts";
 import { queueTurnForTests, runningTurns, turnSignalsForTests } from "../turns/testing.ts";
 import { chatStore } from "./store.ts";
 
@@ -261,7 +262,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	it("includes Routine runs in the main Chat timeline", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
@@ -296,7 +297,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	it("paginates interleaved messages and Routine runs without gaps", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",
@@ -471,7 +472,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	it("reports each history thread's own status, participants, and Routine run", async () => {
 		const current = await store.getOrCreate({ workspaceId, podId, hostAgentId: agentId, userId });
 		const routines = onPostgres(
-			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests),
+			routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests, routineRunsForTests),
 		);
 		const created = await routines.create(workspaceId, agentId, userId, {
 			name: "Overnight review",

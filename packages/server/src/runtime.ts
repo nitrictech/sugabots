@@ -1,4 +1,3 @@
-import { routineDispatcherLayer } from "@sugabots/core/conversations/routines/dispatcher";
 import { routineSchedulerLayer } from "@sugabots/core/conversations/routines/scheduler";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import { facilitatorWorkerLayer } from "@sugabots/core/conversations/turns/facilitator";
@@ -36,9 +35,7 @@ export function backgroundLayer({
 }: BackgroundOptions): Layer.Layer<never, never, Database> {
 	return Layer.mergeAll(
 		eventPruningLayer(eventStore),
-		...(routines
-			? [routineDispatcherLayer({ store: routines }), routineSchedulerLayer({ store: routines })]
-			: []),
+		...(routines ? [routineSchedulerLayer({ store: routines })] : []),
 		facilitatorWorkerLayer({ model, publishEvents, queueTurn, routines }),
 	);
 }

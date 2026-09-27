@@ -1,9 +1,8 @@
 import { and, asc, eq, ne } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Schema } from "effect";
-import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
+import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import { Lanes } from "../../workflows/lanes.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
+import { engineForTests, lanesForTests } from "../../workflows/testing.ts";
 import { type QueueTurn, queueTurnInLane } from "./queue.ts";
 import { turnSignals } from "./signals.ts";
 import type { ClaimedTurn } from "./store.ts";
@@ -14,15 +13,9 @@ import { Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
  * turn's workflow here only holds its lane: a case runs the turn's steps
  * itself, with `runningTurns`, and frees the lane with `releaseTurn`.
  */
-const engine = ManagedRuntime.make(
-	Turn.toLayer(() => DurableDeferred.await(DurableDeferred.make("released"))).pipe(
-		Layer.provideMerge(WorkflowEngine.layerMemory),
-	),
-).runSync(Effect.service(WorkflowEngine.WorkflowEngine));
+const lanes = lanesForTests;
 
-const lanes = Lanes.make([Turn]).pipe(Effect.provideService(WorkflowEngine.WorkflowEngine, engine));
-
-export const turnSignalsForTests = turnSignals(engine);
+export const turnSignalsForTests = turnSignals(engineForTests);
 
 export const queueTurnForTests: QueueTurn = (request) =>
 	Effect.flatMap(lanes, (service) => queueTurnInLane(service)(request));

@@ -126,9 +126,14 @@ export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalS
 						.pipe(Effect.provideService(Database, database)),
 				stopWaiting: (request) =>
 					execution.store.stopWaiting(request).pipe(Effect.provideService(Database, database)),
+				// A routine run cannot settle while its turn holds the lane, so the
+				// run is settled again once the lane is free.
 				release: (request) =>
 					Effect.flatMap(Turn.executionId(request), (executionId) =>
 						lanes.release({ key: turnLane(request), executionId }),
+					).pipe(
+						Effect.andThen(execution.routines?.settleThread(request.threadId) ?? Effect.void),
+						Effect.provideService(Database, database),
 					),
 			});
 		}),

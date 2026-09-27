@@ -1,0 +1,23 @@
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
+import { Routine } from "../conversations/routines/routine.workflow.ts";
+import { Turn } from "../conversations/turns/turn.workflow.ts";
+import { Lanes } from "./lanes.ts";
+
+/**
+ * A workflow engine for the Postgres cases. The workflows it starts only hold
+ * their lanes: a case runs their steps itself, and frees each lane as the
+ * workflow's last step would.
+ */
+const held = () => DurableDeferred.await(DurableDeferred.make("released"));
+
+export const engineForTests = ManagedRuntime.make(
+	Layer.mergeAll(Turn.toLayer(held), Routine.toLayer(held)).pipe(
+		Layer.provideMerge(WorkflowEngine.layerMemory),
+	),
+).runSync(Effect.service(WorkflowEngine.WorkflowEngine));
+
+/** Lanes over the test engine, in the caller's database. */
+export const lanesForTests = Lanes.make([Turn, Routine]).pipe(
+	Effect.provideService(WorkflowEngine.WorkflowEngine, engineForTests),
+);

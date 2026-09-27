@@ -1,3 +1,4 @@
+import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -34,10 +35,27 @@ import {
 	RoutineTriggerConflict,
 	routineStore,
 } from "./store.ts";
+import { releaseRun, routineRunsForTests, runningRun } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
-	const routineEffects = routineStore(() => Effect.void, queueTurnForTests, turnSignalsForTests);
+	const routineEffects = routineStore(
+		() => Effect.void,
+		queueTurnForTests,
+		turnSignalsForTests,
+		routineRunsForTests,
+	);
 	const store = onPostgres(routineEffects);
+	/** Starts the routine's run holding its lane, as its workflow's first step does. */
+	const startRunning = async (routineId: string) => {
+		const run = await runOnPostgres(runningRun(routineId));
+		if (!run) throw new Error("No run of the routine is running");
+		await store.startRun(run);
+		const [execution] = await onDatabase((db) =>
+			db.select().from(routineExecution).where(eq(routineExecution.id, run.executionId)),
+		);
+		if (!execution) throw new Error("The running run has no execution");
+		return { run, execution };
+	};
 	/** Ends the turns running in the thread, as their workflows do once done. */
 	const finishTurnsIn = async (threadId: string) => {
 		for (const claim of await runOnPostgres(runningTurns(threadId))) {
@@ -131,9 +149,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				requestedByUserId: userId,
 			},
 		});
-		const claimed = await store.claimNext();
-		if (!claimed || claimed.id !== accepted.executionId) {
-			throw new Error("Could not claim settlement test execution");
+		const started = await startRunning(created.routine.id);
+		if (started.execution.id !== accepted.executionId) {
+			throw new Error("Could not start settlement test execution");
 		}
 		const [triggerMessage] = await onDatabase((db) =>
 			db.select({ id: message.id }).from(message).where(eq(message.threadId, accepted.threadId)),
@@ -460,7 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		).rejects.toThrow(RoutineTriggerConflict);
 	});
 
-	it("dispatches FIFO while allowing a separate Routine to run", async () => {
+	it("runs a routine's executions in order while allowing a separate Routine to run", async () => {
 		const firstRoutine = await store.create(workspaceId, agentId, userId, {
 			name: "First queue",
 			instructions: "Run in order.",
@@ -471,7 +489,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			instructions: "Run independently.",
 			trigger: { kind: "webhook" },
 		});
-		const accepted = [];
+		const accepted: AcceptedRoutineExecution[] = [];
 		for (const routineId of [
 			firstRoutine.routine.id,
 			firstRoutine.routine.id,
@@ -493,14 +511,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				}),
 			);
 		}
-		const firstClaim = await store.claimNext();
-		const secondClaim = await store.claimNext();
-		expect(firstClaim?.id).toBe(accepted[0]?.executionId);
-		expect(secondClaim?.routineId).toBe(secondRoutine.routine.id);
-		await finishTurnsIn(firstClaim?.threadId ?? "");
-		expect(await store.settleThread(firstClaim?.threadId ?? "")).toBe(true);
-		const thirdClaim = await store.claimNext();
-		expect(thirdClaim?.id).toBe(accepted[1]?.executionId);
+		const first = await startRunning(firstRoutine.routine.id);
+		const second = await startRunning(secondRoutine.routine.id);
+		expect(first.execution.id).toBe(accepted[0]?.executionId);
+		expect(second.execution.state).toBe("running");
+		const [waiting] = await onDatabase((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(eq(routineExecution.id, accepted[1]?.executionId ?? "")),
+		);
+		expect(waiting?.state).toBe("queued");
+		await finishTurnsIn(first.execution.threadId);
+		expect(await store.settleRun(first.run)).toBe(true);
+		await runOnPostgres(releaseRun(first.run));
+		const third = await startRunning(firstRoutine.routine.id);
+		expect(third.execution.id).toBe(accepted[1]?.executionId);
 		const queued = await onDatabase((db) =>
 			db
 				.select()
@@ -588,7 +614,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				requestedByUserId: userId,
 			},
 		});
-		await store.claimNext();
+		await startRunning(created.routine.id);
 		await finishTurnsIn(accepted.threadId);
 		const [triggerMessage] = await onDatabase((db) =>
 			db.select({ id: message.id }).from(message).where(eq(message.threadId, accepted.threadId)),
@@ -680,7 +706,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		);
 		const cancel = vi.fn(() => Effect.void);
 		const ending = onPostgres(
-			routineStore(() => Effect.void, queueTurnForTests, { decide: () => Effect.void, cancel }),
+			routineStore(
+				() => Effect.void,
+				queueTurnForTests,
+				{ decide: () => Effect.void, cancel },
+				routineRunsForTests,
+			),
 		);
 
 		expect(await ending.settleThread(fixture.childThread.id, { state: "cancelled" })).toBe(true);
