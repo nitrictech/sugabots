@@ -81,6 +81,7 @@ const meta = preview.meta({
 		status: "ready" as const,
 		selectedAgentId: growthDesk.id,
 		onNewBot: fn(),
+		settingsFor: revenue,
 		emptyState: { title: "No bots in Revenue yet" },
 	},
 	decorators: [
@@ -92,19 +93,26 @@ const meta = preview.meta({
 	],
 });
 
-/** Default is a pod's chats, newest first, with the open one marked. */
-export const Default = meta.story({});
+/** Default is a pod's chats, newest first, with the open one marked and a way to its settings. */
+export const Default = meta.story({
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: "Pod settings" })).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/pods\/revenue$/),
+		);
+	},
+});
 
 /** All shows every shared pod's chats, each face carrying its pod's badge. */
 export const All = meta.story({
-	args: { title: "All", inAll: true, rows: allRows, onNewBot: undefined },
+	args: { title: "All", inAll: true, rows: allRows, onNewBot: undefined, settingsFor: undefined },
 });
 
 /** Search narrows the rows to bots whose names match. */
 export const Search = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.type(canvas.getByRole("searchbox", { name: "Search Revenue" }), "lead");
-		await expect(canvas.getAllByRole("link")).toHaveLength(1);
+		await expect(canvas.getAllByRole("listitem")).toHaveLength(1);
 		await expect(canvas.getByRole("link", { name: /Lead Researcher/ })).toBeVisible();
 	},
 });

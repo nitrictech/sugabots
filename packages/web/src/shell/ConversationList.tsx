@@ -1,13 +1,14 @@
 import type { Agent, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Settings } from "lucide-react";
 import { useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, allAgentChatLink, podLink } from "@/lib/links.ts";
+import { agentChatLink, allAgentChatLink, podLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { usePods } from "@/lib/pods.ts";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -84,6 +85,7 @@ export function ConversationList({
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selectedAgentId={selectedAgentId}
 				onNewBot={newBot}
+				settingsFor={pod}
 				emptyState={emptyState}
 				className={className}
 			/>
@@ -142,6 +144,7 @@ export function ConversationListView({
 	status,
 	selectedAgentId,
 	onNewBot,
+	settingsFor,
 	emptyState,
 	className,
 }: {
@@ -152,9 +155,12 @@ export function ConversationListView({
 	selectedAgentId?: string;
 	/** Absent when the viewer may not make a bot here. */
 	onNewBot?: () => void;
+	/** The pod whose settings the cog opens. Absent in All, which spans several. */
+	settingsFor?: Pod;
 	emptyState: EmptyList;
 	className?: string;
 }) {
+	const backToChat = useBackToHere("Chat");
 	const [query, setQuery] = useState("");
 	const needle = query.trim().toLowerCase();
 	const shown = needle ? rows.filter((row) => row.agent.name.toLowerCase().includes(needle)) : rows;
@@ -182,6 +188,18 @@ export function ConversationListView({
 						>
 							<Plus size={18} strokeWidth={2.4} />
 						</button>
+					</Tooltip>
+				)}
+				{settingsFor && (
+					<Tooltip label="Pod settings">
+						<Link
+							{...podSettingsLink(settingsFor)}
+							state={backToChat}
+							aria-label="Pod settings"
+							className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
+						>
+							<Settings size={17} strokeWidth={2.2} />
+						</Link>
 					</Tooltip>
 				)}
 			</header>
