@@ -4,7 +4,6 @@ import {
 	type WorkspaceRole,
 	workspaceRoleDescription,
 	workspaceRoleLabel,
-	workspaceRoleOf,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, X } from "lucide-react";
@@ -79,7 +78,7 @@ export function WorkspaceMembersSettings({
 				workspaceId={workspaceId}
 				member={member}
 				canManage={canManage}
-				isYou={member.userId === currentUserId}
+				isYou={member.user.id === currentUserId}
 			/>
 		);
 	}
@@ -136,9 +135,7 @@ function Roster({
 							sub={member.user.email}
 							trailing={
 								<SettingsValue>
-									{member.userId === currentUserId
-										? "You"
-										: workspaceRoleLabel(workspaceRoleOf(member.role))}
+									{member.user.id === currentUserId ? "You" : workspaceRoleLabel(member.role)}
 								</SettingsValue>
 							}
 							chevron
@@ -173,7 +170,7 @@ function Invitations({
 	canManage,
 }: {
 	workspaceId: string;
-	invitations: Invitation[];
+	invitations: readonly Invitation[];
 	canManage: boolean;
 }) {
 	const invite = useInviteWorkspaceMember(workspaceId);
@@ -200,7 +197,7 @@ function Invitations({
 										invite.mutate(
 											{
 												email: invitation.email,
-												role: workspaceRoleOf(invitation.role) ?? "member",
+												role: invitation.role,
 												resend: true,
 											},
 											{ onSuccess: () => setResent((sent) => new Set(sent).add(invitation.id)) },
@@ -236,7 +233,7 @@ const INVITE_LIFETIME_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Whole days left, so a link with a day and a half to go says one day rather than two. */
-function expiryText(expiresAt: Date): string {
+function expiryText(expiresAt: string): string {
 	const left = new Date(expiresAt).getTime() - Date.now();
 	if (left <= 0) return "Expired";
 	const days = Math.floor(left / DAY_MS);
@@ -261,7 +258,7 @@ function MemberPage({
 	const pods = usePods();
 	const navigate = useNavigate();
 	const [confirming, setConfirming] = useState(false);
-	const role = workspaceRoleOf(member.role);
+	const role = member.role;
 	const sharedPods = pods.data?.filter((pod) => pod.kind === "shared") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
 	// control you would need to undo it. Leaving stays, behind a confirmation.
@@ -337,7 +334,7 @@ function MemberPage({
 						<PodMembershipRow
 							key={pod.id}
 							pod={pod}
-							userId={member.userId}
+							userId={member.user.id}
 							name={member.user.name}
 							canManage={canManage}
 						/>
@@ -347,7 +344,7 @@ function MemberPage({
 			<SettingsGroup label="Details">
 				<SettingsRow
 					label="Joined"
-					trailing={<SettingsValue>{joinedDate(member.createdAt)}</SettingsValue>}
+					trailing={<SettingsValue>{joinedDate(member.joinedAt)}</SettingsValue>}
 				/>
 			</SettingsGroup>
 			{(isYou || canManage) && (
@@ -373,8 +370,8 @@ function MemberPage({
 	);
 }
 
-function joinedDate(createdAt: Date): string {
-	return new Date(createdAt).toLocaleDateString(undefined, {
+function joinedDate(joinedAt: string): string {
+	return new Date(joinedAt).toLocaleDateString(undefined, {
 		day: "numeric",
 		month: "short",
 		year: "numeric",

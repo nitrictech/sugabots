@@ -43,9 +43,6 @@ export const storyWorkspace = {
 	id: firstPod.workspaceId,
 	name: "Nitric",
 	slug: "nitric",
-	createdAt: "2026-09-01T00:00:00.000Z",
-	logo: null,
-	metadata: null,
 };
 
 /** Every pod, with the viewer as the Personal pod's owner, and every bot. */
@@ -184,23 +181,18 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		bots.find((bot) => storyChatFor(bot).mainThreadId === threadId);
 
 	return [
-		http.get(api("/auth/organization/list"), () => HttpResponse.json([storyWorkspace])),
-		http.get(api("/auth/organization/list-members"), () =>
-			HttpResponse.json({
-				members: [
-					{
-						id: "0199a3a0-0000-7000-8000-0000000000d1",
-						organizationId: storyWorkspace.id,
-						userId: storyUser.id,
-						role: data.role ?? "admin",
-						createdAt: "2026-09-01T00:00:00.000Z",
-						user: storyUser,
-					},
-				],
-				total: 1,
-			}),
+		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
+		http.get(api("/workspaces/:workspace/members"), () =>
+			HttpResponse.json([
+				{
+					id: "0199a3a0-0000-7000-8000-0000000000d1",
+					role: data.role ?? "admin",
+					user: storyUser,
+					joinedAt: "2026-09-01T00:00:00.000Z",
+				},
+			]),
 		),
-		http.get(api("/auth/organization/list-invitations"), () => HttpResponse.json([])),
+		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
 		http.get(api("/onboarding"), () => HttpResponse.json({ completed: data.onboarded ?? true })),
 		http.get(api("/workspaces/:workspace/me"), () =>
 			HttpResponse.json({

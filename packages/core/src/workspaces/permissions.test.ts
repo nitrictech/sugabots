@@ -90,6 +90,7 @@ const VIEWER_IN_JOINED_POD: PodPermission[] = [
 
 const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.read": true,
+	"workspace.update": true,
 	"workspace.providers.manage": true,
 	"workspace.members.manage": true,
 	"workspace.builtInAgents.configure": true,
@@ -114,11 +115,6 @@ describe("workspace actions", () => {
 
 	it.each(WORKSPACE_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
 		expect(mayInWorkspace(actor(undefined), permission)).toBe(false);
-	});
-
-	it.each(WORKSPACE_PERMISSIONS)("an unknown role may not %s", (permission) => {
-		const stranger = actor("auditor" as WorkspaceRole);
-		expect(mayInWorkspace(stranger, permission)).toBe(false);
 	});
 });
 
@@ -149,10 +145,6 @@ describe("shared pods", () => {
 
 	it.each(POD_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
 		expect(mayInPod(actor(undefined), permission, sharedPod(true))).toBe(false);
-	});
-
-	it.each(POD_PERMISSIONS)("an unknown role may not %s", (permission) => {
-		expect(mayInPod(actor("auditor" as WorkspaceRole), permission, sharedPod(true))).toBe(false);
 	});
 
 	it("a member creates and edits agents but cannot delete them", () => {
@@ -263,6 +255,5 @@ describe("shared pod reach", () => {
 
 	it("reaches nothing without a workspace role", () => {
 		expect(sharedPodReach(undefined)).toBe("none");
-		expect(sharedPodReach("auditor" as WorkspaceRole)).toBe("none");
 	});
 });

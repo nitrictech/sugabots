@@ -3,7 +3,7 @@ import { createEventBus, type EventBus } from "@sugabots/core/database/events/bu
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, type TestApp } from "../../http/app.test-support.ts";
 import { openChannelAccess } from "./access.test-support.ts";
 import type { ChannelAccess } from "./access.ts";
@@ -28,12 +28,12 @@ const user = {
 	image: null,
 };
 
-const resolveSession: SessionResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? { user } : null;
+const resolveUser: UserResolver = async (headers) =>
+	headers.get("authorization") === "Bearer good-token" ? user : null;
 
 function server(access: ChannelAccess = openChannelAccess(), stream?: StreamOptions) {
 	const bus = createEventBus({ store: memoryEventStore() });
-	return { bus, app: createTestApp({ resolveSession, events: { bus, access, stream } }) };
+	return { bus, app: createTestApp({ resolveUser, events: { bus, access, stream } }) };
 }
 
 interface Frame {
@@ -209,7 +209,7 @@ describe("the stream", () => {
 			},
 		};
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			events: { bus: counted, access: openChannelAccess() },
 		});
 
@@ -260,7 +260,7 @@ describe("the stream", () => {
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		const bus = createEventBus({ store: memoryEventStore() });
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			events: {
 				access: openChannelAccess(),
 				bus: {
@@ -287,7 +287,7 @@ describe("the stream", () => {
 		let subscribed = false;
 		const bus = createEventBus({ store: memoryEventStore() });
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			events: {
 				access: openChannelAccess(),
 				bus: {
@@ -321,7 +321,7 @@ describe("the stream", () => {
 	it("flushes a reset and ends when a slow subscriber overflows the bus", async () => {
 		const bus = createEventBus({ store: memoryEventStore(), maxBuffered: 2 });
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			events: { bus, access: openChannelAccess() },
 		});
 		const response = await app.request(`/threads/${THREAD}/events`, {

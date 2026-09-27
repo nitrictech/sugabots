@@ -6,7 +6,7 @@ import { PersonalPodFixed, type PodStore, SlugTaken } from "@sugabots/core/works
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 /**
@@ -44,10 +44,10 @@ const people = {
 	"outsider-token": outsider,
 };
 
-const resolveSession: SessionResolver = async (headers) => {
+const resolveUser: UserResolver = async (headers) => {
 	const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 	const user = people[token as keyof typeof people];
-	return user ? { user } : null;
+	return user ?? null;
 };
 
 /**
@@ -158,7 +158,7 @@ beforeEach(() => {
 });
 
 const app = () =>
-	createTestApp({ resolveSession, authorization: world(podKind), stores: { pods: store } });
+	createTestApp({ resolveUser, authorization: world(podKind), stores: { pods: store } });
 
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,

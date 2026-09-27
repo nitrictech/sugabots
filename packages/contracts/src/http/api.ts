@@ -13,6 +13,7 @@ import { SystemApi } from "./groups/system.ts";
 import { SystemAgentsApi } from "./groups/system-agents.ts";
 import { ThreadsApi } from "./groups/threads.ts";
 import { ToolApprovalsApi } from "./groups/tool-approvals.ts";
+import { WorkspacesApi } from "./groups/workspaces.ts";
 import { ValidateRequest } from "./middleware.ts";
 
 /**
@@ -24,6 +25,7 @@ import { ValidateRequest } from "./middleware.ts";
  */
 export class Api extends HttpApi.make("sugabots")
 	.add(SystemApi)
+	.add(WorkspacesApi)
 	.add(AgentsApi)
 	.add(PodsApi)
 	.add(OnboardingApi)

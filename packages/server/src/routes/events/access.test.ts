@@ -14,7 +14,6 @@ import { authorization } from "@sugabots/core/workspaces/access";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Session } from "../../auth/session.ts";
 import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access.ts";
 
 /**
@@ -25,20 +24,16 @@ import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access
 /** The access with its answers run against a database nothing may reach. */
 function onNoDatabase(access: ChannelAccess) {
 	return {
-		workspace: (session: Session, id: string) =>
-			Effect.runPromise(access.workspace(session, id).pipe(Effect.provide(noDatabase))),
-		thread: (session: Session, id: string) =>
-			Effect.runPromise(access.thread(session, id).pipe(Effect.provide(noDatabase))),
+		workspace: (userId: string, id: string) =>
+			Effect.runPromise(access.workspace(userId, id).pipe(Effect.provide(noDatabase))),
+		thread: (userId: string, id: string) =>
+			Effect.runPromise(access.thread(userId, id).pipe(Effect.provide(noDatabase))),
 	};
 }
 
-const session = (id: string): Session => ({
-	user: { id, email: `${id}@example.com`, name: "Sam", image: null },
-});
-
 it("denies event access when no access dependency is configured", async () => {
 	const access = closedChannelAccess();
-	const who = session(crypto.randomUUID());
+	const who = crypto.randomUUID();
 
 	const { workspace, thread } = onNoDatabase(access);
 
@@ -157,58 +152,56 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	it("gives a member the workspace channel", async () => {
 		const { access, member, space } = await fixture();
 
-		expect(await access.workspace(session(member.id), space.id)).toBe(`workspace:${space.id}`);
+		expect(await access.workspace(member.id, space.id)).toBe(`workspace:${space.id}`);
 	});
 
 	it("gives a member the same channel when the workspace is named by its slug", async () => {
 		const { access, member, space } = await fixture();
 
-		expect(await access.workspace(session(member.id), space.slug)).toBe(`workspace:${space.id}`);
+		expect(await access.workspace(member.id, space.slug)).toBe(`workspace:${space.id}`);
 	});
 
 	it("gives someone who is not a member nothing", async () => {
 		const { access, outsider, space } = await fixture();
 
-		expect(await access.workspace(session(outsider.id), space.id)).toBeUndefined();
-		expect(await access.workspace(session(outsider.id), space.slug)).toBeUndefined();
+		expect(await access.workspace(outsider.id, space.id)).toBeUndefined();
+		expect(await access.workspace(outsider.id, space.slug)).toBeUndefined();
 	});
 
 	it("gives nothing for a workspace that does not exist", async () => {
 		const { access, member } = await fixture();
 
-		expect(await access.workspace(session(member.id), crypto.randomUUID())).toBeUndefined();
+		expect(await access.workspace(member.id, crypto.randomUUID())).toBeUndefined();
 	});
 
 	it("gives nothing for a slug that names no workspace, rather than raising on it", async () => {
 		const { access, member } = await fixture();
 
-		expect(await access.workspace(session(member.id), "not-a-uuid")).toBeUndefined();
+		expect(await access.workspace(member.id, "not-a-uuid")).toBeUndefined();
 	});
 
 	it("gives a pod member the thread's channel", async () => {
 		const { access, member, conversation } = await fixture();
 
-		expect(await access.thread(session(member.id), conversation.id)).toBe(
-			`thread:${conversation.id}`,
-		);
+		expect(await access.thread(member.id, conversation.id)).toBe(`thread:${conversation.id}`);
 	});
 
 	it("gives someone outside the pod nothing for its thread", async () => {
 		const { access, outsider, conversation } = await fixture();
 
-		expect(await access.thread(session(outsider.id), conversation.id)).toBeUndefined();
+		expect(await access.thread(outsider.id, conversation.id)).toBeUndefined();
 	});
 
 	it("gives nothing for a thread that does not exist", async () => {
 		const { access, member } = await fixture();
 
-		expect(await access.thread(session(member.id), crypto.randomUUID())).toBeUndefined();
+		expect(await access.thread(member.id, crypto.randomUUID())).toBeUndefined();
 	});
 
 	it("gives an administrator the channel of a shared pod's thread without membership", async () => {
 		const { access, administrator, conversation } = await fixture();
 
-		expect(await access.thread(session(administrator.id), conversation.id)).toBe(
+		expect(await access.thread(administrator.id, conversation.id)).toBe(
 			`thread:${conversation.id}`,
 		);
 	});
@@ -227,6 +220,6 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				),
 		);
 
-		expect(await access.thread(session(administrator.id), conversation.id)).toBeUndefined();
+		expect(await access.thread(administrator.id, conversation.id)).toBeUndefined();
 	});
 });

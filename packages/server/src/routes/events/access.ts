@@ -3,7 +3,6 @@ import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import type { Database } from "@sugabots/core/database/database";
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import { Effect } from "effect";
-import type { Session } from "../../auth/session.ts";
 
 /**
  * Who may listen to what.
@@ -23,10 +22,10 @@ import type { Session } from "../../auth/session.ts";
 export interface ChannelAccess {
 	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
 	workspace(
-		session: Session,
+		userId: string,
 		workspaceRef: string,
 	): Effect.Effect<Channel | undefined, never, Database>;
-	thread(session: Session, threadId: string): Effect.Effect<Channel | undefined, never, Database>;
+	thread(userId: string, threadId: string): Effect.Effect<Channel | undefined, never, Database>;
 }
 
 export function channelAccess(
@@ -34,16 +33,16 @@ export function channelAccess(
 	threads: Pick<ThreadStore, "visibleThreadId">,
 ): ChannelAccess {
 	return {
-		workspace: (session, workspaceRef) =>
-			authorization.workspace(session.user.id, workspaceRef, "workspace.read").pipe(
+		workspace: (userId, workspaceRef) =>
+			authorization.workspace(userId, workspaceRef, "workspace.read").pipe(
 				Effect.match({
 					onSuccess: ({ workspaceId }) => workspaceChannel(workspaceId),
 					onFailure: () => undefined,
 				}),
 			),
 
-		thread: (session, threadId) =>
-			Effect.map(threads.visibleThreadId(threadId, session.user.id), (visibleId) =>
+		thread: (userId, threadId) =>
+			Effect.map(threads.visibleThreadId(threadId, userId), (visibleId) =>
 				visibleId ? threadChannel(visibleId) : undefined,
 			),
 	};

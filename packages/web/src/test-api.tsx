@@ -305,43 +305,40 @@ export const facilitator = builtInAgents[1] as SystemAgent;
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.thread.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
-	client.auth.workspaces.list.mockResolvedValue([workspace]);
-	client.auth.workspaces.members.mockResolvedValue([
-		{
-			id: "0199a3a0-0000-7000-8000-0000000000d1",
-			organizationId: WORKSPACE,
-			userId: sam.id,
-			role: "admin",
-			createdAt: new Date("2026-09-09T00:00:00.000Z"),
-			user: sam,
-		},
-		{
-			id: "0199a3a0-0000-7000-8000-0000000000d2",
-			organizationId: WORKSPACE,
-			userId: jye.id,
-			role: "member",
-			createdAt: new Date("2026-09-10T00:00:00.000Z"),
-			user: jye,
-		},
-	]);
-	client.auth.workspaces.updateRole.mockResolvedValue(undefined);
-	client.auth.workspaces.removeMember.mockResolvedValue(undefined);
-	client.auth.workspaces.leave.mockResolvedValue(undefined);
-	client.auth.workspaces.cancelInvite.mockResolvedValue(undefined);
-	client.auth.workspaces.invitations.mockResolvedValue([
-		{
-			id: "0199a3a0-0000-7000-8000-0000000000e1",
-			email: "dana@example.com",
-			role: "viewer",
-			status: "pending",
-			organizationId: WORKSPACE,
-			inviterId: sam.id,
-			expiresAt: new Date("2026-09-24T00:00:00.000Z"),
-		},
-	]);
+	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
+	client.api.workspaces.members.mockReturnValue(
+		Effect.succeed([
+			{
+				id: "0199a3a0-0000-7000-8000-0000000000d1",
+				role: "admin",
+				user: sam,
+				joinedAt: "2026-09-09T00:00:00.000Z",
+			},
+			{
+				id: "0199a3a0-0000-7000-8000-0000000000d2",
+				role: "member",
+				user: jye,
+				joinedAt: "2026-09-10T00:00:00.000Z",
+			},
+		]),
+	);
+	client.api.workspaces.updateMember.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.removeMember.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.leave.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.cancelInvitation.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.invitations.mockReturnValue(
+		Effect.succeed([
+			{
+				id: "0199a3a0-0000-7000-8000-0000000000e1",
+				email: "dana@example.com",
+				role: "viewer",
+				expiresAt: "2026-09-24T00:00:00.000Z",
+			},
+		]),
+	);
 	client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
 	client.api.onboarding.completeInvite.mockImplementation(() =>
-		client.auth.workspaces.acceptInvite.mock.calls.length > 0
+		client.api.workspaces.acceptInvitation.mock.calls.length > 0
 			? Effect.succeed({ workspaceId: WORKSPACE })
 			: Effect.fail(new BadRequest({ message: "Pending" })),
 	);

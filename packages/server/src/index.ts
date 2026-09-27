@@ -13,16 +13,11 @@ import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Credentials } from "@sugabots/core/credentials/credentials";
-import {
-	type Database,
-	layer as databaseLayer,
-	effectRunner,
-} from "@sugabots/core/database/database";
+import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventRelay } from "@sugabots/core/database/events/relay";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
-import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { oauthProviders } from "@sugabots/core/providers/connections/oauth";
 import { connectionStore } from "@sugabots/core/providers/connections/store";
@@ -32,14 +27,13 @@ import { searchProviderStore } from "@sugabots/core/providers/search-providers/s
 import { authorization } from "@sugabots/core/workspaces/access";
 import { agentStore } from "@sugabots/core/workspaces/agents/store";
 import { systemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Duration, Effect, Layer, Redacted } from "effect";
-import { HttpRouter } from "effect/unstable/http";
-import { Pool } from "pg";
-import { createAuth } from "./auth/auth.ts";
-import { API_BASE_PATH, ServerConfig } from "./config.ts";
+import { Config, Duration, Effect, Layer } from "effect";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { Authentication } from "./auth/authentication.ts";
+import { API_BASE_PATH } from "./http/api.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
 import { observabilityLayer } from "./observability.ts";
@@ -63,30 +57,10 @@ const SHUTDOWN_GRACE = Duration.seconds(3);
 
 const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
-	const run = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
-	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
-	const config = yield* ServerConfig.Service;
 
-	// better-auth's drizzle adapter only speaks node-postgres, so it keeps a pool
-	// of its own until it can be ported onto the database's.
-	const authPool = yield* Effect.acquireRelease(
-		Effect.map(
-			Config.Redacted("DATABASE_URL"),
-			(url) => new Pool({ connectionString: Redacted.value(url) }),
-		),
-		(pool) => Effect.promise(() => pool.end()),
-	);
-	const auth = createAuth({
-		db: drizzle({ client: authPool }),
-		run,
-		secret: Redacted.value(config.secret),
-		installation,
-		mailer: (message) => Effect.runPromiseWith(database)(email.send(message)),
-		emailFrom: config.transactionalSender,
-		allowOpenSignUp: config.allowOpenSignUp,
-		requireEmailVerification: config.requireEmailVerification,
-	});
+	const authentication = yield* Authentication.Service;
+	const membership = yield* Membership.Service;
 
 	const eventStore = yield* postgresEventStore;
 	// Every process runs a worker, so what one writes the others must hear about.
@@ -157,22 +131,23 @@ const main = Effect.gen(function* () {
 		}),
 	);
 	const api = apiLayer({
-		auth,
+		authentication,
 		installation,
 		oauthFetch: egress.oauth,
 		authorization,
+		membership,
 		stores,
 		events: { bus, access: channelAccess(authorization, stores.threads) },
 		httpClients,
 		validateProviderUrl: egress.validateProviderUrl,
 		model,
 	});
-	yield* Layer.build(
+	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
-			Layer.provide(
-				NodeHttpServer.layer(createServer, {
-					port: config.port,
-					gracefulShutdownTimeout: SHUTDOWN_GRACE,
+			Layer.provideMerge(
+				NodeHttpServer.layerConfig(createServer, {
+					port: Config.Port("PORT").pipe(Config.withDefault(3000)),
+					gracefulShutdownTimeout: Config.succeed(SHUTDOWN_GRACE),
 				}),
 			),
 		),
@@ -181,7 +156,9 @@ const main = Effect.gen(function* () {
 	// holds a socket open for as long as its browser is there, and closing the
 	// server first would wait on clients that never hang up.
 	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
-	console.log(`sugabots ${VERSION} listening on http://localhost:${config.port}`);
+	yield* HttpServer.addressFormattedWith((address) =>
+		Effect.sync(() => console.log(`sugabots ${VERSION} listening on ${address}`)),
+	).pipe(Effect.provide(server));
 	return yield* Effect.never;
 });
 
@@ -192,11 +169,11 @@ main.pipe(
 	Effect.provide(
 		Layer.mergeAll(
 			databaseLayer,
-			Email.layer,
 			Credentials.layer,
 			Installation.layer,
 			Egress.layer,
-			ServerConfig.layer,
+			Authentication.layer,
+			Membership.layer,
 		).pipe(Layer.provideMerge(observabilityLayer)),
 	),
 	NodeRuntime.runMain,

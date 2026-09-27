@@ -14,16 +14,16 @@ import { createEgressUrlValidator } from "@sugabots/core/providers/network/egres
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, type TestApp } from "../../http/app.test-support.ts";
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const PROVIDER_ID = "0199a3a0-0000-7000-8000-000000000003";
 
-const resolveSession: SessionResolver = async (headers) =>
+const resolveUser: UserResolver = async (headers) =>
 	headers.get("authorization") === "Bearer good-token"
-		? { user: { id: USER_ID, name: "Sam", email: "sam@example.com", image: null } }
+		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
 const authorization = testAuthorization({
@@ -120,7 +120,7 @@ function routes(
 		...overrides,
 	};
 	const app = createTestApp({
-		resolveSession,
+		resolveUser,
 		authorization,
 		stores: { modelProviders: store },
 		httpClients: { for: () => unreachableProvider },

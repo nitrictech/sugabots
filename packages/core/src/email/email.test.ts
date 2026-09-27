@@ -114,3 +114,42 @@ describe("Email.parseAddress", () => {
 		expect(Email.parseAddress(value)).toEqual(expected);
 	});
 });
+
+describe("Email.transactionalSender", () => {
+	function senderFor(env: Record<string, string>) {
+		return Effect.runPromiseExit(
+			Email.transactionalSender.pipe(
+				Effect.provide(Installation.layer),
+				Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+			),
+		);
+	}
+
+	it("sends from a local address in development", async () => {
+		expect(await senderFor({})).toEqual(
+			Exit.succeed({ email: "sugabots@localhost", name: "Sugabots" }),
+		);
+	});
+
+	it("is required in production", async () => {
+		const exit = await senderFor({ NODE_ENV: "production" });
+
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(
+			/EMAIL_TRANSACTIONAL_FROM is required in production/,
+		);
+	});
+
+	it("reads a named address", async () => {
+		expect(
+			await senderFor({ EMAIL_TRANSACTIONAL_FROM: "Sugabots <no-reply@example.com>" }),
+		).toEqual(Exit.succeed({ email: "no-reply@example.com", name: "Sugabots" }));
+	});
+
+	it("refuses a value that is not an address", async () => {
+		const exit = await senderFor({ EMAIL_TRANSACTIONAL_FROM: "Sugabots" });
+
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(
+			/EMAIL_TRANSACTIONAL_FROM must be an address/,
+		);
+	});
+});

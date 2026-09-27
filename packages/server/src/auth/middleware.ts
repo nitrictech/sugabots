@@ -1,9 +1,9 @@
+import type { SessionUser } from "@sugabots/contracts";
 import { CurrentUser, Forbidden, Session, Unauthorized } from "@sugabots/contracts/http";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
-import { API_BASE_PATH } from "../config.ts";
+import { API_BASE_PATH } from "../http/api.ts";
 import { failureResponse } from "../http/errors.ts";
-import type { SessionResolver } from "./session.ts";
 
 /**
  * Bearer authentication for native and script clients, or a Better Auth cookie
@@ -50,8 +50,10 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 		});
 }
 
-/** The `Session` middleware, resolving the request's credentials with `resolve`. */
-export function sessionLayer(resolve: SessionResolver) {
+/** The `Session` middleware, asking `identify` who holds the request's credentials. */
+export function sessionLayer(
+	identify: (headers: Headers) => Effect.Effect<SessionUser | undefined>,
+) {
 	return Layer.succeed(Session, (httpEffect) =>
 		Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
@@ -65,11 +67,11 @@ export function sessionLayer(resolve: SessionResolver) {
 				headers = new Headers({ authorization: `Bearer ${token}` });
 			}
 
-			const session = yield* Effect.promise(() => resolve(headers));
-			if (!session) {
+			const holder = yield* identify(headers);
+			if (!holder) {
 				return yield* new Unauthorized({ message: "Invalid or expired session" });
 			}
-			return yield* Effect.provideService(httpEffect, CurrentUser, session.user);
+			return yield* Effect.provideService(httpEffect, CurrentUser, holder);
 		}),
 	);
 }

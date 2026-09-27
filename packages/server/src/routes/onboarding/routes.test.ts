@@ -1,7 +1,7 @@
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionResolver } from "../../auth/session.ts";
+import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
 const USER_ID = "0199a3a0-0000-7000-8000-0000000000ff";
@@ -10,9 +10,9 @@ const POD_ID = "0199a3a0-0000-7000-8000-000000000002";
 const AGENT_ID = "0199a3a0-0000-7000-8000-000000000003";
 const INVITATION_ID = "0199a3a0-0000-7000-8000-000000000004";
 
-const resolveSession: SessionResolver = async (headers) =>
+const resolveUser: UserResolver = async (headers) =>
 	headers.get("authorization") === "Bearer good-token"
-		? { user: { id: USER_ID, name: "Sam", email: "sam@example.com", image: null } }
+		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
 /** A store that says nobody has finished, apart from what a case overrides. */
@@ -29,7 +29,7 @@ const authorization = { authorization: "Bearer good-token", "content-type": "app
 
 describe("onboarding routes", () => {
 	it("does not complete when the resources do not form a valid setup", async () => {
-		const app = createTestApp({ resolveSession, stores: { onboarding: onboardingStoreWith() } });
+		const app = createTestApp({ resolveUser, stores: { onboarding: onboardingStoreWith() } });
 
 		const response = await app.request("/onboarding/complete", {
 			method: "POST",
@@ -43,7 +43,7 @@ describe("onboarding routes", () => {
 	it("returns the workspace belonging to an accepted invitation", async () => {
 		const completeAcceptedInvite = vi.fn(() => Effect.succeed(WORKSPACE_ID));
 		const app = createTestApp({
-			resolveSession,
+			resolveUser,
 			stores: { onboarding: onboardingStoreWith({ completeAcceptedInvite }) },
 		});
 

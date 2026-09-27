@@ -65,6 +65,33 @@ export function parseAddress(value: string): Address | undefined {
 	return /^[^<>\s@]+@[^<>\s@]+$/.test(bare) ? { email: bare } : undefined;
 }
 
+/**
+ * `EMAIL_TRANSACTIONAL_FROM`, the sender of mail a person's own action triggers.
+ * Required in production, where providers send only from verified addresses.
+ */
+export const transactionalSender = Effect.gen(function* () {
+	const installation = yield* Installation.Service;
+	const value = yield* Config.option(Config.String("EMAIL_TRANSACTIONAL_FROM"));
+	if (Option.isNone(value)) {
+		if (installation.isProduction) {
+			return yield* new InvalidConfig({
+				message: "EMAIL_TRANSACTIONAL_FROM is required in production.",
+			});
+		}
+		return DEVELOPMENT_TRANSACTIONAL_SENDER;
+	}
+	const address = parseAddress(value.value);
+	if (!address) {
+		return yield* new InvalidConfig({
+			message:
+				"EMAIL_TRANSACTIONAL_FROM must be an address, like `Sugabots <no-reply@example.com>`.",
+		});
+	}
+	return address;
+});
+
+const DEVELOPMENT_TRANSACTIONAL_SENDER: Address = { email: "sugabots@localhost", name: "Sugabots" };
+
 const PROVIDERS = ["console", "webhook"] as const;
 
 /** The webhook's settings, `EMAIL_WEBHOOK_URL` and `EMAIL_WEBHOOK_TOKEN`. Production requires HTTPS. */

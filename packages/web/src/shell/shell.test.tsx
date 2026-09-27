@@ -58,7 +58,7 @@ describe("the workspace choice", () => {
 	const other = { id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Nitric", slug: "nitric" };
 
 	it("keeps a workspace choice in memory when storage is unavailable", async () => {
-		client.auth.workspaces.list.mockResolvedValue([workspace, other]);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 		const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
 			throw new Error("Storage disabled");
 		});
@@ -73,7 +73,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("follows workspace choices made in another tab", async () => {
-		client.auth.workspaces.list.mockResolvedValue([workspace, other]);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
 		const router = mount(linearPage);
 		await screen.findByRole("navigation", { name: "Pods" });
 		localStorage.setItem("sugabots-workspace", other.id);
@@ -268,16 +268,16 @@ describe("the settings navigation", () => {
 	});
 
 	it("leaves the roster uncounted while you are the only person in it", async () => {
-		client.auth.workspaces.members.mockResolvedValue([
-			{
-				id: "0199a3a0-0000-7000-8000-0000000000d1",
-				organizationId: workspace.id,
-				userId: sam.id,
-				role: "admin",
-				createdAt: new Date("2026-09-09T00:00:00.000Z"),
-				user: sam,
-			},
-		]);
+		client.api.workspaces.members.mockReturnValue(
+			Effect.succeed([
+				{
+					id: "0199a3a0-0000-7000-8000-0000000000d1",
+					role: "admin",
+					user: sam,
+					joinedAt: "2026-09-09T00:00:00.000Z",
+				},
+			]),
+		);
 		mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
@@ -352,7 +352,7 @@ describe("routes", () => {
 	});
 
 	it("keeps a signed-in user without a workspace out of the shell", async () => {
-		client.auth.workspaces.list.mockResolvedValue([]);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		const router = mount(linearPage);
 
@@ -417,7 +417,7 @@ describe("routes", () => {
 			Effect.succeed([{ ...personalAssistant, name: "Chief" }]),
 		);
 		client.api.agents.update.mockReturnValue(Effect.succeed(personalAssistant));
-		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
+		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
 		mount(linearPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Create bot" }));
@@ -432,8 +432,8 @@ describe("routes", () => {
 
 		await waitFor(() => {
 			for (const email of ["jay@nitric.io", "mara@nitric.io"]) {
-				expect(client.auth.workspaces.invite).toHaveBeenCalledWith(
-					expect.objectContaining({ email, role: "member" }),
+				expect(client.api.workspaces.invite).toHaveBeenCalledWith(
+					expect.objectContaining({ payload: expect.objectContaining({ email, role: "member" }) }),
 				);
 			}
 		});
@@ -497,9 +497,12 @@ describe("routes", () => {
 	});
 
 	it("still honours the older ?invite= link shape", async () => {
-		client.auth.workspaces.invitation.mockResolvedValue({
-			organizationName: "Nitric",
-		});
+		client.api.workspaces.invitation.mockReturnValue(
+			Effect.succeed({
+				workspaceName: "Nitric",
+				inviterName: "Sam",
+			}),
+		);
 
 		const router = mount("/?invite=an-invitation");
 
@@ -594,11 +597,13 @@ describe("routes", () => {
 	});
 
 	it("tells an invitee to verify rather than blaming the address", async () => {
-		client.auth.workspaces.invitation.mockRejectedValue(
-			failureForStatus(
-				403,
-				"Email verification required to view or list invitations for the session email",
-				"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
+		client.api.workspaces.invitation.mockReturnValue(
+			Effect.fail(
+				failureForStatus(
+					403,
+					"Email verification required to view or list invitations for the session email",
+					"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
+				),
 			),
 		);
 
@@ -610,10 +615,13 @@ describe("routes", () => {
 	});
 
 	it("does not retry an accepted invitation when continuing initially fails", async () => {
-		client.auth.workspaces.invitation.mockResolvedValue({
-			organizationName: "Nitric",
-		});
-		client.auth.workspaces.acceptInvite.mockResolvedValue(undefined);
+		client.api.workspaces.invitation.mockReturnValue(
+			Effect.succeed({
+				workspaceName: "Nitric",
+				inviterName: "Sam",
+			}),
+		);
+		client.api.workspaces.acceptInvitation.mockReturnValue(Effect.succeed(undefined));
 		const refresh = vi
 			.fn<() => Promise<void>>()
 			.mockRejectedValueOnce(new Error("Offline"))
@@ -626,11 +634,11 @@ describe("routes", () => {
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			"The invitation was accepted, but we could not continue",
 		);
-		expect(client.auth.workspaces.acceptInvite).toHaveBeenCalledOnce();
+		expect(client.api.workspaces.acceptInvitation).toHaveBeenCalledOnce();
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
-		expect(client.auth.workspaces.acceptInvite).toHaveBeenCalledOnce();
+		expect(client.api.workspaces.acceptInvitation).toHaveBeenCalledOnce();
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
 
@@ -642,7 +650,7 @@ describe("routes", () => {
 		const router = mount("/invite/an-invitation", sam, refresh);
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
-		expect(client.auth.workspaces.acceptInvite).not.toHaveBeenCalled();
+		expect(client.api.workspaces.acceptInvitation).not.toHaveBeenCalled();
 		expect(refresh).toHaveBeenCalledOnce();
 	});
 
@@ -1252,7 +1260,7 @@ describe("workspace settings", () => {
 	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
 
 	it("invites every address typed, with the role chosen", async () => {
-		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
+		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
 		mount("/suga/settings/members");
 		const panel = await openInvitePanel();
 
@@ -1267,24 +1275,26 @@ describe("workspace settings", () => {
 		fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.invite).toHaveBeenCalledWith({
-				email: "jye@example.com",
-				role: "viewer",
-				workspaceId: workspace.id,
-				resend: undefined,
+			expect(client.api.workspaces.invite).toHaveBeenCalledWith({
+				params: { workspace: workspace.id },
+				payload: { email: "jye@example.com", role: "viewer", resend: undefined },
 			});
-			expect(client.auth.workspaces.invite).toHaveBeenCalledWith(
-				expect.objectContaining({ email: "kim@example.com", role: "viewer" }),
+			expect(client.api.workspaces.invite).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({ email: "kim@example.com", role: "viewer" }),
+				}),
 			);
 		});
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite people" })).toBeNull());
 	});
 
 	it("keeps only the addresses that were refused, saying why", async () => {
-		client.auth.workspaces.invite.mockImplementation(async ({ email }: { email: string }) => {
-			if (email === "kim@example.com") throw new Error("Offline");
-			return { id: "an-invitation" };
-		});
+		client.api.workspaces.invite.mockImplementation(
+			({ payload }: { payload: { email: string } }) =>
+				payload.email === "kim@example.com"
+					? Effect.die(new Error("Offline"))
+					: Effect.succeed({ id: "an-invitation" }),
+		);
 		mount("/suga/settings/members");
 		const panel = await openInvitePanel();
 		const emails = within(panel).getByLabelText("Email addresses");
@@ -1314,10 +1324,9 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("radio", { name: "Viewer" }));
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.updateRole).toHaveBeenCalledWith({
-				workspaceId: workspace.id,
-				memberId: "0199a3a0-0000-7000-8000-0000000000d2",
-				role: "viewer",
+			expect(client.api.workspaces.updateMember).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, memberId: "0199a3a0-0000-7000-8000-0000000000d2" },
+				payload: { role: "viewer" },
 			});
 		});
 	});
@@ -1326,7 +1335,10 @@ describe("workspace settings", () => {
 		client.api.pods.addMember.mockReturnValue(Effect.void);
 		mount(jyePage);
 
-		fireEvent.click(await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` }));
+		const toggle = await screen.findByRole("switch", { name: `${jye.name} is in Suga-Team` });
+		// Disabled until the pod's people have loaded.
+		await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
+		fireEvent.click(toggle);
 
 		await waitFor(() =>
 			expect(client.api.pods.addMember).toHaveBeenCalledWith({
@@ -1343,14 +1355,13 @@ describe("workspace settings", () => {
 
 		expect(await screen.findByRole("heading", { name: `Remove ${jye.name}?` })).toBeDefined();
 		expect(screen.getByText(/their Personal pod and its conversations are deleted/)).toBeDefined();
-		expect(client.auth.workspaces.removeMember).not.toHaveBeenCalled();
+		expect(client.api.workspaces.removeMember).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.removeMember).toHaveBeenCalledWith({
-				workspaceId: workspace.id,
-				memberId: "0199a3a0-0000-7000-8000-0000000000d2",
+			expect(client.api.workspaces.removeMember).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, memberId: "0199a3a0-0000-7000-8000-0000000000d2" },
 			});
 		});
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
@@ -1369,7 +1380,9 @@ describe("workspace settings", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.leave).toHaveBeenCalledWith(workspace.id);
+			expect(client.api.workspaces.leave).toHaveBeenCalledWith({
+				params: { workspace: workspace.id },
+			});
 		});
 	});
 
@@ -1382,25 +1395,23 @@ describe("workspace settings", () => {
 		);
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.cancelInvite).toHaveBeenCalledWith(
-				"0199a3a0-0000-7000-8000-0000000000e1",
-			);
+			expect(client.api.workspaces.cancelInvitation).toHaveBeenCalledWith({
+				params: { invitationId: "0199a3a0-0000-7000-8000-0000000000e1" },
+			});
 		});
 	});
 
 	it("sends an invitation again without retyping it", async () => {
-		client.auth.workspaces.invite.mockResolvedValue({ id: "an-invitation" });
+		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
 		mount("/suga/settings/members");
 
 		await screen.findByText("dana@example.com");
 		fireEvent.click(screen.getByRole("button", { name: "Resend" }));
 
 		await waitFor(() => {
-			expect(client.auth.workspaces.invite).toHaveBeenCalledWith({
-				email: "dana@example.com",
-				role: "viewer",
-				workspaceId: workspace.id,
-				resend: true,
+			expect(client.api.workspaces.invite).toHaveBeenCalledWith({
+				params: { workspace: workspace.id },
+				payload: { email: "dana@example.com", role: "viewer", resend: true },
 			});
 		});
 		expect(await screen.findByText("Sent again")).toBeDefined();
@@ -1429,13 +1440,15 @@ describe("workspace settings", () => {
 	});
 
 	it("lets somebody with no workspace start their first one", async () => {
-		client.auth.workspaces.list.mockResolvedValue([]);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
-		client.auth.workspaces.create.mockResolvedValue({
-			id: "0199a3a0-0000-7000-8000-0000000000f9",
-			name: "Nitric",
-			slug: "nitric",
-		});
+		client.api.workspaces.create.mockReturnValue(
+			Effect.succeed({
+				id: "0199a3a0-0000-7000-8000-0000000000f9",
+				name: "Nitric",
+				slug: "nitric",
+			}),
+		);
 		const router = mount("/suga/settings");
 
 		fireEvent.change(await screen.findByLabelText("Workspace name"), {
@@ -1445,17 +1458,16 @@ describe("workspace settings", () => {
 
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe("/onboarding");
-			expect(client.auth.workspaces.create).toHaveBeenCalledWith({
-				name: "Nitric",
-				slug: "nitric",
+			expect(client.api.workspaces.create).toHaveBeenCalledWith({
+				payload: { name: "Nitric", slug: "nitric" },
 			});
 		});
 	});
 
 	it("keeps a rejected workspace name and creation form open", async () => {
-		client.auth.workspaces.list.mockResolvedValue([]);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
-		client.auth.workspaces.create.mockRejectedValue(new Error("Offline"));
+		client.api.workspaces.create.mockReturnValue(Effect.die(new Error("Offline")));
 		mount("/suga/settings");
 		const name = await screen.findByLabelText("Workspace name");
 		fireEvent.change(name, { target: { value: "Nitric" } });

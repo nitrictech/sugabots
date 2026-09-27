@@ -12,9 +12,7 @@ import { Schema } from "effect";
  * Every role owns their own Personal pod outright; a role describes what
  * somebody may do in shared space.
  *
- * These are the whole set. Anything else — better-auth's own `owner`, a
- * comma-separated pair, a role from a future release — grants nothing, so
- * assignment is validated against this list wherever a role is written.
+ * These are the whole set: the database refuses any other value.
  *
  * `docs/permissions.md` is the specification; the grants are in
  * `packages/core/src/workspaces/permissions.ts`.
@@ -26,24 +24,6 @@ export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
 export const workspaceIdOrSlugSchema = Schema.String.check(Schema.isMinLength(1));
 
 export type WorkspaceRole = typeof workspaceRoleSchema.Type;
-
-/** Whether a value written by better-auth names a role this product supports. */
-export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
-	return typeof value === "string" && (WORKSPACE_ROLES as readonly string[]).includes(value);
-}
-
-/**
- * The role a stored value names, or `undefined` when it names one this product
- * does not support.
- *
- * better-auth writes the column as free text, so a value outside the supported
- * roles is reachable at run time however the types read. Narrowing it as it is
- * read is what makes "anything else grants nothing" true of real rows rather
- * than only of the values the grant tables were written against.
- */
-export function workspaceRoleOf(value: unknown): WorkspaceRole | undefined {
-	return isWorkspaceRole(value) ? value : undefined;
-}
 
 /**
  * A `Record` rather than a chain of comparisons, so adding a role to

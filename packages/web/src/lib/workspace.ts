@@ -1,4 +1,4 @@
-import type { WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
+import type { Workspace, WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
@@ -12,14 +12,10 @@ import { client } from "@/api.ts";
  * onboarding — it is the one last chosen, kept in a module-level store because
  * every `useWorkspace` has to agree on it within one render.
  *
- * It is the client's choice and not the server's. better-auth keeps an
- * `activeOrganizationId` on the session row, but nothing in our API reads it —
- * every scoped route names its workspace in the path — so writing it would be
- * state with no reader. localStorage is enough to survive a reload, which is
+ * It is the client's choice and not the server's: every scoped route names its
+ * workspace in the path. localStorage is enough to survive a reload, which is
  * all "which one was I in" needs to do.
  */
-
-type Workspace = Awaited<ReturnType<typeof client.auth.workspaces.list>>[number];
 
 const KEY = "sugabots-workspace";
 
@@ -27,7 +23,7 @@ const KEY = "sugabots-workspace";
 export function useWorkspaces() {
 	return useQuery({
 		queryKey: ["workspaces"],
-		queryFn: () => client.auth.workspaces.list(),
+		queryFn: ({ signal }) => Effect.runPromise(client.api.workspaces.list(), { signal }),
 	});
 }
 
@@ -35,7 +31,12 @@ export function useWorkspaces() {
 export function useWorkspaceMembers(workspaceId: string | undefined) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "members"],
-		queryFn: workspaceId ? () => client.auth.workspaces.members(workspaceId) : skipToken,
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.workspaces.members({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
 	});
 }
 
@@ -43,7 +44,7 @@ export function useCreateWorkspace() {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: ({ name, slug }: { name: string; slug: string }) =>
-			client.auth.workspaces.create({ name, slug }),
+			Effect.runPromise(client.api.workspaces.create({ payload: { name, slug } })),
 		onSuccess: async (workspace) => {
 			chooseWorkspace(workspace.id);
 			await queries.invalidateQueries({ queryKey: ["workspaces"] });
@@ -56,7 +57,12 @@ export function useUpdateWorkspace(workspaceId: string | undefined) {
 	return useMutation({
 		mutationFn: ({ name, slug }: { name: string; slug: string }) => {
 			if (!workspaceId) throw new Error("A workspace is required");
-			return client.auth.workspaces.update({ workspaceId, name, slug });
+			return Effect.runPromise(
+				client.api.workspaces.update({
+					params: { workspace: workspaceId },
+					payload: { name, slug },
+				}),
+			);
 		},
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["workspaces"] }),
 	});
@@ -73,7 +79,13 @@ export function useInviteWorkspaceMember(workspaceId: string) {
 			email: string;
 			role: WorkspaceRole;
 			resend?: boolean;
-		}) => client.auth.workspaces.invite({ email, role, workspaceId, resend }),
+		}) =>
+			Effect.runPromise(
+				client.api.workspaces.invite({
+					params: { workspace: workspaceId },
+					payload: { email, role, resend },
+				}),
+			),
 		onSuccess: () =>
 			queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "invites"] }),
 	});
@@ -83,14 +95,18 @@ export function useInviteWorkspaceMember(workspaceId: string) {
 export function useWorkspaceInvitations(workspaceId: string) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "invites"],
-		queryFn: () => client.auth.workspaces.invitations(workspaceId),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.workspaces.invitations({ params: { workspace: workspaceId } }), {
+				signal,
+			}),
 	});
 }
 
 export function useCancelWorkspaceInvitation(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
-		mutationFn: (invitationId: string) => client.auth.workspaces.cancelInvite(invitationId),
+		mutationFn: (invitationId: string) =>
+			Effect.runPromise(client.api.workspaces.cancelInvitation({ params: { invitationId } })),
 		onSuccess: () =>
 			queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "invites"] }),
 	});
@@ -104,7 +120,8 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 export function useLeaveWorkspace(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
-		mutationFn: () => client.auth.workspaces.leave(workspaceId),
+		mutationFn: () =>
+			Effect.runPromise(client.api.workspaces.leave({ params: { workspace: workspaceId } })),
 		onSuccess: async () => {
 			await queries.invalidateQueries();
 		},
@@ -138,13 +155,20 @@ export function useUpdateWorkspaceMemberRole(workspaceId: string) {
 	return useMemberChange(
 		workspaceId,
 		({ memberId, role }: { memberId: string; role: WorkspaceRole }) =>
-			client.auth.workspaces.updateRole({ workspaceId, memberId, role }),
+			Effect.runPromise(
+				client.api.workspaces.updateMember({
+					params: { workspace: workspaceId, memberId },
+					payload: { role },
+				}),
+			),
 	);
 }
 
 export function useRemoveWorkspaceMember(workspaceId: string) {
 	return useMemberChange(workspaceId, (memberId: string) =>
-		client.auth.workspaces.removeMember({ workspaceId, memberId }),
+		Effect.runPromise(
+			client.api.workspaces.removeMember({ params: { workspace: workspaceId, memberId } }),
+		),
 	);
 }
 
@@ -205,9 +229,9 @@ export function useWorkspacePermissions(): WorkspacePermissions {
 }
 
 /**
- * Which role the caller holds, for the places that name it: the access line in
- * settings, and the roster controls better-auth decides for itself. Anything
- * that gates on what somebody may *do* asks `useWorkspacePermissions`.
+ * Which role the caller holds, for the places that name it, such as the access
+ * line in settings. Anything that gates on what somebody may *do* asks
+ * `useWorkspacePermissions`.
  */
 export function useWorkspaceRole(): WorkspaceRole | undefined {
 	return useWorkspaceStanding().data?.role;

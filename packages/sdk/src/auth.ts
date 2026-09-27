@@ -1,34 +1,14 @@
-import type { WorkspaceRole } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
 import { createAuthClient } from "better-auth/client";
-import { organizationClient } from "better-auth/client/plugins";
-import { defaultAc, defaultRoles } from "better-auth/plugins/organization/access";
 import { failureForStatus, isApiFailure } from "./errors.ts";
 import type { TokenStore } from "./tokens.ts";
 
 /**
- * Accounts, sessions, workspaces and invitations.
- *
- * better-auth serves these routes and ships the client that calls them, so we
- * use it rather than hand-writing another HTTP layer. What we do own is the
- * vocabulary: better-auth calls a tenant an organisation, and everywhere else
- * in this product it is a workspace. The wrapper below is that rename, plus one
- * other thing — better-auth returns `{ data, error }` where the rest of this
- * client throws the API's own failures, and callers should not have to know which half of
- * the API they are talking to.
+ * Signing up, in and out, which better-auth serves under `/auth` with a client
+ * of its own. better-auth returns `{ data, error }` where the rest of this
+ * client throws the API's own failures, so the wrapper below throws too, and
+ * callers need not know which half of the API they are talking to.
  */
-
-/**
- * The roles this client can name, which have to be the ones the server
- * registers (`packages/server/src/auth/auth.ts`). Neither package depends on
- * the other, so the two are kept in step by `satisfies`: a role added to
- * `WORKSPACE_ROLES` stops both files compiling until it is registered in both.
- */
-const WORKSPACE_ROLE_DEFINITIONS = {
-	admin: defaultRoles.admin,
-	member: defaultRoles.member,
-	viewer: defaultAc.newRole({}),
-} satisfies Record<WorkspaceRole, unknown>;
 
 export interface AuthClientOptions {
 	baseUrl: string;
@@ -43,7 +23,6 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 	// path, and `baseUrl` carries the API's mount path, so /auth goes in the URL.
 	const auth = createAuthClient({
 		baseURL: `${baseUrl}/auth`,
-		plugins: [organizationClient({ roles: WORKSPACE_ROLE_DEFINITIONS })],
 		fetchOptions: {
 			...(fetch ? { customFetchImpl: fetch } : {}),
 			credentials: tokens ? "omit" : "include",
@@ -77,80 +56,6 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 				tokens?.set(undefined);
 			}
 		},
-
-		workspaces: {
-			list: () => orThrow(auth.organization.list()),
-
-			members: (workspaceId: string) =>
-				orThrow(auth.organization.listMembers({ query: { organizationId: workspaceId } })).then(
-					({ members }) => members,
-				),
-
-			create: (input: { name: string; slug: string }) => orThrow(auth.organization.create(input)),
-
-			update: (input: { workspaceId: string; name: string; slug: string }) =>
-				orThrow(
-					auth.organization.update({
-						organizationId: input.workspaceId,
-						data: { name: input.name, slug: input.slug },
-					}),
-				),
-
-			/** The invitations still waiting to be accepted. */
-			invitations: (workspaceId: string) =>
-				orThrow(auth.organization.listInvitations({ query: { organizationId: workspaceId } })).then(
-					(invitations) => invitations.filter(({ status }) => status === "pending"),
-				),
-
-			/** Withdraws an invitation, so its link stops working. */
-			cancelInvite: (invitationId: string) =>
-				orThrow(auth.organization.cancelInvitation({ invitationId })),
-
-			/** Leaves a workspace. Refused to the last administrator. */
-			leave: (workspaceId: string) =>
-				orThrow(auth.organization.leave({ organizationId: workspaceId })),
-
-			/** `memberId` is the membership row's id, which `members` returns. */
-			updateRole: (input: { workspaceId: string; memberId: string; role: WorkspaceRole }) =>
-				orThrow(
-					auth.organization.updateMemberRole({
-						organizationId: input.workspaceId,
-						memberId: input.memberId,
-						role: input.role,
-					}),
-				),
-
-			/** Takes somebody out of the workspace, and their Personal pod with them. */
-			removeMember: (input: { workspaceId: string; memberId: string }) =>
-				orThrow(
-					auth.organization.removeMember({
-						organizationId: input.workspaceId,
-						memberIdOrEmail: input.memberId,
-					}),
-				),
-
-			/** `resend` refreshes an invitation that is already outstanding. */
-			invite: (input: {
-				email: string;
-				role?: WorkspaceRole;
-				workspaceId: string;
-				resend?: boolean;
-			}) =>
-				orThrow(
-					auth.organization.inviteMember({
-						email: input.email,
-						role: input.role ?? "member",
-						organizationId: input.workspaceId,
-						...(input.resend ? { resend: true } : {}),
-					}),
-				),
-
-			/** Read an invitation before signing in, to show who invited whom. */
-			invitation: (id: string) => orThrow(auth.organization.getInvitation({ query: { id } })),
-
-			acceptInvite: (id: string) =>
-				orThrow(auth.organization.acceptInvitation({ invitationId: id })),
-		},
 	};
 }
 
@@ -181,26 +86,6 @@ interface Failure {
 	code?: string;
 }
 
-/**
- * better-auth's refusals in this product's words.
- *
- * It says "organization" and "owner"; here they are a workspace and an
- * administrator, and its creator role is `admin`. The renaming this module
- * exists for has to reach the failures too — the moment somebody is told they
- * cannot do something is the worst moment for the vocabulary to slip. Keyed by
- * better-auth's own error code, which `orThrow` also keeps as `details`; anything
- * not listed is passed through as it came.
- */
-const REPHRASED: Record<string, string> = {
-	YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER:
-		"A workspace needs at least one administrator",
-	YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER:
-		"A workspace needs at least one administrator",
-	YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER:
-		"Only an administrator can change what somebody may do",
-	YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER: "Only an administrator can remove somebody",
-};
-
 /** better-auth answers with `{ data, error }`; this client throws instead. */
 async function orThrow<T>(
 	call: PromiseLike<{ data: T | null; error: Failure | null }>,
@@ -209,11 +94,7 @@ async function orThrow<T>(
 
 	if (error) {
 		const status = error.status ?? 500;
-		const message =
-			(error.code && REPHRASED[error.code]) ??
-			error.message ??
-			error.statusText ??
-			`Request failed with status ${status}`;
+		const message = error.message ?? error.statusText ?? `Request failed with status ${status}`;
 		throw failureForStatus(status, message, error.code);
 	}
 	if (data === null) {
@@ -224,13 +105,8 @@ async function orThrow<T>(
 }
 
 /**
- * Whether better-auth refused because this account has not proved its address.
- *
- * It answers 403 to refusals that have nothing else in common — an invitation
- * addressed to somebody else, a sign-up an invite-only installation will not
- * admit, an unproven address — so the status cannot tell them apart and only
- * its `code` can, which is why `orThrow` keeps it. The vocabulary stays here,
- * so a screen asks the question in its own terms.
+ * Whether the API refused because this account has not proved its address.
+ * Other refusals share its 403, so only the code in `details` tells them apart.
  */
 export function isEmailUnverified(failure: unknown): boolean {
 	return (
@@ -241,7 +117,8 @@ export function isEmailUnverified(failure: unknown): boolean {
 }
 
 const emailUnverifiedCodes = new Set([
+	// Signing in, from better-auth.
 	"EMAIL_NOT_VERIFIED",
-	"EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION",
+	// Accepting an invitation.
 	"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
 ]);

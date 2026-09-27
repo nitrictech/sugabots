@@ -43,7 +43,7 @@ function webhookApp() {
 		acceptWebhook,
 	};
 	return {
-		app: createTestApp({ resolveSession: async () => null, stores: { routines } }),
+		app: createTestApp({ resolveUser: async () => null, stores: { routines } }),
 		acceptTrigger,
 		acceptWebhook,
 		routines,
@@ -162,8 +162,11 @@ const authorization = testAuthorization({
 function historyApp(userId: string, listExecutions: RoutineStore["listExecutions"]) {
 	const base = webhookApp();
 	return createTestApp({
-		resolveSession: async () => ({
-			user: { id: userId, name: "Somebody", email: "somebody@example.com", image: null },
+		resolveUser: async () => ({
+			id: userId,
+			name: "Somebody",
+			email: "somebody@example.com",
+			image: null,
 		}),
 		authorization,
 		stores: { routines: { ...base.routines, listExecutions } },
@@ -216,8 +219,11 @@ describe("Routine execution history", () => {
 		);
 		const base = webhookApp();
 		const app = createTestApp({
-			resolveSession: async () => ({
-				user: { id: MEMBER_ID, name: "Sam", email: "sam@example.com", image: null },
+			resolveUser: async () => ({
+				id: MEMBER_ID,
+				name: "Sam",
+				email: "sam@example.com",
+				image: null,
 			}),
 			authorization,
 			stores: { routines: { ...base.routines, acceptTrigger } },
@@ -237,8 +243,11 @@ describe("Routine execution history", () => {
 describe("the workspace's routines", () => {
 	const listFor = (userId: string, listInWorkspace: RoutineStore["listInWorkspace"]) =>
 		createTestApp({
-			resolveSession: async () => ({
-				user: { id: userId, name: "Somebody", email: "somebody@example.com", image: null },
+			resolveUser: async () => ({
+				id: userId,
+				name: "Somebody",
+				email: "somebody@example.com",
+				image: null,
 			}),
 			authorization,
 			stores: { routines: { ...webhookApp().routines, listInWorkspace } },

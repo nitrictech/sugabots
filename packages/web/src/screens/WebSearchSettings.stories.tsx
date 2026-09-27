@@ -67,9 +67,7 @@ const meta = preview.meta({
 	],
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${import.meta.env.VITE_API_URL}/auth/organization/list`, () =>
-				HttpResponse.json([workspace]),
-			),
+			http.get(`${import.meta.env.VITE_API_URL}/workspaces`, () => HttpResponse.json([workspace])),
 			answers(null),
 			http.all(`${providerUrl}*`, () =>
 				HttpResponse.json(

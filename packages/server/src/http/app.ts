@@ -19,6 +19,7 @@ import type { SearchProviderStore } from "@sugabots/core/providers/search-provid
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
 import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
+import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Clock, Effect, Layer, type Types } from "effect";
@@ -31,10 +32,8 @@ import {
 	HttpServerResponse,
 } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import type { Auth } from "../auth/auth.ts";
+import type { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { betterAuthSessionResolver } from "../auth/session.ts";
-import { API_BASE_PATH } from "../config.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
@@ -50,7 +49,8 @@ import { systemRoutes } from "../routes/system/routes.ts";
 import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
 import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
-import { ServerApi } from "./api.ts";
+import { workspaceRoutes } from "../routes/workspaces/routes.ts";
+import { API_BASE_PATH, ServerApi } from "./api.ts";
 import { authoriseLayer } from "./authorisation.ts";
 import { failureResponse } from "./errors.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
@@ -86,12 +86,14 @@ export interface Stores {
 }
 
 export interface AppOptions {
-	/** better-auth. Mounted under `/auth`, and asked who a token belongs to. */
-	auth: Auth;
+	/** Mounted under `/auth`, and asked who a token belongs to. */
+	authentication: Authentication.Interface;
 	/** Where the API and web app are reached, and which origins may send a cookie. */
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
+	/** Workspaces, the people in them, and invitations. */
+	membership: Membership.Interface;
 	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
@@ -105,9 +107,10 @@ export interface AppOptions {
 }
 
 export function apiLayer({
-	auth,
+	authentication,
 	installation,
 	authorization,
+	membership,
 	stores,
 	events,
 	httpClients,
@@ -119,6 +122,7 @@ export function apiLayer({
 
 	const groups = Layer.mergeAll(
 		systemRoutes,
+		workspaceRoutes({ membership }),
 		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
 		onboardingRoutes({ onboarding: stores.onboarding }),
 		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),
@@ -156,7 +160,7 @@ export function apiLayer({
 		threadRoutes({ threads: stores.threads, turns: stores.turns }),
 	);
 	const middleware = Layer.mergeAll(
-		sessionLayer(betterAuthSessionResolver(auth)),
+		sessionLayer(authentication.identify),
 		authoriseLayer(authorization),
 		validateRequestLayer,
 	);
@@ -167,7 +171,7 @@ export function apiLayer({
 	// Sign-up, sign-in, workspaces and invitations.
 	const betterAuth = HttpRouter.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
 		toWebRequest(request).pipe(
-			Effect.flatMap((web) => Effect.promise(() => auth.handler(web))),
+			Effect.flatMap(authentication.handler),
 			Effect.map(HttpServerResponse.fromWeb),
 		),
 	);

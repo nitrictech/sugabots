@@ -44,19 +44,8 @@ export const Invited = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			notYetAccepted,
-			http.get(`${API}/auth/organization/get-invitation`, () =>
-				HttpResponse.json({
-					id: ID,
-					email: "ryan@nitric.io",
-					role: "member",
-					status: "pending",
-					organizationId: "0199a3a0-0000-7000-8000-000000000001",
-					organizationName: "Nitric",
-					organizationSlug: "nitric",
-					inviterEmail: "jay@nitric.io",
-					inviterId: "0199a3a0-0000-7000-8000-00000000000a",
-					expiresAt: "2026-09-28T00:00:00.000Z",
-				}),
+			http.get(`${API}/invitations/:invitationId`, () =>
+				HttpResponse.json({ workspaceName: "Nitric", inviterName: "Jay Young" }),
 			),
 		);
 	},
@@ -73,9 +62,9 @@ export const WrongAccount = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			notYetAccepted,
-			http.get(`${API}/auth/organization/get-invitation`, () =>
+			http.get(`${API}/invitations/:invitationId`, () =>
 				HttpResponse.json(
-					{ code: "YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION", message: "Not the recipient" },
+					{ _tag: "Forbidden", message: "This invitation was sent to a different address" },
 					{ status: 403 },
 				),
 			),

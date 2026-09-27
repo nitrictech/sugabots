@@ -28,11 +28,9 @@ function person(n: number, name: string, email: string, role: string) {
 	const userId = `0199a3a0-0000-7000-8000-0000000000${String(n).padStart(2, "0")}`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000d${n}`,
-		organizationId: workspace.id,
-		userId,
 		role,
-		createdAt: `2026-09-0${n}T00:00:00.000Z`,
-		user: { id: userId, name, email },
+		user: { id: userId, name, email, image: null },
+		joinedAt: `2026-09-0${n}T00:00:00.000Z`,
 	};
 }
 
@@ -42,11 +40,11 @@ const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
 const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
 
 const inPod = (member: typeof ryan) => ({
-	userId: member.userId,
+	userId: member.user.id,
 	name: member.user.name,
 	email: member.user.email,
 	image: null,
-	addedAt: member.createdAt,
+	addedAt: member.joinedAt,
 });
 
 /** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */
@@ -54,17 +52,13 @@ const alex = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	email: "alex@nitric.io",
 	role: "member",
-	status: "pending",
-	organizationId: workspace.id,
-	inviterId: ryan.userId,
 	expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
 };
 
-const auth = `${import.meta.env.VITE_API_URL}/auth/organization`;
+const roster = `${import.meta.env.VITE_API_URL}/workspaces/:workspace`;
 
-/** better-auth's refusal shape, which the SDK turns into this product's words. */
-const refuses = (code: string, message: string) =>
-	HttpResponse.json({ code, message }, { status: 400 });
+const refuses = (message: string) =>
+	HttpResponse.json({ _tag: "BadRequest", message }, { status: 400 });
 
 function SettingsPreview({ children }: { children: ReactNode }) {
 	const [queryClient] = useState(() => {
@@ -94,7 +88,7 @@ const meta = preview.meta({
 	title: "Views/WorkspaceMembersSettings",
 	component: WorkspaceMembersSettings,
 	tags: ["ai-generated"],
-	args: { workspaceId: workspace.id, canManage: true, currentUserId: ryan.userId },
+	args: { workspaceId: workspace.id, canManage: true, currentUserId: ryan.user.id },
 	parameters: {
 		layout: "fullscreen",
 		// Inline docs examples share MSW handlers; separate frames keep their responses independent.
@@ -109,19 +103,15 @@ const meta = preview.meta({
 	],
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${auth}/list-members`, () =>
-				HttpResponse.json({ members: [ryan, jay, mara, sam], total: 4 }),
+			http.get(`${roster}/members`, () => HttpResponse.json([ryan, jay, mara, sam])),
+			http.get(`${roster}/invitations`, () => HttpResponse.json([alex])),
+			http.patch(`${roster}/members/:memberId`, () =>
+				refuses("This preview does not save role changes."),
 			),
-			http.get(`${auth}/list-invitations`, () => HttpResponse.json([alex])),
-			http.post(`${auth}/update-member-role`, () =>
-				refuses("PREVIEW", "This preview does not save role changes."),
+			http.delete(`${roster}/members/:memberId`, () =>
+				refuses("This preview does not remove anybody."),
 			),
-			http.post(`${auth}/remove-member`, () =>
-				refuses("PREVIEW", "This preview does not remove anybody."),
-			),
-			http.post(`${auth}/invite-member`, () =>
-				refuses("PREVIEW", "This preview does not send invitations."),
-			),
+			http.post(`${roster}/invitations`, () => refuses("This preview does not send invitations.")),
 		);
 	},
 });
@@ -193,7 +183,7 @@ export const Leaving = meta.story({
 
 /** Reading is everybody else: the same pages, stated rather than editable. */
 export const Reading = meta.story({
-	args: { canManage: false, currentUserId: mara.userId, selectedMemberId: sam.id },
+	args: { canManage: false, currentUserId: mara.user.id, selectedMemberId: sam.id },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Sam Park" })).toBeInTheDocument();
 		await expect(canvas.getByText("Viewer")).toBeInTheDocument();
