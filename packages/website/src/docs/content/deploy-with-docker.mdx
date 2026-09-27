@@ -1,33 +1,103 @@
 ---
 title: Deploy with Docker
-description: Run the API and the built web app from one image.
+description: Host Sugabots where your team can reach it, from the published image.
 ---
 
-One image runs the whole application: the API, serving the built web app at
-every path outside `/api`. Any platform that builds a `Dockerfile` from a
-repository can run it, such as Railway, Render or Suga; point the service at
-the repository root and give it a PostgreSQL 18 database.
+To use Sugabots with other people, run it somewhere they can all reach, with
+email set up so invites arrive. One image,
+`ghcr.io/nitrictech/sugabots`, runs the whole application: the API, and the web
+app at every path outside `/api`. It needs a PostgreSQL 18 database.
 
-```sh
-docker build -t sugabots .
+## What a hosted installation needs
+
+- **An HTTPS address**, set as `PUBLIC_URL`: the one in the browser's address
+  bar. Links in emails and sign-in redirects start there.
+- **Email**, so invites and verification links reach people. See
+  [Email](#email).
+- **Its two keys**, `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`, each
+  made once with `openssl rand -base64 32` and never changed.
+- **Backups** of the database and the keys.
+
+The [configuration reference](/docs/configuration) describes every other
+setting.
+
+## On a hosting platform
+
+Platforms such as Railway, Render or Suga run the image and give it an HTTPS
+address. Create a service from `ghcr.io/nitrictech/sugabots:latest`, give it a
+PostgreSQL 18 database, and set:
+
+- `DATABASE_URL`: the database's connection string
+- `PUBLIC_URL`: the address the platform gives the service, or your own domain
+- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`
+- The [email settings](#email)
+
+The container listens on `$PORT`, which is 3000 unless the platform sets it.
+
+## On your own server
+
+Start as in the [Quickstart](/docs/quickstart): run the install script on the
+server. Then point the installation at its public address and your email
+service, in `compose.yml`:
+
+```yaml title="compose.yml"
+    environment:
+      # ...keep the settings already there, and change or add:
+      PUBLIC_URL: https://sugabots.example.com
+      EMAIL_PROVIDER: webhook
+      EMAIL_WEBHOOK_URL: https://mailer.example.com/sugabots
+      EMAIL_TRANSACTIONAL_FROM: Sugabots <no-reply@example.com>
 ```
 
-## Configure the container
+Sugabots only listens on the server itself, at `127.0.0.1:3000`. Put a reverse
+proxy with HTTPS in front of it. [Caddy](https://caddyserver.com/) gets and
+renews a certificate on its own:
 
-The container takes the variables described in
-[Configuration](/docs/configuration). In production, at minimum set:
+```text title="Caddyfile"
+sugabots.example.com {
+	reverse_proxy 127.0.0.1:3000
+}
+```
 
-- `DATABASE_URL`
-- `PUBLIC_URL`: the installation's public address, the one in the browser's
-  address bar
-- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`, each generated with
-  `openssl rand -base64 32`
-- `EMAIL_TRANSACTIONAL_FROM`
+Then apply the changes:
+
+```sh
+docker compose up -d
+```
+
+## Email
+
+Sugabots sends email through a webhook. With `EMAIL_PROVIDER=webhook`, it posts
+each email as JSON to `EMAIL_WEBHOOK_URL`: `from`, `to`, `cc`, `bcc` and
+`replyTo` as `{email, name}` addresses, `subject`, and `text` and/or `html`. Put
+a small service there that hands each one to your mail provider. If it checks a
+bearer token, set it as `EMAIL_WEBHOOK_TOKEN`.
+
+`EMAIL_TRANSACTIONAL_FROM` is the sender, and must be an address your mail
+provider accepts.
+
+<Careful title="Without a webhook, nothing is sent">
+
+Emails, invites included, only reach the logs, and people have to be handed
+their links by hand.
+
+</Careful>
+
+## Who can sign in
 
 Sign-up is closed unless `ALLOW_OPEN_SIGNUP=true`: the first account claims the
 installation and the rest arrive by invitation. `REQUIRE_EMAIL_VERIFICATION=true`
-additionally withholds a session until the address is proven, and then
-`EMAIL_PROVIDER=webhook` and `EMAIL_WEBHOOK_URL` must be set.
+also holds back a session until the address is proven, so turn it on only once
+email works.
+
+## Back up
+
+Keep a copy of `.env`, or wherever your platform holds the keys, somewhere
+safe. On your own server, this writes the database to a file:
+
+```sh
+docker compose exec -T postgres pg_dump -U sugabots sugabots > sugabots-backup.sql
+```
 
 ## Migrations
 
@@ -35,7 +105,13 @@ On start the container applies pending database migrations, then listens on
 `$PORT`. Set `SUGABOTS_SKIP_MIGRATIONS=true` to skip that, for example when a
 deploy step migrates or several instances share a database.
 
-## Host the web app separately
+## Build the image yourself
+
+To run your own changes, build the image from a checkout of the repository:
+
+```sh
+docker build -t sugabots .
+```
 
 To host the web app on an origin of its own, set its address in `WEB_APP_URL`
 and build the web app with `VITE_API_URL`. The image still serves its own copy
