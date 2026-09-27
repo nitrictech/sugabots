@@ -3,12 +3,11 @@ import { cn } from "cn";
 import { MenuIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { accentText } from "@/components/accent";
-import { BotAvatar } from "@/components/bot-avatar";
 import { Button } from "@/components/ui/button";
 import { docGroups } from "@/docs/nav";
 import { findDocPage } from "@/docs/pages";
 
-/** Every docs page, grouped, each beside the bot that hosts it. */
+/** Every docs page, grouped. */
 function DocsLinks() {
 	return (
 		<div className="flex flex-col gap-7">
@@ -24,15 +23,14 @@ function DocsLinks() {
 						{group.title}
 					</h2>
 					<ul className="flex flex-col gap-0.5">
-						{group.pages.map(({ slug, bot }) => (
+						{group.pages.map(({ slug }) => (
 							<li key={slug}>
 								<Link
 									to="/docs/$slug"
 									params={{ slug }}
-									className="flex items-center gap-2.5 rounded-full px-3 py-1.5 text-[0.95rem] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+									className="block rounded-full px-3 py-1.5 text-[0.95rem] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
 									activeProps={{ className: "bg-secondary text-foreground font-semibold" }}
 								>
-									<BotAvatar size="xs" {...bot} />
 									{findDocPage(slug)?.title}
 								</Link>
 							</li>

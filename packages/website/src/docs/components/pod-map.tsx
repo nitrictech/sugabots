@@ -129,7 +129,7 @@ export function PodMap() {
 							aria-selected={part === picked}
 							onClick={() => setPicked(part)}
 							className={cn(
-								"rounded-full border-2 px-3.5 py-1 text-sm font-semibold transition-colors",
+								"cursor-pointer rounded-full border-2 px-3.5 py-1 text-sm font-semibold transition-colors",
 								part === picked
 									? "border-brand bg-brand text-brand-foreground"
 									: "border-input text-muted-foreground hover:border-muted-foreground hover:text-foreground",

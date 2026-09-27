@@ -1,9 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { cn } from "cn";
 import { motion } from "motion/react";
-import { accentText } from "@/components/accent";
-import { BotAvatar } from "@/components/bot-avatar";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
+import { SiteFooter } from "@/components/site-footer";
 import { CopyPageButton } from "@/docs/components/copy-page-button";
 import { DocsSidebar } from "@/docs/components/docs-nav";
 import { docsComponents } from "@/docs/components/mdx-components";
@@ -38,43 +36,36 @@ function DocsPage() {
 	const { Content } = page;
 
 	return (
-		<div className="mx-auto flex max-w-7xl gap-10 px-6">
-			<DocsSidebar />
-			<main className="docs-content min-w-0 flex-1 py-10 lg:py-14">
-				<article className="mx-auto max-w-3xl">
-					{/* Keyed so each page's header plays in as it arrives. */}
-					<Reveal key={slug} className="flex flex-col gap-5 pb-4">
-						<RevealItem variant="pop" className="w-fit">
-							<BotAvatar size="lg" {...page.bot} className="size-14 rotate-[-6deg]" />
-						</RevealItem>
-						<motion.p
-							variants={riseIn}
-							className={cn(
-								"flex items-center gap-2 text-sm font-semibold",
-								accentText({ tone: page.group.tone }),
-							)}
-						>
-							<span className="size-2 rounded-full bg-current" />
-							{page.group.title}
-						</motion.p>
-						<motion.h1
-							variants={riseIn}
-							className="text-4xl font-black tracking-tight text-balance sm:text-5xl"
-						>
-							{page.title}
-						</motion.h1>
-						<motion.p variants={riseIn} className="text-lg text-muted-foreground text-pretty">
-							{page.description}
-						</motion.p>
-						<RevealItem>
-							<CopyPageButton markdown={page.markdown} />
-						</RevealItem>
-					</Reveal>
-					<Content components={docsComponents} />
-					<PageLinks {...neighbours(page)} />
-				</article>
-			</main>
-			<OnThisPage headings={page.headings} />
-		</div>
+		<>
+			<div className="mx-auto flex max-w-7xl gap-10 px-6">
+				<DocsSidebar />
+				<main className="docs-content min-w-0 flex-1 py-10 lg:py-14">
+					<article className="mx-auto max-w-3xl">
+						{/* Keyed so each page's header plays in as it arrives. */}
+						<Reveal key={slug} className="flex flex-col gap-5 pb-4">
+							<motion.h1
+								variants={riseIn}
+								className="text-4xl font-black tracking-tight text-balance sm:text-5xl"
+							>
+								{page.title}
+							</motion.h1>
+							<motion.p variants={riseIn} className="text-lg text-muted-foreground text-pretty">
+								{page.description}
+							</motion.p>
+							<RevealItem className="xl:hidden">
+								<CopyPageButton markdown={page.markdown} />
+							</RevealItem>
+						</Reveal>
+						<Content components={docsComponents} />
+						<PageLinks {...neighbours(page)} />
+					</article>
+				</main>
+				<aside className="sticky top-16 hidden max-h-[calc(100svh-4rem)] w-52 shrink-0 flex-col gap-6 overflow-y-auto py-10 xl:flex">
+					<CopyPageButton markdown={page.markdown} />
+					<OnThisPage headings={page.headings} />
+				</aside>
+			</div>
+			<SiteFooter />
+		</>
 	);
 }

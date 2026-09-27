@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
+import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
 import { DocsMenu } from "@/docs/components/docs-nav";
-import { launched, siteLinks } from "@/site-links";
+import { siteLinks } from "@/site-links";
 
 export function DocsHeader() {
 	return (
@@ -19,27 +20,19 @@ export function DocsHeader() {
 					Docs
 				</Link>
 				<div className="flex flex-1 justify-end gap-5">
-					{launched && (
-						<a
-							href={siteLinks.github}
-							className={buttonVariants({
-								variant: "nav",
-								size: "inline",
-								className: "max-sm:hidden",
-							})}
-						>
-							GitHub
-						</a>
-					)}
+					<a
+						href={siteLinks.github}
+						aria-label="GitHub"
+						className={buttonVariants({ variant: "nav", size: "inline" })}
+					>
+						<GitHubIcon className="size-5" />
+					</a>
 					<a
 						href={siteLinks.discord}
-						className={buttonVariants({
-							variant: "nav",
-							size: "inline",
-							className: "max-sm:hidden",
-						})}
+						aria-label="Discord"
+						className={buttonVariants({ variant: "nav", size: "inline" })}
 					>
-						Discord
+						<DiscordIcon className="size-5" />
 					</a>
 				</div>
 				<DocsMenu />

@@ -26,16 +26,13 @@ function useCurrentHeading(headings: readonly Heading[]) {
 	return current;
 }
 
-/** The page's sections, with the one being read marked. From extra-large screens up. */
+/** The page's sections, with the one being read marked. */
 export function OnThisPage({ headings }: { headings: readonly Heading[] }) {
 	const current = useCurrentHeading(headings);
 	if (headings.length === 0) return null;
 
 	return (
-		<nav
-			aria-label="On this page"
-			className="sticky top-16 hidden max-h-[calc(100svh-4rem)] w-52 shrink-0 overflow-y-auto py-10 xl:block"
-		>
+		<nav aria-label="On this page">
 			<p className="pb-3 text-sm font-semibold">On this page</p>
 			<ul className="flex flex-col border-l">
 				{headings.map(({ id, text }) => (

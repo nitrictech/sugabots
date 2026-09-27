@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
-import { BotAvatar } from "@/components/bot-avatar";
 import type { DocPage } from "@/docs/pages";
 
 function PageLink({ page, direction }: { page: DocPage; direction: "previous" | "next" }) {
@@ -11,15 +10,10 @@ function PageLink({ page, direction }: { page: DocPage; direction: "previous" | 
 			to="/docs/$slug"
 			params={{ slug: page.slug }}
 			className={cn(
-				"group flex items-center gap-3 rounded-3xl bg-card p-4 ring-1 ring-foreground/10 transition hover:-translate-y-0.5 hover:shadow-lg",
-				isNext && "flex-row-reverse text-right sm:col-start-2",
+				"flex rounded-3xl bg-card px-5 py-4 ring-1 ring-foreground/10 transition hover:-translate-y-0.5 hover:shadow-lg",
+				isNext && "text-right sm:col-start-2",
 			)}
 		>
-			<BotAvatar
-				size="lg"
-				{...page.bot}
-				className="transition-transform group-hover:rotate-6 group-hover:scale-110"
-			/>
 			<span className="flex min-w-0 flex-1 flex-col">
 				<span
 					className={cn(

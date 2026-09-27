@@ -1,6 +1,5 @@
 import type { MDXComponents } from "mdx/types";
 import { Careful, Tip } from "@/docs/components/bot-aside";
-import { BotBuilder } from "@/docs/components/bot-builder";
 import { Activity, Chat, Say } from "@/docs/components/chat-demo";
 import { PodMap } from "@/docs/components/pod-map";
 import { proseComponents } from "@/docs/components/prose";
@@ -10,7 +9,6 @@ import { Steps } from "@/docs/components/steps";
 export const docsComponents: MDXComponents = {
 	...proseComponents,
 	Activity,
-	BotBuilder,
 	Careful,
 	Chat,
 	PodMap,
