@@ -6,6 +6,7 @@ import {
 	layer,
 	type QueryFailure,
 	query,
+	type RunEffect,
 } from "./database.ts";
 
 /**
@@ -41,14 +42,26 @@ export type Promised<Store> = {
 		: never;
 };
 
-export function onPostgres<Store extends object>(store: Store): Promised<Store> {
-	const promises: Record<string, unknown> = {};
-	for (const [name, method] of Object.entries(store)) {
-		const call = method as (...args: unknown[]) => Effect.Effect<unknown, unknown, Database>;
-		promises[name] = (...args: unknown[]) => runOnPostgres(call.call(store, ...args));
-	}
-	return promises as Promised<Store>;
+/**
+ * `store` with its methods returning promises, each run by `run`. A method
+ * needing a service `run` does not provide is a type error.
+ */
+export function promising<R>(run: RunEffect<R>) {
+	return <
+		Store extends Record<keyof Store, (...args: never[]) => Effect.Effect<unknown, unknown, R>>,
+	>(
+		store: Store,
+	): Promised<Store> => {
+		const promises: Record<string, unknown> = {};
+		for (const [name, method] of Object.entries(store)) {
+			const call = method as (...args: unknown[]) => Effect.Effect<unknown, unknown, R>;
+			promises[name] = (...args: unknown[]) => run(call.call(store, ...args));
+		}
+		return promises as Promised<Store>;
+	};
 }
+
+export const onPostgres = promising(runOnPostgres);
 
 /**
  * A database nothing is expected to reach.

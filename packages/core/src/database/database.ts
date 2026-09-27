@@ -161,16 +161,16 @@ export const queryCatching = <A, Failure>(
 	);
 
 /** Runs an Effect on a runtime that has the database, resolving with its value. */
-export type RunEffect = <A, E>(effect: Effect.Effect<A, E, Database>) => Promise<A>;
+export type RunEffect<R = Database> = <A, E>(effect: Effect.Effect<A, E, R>) => Promise<A>;
 
 /**
  * A failure rejects with the failure value itself, not Effect's wrapper, so a
  * caller can `catch` a store's own error class. A defect rejects with the
  * thrown value.
  */
-export function effectRunner(
-	runtime: Pick<ManagedRuntime.ManagedRuntime<Database, never>, "runPromiseExit">,
-): RunEffect {
+export function effectRunner<R = Database>(
+	runtime: Pick<ManagedRuntime.ManagedRuntime<R, never>, "runPromiseExit">,
+): RunEffect<R> {
 	return async (effect) => {
 		const exit = await runtime.runPromiseExit(effect);
 		if (Exit.isSuccess(exit)) {
