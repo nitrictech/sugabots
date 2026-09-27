@@ -7,7 +7,6 @@ import { type Database, query, transaction } from "../../database/database.ts";
 import {
 	agent,
 	collaboration,
-	job,
 	message,
 	pod,
 	podMember,
@@ -75,7 +74,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 	});
 
 	beforeEach(async () => {
-		await onDatabase((db) => db.delete(job));
 		await onDatabase((db) =>
 			db
 				.update(routineExecution)

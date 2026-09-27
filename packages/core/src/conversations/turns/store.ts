@@ -793,7 +793,7 @@ interface TurnScope {
  * picks, and that is rarely the host — requiring the host discarded
  * every routed turn, so the person watched a reply that was never coming.
  *
- * Pod membership is still a real check: it is what stops a job naming an agent
+ * Pod membership is still a real check: it is what stops a turn request naming an agent
  * from another pod or another workspace.
  */
 const loadTurnScope = Effect.fn("TurnStore.loadTurnScope")(function* (
@@ -990,7 +990,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 				(existing.status !== "waiting" && existing.status !== "running") ||
 				existing.owner !== claimed.owner
 			) {
-				return { notRunnableReason: "The suspended turn no longer belongs to this job" };
+				return { notRunnableReason: "The suspended turn no longer belongs to this workflow" };
 			}
 			const [resumed] = yield* db
 				.update(turn)

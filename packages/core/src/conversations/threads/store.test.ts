@@ -1,5 +1,5 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
@@ -8,7 +8,6 @@ import { postgresEventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	event,
-	job,
 	message,
 	pod,
 	podMember,
@@ -23,7 +22,6 @@ import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { chatStore } from "../chats/store.ts";
-import { claimNextJob, enqueueJob, renewJobLeases, requeueInterruptedJobs } from "../jobs/queue.ts";
 import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { turnStore } from "../turns/store.ts";
@@ -101,10 +99,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	});
 
 	beforeEach(async () => {
-		// The queue is global, so `claimNext` would otherwise hand back whatever
-		// an earlier run left queued. This is the only test file that queues jobs,
-		// and vitest runs a file's cases one after another.
-		await onDatabase((db) => db.delete(job));
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [workspaceRow] = await onDatabase((db) =>
 			db
@@ -823,86 +817,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				.where(eq(event.type, "turn.cancel_requested")),
 		);
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
-	});
-
-	const queueFacilitation = (threadId: string, triggerMessageId: string) =>
-		runOnPostgres(
-			enqueueJob({
-				kind: "facilitate",
-				threadId,
-				payload: { triggerMessageId },
-				dedupeKey: `facilitate:${threadId}`,
-				ifAlreadyQueued: "keep",
-			}),
-		);
-
-	/** Ages a job's lease past `JOB_LEASE`, as if the process holding it had stopped. */
-	const lapseLease = (jobId: string | undefined) =>
-		onDatabase((db) =>
-			db
-				.update(job)
-				.set({ lockedAt: sql`now() - interval '2 minutes'` })
-				.where(eq(job.id, jobId ?? "")),
-		);
-
-	it("claims queued work once and puts back only work whose lease has lapsed", async () => {
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Queued work",
-		});
-		const triggerMessageId = details.messages[0]?.id;
-		if (!triggerMessageId) {
-			throw new Error("Thread test has no trigger message");
-		}
-		// Asking again for work that is already queued keeps the one there.
-		await queueFacilitation(details.thread.id, triggerMessageId);
-		await queueFacilitation(details.thread.id, triggerMessageId);
-
-		const claimed = await runOnPostgres(claimNextJob("facilitate"));
-		expect(claimed).toMatchObject({
-			threadId: details.thread.id,
-			payload: { triggerMessageId },
-			attempts: 1,
-		});
-		expect(await runOnPostgres(claimNextJob("facilitate"))).toBeUndefined();
-		// Another process may still be running it.
-		await runOnPostgres(requeueInterruptedJobs("facilitate"));
-		expect(await onDatabase((db) => db.select().from(job))).toMatchObject([
-			{ id: claimed?.id, status: "running" },
-		]);
-		await lapseLease(claimed?.id);
-		await runOnPostgres(requeueInterruptedJobs("facilitate"));
-		expect(await onDatabase((db) => db.select().from(job))).toMatchObject([
-			{ id: claimed?.id, status: "queued" },
-		]);
-	});
-
-	it("keeps a job whose worker renewed its lease", async () => {
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Long-running work",
-		});
-		await queueFacilitation(details.thread.id, details.messages[0]?.id ?? "");
-		const claimed = await runOnPostgres(claimNextJob("facilitate"));
-		expect(claimed?.threadId).toBe(details.thread.id);
-		await lapseLease(claimed?.id);
-
-		await runOnPostgres(renewJobLeases([claimed?.id ?? ""]));
-		await runOnPostgres(requeueInterruptedJobs("facilitate"));
-
-		const [row] = await onDatabase((db) =>
-			db
-				.select()
-				.from(job)
-				.where(eq(job.id, claimed?.id ?? "")),
-		);
-		expect(row?.status).toBe("running");
 	});
 
 	it("does not expose a thread to another workspace member outside its pod", async () => {

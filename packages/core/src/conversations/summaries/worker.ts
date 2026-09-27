@@ -2,7 +2,7 @@ import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sug
 import { Cause, Duration, Effect, Exit, Layer, Ref, Schema } from "effect";
 import { Database } from "../../database/database.ts";
 import { Lanes } from "../../workflows/lanes.ts";
-import { describeFailure } from "../jobs/worker.ts";
+import { describeFailure } from "../failure.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
 import { forEachDelta, type ModelAccounting, type TurnModel } from "../turns/model.ts";
 import { threadSummaryPrompt } from "./prompt.ts";

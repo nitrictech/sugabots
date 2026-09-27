@@ -15,7 +15,7 @@ import {
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { Lanes } from "../../workflows/lanes.ts";
-import { describeFailure } from "../jobs/worker.ts";
+import { describeFailure } from "../failure.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
 import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";

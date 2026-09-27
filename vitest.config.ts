@@ -40,8 +40,8 @@ export default defineConfig({
 					root: ".",
 					environment: "node",
 					include: ["packages/{core,server,workflow}/src/**/*.test.ts"],
-					// The store tests share one Postgres and one job table; files that
-					// clear or claim from it cannot run beside each other.
+					// The store tests share one Postgres; files that clear or claim from
+					// shared tables, such as the routine queue, cannot run beside each other.
 					fileParallelism: false,
 					env: DATABASE_URL ? { DATABASE_URL } : {},
 					// Creates it, migrates it and empties it before the run.

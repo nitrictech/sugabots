@@ -9,7 +9,6 @@ import {
 	agent,
 	chat,
 	collaboration,
-	job,
 	laneRequest,
 	message,
 	pod,
@@ -49,7 +48,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 	});
 
 	beforeEach(async () => {
-		await onDatabase((db) => db.delete(job));
 		const suffix = crypto.randomUUID();
 		const [person] = await onDatabase((db) =>
 			db

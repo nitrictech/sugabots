@@ -15,7 +15,7 @@ import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
 } from "../../workspaces/agents/system-agents.ts";
-import { describeFailure } from "../jobs/worker.ts";
+import { describeFailure } from "../failure.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import {

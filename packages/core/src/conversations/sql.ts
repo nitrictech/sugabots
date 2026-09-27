@@ -252,12 +252,7 @@ export const routineExecution = pgTable(
 		uniqueIndex("routine_execution_running_idx")
 			.on(table.routineId)
 			.where(sql`${table.state} = 'running'`),
-		index("routine_execution_dispatch_idx").on(
-			table.routineId,
-			table.state,
-			table.acceptedAt,
-			table.id,
-		),
+		index("routine_execution_list_idx").on(table.routineId, table.acceptedAt, table.id),
 	],
 );
 
@@ -299,20 +294,6 @@ export type TurnReason =
 	| "routine"
 	| "resume";
 
-/** The Facilitator deciding who speaks after a message, when the pod has it on. */
-export interface FacilitateJobPayload {
-	triggerMessageId: string;
-}
-
-/** Every kind of background work, and what each kind carries. */
-export interface JobPayloads {
-	facilitate: FacilitateJobPayload;
-}
-
-export type JobKind = keyof JobPayloads;
-export type JobPayloadOf<Kind extends JobKind> = JobPayloads[Kind];
-
-export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 
 export interface TurnUsage {
@@ -323,38 +304,6 @@ export interface TurnUsage {
 	reasoningTokens?: number;
 	cachedInputTokens?: number;
 }
-
-/**
- * Background work waiting for a worker: see `jobs/queue.ts`. Every job is
- * about one thread, which is what lets "is anything running for this thread"
- * be an indexed lookup rather than a scan of the payloads.
- */
-export const job = pgTable(
-	"job",
-	{
-		id: primaryKey(),
-		kind: text("kind").$type<JobKind>().notNull(),
-		threadId: uuid("thread_id")
-			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
-		payload: jsonb("payload").$type<JobPayloads[JobKind]>().notNull(),
-		// Names the work, so the same work is not queued twice: see the partial
-		// unique index below.
-		dedupeKey: text("dedupe_key").notNull(),
-		status: text("status").$type<JobStatus>().notNull().default("queued"),
-		attempts: integer("attempts").notNull().default(0),
-		availableAt: stamp("available_at"),
-		lockedAt: timestamp("locked_at", { withTimezone: true }),
-		lastError: text("last_error"),
-		createdAt: stamp("created_at"),
-		updatedAt: updatedStamp("updated_at"),
-	},
-	(table) => [
-		index("job_claim_idx").on(table.status, table.availableAt, table.createdAt),
-		index("job_thread_idx").on(table.threadId, table.kind, table.status),
-		uniqueIndex("job_queued_dedupe_idx").on(table.dedupeKey).where(sql`${table.status} = 'queued'`),
-	],
-);
 
 export const turn = pgTable(
 	"turn",
@@ -567,6 +516,5 @@ export type ChatRow = typeof chat.$inferSelect;
 export type RoutineRow = typeof routine.$inferSelect;
 export type RoutineExecutionRow = typeof routineExecution.$inferSelect;
 export type MessageRow = typeof message.$inferSelect;
-export type JobRow = typeof job.$inferSelect;
 export type TurnRow = typeof turn.$inferSelect;
 export type ThreadSummaryRow = typeof threadSummary.$inferSelect;
