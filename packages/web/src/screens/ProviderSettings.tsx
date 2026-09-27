@@ -14,7 +14,6 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
 	Brain,
-	ChevronLeft,
 	Eye,
 	Grid2X2,
 	Image,
@@ -30,6 +29,7 @@ import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { useBackTarget } from "@/lib/settings-trail.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -40,6 +40,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
+	PageBackLink,
 	SettingsAddRow,
 	SettingsDanger,
 	SettingsGroup,
@@ -232,15 +233,14 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 
 export function BackToModels() {
 	return (
-		<Link
-			from="/$workspace"
-			to="./settings/$section"
-			params={{ section: "providers" }}
-			className="focus-ring inline-flex items-center gap-1 rounded-md font-medium text-link text-sm"
-		>
-			<ChevronLeft aria-hidden size={14} strokeWidth={2.4} />
-			Models
-		</Link>
+		<PageBackLink
+			{...useBackTarget({
+				label: "Models",
+				render: (
+					<Link from="/$workspace" to="./settings/$section" params={{ section: "providers" }} />
+				),
+			})}
+		/>
 	);
 }
 

@@ -1,3 +1,4 @@
+import { useRender } from "@base-ui/react/use-render";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronLeft, X } from "lucide-react";
@@ -5,10 +6,16 @@ import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
+import { startSettingsTrail, useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { type SettingSection, workspaceSettingGroups } from "@/lib/workspace-settings.ts";
 import { PersonAvatar } from "@/ui/avatar.tsx";
-import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import {
+	SettingsGroup,
+	SettingsReturnBar,
+	SettingsRow,
+	SettingsValue,
+} from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
@@ -38,8 +45,10 @@ export function SettingsLayout({
 		workspaceSettingGroups.some((group) =>
 			group.sections.some((section: SettingSection) => section.path === pathname),
 		);
+	const back = useSettingsBack();
 	return (
-		<div className="flex min-h-0 min-w-0 flex-1">
+		// A group, so the wide Back can stand aside for one the page draws itself.
+		<div className="group/settings flex min-h-0 min-w-0 flex-1">
 			<SettingsNavigation />
 			{index && <CompactSettingsList />}
 			<main
@@ -49,24 +58,46 @@ export function SettingsLayout({
 					index && "max-lg:hidden",
 				)}
 			>
-				{(atSection || pathname === "/settings/general") && (
-					<div className="sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur lg:hidden">
-						<Link
-							from="/$workspace"
-							to="./settings"
-							className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link"
-						>
-							<ChevronLeft aria-hidden size={20} strokeWidth={2.2} />
-							Settings
-						</Link>
-					</div>
+				{back && !LIST_DETAIL_PAGE.test(pathname) && (
+					// A page with its own Back needs no second one.
+					<SettingsReturnBar
+						{...back}
+						className="group-has-[[data-page-back]]/settings:hidden max-lg:hidden"
+					/>
 				)}
+				{(atSection || pathname === "/settings/general") && <CompactBackBar />}
 				{/*
 				 * Nothing rather than a skeleton: the navigation has already answered
 				 * the click, and a shape that flashes beside it reads as a fault.
 				 */}
 				<Suspense fallback={null}>{children}</Suspense>
 			</main>
+		</div>
+	);
+}
+
+/** On a phone or tablet, the bar above a section with its Back: where you came from, or else Settings. */
+function CompactBackBar() {
+	const back = useBackTarget({
+		label: "Settings",
+		render: <Link from="/$workspace" to="./settings" />,
+	});
+	const link = useRender({
+		render: back.render,
+		props: {
+			className:
+				"focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-[15px] text-link",
+			children: (
+				<>
+					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} />
+					{back.label}
+				</>
+			),
+		},
+	});
+	return (
+		<div className="sticky top-0 z-10 flex h-12 items-center bg-background/90 px-2.5 backdrop-blur lg:hidden">
+			{link}
 		</div>
 	);
 }
@@ -189,7 +220,12 @@ function CompactSettingsList() {
 						sub={session.user.email}
 						chevron
 						render={
-							<Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "profile" }}
+								state={startSettingsTrail}
+							/>
 						}
 					/>
 				</div>
@@ -215,6 +251,7 @@ function CompactSettingsList() {
 										from="/$workspace"
 										to="./settings/$section"
 										params={{ section: section.id }}
+										state={startSettingsTrail}
 									/>
 								}
 							/>
@@ -231,6 +268,9 @@ function useSettingsPath(): string {
 	const workspacePath = useMatch({ from: "/$workspace", select: (match) => match.pathname });
 	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
 }
+
+/** Pods and Bots, which draw the way back above their open item rather than across their list. */
+const LIST_DETAIL_PAGE = /^\/settings\/(pods|agents)(\/|$)/;
 
 /**
  * `/settings` is General, so it matches itself alone; the rest stay selected
@@ -275,6 +315,7 @@ function SectionLink({
 		<Link
 			from="/$workspace"
 			to="./settings"
+			state={startSettingsTrail}
 			activeOptions={{ exact: true }}
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
@@ -287,6 +328,7 @@ function SectionLink({
 			from="/$workspace"
 			to="./settings/$section"
 			params={{ section: section.id }}
+			state={startSettingsTrail}
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
 			className={className}

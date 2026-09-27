@@ -7,7 +7,6 @@ import {
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
 import { useId, useState } from "react";
 import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
@@ -17,9 +16,11 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ColourPicker, EyesPicker } from "@/shell/LookPickers.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
+import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
+	PageBackLink,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -56,14 +57,10 @@ export function AgentSettingsPage({
 	const update = useUpdateAgent(agent.id);
 	const failure = update.error ? failureMessage(update.error) : undefined;
 	const back = (
-		<button
-			type="button"
-			onClick={() => setPage("card")}
-			className="focus-ring flex items-center gap-1 rounded-md font-medium text-[14px] text-link"
-		>
-			<ChevronLeft aria-hidden size={16} />
-			{agent.name}
-		</button>
+		<PageBackLink
+			label={agent.name}
+			render={<button type="button" onClick={() => setPage("card")} />}
+		/>
 	);
 
 	if (page === "model") {
@@ -320,18 +317,6 @@ function Instructions({
 	return (
 		<SettingsPage
 			back={back}
-			action={
-				editable && (
-					<button
-						type="button"
-						disabled={!dirty || savePending}
-						onClick={() => void save({ prompt: draft }).catch(() => {})}
-						className="focus-ring rounded-md font-semibold text-[14.5px] text-link disabled:text-disabled-foreground"
-					>
-						{savePending ? "Saving…" : "Save"}
-					</button>
-				)
-			}
 			title="Instructions"
 			description={`How ${agent.name} should work. It follows these in every chat.`}
 		>
@@ -357,6 +342,16 @@ function Instructions({
 					className="block min-h-[380px] w-full resize-y rounded-[12px] bg-transparent p-3.5 text-[14.5px] text-foreground leading-[1.65] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsGroup>
+			{editable && (
+				<div className="flex justify-end">
+					<Button
+						disabled={!dirty || savePending}
+						onClick={() => void save({ prompt: draft }).catch(() => {})}
+					>
+						{savePending ? "Saving…" : "Save"}
+					</Button>
+				</div>
+			)}
 		</SettingsPage>
 	);
 }

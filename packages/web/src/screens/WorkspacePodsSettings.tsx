@@ -18,6 +18,7 @@ import {
 	usePods,
 	useUpdatePod,
 } from "@/lib/pods.ts";
+import { startSettingsTrail, useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -66,6 +67,11 @@ export function WorkspacePodsSettings({
 	const { data: pods, isPending, error } = usePods();
 	const { agents } = useAgents();
 	const navigate = useNavigate();
+	const returnTo = useSettingsBack();
+	const back = useBackTarget({
+		label: "Pods",
+		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
+	});
 	const [search, setSearch] = useState("");
 	const [creating, setCreating] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
@@ -85,10 +91,8 @@ export function WorkspacePodsSettings({
 		<>
 			<SettingsListDetail
 				detailOpen={selectedPodId !== undefined}
-				back={{
-					label: "Pods",
-					render: <Link from="/$workspace" to="./settings/$section" params={{ section: "pods" }} />,
-				}}
+				back={back}
+				returnTo={returnTo}
 				list={
 					<SettingsListColumn
 						title="Pods"
@@ -106,7 +110,7 @@ export function WorkspacePodsSettings({
 									label={pod.name}
 									sub={`${bots} ${bots === 1 ? "bot" : "bots"}`}
 									selected={pod.id === selected?.id && (selectedPodId ? true : "wide")}
-									render={<Link {...podSettingsLink(pod)} />}
+									render={<Link {...podSettingsLink(pod)} state={startSettingsTrail} />}
 								/>
 							);
 						})}

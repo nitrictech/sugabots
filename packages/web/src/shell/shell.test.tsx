@@ -300,6 +300,60 @@ describe("the settings navigation", () => {
 		expect(within(rail).queryByRole("link", { name: "Web search" })).toBeNull();
 	});
 
+	// Each settings page draws its own navigation, so it is looked up afresh after every move.
+	const settingsNavigation = () => screen.findByRole("navigation", { name: "Settings" });
+
+	it("goes back to the pod a bot was opened from, naming it", async () => {
+		const router = mount("/suga/settings/pods/suga-team");
+		await screen.findByRole("heading", { name: "Suga-Team" });
+		// Arriving by address leaves nowhere to go back to.
+		expect(screen.queryByRole("link", { name: /^Back to/ })).toBeNull();
+
+		await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
+		fireEvent.click(await screen.findByRole("link", { name: "Back to Suga-Team pod" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/suga/settings/pods/suga-team"),
+		);
+		await screen.findByRole("heading", { name: "Suga-Team" });
+		expect(screen.queryByRole("link", { name: /^Back to/ })).toBeNull();
+	});
+
+	it("starts over when a section is picked from the navigation", async () => {
+		const router = mount("/suga/settings/pods/suga-team");
+		await screen.findByRole("heading", { name: "Suga-Team" });
+		await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
+		await screen.findByRole("link", { name: "Back to Suga-Team pod" });
+
+		fireEvent.click(within(await settingsNavigation()).getByRole("link", { name: "Bots, 3" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/agents"));
+		expect(screen.queryByRole("link", { name: /^Back to/ })).toBeNull();
+	});
+
+	it("starts over when another bot is picked from the list of bots", async () => {
+		const router = mount("/suga/settings/pods/suga-team");
+		await screen.findByRole("heading", { name: "Suga-Team" });
+		await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
+		await screen.findByRole("link", { name: "Back to Suga-Team pod" });
+
+		const bots = screen.getByRole("navigation", { name: "Workspace bots" });
+		fireEvent.click(within(bots).getByRole("link", { name: /^Issue Triager/ }));
+
+		await screen.findByRole("heading", { name: "Issue Triager" });
+		expect(screen.queryByRole("link", { name: /^Back to/ })).toBeNull();
+	});
+
+	it("goes back to the chat settings were opened from", async () => {
+		const router = mount(linearPage);
+		await screen.findByRole("main");
+
+		await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
+
+		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+	});
+
 	it("tells a member who reaches the Models page by address that it is not theirs", async () => {
 		apiAnswers({ role: "member" });
 		mount("/suga/settings/providers/system");

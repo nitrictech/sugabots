@@ -4,6 +4,7 @@ import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
+import { startSettingsTrail, useBackTarget, useSettingsBack } from "@/lib/settings-trail.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -26,6 +27,11 @@ export function WorkspaceAgentsSettings({
 	const { agents, isPending, error } = useAgents();
 	const pods = usePods();
 	const navigate = useNavigate();
+	const returnTo = useSettingsBack();
+	const back = useBackTarget({
+		label: "Bots",
+		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "agents" }} />,
+	});
 	const [search, setSearch] = useState("");
 	const [creating, setCreating] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
@@ -49,12 +55,8 @@ export function WorkspaceAgentsSettings({
 		<>
 			<SettingsListDetail
 				detailOpen={selectedAgentId !== undefined}
-				back={{
-					label: "Bots",
-					render: (
-						<Link from="/$workspace" to="./settings/$section" params={{ section: "agents" }} />
-					),
-				}}
+				back={back}
+				returnTo={returnTo}
 				list={
 					<SettingsListColumn
 						title="Bots"
@@ -73,7 +75,9 @@ export function WorkspaceAgentsSettings({
 									label={agent.name}
 									sub={pod.name}
 									selected={agent.id === selected?.id && (selectedAgentId ? true : "wide")}
-									render={<Link {...agentSettingsLink({ pod, agent })} />}
+									render={
+										<Link {...agentSettingsLink({ pod, agent })} state={startSettingsTrail} />
+									}
 								/>
 							);
 						})}

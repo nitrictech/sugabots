@@ -12,6 +12,7 @@ import { type ReactElement, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { allLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
+import { startSettingsTrail } from "@/lib/settings-trail.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -123,6 +124,7 @@ export function RailView({
 					<Link
 						from="/$workspace"
 						to="./settings"
+						state={startSettingsTrail}
 						aria-label="Settings"
 						aria-current={selected === "settings" ? "page" : undefined}
 						className="focus-ring relative flex shrink-0 items-center rounded-full"
