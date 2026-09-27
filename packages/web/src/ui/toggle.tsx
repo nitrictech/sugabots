@@ -3,46 +3,18 @@ import { Tooltip } from "./tooltip.tsx";
 export function Toggle({
 	checked,
 	disabled,
-	disabledReason,
 	label,
+	tooltip,
 	onChange,
 }: {
 	checked: boolean;
 	disabled?: boolean;
-	/** Why the switch cannot be changed. Disables it, and hovering it says why. */
-	disabledReason?: string;
 	label: string;
+	/** Text shown on hover. Pass what a click does, or, while disabled, why the switch cannot be changed. */
+	tooltip?: string;
 	onChange: (checked: boolean) => void;
 }) {
 	const toggle = (
-		<ToggleButton
-			checked={checked}
-			disabled={disabled || disabledReason !== undefined}
-			label={label}
-			onChange={onChange}
-		/>
-	);
-	if (disabledReason === undefined) return toggle;
-	// A disabled button gets no pointer events, so the tooltip hangs on a wrapper.
-	return (
-		<Tooltip label={disabledReason} side="top">
-			<span className="inline-flex shrink-0">{toggle}</span>
-		</Tooltip>
-	);
-}
-
-function ToggleButton({
-	checked,
-	disabled,
-	label,
-	onChange,
-}: {
-	checked: boolean;
-	disabled: boolean | undefined;
-	label: string;
-	onChange: (checked: boolean) => void;
-}) {
-	return (
 		<button
 			type="button"
 			role="switch"
@@ -56,5 +28,18 @@ function ToggleButton({
 				className={`absolute top-[3px] left-[3px] size-5 rounded-full bg-white transition-transform duration-150 ${checked ? "translate-x-[18px]" : ""}`}
 			/>
 		</button>
+	);
+	if (tooltip === undefined) return toggle;
+	return (
+		<Tooltip label={tooltip} side="top">
+			{/*
+			 * The tooltip hangs on a wrapper because a disabled button receives no
+			 * mouse events. The wrapper stays when the switch is enabled too: Tooltip
+			 * attaches its hover listeners to the element it first renders, so
+			 * swapping the button for a wrapper when `disabled` turns true would leave
+			 * the listeners on a removed element and the tooltip would never open.
+			 */}
+			<span className="inline-flex shrink-0">{toggle}</span>
+		</Tooltip>
 	);
 }

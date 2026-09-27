@@ -137,9 +137,7 @@ describe("a member", () => {
 		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
 		mount(page);
 
-		expect(
-			await screen.findAllByText("Off for the workspace. Ask an admin to turn on web search."),
-		).toHaveLength(2);
+		expect(await screen.findByText(/Ask a workspace admin to turn it on/)).toBeTruthy();
 	});
 
 	it("edits the model and the instructions, which a member of the pod may do", async () => {
@@ -592,8 +590,8 @@ describe("an admin", () => {
 			expect(tool.hasAttribute("disabled")).toBe(true);
 		}
 		expect(
-			screen.getAllByText("Off for the workspace. Turn on web search in settings."),
-		).toHaveLength(2);
+			screen.getByRole("link", { name: "Turn it on in Web search" }).getAttribute("href"),
+		).toMatch(/\/settings\/search$/);
 	});
 
 	it("deletes the bot after asking, and returns to the list", async () => {

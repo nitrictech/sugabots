@@ -23,8 +23,11 @@ export function useSearchProvider() {
 }
 
 /**
- * Whether bots may use the web, which anyone in the workspace may ask. Keyed
- * under the provider, so changing the provider refreshes it too.
+ * useWebAccess fetches whether the current workspace's bots are offered the web
+ * tools. Any workspace member may read it, unlike the provider itself. Its query
+ * key starts with `["search-provider", workspaceId]`, the key that replacing,
+ * updating, or removing the provider through useSearchProviderActions
+ * invalidates, so each of those changes refetches it.
  */
 export function useWebAccess() {
 	const workspaceId = useWorkspace().workspace?.id;

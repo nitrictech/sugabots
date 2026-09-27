@@ -9,13 +9,15 @@ import { searchBackend, searchEndpoint } from "./web-search/backends.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 
 /**
- * The built-in tools a workspace's crew turns are offered.
+ * BuiltInTools supplies the built-in tools offered to a workspace's crew turns.
  *
- * Both reach the web, so both are there only while the workspace has an
- * enabled search provider with what it needs to be called: its switch is the
- * workspace's one switch for web access, and each search is a call the
- * workspace pays for (ADR 005). Asked per turn, so enabling a provider reaches
- * the next turn without a restart.
+ * forWorkspace returns `web_fetch` and `web_search` while
+ * `searchProviders.resolve` finds an enabled search provider with every
+ * setting a search needs, and no tools otherwise. The provider's enabled flag
+ * is the workspace's one setting for whether bots may use the web, and each
+ * search is billed to the workspace (ADR 005). forWorkspace looks the provider
+ * up on every call, so a provider enabled between turns applies from the next
+ * turn without a restart.
  */
 export interface BuiltInTools {
 	forWorkspace(workspaceId: string): Effect.Effect<ToolSet, never, Database>;

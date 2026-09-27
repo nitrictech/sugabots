@@ -18,10 +18,12 @@ import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.
 import { Toggle } from "@/ui/toggle.tsx";
 
 /*
- * Whether bots may use the web, and, under Advanced, who answers searches.
- * The switch gives every bot the `web_search` and `web_fetch` tools. Exa answers until another
- * provider is chosen, and its key is optional, so the switch works on a fresh
- * workspace; a provider that needs a key holds the switch off until it has one.
+ * The workspace's web search settings: a switch for whether bots may use the
+ * web, and, under Advanced, which provider answers searches. Turning the
+ * switch on gives every bot the `web_fetch` and `web_search` tools. Exa
+ * answers until another provider is chosen, and its key is optional, so the
+ * switch works on a fresh workspace; a provider that needs a key keeps the
+ * switch disabled until the key is added.
  */
 
 /** What each provider is good for, in the line under its name. */

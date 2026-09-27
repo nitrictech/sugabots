@@ -123,9 +123,10 @@ export const searchProviderResponseSchema = Schema.Struct({
 });
 
 /**
- * Whether bots may use the web: `web_search` and `web_fetch` are offered only
- * while the workspace's search provider is enabled. Anyone in the workspace
- * may read it, so a bot's settings can show those tools as off.
+ * webAccessSchema describes whether a workspace's bots are offered the web
+ * tools, `web_fetch` and `web_search`. `enabled` is true while the workspace
+ * has an enabled search provider with every setting a search needs, such as
+ * an API key for a provider that requires one.
  */
 export const webAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
 export type WebAccess = typeof webAccessSchema.Type;
