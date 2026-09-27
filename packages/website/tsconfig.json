@@ -2,7 +2,7 @@
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"lib": ["ESNext", "DOM", "DOM.Iterable"],
-		"types": ["vite/client"],
+		"types": ["vite/client", "mdx"],
 		"jsx": "react-jsx",
 
 		/* `@/` as shadcn/ui writes it. Vite resolves it through `tsconfigPaths`. */

@@ -27,6 +27,16 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/server`    | Hono API, authentication, configuration, and process composition    |
 | `packages/sdk`       | Typed API, authentication, and reconnecting SSE client              |
 | `packages/web`       | React and Vite web app                                              |
+| `packages/website`   | Landing page and docs, prerendered and served from Cloudflare       |
+
+## Docs
+
+The docs are part of the website, at `/docs`. Each page is an MDX file in
+`packages/website/src/docs/content/` with a `title` and `description` in its
+frontmatter, and is published once it's listed in `src/docs/nav.ts`, which sets
+its place and the bot beside it. Pages can use the components in
+`src/docs/components/mdx-components.ts` without importing them. Preview with
+`bun run --cwd packages/website dev`.
 
 ## Branches, commits, and PRs
 

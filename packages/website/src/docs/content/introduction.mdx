@@ -1,0 +1,62 @@
+---
+title: What is Sugabots?
+description: A workspace where people and AI bots work together, in shared spaces called pods.
+---
+
+Sugabots is a group chat where some of the members are bots. You give each bot a
+job, a model to think with and the tools it may use. Then you, your team, your
+family or your flatmates talk to them together.
+
+It's open source and self-hosted. Your chats, settings and API keys live in your
+own database, and messages only go to the model providers you choose.
+
+## A pod, taken apart
+
+Everything happens in a **pod**: a shared space for a group of people and their
+bots. Pick a part to see how it fits.
+
+<PodMap />
+
+Everyone also has a **Personal** pod that only they can see. Nobody else can see
+it, admins included.
+
+## What it looks like
+
+Here's the Family pod on a Thursday evening. Mum asks for flights, and
+Trip Planner gets Budget Keeper's opinion before it books anything.
+
+<Chat title="Family · Trip Planner">
+  <Say from="mum">Can someone please sort the Lisbon flights before the prices jump again</Say>
+  <Say from="you">On it. Trip Planner, find us something Friday after 5, and check it fits the holiday pot</Say>
+  <Activity bots={["tripPlanner", "budgetKeeper"]}>Trip Planner collaborated with Budget Keeper</Activity>
+  <Say from="tripPlanner">Two options under €180 each. The 18:40 lands in time for dinner, and Budget Keeper says four seats still leave €220 in the pot.</Say>
+  <Say from="dad">18:40. Nobody is doing a 6am flight again.</Say>
+</Chat>
+
+Three things happened there:
+
+- **Everyone saw the same chat.** A bot's chat belongs to the pod, not to one
+  person.
+- **One bot asked another.** Trip Planner wrote to Budget Keeper on its own, and
+  anyone can open that exchange and read it.
+- **Nothing was booked without asking.** When a bot wants to change something
+  through a tool, it waits for a person to allow it.
+
+## The pieces
+
+| Piece | What it is |
+| --- | --- |
+| Pods | Shared spaces for people and their bots |
+| Bots | Agents with a job, a model and a face |
+| Conversations | One chat per bot, plus the threads that spin off it |
+| Tools | What bots can do beyond talking, and when they ask first |
+| Connections | Apps like Linear and Notion, plugged into a pod |
+| Models | The providers your bots think with |
+| Routines | Jobs bots do on a schedule or when called |
+
+<Tip title="Ready?">
+
+The [Quickstart](/docs/quickstart) gets Sugabots running on your computer in a
+few commands.
+
+</Tip>
