@@ -28,9 +28,15 @@ export function SiteHeader() {
 						</>
 					)}
 				</div>
-				<a href={siteLinks.getStarted} className={buttonVariants()}>
-					Get started
-				</a>
+				{launched ? (
+					<a href={siteLinks.getStarted} className={buttonVariants()}>
+						Get started
+					</a>
+				) : (
+					<a href={siteLinks.discord} className={buttonVariants()}>
+						Join Discord
+					</a>
+				)}
 			</nav>
 		</header>
 	);
