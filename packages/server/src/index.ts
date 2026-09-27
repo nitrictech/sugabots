@@ -36,6 +36,7 @@ import { Authentication } from "./auth/authentication.ts";
 import { API_BASE_PATH } from "./http/api.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
+import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
 import { channelAccess } from "./routes/events/access.ts";
 import { backgroundLayer } from "./runtime.ts";
@@ -144,6 +145,7 @@ const main = Effect.gen(function* () {
 	});
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
+			Layer.provide(requestSpanNames),
 			Layer.provideMerge(
 				NodeHttpServer.layerConfig(createServer, {
 					port: Config.Port("PORT").pipe(Config.withDefault(3000)),
