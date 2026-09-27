@@ -55,7 +55,11 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 						});
 					}
 					return yield* pods
-						.create(workspaceId, actor, { name: payload.name, slug: slug.success })
+						.create(workspaceId, actor, {
+							name: payload.name,
+							slug: slug.success,
+							color: payload.color,
+						})
 						.pipe(asHttpError(podErrors));
 				}),
 			)
@@ -75,6 +79,7 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 					if (
 						payload.name === undefined &&
 						payload.slug === undefined &&
+						payload.color === undefined &&
 						payload.routing === undefined
 					) {
 						return yield* new BadRequest({ message: "Nothing to change" });

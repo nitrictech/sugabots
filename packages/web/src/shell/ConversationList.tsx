@@ -273,7 +273,12 @@ function ConversationRow({
 				<AgentAvatar color={agent.color} face={agent.face} size={44} />
 				{inAll && (
 					<span className="absolute -right-[5px] -bottom-[5px]" title={pod.name}>
-						<PodTile bots={row.podBots} size={20} className="border-[2.5px] border-list" />
+						<PodTile
+							bots={row.podBots}
+							color={pod.color}
+							size={20}
+							className="border-[2.5px] border-list"
+						/>
 					</span>
 				)}
 			</span>

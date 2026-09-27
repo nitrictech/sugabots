@@ -19,7 +19,8 @@ const PERMISSIONS: PodPermissions = {
 	runRoutines: true,
 };
 
-function pod(id: string, name: string, kind: Pod["kind"] = "shared"): Pod {
+function pod(id: string, name: string, color: Pod["color"]): Pod {
+	const kind = color === null ? "personal" : "shared";
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000${id}`,
 		workspaceId: WORKSPACE,
@@ -27,16 +28,17 @@ function pod(id: string, name: string, kind: Pod["kind"] = "shared"): Pod {
 		kind,
 		name,
 		slug: kind === "personal" ? "personal" : name.toLowerCase(),
+		color,
 		routing: DEFAULT_POD_ROUTING,
 		permissions: PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
 
-export const revenue = pod("a1", "Revenue");
-export const engineering = pod("a2", "Engineering");
-export const design = pod("a3", "Design");
-export const personal = pod("af", "Personal", "personal");
+export const revenue = pod("a1", "Revenue", "green");
+export const engineering = pod("a2", "Engineering", "blue");
+export const design = pod("a3", "Design", "plum");
+export const personal = pod("af", "Personal", null);
 
 let next = 0;
 function bot(name: string, home: Pod, color: AgentColor, face: AgentFace = "pill"): Agent {

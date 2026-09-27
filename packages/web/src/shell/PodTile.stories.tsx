@@ -1,6 +1,7 @@
 import type { BotLook } from "@sugabots/avatars";
+import { podColors } from "@sugabots/contracts";
 import preview from "#storybook/preview";
-import { PodTile, type PodTileSize } from "./PodTile.tsx";
+import { AllPodsTile, PodTile, type PodTileSize } from "./PodTile.tsx";
 
 const revenue: BotLook[] = [
 	{ color: "green", face: "pill" },
@@ -16,10 +17,10 @@ const meta = preview.meta({
 	title: "Product/PodTile",
 	component: PodTile,
 	tags: ["ai-generated"],
-	args: { bots: revenue, size: 46 as const },
+	args: { bots: revenue, color: "green" as const, size: 46 as const },
 });
 
-/** Default is a pod on the rail: its first four bots' faces, each with its own colour and eyes. */
+/** Default is a pod on the rail: its first four bots' faces, each with its own colour and eyes, on the pod's colour. */
 export const Default = meta.story({});
 
 /** Partial fills the slots with no bot with faint discs. */
@@ -37,12 +38,43 @@ export const Empty = meta.story({
 	args: { bots: [] },
 });
 
+/** Neutral is the uncoloured tile that All and a Personal pod are drawn on. */
+export const Neutral = meta.story({
+	args: { color: null },
+});
+
+/** Colours shows every pod colour, empty and with a bot in it, as a rail of pods would. */
+export const Colours = meta.story({
+	render: () => (
+		<div className="flex flex-col gap-3">
+			{[[], revenue.slice(0, 1)].map((bots) => (
+				<div key={bots.length} className="flex gap-3">
+					{podColors.map((color) => (
+						<PodTile key={color} bots={bots} color={color} size={46} />
+					))}
+				</div>
+			))}
+		</div>
+	),
+});
+
+/** AllPods is All on the rail with one to four pods: their colours, and faint squares where there is none. */
+export const AllPods = meta.story({
+	render: () => (
+		<div className="flex gap-3">
+			{[1, 2, 3, 4].map((count) => (
+				<AllPodsTile key={count} colors={podColors.slice(0, count)} size={46} />
+			))}
+		</div>
+	),
+});
+
 /** Sizes shows the tile at every size the design draws, from the dialog preview down to the chat-row badge. */
 export const Sizes = meta.story({
 	render: () => (
 		<div className="flex items-end gap-4">
 			{sizes.map((size) => (
-				<PodTile key={size} bots={revenue} size={size} />
+				<PodTile key={size} bots={revenue} color="green" size={size} />
 			))}
 		</div>
 	),

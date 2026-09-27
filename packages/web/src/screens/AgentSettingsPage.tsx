@@ -22,6 +22,7 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
 	PageBackLink,
+	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -215,21 +216,19 @@ function ContactCard({
 function Look({ agent, save }: { agent: Agent; save: Save }) {
 	return (
 		<SettingsGroup label="Look">
-			<div className="flex items-center gap-3 border-border border-b px-4 py-3">
-				<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Colour</span>
+			<SettingsControlRow label="Colour">
 				<ColourPicker
 					value={agent.color}
 					onChange={(color) => void save({ color }).catch(() => {})}
 				/>
-			</div>
-			<div className="flex items-center gap-3 px-4 py-2.5">
-				<span className="w-14 shrink-0 text-[14px] text-muted-foreground">Eyes</span>
+			</SettingsControlRow>
+			<SettingsControlRow label="Eyes">
 				<EyesPicker
 					color={agent.color}
 					value={agent.face}
 					onChange={(face) => void save({ face }).catch(() => {})}
 				/>
-			</div>
+			</SettingsControlRow>
 		</SettingsGroup>
 	);
 }
@@ -267,10 +266,7 @@ function TextRow({
 	}
 
 	return (
-		<div className="flex items-center gap-3 border-border border-b px-4 py-3 last:border-b-0">
-			<label htmlFor={id} className="w-[110px] shrink-0 text-[14px] text-muted-foreground">
-				{label}
-			</label>
+		<SettingsControlRow label={label} htmlFor={id}>
 			{editable ? (
 				<input
 					id={id}
@@ -290,7 +286,7 @@ function TextRow({
 					{value || <span className="text-subtle-foreground">None yet</span>}
 				</span>
 			)}
-		</div>
+		</SettingsControlRow>
 	);
 }
 
@@ -384,7 +380,7 @@ function Tools({
 	return (
 		<SettingsGroup label="Tools">
 			<SettingsRow
-				icon={<PodTile bots={podBots} size={30} />}
+				icon={<PodTile bots={podBots} color={pod.color} size={30} />}
 				label={`Tools from ${pod.name}`}
 				sub="Every bot in the pod shares these"
 				trailing={<span className="shrink-0 font-medium text-[13.5px] text-link">Edit</span>}
