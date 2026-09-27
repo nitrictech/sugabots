@@ -125,7 +125,9 @@ const claimFor = (request: TurnRequest, attempt: number) =>
  * The turn workflow's steps: running a segment of the turn, and freeing its
  * lane afterwards. Activities reach them through `TurnSteps`.
  */
-export const stepsLayer = (execution: Omit<TurnExecution, "owner">) =>
+export const stepsLayer = (
+	execution: Omit<TurnExecution, "owner"> & { approvals: ToolApprovalStore },
+) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
@@ -152,6 +154,12 @@ export const stepsLayer = (execution: Omit<TurnExecution, "owner">) =>
 							}
 						}),
 					).pipe(Effect.provideService(Database, database)),
+				decide: (request, approvalId, decision) =>
+					execution.approvals
+						.record({ threadId: request.threadId, approvalId, decision })
+						.pipe(Effect.provideService(Database, database)),
+				stopWaiting: (request) =>
+					execution.store.stopWaiting(request).pipe(Effect.provideService(Database, database)),
 				release: (request) =>
 					Effect.flatMap(Turn.executionId(request), (executionId) =>
 						lanes.release({ key: turnLane(request), executionId }),

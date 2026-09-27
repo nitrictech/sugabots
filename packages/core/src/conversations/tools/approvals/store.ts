@@ -1,13 +1,12 @@
 import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../../database/database.ts";
 import type { PublishEvents } from "../../../database/events/publish.ts";
 import {
 	connection,
-	job,
 	pod,
 	routineExecution,
 	thread,
@@ -18,6 +17,9 @@ import {
 import { podStandingFor } from "../../../workspaces/access.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { ownedByJob, resumeWaitingJob } from "../../turns/owner.ts";
+import type { TurnSignals } from "../../turns/signals.ts";
+import type { ApprovalDecision } from "../../turns/turn.workflow.ts";
 import { boundedJson } from "../calls/store.ts";
 
 export interface PendingToolApproval {
@@ -52,6 +54,10 @@ export interface ToolApprovalStore {
 		connectionRevision: number;
 		remoteToolName: string;
 	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
+	/**
+	 * Checks a person may make the decision, then sends it to the turn's
+	 * workflow, which records it. A turn run as a job records it here.
+	 */
 	decide(input: {
 		workspaceId: string;
 		podId: string;
@@ -59,10 +65,16 @@ export interface ToolApprovalStore {
 		userId: string;
 		decision: ToolApprovalDecision["decision"];
 	}): Effect.Effect<
-		ToolCallPart,
+		void,
 		ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
 		Database
 	>;
+	/** Records a decision on an approval in the thread, and announces it. Does nothing once decided. */
+	record(input: {
+		threadId: string;
+		approvalId: string;
+		decision: ApprovalDecision;
+	}): Effect.Effect<void, never, Database>;
 }
 
 export class ToolApprovalNotFound extends Data.TaggedError("ToolApprovalNotFound") {}
@@ -75,7 +87,56 @@ export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused
 	readonly message: string;
 }> {}
 
-export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalStore {
+export function toolApprovalStore(
+	publishEvents: PublishEvents,
+	signals: TurnSignals,
+): ToolApprovalStore {
+	/** Writes a decision still pending and announces it; `undefined` if it was already decided. */
+	const recordDecision = (threadId: string, approvalId: string, decision: ApprovalDecision) =>
+		Effect.gen(function* () {
+			const allowed = decision.decision !== "deny";
+			const [updated] = yield* query((db) =>
+				db
+					.update(toolCall)
+					.set({
+						approvalStatus: allowed ? "allowed" : "denied",
+						decidedById: decision.userId,
+						decidedAt: new Date(),
+						...(allowed
+							? {}
+							: {
+									status: "completed" as const,
+									output: boundedJson({
+										status: "denied",
+										reason: "A person denied this action",
+									}),
+									finishedAt: new Date(),
+								}),
+					})
+					.where(
+						and(
+							eq(toolCall.threadId, threadId),
+							eq(toolCall.approvalId, approvalId),
+							eq(toolCall.approvalStatus, "pending"),
+						),
+					)
+					.returning(),
+			);
+			if (!updated) return undefined;
+			const [deciderName] = yield* query((db) =>
+				db.select({ name: user.name }).from(user).where(eq(user.id, decision.userId)).limit(1),
+			);
+			yield* publishEvents([
+				callEvent(
+					"tool_call.updated",
+					toToolCallPart(updated, deciderName?.name ?? null),
+					updated.threadId,
+					updated.messageId,
+				),
+			]);
+			return updated;
+		});
+
 	return {
 		responsesForTurn: (turnId, approvalIds) =>
 			Effect.flatMap(
@@ -286,8 +347,8 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					);
 					if (!candidate?.call.approvalId) return yield* new ToolApprovalNotFound();
 					// The caller's authority is read again here, inside the
-					// transaction that settles the call, so a demotion between the
-					// route's check and the write does not slip through. Somebody who
+					// transaction that sends or records the decision, so a demotion
+					// between the route's check and the decision does not slip through. Somebody who
 					// cannot decide at all is told nothing is there, exactly as the
 					// route would have.
 					const decider = yield* query((db) => podStandingFor(db, input.podId, input.userId));
@@ -298,66 +359,46 @@ export function toolApprovalStore(publishEvents: PublishEvents): ToolApprovalSto
 					if (routineExecutionId && !decider.may("approval.routine.decide")) {
 						return yield* new ToolApprovalForbidden();
 					}
-					const allowed = input.decision !== "deny";
-					const [updated] = yield* query((db) =>
-						db
-							.update(toolCall)
-							.set({
-								approvalStatus: allowed ? "allowed" : "denied",
-								decidedById: input.userId,
-								decidedAt: new Date(),
-								...(allowed
-									? {}
-									: {
-											status: "completed" as const,
-											output: boundedJson({
-												status: "denied",
-												reason: "A person denied this action",
-											}),
-											finishedAt: new Date(),
-										}),
-							})
-							.where(and(eq(toolCall.id, input.toolCallId), eq(toolCall.approvalStatus, "pending")))
-							.returning(),
-					);
-					if (!updated) return yield* new ToolApprovalConflict();
-					const [deciderName] = yield* query((db) =>
-						db.select({ name: user.name }).from(user).where(eq(user.id, input.userId)).limit(1),
-					);
-					const part = toToolCallPart(updated, deciderName?.name ?? null);
-					yield* publishEvents([
-						callEvent("tool_call.updated", part, updated.threadId, updated.messageId),
-					]);
-
+					const approvalId = candidate.call.approvalId;
+					const decision = { decision: input.decision, userId: input.userId };
+					if (!candidate.owner) return yield* new ToolApprovalNotFound();
+					if (!(yield* ownedByJob(candidate.owner))) {
+						// Only one person's decision reaches the workflow, so the first to
+						// claim the call decides it and anyone after is told it is taken.
+						// The claim is undone with this transaction if the send fails.
+						const claimed = yield* query((db) =>
+							db
+								.update(toolCall)
+								.set({ decidedById: input.userId })
+								.where(
+									and(
+										eq(toolCall.id, input.toolCallId),
+										eq(toolCall.approvalStatus, "pending"),
+										isNull(toolCall.decidedById),
+									),
+								)
+								.returning({ id: toolCall.id }),
+						);
+						if (claimed.length === 0) return yield* new ToolApprovalConflict();
+						return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
+					}
+					const recorded = yield* recordDecision(candidate.threadId, approvalId, decision);
+					if (!recorded) return yield* new ToolApprovalConflict();
 					const [count] = yield* query((db) =>
 						db
 							.select({ unresolved: sql<number>`count(*)`.mapWith(Number) })
 							.from(toolCall)
 							.where(
-								and(eq(toolCall.turnId, updated.turnId), eq(toolCall.approvalStatus, "pending")),
+								and(eq(toolCall.turnId, recorded.turnId), eq(toolCall.approvalStatus, "pending")),
 							),
 					);
-					if ((count?.unresolved ?? 0) === 0) {
-						yield* query((db) =>
-							db
-								.update(job)
-								.set({ status: "queued", availableAt: new Date(), lockedAt: null })
-								.where(
-									and(
-										eq(job.id, candidate.owner ?? "00000000-0000-0000-0000-000000000000"),
-										eq(job.status, "waiting"),
-										sql`exists (
-											select 1 from ${turn}
-											where ${turn.owner} = ${job.id}::text
-												and ${turn.status} = 'waiting'
-												and ${turn.cancelRequested} = false
-										)`,
-									),
-								),
-						);
-					}
-					return part;
+					if ((count?.unresolved ?? 0) === 0) yield* resumeWaitingJob(candidate.owner);
 				}),
+			),
+
+		record: (input) =>
+			transaction(recordDecision(input.threadId, input.approvalId, input.decision)).pipe(
+				Effect.asVoid,
 			),
 	};
 }
@@ -369,6 +410,7 @@ export const noToolApprovalStore: ToolApprovalStore = {
 	beginExecution: () =>
 		Effect.fail(new ToolExecutionRefused({ message: "Tool approvals are not configured" })),
 	decide: () => Effect.fail(new ToolApprovalNotFound()),
+	record: () => Effect.void,
 };
 
 export function executionJson(value: unknown) {

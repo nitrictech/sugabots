@@ -28,6 +28,7 @@ import { summaryStore } from "../summaries/store.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { queueTurnAsJob } from "../turns/queue.ts";
 import { turnStore } from "../turns/store.ts";
+import { turnSignalsForTests } from "../turns/testing.ts";
 import { threadStore } from "./store.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -40,7 +41,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const publishEvents = eventPublisher(eventBus);
 	const store = onPostgres(threadStore());
 	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
-	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
 	const summaries = onPostgres(summaryStore(publishEvents));
 	let workspaceId: string;
 	let podId: string;

@@ -1,4 +1,3 @@
-import type { ToolCallPart } from "@sugabots/contracts";
 import {
 	noToolApprovalStore,
 	type ToolApprovalStore,
@@ -32,23 +31,8 @@ const authorization = testAuthorization({
 	pods: [{ id: POD_ID, kind: "shared", members: [MEMBER_ID], name: "Support", slug: "support" }],
 });
 
-const pending: ToolCallPart = {
-	type: "tool_call",
-	id: CALL_ID,
-	tool: "linear__create_issue",
-	input: { title: "Broken nav" },
-	output: null,
-	status: "awaiting_approval",
-	approval: { status: "pending", decidedByName: null, decidedAt: null },
-	error: null,
-	mutating: true,
-	atOffset: 0,
-	startedAt: "2026-09-14T00:00:00.000Z",
-	finishedAt: null,
-};
-
 function app() {
-	const decide = vi.fn<ToolApprovalStore["decide"]>(() => Effect.succeed(pending));
+	const decide = vi.fn<ToolApprovalStore["decide"]>(() => Effect.void);
 	return {
 		decide,
 		app: createTestApp({
@@ -68,7 +52,7 @@ describe("tool approval routes", () => {
 			body: JSON.stringify({ decision: "allow_once" }),
 		});
 
-		expect(response.status).toBe(200);
+		expect(response.status).toBe(202);
 		expect(built.decide).toHaveBeenCalledWith(
 			expect.objectContaining({ userId: MEMBER_ID, decision: "allow_once" }),
 		);
@@ -82,7 +66,7 @@ describe("tool approval routes", () => {
 			body: JSON.stringify({ decision: "deny" }),
 		});
 
-		expect(response.status).toBe(200);
+		expect(response.status).toBe(202);
 	});
 
 	it("has no standing approval to give: every call that changes things is decided on its own", async () => {

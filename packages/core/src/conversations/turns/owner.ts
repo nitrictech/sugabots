@@ -1,7 +1,8 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { Effect, Ref } from "effect";
 import type { Database } from "../../database/database.ts";
 import { query } from "../../database/database.ts";
+import { isUuid } from "../../database/ids.ts";
 import { job } from "../../database/schema.ts";
 import {
 	cancelJob,
@@ -107,9 +108,38 @@ export const jobTurnOwner: TurnOwner = {
 	discarded: (claim, reason) => cancelJob(claim.owner, reason),
 };
 
-/** The batch of approvals a checkpoint waits for, named by its first approval. */
-export const approvalBatchOf = (checkpoint: TurnCheckpoint) =>
-	checkpoint.approvals[0]?.approvalId ?? "none";
+/**
+ * Whether a job owns the turn: one asked for before turns ran as workflows,
+ * still draining. Jobs have uuids and workflow executions never do.
+ */
+export const ownedByJob = (owner: string) =>
+	isUuid(owner)
+		? Effect.map(
+				query((db) => db.select({ id: job.id }).from(job).where(eq(job.id, owner)).limit(1)),
+				(rows) => rows.length > 0,
+			)
+		: Effect.succeed(false);
+
+/** Every approval of the job's waiting turn is decided, so the job runs on. */
+export const resumeWaitingJob = (owner: string) =>
+	query((db) =>
+		db
+			.update(job)
+			.set({ status: "queued", availableAt: new Date(), lockedAt: null })
+			.where(and(eq(job.id, owner), eq(job.status, "waiting"))),
+	);
+
+/** A person cancelled the job's waiting turn; work it held back is queued. */
+export const cancelWaitingJob = (owner: string) =>
+	Effect.andThen(
+		query((db) =>
+			db
+				.update(job)
+				.set({ status: "cancelled", lastError: "Cancelled by a person", lockedAt: null })
+				.where(and(eq(job.id, owner), inArray(job.status, ["waiting", "queued"]))),
+		),
+		query((db) => queueDeferredJob(db, owner)),
+	);
 
 /**
  * A segment of the turn workflow. The workflow does the bookkeeping itself,
@@ -118,7 +148,10 @@ export const approvalBatchOf = (checkpoint: TurnCheckpoint) =>
 export const segmentTurnOwner = (outcome: Ref.Ref<SegmentOutcome>): TurnOwner => ({
 	completed: () => Effect.void,
 	suspended: (_claim, checkpoint) =>
-		Ref.set(outcome, { _tag: "Suspended", approvals: approvalBatchOf(checkpoint) }),
+		Ref.set(outcome, {
+			_tag: "Suspended",
+			approvals: checkpoint.approvals.map((approval) => approval.approvalId),
+		}),
 	failed: (claim, _error, retryable) => {
 		const willRetry = retryable && claim.attempts < MAX_TURN_RUNS;
 		return Ref.set(outcome, willRetry ? { _tag: "Retry" } : { _tag: "Finished" }).pipe(

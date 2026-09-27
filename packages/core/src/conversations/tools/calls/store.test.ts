@@ -1,7 +1,8 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq, inArray } from "drizzle-orm";
-import { Effect } from "effect";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { WorkflowEngine } from "effect/unstable/workflow";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { transaction } from "../../../database/database.ts";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { eventPublisher } from "../../../database/events/publish.ts";
@@ -29,6 +30,7 @@ import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
 import { jobTurnOwner } from "../../turns/owner.ts";
 import { queueTurnAsJob } from "../../turns/queue.ts";
+import { turnSignals } from "../../turns/signals.ts";
 import {
 	MAX_TURN_RUNS,
 	type PreparedTurn,
@@ -38,8 +40,17 @@ import {
 	type TurnStore,
 	turnStore,
 } from "../../turns/store.ts";
+import { turnSignalsForTests } from "../../turns/testing.ts";
+import {
+	type SegmentOutcome,
+	Turn,
+	type TurnRequest,
+	TurnSteps,
+	turnWorkflow,
+} from "../../turns/turn.workflow.ts";
 import {
 	type PendingToolApproval,
+	ToolApprovalConflict,
 	ToolApprovalNotFound,
 	type ToolApprovalStore,
 	toolApprovalStore,
@@ -59,10 +70,12 @@ import {
 describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () => {
 	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
 	const calls: Promised<ToolCallStore> = onPostgres(toolCallStore(publishEvents));
-	const approvals: Promised<ToolApprovalStore> = onPostgres(toolApprovalStore(publishEvents));
+	const approvals: Promised<ToolApprovalStore> = onPostgres(
+		toolApprovalStore(publishEvents, turnSignalsForTests),
+	);
 	const threads = onPostgres(threadStore());
 	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
-	const store = turnStore(publishEvents, queueTurnAsJob);
+	const store = turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests);
 	const turns = onPostgres(store);
 	let workspaceId: string;
 	let podId: string;
@@ -315,7 +328,11 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			userId: memberId,
 			decision: "allow_once",
 		});
-		expect(decided.approval?.status).toBe("allowed");
+		expect(decided).toBeUndefined();
+		const [allowedCall] = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+		);
+		expect(allowedCall?.approvalStatus).toBe("allowed");
 		const [queued] = await onDatabase((db) =>
 			db.select({ status: job.status }).from(job).where(eq(job.id, prepared.claim.owner)),
 		);
@@ -413,6 +430,137 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			remoteToolName: pending.remoteToolName,
 		};
 	}
+
+	describe("when a workflow owns the turn", () => {
+		const segment = vi.fn((_request: TurnRequest, _attempt: number) =>
+			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
+		);
+		// Recording decisions and cancellations is real; the segments are not.
+		const recorder = onPostgres(toolApprovalStore(publishEvents, turnSignalsForTests));
+		const steps = TurnSteps.of({
+			segment,
+			decide: (request, approvalId, decision) =>
+				Effect.promise(() => recorder.record({ threadId: request.threadId, approvalId, decision })),
+			stopWaiting: (request) => Effect.promise(() => turns.stopWaiting(request)),
+			abandon: () => Effect.void,
+			release: () => Effect.void,
+		});
+		const workflows = ManagedRuntime.make(
+			Turn.toLayer(turnWorkflow).pipe(
+				Layer.provideMerge(Layer.succeed(TurnSteps, steps)),
+				Layer.provideMerge(WorkflowEngine.layerMemory),
+			),
+		);
+		afterAll(() => workflows.dispose());
+
+		/** Runs the turn's workflow to its first segment, which parks `pending` for approval. */
+		async function parkInWorkflow(pending: PendingToolApproval) {
+			segment.mockClear();
+			segment.mockReturnValueOnce(
+				Effect.succeed({ _tag: "Suspended", approvals: [pending.approvalId] }),
+			);
+			const executionId = await workflows.runPromise(
+				Turn.execute(
+					{
+						threadId,
+						agentId: prepared.claim.payload.agentId,
+						triggerMessageId: prepared.claim.payload.triggerMessageId,
+						reason: "mention",
+					},
+					{ discard: true },
+				),
+			);
+			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
+			await onDatabase((db) =>
+				db.update(turn).set({ owner: executionId }).where(eq(turn.id, prepared.turnId)),
+			);
+			await turns.suspend(
+				prepared,
+				checkpoint({
+					approvals: [
+						{
+							approvalId: pending.approvalId,
+							tool: pending.tool,
+							connectionId,
+							connectionRevision: 1,
+							remoteToolName: pending.remoteToolName,
+						},
+					],
+				}),
+				[pending],
+			);
+			const engine = await workflows.runPromise(Effect.service(WorkflowEngine.WorkflowEngine));
+			return turnSignals(engine);
+		}
+
+		const pendingCall = (): PendingToolApproval => ({
+			id: crypto.randomUUID(),
+			approvalId: `approval-${crypto.randomUUID()}`,
+			sdkToolCallId: "sdk-workflow",
+			tool: "linear__create_issue",
+			input: { title: "Workflow" },
+			connectionId,
+			connectionRevision: 1,
+			remoteToolName: "create_issue",
+			mutating: true,
+			atOffset: 0,
+		});
+
+		it("sends a decision to the workflow, which records it and runs on", async () => {
+			const pending = pendingCall();
+			const signals = await parkInWorkflow(pending);
+
+			await onPostgres(toolApprovalStore(publishEvents, signals)).decide({
+				workspaceId,
+				podId,
+				toolCallId: pending.id,
+				userId: memberId,
+				decision: "allow_once",
+			});
+
+			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
+			const [decided] = await onDatabase((db) =>
+				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+			);
+			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: memberId });
+		});
+
+		it("tells a second person the approval is already decided", async () => {
+			const pending = pendingCall();
+			const signals = await parkInWorkflow(pending);
+			const deciding = onPostgres(toolApprovalStore(publishEvents, signals));
+			const decide = (decision: "allow_once" | "deny") =>
+				deciding.decide({ workspaceId, podId, toolCallId: pending.id, userId: memberId, decision });
+
+			await decide("allow_once");
+
+			await expect(decide("deny")).rejects.toBeInstanceOf(ToolApprovalConflict);
+		});
+
+		it("sends a cancel to the workflow, which records it and ends", async () => {
+			const signals = await parkInWorkflow(pendingCall());
+
+			expect(
+				await onPostgres(turnStore(publishEvents, queueTurnAsJob, signals)).requestCancel(
+					prepared.turnId,
+					memberId,
+				),
+			).toBe(true);
+
+			// Marked at once, so a segment starting as the signal lands stops too.
+			const [marked] = await onDatabase((db) =>
+				db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+			);
+			expect(marked?.cancelRequested).toBe(true);
+			await vi.waitFor(async () => {
+				const [cancelled] = await onDatabase((db) =>
+					db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+				);
+				expect(cancelled?.status).toBe("cancelled");
+			});
+			expect(segment).toHaveBeenCalledTimes(1);
+		});
+	});
 
 	it("refuses an allowed call once its connection is turned off", async () => {
 		const execution = await allowAndResume({

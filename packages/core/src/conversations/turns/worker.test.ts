@@ -264,6 +264,7 @@ describe("runClaimedTurn", () => {
 							mutating: true,
 						}),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -343,6 +344,7 @@ describe("runClaimedTurn", () => {
 					beginExecution: () =>
 						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -404,6 +406,7 @@ describe("runClaimedTurn", () => {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
 					decide: () => Effect.die(new Error("unused")),
+					record: () => Effect.void,
 				},
 			}),
 		);
@@ -912,6 +915,7 @@ function turnStore(): TurnStore {
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
 		requestCancel: vi.fn(() => Effect.succeed(false)),
 		abandon: vi.fn(() => Effect.void),
+		stopWaiting: vi.fn(() => Effect.void),
 	};
 }
 

@@ -21,6 +21,7 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { queueTurnAsJob } from "../turns/queue.ts";
 import { type ClaimedTurn, turnStore as createTurnStore } from "../turns/store.ts";
+import { turnSignalsForTests } from "../turns/testing.ts";
 import {
 	InvalidRoutineExecutionCursor,
 	RoutineRequiresCrewAgent,
@@ -751,7 +752,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				error: "Child model failed",
 			}),
 		).toBe(false);
-		const turns = onPostgres(createTurnStore(() => Effect.void, queueTurnAsJob));
+		const turns = onPostgres(
+			createTurnStore(() => Effect.void, queueTurnAsJob, turnSignalsForTests),
+		);
 		const claimedChild: ClaimedTurn = {
 			owner: childJob.id,
 			threadId: childJob.threadId,

@@ -14,8 +14,9 @@ import { connectionTools as connectionToolsFor } from "@sugabots/core/conversati
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueTurnAsJob } from "@sugabots/core/conversations/turns/queue";
+import { turnSignals } from "@sugabots/core/conversations/turns/signals";
 import { turnStore } from "@sugabots/core/conversations/turns/store";
-import { Turn, turn } from "@sugabots/core/conversations/turns/turn.workflow";
+import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
 import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/worker";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
@@ -38,6 +39,7 @@ import { onboardingStore } from "@sugabots/core/workspaces/onboarding/store";
 import { podStore } from "@sugabots/core/workspaces/pods/store";
 import { Config, Context, Duration, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { WorkflowEngine } from "effect/unstable/workflow";
 import { Authentication } from "./auth/authentication.ts";
 import { API_BASE_PATH } from "./http/api.ts";
 import { apiLayer } from "./http/app.ts";
@@ -82,6 +84,13 @@ const main = Effect.gen(function* () {
 	const modelProviders = modelProviderStore(credentials);
 	// One model client for turns, system agents, trials, and chat routing.
 	const model = workspaceTurnModel({ modelProviders, httpClients });
+	// Durable workflows, on the engine WORKFLOW_ENGINE names. The engine and
+	// lanes come first, because the stores start and wake workflows.
+	const engine = yield* Layer.build(
+		Lanes.layer([Summary, Turn]).pipe(Layer.provideMerge(Workflows.engine)),
+	);
+	const lanes = Context.get(engine, Lanes.Service);
+	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -93,11 +102,11 @@ const main = Effect.gen(function* () {
 		chats: chatStore(publishEvents, queueTurnAsJob),
 		routines: routineStore(publishEvents, queueTurnAsJob),
 		threads: threadStore(),
-		turns: turnStore(publishEvents, queueTurnAsJob),
+		turns: turnStore(publishEvents, queueTurnAsJob, signals),
 		summaries: summaryStore(publishEvents),
 		collaborations: collaborationStore(publishEvents, queueTurnAsJob),
 		calls: toolCallStore(publishEvents),
-		approvals: toolApprovalStore(publishEvents),
+		approvals: toolApprovalStore(publishEvents, signals),
 	};
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
@@ -122,35 +131,28 @@ const main = Effect.gen(function* () {
 		},
 	});
 
-	// Durable workflows, on the engine WORKFLOW_ENGINE names. Summaries are the
-	// first to move from the job queue; turns are registered but still run as
-	// jobs until the code that starts them moves over.
-	const workflows = yield* Layer.build(
-		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turn), Lanes.reconcileLayer).pipe(
+	// Summaries are the first workflows to move from the job queue; turns are
+	// registered but still run as jobs until the code that starts them moves over.
+	yield* Layer.build(
+		Layer.mergeAll(Summary.toLayer(summary), Turn.toLayer(turnWorkflow), Lanes.reconcileLayer).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
 			Layer.provideMerge(
-				Layer.unwrap(
-					Effect.map(Effect.service(Lanes.Service), (lanes) =>
-						turnSteps({
-							store: stores.turns,
-							model,
-							events: bus,
-							collaborations: stores.collaborations,
-							calls: stores.calls,
-							approvals: stores.approvals,
-							builtInTools,
-							connectionTools,
-							routines: stores.routines,
-							queueSummary: (request) => queueSummary(lanes, request),
-						}),
-					),
-				),
+				turnSteps({
+					store: stores.turns,
+					model,
+					events: bus,
+					collaborations: stores.collaborations,
+					calls: stores.calls,
+					approvals: stores.approvals,
+					builtInTools,
+					connectionTools,
+					routines: stores.routines,
+					queueSummary: (request) => queueSummary(lanes, request),
+				}),
 			),
-			Layer.provideMerge(Lanes.layer([Summary, Turn])),
-			Layer.provideMerge(Workflows.engine),
+			Layer.provide(Layer.succeedContext(engine)),
 		),
 	);
-	const lanes = Context.get(workflows, Lanes.Service);
 
 	yield* Layer.build(
 		backgroundLayer({

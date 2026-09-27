@@ -21,7 +21,6 @@ import type { PendingEvent, PublishEvents } from "../../database/events/publish.
 import {
 	type AgentRow,
 	agent,
-	job,
 	type MessageRow,
 	message,
 	pod,
@@ -35,7 +34,6 @@ import {
 	user,
 	workspace,
 } from "../../database/schema.ts";
-import { queueDeferredJob } from "../jobs/queue.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../routines/execution.ts";
 import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
@@ -46,7 +44,10 @@ import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
+import { cancelWaitingJob, ownedByJob } from "./owner.ts";
 import type { QueueTurn } from "./queue.ts";
+import type { TurnSignals } from "./signals.ts";
+import type { TurnRequest } from "./turn.workflow.ts";
 
 /**
  * Turns: one agent answering one message in a thread.
@@ -209,6 +210,10 @@ export interface TurnStore {
 	): Effect.Effect<boolean, never, Database>;
 	/** `false` when there is no running turn this person may see. */
 	requestCancel(turnId: string, userId: string): Effect.Effect<boolean, never, Database>;
+	/** Records a turn waiting for approvals as cancelled; its workflow calls this once told. */
+	stopWaiting(
+		request: Pick<TurnRequest, "agentId" | "triggerMessageId">,
+	): Effect.Effect<void, never, Database>;
 }
 
 /**
@@ -218,7 +223,64 @@ export interface TurnStore {
 export const retryable = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
 	!prepared.checkpoint && !reply.acted;
 
-export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): TurnStore {
+export function turnStore(
+	publishEvents: PublishEvents,
+	queueTurn: QueueTurn,
+	signals: TurnSignals,
+): TurnStore {
+	/** Records a waiting turn as cancelled and says so; `false` if it had stopped waiting. */
+	const stopWaitingTurn = (
+		turnId: string,
+		waitingTurn: { threadId: string; workspaceId: string; messageId: string; content: string },
+	) =>
+		Effect.gen(function* () {
+			const stopped = yield* query((db) =>
+				db
+					.update(turn)
+					.set({
+						status: "cancelled",
+						cancelRequested: true,
+						checkpoint: null,
+						finishedAt: new Date(),
+					})
+					.where(and(eq(turn.id, turnId), eq(turn.status, "waiting")))
+					.returning({ id: turn.id }),
+			);
+			if (stopped.length === 0) return false;
+			yield* query((db) =>
+				db
+					.update(message)
+					.set({ status: "cancelled" })
+					.where(eq(message.id, waitingTurn.messageId)),
+			);
+			const abandoned = yield* query((db) => abandonRunningToolCalls(db, turnId, "Turn cancelled"));
+			yield* publishEvents([
+				...abandoned,
+				{
+					channel: threadChannel(waitingTurn.threadId),
+					event: streamEvent("message.completed", {
+						threadId: waitingTurn.threadId,
+						messageId: waitingTurn.messageId,
+						content: waitingTurn.content,
+						status: "cancelled",
+					}),
+				},
+				{
+					channel: threadChannel(waitingTurn.threadId),
+					event: streamEvent("turn.completed", {
+						threadId: waitingTurn.threadId,
+						turnId,
+						status: "cancelled",
+					}),
+				},
+				{
+					channel: workspaceChannel(waitingTurn.workspaceId),
+					event: streamEvent("thread.changed"),
+				},
+			]);
+			return true;
+		});
+
 	return {
 		abandon: (claimed, error) =>
 			query((db) =>
@@ -607,6 +669,35 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 				}),
 			),
 
+		stopWaiting: (request) =>
+			transaction(
+				Effect.gen(function* () {
+					const [waitingTurn] = yield* query((db) =>
+						db
+							.select({
+								id: turn.id,
+								threadId: turn.threadId,
+								workspaceId: thread.workspaceId,
+								messageId: message.id,
+								content: message.content,
+							})
+							.from(turn)
+							.innerJoin(thread, eq(thread.id, turn.threadId))
+							.innerJoin(message, eq(message.turnId, turn.id))
+							.where(
+								and(
+									eq(turn.triggerMessageId, request.triggerMessageId),
+									eq(turn.agentId, request.agentId),
+									eq(turn.status, "waiting"),
+								),
+							)
+							.limit(1)
+							.for("update"),
+					);
+					if (waitingTurn) yield* stopWaitingTurn(waitingTurn.id, waitingTurn);
+				}),
+			),
+
 		requestCancel: (turnId, userId) =>
 			transaction(
 				Effect.gen(function* () {
@@ -635,67 +726,19 @@ export function turnStore(publishEvents: PublishEvents, queueTurn: QueueTurn): T
 						return false;
 					}
 					if (candidate.status === "waiting") {
-						const stopped = yield* query((db) =>
-							db
-								.update(turn)
-								.set({
-									status: "cancelled",
-									cancelRequested: true,
-									checkpoint: null,
-									finishedAt: new Date(),
-								})
-								.where(and(eq(turn.id, turnId), eq(turn.status, "waiting")))
-								.returning({ id: turn.id }),
-						);
-						if (stopped.length === 0) return false;
-						yield* query((db) =>
-							db
-								.update(message)
-								.set({ status: "cancelled" })
-								.where(eq(message.id, candidate.messageId)),
-						);
-						yield* query((db) =>
-							db
-								.update(job)
-								.set({ status: "cancelled", lastError: "Cancelled by a person", lockedAt: null })
-								.where(
-									and(
-										eq(job.id, candidate.owner ?? "00000000-0000-0000-0000-000000000000"),
-										inArray(job.status, ["waiting", "queued"]),
-									),
-								),
-						);
-						if (candidate.owner) {
-							yield* query((db) => queueDeferredJob(db, candidate.owner as string));
+						if (candidate.owner && !(yield* ownedByJob(candidate.owner))) {
+							// Telling the workflow is the cancellation; it records it. The
+							// flag stops the next segment instead if the workflow has just
+							// stopped waiting, since the signal would then go unheard.
+							yield* query((db) =>
+								db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, turnId)),
+							);
+							yield* signals.cancel(candidate.owner);
+							return true;
 						}
-						const abandoned = yield* query((db) =>
-							abandonRunningToolCalls(db, turnId, "Turn cancelled"),
-						);
-						yield* publishEvents([
-							...abandoned,
-							{
-								channel: threadChannel(candidate.threadId),
-								event: streamEvent("message.completed", {
-									threadId: candidate.threadId,
-									messageId: candidate.messageId,
-									content: candidate.content,
-									status: "cancelled",
-								}),
-							},
-							{
-								channel: threadChannel(candidate.threadId),
-								event: streamEvent("turn.completed", {
-									threadId: candidate.threadId,
-									turnId,
-									status: "cancelled",
-								}),
-							},
-							{
-								channel: workspaceChannel(candidate.workspaceId),
-								event: streamEvent("thread.changed"),
-							},
-						]);
-						return true;
+						const stopped = yield* stopWaitingTurn(turnId, candidate);
+						if (stopped && candidate.owner) yield* cancelWaitingJob(candidate.owner);
+						return stopped;
 					}
 					const updated = yield* query((db) =>
 						db

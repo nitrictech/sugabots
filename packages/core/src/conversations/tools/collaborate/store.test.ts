@@ -24,6 +24,7 @@ import { threadStore } from "../../threads/store.ts";
 import { modelPrompt } from "../../turns/context.ts";
 import { queueTurnAsJob } from "../../turns/queue.ts";
 import { turnStore } from "../../turns/store.ts";
+import { turnSignalsForTests } from "../../turns/testing.ts";
 import { CollaborationRefused, type CollaborationStore, collaborationStore } from "./store.ts";
 
 /**
@@ -37,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 	);
 	const threads = onPostgres(threadStore());
 	const chats = onPostgres(chatStore(publishEvents, queueTurnAsJob));
-	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob));
+	const turns = onPostgres(turnStore(publishEvents, queueTurnAsJob, turnSignalsForTests));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;

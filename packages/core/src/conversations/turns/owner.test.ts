@@ -41,13 +41,13 @@ describe("a turn workflow segment's owner", () => {
 		});
 	});
 
-	it("waits for the batch of approvals the checkpoint names", async () => {
+	it("waits for every approval the checkpoint names", async () => {
 		const checkpoint = {
 			approvals: [{ approvalId: "approval-1" }, { approvalId: "approval-2" }],
 		} as TurnCheckpoint;
 
 		const after = await outcomeAfter((owner) => owner.suspended(claim(1), checkpoint));
 
-		expect(after.outcome).toEqual({ _tag: "Suspended", approvals: "approval-1" });
+		expect(after.outcome).toEqual({ _tag: "Suspended", approvals: ["approval-1", "approval-2"] });
 	});
 });
