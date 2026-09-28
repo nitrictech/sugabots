@@ -136,6 +136,10 @@ function GeneralSettings({ role }: { role: WorkspaceRole | undefined }) {
 			<SettingsGroup label="Workspace">
 				<SettingsRow label="Name" trailing={<SettingsValue>{workspace.name}</SettingsValue>} />
 				<SettingsRow
+					label="Time zone"
+					trailing={<SettingsValue>{workspace.timeZone}</SettingsValue>}
+				/>
+				<SettingsRow
 					label="Your access"
 					trailing={<SettingsValue>{workspaceRoleLabel(role)}</SettingsValue>}
 				/>

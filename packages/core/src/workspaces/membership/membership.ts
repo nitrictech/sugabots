@@ -2,6 +2,7 @@ export * as Membership from "./membership.ts";
 
 import type {
 	InvitationPreview,
+	NewWorkspace,
 	NewWorkspaceInvitation,
 	Workspace,
 	WorkspaceDetails,
@@ -45,8 +46,12 @@ export interface Interface {
 	readonly workspaces: Effect.Effect<readonly Workspace[], never, CurrentActor.Service>;
 	/** Administered by the person who created it. */
 	readonly create: (input: {
-		details: WorkspaceDetails;
-	}) => Effect.Effect<Workspace, SlugTaken | SlugShapedLikeUuid, CurrentActor.Service>;
+		details: NewWorkspace;
+	}) => Effect.Effect<
+		Workspace,
+		SlugTaken | SlugShapedLikeUuid | TimeZoneUnknown,
+		CurrentActor.Service
+	>;
 	readonly update: (
 		input: InWorkspace & { details: WorkspaceDetails },
 	) => Effect.Effect<
@@ -165,7 +170,7 @@ export const make = Effect.gen(function* () {
 			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
 				query((db) =>
 					db
-						.select({ id: workspace.id, name: workspace.name, slug: workspace.slug })
+						.select(workspaceColumns)
 						.from(workspaceMember)
 						.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
 						.where(eq(workspaceMember.userId, userId))
@@ -180,14 +185,13 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					yield* requireSlugUnlikeUuid(input.details.slug);
+					if (input.details.timeZone !== undefined) {
+						yield* requireTimeZoneKnownToPostgres(input.details.timeZone);
+					}
 					return yield* transaction(
 						Effect.gen(function* () {
 							const [created] = yield* queryCatching(
-								(db) =>
-									db
-										.insert(workspace)
-										.values(input.details)
-										.returning({ id: workspace.id, name: workspace.name, slug: workspace.slug }),
+								(db) => db.insert(workspace).values(input.details).returning(workspaceColumns),
 								(failure) => (isUniqueViolation(failure) ? new SlugTaken() : undefined),
 							);
 							if (!created) return yield* Effect.die(new Error("The workspace was not created"));
@@ -218,7 +222,7 @@ export const make = Effect.gen(function* () {
 								.update(workspace)
 								.set(input.details)
 								.where(eq(workspace.id, standing.workspaceId))
-								.returning({ id: workspace.id, name: workspace.name, slug: workspace.slug }),
+								.returning(workspaceColumns),
 						(failure) => (isUniqueViolation(failure) ? new SlugTaken() : undefined),
 					);
 					if (!updated) return yield* new ResourceHidden({ resource: "workspace" });
@@ -538,6 +542,17 @@ export class SlugShapedLikeUuid
 	}
 }
 
+/**
+ * Postgres does not have the time zone, though the API's own check passed:
+ * their time zone databases can differ. Every day and month in the workspace
+ * is worked out in Postgres, so it has to know the zone.
+ */
+export class TimeZoneUnknown extends Data.TaggedError("TimeZoneUnknown") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`That time zone isn't one the server knows`;
+	}
+}
+
 export class LastAdministrator extends Data.TaggedError("LastAdministrator") implements UserFacing {
 	get userMessage() {
 		return UserMessage.of`A workspace needs at least one administrator`;
@@ -568,10 +583,31 @@ export class EmailUnverified extends Data.TaggedError("EmailUnverified") impleme
 	}
 }
 
+/** A workspace as the API describes it. */
+const workspaceColumns = {
+	id: workspace.id,
+	name: workspace.name,
+	slug: workspace.slug,
+	timeZone: workspace.timeZone,
+};
+
 const INVITATION_LIFETIME = Duration.days(2);
 
 function requireSlugUnlikeUuid(slug: string) {
 	return isUuid(slug) ? Effect.fail(new SlugShapedLikeUuid()) : Effect.void;
+}
+
+function requireTimeZoneKnownToPostgres(timeZone: string) {
+	return query((db) =>
+		db
+			.select({ name: sql<string>`name` })
+			.from(sql`pg_timezone_names`)
+			.where(sql`name = ${timeZone}`),
+	).pipe(
+		Effect.flatMap((known) =>
+			known.length > 0 ? Effect.void : Effect.fail(new TimeZoneUnknown()),
+		),
+	);
 }
 
 /** Serialises membership changes, so two cannot each count on the other's administrator. */

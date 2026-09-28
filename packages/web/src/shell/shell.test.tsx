@@ -3,7 +3,7 @@ import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/ht
 import { failureForStatus } from "@sugabots/sdk";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { chooseWorkspace } from "@/lib/workspace.ts";
 import {
 	agents,
@@ -55,7 +55,12 @@ describe("the shell", () => {
 });
 
 describe("the workspace choice", () => {
-	const other = { id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Nitric", slug: "nitric" };
+	const other = {
+		id: "0199a3a0-0000-7000-8000-0000000000f9",
+		name: "Nitric",
+		slug: "nitric",
+		timeZone: "UTC",
+	};
 
 	it("keeps a workspace choice in memory when storage is unavailable", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
@@ -301,6 +306,16 @@ describe("the settings navigation", () => {
 		expect(within(rail).getByRole("link", { name: "Bots, 3" })).toBeDefined();
 		// General holds nothing to count.
 		expect(within(rail).getByRole("link", { name: "General" })).toBeDefined();
+	});
+
+	it("shows the workspace's time zone under General", async () => {
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([{ ...workspace, timeZone: "Australia/Sydney" }]),
+		);
+		mount("/suga/settings");
+
+		expect(await screen.findByText("Time zone")).toBeDefined();
+		expect(screen.getByText("Australia/Sydney")).toBeDefined();
 	});
 
 	it("leaves the roster uncounted while you are the only person in it", async () => {
@@ -1541,7 +1556,12 @@ describe("workspace settings", () => {
 		).toBe(true);
 	});
 
-	it("lets somebody with no workspace start their first one", async () => {
+	it("lets somebody with no workspace start their first one, in their own time zone", async () => {
+		const browserOptions = new Intl.DateTimeFormat().resolvedOptions();
+		const browser = vi
+			.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+			.mockReturnValue({ ...browserOptions, timeZone: "Australia/Sydney" });
+		onTestFinished(() => browser.mockRestore());
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.workspaces.create.mockReturnValue(
@@ -1549,6 +1569,7 @@ describe("workspace settings", () => {
 				id: "0199a3a0-0000-7000-8000-0000000000f9",
 				name: "Nitric",
 				slug: "nitric",
+				timeZone: "Australia/Sydney",
 			}),
 		);
 		const router = mount("/suga/settings");
@@ -1561,7 +1582,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe("/onboarding");
 			expect(client.api.workspaces.create).toHaveBeenCalledWith({
-				payload: { name: "Nitric", slug: "nitric" },
+				payload: { name: "Nitric", slug: "nitric", timeZone: "Australia/Sydney" },
 			});
 		});
 	});

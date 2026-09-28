@@ -125,7 +125,10 @@ const meta = preview.meta({
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
 				client.setQueryData(["connections", revenue.id], connections);
-				client.setQueryData(["workspaces"], [{ id: WORKSPACE, name: "Nitric", slug: "nitric" }]);
+				client.setQueryData(
+					["workspaces"],
+					[{ id: WORKSPACE, name: "Nitric", slug: "nitric", timeZone: "UTC" }],
+				);
 				client.setQueryData(
 					["built-in-agents", WORKSPACE],
 					[scribeHasModel ? scribe : { ...scribe, model: null }],

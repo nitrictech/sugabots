@@ -152,7 +152,7 @@ function Preview({ children, run }: { children: React.ReactNode; run?: ThreadDet
 		// The run's link to its routine is found through the bot's pod.
 		client.setQueryData(
 			["workspaces"],
-			[{ id: revenue.workspaceId, name: "Nitric", slug: "nitric" }],
+			[{ id: revenue.workspaceId, name: "Nitric", slug: "nitric", timeZone: "UTC" }],
 		);
 		client.setQueryData(["pods", revenue.workspaceId], [revenue]);
 		client.setQueryData(["agents", revenue.workspaceId], [growthDesk, linearHandler]);

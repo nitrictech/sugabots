@@ -13,12 +13,14 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 		return handlers
 			.handle("list", () => asSessionUser(membership.workspaces))
 			.handle("create", ({ payload }) =>
-				membership
-					.create({ details: payload })
-					.pipe(
-						asSessionUser,
-						asHttpError({ SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
-					),
+				membership.create({ details: payload }).pipe(
+					asSessionUser,
+					asHttpError({
+						SlugTaken: Conflict,
+						SlugShapedLikeUuid: BadRequest,
+						TimeZoneUnknown: BadRequest,
+					}),
+				),
 			)
 			.handle("update", ({ params, payload }) =>
 				membership

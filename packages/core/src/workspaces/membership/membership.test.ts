@@ -170,6 +170,36 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([workspace]);
 	});
 
+	it("keeps the time zone a workspace is created in, and is in UTC when given none", async () => {
+		const ada = await person("Ada");
+
+		const inSydney = await run(ada.id, (m) =>
+			m.create({
+				details: { name: "Sydney", slug: `sydney-${unique()}`, timeZone: "Australia/Sydney" },
+			}),
+		);
+		const inDefault = await run(ada.id, (m) =>
+			m.create({ details: { name: "Nitric", slug: `nitric-${unique()}` } }),
+		);
+
+		expect(inSydney).toEqual(expect.objectContaining({ timeZone: "Australia/Sydney" }));
+		expect(inDefault).toEqual(expect.objectContaining({ timeZone: "UTC" }));
+		expect(await run(ada.id, (m) => m.workspaces)).toEqual([inSydney, inDefault]);
+	});
+
+	it("refuses a time zone Postgres does not have, and creates nothing", async () => {
+		const ada = await person("Ada");
+
+		expect(
+			await run(ada.id, (m) =>
+				m.create({
+					details: { name: "Mars", slug: `mars-${unique()}`, timeZone: "Mars/Olympus" },
+				}),
+			),
+		).toEqual({ failed: "TimeZoneUnknown" });
+		expect(await run(ada.id, (m) => m.workspaces)).toEqual([]);
+	});
+
 	it("refuses a slug shaped like a UUID, or one another workspace has", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 

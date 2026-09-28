@@ -4,6 +4,7 @@ import {
 	acceptedInvitationSchema,
 	invitationPreviewSchema,
 	newWorkspaceInvitationSchema,
+	newWorkspaceSchema,
 	workspaceDetailsSchema,
 	workspaceInvitationSchema,
 	workspaceMemberSchema,
@@ -23,7 +24,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 			success: Schema.Array(workspaceSchema),
 		}),
 		HttpApiEndpoint.post("create", "/workspaces", {
-			payload: workspaceDetailsSchema,
+			payload: newWorkspaceSchema,
 			success: workspaceSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict],
 		}),
