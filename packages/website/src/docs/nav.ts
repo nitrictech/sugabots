@@ -27,4 +27,10 @@ export const docGroups: readonly DocGroup[] = [
 			{ slug: "first-workspace", bot: { color: "purple", face: "wink" } },
 		],
 	},
+	{
+		title: "Reference",
+		tone: "purple",
+		summary: "Every setting, in one place.",
+		pages: [{ slug: "configuration", bot: { color: "purple", face: "square" } }],
+	},
 ];
