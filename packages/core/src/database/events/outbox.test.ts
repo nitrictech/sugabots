@@ -2,7 +2,7 @@ import { type Channel, EVENT_VERSION } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { query, transaction } from "../database.ts";
+import { batchedBeforeCommit, query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
 import { closeDatabase, runOnPostgres } from "../testing.ts";
 import { EventBus } from "./bus.ts";
@@ -115,13 +115,17 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 		const inserted = new Promise<void>((resolve) => {
 			firstInserted = resolve;
 		});
+		// Flushed after the outbox's own batch, so the first transaction holds
+		// its channel lock and its row while it waits to commit.
+		const holdBeforeCommit = batchedBeforeCommit(() =>
+			Effect.sync(firstInserted).pipe(Effect.andThen(Effect.promise(() => holdFirst))),
+		);
 
 		const first = runOnPostgres(
 			transaction(
 				Effect.gen(function* () {
 					yield* publish([marked(1)]);
-					firstInserted();
-					yield* Effect.promise(() => holdFirst);
+					yield* holdBeforeCommit([true]);
 				}),
 			),
 		);
@@ -143,5 +147,52 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 		expect(firstEvent?.event.n).toBe(1);
 		expect(secondEvent?.event.n).toBe(2);
 		expect(firstEvent?.seq).toBeLessThan(secondEvent?.seq ?? 0);
+	});
+
+	it("stores what a transaction publishes in several batches together, so crossed channels cannot deadlock", async () => {
+		const other: Channel = `thread:${crypto.randomUUID()}`;
+		const on = (to: Channel, n: number): PendingEvent => ({ ...marked(n), channel: to });
+		let firstPublished = () => {};
+		const firstHasPublished = new Promise<void>((resolve) => {
+			firstPublished = resolve;
+		});
+		let secondPublished = () => {};
+		const secondHasPublished = new Promise<void>((resolve) => {
+			secondPublished = resolve;
+		});
+
+		// Each publishes to one channel, waits until the other has published to
+		// the other channel, then publishes to the first's. Locking per publish
+		// would leave each holding the channel the other waits for.
+		const first = runOnPostgres(
+			transaction(
+				Effect.gen(function* () {
+					yield* publish([on(channel, 1)]);
+					firstPublished();
+					yield* Effect.promise(() => secondHasPublished);
+					yield* publish([on(other, 2)]);
+				}),
+			),
+		);
+		const second = runOnPostgres(
+			transaction(
+				Effect.gen(function* () {
+					yield* Effect.promise(() => firstHasPublished);
+					yield* publish([on(other, 3)]);
+					secondPublished();
+					yield* publish([on(channel, 4)]);
+				}),
+			),
+		);
+		await Promise.all([first, second]);
+
+		const delivered = deliveries().map((committed) => committed.map(({ event }) => event.n));
+		expect(delivered).toHaveLength(2);
+		expect(delivered).toEqual(
+			expect.arrayContaining([
+				[1, 2],
+				[3, 4],
+			]),
+		);
 	});
 });

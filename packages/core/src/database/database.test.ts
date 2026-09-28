@@ -3,6 +3,8 @@ import { Cause, Context, Data, Deferred, Effect, Exit, Fiber, ManagedRuntime } f
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
 	afterCommit,
+	batchedBeforeCommit,
+	beforeCommit,
 	type Database,
 	effectRunner,
 	layer,
@@ -304,4 +306,34 @@ it("runs afterCommit work immediately when there is no transaction", async () =>
 	);
 
 	expect(ran).toBe(true);
+});
+
+it("flushes a batch once, after the beforeCommit work, with what every surviving savepoint added", async () => {
+	const order: string[] = [];
+	const gather = batchedBeforeCommit((labels: readonly string[]) =>
+		Effect.sync(() => {
+			order.push(`flushed ${labels.join(", ")}`);
+		}),
+	);
+	await run(
+		transaction(
+			Effect.gen(function* () {
+				yield* gather(["outer"]);
+				yield* transaction(gather(["kept savepoint"]));
+				yield* transaction(
+					Effect.andThen(gather(["lost savepoint"]), Effect.fail(new Rejected())),
+				).pipe(Effect.catchTag("Rejected", () => Effect.void));
+				yield* beforeCommit(
+					Effect.andThen(
+						Effect.sync(() => {
+							order.push("before commit");
+						}),
+						gather(["from before commit"]),
+					),
+				);
+			}),
+		),
+	);
+
+	expect(order).toEqual(["before commit", "flushed outer, kept savepoint, from before commit"]);
 });

@@ -38,9 +38,17 @@ export class Transaction extends Context.Service<
 	Transaction,
 	{
 		readonly beforeCommit: Array<Effect.Effect<void, never, Transaction>>;
+		/** What each `batchedBeforeCommit` gathered, keyed by the `add` it returned. */
+		readonly batches: Map<unknown, Batch>;
 		readonly afterCommit: Array<Effect.Effect<void>>;
 	}
 >()("Database/Transaction") {}
+
+/** Items one `batchedBeforeCommit` gathered in a transaction, and the work that flushes them. */
+interface Batch {
+	readonly items: unknown[];
+	readonly flush: Effect.Effect<void, never, Transaction>;
+}
 
 /**
  * Runs `work` inside the outermost transaction, after everything else in it,
@@ -57,6 +65,38 @@ export const beforeCommit = (
 		const database = yield* Database;
 		open.beforeCommit.push(Effect.provideService(work, Database, database));
 	});
+
+/**
+ * Returns `add`, which gathers items on the outermost transaction and hands
+ * every item gathered there to one `flush`, still inside it, once all the
+ * `beforeCommit` work has run: for work a transaction must do once, however
+ * many places inside it contribute, such as taking a set of locks in one
+ * order. Batches flush in the order the transaction first added to them.
+ * Items added in a savepoint that rolls back are dropped with it. Items added
+ * once their batch has flushed are flushed again, after the work added
+ * meanwhile.
+ */
+export const batchedBeforeCommit = <Item>(
+	flush: (items: ReadonlyArray<Item>) => Effect.Effect<void, never, Database | Transaction>,
+) => {
+	const add = (items: ReadonlyArray<Item>): Effect.Effect<void, never, Database | Transaction> =>
+		Effect.gen(function* () {
+			if (items.length === 0) return;
+			const open = yield* Transaction;
+			const database = yield* Database;
+			const gathered = open.batches.get(add);
+			if (gathered) {
+				gathered.items.push(...items);
+				return;
+			}
+			const batch: Item[] = [...items];
+			open.batches.set(add, {
+				items: batch,
+				flush: Effect.provideService(flush(batch), Database, database),
+			});
+		});
+	return add;
+};
 
 /**
  * Runs `work` once the enclosing transaction has committed, or straight away
@@ -115,11 +155,16 @@ export function transactional(
 	return <A, E, R>(use: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Transaction>> =>
 		Effect.gen(function* () {
 			const outer = yield* Effect.serviceOption(Transaction);
-			const open = Transaction.of({ beforeCommit: [], afterCommit: [] });
+			const open = Transaction.of({ beforeCommit: [], batches: new Map(), afterCommit: [] });
 			const body = Option.isSome(outer) ? use : Effect.tap(use, () => runBeforeCommit(open));
 			const value = yield* begin(Effect.provideService(body, Transaction, open));
 			if (Option.isSome(outer)) {
 				outer.value.beforeCommit.push(...open.beforeCommit);
+				for (const [key, batch] of open.batches) {
+					const joined = outer.value.batches.get(key);
+					if (joined) joined.items.push(...batch.items);
+					else outer.value.batches.set(key, batch);
+				}
 				outer.value.afterCommit.push(...open.afterCommit);
 				return value;
 			}
@@ -134,8 +179,13 @@ export function transactional(
 
 const runBeforeCommit = (open: Transaction["Service"]) =>
 	Effect.gen(function* () {
-		for (let work = open.beforeCommit.shift(); work; work = open.beforeCommit.shift()) {
-			yield* work;
+		while (open.beforeCommit.length > 0 || open.batches.size > 0) {
+			for (let work = open.beforeCommit.shift(); work; work = open.beforeCommit.shift()) {
+				yield* work;
+			}
+			const batches = [...open.batches.values()];
+			open.batches.clear();
+			for (const batch of batches) yield* batch.flush;
 		}
 	});
 
