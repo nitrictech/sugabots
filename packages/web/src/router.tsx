@@ -16,6 +16,7 @@ import {
 import { type ComponentType, lazy, useEffect, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
+import { signInFailureReason } from "@/lib/connections.ts";
 import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
@@ -195,6 +196,7 @@ function LoginRoute() {
 interface SignInReturnSearch {
 	workspace?: string;
 	pod?: string;
+	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
 	oauth_error?: string;
 }
 
@@ -239,7 +241,11 @@ function SignInReturnRoute() {
 	return (
 		<div className="grid h-full place-items-center bg-list p-6">
 			<EmptyState title="Connection sign-in failed">
-				<p>{oauthError ?? "The pod it was for is no longer available to you."}</p>
+				<p>
+					{oauthError
+						? signInFailureReason(oauthError)
+						: "The pod it was for is no longer available to you."}
+				</p>
 				<Link to="/" className="text-link underline">
 					Return to workspace
 				</Link>
@@ -476,7 +482,7 @@ function SettingsPodRoute() {
 			<WorkspaceSettings
 				section="pods"
 				selectedPodId={pod.id}
-				connectionSignInError={signInError}
+				connectionSignInError={signInError && signInFailureReason(signInError)}
 			/>
 		</SettingsLayout>
 	);

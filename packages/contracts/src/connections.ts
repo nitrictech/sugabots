@@ -52,8 +52,38 @@ export const connectionAccesses = ["off", "ask", "allow"] as const;
 export const connectionAccessSchema = Schema.Literals(connectionAccesses);
 export type ConnectionAccess = typeof connectionAccessSchema.Type;
 
-/** The web page a connection's OAuth sign-in returns to, with ids only. */
+/**
+ * Where an authorization server sends the browser back after a connection's
+ * sign-in: an API path, under `API_BASE_PATH`.
+ */
+export const CONNECTION_SIGN_IN_CALLBACK_PATH = "/connections/oauth/callback";
+
+/**
+ * The web page a connection's OAuth sign-in returns to, with the pod's ids
+ * and, when it did not finish, an `oauth_error` code from
+ * {@link connectionSignInFailures}.
+ */
 export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
+
+/**
+ * Why a sign-in did not finish, as the web app is told it. The web app words
+ * each one itself, so nothing an authorization server sent back is shown.
+ *
+ * - `missing_state`: the callback carried no `state`.
+ * - `unknown_state`: no connection is waiting on that `state`.
+ * - `not_allowed`: the person may no longer manage the pod's connections.
+ * - `refused`: the authorization server refused, or sent no code.
+ * - `not_completed`: exchanging the code for tokens failed.
+ */
+export const connectionSignInFailures = [
+	"missing_state",
+	"unknown_state",
+	"not_allowed",
+	"refused",
+	"not_completed",
+] as const;
+export const connectionSignInFailureSchema = Schema.Literals(connectionSignInFailures);
+export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,

@@ -126,6 +126,15 @@ describe("the Web search settings", () => {
 		expect(route.update.mock.calls[1]?.[0]).toMatchObject({ payload: { enabled: true } });
 	});
 
+	it("shows a saved key as hidden when the API gives no hint of it", async () => {
+		route.get.mockReturnValue(Effect.succeed({ provider: { ...keyed, apiKeyHint: "" } }));
+		mount("/suga/settings/search");
+		await searchSwitch();
+		openAdvanced();
+
+		expect(await screen.findByText("••••••••")).toBeDefined();
+	});
+
 	it("removes a saved key after asking", async () => {
 		route.get.mockReturnValue(Effect.succeed({ provider: keyed }));
 		route.update.mockImplementation(() => {

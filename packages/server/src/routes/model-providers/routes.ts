@@ -1,88 +1,81 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { modelProviderOperations } from "@sugabots/core/providers/model-providers/operations";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import type {
-	EgressHttpClients,
-	EgressUrlValidator,
-} from "@sugabots/core/providers/network/egress";
+import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface ModelProviderRoutesOptions {
-	modelProviders: ModelProviderStore;
-	httpClients: EgressHttpClients;
-	validateProviderUrl: EgressUrlValidator;
-	model: TurnModel;
-}
-
-export function modelProviderRoutes({
-	modelProviders,
-	httpClients,
-	validateProviderUrl,
-	model,
-}: ModelProviderRoutesOptions) {
-	const operations = modelProviderOperations({
-		providers: modelProviders,
-		httpClients,
-		validateProviderUrl,
-		model,
-	});
-
-	return HttpApiBuilder.group(ServerApi, "modelProviders", (handlers) =>
-		handlers
+export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProviders", (handlers) =>
+	Effect.gen(function* () {
+		const providers = yield* ModelProviderSetup.Service;
+		return handlers
 			.handle("list", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => operations.list(workspaceId)),
+				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => providers.list(workspaceId)),
 			)
 			.handle("listEnabledModels", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => operations.listEnabled(workspaceId)),
+				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
+					providers.listEnabledModels(workspaceId),
+				),
 			)
 			.handle("create", ({ payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					operations.create(workspaceId, actor.userId, payload).pipe(asHttpError(providerErrors)),
+					providers
+						.create({ workspaceId, createdById: actor.userId, provider: payload })
+						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("get", ({ params }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations.get(workspaceId, params.providerId).pipe(asHttpError(providerErrors)),
+					providers
+						.get({ workspaceId, providerId: params.providerId })
+						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations
-						.update(workspaceId, params.providerId, payload)
+					providers
+						.update({ workspaceId, providerId: params.providerId, changes: payload })
 						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("remove", ({ params }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations.remove(workspaceId, params.providerId).pipe(asHttpError(providerErrors)),
+					providers
+						.remove({ workspaceId, providerId: params.providerId })
+						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("test", ({ params }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations.test(workspaceId, params.providerId).pipe(asHttpError(providerErrors)),
+					providers
+						.test({ workspaceId, providerId: params.providerId })
+						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("fetchModels", ({ params }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations.fetchModels(workspaceId, params.providerId),
+					providers
+						.fetchModels({ workspaceId, providerId: params.providerId })
+						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("addModel", ({ params, payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations
-						.addModel(workspaceId, params.providerId, payload)
+					providers
+						.addModel({ workspaceId, providerId: params.providerId, model: payload })
 						.pipe(asHttpError(providerErrors)),
 				),
 			)
 			.handle("setModelsEnabled", ({ params, payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations
-						.setModelsEnabled(workspaceId, params.providerId, payload.modelIds, payload.enabled)
+					providers
+						.setModelsEnabled({
+							workspaceId,
+							providerId: params.providerId,
+							modelIds: payload.modelIds,
+							enabled: payload.enabled,
+						})
 						.pipe(
 							asHttpError(providerErrors),
 							Effect.map((updated) => ({ updated })),
@@ -91,26 +84,33 @@ export function modelProviderRoutes({
 			)
 			.handle("updateModel", ({ params, payload }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations.updateModel(workspaceId, params.providerId, params.modelId, payload).pipe(
-						asHttpError(providerErrors),
-						Effect.map((updated) => ({ updated })),
-					),
+					providers
+						.updateModel({
+							workspaceId,
+							providerId: params.providerId,
+							modelId: params.modelId,
+							changes: payload,
+						})
+						.pipe(
+							asHttpError(providerErrors),
+							Effect.map((updated) => ({ updated })),
+						),
 				),
 			)
 			.handle("removeModel", ({ params }) =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-					operations
-						.removeModel(workspaceId, params.providerId, params.modelId)
+					providers
+						.removeModel({ workspaceId, providerId: params.providerId, modelId: params.modelId })
 						.pipe(asHttpError(providerErrors)),
 				),
-			),
-	);
-}
+			);
+	}),
+);
 
 const providerErrors = {
 	ModelProviderNameConflict: Conflict,
 	ModelProviderNotFound: NotFound,
-	ModelProviderUrlNotAllowed: BadRequest,
+	UrlNotAllowed: BadRequest,
 	ProviderModelsRequireApiKey: BadRequest,
 	ProviderActivationRequiresApiKey: BadRequest,
 	ModelProviderRemovalNotAllowed: BadRequest,
@@ -118,4 +118,5 @@ const providerErrors = {
 	FetchedModelCapabilitiesImmutable: BadRequest,
 	ProviderModelNotFound: NotFound,
 	ProviderModelRemovalNotAllowed: BadRequest,
+	ModelDiscoveryFailed: BadRequest,
 };

@@ -5,13 +5,15 @@ import { noDatabase } from "../../database/testing.ts";
 import type { EgressHttpClients } from "../network/egress.ts";
 import { type DiscoveredModel, emptyRegistry, type ModelRegistry } from "./dialects/index.ts";
 import { registryFrom } from "./dialects/registry.ts";
+import type { ModelProviderRepository } from "./model-provider-repository.ts";
 import { fetchProviderModels, testProvider } from "./remote.ts";
-import type { ProviderConnection } from "./store.ts";
 
 /** Discovery reads the connection the fake store hands it, so nothing reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
-function connection(overrides: Partial<ProviderConnection>): ProviderConnection {
+function connection(
+	overrides: Partial<ModelProviderRepository.ProviderEndpoint>,
+): ModelProviderRepository.ProviderEndpoint {
 	return {
 		providerId: "provider-id",
 		preset: null,
@@ -25,11 +27,11 @@ function connection(overrides: Partial<ProviderConnection>): ProviderConnection 
 }
 
 /** A store that remembers what discovery told it, and reports it all as new. */
-function store(found: ProviderConnection) {
+function store(found: ModelProviderRepository.ProviderEndpoint) {
 	const synced: DiscoveredModel[][] = [];
 	return {
 		synced,
-		connection: vi.fn(() => Effect.succeed(found)),
+		endpoint: vi.fn(() => Effect.succeed(found)),
 		syncDiscovered: vi.fn((_workspaceId: string, _providerId: string, models: DiscoveredModel[]) =>
 			Effect.sync(() => {
 				synced.push(models);
@@ -55,7 +57,7 @@ function clients(httpClient: (url: string, init?: RequestInit) => Promise<Respon
 /** Runs discovery for `found` against `httpClient`, consulting no registry unless given one. */
 function discover(
 	models: ReturnType<typeof store>,
-	found: ProviderConnection,
+	found: ModelProviderRepository.ProviderEndpoint,
 	httpClient: (url: string, init?: RequestInit) => Promise<Response>,
 	registry: ModelRegistry = emptyRegistry,
 ) {
@@ -273,9 +275,10 @@ it("rejects invalid OpenRouter keys even when the public model list is accessibl
 		reachable: false,
 		error: "The provider rejected the API key. Replace it with a valid key and try again.",
 	});
-	await expect(discover(models, found, httpClient).result).rejects.toThrow(
-		"The provider rejected the API key. Replace it with a valid key and try again.",
-	);
+	await expect(discover(models, found, httpClient).result).rejects.toMatchObject({
+		_tag: "ModelDiscoveryFailed",
+		userMessage: "The provider rejected the API key. Replace it with a valid key and try again.",
+	});
 	expect(models.synced).toEqual([]);
 });
 
@@ -327,6 +330,27 @@ it("reads OpenRouter's own account of what a model can do", async () => {
 			contextLength: 32_000,
 		},
 	]);
+});
+
+it("records a fixed sentence for an unreachable provider, and keeps the network's words out of it", async () => {
+	const found = connection({});
+	const models = store(found);
+	const httpClient = async () => {
+		throw new Error("getaddrinfo ENOTFOUND models.internal.example 10.0.0.7");
+	};
+	const { httpClients } = clients(httpClient);
+
+	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
+
+	expect(result).toMatchObject({ reachable: false, error: "Connection failed" });
+	expect(models.recordTest).toHaveBeenCalledWith(
+		"workspace-id",
+		found.providerId,
+		expect.any(Date),
+		{
+			error: "Connection failed",
+		},
+	);
 });
 
 it("records a model a listing names twice once", async () => {

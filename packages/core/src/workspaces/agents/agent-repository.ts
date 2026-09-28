@@ -1,0 +1,394 @@
+export * as AgentRepository from "./agent-repository.ts";
+
+import {
+	type AgentUpdate,
+	colorFromText,
+	handleFromName,
+	type NewAgent,
+	type SystemAgentKey,
+} from "@sugabots/contracts";
+import { and, eq } from "drizzle-orm";
+import { Context, Data, Effect, Layer } from "effect";
+import {
+	type QueryFailure,
+	query,
+	queryCatching,
+	serviceOperations,
+	transaction,
+} from "../../database/database.ts";
+import { violatedUniqueConstraint } from "../../database/errors.ts";
+import { agent, pod } from "../../database/schema.ts";
+import { Ids } from "../../ids/ids.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
+import {
+	findRunnableSystemAgent,
+	SYSTEM_AGENTS,
+	type SystemAgentDefinition,
+} from "./system-agents.ts";
+
+/**
+ * The only writer of `agent`: crew agents, each in one pod, the Personal
+ * Assistant in each Personal pod, and the workspace's system agents, which sit
+ * in no pod and of which only the model ever changes.
+ */
+export interface Interface {
+	/** Creates a crew agent in `agent.podId`, which must be in the workspace. */
+	readonly create: (
+		workspaceId: string,
+		input: { createdById: string; agent: NewAgent },
+	) => Effect.Effect<CrewAgentRow, AgentNameTaken | PodOutsideWorkspace>;
+	readonly update: (
+		workspaceId: string,
+		agentId: string,
+		changes: AgentUpdate,
+	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentGone | SystemAgentImmutable>;
+	readonly remove: (
+		workspaceId: string,
+		agentId: string,
+	) => Effect.Effect<void, SystemAgentImmutable>;
+	/**
+	 * The Personal pod's Personal Assistant, placed there on `model`, or else
+	 * {@link FALLBACK_ASSISTANT_MODEL}, if it is missing. One already there is
+	 * returned exactly as its owner left it.
+	 */
+	readonly provisionPersonalAssistant: (input: {
+		workspaceId: string;
+		podId: string;
+		userId: string;
+		model?: string;
+	}) => Effect.Effect<CrewAgentRow>;
+	/**
+	 * Creates any system agent the workspace does not have yet, with no model.
+	 * An existing one is left exactly as it is, so repeating this never unsets
+	 * a model an administrator chose.
+	 */
+	readonly ensureSystemAgents: (input: {
+		workspaceId: string;
+		createdById: string;
+	}) => Effect.Effect<void>;
+	/** Points a system agent at a model, which is how it is set up, or at `null`, which turns it off. */
+	readonly setSystemAgentModel: (
+		workspaceId: string,
+		key: SystemAgentKey,
+		model: string | null,
+	) => Effect.Effect<void, SystemAgentMissing>;
+	/** The system agent and its model, or nothing when it is not set up. */
+	readonly runnableSystemAgent: (
+		workspaceId: string,
+		key: SystemAgentKey,
+	) => Effect.Effect<{ id: string; model: string } | undefined>;
+}
+
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/core/AgentRepository",
+) {}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("AgentRepository");
+	const ids = yield* Ids.Service;
+
+	const isSystemAgent = (workspaceId: string, agentId: string) =>
+		query((db) =>
+			db
+				.select({ systemAgentKey: agent.systemAgentKey })
+				.from(agent)
+				.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
+				.limit(1),
+		).pipe(Effect.map(([row]) => Boolean(row?.systemAgentKey)));
+
+	const ensureSystemAgent = (
+		workspaceId: string,
+		createdById: string,
+		definition: SystemAgentDefinition,
+	) =>
+		Effect.gen(function* () {
+			const id = yield* ids.next;
+			yield* query((db) =>
+				db
+					.insert(agent)
+					.values({
+						id,
+						workspaceId,
+						podId: null,
+						createdById,
+						name: definition.name,
+						handle: handleFromName(definition.name),
+						systemAgentKey: definition.key,
+						description: definition.description,
+						color: definition.color,
+						face: definition.face,
+						model: null,
+						prompt: definition.prompt,
+					})
+					.onConflictDoNothing({ target: [agent.workspaceId, agent.systemAgentKey] }),
+			);
+		});
+
+	return Service.of({
+		create: (workspaceId, { createdById, agent: input }) =>
+			operation(
+				"create",
+				transaction(
+					Effect.gen(function* () {
+						const [owningPod] = yield* query((db) =>
+							db
+								.select({ id: pod.id })
+								.from(pod)
+								.where(and(eq(pod.workspaceId, workspaceId), eq(pod.id, input.podId)))
+								.limit(1),
+						);
+						if (!owningPod) {
+							return yield* new PodOutsideWorkspace();
+						}
+
+						const id = yield* ids.next;
+						const handle = input.handle ?? handleFromName(input.name);
+						const [row] = yield* queryCatching(
+							(db) =>
+								db
+									.insert(agent)
+									.values({
+										id,
+										workspaceId,
+										podId: input.podId,
+										createdById,
+										name: input.name,
+										handle,
+										description: input.description ?? null,
+										color: input.color ?? colorFromText(input.name),
+										face: input.face ?? "pill",
+										model: input.model,
+										prompt: input.prompt ?? "",
+										disabledTools: input.disabledTools ?? [],
+									})
+									.returning(),
+							(failure) => nameTaken(failure, { name: input.name, handle }),
+						);
+						const crew = row && crewAgentRow(row);
+						if (!crew) {
+							return yield* Effect.die(new Error("Agent insert returned no crew row"));
+						}
+						return crew;
+					}),
+				),
+			),
+
+		update: (workspaceId, agentId, changes) =>
+			operation(
+				"update",
+				Effect.gen(function* () {
+					// A system agent's one changeable setting, its model, belongs to the
+					// workspace and is set through `setSystemAgentModel`.
+					if (yield* isSystemAgent(workspaceId, agentId)) {
+						return yield* new SystemAgentImmutable();
+					}
+					const [row] = yield* queryCatching(
+						(db) =>
+							db
+								.update(agent)
+								.set(changes)
+								.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
+								.returning(),
+						(failure) => nameTaken(failure, changes),
+					);
+					const crew = row && crewAgentRow(row);
+					if (!crew) {
+						return yield* new AgentGone({ agentId });
+					}
+					return crew;
+				}),
+			),
+
+		remove: (workspaceId, agentId) =>
+			operation(
+				"remove",
+				Effect.gen(function* () {
+					if (yield* isSystemAgent(workspaceId, agentId)) {
+						return yield* new SystemAgentImmutable();
+					}
+					yield* query((db) =>
+						db.delete(agent).where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId))),
+					);
+				}),
+			),
+
+		provisionPersonalAssistant: ({ workspaceId, podId, userId, model }) =>
+			operation(
+				"provisionPersonalAssistant",
+				Effect.gen(function* () {
+					const id = yield* ids.next;
+					const [created] = yield* query((db) =>
+						db
+							.insert(agent)
+							.values({
+								id,
+								workspaceId,
+								podId,
+								createdById: userId,
+								name: "Personal Assistant",
+								handle: PERSONAL_ASSISTANT_KEY,
+								provisionedKey: PERSONAL_ASSISTANT_KEY,
+								description: "Your private assistant.",
+								color: "sky",
+								face: "pill",
+								model: model ?? FALLBACK_ASSISTANT_MODEL,
+								prompt: PERSONAL_ASSISTANT_PROMPT,
+							})
+							.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
+							.returning(),
+					);
+					const [assistant] = created
+						? [created]
+						: yield* query((db) =>
+								db
+									.select()
+									.from(agent)
+									.where(
+										and(eq(agent.podId, podId), eq(agent.provisionedKey, PERSONAL_ASSISTANT_KEY)),
+									)
+									.limit(1),
+							);
+					const crew = assistant && crewAgentRow(assistant);
+					if (!crew) {
+						return yield* Effect.die(new Error("Personal Assistant could not be provisioned"));
+					}
+					return crew;
+				}),
+			),
+
+		ensureSystemAgents: ({ workspaceId, createdById }) =>
+			operation(
+				"ensureSystemAgents",
+				Effect.forEach(
+					SYSTEM_AGENTS,
+					(definition) => ensureSystemAgent(workspaceId, createdById, definition),
+					{ discard: true },
+				),
+			),
+
+		setSystemAgentModel: (workspaceId, key, model) =>
+			operation(
+				"setSystemAgentModel",
+				Effect.gen(function* () {
+					const [row] = yield* query((db) =>
+						db
+							.update(agent)
+							.set({ model })
+							.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, key)))
+							.returning({ id: agent.id }),
+					);
+					if (!row) {
+						return yield* new SystemAgentMissing({ key });
+					}
+				}),
+			),
+
+		runnableSystemAgent: (workspaceId, key) =>
+			operation(
+				"runnableSystemAgent",
+				query((db) => findRunnableSystemAgent(db, workspaceId, key)),
+			),
+	});
+});
+
+export const layer = Layer.effect(Service, make);
+
+export const PERSONAL_ASSISTANT_PROMPT =
+	"You are Personal Assistant, the user's general-purpose assistant. Help them answer questions, think through problems, make plans, write, and complete tasks. Be clear, practical, and concise. Ask clarifying questions when important details are missing. Distinguish facts from assumptions and say when you are uncertain. Use available tools when they help, and report their results accurately.";
+
+/**
+ * The model a Personal Assistant is given when its pod is provisioned without
+ * one, which is the invitation path: somebody joining has no model to name yet.
+ */
+export const FALLBACK_ASSISTANT_MODEL = "claude-sonnet-4-20250514";
+
+/** Another agent in the pod already has this name or handle. */
+export class AgentNameTaken
+	extends Data.TaggedError("AgentNameTaken")<{
+		readonly field: "name" | "handle";
+		readonly value: string;
+	}>
+	implements UserFacing
+{
+	override get message() {
+		return `An agent with the ${this.field} "${this.value}" already exists in this pod`;
+	}
+	get userMessage() {
+		return this.field === "name"
+			? UserMessage.of`Another agent in this pod already has that name`
+			: UserMessage.of`Another agent in this pod already has that handle`;
+	}
+}
+
+/** The agent was deleted before the write reached it. */
+export class AgentGone
+	extends Data.TaggedError("AgentGone")<{ readonly agentId: string }>
+	implements UserFacing
+{
+	override get message() {
+		return `No agent with the id "${this.agentId}"`;
+	}
+	get userMessage() {
+		return UserMessage.of`No such agent`;
+	}
+}
+
+/** A placement names a pod in another workspace. */
+export class PodOutsideWorkspace
+	extends Data.TaggedError("PodOutsideWorkspace")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That is not a pod in this workspace`;
+	}
+}
+
+/**
+ * System agents are shipped by the product and belong to the workspace, not to
+ * a pod. The one thing about one that changes, its model, is set through
+ * `setSystemAgentModel`.
+ */
+export class SystemAgentImmutable
+	extends Data.TaggedError("SystemAgentImmutable")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`A system agent is configured for the workspace, not in a pod`;
+	}
+}
+
+/**
+ * The workspace has no row for this system agent. Every workspace is given
+ * one when it is created, so this is a fault in the data rather than
+ * something a caller can retry.
+ */
+export class SystemAgentMissing
+	extends Data.TaggedError("SystemAgentMissing")<{ readonly key: SystemAgentKey }>
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This workspace has no ${this.key} agent`;
+	}
+}
+
+/** The Personal Assistant's handle, and the key it is provisioned under once per Personal pod. */
+const PERSONAL_ASSISTANT_KEY = "personal-assistant";
+
+/**
+ * The clash a write's unique violation means, for the values it wrote. Any
+ * other failure is not a clash and stays a defect.
+ */
+function nameTaken(
+	failure: QueryFailure,
+	written: { name?: string; handle?: string },
+): AgentNameTaken | undefined {
+	const constraint = violatedUniqueConstraint(failure);
+	if (constraint === "agent_name_idx" && written.name !== undefined) {
+		return new AgentNameTaken({ field: "name", value: written.name });
+	}
+	if (constraint === "agent_handle_idx" && written.handle !== undefined) {
+		return new AgentNameTaken({ field: "handle", value: written.handle });
+	}
+	return undefined;
+}

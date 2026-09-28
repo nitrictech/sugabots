@@ -17,7 +17,7 @@ export interface Interface {
 	/** For model providers and model discovery: a client bound to one provider's base URL. */
 	readonly providers: EgressHttpClients;
 	/** Checks an address a workspace gives for a provider or connection, under the providers' policy. */
-	readonly validateProviderUrl: EgressUrlValidator;
+	readonly validateProviderUrl: (url: string) => Effect.Effect<void, EgressRefused>;
 	/**
 	 * Unbound, under the providers' policy. A connection's sign-in goes wherever
 	 * its authorization server says: its well-known documents, then often
@@ -48,9 +48,9 @@ export const make = Effect.gen(function* () {
 		providers: yield* closedWithLayer(() =>
 			createEgressHttpClients({ allowPrivateNetwork: allowPrivateProviderNetwork }),
 		),
-		validateProviderUrl: createEgressUrlValidator({
-			allowPrivateNetwork: allowPrivateProviderNetwork,
-		}),
+		validateProviderUrl: urlValidation(
+			createEgressUrlValidator({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+		),
 		oauth: yield* closedWithLayer(() =>
 			createEgressHttpClient({ allowPrivateNetwork: allowPrivateProviderNetwork }),
 		),
@@ -290,6 +290,21 @@ function requireUrlUnderBase(value: string, baseUrl: string) {
 	) {
 		throw new EgressRefused({ reason: "outsideBaseUrl" });
 	}
+}
+
+/**
+ * `validate` as an Effect. A lookup that throws rather than answering is a
+ * hostname that did not resolve, so every failure is a refusal.
+ */
+export function urlValidation(
+	validate: EgressUrlValidator,
+): (url: string) => Effect.Effect<void, EgressRefused> {
+	return (url) =>
+		Effect.tryPromise({
+			try: () => validate(url),
+			catch: (cause) =>
+				cause instanceof EgressRefused ? cause : new EgressRefused({ reason: "unresolved" }),
+		});
 }
 
 export function createEgressUrlValidator({

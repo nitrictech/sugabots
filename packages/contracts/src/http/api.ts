@@ -16,6 +16,9 @@ import { ToolApprovalsApi } from "./groups/tool-approvals.ts";
 import { WorkspacesApi } from "./groups/workspaces.ts";
 import { ValidateRequest } from "./middleware.ts";
 
+/** The path under the installation's `publicUrl` the API answers at, better-auth's routes included. */
+export const API_BASE_PATH = "/api";
+
 /**
  * The whole API, as data.
  *

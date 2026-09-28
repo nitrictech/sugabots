@@ -19,7 +19,6 @@ import { Data, Effect } from "effect";
 import { type Database, query, queryCatching, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { isUuid } from "../../database/ids.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	agent,
@@ -31,9 +30,10 @@ import {
 	thread,
 	threadParticipant,
 } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
-import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { ConversationEvent } from "../events.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { toRoutineExecution } from "./execution.ts";

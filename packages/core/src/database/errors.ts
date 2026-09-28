@@ -31,6 +31,12 @@ export function isUniqueViolation(failure: unknown): boolean {
 	return postgresError(failure)?.code === "23505";
 }
 
+/** The constraint a Postgres unique violation names, or nothing for any other failure. */
+export function violatedUniqueConstraint(failure: unknown): string | undefined {
+	const error = postgresError(failure);
+	return error?.code === "23505" ? error.constraint : undefined;
+}
+
 export function isForeignKeyViolation(failure: unknown, constraint: string): boolean {
 	const error = postgresError(failure);
 	return (error?.code === "23503" || error?.code === "23001") && error.constraint === constraint;

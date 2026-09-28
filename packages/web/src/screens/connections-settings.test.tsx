@@ -302,10 +302,14 @@ describe("coming back from a connection sign-in", () => {
 	it("says once why a sign-in for a pod did not finish", async () => {
 		route.list.mockReturnValue(Effect.succeed([wiki]));
 		const router = mount(
-			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&oauth_error=No+thanks`,
+			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&oauth_error=refused`,
 		);
 
-		expect(await screen.findByText("Signing in did not finish: No thanks")).toBeDefined();
+		expect(
+			await screen.findByText(
+				"Signing in did not finish: The server's sign-in was refused or cancelled.",
+			),
+		).toBeDefined();
 		await waitFor(() => expect(router.state.location.href).toBe(page));
 
 		const other = pods[1] as (typeof pods)[number];
@@ -318,9 +322,16 @@ describe("coming back from a connection sign-in", () => {
 	});
 
 	it("says what went wrong when the sign-in never reached a pod", async () => {
-		mount("/connections/oauth/return?oauth_error=The+sign-in+does+not+match+any+connection");
+		mount("/connections/oauth/return?oauth_error=unknown_state");
 
-		expect(await screen.findByText("The sign-in does not match any connection")).toBeDefined();
+		expect(await screen.findByText("The sign-in does not match any connection.")).toBeDefined();
 		expect(screen.getByRole("link", { name: "Return to workspace" })).toBeDefined();
+	});
+
+	it("never shows text from the address in place of a code", async () => {
+		mount("/connections/oauth/return?oauth_error=Call+555-0100+to+verify+your+account");
+
+		expect(await screen.findByText("Something went wrong. Try again.")).toBeDefined();
+		expect(screen.queryByText(/555-0100/)).toBeNull();
 	});
 });

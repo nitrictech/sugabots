@@ -14,22 +14,22 @@ import { Context, Data, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
 	afterCommit,
-	Database,
-	layer as databaseLayer,
 	query,
 	queryCatching,
+	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { isUuid } from "../../database/ids.ts";
 import { user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
+import { isUuid } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
-import { provisionDefaultSearchProvider } from "../../providers/search-providers/store.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type AuthorizationDenied, authorization, ResourceHidden } from "../access.ts";
-import { ensureSystemAgents } from "../agents/system-agents.ts";
-import { provisionPersonalPod } from "../pods/store.ts";
+import { AgentRepository } from "../agents/agent-repository.ts";
+import { PodAdministration } from "../pods/pod-administration.ts";
 
 /**
  * Every operation takes the id of the person asking and checks what they may do
@@ -91,14 +91,15 @@ export interface ForInvitation {
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Membership") {}
 
 export const make = Effect.gen(function* () {
-	const database = yield* Database;
+	const operation = yield* serviceOperations<Interface>("Membership");
 	const accounts = yield* Accounts.Service;
 	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
-
-	const operation = <A, E>(name: keyof Interface, effect: Effect.Effect<A, E, Database>) =>
-		Effect.provideService(effect, Database, database).pipe(Effect.withSpan(`Membership.${name}`));
+	const pods = yield* PodAdministration.Service;
+	const agents = yield* AgentRepository.Service;
+	const searchProviders = yield* SearchProviderRepository.Service;
+	const modelProviders = yield* ModelProviderRepository.Service;
 
 	const sendInvitation = (
 		invitationId: string,
@@ -164,18 +165,17 @@ export const make = Effect.gen(function* () {
 							);
 							if (!created) return yield* Effect.die(new Error("The workspace was not created"));
 							yield* query((db) =>
-								Effect.gen(function* () {
-									yield* db
-										.insert(workspaceMember)
-										.values({ workspaceId: created.id, userId: input.userId, role: "admin" });
-									yield* provisionDefaultSearchProvider(db, created.id, input.userId);
-									yield* ensureSystemAgents(db, {
-										workspaceId: created.id,
-										createdById: input.userId,
-									});
-									yield* provisionPersonalPod(db, created.id, input.userId);
-								}),
+								db
+									.insert(workspaceMember)
+									.values({ workspaceId: created.id, userId: input.userId, role: "admin" }),
 							);
+							yield* agents.ensureSystemAgents({
+								workspaceId: created.id,
+								createdById: input.userId,
+							});
+							yield* searchProviders.provisionDefault(created.id, input.userId);
+							yield* modelProviders.seedPresets(created.id);
+							yield* pods.provisionPersonal({ workspaceId: created.id, userId: input.userId });
 							return created;
 						}),
 					);
@@ -473,9 +473,12 @@ export const make = Effect.gen(function* () {
 									.update(workspaceInvite)
 									.set({ status: "accepted" })
 									.where(eq(workspaceInvite.id, input.invitationId));
-								yield* provisionPersonalPod(db, invitation.workspaceId, input.userId);
 							}),
 						);
+						yield* pods.provisionPersonal({
+							workspaceId: invitation.workspaceId,
+							userId: input.userId,
+						});
 						return { workspaceId: invitation.workspaceId };
 					}),
 				),
@@ -486,7 +489,12 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([databaseLayer, Installation.layer, Email.layer, Accounts.layer]),
+	Layer.provide([
+		PodAdministration.layer,
+		AgentRepository.layer,
+		SearchProviderRepository.layer,
+		ModelProviderRepository.layer,
+	]),
 );
 
 export class SlugTaken extends Data.TaggedError("SlugTaken") implements UserFacing {

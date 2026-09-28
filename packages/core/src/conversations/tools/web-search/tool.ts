@@ -1,6 +1,9 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
-import { MAX_SEARCH_RESULTS, type SearchBackend } from "./backends.ts";
+import {
+	MAX_SEARCH_RESULTS,
+	type SearchBackend,
+} from "../../../providers/search-providers/backends.ts";
 
 export const WEB_SEARCH_TOOL = "web_search";
 const MAX_QUERY_LENGTH = 400;

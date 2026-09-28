@@ -1,6 +1,5 @@
-import { Data, Effect, Schema } from "effect";
-import type { Database } from "../../database/database.ts";
-import { UserMessage } from "../../user-message.ts";
+import { Clock, Data, Effect, Schema } from "effect";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import {
 	type DiscoveredModel,
@@ -8,7 +7,7 @@ import {
 	type ModelRegistry,
 	modelsDev,
 } from "./dialects/index.ts";
-import type { ModelProviderStore, ProviderConnection } from "./store.ts";
+import type { ModelProviderRepository } from "./model-provider-repository.ts";
 
 /**
  * Asking a provider which models it offers and what they can do.
@@ -40,9 +39,13 @@ class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
 	readonly reason: UserMessage;
 }> {}
 
-export class ModelDiscoveryFailed extends Data.TaggedError("ModelDiscoveryFailed")<{
-	readonly message: string;
-}> {}
+/** Asking the provider which models it offers failed; `message` is what went wrong, for the logs. */
+export class ModelDiscoveryFailed
+	extends Data.TaggedError("ModelDiscoveryFailed")<{
+		readonly message: string;
+		readonly userMessage: UserMessage;
+	}>
+	implements UserFacing {}
 
 type ProviderFailure =
 	| ConnectionMissing
@@ -72,17 +75,37 @@ function describe(failure: ProviderFailure): UserMessage {
 	}
 }
 
+/** What went wrong, for the logs, with whatever the provider or the network said. */
+function detail(failure: ProviderFailure): string {
+	switch (failure._tag) {
+		case "ConnectionMissing":
+			return "The provider needs a key it does not have";
+		case "ProviderRejected":
+			return `The provider answered ${failure.status} ${failure.statusText}`;
+		case "InvalidModelList":
+			return failure.reason;
+		case "ProviderUnreachable":
+			return `The provider could not be reached: ${String(failure.cause)}`;
+	}
+}
+
+const logFailure = (failure: ProviderFailure) =>
+	Effect.logWarning("Asking a model provider for its models failed", detail(failure));
+
 export function testProvider(
-	store: Pick<ModelProviderStore, "connection" | "recordTest">,
+	store: Pick<ModelProviderRepository.Interface, "endpoint" | "recordTest">,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
-): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserMessage }, never, Database> {
+): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserMessage }> {
 	const attempt = Effect.gen(function* () {
-		const started = Date.now();
+		const started = yield* Clock.currentTimeMillis;
 		const connection = yield* requireConnection(store, workspaceId, providerId);
 
-		const outcome = yield* requestModels(connection, httpClients).pipe(Effect.result);
+		const outcome = yield* requestModels(connection, httpClients).pipe(
+			Effect.tapError(logFailure),
+			Effect.result,
+		);
 		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
 
 		// A test is recorded either way: its result is the point.
@@ -92,7 +115,8 @@ export function testProvider(
 			connection.configurationUpdatedAt,
 			error === undefined ? { activateOnSuccess: true } : { error },
 		);
-		return { reachable: error === undefined, latencyMs: Date.now() - started, error };
+		const latencyMs = (yield* Clock.currentTimeMillis) - started;
+		return { reachable: error === undefined, latencyMs, error };
 	});
 
 	// A missing connection is the one failure with nothing to record against.
@@ -104,7 +128,7 @@ export function testProvider(
 }
 
 export function fetchProviderModels(
-	store: Pick<ModelProviderStore, "connection" | "recordTest" | "syncDiscovered">,
+	store: Pick<ModelProviderRepository.Interface, "endpoint" | "recordTest" | "syncDiscovered">,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
@@ -112,14 +136,11 @@ export function fetchProviderModels(
 		registry = modelsDev,
 		activateOnSuccess = false,
 	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
-): Effect.Effect<
-	{ added: number; updated: number; unchanged: number },
-	ModelDiscoveryFailed,
-	Database
-> {
+): Effect.Effect<{ added: number; updated: number; unchanged: number }, ModelDiscoveryFailed> {
 	const discover = Effect.gen(function* () {
 		const connection = yield* requireConnection(store, workspaceId, providerId);
 		const outcome = yield* requestModels(connection, httpClients).pipe(
+			Effect.tapError(logFailure),
 			Effect.map((models) => models.map((model) => registry.complete(model, connection))),
 			Effect.result,
 		);
@@ -144,24 +165,27 @@ export function fetchProviderModels(
 
 	// The tags are this module's business. A caller only needs the sentence.
 	return discover.pipe(
-		Effect.mapError((failure) => new ModelDiscoveryFailed({ message: describe(failure) })),
+		Effect.mapError(
+			(failure) =>
+				new ModelDiscoveryFailed({ message: detail(failure), userMessage: describe(failure) }),
+		),
 	);
 }
 
 function requireConnection(
-	store: Pick<ModelProviderStore, "connection">,
+	store: Pick<ModelProviderRepository.Interface, "endpoint">,
 	workspaceId: string,
 	providerId: string,
-): Effect.Effect<ProviderConnection, ConnectionMissing, Database> {
+): Effect.Effect<ModelProviderRepository.ProviderEndpoint, ConnectionMissing> {
 	return Effect.filterOrFail(
-		store.connection(workspaceId, providerId),
+		store.endpoint(workspaceId, providerId),
 		(connection) => connection != null,
 		() => new ConnectionMissing({}),
 	);
 }
 
 function requestModels(
-	connection: ProviderConnection,
+	connection: ModelProviderRepository.ProviderEndpoint,
 	httpClients: EgressHttpClients,
 ): Effect.Effect<DiscoveredModel[], ProviderFailure> {
 	const dialect = dialectFor(connection);

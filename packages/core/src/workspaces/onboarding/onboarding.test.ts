@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	agent,
 	modelProvider,
@@ -11,11 +11,16 @@ import {
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
-import { onboardingStore } from "./store.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { Onboarding } from "./onboarding.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () => {
-	const store = onPostgres(onboardingStore);
+	let store: Promised<Onboarding.Interface>;
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
@@ -24,9 +29,16 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	let customAgentId: string;
 	let systemAgentId: string;
 
+	beforeAll(async () => {
+		store = await servedOnPostgres(Onboarding.Service, Onboarding.layer);
+	});
+
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	const complete = (userId: string, agentId: string) =>
+		store.complete({ userId, workspaceId, podId, agentId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -135,7 +147,8 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	});
 
 	it("completes only for an admin's custom agent in their pod", async () => {
-		expect(await store.complete(adminId, workspaceId, podId, customAgentId)).toBe(true);
+		await complete(adminId, customAgentId);
+
 		expect(await store.isCompleted(adminId)).toBe(true);
 	});
 
@@ -145,11 +158,13 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 			db.update(agent).set({ model: "not-switched-on" }).where(eq(agent.id, customAgentId)),
 		);
 
-		expect(await store.complete(adminId, workspaceId, podId, customAgentId)).toBe(true);
+		await complete(adminId, customAgentId);
+
+		expect(await store.isCompleted(adminId)).toBe(true);
 	});
 
 	it("leaves the Scribe unset, so nobody is given a model they were not shown", async () => {
-		await store.complete(adminId, workspaceId, podId, customAgentId);
+		await complete(adminId, customAgentId);
 
 		const [scribe] = await onDatabase((db) =>
 			db.select({ model: agent.model }).from(agent).where(eq(agent.id, systemAgentId)),
@@ -158,8 +173,12 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	});
 
 	it("does not accept a system agent or a non-admin member", async () => {
-		expect(await store.complete(adminId, workspaceId, podId, systemAgentId)).toBe(false);
-		expect(await store.complete(memberId, workspaceId, podId, customAgentId)).toBe(false);
+		await expect(complete(adminId, systemAgentId)).rejects.toBeInstanceOf(
+			Onboarding.NotReadyToFinish,
+		);
+		await expect(complete(memberId, customAgentId)).rejects.toBeInstanceOf(
+			Onboarding.NotReadyToFinish,
+		);
 		expect(await store.isCompleted(adminId)).toBe(false);
 	});
 
@@ -179,7 +198,24 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		);
 		if (!invitation) throw new Error("could not create invitation");
 
-		expect(await store.completeAcceptedInvite(memberId, invitation.id)).toBe(workspaceId);
+		expect(
+			await store.completeAcceptedInvite({ userId: memberId, invitationId: invitation.id }),
+		).toBe(workspaceId);
 		expect(await store.isCompleted(memberId)).toBe(true);
+		const [assistant] = await onDatabase((db) =>
+			db
+				.select({ model: agent.model })
+				.from(agent)
+				.innerJoin(pod, eq(pod.id, agent.podId))
+				.where(and(eq(pod.ownerId, memberId), eq(agent.provisionedKey, "personal-assistant"))),
+		);
+		expect(assistant?.model).toBe("model");
+	});
+
+	it("refuses an invitation this account has not accepted", async () => {
+		await expect(
+			store.completeAcceptedInvite({ userId: memberId, invitationId: crypto.randomUUID() }),
+		).rejects.toBeInstanceOf(Onboarding.InvitationNotAccepted);
+		expect(await store.isCompleted(memberId)).toBe(false);
 	});
 });

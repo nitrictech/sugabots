@@ -43,7 +43,7 @@ describe("Egress.layer", () => {
 		["outside production when refused", { ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "false" }, PRIVATE],
 	])("lets model providers reach a private network %s as configured", async (_, env, expected) => {
 		const exit = await withEgress(env, (egress) =>
-			rejection(egress.validateProviderUrl(privateProvider)),
+			rejection(Effect.runPromise(egress.validateProviderUrl(privateProvider))),
 		);
 
 		expect(Exit.isSuccess(exit) && exit.value).toMatch(expected);

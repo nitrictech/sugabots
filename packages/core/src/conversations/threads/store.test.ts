@@ -16,10 +16,16 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { agentStore } from "../../workspaces/agents/store.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
-import { podStore } from "../../workspaces/pods/store.ts";
+import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
 import { conversationsForTests } from "../testing.ts";
 import { replyTurnOf } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
@@ -604,11 +610,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			message: "Keep this history",
 		});
 
-		await onPostgres(agentStore).remove(workspaceId, agentId);
+		const agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+		const pods = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
+		await agents.remove(workspaceId, agentId);
 		expect(
 			await onDatabase((db) => db.select().from(thread).where(eq(thread.id, details.thread.id))),
 		).toHaveLength(0);
-		await expect(onPostgres(podStore).remove(workspaceId, podId)).resolves.toBeUndefined();
+		await expect(pods.remove(workspaceId, podId)).resolves.toBeUndefined();
 	});
 
 	it("adds each human sender to the participant stack", async () => {

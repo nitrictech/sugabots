@@ -1,4 +1,5 @@
 import type { SessionUser } from "@sugabots/contracts";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
@@ -8,41 +9,35 @@ import { createEventBus, type EventBus } from "@sugabots/core/database/events/bu
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Installation } from "@sugabots/core/installation/installation";
-import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import type {
-	EgressHttpClients,
-	EgressUrlValidator,
-} from "@sugabots/core/providers/network/egress";
-import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
+import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
+import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
+import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { unimplemented } from "@sugabots/core/testing";
 import { type Authorization, closedAuthorization } from "@sugabots/core/workspaces/access";
-import { type AgentStore, crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/store";
-import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
-import type { Membership } from "@sugabots/core/workspaces/membership/membership";
-import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
-import type { PodStore } from "@sugabots/core/workspaces/pods/store";
+import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import type { Authentication } from "../auth/authentication.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
-import { API_BASE_PATH } from "./api.ts";
 import { apiLayer, type Stores } from "./app.ts";
 
 type TestIdentity =
 	| { authentication: Authentication.Interface; resolveUser?: never }
 	| { authentication?: never; resolveUser: UserResolver };
 
-type TestAppOptions = TestIdentity & {
+type TestAppOptions<Provided> = TestIdentity & {
 	/** Where the web app is served, when a case needs it apart from the API. */
 	webAppUrl?: string;
 	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
 	authorization?: Authorization;
-	membership?: Membership.Interface;
+	/** The services a case is about, in place of the unimplemented ones. */
+	services?: Layer.Layer<Provided>;
 	/** The stores a case is about. Anything left out answers nothing. */
 	stores?: Partial<Stores>;
-	httpClients?: EgressHttpClients;
-	validateProviderUrl?: EgressUrlValidator;
 	model?: TurnModel;
 };
 
@@ -62,7 +57,9 @@ export interface TestApp {
  * The complete route table over fakes that grant nothing, reach nothing and
  * store nothing, so a case supplies only what it is about.
  */
-export function createTestApp(options: TestAppOptions): TestApp {
+export function createTestApp<Provided extends Layer.Success<typeof emptyServices> = never>(
+	options: TestAppOptions<Provided>,
+): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
 	const routes = apiLayer({
 		authentication: options.authentication ?? authenticationForResolver(options.resolveUser),
@@ -72,7 +69,6 @@ export function createTestApp(options: TestAppOptions): TestApp {
 			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
 		}),
 		authorization: options.authorization ?? closedAuthorization(),
-		membership: options.membership ?? noMembership,
 		stores: { ...emptyStores, ...options.stores },
 		events: {
 			bus,
@@ -85,12 +81,10 @@ export function createTestApp(options: TestAppOptions): TestApp {
 					new ModelRequestFailed({ message: "This test app has no model", reason: "unavailable" }),
 				),
 		},
-		httpClients: options.httpClients ?? {
-			for: () => async () => new Response(null, { status: 503 }),
-		},
-		validateProviderUrl: options.validateProviderUrl ?? (async () => {}),
-		oauthFetch: async () => new Response(null, { status: 503 }),
-	}).pipe(Layer.provide([noDatabase, HttpServer.layerServices]));
+	}).pipe(
+		Layer.provide(Layer.merge(emptyServices, options.services ?? Layer.empty)),
+		Layer.provide([noDatabase, HttpServer.layerServices]),
+	);
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 	return {
 		request: (path, init) =>
@@ -114,29 +108,6 @@ function authenticationForResolver(resolveUser: UserResolver): Authentication.In
 function notStubbed(method: string): Effect.Effect<never> {
 	return Effect.die(new Error(`${method} has no test double. Pass one to createTestApp.`));
 }
-
-const emptyPodStore: PodStore = {
-	listVisible: () => Effect.succeed([]),
-	create: () => notStubbed("pods.create"),
-	ensurePersonal: () => notStubbed("pods.ensurePersonal"),
-	update: () => notStubbed("pods.update"),
-	remove: () => Effect.void,
-	listMembers: () => Effect.succeed([]),
-	addMember: () => Effect.succeed("not_workspace_member"),
-	removeMember: () => Effect.succeed("not_a_member" as const),
-};
-
-const emptyAgentStore: AgentStore = {
-	listVisible: () => Effect.succeed([]),
-	get: () => Effect.undefined,
-	fromRow: (row) => {
-		const crew = crewAgentRow(row);
-		return Effect.succeed(crew ? toAgent(crew) : undefined);
-	},
-	create: () => notStubbed("agents.create"),
-	update: () => notStubbed("agents.update"),
-	remove: () => Effect.void,
-};
 
 const emptyThreadStore: ThreadStore = {
 	listVisible: () => Effect.succeed([]),
@@ -168,67 +139,7 @@ const emptyRoutineStore: RoutineStore = {
 	acceptWebhook: () => Effect.undefined,
 };
 
-const emptyConnectionStore: ConnectionStore = {
-	list: () => Effect.succeed([]),
-	get: () => Effect.undefined,
-	create: () => notStubbed("connections.create"),
-	update: () => Effect.undefined,
-	remove: () => Effect.succeed(false),
-	target: () => Effect.undefined,
-	targetsForPod: () => Effect.succeed([]),
-	recordTest: () => Effect.void,
-	oauthRecord: () => Effect.undefined,
-	saveOauthRecord: () => Effect.void,
-	byOauthState: () => Effect.undefined,
-};
-
-const emptySearchProviderStore: SearchProviderStore = {
-	get: () => Effect.undefined,
-	replace: () => notStubbed("searchProviders.replace"),
-	update: () => Effect.undefined,
-	remove: () => Effect.succeed(false),
-	connection: () => Effect.undefined,
-	resolve: () => Effect.undefined,
-	recordTest: () => Effect.void,
-};
-
-const emptyModelProviderStore: ModelProviderStore = {
-	list: () => Effect.succeed([]),
-	get: () => Effect.undefined,
-	create: () => notStubbed("modelProviders.create"),
-	update: () => Effect.undefined,
-	remove: () => Effect.succeed(false),
-	connection: () => Effect.undefined,
-	resolve: () => Effect.undefined,
-	recordTest: () => Effect.void,
-	addModels: () => Effect.succeed(0),
-	syncDiscovered: () => Effect.succeed({ added: 0, updated: 0 }),
-	setModelEnabled: () => Effect.succeed(0),
-	updateModel: () => Effect.succeed(0),
-	removeModel: () => Effect.succeed(false),
-	listEnabled: () => Effect.succeed({ models: [] }),
-	isEnabled: () => Effect.succeed(false),
-};
-
-const emptyOnboardingStore: OnboardingStore = {
-	isCompleted: () => Effect.succeed(true),
-	complete: () => Effect.succeed(false),
-	completeAcceptedInvite: () => Effect.undefined,
-};
-
-const emptySystemAgentStore: SystemAgentStore = {
-	list: () => Effect.succeed([]),
-	setModel: () => notStubbed("systemAgents.setModel"),
-};
-
 const emptyStores: Stores = {
-	pods: emptyPodStore,
-	agents: emptyAgentStore,
-	systemAgents: emptySystemAgentStore,
-	onboarding: emptyOnboardingStore,
-	modelProviders: emptyModelProviderStore,
-	searchProviders: emptySearchProviderStore,
-	connections: emptyConnectionStore,
 	threads: emptyThreadStore,
 	chats: emptyChatStore,
 	routines: emptyRoutineStore,
@@ -236,23 +147,19 @@ const emptyStores: Stores = {
 	approvals: noToolApprovalStore,
 };
 
-const unused = () => Effect.die(new Error("This test app has no membership"));
-
-/** Belongs to no workspace, and fails any case that reaches further. */
-const noMembership: Membership.Interface = {
-	workspaces: () => Effect.succeed([]),
-	create: unused,
-	update: unused,
-	members: unused,
-	changeRole: unused,
-	remove: unused,
-	leave: unused,
-	invitations: unused,
-	invite: unused,
-	cancelInvitation: unused,
-	invitation: unused,
-	accept: unused,
-};
+/**
+ * Services whose every method dies naming itself, so a case supplies, through
+ * `services`, exactly the ones it is about.
+ */
+const emptyServices = Layer.mergeAll(
+	unimplemented(Membership.Service),
+	unimplemented(PodAdministration.Service),
+	unimplemented(AgentAdministration.Service),
+	unimplemented(Onboarding.Service),
+	unimplemented(ModelProviderSetup.Service),
+	unimplemented(SearchProviderSetup.Service),
+	unimplemented(ConnectionSetup.Service),
+);
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
 export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;

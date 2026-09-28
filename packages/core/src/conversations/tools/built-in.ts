@@ -2,10 +2,10 @@ import type { ToolSet } from "ai";
 import { Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import type { EgressHttpClients } from "../../providers/network/egress.ts";
-import type { SearchProviderStore } from "../../providers/search-providers/store.ts";
+import { searchBackend, searchEndpoint } from "../../providers/search-providers/backends.ts";
+import type { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
 import type { FetchPage } from "./web-fetch/fetch-page.ts";
 import { WEB_FETCH_TOOL, webFetchTool } from "./web-fetch/tool.ts";
-import { searchBackend, searchEndpoint } from "./web-search/backends.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 
 /**
@@ -25,7 +25,7 @@ export interface BuiltInTools {
 
 export interface BuiltInToolsOptions {
 	fetchPage: FetchPage;
-	searchProviders: Pick<SearchProviderStore, "resolve">;
+	searchProviders: Pick<SearchProviderRepository.Interface, "resolve">;
 	/** Bound egress clients, so a search goes only to the provider's own address. */
 	httpClients: EgressHttpClients;
 }

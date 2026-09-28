@@ -7,10 +7,7 @@ import {
 	type OAuthTokens,
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
-import type { Effect } from "effect";
-import type { Database } from "../../database/database.ts";
 import type { EgressHttpClient } from "../network/egress.ts";
-import type { ConnectionStore } from "./store.ts";
 
 /**
  * Signing a connection in through the server's own OAuth (ADR 006, C14c).
@@ -33,7 +30,7 @@ export interface OAuthRecord {
 	state?: string;
 }
 
-/** Where a connection's record lives; the store behind it is the connection table. */
+/** Where a connection's record lives. */
 export interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
 	save(record: OAuthRecord): Promise<void>;
@@ -153,32 +150,7 @@ export function needsSignIn(cause: unknown): boolean {
 	return cause instanceof UnauthorizedError;
 }
 
-type RunStore = <A>(effect: Effect.Effect<A, never, Database>) => Promise<A>;
-
 /** Providers backed by the connection table, one per connection asked for. */
 export interface OAuthProviders {
 	for(workspaceId: string, connectionId: string): StoredOAuthProvider;
-}
-
-export function oauthProviders({
-	connections,
-	run,
-	redirectUrl,
-	clientName = "Sugabots",
-}: {
-	connections: Pick<ConnectionStore, "oauthRecord" | "saveOauthRecord">;
-	run: RunStore;
-	redirectUrl: string;
-	clientName?: string;
-}): OAuthProviders {
-	return {
-		for: (workspaceId, connectionId) =>
-			storedOAuthProvider(
-				{
-					load: () => run(connections.oauthRecord(workspaceId, connectionId)),
-					save: (record) => run(connections.saveOauthRecord(workspaceId, connectionId, record)),
-				},
-				{ redirectUrl, clientName },
-			),
-	};
 }

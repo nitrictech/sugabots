@@ -1,7 +1,8 @@
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Layer } from "effect";
 import { FindMyWay, HttpMiddleware, type HttpServerRequest } from "effect/unstable/http";
 import { HttpApi } from "effect/unstable/httpapi";
-import { API_BASE_PATH, ServerApi } from "./api.ts";
+import { ServerApi } from "./api.ts";
 
 /**
  * Names each request's span by the route it matches, `GET /api/pods/:podId`,

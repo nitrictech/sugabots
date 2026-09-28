@@ -1,7 +1,6 @@
 import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import { type PodStore, podSeenBy } from "@sugabots/core/workspaces/pods/store";
+import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
@@ -16,26 +15,22 @@ import { asHttpError } from "../../http/errors.ts";
  * `packages/core/src/workspaces/permissions.ts` and not in each handler.
  */
 
-export interface PodRoutesOptions {
-	pods: PodStore;
-	modelProviders: Pick<ModelProviderStore, "isEnabled">;
-}
-
 const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
-export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
-		handlers
+export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
+	Effect.gen(function* () {
+		const pods = yield* PodAdministration.Service;
+		return handlers
 			.handle("list", () =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					pods.listVisible(workspaceId, actor),
+					pods.list({ workspaceId, actor }),
 				),
 			)
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* grantedWorkspace;
-					// Derived here rather than in the store, so an unsluggable name such
-					// as "!!!", or one only a Personal pod may have, is a bad request about
+					// Derived before anything is written, so an unsluggable name such as
+					// "!!!", or one only a Personal pod may have, is a bad request about
 					// the name rather than a slug conflict.
 					const proposedSlug = payload.slug ?? slugify(payload.name);
 					const slug = Schema.decodeResult(sharedPodSlugSchema)(proposedSlug);
@@ -49,7 +44,9 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 						});
 					}
 					return yield* pods
-						.create(workspaceId, actor, {
+						.create({
+							workspaceId,
+							creator: actor,
 							name: payload.name,
 							slug: slug.success,
 							color: payload.color,
@@ -58,74 +55,49 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 				}),
 			)
 			.handle("ensurePersonal", ({ payload }) =>
-				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* grantedWorkspace;
-					if (!(yield* modelProviders.isEnabled(workspaceId, payload.model))) {
-						return yield* new BadRequest({
-							message: "That model is not enabled in this workspace",
-						});
-					}
-					return yield* pods.ensurePersonal(workspaceId, actor, payload.model);
-				}),
+				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
+					pods
+						.ensurePersonal({ workspaceId, owner: actor, model: payload.model })
+						.pipe(asHttpError(podErrors)),
+				),
 			)
 			.handle("update", ({ payload }) =>
-				Effect.gen(function* () {
-					if (
-						payload.name === undefined &&
-						payload.slug === undefined &&
-						payload.color === undefined &&
-						payload.routing === undefined
-					) {
-						return yield* new BadRequest({ message: "Nothing to change" });
-					}
-					const standing = yield* grantedPod;
-					const updated = yield* pods
-						.update(standing.pod.workspaceId, standing.pod.id, payload)
-						.pipe(asHttpError(podErrors));
-					return podSeenBy({ ...standing, pod: updated });
-				}),
+				Effect.flatMap(grantedPod, (standing) =>
+					pods.update({ standing, changes: payload }).pipe(asHttpError(podErrors)),
+				),
 			)
 			.handle("remove", () =>
 				Effect.flatMap(grantedPod, ({ pod }) =>
-					pods.remove(pod.workspaceId, pod.id).pipe(asHttpError(podErrors)),
+					pods.remove({ workspaceId: pod.workspaceId, podId: pod.id }).pipe(asHttpError(podErrors)),
 				),
 			)
-			.handle("listMembers", () =>
-				Effect.flatMap(grantedPod, ({ pod }) => pods.listMembers(pod.id)),
-			)
+			.handle("listMembers", () => Effect.flatMap(grantedPod, ({ pod }) => pods.members(pod.id)))
 			.handle("addMember", ({ payload }) =>
-				Effect.gen(function* () {
-					const { pod } = yield* grantedPod;
-					const outcome = yield* pods.addMember(pod.workspaceId, pod.id, payload.userId);
-					if (outcome === "personal_pod") {
-						return yield* new BadRequest({ message: "Personal pods cannot have other members" });
-					}
-					if (outcome === "not_workspace_member") {
-						return yield* new BadRequest({ message: "That person is not in this workspace" });
-					}
-				}),
+				Effect.flatMap(grantedPod, ({ pod }) =>
+					pods
+						.addMember({ workspaceId: pod.workspaceId, podId: pod.id, userId: payload.userId })
+						.pipe(asHttpError(podErrors)),
+				),
 			)
 			.handle("removeMember", ({ params }) =>
-				Effect.gen(function* () {
-					const { pod } = yield* grantedPod;
-					const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, params.userId);
-					if (outcome === "personal_pod") {
-						return yield* new BadRequest({
-							message: "Personal pod membership cannot be changed",
-						});
-					}
-					if (outcome === "not_a_member") {
-						return yield* new NotFound({ message: "That person is not in this pod" });
-					}
-				}),
-			),
-	);
-}
+				Effect.flatMap(grantedPod, ({ pod }) =>
+					pods
+						.removeMember({ workspaceId: pod.workspaceId, podId: pod.id, userId: params.userId })
+						.pipe(asHttpError(podErrors)),
+				),
+			);
+	}),
+);
 
 /** What each way a pod write can fail means over HTTP. */
 const podErrors = {
-	SlugTaken: Conflict,
+	PodSlugTaken: Conflict,
 	PersonalPodFixed: BadRequest,
 	FacilitatorNotSetUp: BadRequest,
+	ModelNotEnabled: BadRequest,
+	EmptyPodUpdate: BadRequest,
 	PodGone: NotFound,
+	PersonalPodMembershipFixed: BadRequest,
+	NotInWorkspace: BadRequest,
+	NotInPod: NotFound,
 };

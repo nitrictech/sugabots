@@ -1,18 +1,34 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import type { NewAgent } from "@sugabots/contracts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres } from "../../database/testing.ts";
-import { agentStore, NameTaken, PodOutsideWorkspace, SystemAgentImmutable } from "./store.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import { visibleCrewAgents } from "./agent-reads.ts";
+import { AgentRepository } from "./agent-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
-	const store = onPostgres(agentStore);
+	let store: Promised<AgentRepository.Interface>;
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
 	let podId: string;
 
+	beforeAll(async () => {
+		store = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+	});
+
 	afterAll(async () => {
 		await closeDatabase();
 	});
+
+	const create = (createdById: string, input: NewAgent) =>
+		store.create(workspaceId, { createdById, agent: input });
+	const visibleTo = (userId: string) => runOnPostgres(visibleCrewAgents(workspaceId, userId));
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -57,23 +73,23 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	});
 
 	it("creates an agent in exactly one pod and scopes member visibility to that pod", async () => {
-		const made = await store.create(workspaceId, adminId, {
+		const made = await create(adminId, {
 			podId,
 			name: "Triage",
 			model: "gpt-4o-mini",
 		});
 		expect(made.podId).toBe(podId);
-		expect(await store.listVisible(workspaceId, memberId)).toEqual([made]);
+		expect((await visibleTo(memberId)).map(({ id }) => id)).toEqual([made.id]);
 	});
 
 	it("shows an admin an agent in a shared pod they are not a member of", async () => {
-		const made = await store.create(workspaceId, adminId, {
+		const made = await create(adminId, {
 			podId,
 			name: "Triage",
 			model: "gpt-4o-mini",
 		});
 
-		expect((await store.listVisible(workspaceId, adminId)).map(({ id }) => id)).toContain(made.id);
+		expect((await visibleTo(adminId)).map(({ id }) => id)).toContain(made.id);
 	});
 
 	it("rejects a pod from another workspace", async () => {
@@ -104,19 +120,39 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		);
 		if (!foreign) throw new Error("foreign pod setup failed");
 		await expect(
-			store.create(workspaceId, adminId, { podId: foreign.id, name: "Nope", model: "model" }),
-		).rejects.toBeInstanceOf(PodOutsideWorkspace);
+			create(adminId, { podId: foreign.id, name: "Nope", model: "model" }),
+		).rejects.toBeInstanceOf(AgentRepository.PodOutsideWorkspace);
 	});
 
-	it("allows the same name in different pods but not the same pod", async () => {
-		await store.create(workspaceId, adminId, { podId, name: "Triage", model: "model" });
+	it("refuses a name another agent in the pod has", async () => {
+		await create(adminId, { podId, name: "Triage", model: "model" });
+		await expect(create(adminId, { podId, name: "Triage", model: "model" })).rejects.toMatchObject({
+			_tag: "AgentNameTaken",
+			field: "name",
+		});
+	});
+
+	it("refuses a handle another agent in the pod has, as a clash rather than a fault", async () => {
+		await create(adminId, { podId, name: "Triage", model: "model" });
+
 		await expect(
-			store.create(workspaceId, adminId, { podId, name: "Triage", model: "model" }),
-		).rejects.toBeInstanceOf(NameTaken);
+			create(adminId, { podId, name: "Sorter", handle: "triage", model: "model" }),
+		).rejects.toMatchObject({ _tag: "AgentNameTaken", field: "handle" });
+	});
+
+	it("says which name a renaming clashes on", async () => {
+		await create(adminId, { podId, name: "Triage", model: "model" });
+		const other = await create(adminId, { podId, name: "Sorter", model: "model" });
+
+		await expect(store.update(workspaceId, other.id, { name: "Triage" })).rejects.toMatchObject({
+			_tag: "AgentNameTaken",
+			field: "name",
+			value: "Triage",
+		});
 	});
 
 	it("lets a crew agent's model be cleared, which stops it rather than breaking it", async () => {
-		const made = await store.create(workspaceId, adminId, {
+		const made = await create(adminId, {
 			podId,
 			name: "Clearable",
 			model: "model",
@@ -126,26 +162,28 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 		expect(cleared.model).toBeNull();
 		// Still a crew agent in its pod, still listed: it simply cannot take a turn.
-		const visible = await store.listVisible(workspaceId, adminId);
+		const visible = await visibleTo(adminId);
 		expect(visible.map((one) => one.name)).toContain("Clearable");
 	});
 
 	it("does not individually delete a system agent", async () => {
 		const system = await placeScribe();
-		await expect(store.remove(workspaceId, system.id)).rejects.toBeInstanceOf(SystemAgentImmutable);
+		await expect(store.remove(workspaceId, system.id)).rejects.toBeInstanceOf(
+			AgentRepository.SystemAgentImmutable,
+		);
 	});
 
-	it("does not change a system agent through the pod agent store", async () => {
+	it("does not change a system agent as a crew agent", async () => {
 		const system = await placeScribe();
 		await expect(store.update(workspaceId, system.id, { model: "another" })).rejects.toBeInstanceOf(
-			SystemAgentImmutable,
+			AgentRepository.SystemAgentImmutable,
 		);
 	});
 
 	it("leaves system agents out of the roster, since they are in no pod", async () => {
 		await placeScribe();
-		await store.create(workspaceId, adminId, { podId, name: "Crew", model: "model" });
-		const visible = await store.listVisible(workspaceId, adminId);
+		await create(adminId, { podId, name: "Crew", model: "model" });
+		const visible = await visibleTo(adminId);
 		expect(visible.map((one) => one.name)).not.toContain("Scribe");
 		expect(visible.map((one) => one.name)).toContain("Crew");
 	});

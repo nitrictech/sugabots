@@ -1,4 +1,4 @@
-import { InternalServerError, NotFound } from "@sugabots/contracts/http";
+import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
@@ -8,20 +8,7 @@ import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { Installation } from "@sugabots/core/installation/installation";
-import type { ConnectionStore } from "@sugabots/core/providers/connections/store";
-import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import type {
-	EgressHttpClient,
-	EgressHttpClients,
-	EgressUrlValidator,
-} from "@sugabots/core/providers/network/egress";
-import type { SearchProviderStore } from "@sugabots/core/providers/search-providers/store";
 import type { Authorization } from "@sugabots/core/workspaces/access";
-import type { AgentStore } from "@sugabots/core/workspaces/agents/store";
-import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
-import type { Membership } from "@sugabots/core/workspaces/membership/membership";
-import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
-import type { PodStore } from "@sugabots/core/workspaces/pods/store";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -50,7 +37,7 @@ import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
 import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
-import { API_BASE_PATH, ServerApi } from "./api.ts";
+import { ServerApi } from "./api.ts";
 import { authoriseLayer } from "./authorisation.ts";
 import { failureResponse } from "./errors.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
@@ -65,19 +52,13 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * `apiLayer` takes every dependency explicitly. `createTestApp` in
+ * The workspace and provider routes take their services from the layer's
+ * context; the rest take their dependencies here. `createTestApp` in
  * `app.test-support.ts` drives the same routes with fakes.
  */
 
 /** What the route table reads and writes. */
 export interface Stores {
-	pods: PodStore;
-	agents: AgentStore;
-	systemAgents: SystemAgentStore;
-	onboarding: OnboardingStore;
-	modelProviders: ModelProviderStore;
-	searchProviders: SearchProviderStore;
-	connections: ConnectionStore;
 	threads: ThreadStore;
 	chats: ChatStore;
 	routines: RoutineStore;
@@ -92,16 +73,9 @@ export interface AppOptions {
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
-	/** Workspaces, the people in them, and invitations. */
-	membership: Membership.Interface;
 	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
-	/** How a model provider is reached, and which URLs it may be reached at. */
-	httpClients: EgressHttpClients;
-	validateProviderUrl: EgressUrlValidator;
-	/** For a connection's sign-in, which goes wherever its authorization server is. */
-	oauthFetch: EgressHttpClient;
 	/** Runs a model, for trying one out on a system agent before choosing it. */
 	model: TurnModel;
 }
@@ -110,50 +84,22 @@ export function apiLayer({
 	authentication,
 	installation,
 	authorization,
-	membership,
 	stores,
 	events,
-	httpClients,
-	validateProviderUrl,
-	oauthFetch,
 	model,
 }: AppOptions) {
-	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
-
 	const groups = Layer.mergeAll(
 		systemRoutes,
-		workspaceRoutes({ membership }),
+		workspaceRoutes,
 		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
-		onboardingRoutes({ onboarding: stores.onboarding }),
-		podRoutes({ pods: stores.pods, modelProviders: stores.modelProviders }),
-		systemAgentRoutes({
-			systemAgents: stores.systemAgents,
-			modelProviders: stores.modelProviders,
-		}),
+		onboardingRoutes,
+		podRoutes,
+		systemAgentRoutes,
 		modelTrialRoutes({ model }),
-		modelProviderRoutes({
-			modelProviders: stores.modelProviders,
-			httpClients,
-			validateProviderUrl,
-			model,
-		}),
-		searchProviderRoutes({
-			searchProviders: stores.searchProviders,
-			httpClients,
-			validateProviderUrl,
-		}),
-		connectionRoutes({
-			authorization,
-			connections: stores.connections,
-			httpClients,
-			validateProviderUrl,
-			oauth: {
-				redirectUrl: `${apiUrl}/connections/oauth/callback`,
-				webAppUrl: installation.webAppUrl,
-				fetch: oauthFetch,
-			},
-		}),
-		agentRoutes({ agents: stores.agents, modelProviders: stores.modelProviders }),
+		modelProviderRoutes,
+		searchProviderRoutes,
+		connectionRoutes({ webAppUrl: installation.webAppUrl }),
+		agentRoutes,
 		chatRoutes({ chats: stores.chats }),
 		routineRoutes({ routines: stores.routines }),
 		toolApprovalRoutes({ approvals: stores.approvals }),

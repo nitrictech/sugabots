@@ -68,7 +68,7 @@ export const accessPolicy: AccessPolicy = {
 	},
 	onboarding: {
 		status: { reach: "the signed-in person's own progress" },
-		complete: { reach: "onboarding/store.ts checks the pod and agent named" },
+		complete: { reach: "Onboarding.complete checks the pod and agent named" },
 		completeInvite: { reach: "matches the invitation against this account" },
 	},
 	systemAgents: {
@@ -110,7 +110,7 @@ export const accessPolicy: AccessPolicy = {
 		connectFromCatalog: { pod: "connection.manage" },
 		startOAuth: { pod: "connection.manage" },
 		oauthCallback: {
-			reach: "connections/operations.ts asks again on the way back from the provider",
+			reach: "ConnectionSetup.completeOAuth asks again on the way back from the provider",
 		},
 	},
 	events: {

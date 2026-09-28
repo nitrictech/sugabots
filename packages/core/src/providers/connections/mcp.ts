@@ -1,8 +1,9 @@
 import { createMCPClient, type OAuthClientProvider, UnauthorizedError } from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
 import type { Tool } from "ai";
+import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
-import type { EgressHttpClient } from "../network/egress.ts";
+import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 
 /**
  * Talking to an MCP server: one session over Streamable HTTP, through the
@@ -13,10 +14,12 @@ import type { EgressHttpClient } from "../network/egress.ts";
  * turn's model can call. It is kept behind this module so a change in it lands
  * in one place (ADR 006). A failure to list is an answer with a reason rather
  * than a throw, so the settings page and a recorded test read the same
- * sentence.
+ * sentence; `cause` is what went wrong, for the logs.
  */
 
-export type ServerTools = { ok: true; tools: ConnectionTool[] } | { ok: false; reason: string };
+export type ServerTools =
+	| { ok: true; tools: ConnectionTool[] }
+	| { ok: false; reason: UserMessage; cause: unknown };
 
 export interface ServerTarget {
 	url: string;
@@ -96,14 +99,21 @@ export async function listServerTools(
 			await session.close();
 		}
 	} catch (cause) {
-		return { ok: false, reason: describe(cause) };
+		return { ok: false, reason: describe(cause), cause };
 	}
 }
 
-/** The SDK's transport error names the status in its message; that is the part worth repeating. */
-function describe(cause: unknown): string {
-	if (cause instanceof UnauthorizedError) return "Sign in again to reconnect";
+/**
+ * What a person is told about `cause`, in our words. The SDK's transport error
+ * names the server's HTTP status in its message, which is the one part of it
+ * worth repeating.
+ */
+function describe(cause: unknown): UserMessage {
+	if (cause instanceof UnauthorizedError) return UserMessage.of`Sign in again to reconnect`;
+	if (cause instanceof EgressRefused) return cause.userMessage;
 	const message = cause instanceof Error ? cause.message : String(cause);
 	const status = /\bHTTP (\d{3})\b/.exec(message)?.[1];
-	return status ? `The server answered HTTP ${status}` : message;
+	return status
+		? UserMessage.of`The server answered HTTP ${Number(status)}`
+		: UserMessage.of`The server could not be reached`;
 }

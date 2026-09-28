@@ -1,17 +1,15 @@
 import { BadRequest, CurrentUser } from "@sugabots/contracts/http";
-import type { OnboardingStore } from "@sugabots/core/workspaces/onboarding/store";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
+import { asHttpError } from "../../http/errors.ts";
 
 /** Whether the signed-in person has finished setting up, and marking that they have. */
-export interface OnboardingRoutesOptions {
-	onboarding: OnboardingStore;
-}
-
-export function onboardingRoutes({ onboarding }: OnboardingRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "onboarding", (handlers) =>
-		handlers
+export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (handlers) =>
+	Effect.gen(function* () {
+		const onboarding = yield* Onboarding.Service;
+		return handlers
 			.handle("status", () =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
@@ -21,27 +19,31 @@ export function onboardingRoutes({ onboarding }: OnboardingRoutesOptions) {
 			.handle("complete", ({ payload }) =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
-					const { workspaceId, podId, agentId } = payload;
-					if (!(yield* onboarding.complete(user.id, workspaceId, podId, agentId))) {
-						return yield* new BadRequest({ message: "Finish creating your pod and agent first" });
-					}
+					yield* onboarding
+						.complete({
+							userId: user.id,
+							workspaceId: payload.workspaceId,
+							podId: payload.podId,
+							agentId: payload.agentId,
+						})
+						.pipe(asHttpError(onboardingErrors));
 					return { completed: true };
 				}),
 			)
 			.handle("completeInvite", ({ payload }) =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
-					const workspaceId = yield* onboarding.completeAcceptedInvite(
-						user.id,
-						payload.invitationId,
-					);
-					if (!workspaceId) {
-						return yield* new BadRequest({
-							message: "The invitation has not been accepted by this account",
-						});
-					}
+					const workspaceId = yield* onboarding
+						.completeAcceptedInvite({ userId: user.id, invitationId: payload.invitationId })
+						.pipe(asHttpError(onboardingErrors));
 					return { workspaceId };
 				}),
-			),
-	);
-}
+			);
+	}),
+);
+
+const onboardingErrors = {
+	NotReadyToFinish: BadRequest,
+	InvitationNotAccepted: BadRequest,
+	ModelNotEnabled: BadRequest,
+};
