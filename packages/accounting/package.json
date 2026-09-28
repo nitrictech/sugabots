@@ -10,7 +10,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@opencode-ai/models": "^0.0.73",
+		"@opencode-ai/models": "^0.0.85",
 		"ai": "^7.0.100",
 		"effect": "catalog:"
 	}
