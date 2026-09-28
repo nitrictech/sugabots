@@ -1,0 +1,17 @@
+{
+	"name": "@sugabots/accounting",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@opencode-ai/models": "^0.0.73",
+		"ai": "^7.0.100",
+		"effect": "catalog:"
+	}
+}

@@ -20,6 +20,14 @@ export default defineConfig({
 		projects: [
 			{
 				test: {
+					name: "accounting",
+					root: "packages/accounting",
+					environment: "node",
+					include: ["src/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "contracts",
 					root: "packages/contracts",
 					environment: "node",

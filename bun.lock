@@ -16,6 +16,15 @@
         "vitest": "^5.0.0",
       },
     },
+    "packages/accounting": {
+      "name": "@sugabots/accounting",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/models": "^0.0.73",
+        "ai": "^7.0.100",
+        "effect": "catalog:",
+      },
+    },
     "packages/avatars": {
       "name": "@sugabots/avatars",
       "version": "0.0.0",
@@ -864,6 +873,8 @@
     "@storybook/react-dom-shim": ["@storybook/react-dom-shim@11.0.0-alpha.1", "", { "peerDependencies": { "@types/react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "@types/react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "storybook": "^11.0.0-alpha.1" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-3S3YUcHjY8q59CQuYkXguNypgamJ/morzQZDBxm1b8rk6u5xC4hVPmHhdSC9TTeDxRhWecl/IV0SlVNyq7r3vw=="],
 
     "@storybook/react-vite": ["@storybook/react-vite@11.0.0-alpha.1", "", { "dependencies": { "@joshwooding/vite-plugin-react-docgen-typescript": "^0.7.0", "@rollup/pluginutils": "^5.0.2", "@storybook/builder-vite": "11.0.0-alpha.1", "@storybook/react": "11.0.0-alpha.1", "empathic": "^2.0.0", "magic-string": "^1.1.0", "react-docgen": "^8.0.2", "resolve": "^1.22.8", "tsconfig-paths": "^4.2.0" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "storybook": "^11.0.0-alpha.1", "typescript": ">= 4.9.x", "vite": "^6.3.0 || ^7.0.0 || ^8.0.0" }, "optionalPeers": ["typescript"] }, "sha512-bWEFwod0F6r6ZX49cFTnJBnWkpygLiRjPVPxntD2I9rt7FLuWmQfj4w9Ty830L5b7yB4gsoV1s/4rnK2eZHH4Q=="],
+
+    "@sugabots/accounting": ["@sugabots/accounting@workspace:packages/accounting"],
 
     "@sugabots/avatars": ["@sugabots/avatars@workspace:packages/avatars"],
 
