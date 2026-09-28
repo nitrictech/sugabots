@@ -136,3 +136,18 @@ export function usePlacePodMember(podId: string) {
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
 	});
 }
+
+/** Takes you out of a pod, and so off the rail. */
+export function useLeavePod(podId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+
+	return useMutation({
+		mutationFn: () => Effect.runPromise(client.api.pods.leave({ params: { podId } })),
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
+			]),
+	});
+}

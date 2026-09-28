@@ -51,6 +51,7 @@ export const client = {
 			listMembers: vi.fn(),
 			addMember: vi.fn(),
 			removeMember: vi.fn(),
+			leave: vi.fn(),
 		},
 		onboarding: {
 			status: vi.fn(),

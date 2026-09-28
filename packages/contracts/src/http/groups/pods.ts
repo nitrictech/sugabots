@@ -63,5 +63,10 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			params: { podId: uuidSchema, userId: Schema.String },
 			error: refused,
 		}),
+		/** Takes the caller out of the pod. */
+		HttpApiEndpoint.delete("leave", "/pods/:podId/membership", {
+			params: { podId: uuidSchema },
+			error: refused,
+		}),
 	)
 	.middleware(Session) {}

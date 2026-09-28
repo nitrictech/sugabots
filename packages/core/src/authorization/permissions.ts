@@ -63,6 +63,8 @@ export type PodPermission =
 	| "pod.update"
 	| "pod.delete"
 	| "pod.members.manage"
+	/** Take yourself out of a shared pod. Administrators stay in every one. */
+	| "pod.leave"
 	| "agent.read"
 	| "agent.create"
 	| "agent.update"
@@ -141,6 +143,7 @@ const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
 	]),
 	member: new Set<PodPermission>([
 		"pod.read",
+		"pod.leave",
 		"agent.read",
 		"agent.create",
 		"agent.update",
@@ -153,6 +156,7 @@ const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
 	// nothing beyond that.
 	viewer: new Set<PodPermission>([
 		"pod.read",
+		"pod.leave",
 		"agent.read",
 		"connection.read",
 		"routine.read",
@@ -222,6 +226,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		rename: shared && may("pod.update"),
 		changeRouting: may("pod.update"),
 		manageMembers: shared && may("pod.members.manage"),
+		leave: shared && may("pod.leave"),
 		createAgents: may("agent.create"),
 		updateAgents: may("agent.update"),
 		deleteAgents: may("agent.delete"),

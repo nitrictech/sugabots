@@ -517,13 +517,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect((await visibleTo(viewerId)).map(({ id }) => id)).toEqual([joined.id]);
 		});
 
-		it("carries a viewer's permissions on the pods it lists, all of them closed", async () => {
+		it("carries a viewer's permissions on the pods it lists, all closed but leaving", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, joined.id, viewerId);
 
 			const [seen] = await visibleTo(viewerId);
+			const { leave, ...others } = seen?.permissions ?? { leave: false };
 
-			expect(Object.values(seen?.permissions ?? {})).not.toContain(true);
+			expect(leave).toBe(true);
+			expect(Object.values(others)).not.toContain(true);
 		});
 
 		it("leaves a viewer in charge of their own Personal pod", async () => {
@@ -534,6 +536,18 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				manageConnections: true,
 				manageRoutines: true,
 			});
+		});
+
+		it("lets a member leave a shared pod, and keeps an administrator in it", async () => {
+			const made = await create(adminId, { name: "Sales", slug: "sales" });
+			await repository.addMember(workspaceId, made.id, memberId);
+
+			await administrationAs(memberId).leave({ podId: made.id });
+
+			expect((await membersOf(made.id)).map(({ userId }) => userId)).toEqual([adminId]);
+			await expect(administrationAs(adminId).leave({ podId: made.id })).rejects.toThrow(
+				ActionForbidden,
+			);
 		});
 
 		it("keeps a demoted administrator in their pods, with a member's permissions there", async () => {

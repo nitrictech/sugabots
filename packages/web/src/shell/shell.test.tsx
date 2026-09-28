@@ -1773,7 +1773,25 @@ describe("pod settings", () => {
 		mount(podPage);
 
 		expect(await screen.findByRole("button", { name: `Remove ${jye.name}` })).toBeDefined();
+		expect(screen.queryByRole("button", { name: `Leave ${suga.name}` })).toBeNull();
 		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
+	});
+
+	it("lets a member leave a pod, and nothing more", async () => {
+		apiAnswers({ role: "member" });
+		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
+		client.api.pods.leave.mockReturnValue(Effect.void);
+		mount(podPage);
+
+		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
+		expect(screen.queryByRole("button", { name: `Remove ${jye.name}` })).toBeNull();
+
+		expect(await screen.findByRole("dialog", { name: `Leave ${suga.name}?` })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+
+		await waitFor(() =>
+			expect(client.api.pods.leave).toHaveBeenCalledWith({ params: { podId: suga.id } }),
+		);
 	});
 
 	it("says when everyone in the workspace is already in", async () => {

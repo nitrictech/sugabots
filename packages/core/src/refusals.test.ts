@@ -212,6 +212,7 @@ const table: ReadonlyArray<ServiceRefusals> = [
 			call: (p, f) => p.removeMember({ podId: f.podId, userId: f.viewerId }),
 			forbiddenFor: "member",
 		},
+		leave: { call: (p, f) => p.leave({ podId: f.podId }) },
 	}),
 	refusing(AgentAdministration.Service, {
 		list: { call: (a, f) => a.list({ workspace: f.workspaceId }) },
