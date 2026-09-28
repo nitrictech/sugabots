@@ -13,6 +13,7 @@ const source: RegistrySource = {
 				tool_call: true,
 				modalities: { input: ["text", "image"], output: ["text"] },
 				limit: { context: 128_000 },
+				cost: { input: 2.5, output: 10 },
 			}),
 			"text-embedding-3-small": entry({
 				name: "text-embedding-3-small",
@@ -60,7 +61,7 @@ const custom = (baseUrl: string): ProviderIdentity => ({
 });
 
 describe("registryFrom", () => {
-	const registry: ModelRegistry = registryFrom(source);
+	const registry: ModelRegistry = registryFrom(source, "test");
 
 	it("fills a preset's model from that provider's entry", () => {
 		expect(registry.complete(blank("gpt-4o"), openai)).toEqual({
@@ -100,6 +101,12 @@ describe("registryFrom", () => {
 		expect(
 			registry.complete(blank("vendor/gpt-4o"), custom("https://unknown.example/v1")).capabilities,
 		).toEqual(["tools", "vision"]);
+	});
+
+	it("prices a model only from its own provider's entry", () => {
+		expect(registry.cost("gpt-4o", openai)).toEqual({ input: 2.5, output: 10 });
+		expect(registry.cost("gpt-4o", custom("https://unknown.example/v1"))).toBeUndefined();
+		expect(registry.cost("openai/gpt-4o", custom("https://openrouter.ai/api/v1"))).toBeUndefined();
 	});
 
 	it("believes the provider over models.dev wherever the provider spoke", () => {

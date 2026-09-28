@@ -2,6 +2,7 @@ import { Effect, ManagedRuntime } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { emptyRegistry } from "../../providers/model-providers/dialects/index.ts";
 
 const sdk = vi.hoisted(() => ({
 	createAnthropic: vi.fn(),
@@ -66,11 +67,14 @@ describe("workspace turn model", () => {
 						}),
 				},
 				httpClients: { for: () => httpClient },
+				requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
+				registry: emptyRegistry,
 			});
 
 			await run(
 				model.stream({
 					workspaceId: "workspace-id",
+					activity: { purpose: "probe" },
 					model: "model-id",
 					system: "",
 					messages: [],
@@ -105,11 +109,14 @@ describe("workspace turn model", () => {
 					}),
 			},
 			httpClients: { for: () => vi.fn<typeof fetch>() },
+			requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
+			registry: emptyRegistry,
 		});
 
 		await run(
 			model.stream({
 				workspaceId: "workspace-id",
+				activity: { purpose: "probe" },
 				model: "gpt-5.5",
 				system: "You are Suga.",
 				messages: [{ role: "user", content: "Hello" }],

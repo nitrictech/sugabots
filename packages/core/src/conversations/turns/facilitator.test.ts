@@ -3,6 +3,7 @@ import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "./facil
 
 const scope: FacilitatorScope = {
 	threadId: "t1",
+	podId: "p1",
 	threadType: "routine",
 	workspaceId: "w1",
 	model: "small-model",

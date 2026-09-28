@@ -29,7 +29,7 @@ import {
 	type ModelRequestFailed,
 	Models,
 	type TurnModel,
-	type TurnModelInput,
+	type TurnModelPrompt,
 } from "./model.ts";
 import { TurnRequests } from "./requests.ts";
 
@@ -78,6 +78,7 @@ export const facilitateStepsLayer = Layer.effect(
 /** What the facilitator sees: who is here, and what was last said. */
 export interface FacilitatorScope {
 	threadId: string;
+	podId: string;
 	threadType: ThreadType;
 	workspaceId: string;
 	/** The model the workspace chose for its Facilitator. */
@@ -179,7 +180,10 @@ const decide = (
 		Effect.gen(function* () {
 			const stop = new AbortController();
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* model.stream(facilitatorPrompt(scope, stop.signal));
+			const generated = yield* model.stream({
+				...facilitatorPrompt(scope, stop.signal),
+				activity: { purpose: "facilitation", podId: scope.podId, threadId: scope.threadId },
+			});
 			const collected = yield* Ref.make("");
 			yield* forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
@@ -252,7 +256,7 @@ export function parseDecision(
  * agent just spoke) has its own rule, and the message being decided about is
  * named instead of left at the end of a transcript.
  */
-export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal): TurnModelInput {
+export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal): TurnModelPrompt {
 	const agents = scope.crew.map(
 		(member) =>
 			`- @${member.handle}: ${member.name}, agent${member.inThread ? "" : " (not in the thread yet)"}${member.description ? `. ${member.description}` : ""}`,
@@ -378,6 +382,7 @@ export const loadFacilitatorScope = Effect.fn("Facilitator.loadFacilitatorScope"
 	const inThread = new Set(participantRows.flatMap((row) => (row.agentId ? [row.agentId] : [])));
 	return {
 		threadId,
+		podId: scope.podId,
 		threadType: scope.threadType,
 		workspaceId: scope.workspaceId,
 		model: facilitator.model,
