@@ -2,16 +2,11 @@ import type { ThreadContext } from "@sugabots/contracts";
 import { cn } from "cn";
 import { formatListTime } from "@/lib/list-time.ts";
 
-const tokenCount = new Intl.NumberFormat(undefined, {
-	notation: "compact",
-	maximumFractionDigits: 1,
-});
-
 /**
- * How much of the bot's context window the chat fills, measured on the latest
- * reply, with the line where it is compacted marked on the bar. A compaction
- * since that reply leaves the count out of date until the next one, so the bar
- * fades and says so.
+ * How much of the bot's short-term memory (its context window) the chat
+ * fills, as a percentage measured on the latest reply, with the line where it
+ * is compacted marked on the bar. A compaction since that reply leaves the
+ * figure out of date until the next one, so the bar fades and says so.
  */
 export function ContextMeter({
 	context,
@@ -24,23 +19,18 @@ export function ContextMeter({
 	const { usedTokens, measuredAt, windowTokens, compactionLineTokens, compactedAt } = context;
 	const compactedSinceMeasured = compactedAt !== null && compactedAt > measuredAt;
 	const pastLine = !compactedSinceMeasured && usedTokens >= compactionLineTokens;
-	const usedShare = Math.min(usedTokens / windowTokens, 1);
-	const lineShare = compactionLineTokens / windowTokens;
+	const usedPercent = Math.round(Math.min(usedTokens / windowTokens, 1) * 100);
+	const linePercent = Math.round((compactionLineTokens / windowTokens) * 100);
 	return (
 		<div className="flex flex-col gap-2 px-3.5 py-3">
-			<div className="flex items-baseline justify-between gap-3 text-[14px]">
-				<span className="text-foreground">
-					{tokenCount.format(usedTokens)} of {tokenCount.format(windowTokens)} tokens
-				</span>
-				<span className="text-muted-foreground text-xs">{Math.round(usedShare * 100)}% full</span>
-			</div>
+			<span className="text-[14px] text-foreground">{usedPercent}% full</span>
 			{/* The native meter can't be styled across browsers, so it is read out and the bar drawn. */}
 			<meter
 				className="sr-only"
-				aria-label="Context window used"
+				aria-label="Short-term memory used"
 				min={0}
-				max={windowTokens}
-				value={usedTokens}
+				max={100}
+				value={usedPercent}
 			/>
 			<div
 				aria-hidden
@@ -51,21 +41,21 @@ export function ContextMeter({
 						"absolute inset-y-0 left-0 rounded-full transition-[width]",
 						pastLine ? "bg-warning" : "bg-primary",
 					)}
-					style={{ width: `${usedShare * 100}%` }}
+					style={{ width: `${usedPercent}%` }}
 				/>
 				<div
 					aria-hidden
 					className="absolute -inset-y-0.5 w-0.5 rounded-full bg-soft-foreground"
-					style={{ left: `${lineShare * 100}%` }}
+					style={{ left: `${linePercent}%` }}
 				/>
 			</div>
 			<p className="m-0 text-muted-foreground text-xs">
 				{compactedSinceMeasured
-					? `Compacted ${lastCompacted(new Date(compactedAt), now)}; the size updates after the next reply.`
+					? `Compacted ${lastCompacted(new Date(compactedAt), now)}; this updates after the next reply.`
 					: [
 							pastLine
-								? "Past the compaction line: older messages are being summarised."
-								: `Compacts at ${tokenCount.format(compactionLineTokens)} tokens.`,
+								? `Past ${linePercent}%: older messages are being summarised.`
+								: `Compacts at ${linePercent}%.`,
 							compactedAt && `Last compacted ${lastCompacted(new Date(compactedAt), now)}.`,
 						]
 							.filter(Boolean)

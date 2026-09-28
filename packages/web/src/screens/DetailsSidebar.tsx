@@ -33,7 +33,7 @@ const SUMMARY_FOLDED_OVER = 180;
 
 /**
  * A bot as a contact card, beside its chat: its face, name and pod, the way to
- * its settings, then what the chat is about, how much of the bot's context it
+ * its settings, then what the chat is about, how much of the bot's short-term memory it
  * fills and who has been in it, the apps it can reach and the routines it runs.
  */
 export function DetailsSidebar({
@@ -75,7 +75,7 @@ export function DetailsSidebar({
 				</div>
 				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
 				{activity?.context && (
-					<SidebarSection title="Context">
+					<SidebarSection title="Short-term memory">
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}

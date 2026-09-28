@@ -153,7 +153,7 @@ export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText("You")).toBeVisible();
-		await expect(canvas.getByRole("meter", { name: "Context window used" })).toBeVisible();
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
 	},
 });

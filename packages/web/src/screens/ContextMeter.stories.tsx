@@ -30,11 +30,13 @@ const meta = preview.meta({
 /** Filling is a chat well short of the line, where the bot still reads all of it. */
 export const Filling = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("meter", { name: "Context window used" })).toHaveAttribute(
+		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
 			"value",
-			"48200",
+			"19",
 		);
-		await expect(canvas.getByText("Compacts at 179.2K tokens.")).toBeVisible();
+		await expect(canvas.getByText("19% full")).toBeVisible();
+		await expect(canvas.getByText("Compacts at 70%.")).toBeVisible();
+		await expect(canvas.queryByText(/tokens/)).toBeNull();
 	},
 });
 
@@ -42,7 +44,7 @@ export const Filling = meta.story({
 export const PastTheLine = meta.story({
 	args: { context: context(186_400) },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Past the compaction line/)).toBeVisible();
+		await expect(canvas.getByText(/Past 70%/)).toBeVisible();
 	},
 });
 
@@ -54,11 +56,11 @@ export const Compacted = meta.story({
 	},
 });
 
-/** CompactedSinceMeasured is a chat compacted after its latest reply, so the count waits for the next. */
+/** CompactedSinceMeasured is a chat compacted after its latest reply, so the figure waits for the next. */
 export const CompactedSinceMeasured = meta.story({
 	args: { context: context(186_400, "2026-09-28T09:06:00.000Z") },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/the size updates after the next reply/)).toBeVisible();
-		await expect(canvas.queryByText(/Past the compaction line/)).toBeNull();
+		await expect(canvas.getByText(/this updates after the next reply/)).toBeVisible();
+		await expect(canvas.queryByText(/Past 70%/)).toBeNull();
 	},
 });
