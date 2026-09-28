@@ -53,14 +53,13 @@ import { Workflows } from "./workflows.ts";
  * however many services use them.
  */
 const Infrastructure = Layer.mergeAll(
-	Ids.layer,
 	Credentials.layer,
 	Egress.layer,
 	EventOutbox.layer,
 	Workflows.lanes,
 ).pipe(
 	Layer.provideMerge(Layer.mergeAll(Installation.layer, EventBus.layer, Workflows.engine)),
-	Layer.provideMerge(EventStore.layer),
+	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
 	Layer.provideMerge(databaseLayer),
 );
 

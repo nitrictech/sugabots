@@ -11,7 +11,7 @@ import type {
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
-import { Context, Data, Duration, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
 	afterCommit,
@@ -23,7 +23,7 @@ import {
 import { isUniqueViolation } from "../../database/errors.ts";
 import { user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
-import { isUuid } from "../../ids/ids.ts";
+import { Ids, isUuid } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
@@ -124,6 +124,7 @@ export const make = Effect.gen(function* () {
 	const agents = yield* AgentRepository.Service;
 	const searchProviders = yield* SearchProviderRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
+	const ids = yield* Ids.Service;
 
 	const sendInvitation = (
 		invitationId: string,
@@ -380,7 +381,10 @@ export const make = Effect.gen(function* () {
 						);
 						if (member) return yield* new AlreadyMember();
 
-						const expiresAt = new Date(Date.now() + Duration.toMillis(INVITATION_LIFETIME));
+						const now = yield* DateTime.now;
+						const expiresAt = DateTime.toDate(
+							DateTime.add(now, { milliseconds: Duration.toMillis(INVITATION_LIFETIME) }),
+						);
 						const [outstanding] = yield* query((db) =>
 							db
 								.select({ id: workspaceInvite.id })
@@ -390,7 +394,7 @@ export const make = Effect.gen(function* () {
 										eq(workspaceInvite.workspaceId, workspaceId),
 										eq(workspaceInvite.email, address),
 										eq(workspaceInvite.status, "pending"),
-										gt(workspaceInvite.expiresAt, new Date()),
+										gt(workspaceInvite.expiresAt, DateTime.toDate(now)),
 									),
 								),
 						);
@@ -404,20 +408,24 @@ export const make = Effect.gen(function* () {
 										.where(eq(workspaceInvite.id, outstanding.id))
 										.returning(),
 								)
-							: yield* query((db) =>
-									db
-										.insert(workspaceInvite)
-										.values({
-											// The id is the invitation link, so random v4 rather than the
-											// partly guessable time-ordered v7 default.
-											id: crypto.randomUUID(),
-											workspaceId,
-											email: address,
-											role: input.invitation.role,
-											inviterId,
-											expiresAt,
-										})
-										.returning(),
+							: yield* Effect.flatMap(
+									// The id is the invitation link, so random v4 rather than the
+									// partly guessable time-ordered v7 default.
+									ids.random,
+									(id) =>
+										query((db) =>
+											db
+												.insert(workspaceInvite)
+												.values({
+													id,
+													workspaceId,
+													email: address,
+													role: input.invitation.role,
+													inviterId,
+													expiresAt,
+												})
+												.returning(),
+										),
 								);
 						if (!row) return yield* Effect.die(new Error("The invitation was not saved"));
 						yield* sendInvitation(row.id, address, workspaceId, inviterId);
@@ -629,6 +637,7 @@ function deleteMember(memberId: string) {
  */
 function invitationFor(userId: string, invitationId: string) {
 	return Effect.gen(function* () {
+		const now = yield* DateTime.nowAsDate;
 		const [invitation] = yield* query((db) =>
 			db
 				.select({
@@ -645,7 +654,7 @@ function invitationFor(userId: string, invitationId: string) {
 					and(
 						eq(workspaceInvite.id, invitationId),
 						eq(workspaceInvite.status, "pending"),
-						gt(workspaceInvite.expiresAt, new Date()),
+						gt(workspaceInvite.expiresAt, now),
 					),
 				)
 				.for("update", { of: workspaceInvite }),

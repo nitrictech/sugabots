@@ -1,6 +1,6 @@
 export * as Ids from "./ids.ts";
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Clock, Context, Effect, Layer } from "effect";
 
 /** Identifiers for new rows. */
@@ -10,14 +10,21 @@ export interface Interface {
 	 * rows written together sit together in an index.
 	 */
 	readonly next: Effect.Effect<string>;
+	/**
+	 * A new UUID v4: all random bits, for an id that is also a link a person
+	 * holds, such as an invitation's, where a time-ordered id would be partly
+	 * guessable.
+	 */
+	readonly random: Effect.Effect<string>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Ids") {}
 
-/** UUID v7 from Node's secure random bytes, stamped with Effect's `Clock`. */
+/** UUIDs from Node's secure random bytes, a v7 stamped with Effect's `Clock`. */
 export const make = Effect.succeed(
 	Service.of({
 		next: Effect.map(Clock.currentTimeMillis, (millis) => uuidV7(millis, randomBytes(16))),
+		random: Effect.sync(randomUUID),
 	}),
 );
 

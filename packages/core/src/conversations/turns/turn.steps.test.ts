@@ -6,6 +6,7 @@ import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { Ids } from "../../ids/ids.ts";
 import { unimplemented } from "../../testing.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
 import {
@@ -881,6 +882,7 @@ function segmentWith(given: Given) {
 					giveFloor: () => Effect.succeed({ kind: "nobody", why: "exchange-over" }),
 				}),
 				unimplemented(TurnRequests.Service, given.requests),
+				Ids.layer,
 			),
 		),
 	);

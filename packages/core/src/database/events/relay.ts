@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import type { Channel, StreamEvent } from "@sugabots/contracts";
 import { Deferred, Duration, Effect, Fiber, Queue } from "effect";
+import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
 
@@ -55,13 +55,14 @@ interface Notice {
 export const postgresEventRelay = (
 	store: Pick<EventStore.Interface, "replay">,
 	{ log = console.error }: { log?: (message: string, cause: unknown) => void } = {},
-): Effect.Effect<EventRelay, never, PgClient.PgClient> =>
+): Effect.Effect<EventRelay, never, PgClient.PgClient | Ids.Service> =>
 	Effect.gen(function* () {
 		const client = yield* PgClient.PgClient;
+		const ids = yield* Ids.Service;
 		const context = yield* Effect.context<never>();
 		const runPromise = Effect.runPromiseWith(context);
 		/** Identifies this process, so it can ignore its own notices coming back. */
-		const origin = randomUUID();
+		const origin = yield* ids.next;
 
 		return {
 			async broadcast(channel, delivery) {

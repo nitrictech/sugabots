@@ -112,7 +112,11 @@ export const make = Effect.gen(function* () {
 					const state = input.state ?? "enabled";
 					const schedule =
 						input.trigger.kind === "cron" && state === "enabled"
-							? yield* nextOccurrence(input.trigger.expression, input.trigger.timezone)
+							? yield* nextOccurrence(
+									input.trigger.expression,
+									input.trigger.timezone,
+									yield* DateTime.nowAsDate,
+								)
 							: null;
 					const secret = input.trigger.kind === "webhook" ? generateSecret() : null;
 					return yield* transaction(
@@ -154,7 +158,11 @@ export const make = Effect.gen(function* () {
 							trigger.kind !== "cron" || state === "paused"
 								? null
 								: scheduleChanged || reenabled
-									? yield* nextOccurrence(trigger.expression, trigger.timezone)
+									? yield* nextOccurrence(
+											trigger.expression,
+											trigger.timezone,
+											yield* DateTime.nowAsDate,
+										)
 									: current.nextScheduledAt;
 						const switchedToWebhook =
 							input.trigger?.kind === "webhook" && current.triggerKind !== "webhook";
@@ -215,7 +223,9 @@ export const make = Effect.gen(function* () {
 				"previewSchedule",
 				Effect.andThen(
 					authorization.agent(agentId, "routine.manage"),
-					upcomingOccurrences(expression, timezone),
+					Effect.flatMap(DateTime.nowAsDate, (now) =>
+						upcomingOccurrences(expression, timezone, now),
+					),
 				),
 			),
 

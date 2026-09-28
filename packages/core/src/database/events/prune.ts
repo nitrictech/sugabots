@@ -1,6 +1,6 @@
 export * as EventPruning from "./prune.ts";
 
-import { Duration, Effect, Layer, Schedule } from "effect";
+import { DateTime, Duration, Effect, Layer, Schedule } from "effect";
 import { EventStore } from "./store.ts";
 
 /**
@@ -43,8 +43,10 @@ export const layer = sweepingEvery(NIGHTLY);
  * API down for.
  */
 const sweep = (store: EventStore.Interface) =>
-	Effect.promise(() =>
-		store.prune(new Date(Date.now() - RETENTION_DAYS * Duration.toMillis(Duration.days(1)))),
+	Effect.flatMap(DateTime.now, (now) =>
+		Effect.promise(() =>
+			store.prune(DateTime.toDate(DateTime.subtract(now, { days: RETENTION_DAYS }))),
+		),
 	).pipe(
 		Effect.flatMap((removed) =>
 			removed > 0

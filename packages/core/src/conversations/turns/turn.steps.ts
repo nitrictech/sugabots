@@ -4,6 +4,7 @@ import {
 	Cause,
 	Clock,
 	Data,
+	DateTime,
 	Duration,
 	Effect,
 	Exit,
@@ -15,6 +16,7 @@ import {
 } from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
+import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -88,7 +90,8 @@ type SegmentServices =
 	| Collaborations.Service
 	| ApprovedToolCalls.Service
 	| FloorControl.Service
-	| TurnRequests.Service;
+	| TurnRequests.Service
+	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
 export const stepsLayer = Layer.effect(
@@ -409,7 +412,7 @@ const streamReply = (
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
-			const now = new Date(yield* Clock.currentTimeMillis);
+			const now = yield* DateTime.nowAsDate;
 			const builtIn = withoutDisabled(
 				yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId),
 				prepared.context.agent.disabledTools,
@@ -513,13 +516,14 @@ const streamReply = (
 					};
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
+				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(terminal.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.requiresApproval) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
-					return Effect.succeed({
-						id: crypto.randomUUID(),
+					return Effect.map(ids.next, (id) => ({
+						id,
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
 						tool: request.toolCall.toolName,
@@ -530,7 +534,7 @@ const streamReply = (
 						remoteToolName: offered.remoteToolName,
 						mutating: offered.mutating,
 						atOffset,
-					});
+					}));
 				});
 				yield* Ref.update(reply, (draft) => ({
 					...draft,

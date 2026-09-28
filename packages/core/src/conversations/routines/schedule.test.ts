@@ -9,7 +9,7 @@ import {
 describe("Routine schedules", () => {
 	it("calculates minute-precision occurrences in the selected timezone", async () => {
 		const dates = await Effect.runPromise(
-			upcomingOccurrences("0 9 * * 1-5", "Australia/Sydney", 2, new Date("2026-09-18T00:00:00Z")),
+			upcomingOccurrences("0 9 * * 1-5", "Australia/Sydney", new Date("2026-09-18T00:00:00Z"), 2),
 		);
 		expect(dates.map((date) => date.toISOString())).toEqual([
 			"2026-09-20T23:00:00.000Z",
@@ -18,11 +18,11 @@ describe("Routine schedules", () => {
 	});
 
 	it("rejects six-field expressions and unknown timezones", async () => {
-		await expect(Effect.runPromise(upcomingOccurrences("0 0 9 * * 1-5", "UTC"))).rejects.toThrow(
-			InvalidRoutineSchedule,
-		);
 		await expect(
-			Effect.runPromise(upcomingOccurrences("0 9 * * *", "Not/A_Timezone")),
+			Effect.runPromise(upcomingOccurrences("0 0 9 * * 1-5", "UTC", new Date())),
+		).rejects.toThrow(InvalidRoutineSchedule);
+		await expect(
+			Effect.runPromise(upcomingOccurrences("0 9 * * *", "Not/A_Timezone", new Date())),
 		).rejects.toThrow(InvalidRoutineSchedule);
 	});
 
