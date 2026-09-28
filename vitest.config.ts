@@ -36,6 +36,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "website",
+					root: "packages/website",
+					environment: "node",
+					include: ["src/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "backend",
 					root: ".",
 					environment: "node",
