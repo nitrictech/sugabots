@@ -556,20 +556,19 @@ describe("routes", () => {
 		expect(await screen.findByRole("heading", { name: "Chief is ready" })).toBeDefined();
 	});
 
-	it("starts at the model step while no model is switched on, and lets it be skipped", async () => {
+	it("starts at the model step while the first bot has no model, and will not skip it", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
-		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
-		client.api.modelProviders.listEnabledModels.mockReturnValue(Effect.succeed({ models: [] }));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
+		);
 		mount(linearPage);
 
 		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
-
-		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
+		expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 	});
 
-	it("connects the first provider by its key and switches its models on", async () => {
+	it("connects the first provider by its key, then switches on the model chosen for the first bot", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
@@ -579,36 +578,52 @@ describe("routes", () => {
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
 			preset: "openrouter" as const,
 			name: "OpenRouter",
-			models: [
-				{
-					...(modelProviders[0]?.models[0] as ProviderModel),
-					enabled: false,
-					modelId: "meta/llama",
-				},
-			],
+			models: ["meta/llama", "mistral/large"].map((modelId, index) => ({
+				...(modelProviders[0]?.models[0] as ProviderModel),
+				id: `0199a3a0-0000-7000-8000-0000000000e${index}`,
+				enabled: false,
+				modelId,
+			})),
 		};
+		const [, large] = openrouter.models;
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(openrouter));
 		client.api.modelProviders.fetchModels.mockReturnValue(
-			Effect.succeed({ added: 1, updated: 0, unchanged: 0 }),
+			Effect.succeed({ added: 2, updated: 0, unchanged: 0 }),
 		);
 		client.api.modelProviders.get.mockReturnValue(Effect.succeed(openrouter));
-		client.api.modelProviders.setModelsEnabled.mockReturnValue(Effect.succeed({ updated: 1 }));
+		client.api.modelProviders.updateModel.mockReturnValue(
+			Effect.succeed({ ...(large as ProviderModel), enabled: true }),
+		);
+		client.api.agents.update.mockReturnValue(
+			Effect.succeed({ ...personalAssistant, model: "mistral/large" }),
+		);
 		mount(linearPage);
 
 		fireEvent.click(await screen.findByRole("radio", { name: /OpenRouter/ }));
 		fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-or-test" } });
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		await waitFor(() =>
-			expect(client.api.modelProviders.setModelsEnabled).toHaveBeenCalledWith({
-				params: { workspace: workspace.id, providerId: openrouter.id },
-				payload: { modelIds: [openrouter.models[0]?.id], enabled: true },
-			}),
-		);
+		expect(await screen.findByRole("heading", { name: "Choose a model" })).toBeDefined();
 		expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
 			payload: { preset: "openrouter", apiKey: "sk-or-test" },
 		});
+		const next = screen.getByRole("button", { name: "Continue" });
+		expect(next.hasAttribute("disabled")).toBe(true);
+		fireEvent.click(screen.getByRole("radio", { name: "mistral/large" }));
+		fireEvent.click(next);
+
+		await waitFor(() =>
+			expect(client.api.agents.update).toHaveBeenCalledWith({
+				params: { agentId: personalAssistant.id },
+				payload: { model: "mistral/large" },
+			}),
+		);
+		expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
+			params: { workspace: workspace.id, providerId: openrouter.id, modelId: large?.id },
+			payload: { enabled: true },
+		});
+		expect(client.api.modelProviders.setModelsEnabled).not.toHaveBeenCalled();
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 	});
 

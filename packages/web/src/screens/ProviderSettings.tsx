@@ -65,7 +65,7 @@ import { ConnectionRow, valueText } from "./connection-row.tsx";
  */
 
 /** More models than this and the list gets a search and a filter by who makes them. */
-const LARGE_CATALOG = 20;
+export const LARGE_CATALOG = 20;
 
 /**
  * Whether bots can reach a provider: switched on, and holding the key or

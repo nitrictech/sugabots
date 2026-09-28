@@ -162,15 +162,17 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		expect(await isCompleted(adminId)).toBe(true);
 	});
 
-	// Connecting a model is a step that can be skipped.
-	it("completes for an agent whose model the workspace has not switched on", async () => {
+	it("does not complete for an agent with no model the workspace offers", async () => {
 		await onDatabase((db) =>
 			db.update(agent).set({ model: "not-switched-on" }).where(eq(agent.id, customAgentId)),
 		);
+		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
 
-		await complete(adminId, customAgentId);
-
-		expect(await isCompleted(adminId)).toBe(true);
+		await onDatabase((db) =>
+			db.update(agent).set({ model: null }).where(eq(agent.id, customAgentId)),
+		);
+		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
+		expect(await isCompleted(adminId)).toBe(false);
 	});
 
 	it("leaves the Scribe unset, so nobody is given a model they were not shown", async () => {

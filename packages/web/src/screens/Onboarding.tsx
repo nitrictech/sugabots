@@ -3,19 +3,25 @@ import {
 	type Agent,
 	type AgentColor,
 	type AgentFace,
+	effectiveCapabilities,
 	type ModelProvider,
 	type Pod,
+	type ProviderModel,
 	type ProviderPresetId,
 	providerPreset,
 	slugify,
 } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, X } from "lucide-react";
+import { ChevronLeft, Search, X } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { useAgents, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
-import { useCompleteOnboarding, useConnectFirstModel } from "@/lib/onboarding.ts";
+import {
+	useChooseFirstModel,
+	useCompleteOnboarding,
+	useConnectFirstProvider,
+} from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import type { Session } from "@/lib/session.ts";
@@ -25,7 +31,7 @@ import {
 	useUpdateWorkspace,
 	useWorkspace,
 } from "@/lib/workspace.ts";
-import { isConnected } from "@/screens/ProviderSettings.tsx";
+import { isConnected, LARGE_CATALOG, modelName } from "@/screens/ProviderSettings.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -56,12 +62,10 @@ export function Onboarding({ session }: { session: Session }) {
 	const firstBot = agents?.find(
 		(agent) => agent.podId === personalPod?.id && agent.systemAgentKey === null,
 	);
+	const botHasModel =
+		models.data?.models.some((model) => model.modelId === firstBot?.model) ?? false;
 	// Coming back part way through picks up where the workspace says it got to.
-	const inferred: Step = !workspace
-		? "workspace"
-		: (models.data?.models.length ?? 0) === 0
-			? "model"
-			: "bot";
+	const inferred: Step = !workspace ? "workspace" : botHasModel ? "bot" : "model";
 	const step = chosen ?? inferred;
 	const loading = Boolean(workspace) && (pods.isPending || models.isPending || agentsPending);
 	const failure = pods.error ?? models.error ?? agentsError;
@@ -92,15 +96,11 @@ export function Onboarding({ session }: { session: Session }) {
 					onContinue={() => setChosen("model")}
 				/>
 			) : step === "model" ? (
-				<ModelStep onContinue={() => setChosen("bot")} />
+				<ModelStep bot={firstBot} onContinue={() => setChosen("bot")} />
 			) : !workspace || !personalPod ? (
 				<PersonalPodMissing modelId={models.data?.models[0]?.modelId} />
 			) : step === "bot" ? (
-				<BotStep
-					bot={firstBot}
-					modelIds={models.data?.models.map((model) => model.modelId) ?? []}
-					onCreated={() => setChosen("invite")}
-				/>
+				<BotStep bot={firstBot} onCreated={() => setChosen("invite")} />
 			) : step === "invite" ? (
 				<InviteStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
@@ -177,14 +177,14 @@ function StepHeading({ title, children }: { title: ReactNode; children?: ReactNo
 	);
 }
 
-function SkipLink({ onClick }: { onClick: () => void }) {
+function QuietLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
 			className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground"
 		>
-			Skip for now
+			{children}
 		</button>
 	);
 }
@@ -266,9 +266,24 @@ const KEY_PLACEHOLDERS: Partial<Record<ProviderPresetId, string>> = {
 	openrouter: "sk-or-…",
 };
 
-function ModelStep({ onContinue }: { onContinue: () => void }) {
+/** Connecting a provider, then choosing which of its models the first bot runs on. */
+function ModelStep({ bot, onContinue }: { bot?: Agent; onContinue: () => void }) {
+	const [connected, setConnected] = useState<ModelProvider>();
+	return connected ? (
+		<ChooseModelStep
+			provider={connected}
+			bot={bot}
+			onChosen={onContinue}
+			onOtherProvider={() => setConnected(undefined)}
+		/>
+	) : (
+		<ConnectProviderStep onConnected={setConnected} />
+	);
+}
+
+function ConnectProviderStep({ onConnected }: { onConnected: (provider: ModelProvider) => void }) {
 	const providers = useModelProviders();
-	const connect = useConnectFirstModel();
+	const connect = useConnectFirstProvider();
 	const [chosen, setChosen] = useState<ProviderPresetId>("anthropic");
 	const [secret, setSecret] = useState("");
 	const group = useId();
@@ -276,29 +291,29 @@ function ModelStep({ onContinue }: { onContinue: () => void }) {
 	const preset = providerPreset(chosen);
 	const local = preset.hosting === "local";
 	const existing = providers.data?.find((provider) => provider.preset === chosen);
+	// Ollama is on in every workspace from the start, so being reachable is not enough: it has to have listed models.
 	const alreadyConnected =
-		existing !== undefined && isConnected(existing) && existing.enabledModelCount > 0;
+		existing !== undefined && isConnected(existing) && existing.modelCount > 0;
 	const baseUrl = local ? parseProviderBaseUrl(secret || preset.baseUrl) : undefined;
 	const ready = alreadyConnected || (local ? baseUrl !== undefined : secret.trim() !== "");
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!ready) return;
-		if (alreadyConnected && !secret) {
-			onContinue();
-			return;
-		}
+		// Continuing with a connected provider as it is changes nothing but its model list.
+		const unchanged = alreadyConnected && !secret;
 		try {
-			await connect.mutateAsync({
-				preset,
-				existing: existing as ModelProvider | undefined,
-				apiKey: local ? undefined : secret.trim(),
-				baseUrl,
-			});
+			onConnected(
+				await connect.mutateAsync({
+					preset,
+					existing,
+					apiKey: local || unchanged ? undefined : secret.trim(),
+					baseUrl: unchanged ? undefined : baseUrl,
+				}),
+			);
 		} catch {
 			return;
 		}
-		onContinue();
 	}
 
 	return (
@@ -359,7 +374,121 @@ function ModelStep({ onContinue }: { onContinue: () => void }) {
 			<Button type="submit" size="lg" className="w-full" disabled={!ready || connect.isPending}>
 				{connect.isPending ? "Connecting…" : "Continue"}
 			</Button>
-			<SkipLink onClick={onContinue} />
+		</form>
+	);
+}
+
+/**
+ * Choosing the model the first bot thinks with, from those the provider just
+ * connected lists, with the catalog's picks first. Only the one chosen is
+ * switched on; more can be switched on later in the Models settings.
+ */
+function ChooseModelStep({
+	provider,
+	bot,
+	onChosen,
+	onOtherProvider,
+}: {
+	provider: ModelProvider;
+	bot?: Agent;
+	onChosen: () => void;
+	onOtherProvider: () => void;
+}) {
+	const choose = useChooseFirstModel(bot?.id);
+	const [search, setSearch] = useState("");
+	const group = useId();
+	const starters = provider.preset
+		? providerPreset(provider.preset).models.map((model) => model.modelId)
+		: [];
+	const rank = (model: ProviderModel) => {
+		const index = starters.indexOf(model.modelId);
+		return index === -1 ? starters.length : index;
+	};
+	const choices = provider.models
+		.filter((model) => !effectiveCapabilities(model).includes("embeddings"))
+		.sort((a, b) => rank(a) - rank(b));
+	const [chosenId, setChosenId] = useState(
+		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,
+	);
+	const chosen = choices.find((model) => model.id === chosenId);
+	const large = choices.length > LARGE_CATALOG;
+	const needle = search.trim().toLowerCase();
+	const shown = choices.filter(
+		(model) =>
+			needle === "" || `${model.modelId} ${model.displayName ?? ""}`.toLowerCase().includes(needle),
+	);
+
+	async function submit(event: FormEvent) {
+		event.preventDefault();
+		if (!chosen) return;
+		try {
+			await choose.mutateAsync({ providerId: provider.id, model: chosen });
+		} catch {
+			return;
+		}
+		onChosen();
+	}
+
+	return (
+		<form onSubmit={submit} className="flex flex-col gap-[22px]">
+			<StepHeading title="Choose a model">
+				Your first bot thinks with this. You can switch on more of {provider.name}'s models later.
+			</StepHeading>
+			{choices.length === 0 ? (
+				<Alert>
+					{provider.name} lists no models yet. Check it has some, or use another provider.
+				</Alert>
+			) : (
+				<fieldset className="m-0 overflow-hidden rounded-panel border-0 bg-list p-0">
+					<legend className="sr-only">Model</legend>
+					{large && (
+						<div className="border-border border-b p-3">
+							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+								<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+								<input
+									type="search"
+									value={search}
+									onChange={(event) => setSearch(event.target.value)}
+									placeholder={`Search ${choices.length} models`}
+									aria-label="Search models"
+									className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+								/>
+							</label>
+						</div>
+					)}
+					{/*
+					 * A fixed height, so the centred step does not move as the search narrows the list.
+					 * About four and a half rows: the cut-off one shows the list scrolls.
+					 */}
+					<div className={large ? "h-52 overflow-y-auto" : undefined}>
+						{shown.length === 0 && (
+							<p className="m-0 px-4 py-3 text-muted-foreground text-sm">No models match.</p>
+						)}
+						{shown.map((model) => (
+							<label
+								key={model.id}
+								className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 last:border-b-0 has-focus-visible:bg-panel hover:bg-panel"
+							>
+								<span className="min-w-0 flex-1 truncate font-medium text-[14.5px] text-foreground">
+									{modelName(model)}
+								</span>
+								<input
+									type="radio"
+									name={group}
+									checked={model.id === chosenId}
+									onChange={() => setChosenId(model.id)}
+									className="size-5 shrink-0 accent-primary"
+								/>
+							</label>
+						))}
+					</div>
+				</fieldset>
+			)}
+			{choose.error && <Alert>{failureMessage(choose.error)}</Alert>}
+			<Button type="submit" size="lg" className="w-full" disabled={!chosen || choose.isPending}>
+				{choose.isPending ? "Saving…" : "Continue"}
+			</Button>
+			<QuietLink onClick={onOtherProvider}>Use another provider</QuietLink>
 		</form>
 	);
 }
@@ -404,16 +533,7 @@ function purposeOf(bot: Agent | undefined): Purpose | undefined {
 	return purposes.find((purpose) => purpose.description === bot?.description);
 }
 
-function BotStep({
-	bot,
-	modelIds,
-	onCreated,
-}: {
-	bot?: Agent;
-	/** The models switched on, the first of which the bot moves to if its own is not one. */
-	modelIds: readonly string[];
-	onCreated: () => void;
-}) {
+function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 	const update = useUpdateAgent(bot?.id ?? "");
 	// The Personal pod's bot starts as a placeholder; it becomes yours here.
 	const started = bot && bot.name !== "Personal Assistant";
@@ -433,7 +553,6 @@ function BotStep({
 				color,
 				face,
 				description: purpose?.description ?? null,
-				...(modelIds[0] && !modelIds.includes(bot.model ?? "") ? { model: modelIds[0] } : {}),
 			});
 		} catch {
 			return;
@@ -608,7 +727,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 						? "Continue"
 						: `Send ${count} ${count === 1 ? "invite" : "invites"}`}
 			</Button>
-			<SkipLink onClick={onContinue} />
+			<QuietLink onClick={onContinue}>Skip for now</QuietLink>
 		</form>
 	);
 }
