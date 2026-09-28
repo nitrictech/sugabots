@@ -27,7 +27,9 @@ import {
 import { composeConversations } from "../../composition.ts";
 import { routineRunsForTests } from "../../routines/testing.ts";
 import { modelPrompt } from "../../turns/context.ts";
+import { replyTurnOf } from "../../turns/execution.ts";
 import {
+	prepareRunnable,
 	queueFacilitationForTests,
 	queueTurnForTests,
 	releaseTurn,
@@ -42,7 +44,7 @@ import { CollaborationRefused, type CollaborationStore } from "./store.ts";
  * how a collaboration moves between the asking agent and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
-	const { stores } = composeConversations({
+	const { repositories, stores } = composeConversations({
 		publishEvents: eventPublisher(createEventBus({ store: memoryEventStore() })),
 		queueTurn: queueTurnForTests,
 		queueFacilitation: queueFacilitationForTests,
@@ -53,6 +55,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 	const threads = onPostgres(stores.threads);
 	const chats = onPostgres(stores.chats);
 	const turns = onPostgres(stores.turns);
+	const turnRecords = onPostgres(repositories.turns);
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -162,11 +165,12 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 	/** Prepares the turn running for a thread's host, so a reply message exists. */
 	async function openReply(threadId: string, agentId: string) {
-		const [claim] = await runOnPostgres(runningTurns(threadId));
-		if (!claim) throw new Error("no turn running");
-		const prepared = await turns.prepare(claim);
+		const [run] = await runOnPostgres(runningTurns(threadId));
+		if (!run) throw new Error("no turn running");
+		const prepared = await prepareRunnable(turns, run);
 		return {
-			claim,
+			run,
+			prepared,
 			turnId: prepared.turnId,
 			messageId: prepared.responseMessage.id,
 			agentId,
@@ -217,7 +221,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 		expect(visibleThreadIds).toEqual(expect.arrayContaining([rootThreadId, helperMainThreadId]));
 		expect(visibleThreadIds).toHaveLength(2);
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
-			{ payload: { agentId: helper.id } },
+			{ request: { agentId: helper.id } },
 		]);
 		expect((await chats.messages(helperChatId, memberId))?.items).toEqual([
 			expect.objectContaining({
@@ -246,7 +250,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 
 	it("composes the collaboration into the reply's parts where it was made", async () => {
 		const opened = await collaborations.open({ from: from(6), to: helper.name, brief: "Look" });
-		await turns.saveStreamingMessage({ responseMessage: { id: reply.messageId } } as never, {
+		await turnRecords.saveReply(replyTurnOf(reply.prepared), {
 			content: "Hello. Asking now.",
 			collaborations: [{ id: opened.collaboration.id, atOffset: 6 }],
 			toolCalls: [],
@@ -344,7 +348,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", ()
 				.set({ status: "done", finishedAt: new Date() })
 				.where(eq(turn.id, reply.turnId)),
 		);
-		await runOnPostgres(releaseTurn(reply.claim));
+		await runOnPostgres(releaseTurn(reply.run));
 		await onDatabase((db) =>
 			db.insert(threadSummary).values({
 				threadId: rootThreadId,

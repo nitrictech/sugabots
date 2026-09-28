@@ -6,29 +6,30 @@ import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { ToolApprovalsIncomplete, ToolExecutionRefused } from "../tools/approvals/store.ts";
-import type { ToolCallStore } from "../tools/calls/store.ts";
-import type { CollaborationStore } from "../tools/collaborate/store.ts";
-import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
 import {
-	type ClaimedTurn,
-	MAX_TURN_RUNS,
-	type PreparedTurn,
-	TurnNotRunnable,
-	type TurnStore,
-} from "./store.ts";
-import { runClaimedTurn } from "./worker.ts";
+	noToolApprovalStore,
+	ToolApprovalsIncomplete,
+	ToolExecutionRefused,
+} from "../tools/approvals/store.ts";
+import { noBuiltInTools } from "../tools/built-in.ts";
+import type { CollaborationStore } from "../tools/collaborate/store.ts";
+import { noConnectionTools } from "../tools/connections.ts";
+import { type PreparedTurn, replyTurnOf, type TurnRun } from "./execution.ts";
+import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
+import type { NotRunnable } from "./repository.ts";
+import { runSegment, type TurnStepsDependencies } from "./turn.steps.ts";
 
 /**
- * The stores and models in these cases never query, so the database they run
- * against is one nothing reaches. The real one is the app runtime.
+ * The repositories and models in these cases are fakes that never query, so
+ * the database they run against is one nothing reaches. `repository.test.ts`
+ * runs a segment against the real ones.
  */
 const runWithServices: RunEffect = effectRunner(ManagedRuntime.make(noDatabase));
 
-const claimed: ClaimedTurn = {
-	owner: "0199a3a0-0000-7000-8000-000000000010",
-	threadId: "0199a3a0-0000-7000-8000-000000000001",
-	payload: {
+const run: TurnRun = {
+	executionId: "0199a3a0-0000-7000-8000-000000000010",
+	request: {
+		threadId: "0199a3a0-0000-7000-8000-000000000001",
 		agentId: "0199a3a0-0000-7000-8000-000000000003",
 		triggerMessageId: "0199a3a0-0000-7000-8000-000000000006",
 		reason: "default",
@@ -36,15 +37,15 @@ const claimed: ClaimedTurn = {
 };
 
 const prepared: PreparedTurn = {
-	claim: claimed,
+	_tag: "Prepared",
+	run,
 	turnId: "0199a3a0-0000-7000-8000-000000000011",
-	runs: 1,
 	responseMessage: {
 		id: "0199a3a0-0000-7000-8000-000000000012",
-		threadId: claimed.threadId,
+		threadId: run.request.threadId,
 		author: {
 			kind: "agent",
-			id: claimed.payload.agentId,
+			id: run.request.agentId,
 			name: "Host Agent",
 			handle: "host-agent",
 			color: "green",
@@ -58,13 +59,13 @@ const prepared: PreparedTurn = {
 	},
 	context: {
 		thread: {
-			id: claimed.threadId,
+			id: run.request.threadId,
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
 			parentThreadId: null,
 		},
 		agent: {
-			id: claimed.payload.agentId,
+			id: run.request.agentId,
 			podId: "0199a3a0-0000-7000-8000-000000000004",
 			name: "Host Agent",
 			handle: "host-agent",
@@ -82,15 +83,15 @@ const prepared: PreparedTurn = {
 	},
 };
 
-/** The turn's last run, after which a failure does not run it again. */
-const lastRun: PreparedTurn = { ...prepared, runs: MAX_TURN_RUNS };
+/** Where the prepared turn's outcome is recorded. */
+const replyTurn = replyTurnOf(prepared);
 
 /** A reply draft with no collaborations or tool calls, which is most replies in these cases. */
 const reply = (content: string) => ({ content, collaborations: [], toolCalls: [] });
 
-describe("runClaimedTurn", () => {
+describe("runSegment", () => {
 	it("persists a streamed reply and publishes only ephemeral deltas", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
 		const model: TurnModel = {
@@ -105,21 +106,25 @@ describe("runClaimedTurn", () => {
 		};
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events,
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary,
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events,
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary,
+				}),
+			),
 		);
 
-		expect(store.complete).toHaveBeenCalledWith(prepared, reply("Release checked"), {
+		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
 			usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
 			reportedCost: 0.001,
 		});
-		expect(store.fail).not.toHaveBeenCalled();
+		expect(turns.fail).not.toHaveBeenCalled();
 		expect(queueSummary).toHaveBeenCalledWith({
 			threadId: prepared.context.thread.id,
 			agentId: prepared.context.agent.id,
@@ -129,7 +134,7 @@ describe("runClaimedTurn", () => {
 	});
 
 	it("records a built-in tool's call where the reply made it", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const calls = toolCalls();
 		const toolContext = Context.Reference("test/turn-tool-context", {
 			defaultValue: () => "missing",
@@ -141,7 +146,7 @@ describe("runClaimedTurn", () => {
 				return yield* openCall(input);
 			}),
 		);
-		vi.mocked(store.saveStreamingMessage).mockImplementation(() =>
+		vi.mocked(turns.saveReply).mockImplementation(() =>
 			Effect.gen(function* () {
 				expect(yield* toolContext).toBe("turn-context");
 			}),
@@ -172,19 +177,23 @@ describe("runClaimedTurn", () => {
 		};
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls,
-				queueSummary: noSummary,
-				builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
-			}).pipe(Effect.provideService(toolContext, "turn-context")),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: calls,
+					queueSummary: noSummary,
+					builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
+				}),
+			).pipe(Effect.provideService(toolContext, "turn-context")),
 		);
 
 		expect(calls.open).toHaveBeenCalledWith({
-			threadId: claimed.threadId,
+			threadId: run.request.threadId,
 			messageId: prepared.responseMessage.id,
 			turnId: prepared.turnId,
 			tool: "probe",
@@ -195,8 +204,8 @@ describe("runClaimedTurn", () => {
 		expect(calls.close).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-0000000000aa", {
 			output: { answer: "hi!" },
 		});
-		expect(store.complete).toHaveBeenCalledWith(
-			prepared,
+		expect(turns.complete).toHaveBeenCalledWith(
+			replyTurn,
 			{
 				content: 'Looking. Found {"answer":"hi!"}.',
 				collaborations: [],
@@ -207,7 +216,7 @@ describe("runClaimedTurn", () => {
 	});
 
 	it("offers a connection's tools for the turn, notes when an allowed one acted, and closes the session after", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const calls = toolCalls();
 		const close = vi.fn(async () => undefined);
 		const wipe = tool({
@@ -233,52 +242,55 @@ describe("runClaimedTurn", () => {
 		};
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls,
-				queueSummary: noSummary,
-				connectionTools: {
-					forPod: () =>
-						Effect.succeed({
-							tools: {
-								wiki__wipe: {
-									tool: wipe,
-									mutating: true,
-									requiresApproval: true,
-									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
-									connectionRevision: 1,
-									remoteToolName: "wipe",
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: calls,
+					queueSummary: noSummary,
+					connectionTools: {
+						forPod: () =>
+							Effect.succeed({
+								tools: {
+									wiki__wipe: {
+										tool: wipe,
+										mutating: true,
+										requiresApproval: true,
+										connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+										connectionRevision: 1,
+										remoteToolName: "wipe",
+									},
 								},
-							},
-							close,
-						}),
-				},
-				approvals: {
-					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-					beginExecution: ({ atOffset }) =>
-						calls.open({
-							threadId: prepared.context.thread.id,
-							messageId: prepared.responseMessage.id,
-							turnId: prepared.turnId,
-							tool: "wiki__wipe",
-							input: {},
-							atOffset,
-							mutating: true,
-						}),
-					decide: () => Effect.die(new Error("unused")),
-					record: () => Effect.void,
-				},
-			}),
+								close,
+							}),
+					},
+					approvals: {
+						responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+						beginExecution: ({ atOffset }) =>
+							calls.open({
+								threadId: prepared.context.thread.id,
+								messageId: prepared.responseMessage.id,
+								turnId: prepared.turnId,
+								tool: "wiki__wipe",
+								input: {},
+								atOffset,
+								mutating: true,
+							}),
+						decide: () => Effect.die(new Error("unused")),
+					},
+				}),
+			),
 		);
 
 		expect(calls.open).toHaveBeenCalledWith(
 			expect.objectContaining({ tool: "wiki__wipe", mutating: true }),
 		);
-		expect(store.complete).toHaveBeenCalledWith(
-			prepared,
+		expect(turns.complete).toHaveBeenCalledWith(
+			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
 			{ usage: {} },
 		);
@@ -286,7 +298,7 @@ describe("runClaimedTurn", () => {
 	});
 
 	it("parks a mutating call without executing it when approval is required", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const execute = vi.fn(async () => ({ removed: true }));
 		const model: TurnModel = {
 			stream: () =>
@@ -314,49 +326,52 @@ describe("runClaimedTurn", () => {
 		};
 
 		const outcome = await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				connectionTools: {
-					forPod: () =>
-						Effect.succeed({
-							tools: {
-								wiki__wipe: {
-									tool: tool({
-										inputSchema: Schema.Struct({}).pipe(
-											Schema.toStandardSchemaV1,
-											Schema.toStandardJSONSchemaV1,
-										),
-										execute,
-									}),
-									mutating: true,
-									requiresApproval: true,
-									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
-									connectionRevision: 1,
-									remoteToolName: "wipe",
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					connectionTools: {
+						forPod: () =>
+							Effect.succeed({
+								tools: {
+									wiki__wipe: {
+										tool: tool({
+											inputSchema: Schema.Struct({}).pipe(
+												Schema.toStandardSchemaV1,
+												Schema.toStandardJSONSchemaV1,
+											),
+											execute,
+										}),
+										mutating: true,
+										requiresApproval: true,
+										connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+										connectionRevision: 1,
+										remoteToolName: "wipe",
+									},
 								},
-							},
-							close: async () => undefined,
-						}),
-				},
-				approvals: {
-					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-					beginExecution: () =>
-						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
-					decide: () => Effect.die(new Error("unused")),
-					record: () => Effect.void,
-				},
-			}),
+								close: async () => undefined,
+							}),
+					},
+					approvals: {
+						responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+						beginExecution: () =>
+							Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
+						decide: () => Effect.die(new Error("unused")),
+					},
+				}),
+			),
 		);
 
 		expect(execute).not.toHaveBeenCalled();
-		expect(store.complete).not.toHaveBeenCalled();
-		expect(store.suspend).toHaveBeenCalledWith(
-			prepared,
+		expect(turns.complete).not.toHaveBeenCalled();
+		expect(turns.suspend).toHaveBeenCalledWith(
+			replyTurn,
 			expect.objectContaining({
 				approvals: [expect.objectContaining({ approvalId: "approval-1" })],
 				reply: expect.objectContaining({
@@ -370,7 +385,7 @@ describe("runClaimedTurn", () => {
 	});
 
 	it("resumes with the checkpointed model input instead of changed turn context", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const resumed: PreparedTurn = {
 			...prepared,
 			context: {
@@ -389,7 +404,7 @@ describe("runClaimedTurn", () => {
 				accounting: { usage: { modelCalls: 1 } },
 			},
 		};
-		vi.mocked(store.prepare).mockReturnValueOnce(Effect.succeed(resumed));
+		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
 		let received: TurnModelInput | undefined;
 		const model: TurnModel = {
 			stream: (input) => {
@@ -399,20 +414,23 @@ describe("runClaimedTurn", () => {
 		};
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				approvals: {
-					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
-					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
-					decide: () => Effect.die(new Error("unused")),
-					record: () => Effect.void,
-				},
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					approvals: {
+						responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
+						beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
+						decide: () => Effect.die(new Error("unused")),
+					},
+				}),
+			),
 		);
 
 		expect(received).toMatchObject({
@@ -423,7 +441,7 @@ describe("runClaimedTurn", () => {
 	});
 
 	it("tells the model which connection tools wait for a person", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const lookup = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async () => ({ content: [] }),
@@ -445,31 +463,35 @@ describe("runClaimedTurn", () => {
 		};
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				connectionTools: {
-					forPod: () =>
-						Effect.succeed({
-							tools: {
-								wiki__lookup: offered("lookup", false),
-								notes__lookup: offered("lookup", true),
-							},
-							close: async () => undefined,
-						}),
-				},
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					connectionTools: {
+						forPod: () =>
+							Effect.succeed({
+								tools: {
+									wiki__lookup: offered("lookup", false),
+									notes__lookup: offered("lookup", true),
+								},
+								close: async () => undefined,
+							}),
+					},
+				}),
+			),
 		);
 
 		expect(received?.toolApproval).toEqual({ notes__lookup: "user-approval" });
 	});
 
 	it("leaves out a built-in tool the agent has switched off", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const probe = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async () => "ok",
@@ -482,7 +504,7 @@ describe("runClaimedTurn", () => {
 					return { text: chunks("Done"), accounting: Effect.succeed({ usage: {} }) };
 				}),
 		};
-		vi.mocked(store.prepare).mockReturnValueOnce(
+		vi.mocked(execution.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				...prepared,
 				context: {
@@ -493,148 +515,171 @@ describe("runClaimedTurn", () => {
 		);
 
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
+				}),
+			),
 		);
 
 		expect(offered).toEqual([["other"]]);
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
-		const store = turnStore();
-		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
+		const { execution, turns } = fakes();
+		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
 		await expect(
 			runWithServices(
-				runClaimedTurn(claimed, {
-					store,
-					model: unusedModel(),
-					events: eventBus(),
-					collaborations: collaborations(),
-					calls: toolCalls(),
-					queueSummary: noSummary,
-				}),
+				runSegment(
+					run,
+					dependencies({
+						execution,
+						turns,
+						model: unusedModel(),
+						events: eventBus(),
+						collaborations: collaborations(),
+						toolCalls: toolCalls(),
+						queueSummary: noSummary,
+					}),
+				),
 			),
 		).rejects.toThrow("database unavailable");
-		expect(store.abandon).not.toHaveBeenCalled();
+		expect(turns.abandon).not.toHaveBeenCalled();
 	});
 
 	it("settles a Routine as cancelled when its turn is not runnable", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const settleThread = vi.fn(() => Effect.succeed(true));
-		vi.mocked(store.prepare).mockReturnValueOnce(
-			Effect.fail(new TurnNotRunnable({ reason: "The agent left its pod" })),
+		vi.mocked(execution.prepare).mockReturnValueOnce(
+			Effect.succeed({ _tag: "NotRunnable", reason: "The agent left its pod", ended: undefined }),
 		);
 
 		const outcome = await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model: unusedModel(),
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				routines: { settleThread },
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model: unusedModel(),
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					routines: { settleThread },
+				}),
+			),
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, { state: "cancelled" });
+		expect(settleThread).toHaveBeenCalledWith(run.request.threadId, { state: "cancelled" });
 	});
 
 	it("fails the turn and its Routine for good when its last run fails", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const settleThread = vi.fn(() => Effect.succeed(true));
-		vi.mocked(store.prepare).mockReturnValueOnce(Effect.succeed(lastRun));
+		vi.mocked(turns.fail).mockReturnValueOnce(Effect.succeed(false));
 
 		const outcome = await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model: {
-					stream: () =>
-						Effect.fail(
-							new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
-						),
-				},
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-				routines: { settleThread },
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model: {
+						stream: () =>
+							Effect.fail(
+								new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+							),
+					},
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+					routines: { settleThread },
+				}),
+			),
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(store.fail).toHaveBeenCalledWith(
-			lastRun,
+		expect(turns.fail).toHaveBeenCalledWith(
+			replyTurn,
 			reply(""),
 			"The model provider could not answer.",
-			false,
 		);
-		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, {
+		expect(settleThread).toHaveBeenCalledWith(run.request.threadId, {
 			state: "failed",
 			error: "The model provider could not answer.",
 		});
 	});
 
 	it("keeps a completed turn successful when its summary cannot be queued", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const queueSummary = () => Effect.die(new Error("database unavailable"));
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks("Done"),
-							accounting: Effect.succeed({ usage: {} }),
-						})),
-				},
-				events: eventBus(),
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary,
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model: {
+						stream: () =>
+							Effect.sync(() => ({
+								text: chunks("Done"),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary,
+				}),
+			),
 		);
 
-		expect(store.complete).toHaveBeenCalledOnce();
-		expect(store.fail).not.toHaveBeenCalled();
+		expect(turns.complete).toHaveBeenCalledOnce();
+		expect(turns.fail).not.toHaveBeenCalled();
 	});
 
 	it("keeps a turn successful when an ephemeral delta cannot be published", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const events = eventBus();
 		vi.mocked(events.publish).mockRejectedValueOnce(new Error("subscriber unavailable"));
 		await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks("Done"),
-							accounting: Effect.succeed({ usage: {} }),
-						})),
-				},
-				events,
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model: {
+						stream: () =>
+							Effect.sync(() => ({
+								text: chunks("Done"),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events,
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+				}),
+			),
 		);
 
-		expect(store.complete).toHaveBeenCalledOnce();
-		expect(store.fail).not.toHaveBeenCalled();
+		expect(turns.complete).toHaveBeenCalledOnce();
+		expect(turns.fail).not.toHaveBeenCalled();
 	});
 
 	it("marks a failed generation for retry without duplicating its response", async () => {
-		const store = turnStore();
+		const { execution, turns } = fakes();
 		const model: TurnModel = {
 			stream: () =>
 				Effect.fail(
@@ -644,22 +689,25 @@ describe("runClaimedTurn", () => {
 		const events = eventBus();
 
 		const outcome = await runWithServices(
-			runClaimedTurn(claimed, {
-				store,
-				model,
-				events,
-				collaborations: collaborations(),
-				calls: toolCalls(),
-				queueSummary: noSummary,
-			}),
+			runSegment(
+				run,
+				dependencies({
+					execution,
+					turns,
+					model,
+					events,
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					queueSummary: noSummary,
+				}),
+			),
 		);
 
 		expect(outcome).toEqual({ _tag: "Retry" });
-		expect(store.fail).toHaveBeenCalledWith(
-			prepared,
+		expect(turns.fail).toHaveBeenCalledWith(
+			replyTurn,
 			reply(""),
 			"The model provider could not answer.",
-			true,
 		);
 		expect(eventTypes(events)).toEqual([]);
 	});
@@ -667,28 +715,32 @@ describe("runClaimedTurn", () => {
 	it("flushes a short partial response after one second", async () => {
 		vi.useFakeTimers();
 		try {
-			const store = turnStore();
-			const execution = runWithServices(
-				runClaimedTurn(claimed, {
-					store,
-					model: {
-						stream: () =>
-							Effect.sync(() => ({
-								text: delayedChunks(),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events: eventBus(),
-					collaborations: collaborations(),
-					calls: toolCalls(),
-					queueSummary: noSummary,
-				}),
+			const { execution, turns } = fakes();
+			const segment = runWithServices(
+				runSegment(
+					run,
+					dependencies({
+						execution,
+						turns,
+						model: {
+							stream: () =>
+								Effect.sync(() => ({
+									text: delayedChunks(),
+									accounting: Effect.succeed({ usage: {} }),
+								})),
+						},
+						events: eventBus(),
+						collaborations: collaborations(),
+						toolCalls: toolCalls(),
+						queueSummary: noSummary,
+					}),
+				),
 			);
 
 			await vi.advanceTimersByTimeAsync(1_000);
-			expect(store.saveStreamingMessage).toHaveBeenCalledWith(prepared, reply("short"));
+			expect(turns.saveReply).toHaveBeenCalledWith(replyTurn, reply("short"));
 			await vi.advanceTimersByTimeAsync(100);
-			await execution;
+			await segment;
 		} finally {
 			vi.useRealTimers();
 		}
@@ -697,34 +749,38 @@ describe("runClaimedTurn", () => {
 	it("leaves a turn running until its cancellation is requested", async () => {
 		vi.useFakeTimers();
 		try {
-			const store = turnStore();
+			const { execution, turns } = fakes();
 			const events = liveEventBus();
-			const execution = runWithServices(
-				runClaimedTurn(claimed, {
-					store,
-					model: {
-						stream: (input) =>
-							Effect.sync(() => ({
-								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events,
-					collaborations: collaborations(),
-					calls: toolCalls(),
-					queueSummary: noSummary,
-				}),
+			const segment = runWithServices(
+				runSegment(
+					run,
+					dependencies({
+						execution,
+						turns,
+						model: {
+							stream: (input) =>
+								Effect.sync(() => ({
+									text: chunksUntilAborted(input.signal),
+									accounting: Effect.succeed({ usage: {} }),
+								})),
+						},
+						events,
+						collaborations: collaborations(),
+						toolCalls: toolCalls(),
+						queueSummary: noSummary,
+					}),
+				),
 			);
 
 			await vi.advanceTimersByTimeAsync(5_000);
-			expect(store.cancel).not.toHaveBeenCalled();
-			expect(store.fail).not.toHaveBeenCalled();
+			expect(turns.cancel).not.toHaveBeenCalled();
+			expect(turns.fail).not.toHaveBeenCalled();
 
 			await requestCancellation(events);
 			await vi.advanceTimersByTimeAsync(0);
-			await execution;
-			expect(store.cancel).toHaveBeenCalledWith(prepared, reply("partial"));
-			expect(store.fail).not.toHaveBeenCalled();
+			await segment;
+			expect(turns.cancel).toHaveBeenCalledWith(replyTurn, reply("partial"));
+			expect(turns.fail).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -733,55 +789,75 @@ describe("runClaimedTurn", () => {
 	it("reads a cancellation it was not told about, while it runs", async () => {
 		vi.useFakeTimers();
 		try {
-			const store = turnStore();
-			const execution = runWithServices(
-				runClaimedTurn(claimed, {
-					store,
-					model: {
-						stream: (input) =>
-							Effect.sync(() => ({
-								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events: liveEventBus(),
-					collaborations: collaborations(),
-					calls: toolCalls(),
-					queueSummary: noSummary,
-				}),
+			const { execution, turns } = fakes();
+			const segment = runWithServices(
+				runSegment(
+					run,
+					dependencies({
+						execution,
+						turns,
+						model: {
+							stream: (input) =>
+								Effect.sync(() => ({
+									text: chunksUntilAborted(input.signal),
+									accounting: Effect.succeed({ usage: {} }),
+								})),
+						},
+						events: liveEventBus(),
+						collaborations: collaborations(),
+						toolCalls: toolCalls(),
+						queueSummary: noSummary,
+					}),
+				),
 			);
 
 			await vi.advanceTimersByTimeAsync(0);
-			vi.mocked(store.isCancellationRequested).mockReturnValue(Effect.succeed(true));
+			vi.mocked(turns.isCancellationRequested).mockReturnValue(Effect.succeed(true));
 			await vi.advanceTimersByTimeAsync(15_000);
-			await execution;
-			expect(store.cancel).toHaveBeenCalledWith(prepared, reply("partial"));
+			await segment;
+			expect(turns.cancel).toHaveBeenCalledWith(replyTurn, reply("partial"));
 		} finally {
 			vi.useRealTimers();
 		}
 	});
 });
 
-function turnStore(): TurnStore {
-	return {
-		prepare: vi.fn(() => Effect.succeed(prepared)),
-		saveStreamingMessage: vi.fn(() => Effect.void),
-		complete: vi.fn(() => Effect.void),
-		suspend: vi.fn(() => Effect.succeed(true)),
+/** Prepares `prepared` and records nothing; the cases check what was asked to be recorded. */
+function fakes() {
+	const execution: TurnStepsDependencies["execution"] = {
+		prepare: vi.fn(() => Effect.succeed<PreparedTurn | NotRunnable>(prepared)),
 		giveFloor: vi.fn(() =>
 			Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
 		),
-		fail: vi.fn(() => Effect.void),
+	};
+	const turns: TurnStepsDependencies["turns"] = {
+		saveReply: vi.fn(() => Effect.void),
+		suspend: vi.fn(() => Effect.succeed(true)),
+		complete: vi.fn(() => Effect.void),
+		fail: vi.fn(() => Effect.succeed(true)),
 		cancel: vi.fn(() => Effect.void),
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
-		requestCancel: vi.fn(() => Effect.succeed(false)),
-		abandon: vi.fn(() => Effect.void),
 		stopWaiting: vi.fn(() => Effect.void),
+		abandon: vi.fn(() => Effect.undefined),
+	};
+	return { execution, turns };
+}
+
+/** What a segment runs on, with no approvals, built-in tools or connection tools unless given. */
+function dependencies(
+	given: Omit<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools"> &
+		Partial<Pick<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools">>,
+): TurnStepsDependencies {
+	return {
+		approvals: noToolApprovalStore,
+		builtInTools: noBuiltInTools,
+		connectionTools: noConnectionTools,
+		...given,
 	};
 }
 
 /** Records nothing; the cases that call a tool check what it was asked to record. */
-function toolCalls(): ToolCallStore {
+function toolCalls(): TurnStepsDependencies["toolCalls"] {
 	const part = (id: string, atOffset: number) => ({
 		type: "tool_call" as const,
 		id,
@@ -800,6 +876,7 @@ function toolCalls(): ToolCallStore {
 			Effect.succeed(part("0199a3a0-0000-7000-8000-0000000000aa", atOffset)),
 		),
 		close: vi.fn(() => Effect.undefined),
+		recordDecision: vi.fn(() => Effect.void),
 	};
 }
 
@@ -824,8 +901,11 @@ function liveEventBus(): EventBus {
 
 function requestCancellation(events: EventBus) {
 	return events.publish(
-		threadChannel(claimed.threadId),
-		streamEvent("turn.cancel_requested", { threadId: claimed.threadId, turnId: prepared.turnId }),
+		threadChannel(run.request.threadId),
+		streamEvent("turn.cancel_requested", {
+			threadId: run.request.threadId,
+			turnId: prepared.turnId,
+		}),
 	);
 }
 

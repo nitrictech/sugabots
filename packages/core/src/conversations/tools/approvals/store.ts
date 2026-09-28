@@ -1,9 +1,8 @@
 import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../../database/database.ts";
-import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import {
 	connection,
 	pod,
@@ -11,31 +10,16 @@ import {
 	thread,
 	toolCall,
 	turn,
-	user,
 } from "../../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { podStandingFor } from "../../../workspaces/access.ts";
-import { ConversationEvent } from "../../events.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
-import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
+import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { awaitsDecisions, mayRunTools } from "../../turns/lifecycle.ts";
+import type { TurnRepository } from "../../turns/repository.ts";
 import type { TurnSignals } from "../../turns/signals.ts";
-import type { ApprovalDecision } from "../../turns/turn.workflow.ts";
-import { boundedJson } from "../calls/store.ts";
-
-export interface PendingToolApproval {
-	id: string;
-	approvalId: string;
-	sdkToolCallId: string;
-	tool: string;
-	input: unknown;
-	reason?: string;
-	connectionId: string;
-	connectionRevision: number;
-	remoteToolName: string;
-	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
-	mutating: boolean;
-	atOffset: number;
-}
+import { awaitsDecision } from "../calls/lifecycle.ts";
+import type { ToolCallRepository } from "../calls/repository.ts";
 
 export interface ToolApprovalStore {
 	responsesForTurn(
@@ -56,7 +40,7 @@ export interface ToolApprovalStore {
 	}): Effect.Effect<ToolCallPart, ToolExecutionRefused, Database>;
 	/**
 	 * Checks a person may make the decision, then sends it to the turn's
-	 * workflow, which records it through `record`.
+	 * workflow, which records it.
 	 */
 	decide(input: {
 		workspaceId: string;
@@ -69,12 +53,6 @@ export interface ToolApprovalStore {
 		ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
 		Database
 	>;
-	/** Records a decision on an approval in the thread, and announces it. Does nothing once decided. */
-	record(input: {
-		threadId: string;
-		approvalId: string;
-		decision: ApprovalDecision;
-	}): Effect.Effect<void, never, Database>;
 }
 
 export class ToolApprovalNotFound
@@ -116,7 +94,8 @@ export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused
 }> {}
 
 export function toolApprovalStore(
-	emit: DomainEvents.Emit<ConversationEvent>,
+	toolCalls: ToolCallRepository,
+	turns: Pick<TurnRepository, "markActed">,
 	signals: TurnSignals,
 ): ToolApprovalStore {
 	return {
@@ -186,22 +165,19 @@ export function toolApprovalStore(
 							.select({
 								workspaceId: thread.workspaceId,
 								podId: thread.podId,
+								status: turn.status,
+								cancelRequested: turn.cancelRequested,
 							})
 							.from(turn)
 							.innerJoin(thread, eq(thread.id, turn.threadId))
 							.innerJoin(pod, eq(pod.id, thread.podId))
-							.where(
-								and(
-									eq(turn.id, input.turnId),
-									eq(turn.threadId, input.threadId),
-									eq(turn.status, "running"),
-									eq(turn.cancelRequested, false),
-								),
-							)
+							.where(and(eq(turn.id, input.turnId), eq(turn.threadId, input.threadId)))
 							.limit(1)
 							.for("update"),
 					);
-					if (!scope) return yield* new ToolExecutionRefused({ message: "Turn is not running" });
+					if (!scope || !mayRunTools(scope)) {
+						return yield* new ToolExecutionRefused({ message: "Turn is not running" });
+					}
 					const [currentConnection] = yield* query((db) =>
 						db
 							.select({ revision: connection.configurationRevision })
@@ -223,54 +199,12 @@ export function toolApprovalStore(
 							message: "Connection configuration changed after approval",
 						});
 					}
-					const [existing] = yield* query((db) =>
-						db
-							.select()
-							.from(toolCall)
-							.where(
-								and(
-									eq(toolCall.turnId, input.turnId),
-									eq(toolCall.sdkToolCallId, input.sdkToolCallId),
-								),
-							)
-							.limit(1)
-							.for("update"),
-					);
-					// Every call to a connection's tool was parked for a person to allow first.
-					if (!existing) {
-						return yield* new ToolExecutionRefused({ message: "Tool call has no approval record" });
+					const began = yield* toolCalls.beginExecution(input);
+					if (began._tag === "Refused") {
+						return yield* new ToolExecutionRefused({ message: began.reason });
 					}
-					if (existing.approvalStatus !== "allowed" || existing.status !== "awaiting_approval") {
-						return yield* new ToolExecutionRefused({
-							message: "Tool call is not approved for execution",
-						});
-					}
-					const [running] = yield* query((db) =>
-						db
-							.update(toolCall)
-							.set({ status: "running", startedAt: new Date() })
-							.where(
-								and(
-									eq(toolCall.id, existing.id),
-									eq(toolCall.threadId, input.threadId),
-									eq(toolCall.messageId, input.messageId),
-									eq(toolCall.status, "awaiting_approval"),
-									eq(toolCall.tool, input.tool),
-									eq(toolCall.connectionId, input.connectionId),
-									eq(toolCall.connectionRevision, input.connectionRevision),
-									eq(toolCall.remoteToolName, input.remoteToolName),
-									sql`${toolCall.executionInput} = ${JSON.stringify(executionJson(input.input))}::jsonb`,
-								),
-							)
-							.returning(),
-					);
-					if (!running)
-						return yield* new ToolExecutionRefused({
-							message: "Tool call was already claimed, or no longer matches what was approved",
-						});
-					if (running.mutating) yield* markMutationStarted(running.turnId);
-					yield* emit([ConversationEvent.ToolCallExecuting(toolCallChange(running))]);
-					return toToolCallPart(running);
+					if (began.call.mutating) yield* turns.markActed(began.call.turnId);
+					return toToolCallPart(began.call);
 				}),
 			),
 
@@ -306,6 +240,7 @@ export function toolApprovalStore(
 							.select({
 								call: toolCall,
 								owner: turn.owner,
+								turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 							})
 							.from(toolCall)
 							.innerJoin(turn, eq(turn.id, toolCall.turnId))
@@ -315,14 +250,14 @@ export function toolApprovalStore(
 									eq(toolCall.id, input.toolCallId),
 									eq(thread.workspaceId, input.workspaceId),
 									eq(thread.podId, input.podId),
-									eq(turn.status, "waiting"),
-									eq(turn.cancelRequested, false),
 								),
 							)
 							.limit(1)
 							.for("update"),
 					);
-					if (!candidate?.call.approvalId) return yield* new ToolApprovalNotFound();
+					if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
+						return yield* new ToolApprovalNotFound();
+					}
 					// The caller's authority is read again here, inside the
 					// transaction that sends or records the decision, so a demotion
 					// between the route's check and the decision does not slip through. Somebody who
@@ -332,7 +267,7 @@ export function toolApprovalStore(
 					if (!decider?.may("approval.decide")) {
 						return yield* new ToolApprovalNotFound();
 					}
-					if (candidate.call.approvalStatus !== "pending") return yield* new ToolApprovalConflict();
+					if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
 					if (routineExecutionId && !decider.may("approval.routine.decide")) {
 						return yield* new ToolApprovalForbidden();
 					}
@@ -342,92 +277,20 @@ export function toolApprovalStore(
 					// Only one person's decision reaches the workflow, so the first to
 					// claim the call decides it and anyone after is told it is taken.
 					// The claim is undone with this transaction if the send fails.
-					const claimed = yield* query((db) =>
-						db
-							.update(toolCall)
-							.set({ decidedById: input.userId })
-							.where(
-								and(
-									eq(toolCall.id, input.toolCallId),
-									eq(toolCall.approvalStatus, "pending"),
-									isNull(toolCall.decidedById),
-								),
-							)
-							.returning({ id: toolCall.id }),
-					);
-					if (claimed.length === 0) return yield* new ToolApprovalConflict();
+					if (!(yield* toolCalls.claimDecision(input.toolCallId, input.userId))) {
+						return yield* new ToolApprovalConflict();
+					}
 					return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
-				}),
-			),
-
-		record: (input) =>
-			transaction(
-				Effect.gen(function* () {
-					const allowed = input.decision.decision !== "deny";
-					const [updated] = yield* query((db) =>
-						db
-							.update(toolCall)
-							.set({
-								approvalStatus: allowed ? "allowed" : "denied",
-								decidedById: input.decision.userId,
-								decidedAt: new Date(),
-								...(allowed
-									? {}
-									: {
-											status: "completed" as const,
-											output: boundedJson({
-												status: "denied",
-												reason: "A person denied this action",
-											}),
-											finishedAt: new Date(),
-										}),
-							})
-							.where(
-								and(
-									eq(toolCall.threadId, input.threadId),
-									eq(toolCall.approvalId, input.approvalId),
-									eq(toolCall.approvalStatus, "pending"),
-								),
-							)
-							.returning(),
-					);
-					if (!updated) return;
-					const [deciderName] = yield* query((db) =>
-						db
-							.select({ name: user.name })
-							.from(user)
-							.where(eq(user.id, input.decision.userId))
-							.limit(1),
-					);
-					yield* emit([
-						ConversationEvent.ToolCallDecided(toolCallChange(updated, deciderName?.name ?? null)),
-					]);
 				}),
 			),
 	};
 }
 
-/** No connection approvals for workers that are not offered connection tools. */
+/** No connection approvals, for turns that are offered no connection tools. */
 export const noToolApprovalStore: ToolApprovalStore = {
 	responsesForTurn: () =>
 		Effect.fail(new ToolApprovalsIncomplete({ message: "Tool approvals are not configured" })),
 	beginExecution: () =>
 		Effect.fail(new ToolExecutionRefused({ message: "Tool approvals are not configured" })),
 	decide: () => Effect.fail(new ToolApprovalNotFound()),
-	record: () => Effect.void,
 };
-
-export function executionJson(value: unknown) {
-	return JSON.parse(JSON.stringify(value ?? null));
-}
-
-const markMutationStarted = (turnId: string) =>
-	query((db) =>
-		db
-			.update(turn)
-			.set({
-				mutationStarted: true,
-				checkpoint: sql`case when ${turn.checkpoint} is null then null else jsonb_set(${turn.checkpoint}, '{reply,acted}', 'true'::jsonb, true) end`,
-			})
-			.where(eq(turn.id, turnId)),
-	).pipe(Effect.asVoid);

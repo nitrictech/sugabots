@@ -23,8 +23,10 @@ import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
 import { composeConversations } from "../composition.ts";
 import { routineRunsForTests } from "../routines/testing.ts";
+import { replyTurnOf } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import {
+	prepareRunnable,
 	queueFacilitationForTests,
 	queueTurnForTests,
 	releaseTurn,
@@ -39,7 +41,7 @@ const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const eventBus = createEventBus({ store: eventStore });
-	const { stores } = composeConversations({
+	const { repositories, stores } = composeConversations({
 		publishEvents: eventPublisher(eventBus),
 		queueTurn: queueTurnForTests,
 		queueFacilitation: queueFacilitationForTests,
@@ -49,6 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const store = onPostgres(stores.threads);
 	const chats = onPostgres(stores.chats);
 	const turns = onPostgres(stores.turns);
+	const turnRecords = onPostgres(repositories.turns);
 	const summaries = onPostgres(stores.summaries);
 	let workspaceId: string;
 	let podId: string;
@@ -87,13 +90,22 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		return details;
 	}
 
-	/** The agent's turn running in the thread, as its workflow claims it. */
+	/** The agent's turn running in the thread, as its workflow runs it. */
 	async function runningTurn(threadId: string, agent = agentId) {
-		const claim = (await runOnPostgres(runningTurns(threadId))).find(
-			(running) => running.payload.agentId === agent,
+		const run = (await runOnPostgres(runningTurns(threadId))).find(
+			(running) => running.request.agentId === agent,
 		);
-		if (!claim) throw new Error("No turn is running in the thread");
-		return claim;
+		if (!run) throw new Error("No turn is running in the thread");
+		return run;
+	}
+
+	/** Prepares the summary `request` asks for, for a case that needs it to run. */
+	async function preparedSummary(request: Parameters<typeof summaries.prepare>[0]) {
+		const preparation = await summaries.prepare(request);
+		if (preparation._tag !== "Prepared") {
+			throw new Error(`Thread test could not prepare its summary: ${preparation.reason}`);
+		}
+		return preparation;
 	}
 
 	afterAll(async () => {
@@ -230,7 +242,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				reason: "mention",
 			}),
 		);
-		const prepared = await turns.prepare(await runningTurn(details.thread.id, otherRow.id));
+		const prepared = await prepareRunnable(
+			turns,
+			await runningTurn(details.thread.id, otherRow.id),
+		);
 
 		expect(prepared.context.agent.id).toBe(otherRow.id);
 	});
@@ -271,7 +286,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			sourceMessageId,
 		});
 
-		expect(prepared.threadId).toBe(details.thread.id);
+		expect(prepared).toMatchObject({ _tag: "Prepared", threadId: details.thread.id });
 	});
 
 	it("keeps the agent who just spoke off the router's list", async () => {
@@ -335,11 +350,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			message: "Anyone there?",
 		});
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
-		const claim = await runningTurn(details.thread.id);
+		const run = await runningTurn(details.thread.id);
 
 		// It stops rather than falling back to some other model, and the reason
 		// names the agent so somebody can go and fix it.
-		await expect(turns.prepare(claim)).rejects.toThrow("has no model chosen");
+		expect(await turns.prepare(run)).toMatchObject({
+			_tag: "NotRunnable",
+			reason: expect.stringContaining("has no model chosen"),
+		});
 	});
 
 	it("does not facilitate at all until the workspace has chosen a Facilitator model", async () => {
@@ -405,8 +423,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		]);
 		expect(await runOnPostgres(runningTurns(details.thread.id))).toMatchObject([
 			{
-				threadId: details.thread.id,
-				payload: { agentId, triggerMessageId: details.messages[0]?.id },
+				request: {
+					threadId: details.thread.id,
+					agentId,
+					triggerMessageId: details.messages[0]?.id,
+				},
 			},
 		]);
 	});
@@ -677,13 +698,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
 		});
-		const firstClaim = await runningTurn(details.thread.id);
-		const preparedTurn = await turns.prepare(firstClaim);
-		if (!preparedTurn) {
-			throw new Error("Thread test could not prepare its turn");
-		}
-		await turns.complete(
-			preparedTurn,
+		const firstRun = await runningTurn(details.thread.id);
+		const preparedTurn = await prepareRunnable(turns, firstRun);
+		await turnRecords.complete(
+			replyTurnOf(preparedTurn),
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
 			{
 				usage: { modelCalls: 1, inputTokens: 30, outputTokens: 5, totalTokens: 35 },
@@ -691,21 +709,18 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				contextCapacity: 200_000,
 			},
 		);
-		await runOnPostgres(releaseTurn(firstClaim));
-		const preparedSummary = await summaries.prepare({
+		await runOnPostgres(releaseTurn(firstRun));
+		const firstSummary = await preparedSummary({
 			threadId: details.thread.id,
 			agentId: preparedTurn.context.agent.id,
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
-		if (!preparedSummary) {
-			throw new Error("Thread test could not prepare its summary");
-		}
-		expect(preparedSummary.model).toBe(SYSTEM_AGENT_MODEL);
+		expect(firstSummary.model).toBe(SYSTEM_AGENT_MODEL);
 
 		// The summariser works in its own thread hanging off the one it summarises,
 		// so its turns never appear in the conversation people are having.
 		const [summaryTurn] = await onDatabase((db) =>
-			db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, preparedSummary.turnId)),
+			db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, firstSummary.turnId)),
 		);
 		expect(summaryTurn?.threadId).not.toBe(details.thread.id);
 		const [systemAgentThread] = await onDatabase((db) =>
@@ -724,7 +739,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		expect(listed.some((row) => row.id === summaryTurn?.threadId)).toBe(false);
 		expect(listed.some((row) => row.id === details.thread.id)).toBe(true);
 		await summaries.complete(
-			preparedSummary,
+			firstSummary,
 			{ title: "Verify the release", content: "The release work is complete." },
 			{
 				usage: { modelCalls: 1, inputTokens: 40, outputTokens: 6, totalTokens: 46 },
@@ -758,22 +773,19 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
-		const nextTurn = await turns.prepare(await runningTurn(details.thread.id));
-		if (!nextTurn) {
-			throw new Error("Thread test could not prepare its follow-up turn");
-		}
+		const nextTurn = await prepareRunnable(turns, await runningTurn(details.thread.id));
 		expect(nextTurn.context).not.toHaveProperty("summary");
 		expect(nextTurn.context.messages.map(({ content }) => content)).toEqual([
 			"Summarize this thread",
 			"The work is complete.",
 			"What remains?",
 		]);
-		await turns.complete(
-			nextTurn,
+		await turnRecords.complete(
+			replyTurnOf(nextTurn),
 			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
 			{ usage: {} },
 		);
-		const nextSummary = await summaries.prepare({
+		const nextSummary = await preparedSummary({
 			threadId: details.thread.id,
 			agentId: nextTurn.context.agent.id,
 			sourceMessageId: nextTurn.responseMessage.id,
@@ -787,9 +799,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 				{ content: "Only approval remains." },
 			],
 		});
-		if (nextSummary) {
-			await summaries.complete(nextSummary, { content: "Only approval remains." }, { usage: {} });
-		}
+		await summaries.complete(nextSummary, { content: "Only approval remains." }, { usage: {} });
 		expect((await store.getVisible(details.thread.id, memberId))?.thread.title).toBe(
 			"Verify the release",
 		);
@@ -803,10 +813,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 			initiatorUserId: memberId,
 			message: "Wait for review",
 		});
-		const prepared = await turns.prepare(await runningTurn(details.thread.id));
-		if (!prepared) {
-			throw new Error("Thread test could not prepare its turn");
-		}
+		const prepared = await prepareRunnable(turns, await runningTurn(details.thread.id));
 
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(true);
 		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(false);

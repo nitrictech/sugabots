@@ -5,8 +5,8 @@ import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/
 import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
 import { queueSummary } from "@sugabots/core/conversations/summaries/store";
+import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
 import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
-import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/worker";
 import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
@@ -18,8 +18,8 @@ import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turn
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
+import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/turn.steps";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
-import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/worker";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { type Database, layer as databaseLayer } from "@sugabots/core/database/database";
 import { createEventBus } from "@sugabots/core/database/events/bus";
@@ -150,11 +150,12 @@ const main = Effect.gen(function* () {
 			),
 			Layer.provideMerge(
 				turnSteps({
-					store: stores.turns,
+					execution: stores.turns,
+					turns: conversations.repositories.turns,
+					toolCalls: conversations.repositories.toolCalls,
 					model,
 					events: bus,
 					collaborations: stores.collaborations,
-					calls: stores.calls,
 					approvals: stores.approvals,
 					builtInTools,
 					connectionTools,

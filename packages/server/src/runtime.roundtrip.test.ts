@@ -1,5 +1,7 @@
 import { composeConversations } from "@sugabots/core/conversations/composition";
 import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
+import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
+import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import {
 	Facilitate,
 	facilitateLane,
@@ -9,8 +11,8 @@ import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turn
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
+import { stepsLayer } from "@sugabots/core/conversations/turns/turn.steps";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
-import { stepsLayer } from "@sugabots/core/conversations/turns/worker";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { eventPublisher } from "@sugabots/core/database/events/publish";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
@@ -55,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 	const lanes = Context.get(engine, Lanes.Service);
 	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
-	const { emit, stores } = composeConversations({
+	const { emit, repositories, stores } = composeConversations({
 		publishEvents: eventPublisher(bus),
 		queueTurn,
 		queueFacilitation: queueFacilitationInLane(lanes),
@@ -89,12 +91,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		Layer.provideMerge(facilitateSteps({ model, emit, queueTurn })),
 		Layer.provideMerge(
 			stepsLayer({
-				store: stores.turns,
+				execution: stores.turns,
+				turns: repositories.turns,
+				toolCalls: repositories.toolCalls,
 				model,
 				events: bus,
 				collaborations: stores.collaborations,
-				calls: stores.calls,
 				approvals: stores.approvals,
+				builtInTools: noBuiltInTools,
+				connectionTools: noConnectionTools,
 				queueSummary: () => Effect.void,
 			}),
 		),

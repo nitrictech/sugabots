@@ -1,0 +1,373 @@
+import { isDeepStrictEqual } from "node:util";
+import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
+import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { DateTime, Effect } from "effect";
+import { type Database, query, type Transaction, transaction } from "../../../database/database.ts";
+import type { DomainEvents } from "../../../database/events/domain-events.ts";
+import { type ToolCallRow, toolCall, user } from "../../../database/schema.ts";
+import type { UserMessage } from "../../../user-message.ts";
+import { ConversationEvent } from "../../events.ts";
+import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
+import {
+	type ApprovalDecision,
+	isFinished,
+	ToolCallEvent,
+	type ToolCallState,
+	transition,
+	UNFINISHED_STATUSES,
+} from "./lifecycle.ts";
+
+/**
+ * The only writer of `tool_call`: what an agent's reply asked a tool, whether
+ * a person allowed it, and what it got.
+ *
+ * Each command locks the call, asks `lifecycle.ts` what the command makes of
+ * it, writes that and emits it, in one transaction. A command the lifecycle
+ * refuses writes nothing.
+ *
+ * A call is opened when the tool starts and closed when it returns, each in
+ * its own transaction, so a reader watching the thread sees the call appear
+ * and then resolve. The reply keeps a reference to the call among its parts at
+ * the point it was made; the input and output live here, so the tool never
+ * writes the row the streaming reply is being saved to.
+ */
+export interface ToolCallRepository {
+	/** Records that a tool needing no approval has been called. */
+	open(input: {
+		threadId: string;
+		messageId: string;
+		turnId: string;
+		tool: string;
+		input: unknown;
+		/** How far into the reply's text the call was made. */
+		atOffset: number;
+		/** Whether the tool may change something at the other end. Off when left out. */
+		mutating?: boolean;
+	}): Effect.Effect<ToolCallPart, never, Database>;
+	/** Records what the tool returned or how it failed. `undefined` if the call is not running. */
+	close(
+		toolCallId: string,
+		outcome: ToolCallOutcome,
+	): Effect.Effect<ToolCallPart | undefined, never, Database>;
+	/** Parks the calls a reply asked for until people decide them. */
+	requestApprovals(
+		reply: { threadId: string; messageId: string; turnId: string },
+		approvals: readonly PendingToolApproval[],
+	): Effect.Effect<void, never, Database>;
+	/** Takes the decision on a pending call for `userId`. `false` when somebody already has. */
+	claimDecision(toolCallId: string, userId: string): Effect.Effect<boolean, never, Database>;
+	/** Records a decision on an approval in the thread. Does nothing once it is decided. */
+	recordDecision(input: {
+		threadId: string;
+		approvalId: string;
+		decision: ApprovalDecision;
+	}): Effect.Effect<void, never, Database>;
+	/** Starts an allowed call, if it is exactly the call that was approved. */
+	beginExecution(input: {
+		threadId: string;
+		messageId: string;
+		turnId: string;
+		sdkToolCallId: string;
+		tool: string;
+		input: unknown;
+		connectionId: string;
+		connectionRevision: number;
+		remoteToolName: string;
+	}): Effect.Effect<BeganExecution, never, Database>;
+	/**
+	 * Fails these turns' unfinished calls, denying pending approvals, for turns
+	 * that ended before their tools returned. `userMessage` is what people are
+	 * told of each call.
+	 */
+	abandonUnfinished(
+		turnIds: readonly string[],
+		userMessage: UserMessage,
+	): Effect.Effect<void, never, Database>;
+	/** Forgets a reply's calls, for a retry that starts the reply again. */
+	forgetReply(messageId: string): Effect.Effect<void, never, Database>;
+}
+
+/** Stored inputs and outputs are cut at this many characters of JSON (ADR 002). */
+export const MAX_STORED_JSON_CHARACTERS = 64_000;
+
+export type ToolCallOutcome = { output: unknown } | { error: UserMessage };
+
+/** A connection tool call a reply asked for, to be parked until a person decides it. */
+export interface PendingToolApproval {
+	id: string;
+	approvalId: string;
+	sdkToolCallId: string;
+	tool: string;
+	input: unknown;
+	reason?: string;
+	connectionId: string;
+	connectionRevision: number;
+	remoteToolName: string;
+	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
+	mutating: boolean;
+	atOffset: number;
+}
+
+/** A started call, or why it may not start; `reason` is for the logs. */
+export type BeganExecution =
+	| { readonly _tag: "Running"; readonly call: ToolCallRow }
+	| { readonly _tag: "Refused"; readonly reason: string };
+
+export function toolCallRepository(emit: DomainEvents.Emit<ConversationEvent>): ToolCallRepository {
+	/** Applies `event` to a locked call and writes the result. `undefined` when the lifecycle refuses. */
+	const apply = Effect.fn("ToolCallRepository.apply")(function* (
+		row: ToolCallRow,
+		event: ToolCallEvent,
+	) {
+		const decided = transition(stateOf(row), event);
+		if (decided._tag === "Refused") return undefined;
+		const next = decided.state;
+		const now = yield* DateTime.nowAsDate;
+		const [updated] = yield* query((db) =>
+			db
+				.update(toolCall)
+				.set({
+					status: next.status,
+					approvalStatus: next.approvalStatus,
+					decidedById: next.decidedById,
+					output: next.output,
+					error: next.error,
+					...(event._tag === "Decide" ? { decidedAt: now } : {}),
+					...(event._tag === "BeginExecution" ? { startedAt: now } : {}),
+					...(isFinished(next.status) && !isFinished(row.status) ? { finishedAt: now } : {}),
+				})
+				.where(eq(toolCall.id, row.id))
+				.returning(),
+		);
+		if (!updated) return yield* Effect.die(new Error("A locked tool call could not be updated"));
+		return updated;
+	});
+
+	return {
+		open: (input) =>
+			transaction(
+				Effect.gen(function* () {
+					const startedAt = yield* DateTime.nowAsDate;
+					const [row] = yield* query((db) =>
+						db
+							.insert(toolCall)
+							.values({
+								threadId: input.threadId,
+								messageId: input.messageId,
+								turnId: input.turnId,
+								tool: input.tool,
+								input: boundedJson(input.input),
+								atOffset: input.atOffset,
+								mutating: input.mutating ?? false,
+								startedAt,
+							})
+							.returning(),
+					);
+					if (!row) return yield* Effect.die(new Error("Tool call insert returned no row"));
+					yield* emit([ConversationEvent.ToolCallStarted(toolCallChange(row))]);
+					return toToolCallPart(row);
+				}),
+			),
+
+		close: (toolCallId, outcome) =>
+			transaction(
+				Effect.gen(function* () {
+					const row = yield* lockedCall(eq(toolCall.id, toolCallId));
+					if (!row) return undefined;
+					const closed = yield* apply(
+						row,
+						ToolCallEvent.Close({
+							outcome: "error" in outcome ? outcome : { output: boundedJson(outcome.output) },
+						}),
+					);
+					if (!closed) return undefined;
+					yield* emit([ConversationEvent.ToolCallFinished(toolCallChange(closed))]);
+					return toToolCallPart(closed);
+				}),
+			),
+
+		requestApprovals: (reply, approvals) =>
+			transaction(
+				Effect.gen(function* () {
+					if (approvals.length === 0) return;
+					const rows = yield* query((db) =>
+						db
+							.insert(toolCall)
+							.values(
+								approvals.map((approval) => ({
+									id: approval.id,
+									threadId: reply.threadId,
+									messageId: reply.messageId,
+									turnId: reply.turnId,
+									tool: approval.tool,
+									sdkToolCallId: approval.sdkToolCallId,
+									approvalId: approval.approvalId,
+									approvalStatus: "pending" as const,
+									approvalReason: approval.reason ?? null,
+									connectionId: approval.connectionId,
+									connectionRevision: approval.connectionRevision,
+									remoteToolName: approval.remoteToolName,
+									input: boundedJson(approval.input),
+									executionInput: executionJson(approval.input),
+									status: "awaiting_approval" as const,
+									mutating: approval.mutating,
+									atOffset: approval.atOffset,
+								})),
+							)
+							.returning(),
+					);
+					// In the order the reply asked for them, which is how the thread lists them.
+					const byId = new Map(rows.map((row) => [row.id, row]));
+					yield* emit(
+						approvals.flatMap((approval) => {
+							const row = byId.get(approval.id);
+							return row ? [ConversationEvent.ToolCallStarted(toolCallChange(row))] : [];
+						}),
+					);
+				}),
+			),
+
+		claimDecision: (toolCallId, userId) =>
+			transaction(
+				Effect.gen(function* () {
+					const row = yield* lockedCall(eq(toolCall.id, toolCallId));
+					if (!row) return false;
+					return (yield* apply(row, ToolCallEvent.Claim({ userId }))) !== undefined;
+				}),
+			),
+
+		recordDecision: (input) =>
+			transaction(
+				Effect.gen(function* () {
+					const row = yield* lockedCall(
+						and(eq(toolCall.threadId, input.threadId), eq(toolCall.approvalId, input.approvalId)),
+					);
+					if (!row) return;
+					const decided = yield* apply(row, ToolCallEvent.Decide({ decision: input.decision }));
+					if (!decided) return;
+					const [decider] = yield* query((db) =>
+						db
+							.select({ name: user.name })
+							.from(user)
+							.where(eq(user.id, input.decision.userId))
+							.limit(1),
+					);
+					yield* emit([
+						ConversationEvent.ToolCallDecided(toolCallChange(decided, decider?.name ?? null)),
+					]);
+				}),
+			),
+
+		beginExecution: (input) =>
+			transaction(
+				Effect.gen(function* (): Effect.fn.Return<BeganExecution, never, Database | Transaction> {
+					const row = yield* lockedCall(
+						and(eq(toolCall.turnId, input.turnId), eq(toolCall.sdkToolCallId, input.sdkToolCallId)),
+					);
+					// Every call to a connection's tool was parked for a person to allow first.
+					if (!row) return refusedExecution("The call has no approval record");
+					if (!sameCallAsApproved(row, input)) {
+						return refusedExecution(
+							"The call was already claimed, or no longer matches what was approved",
+						);
+					}
+					const running = yield* apply(row, ToolCallEvent.BeginExecution());
+					if (!running) return refusedExecution("The call is not approved for execution");
+					yield* emit([ConversationEvent.ToolCallExecuting(toolCallChange(running))]);
+					return { _tag: "Running", call: running };
+				}),
+			),
+
+		abandonUnfinished: (turnIds, userMessage) =>
+			transaction(
+				Effect.gen(function* () {
+					if (turnIds.length === 0) return;
+					const unfinished = yield* query((db) =>
+						db
+							.select()
+							.from(toolCall)
+							.where(
+								and(
+									inArray(toolCall.turnId, [...turnIds]),
+									inArray(toolCall.status, [...UNFINISHED_STATUSES]),
+								),
+							)
+							.orderBy(toolCall.createdAt, toolCall.id)
+							.for("update"),
+					);
+					const abandoned = yield* Effect.forEach(unfinished, (row) =>
+						apply(row, ToolCallEvent.Abandon({ userMessage })),
+					);
+					yield* emit(
+						abandoned.flatMap((row) =>
+							row ? [ConversationEvent.ToolCallFinished(toolCallChange(row))] : [],
+						),
+					);
+				}),
+			),
+
+		forgetReply: (messageId) =>
+			query((db) => db.delete(toolCall).where(eq(toolCall.messageId, messageId))).pipe(
+				Effect.asVoid,
+			),
+	};
+}
+
+/**
+ * The value as JSON will keep it, cut down when it is too large to store. The
+ * round trip through text is what drops `undefined` and anything else JSON
+ * cannot carry; the cut keeps the start, which is where a page's title and a
+ * result list's first entries are.
+ */
+export function boundedJson(value: unknown): JsonValue {
+	const text = JSON.stringify(value ?? null) ?? "null";
+	if (text.length <= MAX_STORED_JSON_CHARACTERS) {
+		return JSON.parse(text);
+	}
+	return {
+		truncated: true,
+		characters: text.length,
+		preview: text.slice(0, MAX_STORED_JSON_CHARACTERS),
+	};
+}
+
+/** The complete input, as JSON keeps it, for running the call exactly as it was approved. */
+function executionJson(value: unknown): JsonValue {
+	return JSON.parse(JSON.stringify(value ?? null));
+}
+
+const lockedCall = (condition: SQL | undefined) =>
+	Effect.map(
+		query((db) => db.select().from(toolCall).where(condition).limit(1).for("update")),
+		([row]) => row,
+	);
+
+function stateOf(row: ToolCallRow): ToolCallState {
+	return {
+		status: row.status,
+		approvalStatus: row.approvalStatus,
+		decidedById: row.decidedById,
+		output: row.output,
+		error: row.error,
+	};
+}
+
+function refusedExecution(reason: string): BeganExecution {
+	return { _tag: "Refused", reason };
+}
+
+/** sameCallAsApproved reports whether the call about to run is the one a person saw and allowed. */
+function sameCallAsApproved(
+	row: ToolCallRow,
+	input: Parameters<ToolCallRepository["beginExecution"]>[0],
+): boolean {
+	return (
+		row.threadId === input.threadId &&
+		row.messageId === input.messageId &&
+		row.tool === input.tool &&
+		row.connectionId === input.connectionId &&
+		row.connectionRevision === input.connectionRevision &&
+		row.remoteToolName === input.remoteToolName &&
+		isDeepStrictEqual(row.executionInput, executionJson(input.input))
+	);
+}

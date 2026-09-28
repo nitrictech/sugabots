@@ -66,8 +66,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 	};
 	/** Ends the turns running in the thread, as their workflows do once done. */
 	const finishTurnsIn = async (threadId: string) => {
-		for (const claim of await runOnPostgres(runningTurns(threadId))) {
-			await runOnPostgres(releaseTurn(claim));
+		for (const run of await runOnPostgres(runningTurns(threadId))) {
+			await runOnPostgres(releaseTurn(run));
 		}
 	};
 	let workspaceId: string;
@@ -877,7 +877,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		});
 	});
 
-	it("rejects a claimed turn after terminal settlement begins", async () => {
+	it("refuses to run a turn after terminal settlement begins", async () => {
 		const fixture = await createRunningExecutionWithCollaboration("waiting");
 		const [parentTurn] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.threadId, fixture.accepted.threadId)),
@@ -898,7 +898,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 					kind: "text",
 					status: "complete",
 					parts: [],
-					content: "Start claimed child work.",
+					content: "Start child work.",
 				})
 				.returning(),
 		);
@@ -911,8 +911,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				reason: "collaboration",
 			}),
 		);
-		const [claimedChild] = await runOnPostgres(runningTurns(fixture.childThread.id));
-		if (!claimedChild) throw new Error("Could not start settlement test child turn");
+		const [childRun] = await runOnPostgres(runningTurns(fixture.childThread.id));
+		if (!childRun) throw new Error("Could not start settlement test child turn");
 
 		expect(
 			await store.settleThread(fixture.childThread.id, {
@@ -921,7 +921,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 			}),
 		).toBe(false);
 		const turns = onPostgres(stores.turns);
-		await expect(turns.prepare(claimedChild)).rejects.toThrow("The Routine execution has ended");
+		expect(await turns.prepare(childRun)).toMatchObject({
+			_tag: "NotRunnable",
+			reason: "The Routine execution has ended",
+		});
 
 		await onDatabase((db) =>
 			db
@@ -930,7 +933,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				.where(eq(turn.id, parentTurn.id)),
 		);
 		await runOnPostgres(releaseTurn(fixture.runningTurn));
-		await runOnPostgres(releaseTurn(claimedChild));
+		await runOnPostgres(releaseTurn(childRun));
 		expect(await store.settleThread(fixture.accepted.threadId)).toBe(true);
 	});
 

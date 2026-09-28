@@ -3,8 +3,8 @@ import type { ChatStore } from "@sugabots/core/conversations/chats/store";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
 import type { ToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
+import type { TurnExecution } from "@sugabots/core/conversations/turns/execution";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import type { TurnStore } from "@sugabots/core/conversations/turns/store";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { Installation } from "@sugabots/core/installation/installation";
@@ -81,7 +81,7 @@ export interface Stores {
 	threads: ThreadStore;
 	chats: ChatStore;
 	routines: RoutineStore;
-	turns: Pick<TurnStore, "requestCancel">;
+	turns: Pick<TurnExecution, "requestCancel">;
 	approvals: ToolApprovalStore;
 }
 

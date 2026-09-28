@@ -1,6 +1,6 @@
 import { Effect, Exit } from "effect";
 import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
-import { parseGenerated } from "../summaries/worker.ts";
+import { parseGenerated } from "../summaries/summary.steps.ts";
 import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../turns/facilitator.ts";
 import type { TurnModelInput } from "../turns/model.ts";
 

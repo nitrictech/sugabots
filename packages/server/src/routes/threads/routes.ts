@@ -1,6 +1,6 @@
 import { BadRequest, CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
-import type { TurnStore } from "@sugabots/core/conversations/turns/store";
+import type { TurnExecution } from "@sugabots/core/conversations/turns/execution";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
@@ -9,7 +9,7 @@ import { asHttpError } from "../../http/errors.ts";
 
 export interface ThreadRoutesOptions {
 	threads: ThreadStore;
-	turns: Pick<TurnStore, "requestCancel">;
+	turns: Pick<TurnExecution, "requestCancel">;
 }
 
 export function threadRoutes({ threads, turns }: ThreadRoutesOptions) {

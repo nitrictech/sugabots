@@ -1,7 +1,7 @@
 /**
  * An agent's turn, as a durable workflow: its definition and the order of its
  * steps. What each step does lives behind `TurnSteps`, implemented in
- * `worker.ts`.
+ * `turn.steps.ts`.
  *
  * A turn runs in segments. Each segment streams the reply until it ends or
  * stops to wait for tool approvals; the workflow then waits, durably, for
@@ -13,6 +13,7 @@ import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { TurnReason } from "../sql.ts";
+import { ApprovalDecision, DecidedApproval } from "../tools/calls/lifecycle.ts";
 
 export const TurnRequest = Schema.Struct({
 	threadId: Schema.String,
@@ -53,12 +54,6 @@ export const SegmentOutcome = Schema.Union([
 ]);
 export type SegmentOutcome = typeof SegmentOutcome.Type;
 
-export const ApprovalDecision = Schema.Struct({
-	decision: Schema.Literals(["allow_once", "deny"]),
-	userId: Schema.String,
-});
-export type ApprovalDecision = typeof ApprovalDecision.Type;
-
 /**
  * A person's decision on one approval. Sending it is the decision: the
  * workflow records it, and the first decision sent is the one that stands.
@@ -68,13 +63,6 @@ export const approvalDecided = (approvalId: string) =>
 
 /** A person cancelled the turn while it waited for approvals. */
 export const cancelRequested = DurableDeferred.make("cancelled");
-
-/** A person's decision on one of the turn's approvals. */
-export const DecidedApproval = Schema.Struct({
-	approvalId: Schema.String,
-	decision: ApprovalDecision,
-});
-export type DecidedApproval = typeof DecidedApproval.Type;
 
 export class TurnSteps extends Context.Service<
 	TurnSteps,

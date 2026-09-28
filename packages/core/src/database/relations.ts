@@ -7,6 +7,7 @@ import * as schema from "./schema.ts";
  */
 export const relations = defineRelations(schema, (r) => ({
 	thread: {
+		workspace: r.one.workspace({ from: r.thread.workspaceId, to: r.workspace.id, optional: false }),
 		pod: r.one.pod({ from: r.thread.podId, to: r.pod.id, optional: false }),
 		messages: r.many.message({ from: r.thread.id, to: r.message.threadId }),
 		participants: r.many.threadParticipant({ from: r.thread.id, to: r.threadParticipant.threadId }),

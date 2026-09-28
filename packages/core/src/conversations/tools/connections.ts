@@ -124,7 +124,7 @@ interface Opened {
 
 const nothingOffered: ConnectionToolSet = { tools: {}, close: async () => undefined };
 
-/** No connections at all, for a worker that has not been given any. */
+/** No connections at all, for a case that offers a turn none. */
 export const noConnectionTools: ConnectionTools = {
 	forPod: () => Effect.succeed(nothingOffered),
 };

@@ -11,7 +11,7 @@ import type { ToolCallChange } from "../events.ts";
  * A message stores a tool call by id only (`StoredMessagePart`); what the tool
  * was given and what it returned live on the `tool_call` row. These two
  * functions put the row back into the part the API hands out. Writing tool
- * calls is `tools/calls/store.ts`.
+ * calls is `tools/calls/repository.ts`.
  */
 
 /** The tool calls made in each of these messages, keyed by message id. */

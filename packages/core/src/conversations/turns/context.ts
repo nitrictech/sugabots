@@ -1,7 +1,7 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
+import type { TurnContext } from "./execution.ts";
 import type { TurnPromptMessage } from "./model.ts";
-import type { TurnContext } from "./store.ts";
 
 export interface ModelPrompt {
 	system: string;
