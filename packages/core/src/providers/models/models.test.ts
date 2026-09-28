@@ -75,7 +75,7 @@ describe("models", () => {
 				Effect.scoped(
 					model.stream({
 						workspaceId: "workspace-id",
-						activity: { purpose: "probe" },
+						activity: { purpose: "provider-check" },
 						model: "model-id",
 						system: "",
 						messages: [],
@@ -119,7 +119,7 @@ describe("models", () => {
 			Effect.scoped(
 				model.stream({
 					workspaceId: "workspace-id",
-					activity: { purpose: "probe" },
+					activity: { purpose: "provider-check" },
 					model: "gpt-5.5",
 					system: "You are Suga.",
 					messages: [{ role: "user", content: "Hello" }],

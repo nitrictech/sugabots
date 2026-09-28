@@ -82,7 +82,6 @@ const generate = (
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
 			...compactionPrompt(prepared),
-			purpose: "Compaction",
 			activity: {
 				purpose: "compaction",
 				podId: prepared.podId,

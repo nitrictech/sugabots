@@ -279,8 +279,7 @@ export const make = Effect.gen(function* () {
 					model: enabled.modelId,
 					system: "Answer with the single word OK.",
 					messages: [{ role: "user", content: "OK?" }],
-					purpose: "Trying an enabled model",
-					activity: { purpose: "probe" },
+					activity: { purpose: "provider-check" },
 					maxCharacters: 200,
 					timeout: "30 seconds",
 				})
