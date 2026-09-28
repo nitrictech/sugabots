@@ -6,3 +6,12 @@
   Content-Type: text/plain; charset=utf-8
 /compose.yml
   Content-Type: text/plain; charset=utf-8
+
+# UTF-8 for the files written for AI agents, some of which have characters such as € and →.
+# Without it, browsers may read them as Windows-1252, and `text/markdown` requires a charset.
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8
+/*.md
+  Content-Type: text/markdown; charset=utf-8
