@@ -488,7 +488,7 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
-				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.usage.modelCalls ?? 0)),
+				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.modelCalls ?? 0)),
 				signal: stop.signal,
 			});
 
@@ -691,18 +691,8 @@ function addAccounting(
 ): ModelAccounting {
 	if (!checkpoint) return segment;
 	const prior = checkpoint.accounting;
-	const add = (left: number | undefined, right: number | undefined) =>
-		left === undefined && right === undefined ? undefined : (left ?? 0) + (right ?? 0);
 	return {
-		usage: {
-			modelCalls: add(prior.usage.modelCalls, segment.usage.modelCalls),
-			inputTokens: add(prior.usage.inputTokens, segment.usage.inputTokens),
-			outputTokens: add(prior.usage.outputTokens, segment.usage.outputTokens),
-			totalTokens: add(prior.usage.totalTokens, segment.usage.totalTokens),
-			reasoningTokens: add(prior.usage.reasoningTokens, segment.usage.reasoningTokens),
-			cachedInputTokens: add(prior.usage.cachedInputTokens, segment.usage.cachedInputTokens),
-		},
-		reportedCost: add(prior.reportedCost, segment.reportedCost),
+		modelCalls: (prior.modelCalls ?? 0) + segment.modelCalls,
 		// A resumed segment starts with the earlier segment's tool results.
 		contextTokens: prior.contextTokens ?? segment.contextTokens,
 		contextCapacity: segment.contextCapacity,

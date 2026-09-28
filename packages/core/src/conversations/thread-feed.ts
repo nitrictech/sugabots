@@ -37,24 +37,12 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			onThread(threadId, streamEvent("turn.started", { threadId, turnId, agentId })),
 			onThread(threadId, streamEvent("message.created", { threadId, message: reply })),
 		],
-		TurnCompleted: ({
-			threadId,
-			workspaceId,
-			podId,
-			turnId,
-			messageId,
-			content,
-			usage,
-			reportedCost,
-		}) => [
+		TurnCompleted: ({ threadId, workspaceId, podId, turnId, messageId, content }) => [
 			onThread(
 				threadId,
 				streamEvent("message.completed", { threadId, messageId, content, status: "complete" }),
 			),
-			onThread(
-				threadId,
-				streamEvent("turn.completed", { threadId, turnId, status: "done", usage, reportedCost }),
-			),
+			onThread(threadId, streamEvent("turn.completed", { threadId, turnId, status: "done" })),
 			listedThreadChanged(workspaceId, podId, threadId),
 		],
 		TurnSuspended: ({ threadId, workspaceId, podId }) => [

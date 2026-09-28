@@ -475,8 +475,6 @@ export const make = Effect.gen(function* () {
 								turnId: locked.id,
 								messageId: reply.messageId,
 								content: draft.content,
-								usage: accounting.usage,
-								reportedCost: accounting.reportedCost,
 							}),
 						]);
 					}),
@@ -808,27 +806,17 @@ export const TurnCheckpoint = Schema.Struct({
 	}),
 	reply: ReplyDraft,
 	accounting: Schema.Struct({
-		usage: Schema.Struct({
-			modelCalls: OptionalCount,
-			inputTokens: OptionalCount,
-			outputTokens: OptionalCount,
-			totalTokens: OptionalCount,
-			reasoningTokens: OptionalCount,
-			cachedInputTokens: OptionalCount,
-		}),
-		reportedCost: Schema.optional(Schema.Finite),
+		modelCalls: OptionalCount,
 		contextTokens: OptionalCount,
 		contextCapacity: OptionalCount,
 	}),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
-type AccountingColumn = "usage" | "reportedCost" | "contextTokens" | "contextCapacity";
+type AccountingColumn = "contextTokens" | "contextCapacity";
 
 function accountingColumns(accounting: ModelAccounting) {
 	return {
-		usage: accounting.usage,
-		reportedCost: accounting.reportedCost === undefined ? null : String(accounting.reportedCost),
 		contextTokens: accounting.contextTokens ?? null,
 		contextCapacity: accounting.contextCapacity ?? null,
 	};

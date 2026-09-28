@@ -22,7 +22,6 @@ import {
 	index,
 	integer,
 	jsonb,
-	numeric,
 	pgTable,
 	text,
 	timestamp,
@@ -297,15 +296,6 @@ export type TurnReason =
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 
-export interface TurnUsage {
-	modelCalls?: number;
-	inputTokens?: number;
-	outputTokens?: number;
-	totalTokens?: number;
-	reasoningTokens?: number;
-	cachedInputTokens?: number;
-}
-
 export const turn = pgTable(
 	"turn",
 	{
@@ -326,8 +316,6 @@ export const turn = pgTable(
 		owner: text("owner"),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
-		usage: jsonb("usage").$type<TurnUsage>(),
-		reportedCost: numeric("reported_cost", { precision: 18, scale: 10 }),
 		contextTokens: integer("context_tokens"),
 		contextCapacity: integer("context_capacity"),
 		cancelRequested: boolean("cancel_requested").notNull().default(false),

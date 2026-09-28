@@ -71,8 +71,6 @@ export const eventPayloadSchemas = {
 		threadId,
 		turnId: uuidSchema,
 		status: Schema.Literals(["done", "cancelled"]),
-		usage: Schema.optional(Schema.Unknown),
-		reportedCost: Schema.optional(Schema.Finite),
 	}),
 	/**
 	 * What people watching the thread should know that no message in it

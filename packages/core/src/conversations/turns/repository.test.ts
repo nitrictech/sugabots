@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		approvals: [],
 		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
 		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
-		accounting: { usage: { modelCalls: 1 } },
+		accounting: { modelCalls: 1 },
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
@@ -267,14 +267,14 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 							yield "Example Domain";
 							yield " says hello.";
 						})(),
-						accounting: Effect.succeed({ usage: { modelCalls: 1, totalTokens: 12 } }),
+						accounting: Effect.succeed({ modelCalls: 1, contextTokens: 12 }),
 					})),
 			});
 
 			expect(outcome).toEqual({ _tag: "Finished" });
 			expect(await storedTurn()).toMatchObject({
 				status: "done",
-				usage: { modelCalls: 1, totalTokens: 12 },
+				contextTokens: 12,
 			});
 			const [reply] = await onDatabase((db) =>
 				db.select().from(message).where(eq(message.id, prepared.responseMessage.id)),

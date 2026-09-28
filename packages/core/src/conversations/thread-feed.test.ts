@@ -52,8 +52,6 @@ describe("the thread feed", () => {
 					turnId,
 					messageId: "m1",
 					content: "Done.",
-					usage: { modelCalls: 1 },
-					reportedCost: undefined,
 				}),
 			),
 		).toEqual([

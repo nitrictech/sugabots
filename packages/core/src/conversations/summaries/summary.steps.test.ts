@@ -70,10 +70,7 @@ describe("summarise", () => {
 			stream: () =>
 				Effect.sync(() => ({
 					text: chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'),
-					accounting: Effect.succeed({
-						usage: { modelCalls: 1, inputTokens: 20, outputTokens: 4, totalTokens: 24 },
-						reportedCost: 0.002,
-					}),
+					accounting: Effect.succeed({ modelCalls: 1, contextTokens: 20 }),
 				})),
 		};
 
@@ -84,10 +81,7 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Prepare release notes", content: "Notes are ready." },
-			{
-				usage: { modelCalls: 1, inputTokens: 20, outputTokens: 4, totalTokens: 24 },
-				reportedCost: 0.002,
-			},
+			{ modelCalls: 1, contextTokens: 20 },
 		);
 		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 	});
@@ -97,7 +91,7 @@ describe("summarise", () => {
 		const stream = vi.fn(() =>
 			Effect.sync(() => ({
 				text: chunks("Notes are ready."),
-				accounting: Effect.succeed({ usage: {} }),
+				accounting: Effect.succeed({ modelCalls: 1 }),
 			})),
 		);
 
@@ -121,13 +115,13 @@ describe("summarise", () => {
 			.fn(() =>
 				Effect.sync(() => ({
 					text: chunks('{"title":"Release","summary":"Notes are ready."}'),
-					accounting: Effect.succeed({ usage: {} }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 				})),
 			)
 			.mockImplementationOnce(() =>
 				Effect.sync(() => ({
 					text: chunks("Here you go: Notes are ready."),
-					accounting: Effect.succeed({ usage: {} }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 				})),
 			);
 
@@ -155,7 +149,7 @@ describe("summarise", () => {
 				stream: () =>
 					Effect.sync(() => ({
 						text: chunks(fenced),
-						accounting: Effect.succeed({ usage: {} }),
+						accounting: Effect.succeed({ modelCalls: 1 }),
 					})),
 			}).pipe(Effect.provide(services(summaries, turns))),
 		);

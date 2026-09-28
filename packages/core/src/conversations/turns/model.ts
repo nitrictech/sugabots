@@ -17,7 +17,6 @@ import { Context, Data, Effect, Layer } from "effect";
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import { Database } from "../../database/database.ts";
-import type { TurnUsage } from "../../database/schema.ts";
 import { withChatgptAccess } from "../../providers/model-providers/chatgpt.ts";
 import { type ModelRegistry, modelsDev } from "../../providers/model-providers/dialects/index.ts";
 import { ModelProbe } from "../../providers/model-providers/model-probe.ts";
@@ -25,9 +24,13 @@ import { ModelProviderRepository } from "../../providers/model-providers/model-p
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 
+/**
+ * What a turn keeps of its model's work. What each request used and cost is
+ * in the `model_request` ledger, not here.
+ */
 export interface ModelAccounting {
-	usage: TurnUsage;
-	reportedCost?: number;
+	/** How many requests the model made, which caps the steps a resumed turn has left. */
+	modelCalls: number;
 	/**
 	 * The prompt's size at the turn's first model call: its history, system
 	 * text and tools. What its tool calls return is left out, since the next
@@ -235,17 +238,10 @@ export function workspaceTurnModel({
 					text: result.textStream,
 					accounting: Effect.tryPromise({
 						try: async () => {
-							const [usage, steps] = await Promise.all([result.usage, result.steps]);
+							const steps = await result.steps;
 							if (providerFailure !== undefined) throw providerFailure;
 							return {
-								usage: {
-									modelCalls: steps.length,
-									inputTokens: usage.inputTokens,
-									outputTokens: usage.outputTokens,
-									totalTokens: usage.totalTokens,
-									reasoningTokens: usage.outputTokenDetails.reasoningTokens,
-									cachedInputTokens: usage.inputTokenDetails.cacheReadTokens,
-								},
+								modelCalls: steps.length,
 								contextTokens: steps[0]?.usage.inputTokens,
 							};
 						},

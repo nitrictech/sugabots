@@ -590,7 +590,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await turns.complete(
 			replyTurnOf(prepared),
 			{ content: "Done.", collaborations: [], toolCalls: [] },
-			{ usage: { modelCalls: 1 } },
+			{ modelCalls: 1 },
 		);
 
 		const types = delivered.map(({ event }) => event.type);
@@ -704,6 +704,6 @@ function checkpointFor(reply: TurnCheckpoint["reply"]): TurnCheckpoint {
 		approvals: [],
 		modelInput: { model: "test/model", system: "", messages: [] },
 		reply,
-		accounting: { usage: {} },
+		accounting: { modelCalls: 1 },
 	};
 }

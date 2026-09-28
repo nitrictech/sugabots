@@ -2,7 +2,6 @@ import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contrac
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
 import type { Ended } from "./turns/lifecycle.ts";
-import type { ModelAccounting } from "./turns/model.ts";
 
 /**
  * What happened in a conversation, as the facts that changed.
@@ -35,8 +34,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 		readonly messageId: string;
 		readonly content: string;
-		readonly usage: ModelAccounting["usage"];
-		readonly reportedCost: number | undefined;
 	};
 	/** The turn parked until people decide the tool approvals it asked for. */
 	TurnSuspended: {

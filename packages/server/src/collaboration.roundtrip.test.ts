@@ -57,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							yield "A dog named Krypto.";
 						}
 					})(),
-					accounting: Effect.succeed({ usage: { modelCalls: 1 } }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 				})),
 		};
 

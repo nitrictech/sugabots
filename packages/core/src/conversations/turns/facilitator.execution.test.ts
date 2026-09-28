@@ -46,7 +46,8 @@ const scope: FacilitatorScope = {
 };
 
 const answering = (answer: string): TurnModel => ({
-	stream: () => Effect.succeed({ text: chunks(answer), accounting: Effect.succeed({ usage: {} }) }),
+	stream: () =>
+		Effect.succeed({ text: chunks(answer), accounting: Effect.succeed({ modelCalls: 1 }) }),
 });
 
 const unavailable: TurnModel = {
