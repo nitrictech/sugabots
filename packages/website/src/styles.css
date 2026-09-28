@@ -103,6 +103,11 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+	/* Tailwind v4 resets buttons to the default cursor. */
+	button:not(:disabled),
+	[role="button"]:not(:disabled) {
+		cursor: pointer;
+	}
 }
 
 /* Docs pages. */
