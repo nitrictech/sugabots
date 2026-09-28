@@ -39,6 +39,7 @@ function store(found: ModelProviderRepository.ProviderEndpoint) {
 			}),
 		),
 		recordTest: vi.fn(() => Effect.void),
+		renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 	};
 }
 

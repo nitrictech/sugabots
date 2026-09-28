@@ -1,5 +1,5 @@
 import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
-import { effectiveCapabilities, presetRequiresApiKey } from "@sugabots/contracts";
+import { effectiveCapabilities, presetSignsIn, seededPresets } from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
@@ -10,9 +10,12 @@ import {
 	providerModel,
 } from "../../database/schema.ts";
 import { apiKeyHint, configurationStatus } from "../tested-configuration.ts";
-import { offeredIn } from "./model-provider-repository.ts";
+import { lacksCredential, offeredIn } from "./model-provider-repository.ts";
 
-/** Every model provider in the workspace, oldest first, each with its models. */
+/**
+ * Every model provider in the workspace, each with its models: the defaults
+ * first, in the catalog's order, then the rest oldest first.
+ */
 export const providersIn = (workspaceId: string) =>
 	Effect.gen(function* () {
 		const providers = yield* query((db) =>
@@ -38,7 +41,7 @@ export const providersIn = (workspaceId: string) =>
 				)
 				.orderBy(asc(providerModel.displayName), asc(providerModel.modelId)),
 		);
-		return providers.map((provider) =>
+		return inListOrder(providers).map((provider) =>
 			toProvider(
 				provider,
 				models.filter((model) => model.providerId === provider.id),
@@ -94,6 +97,15 @@ export const offeredModels = (workspaceId: string) =>
 		),
 	);
 
+/** A default seeded into an older workspace is still one of the defaults. */
+function inListOrder(rows: ModelProviderRow[]): ModelProviderRow[] {
+	const rank = (row: ModelProviderRow) => {
+		const seeded = row.preset ? seededPresets.indexOf(row.preset) : -1;
+		return seeded === -1 ? seededPresets.length : seeded;
+	};
+	return rows.toSorted((a, b) => rank(a) - rank(b));
+}
+
 function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelProvider {
 	return {
 		id: row.id,
@@ -103,13 +115,17 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 		baseUrl: row.baseUrl,
 		apiFormat: row.apiFormat,
 		active: row.active,
-		status: configurationStatus({
-			missingKey: presetRequiresApiKey(row.preset) && !row.apiKeyEncrypted,
-			lastTestedAt: row.lastTestedAt,
-			lastTestError: row.lastTestError,
-		}),
+		status:
+			presetSignsIn(row.preset) && row.chatgptTokensEncrypted === null
+				? "signed_out"
+				: configurationStatus({
+						missingKey: lacksCredential(row),
+						lastTestedAt: row.lastTestedAt,
+						lastTestError: row.lastTestError,
+					}),
 		hasApiKey: row.apiKeyEncrypted !== null,
 		apiKeyHint: apiKeyHint(row.apiKeyEncrypted),
+		signedIn: row.chatgptTokensEncrypted !== null,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name, valueHint: "********" })),
 		modelCount: models.length,
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,

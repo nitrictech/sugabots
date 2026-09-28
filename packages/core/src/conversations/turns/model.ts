@@ -14,6 +14,7 @@ import {
 import { Context, Data, Effect, Layer } from "effect";
 import { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
+import { withChatgptAccess } from "../../providers/model-providers/chatgpt.ts";
 import { ModelProbe } from "../../providers/model-providers/model-probe.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
@@ -108,10 +109,17 @@ export class ModelRequestFailed
 	}
 }
 
-type ModelRequestFailure = "noProvider" | "rejected" | "rateLimited" | "unavailable" | "timedOut";
+type ModelRequestFailure =
+	| "noProvider"
+	| "signInFailed"
+	| "rejected"
+	| "rateLimited"
+	| "unavailable"
+	| "timedOut";
 
 const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
 	noProvider: UserMessage.of`No active provider offers this model.`,
+	signInFailed: UserMessage.of`The model provider's ChatGPT sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
@@ -119,7 +127,7 @@ const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
 };
 
 export interface TurnModelOptions {
-	modelProviders: Pick<ModelProviderRepository.Interface, "resolve">;
+	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewChatgptTokens">;
 	httpClients: EgressHttpClients;
 }
 
@@ -127,30 +135,30 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 	return {
 		stream: (input) =>
 			Effect.gen(function* () {
-				const connection = yield* modelProviders.resolve(input.workspaceId, input.model);
-				if (!connection) {
+				const resolved = yield* modelProviders.resolve(input.workspaceId, input.model);
+				if (!resolved) {
 					return yield* new ModelRequestFailed({
 						message: `No active provider offers the model "${input.model}"`,
 						reason: "noProvider",
 					});
 				}
+				const connection = yield* withChatgptAccess(
+					modelProviders,
+					httpClients,
+					input.workspaceId,
+					resolved,
+				).pipe(
+					Effect.mapError(
+						(failure) =>
+							new ModelRequestFailed({
+								message: failure.message,
+								reason: "signInFailed",
+								cause: failure,
+							}),
+					),
+				);
 				const fetch = httpClients.for(connection);
-				const model =
-					connection.apiFormat === "anthropic"
-						? createAnthropic({
-								apiKey: connection.apiKey ?? "",
-								baseURL: connection.baseUrl.endsWith("/v1")
-									? connection.baseUrl
-									: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
-								headers: connection.headers,
-								fetch,
-							})(input.model)
-						: createOpenAI({
-								apiKey: connection.apiKey ?? "ollama",
-								baseURL: connection.baseUrl,
-								headers: connection.headers,
-								fetch,
-							}).chat(input.model);
+				const codex = connection.preset === "chatgpt";
 				// The SDK does not throw a provider's error into the text stream: it
 				// reports it here and ends the stream, and whatever is asked of the
 				// result afterwards fails with "No output generated". Keeping the
@@ -158,8 +166,20 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				let providerFailure: unknown;
 				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 				const result = streamText({
-					model,
-					system: input.system,
+					model: languageModel(connection, input.model, fetch),
+					// The Codex backend takes the system prompt only as `instructions`,
+					// and keeps nothing between requests, so reasoning has to travel with them.
+					...(codex
+						? {
+								providerOptions: {
+									openai: {
+										instructions: input.system,
+										store: false,
+										include: ["reasoning.encrypted_content"],
+									},
+								},
+							}
+						: { system: input.system }),
 					messages: [...input.messages, ...(input.continuationMessages ?? [])],
 					tools: input.tools,
 					toolApproval: input.toolApproval,
@@ -205,6 +225,31 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				};
 			}),
 	};
+}
+
+function languageModel(
+	connection: ModelProviderRepository.ProviderEndpoint,
+	modelId: string,
+	fetch: typeof globalThis.fetch,
+) {
+	if (connection.apiFormat === "anthropic") {
+		return createAnthropic({
+			apiKey: connection.apiKey ?? "",
+			baseURL: connection.baseUrl.endsWith("/v1")
+				? connection.baseUrl
+				: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
+			headers: connection.headers,
+			fetch,
+		})(modelId);
+	}
+	const openai = createOpenAI({
+		apiKey: connection.apiKey ?? "ollama",
+		baseURL: connection.baseUrl,
+		headers: connection.headers,
+		fetch,
+	});
+	// The Codex backend speaks only the Responses API.
+	return connection.preset === "chatgpt" ? openai.responses(modelId) : openai.chat(modelId);
 }
 
 /**

@@ -408,7 +408,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 		await expect(
 			setup.update({ workspace: workspaceId, providerId: keyless.id, changes: { active: true } }),
-		).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresApiKey);
+		).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
 		expect(await view(keyless.id)).toMatchObject({ active: false });
 	});
 

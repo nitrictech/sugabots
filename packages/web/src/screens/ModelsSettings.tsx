@@ -336,8 +336,10 @@ function PresetStep({
 	const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? preset.baseUrl);
 	const [error, setError] = useState<unknown>();
 	const local = preset.hosting === "local";
+	const requiresApiKey = preset.credential === "api-key";
+	const signsIn = preset.credential === "chatgpt-sign-in";
 	const typedBaseUrl = parseProviderBaseUrl(baseUrl);
-	const ready = (!preset.requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
+	const ready = (!requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
 	const pending = actions.create.isPending || actions.update.isPending;
 
 	async function submit(event: FormEvent) {
@@ -345,6 +347,12 @@ function PresetStep({
 		if (!ready) return;
 		setError(undefined);
 		try {
+			// A seeded ChatGPT provider already exists; its page is where the person
+			// signs in, which is what switches it on.
+			if (signsIn && existing) {
+				await onAdded(existing);
+				return;
+			}
 			const added = existing
 				? await actions.update.mutateAsync({
 						providerId: existing.id,
@@ -371,6 +379,7 @@ function PresetStep({
 			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup note={preset.hint}>
+					{signsIn && <SettingsRow label="ChatGPT account" sub="Sign in after you continue" />}
 					{local && (
 						<SettingsFieldRow
 							label="Server URL"
@@ -380,14 +389,16 @@ function PresetStep({
 							mono
 						/>
 					)}
-					<SettingsFieldRow
-						label="API key"
-						value={apiKey}
-						onChange={setApiKey}
-						placeholder={preset.requiresApiKey ? "Paste your key" : "Optional"}
-						mono
-						secret
-					/>
+					{!signsIn && (
+						<SettingsFieldRow
+							label="API key"
+							value={apiKey}
+							onChange={setApiKey}
+							placeholder={requiresApiKey ? "Paste your key" : "Optional"}
+							mono
+							secret
+						/>
+					)}
 				</SettingsGroup>
 				{local && baseUrl.trim() !== "" && typedBaseUrl === undefined && (
 					<Alert>
@@ -396,7 +407,11 @@ function PresetStep({
 				)}
 				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
-			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
+			<DialogFormFooter
+				action={signsIn ? "Continue" : "Add"}
+				actionDisabled={!ready || pending}
+				cancel={false}
+			/>
 		</DialogFormStep>
 	);
 }

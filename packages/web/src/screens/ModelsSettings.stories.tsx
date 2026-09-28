@@ -1,8 +1,9 @@
 import type { ModelProvider, ProviderModel, SystemAgent } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
-import { expect, screen, within } from "storybook/test";
+import { expect, fn, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -62,6 +63,7 @@ function provider(
 		status: "connected",
 		hasApiKey: true,
 		apiKeyHint: "4f2a",
+		signedIn: false,
 		customHeaders: [],
 		modelCount: models.length,
 		enabledModelCount: models.filter((one) => one.enabled).length,
@@ -113,7 +115,25 @@ const openrouter = provider(
 		);
 	}),
 );
-const providers = [anthropic, openai, ollama, openrouter];
+const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
+	baseUrl: "https://chatgpt.com/backend-api/codex",
+	active: false,
+	status: "signed_out",
+	hasApiKey: false,
+	apiKeyHint: null,
+});
+const chatgptSignedIn: ModelProvider = {
+	...chatgpt,
+	active: true,
+	status: "connected",
+	signedIn: true,
+	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
+	modelCount: 1,
+	enabledModelCount: 1,
+};
+const providers = [anthropic, openai, ollama, openrouter, chatgpt];
+
+const API = import.meta.env.VITE_API_URL as string;
 
 const bots = [
 	{ ...growthDesk, model: "claude-sonnet" },
@@ -133,7 +153,13 @@ const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((
 	model: "claude-haiku",
 }));
 
-function Preview({ children }: { children: ReactNode }) {
+function Preview({
+	providers,
+	children,
+}: {
+	providers: readonly ModelProvider[];
+	children: ReactNode;
+}) {
 	const [queryClient] = useState(() => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -168,7 +194,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	decorators: [
 		(Story, context) => (
-			<Preview key={context.id}>
+			<Preview key={context.id} providers={context.parameters.providers ?? providers}>
 				<Story />
 			</Preview>
 		),
@@ -225,6 +251,51 @@ export const LocalServer = meta.story({
 	},
 });
 
+/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one person's. */
+export const ChatgptSignIn = meta.story({
+	render: () => <ProviderSettings providerId={chatgpt.id} />,
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/workspaces/:workspace/model-providers/:providerId/chatgpt-sign-in`, () =>
+				HttpResponse.json({
+					verificationUrl: "https://auth.openai.com/codex/device",
+					userCode: "ABCD-1234",
+					attempt: "sealed-attempt",
+					pollIntervalMs: 60_000,
+					expiresAt: "2026-09-01T00:15:00.000Z",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(await canvas.findByText("Not signed in")).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Sign in with ChatGPT" }));
+		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		await expect(within(warning).getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
+			"href",
+			"https://openai.com/policies/terms-of-use/#registration-and-access",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Sign in" }));
+		await expect(await canvas.findByText("ABCD-1234")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Copy code" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Open sign-in page" })).toHaveAttribute(
+			"href",
+			"https://auth.openai.com/codex/device",
+		);
+	},
+});
+
+/** A signed-in ChatGPT provider, with the plan's models. */
+export const ChatgptSignedIn = meta.story({
+	parameters: { providers: [chatgptSignedIn] },
+	render: () => <ProviderSettings providerId={chatgptSignedIn.id} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("Signed in")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+		await expect(canvas.queryByText("API key")).toBeNull();
+	},
+});
+
 /** One model for every system bot, from the models that are switched on. */
 export const SystemAgents = meta.story({
 	render: () => <SystemModelSettings />,
@@ -235,10 +306,14 @@ export const SystemAgents = meta.story({
 	},
 });
 
-function AddProviderPreview() {
+function AddProviderPreview({
+	onAdded = async () => {},
+}: {
+	onAdded?: (provider: ModelProvider) => Promise<void>;
+}) {
 	return (
 		<Dialog open>
-			<AddProviderDialog providers={providers} done={() => {}} onAdded={async () => {}} />
+			<AddProviderDialog providers={providers} done={() => {}} onAdded={onAdded} />
 		</Dialog>
 	);
 }
@@ -265,6 +340,29 @@ export const AddProviderKey = meta.story({
 		const step = await screen.findByRole("dialog", { name: "Groq" });
 		await expect(within(step).getByRole("button", { name: "Add" })).toBeDisabled();
 		await expect(within(step).getByRole("button", { name: "Back" })).toBeInTheDocument();
+	},
+});
+
+const chatgptAdded = fn(async (_provider: ModelProvider) => {});
+
+/**
+ * ChatGPT is in every workspace from the start, so choosing it goes on to its
+ * page, where the person signs in, rather than switching it on without one.
+ */
+export const AddChatgpt = meta.story({
+	render: () => <AddProviderPreview onAdded={chatgptAdded} />,
+	beforeEach() {
+		chatgptAdded.mockClear();
+	},
+	play: async ({ userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+		await userEvent.click(within(dialog).getByRole("button", { name: /^ChatGPT/ }));
+		const step = await screen.findByRole("dialog", { name: "ChatGPT" });
+		await expect(within(step).getByText("Sign in after you continue")).toBeVisible();
+		await expect(within(step).queryByText("API key")).toBeNull();
+		await userEvent.click(within(step).getByRole("button", { name: "Continue" }));
+		await expect(chatgptAdded).toHaveBeenCalledWith(chatgpt);
+		await expect(within(step).queryByRole("alert")).toBeNull();
 	},
 });
 

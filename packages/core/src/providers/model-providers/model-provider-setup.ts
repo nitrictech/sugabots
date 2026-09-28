@@ -1,15 +1,19 @@
 export * as ModelProviderSetup from "./model-provider-setup.ts";
 
 import type {
+	ChatgptSignInOutcome,
+	ChatgptSignInStarted,
 	ModelProvider,
 	ModelProviderUpdate,
 	NewModelProvider,
 	ProviderModel,
 	ProviderModelUpdate,
+	ProviderPresetId,
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
-import { presetRequiresApiKey, providerPreset } from "@sugabots/contracts";
-import { Clock, Context, Data, Effect, Layer } from "effect";
+import { presetSignsIn, providerLacksCredential, providerPreset } from "@sugabots/contracts";
+import { Clock, Context, Data, Effect, Layer, Schema } from "effect";
+import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { AuthorizationDenied } from "../../workspaces/access.ts";
@@ -17,6 +21,13 @@ import { Authorization } from "../../workspaces/authorization.ts";
 import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
+import {
+	CHATGPT_ISSUER,
+	type ChatgptSignInFailed,
+	type ChatgptTokens,
+	redeemDeviceCode,
+	requestDeviceCode,
+} from "./chatgpt.ts";
 import { ModelProbe } from "./model-probe.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
@@ -62,7 +73,10 @@ export interface Interface {
 		input: InProvider & { changes: ModelProviderUpdate },
 	) => Effect.Effect<
 		ModelProvider,
-		AuthorizationDenied | ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresApiKey,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| UrlNotAllowed
+		| ProviderActivationRequiresCredential,
 		CurrentActor.Service
 	>;
 	readonly remove: (
@@ -78,6 +92,37 @@ export interface Interface {
 	) => Effect.Effect<
 		TestOutcome,
 		AuthorizationDenied | ModelProviderNotFound,
+		CurrentActor.Service
+	>;
+	/** Asks ChatGPT for a code the person enters to sign the provider in. */
+	readonly startChatgptSignIn: (
+		input: InProvider,
+	) => Effect.Effect<
+		ChatgptSignInStarted,
+		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered | ChatgptSignInFailed,
+		CurrentActor.Service
+	>;
+	/**
+	 * Asks whether the person has entered the code of `attempt`, from
+	 * `startChatgptSignIn`; once they have, the provider is signed in and its
+	 * models are discovered.
+	 */
+	readonly completeChatgptSignIn: (
+		input: InProvider & { attempt: string },
+	) => Effect.Effect<
+		ChatgptSignInOutcome,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ChatgptSignInNotOffered
+		| ChatgptSignInAttemptInvalid
+		| ChatgptSignInFailed,
+		CurrentActor.Service
+	>;
+	readonly signOutChatgpt: (
+		input: InProvider,
+	) => Effect.Effect<
+		ModelProvider,
+		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered,
 		CurrentActor.Service
 	>;
 	readonly fetchModels: (
@@ -96,7 +141,7 @@ export interface Interface {
 		ModelProvider,
 		| AuthorizationDenied
 		| ModelProviderNotFound
-		| ProviderModelsRequireApiKey
+		| ProviderModelsRequireCredential
 		| ProviderModelAlreadyConfigured,
 		CurrentActor.Service
 	>;
@@ -104,7 +149,7 @@ export interface Interface {
 		input: InProvider & { modelIds: string[]; enabled: boolean },
 	) => Effect.Effect<
 		number,
-		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireApiKey,
+		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireCredential,
 		CurrentActor.Service
 	>;
 	readonly updateModel: (
@@ -113,7 +158,7 @@ export interface Interface {
 		number,
 		| AuthorizationDenied
 		| ModelProviderNotFound
-		| ProviderModelsRequireApiKey
+		| ProviderModelsRequireCredential
 		| FetchedModelCapabilitiesImmutable
 		| ProviderModelNotFound,
 		CurrentActor.Service
@@ -147,6 +192,9 @@ export const make = Effect.gen(function* () {
 	const providers = yield* ModelProviderRepository.Service;
 	const egress = yield* Egress.Service;
 	const probe = yield* ModelProbe.Service;
+	/** Seals a sign-in in progress; the same key as the stored credentials'. */
+	const cipher = yield* Credentials.Service;
+	const chatgptAuth = egress.providers.for({ baseUrl: CHATGPT_ISSUER });
 
 	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
 	const managed = (workspace: string) =>
@@ -165,10 +213,37 @@ export const make = Effect.gen(function* () {
 	const requireConnectedProvider = (workspaceId: string, providerId: string) =>
 		requireProvider(workspaceId, providerId).pipe(
 			Effect.filterOrFail(
-				(provider) => !presetRequiresApiKey(provider.preset) || provider.hasApiKey,
-				() => new ProviderModelsRequireApiKey(),
+				(provider) => !providerLacksCredential(provider),
+				(provider) =>
+					new ProviderModelsRequireCredential({ missing: missingCredential(provider.preset) }),
 			),
 		);
+
+	const requireSignInProvider = (workspaceId: string, providerId: string) =>
+		requireProvider(workspaceId, providerId).pipe(
+			Effect.filterOrFail(
+				(provider) => presetSignsIn(provider.preset),
+				() => new ChatgptSignInNotOffered(),
+			),
+		);
+
+	const sealSignInAttempt = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
+
+	const openSignInAttempt = (sealed: string, workspaceId: string, providerId: string) =>
+		Effect.gen(function* () {
+			const now = yield* Clock.currentTimeMillis;
+			return yield* Effect.try(() => JSON.parse(cipher.decrypt(sealed)) as unknown).pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(SignInAttempt)),
+				Effect.mapError(() => new ChatgptSignInAttemptInvalid()),
+				Effect.filterOrFail(
+					(attempt) =>
+						attempt.workspaceId === workspaceId &&
+						attempt.providerId === providerId &&
+						attempt.expiresAt > now,
+					() => new ChatgptSignInAttemptInvalid(),
+				),
+			);
+		});
 
 	/** Discovery whose failure is recorded on the provider and logged, rather than raised. */
 	const discoverModelsQuietly = (
@@ -179,6 +254,13 @@ export const make = Effect.gen(function* () {
 		fetchProviderModels(providers, workspaceId, providerId, egress.providers, {
 			activateOnSuccess,
 		}).pipe(Effect.catchTag("ModelDiscoveryFailed", () => Effect.void));
+
+	const saveSignIn = (workspaceId: string, providerId: string, tokens: ChatgptTokens) =>
+		Effect.gen(function* () {
+			yield* providers.saveChatgptSignIn(workspaceId, providerId, tokens);
+			yield* discoverModelsQuietly(workspaceId, providerId, true);
+			return yield* requireProvider(workspaceId, providerId);
+		});
 
 	const tryAnEnabledModel = (workspaceId: string, providerId: string, listed: TestOutcome) =>
 		Effect.gen(function* () {
@@ -258,13 +340,10 @@ export const make = Effect.gen(function* () {
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
-					if (
-						changes.active === true &&
-						presetRequiresApiKey(current.preset) &&
-						!current.hasApiKey &&
-						!changes.apiKey
-					) {
-						return yield* new ProviderActivationRequiresApiKey();
+					if (changes.active === true && providerLacksCredential(current) && !changes.apiKey) {
+						return yield* new ProviderActivationRequiresCredential({
+							missing: missingCredential(current.preset),
+						});
 					}
 					// Switching on is a test's to do, below, so it is not written here.
 					const updated = yield* providers.update(workspaceId, providerId, {
@@ -303,6 +382,56 @@ export const make = Effect.gen(function* () {
 					const listed = yield* testProvider(providers, workspaceId, providerId, egress.providers);
 					if (!listed.reachable) return listed;
 					return yield* tryAnEnabledModel(workspaceId, providerId, listed);
+				}),
+			),
+
+		startChatgptSignIn: ({ workspace, providerId }) =>
+			operation(
+				"startChatgptSignIn",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					yield* requireSignInProvider(workspaceId, providerId);
+					const code = yield* requestDeviceCode(chatgptAuth);
+					return {
+						verificationUrl: code.verificationUrl,
+						userCode: code.userCode,
+						attempt: sealSignInAttempt({
+							workspaceId,
+							providerId,
+							deviceAuthId: code.deviceAuthId,
+							userCode: code.userCode,
+							expiresAt: code.expiresAt,
+						}),
+						pollIntervalMs: code.pollIntervalMs,
+						expiresAt: new Date(code.expiresAt).toISOString(),
+					};
+				}),
+			),
+
+		completeChatgptSignIn: ({ workspace, providerId, attempt: sealed }) =>
+			operation(
+				"completeChatgptSignIn",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					yield* requireSignInProvider(workspaceId, providerId);
+					const attempt = yield* openSignInAttempt(sealed, workspaceId, providerId);
+					const tokens = yield* redeemDeviceCode(chatgptAuth, attempt);
+					if (!tokens) return { status: "pending" as const };
+					return {
+						status: "signed_in" as const,
+						provider: yield* saveSignIn(workspaceId, providerId, tokens),
+					};
+				}),
+			),
+
+		signOutChatgpt: ({ workspace, providerId }) =>
+			operation(
+				"signOutChatgpt",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					yield* requireSignInProvider(workspaceId, providerId);
+					yield* providers.saveChatgptSignIn(workspaceId, providerId, null);
+					return yield* requireProvider(workspaceId, providerId);
 				}),
 			),
 
@@ -383,6 +512,16 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ModelProviderRepository.layer]),
 );
 
+/** A device code in progress, sealed and handed to the page so the server keeps no state for it. */
+const SignInAttempt = Schema.Struct({
+	workspaceId: Schema.String,
+	providerId: Schema.String,
+	deviceAuthId: Schema.String,
+	userCode: Schema.String,
+	expiresAt: Schema.Number,
+});
+type SignInAttempt = typeof SignInAttempt.Type;
+
 export interface TestOutcome {
 	reachable: boolean;
 	latencyMs: number;
@@ -398,21 +537,36 @@ export class ModelProviderNotFound
 	}
 }
 
-export class ProviderModelsRequireApiKey
-	extends Data.TaggedError("ProviderModelsRequireApiKey")
+/** What a provider lacks before it can be used: a key, or for ChatGPT, a sign-in. */
+type MissingCredential = "api-key" | "chatgpt-sign-in";
+
+function missingCredential(preset: ProviderPresetId | null): MissingCredential {
+	return presetSignsIn(preset) ? "chatgpt-sign-in" : "api-key";
+}
+
+export class ProviderModelsRequireCredential
+	extends Data.TaggedError("ProviderModelsRequireCredential")<{
+		readonly missing: MissingCredential;
+	}>
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Add an API key before managing models`;
+		return this.missing === "chatgpt-sign-in"
+			? UserMessage.of`Sign in with ChatGPT before managing models`
+			: UserMessage.of`Add an API key before managing models`;
 	}
 }
 
-export class ProviderActivationRequiresApiKey
-	extends Data.TaggedError("ProviderActivationRequiresApiKey")
+export class ProviderActivationRequiresCredential
+	extends Data.TaggedError("ProviderActivationRequiresCredential")<{
+		readonly missing: MissingCredential;
+	}>
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Add an API key before activating this provider`;
+		return this.missing === "chatgpt-sign-in"
+			? UserMessage.of`Sign in with ChatGPT before activating this provider`
+			: UserMessage.of`Add an API key before activating this provider`;
 	}
 }
 
@@ -458,5 +612,23 @@ export class ProviderModelRemovalNotAllowed
 {
 	get userMessage() {
 		return UserMessage.of`Only manually added models can be removed`;
+	}
+}
+
+export class ChatgptSignInNotOffered
+	extends Data.TaggedError("ChatgptSignInNotOffered")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This provider is not signed in to with ChatGPT`;
+	}
+}
+
+export class ChatgptSignInAttemptInvalid
+	extends Data.TaggedError("ChatgptSignInAttemptInvalid")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This sign-in has expired; start again`;
 	}
 }
