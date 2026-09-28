@@ -58,7 +58,8 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
 /**
  * The conversation services, with `ConversationEvents` handing what they
  * emit to its handlers, in order: the thread feed tells watching clients what
- * happened, then routine settlement ends the runs that work finished.
+ * happened, routine settlement ends the runs that work finished, and
+ * collaborations whose collaborator stopped without answering fail.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
@@ -73,6 +74,7 @@ export const layer = Layer.effectContext(
 		const dispatch = DomainEvents.emitTo<ConversationEvent>([
 			ThreadFeed.handler(outbox),
 			Context.get(built, RoutineSettlement.Service).handler,
+			Context.get(built, Collaborations.Service).handler,
 		]);
 		return Context.add(built, ConversationEvents.Service, events);
 	}),

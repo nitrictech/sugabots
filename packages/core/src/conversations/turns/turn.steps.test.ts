@@ -2,7 +2,7 @@ import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { effectRunner, type RunEffect } from "../../database/database.ts";
+import { afterCommit, effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
@@ -179,6 +179,37 @@ describe("runSegment", () => {
 		},
 	);
 
+	it("asks for the thread's summary in the transaction that completes the reply", async () => {
+		const { execution, turns } = fakes();
+		const happened: string[] = [];
+		vi.mocked(turns.complete).mockReturnValue(
+			afterCommit(Effect.sync(() => happened.push("reply completed"))),
+		);
+
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model: {
+					stream: () =>
+						Effect.succeed({
+							text: chunks("Done"),
+							accounting: Effect.succeed({ usage: {}, contextTokens: 0 }),
+						}),
+				},
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: {
+					queueSummary: () => Effect.sync(() => happened.push("summary asked for")),
+					queueCompaction: noCompaction,
+				},
+			}),
+		);
+
+		expect(happened).toEqual(["summary asked for", "reply completed"]);
+	});
+
 	it("records a built-in tool's call where the reply made it", async () => {
 		const { execution, turns } = fakes();
 		const calls = toolCalls();
@@ -339,69 +370,8 @@ describe("runSegment", () => {
 	it("parks a mutating call without executing it when approval is required", async () => {
 		const { execution, turns } = fakes();
 		const execute = vi.fn(async () => ({ removed: true }));
-		const model: TurnModel = {
-			stream: () =>
-				Effect.succeed({
-					text: (async function* () {
-						yield "I need approval.";
-					})(),
-					accounting: Effect.succeed({ usage: { modelCalls: 1 } }),
-					continuation: Effect.succeed({
-						approvalRequests: [
-							{
-								type: "tool-approval-request",
-								approvalId: "approval-1",
-								toolCall: {
-									type: "tool-call",
-									toolCallId: "sdk-1",
-									toolName: "wiki__wipe",
-									input: {},
-								},
-							},
-						] as never,
-						responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
-					}),
-				}),
-		};
 
-		const outcome = await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
-				connectionTools: {
-					forPod: () =>
-						Effect.succeed({
-							tools: {
-								wiki__wipe: {
-									tool: tool({
-										inputSchema: Schema.Struct({}).pipe(
-											Schema.toStandardSchemaV1,
-											Schema.toStandardJSONSchemaV1,
-										),
-										execute,
-									}),
-									mutating: true,
-									requiresApproval: true,
-									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
-									connectionRevision: 1,
-									remoteToolName: "wipe",
-								},
-							},
-							close: async () => undefined,
-						}),
-				},
-				approvals: {
-					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-					beginExecution: () =>
-						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
-				},
-			}),
-		);
+		const outcome = await runWithServices(segmentAskingApproval({ execution, turns }, execute));
 
 		expect(execute).not.toHaveBeenCalled();
 		expect(turns.complete).not.toHaveBeenCalled();
@@ -417,6 +387,18 @@ describe("runSegment", () => {
 			[expect.objectContaining({ approvalId: "approval-1", sdkToolCallId: "sdk-1" })],
 		);
 		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["approval-1"] });
+	});
+
+	it("cancels with the reply as it was when the turn may no longer park, placing no call it never recorded", async () => {
+		const { execution, turns } = fakes();
+		vi.mocked(turns.suspend).mockReturnValue(Effect.succeed(false));
+
+		const outcome = await runWithServices(
+			segmentAskingApproval({ execution, turns }, async () => ({ removed: true })),
+		);
+
+		expect(turns.cancel).toHaveBeenCalledWith(replyTurn, reply("I need approval."));
+		expect(outcome).toEqual({ _tag: "Finished" });
 	});
 
 	it("resumes with the checkpointed model input instead of changed turn context", async () => {
@@ -629,10 +611,10 @@ describe("runSegment", () => {
 		);
 	});
 
-	it("keeps a completed turn successful when its summary cannot be queued", async () => {
+	it("lets a failure to ask for the summary escape, so the completion rolls back with it", async () => {
 		const { execution, turns } = fakes();
 		const queueSummary = () => Effect.die(new Error("database unavailable"));
-		await runWithServices(
+		const segment = runWithServices(
 			segmentWith({
 				execution,
 				turns,
@@ -650,7 +632,7 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(turns.complete).toHaveBeenCalledOnce();
+		await expect(segment).rejects.toThrow("database unavailable");
 		expect(turns.fail).not.toHaveBeenCalled();
 	});
 
@@ -885,6 +867,74 @@ function segmentWith(given: Given) {
 			),
 		),
 	);
+}
+
+/**
+ * A segment whose model asks a person to approve one call to a mutating
+ * connection tool, `wiki__wipe`, which runs `execute`.
+ */
+function segmentAskingApproval(
+	{ execution, turns }: Pick<Given, "execution" | "turns">,
+	execute: () => Promise<unknown>,
+) {
+	return segmentWith({
+		execution,
+		turns,
+		model: {
+			stream: () =>
+				Effect.succeed({
+					text: (async function* () {
+						yield "I need approval.";
+					})(),
+					accounting: Effect.succeed({ usage: { modelCalls: 1 } }),
+					continuation: Effect.succeed({
+						approvalRequests: [
+							{
+								type: "tool-approval-request",
+								approvalId: "approval-1",
+								toolCall: {
+									type: "tool-call",
+									toolCallId: "sdk-1",
+									toolName: "wiki__wipe",
+									input: {},
+								},
+							},
+						] as never,
+						responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
+					}),
+				}),
+		},
+		events: eventBus(),
+		collaborations: collaborations(),
+		toolCalls: toolCalls(),
+		requests: { queueSummary: noSummary },
+		connectionTools: {
+			forPod: () =>
+				Effect.succeed({
+					tools: {
+						wiki__wipe: {
+							tool: tool({
+								inputSchema: Schema.Struct({}).pipe(
+									Schema.toStandardSchemaV1,
+									Schema.toStandardJSONSchemaV1,
+								),
+								execute,
+							}),
+							mutating: true,
+							requiresApproval: true,
+							connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+							connectionRevision: 1,
+							remoteToolName: "wipe",
+						},
+					},
+					close: async () => undefined,
+				}),
+		},
+		approvals: {
+			responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+			beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
+		},
+	});
 }
 
 /** Records nothing; the cases that call a tool check what it was asked to record. */

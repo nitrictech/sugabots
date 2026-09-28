@@ -2,7 +2,8 @@ import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import {
 	MAX_SEARCH_RESULTS,
-	type SearchBackend,
+	type SearchOutcome,
+	type SearchRequest,
 } from "../../../providers/search-providers/backends.ts";
 
 export const WEB_SEARCH_TOOL = "web_search";
@@ -15,7 +16,11 @@ const MAX_QUERY_LENGTH = 400;
  * Results are titles, addresses and snippets; reading a result is `web_fetch`'s
  * job, so a search never costs more than the one call.
  */
-export function webSearchTool({ search }: { search: SearchBackend }) {
+export function webSearchTool({
+	search,
+}: {
+	search: (request: SearchRequest) => Promise<SearchOutcome>;
+}) {
 	return tool({
 		description:
 			"Search the web. Returns titles, addresses and short snippets for a query; use web_fetch to read any result in full. Good for finding a page you do not have the address of, and for anything recent. When your reply relies on a result, name its URL.",

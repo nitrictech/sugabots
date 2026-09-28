@@ -90,7 +90,9 @@ export const make = Effect.gen(function* () {
 									),
 								)
 								.limit(1)
-								.for("update"),
+								// The call alone: whoever ends its turn locks the turn before the
+								// settlement lock this holds, so waiting on the turn could deadlock.
+								.for("update", { of: toolCall }),
 						);
 						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
 							return yield* new ToolApprovalNotFound();

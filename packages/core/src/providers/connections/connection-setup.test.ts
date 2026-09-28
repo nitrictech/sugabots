@@ -250,6 +250,20 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		expect(await setup.list(inPod())).toEqual([]);
 	});
 
+	it("keeps no connection for a catalogued server that needed no sign-in", async () => {
+		const setup = await setupWith({
+			signIn: { begin: () => Effect.succeed({ authorized: true as const }) },
+		});
+
+		await expect(
+			setup.connectFromCatalog({
+				...inPod(),
+				server: { name: "Open", url: `${serverUrl}/open` },
+			}),
+		).rejects.toMatchObject({ _tag: "ConnectionNeededNoSignIn" });
+		expect(await setup.list(inPod())).toEqual([]);
+	});
+
 	it("lets a member of the pod see its connections, and change none of them", async () => {
 		const setup = await setupWith({ as: memberId });
 

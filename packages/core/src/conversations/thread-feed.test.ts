@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
 import type { PendingEvent } from "../database/events/outbox.ts";
+import { PodAudience } from "../database/events/pod-audience.ts";
 import { noDatabase } from "../database/testing.ts";
 import { UserMessage } from "../user-message.ts";
 import { ConversationEvent } from "./events.ts";
@@ -29,6 +30,8 @@ describe("the thread feed", () => {
 	const workspaceId = crypto.randomUUID();
 	const threadId = crypto.randomUUID();
 	const turnId = crypto.randomUUID();
+	const agentId = crypto.randomUUID();
+	const podId = crypto.randomUUID();
 
 	beforeEach(() => {
 		published = [];
@@ -45,6 +48,7 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCompleted({
 					threadId,
 					workspaceId,
+					podId,
 					turnId,
 					messageId: "m1",
 					content: "Done.",
@@ -87,7 +91,9 @@ describe("the thread feed", () => {
 					ConversationEvent.TurnFailed({
 						threadId,
 						workspaceId,
+						podId,
 						turnId,
+						agentId,
 						messageId: "m1",
 						userMessage,
 						willRetry,
@@ -123,7 +129,9 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCancelled({
 					threadId,
 					workspaceId,
+					podId,
 					turnId,
+					agentId,
 					messageId: "m1",
 					content: "Half a thou",
 				}),
@@ -147,6 +155,59 @@ describe("the thread feed", () => {
 				event: expect.objectContaining({ type: "thread.changed", threadId }),
 			},
 		]);
+	});
+
+	it("names the thread's pod on everything it tells the workspace, and on nothing else", () => {
+		const told = sent(
+			ConversationEvent.TurnCancelled({
+				threadId,
+				workspaceId,
+				podId,
+				turnId,
+				agentId,
+				messageId: "m1",
+				content: "",
+			}),
+		);
+
+		expect(
+			told.map(({ channel, event }) => [channel, PodAudience.audienceOf(event).podId]),
+		).toEqual([
+			[threadChannel(threadId), undefined],
+			[threadChannel(threadId), undefined],
+			[workspaceChannel(workspaceId), podId],
+		]);
+	});
+
+	it("tells the thread why a reply it asked for is not coming", () => {
+		const noModel = UserMessage.of`Ada has no model chosen, so it cannot reply.`;
+		const noChoice = UserMessage.of`The Facilitator could not choose who speaks next`;
+
+		expect(
+			sent(
+				ConversationEvent.TurnAbandoned({
+					threadId,
+					agentId,
+					outcome: { state: "failed", error: noModel },
+				}),
+				ConversationEvent.FacilitationFailed({ threadId, userMessage: noChoice }),
+			),
+		).toEqual([
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noModel }),
+			},
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noChoice }),
+			},
+		]);
+	});
+
+	it("shows nothing of a turn given up as cancelled", () => {
+		expect(
+			sent(ConversationEvent.TurnAbandoned({ threadId, agentId, outcome: { state: "cancelled" } })),
+		).toEqual([]);
 	});
 
 	it("tells the reply's thread how each tool call stands", () => {
@@ -180,6 +241,7 @@ describe("the thread feed", () => {
 					parentMessageId: "m1",
 					collaboration,
 					workspaceId,
+					podId,
 					recipientChatId,
 				}),
 			),
@@ -220,7 +282,13 @@ describe("the thread feed", () => {
 		const childId = crypto.randomUUID();
 
 		expect(
-			sent(ConversationEvent.RoutineWorkCancelled({ workspaceId, threadIds: [threadId, childId] })),
+			sent(
+				ConversationEvent.RoutineWorkCancelled({
+					workspaceId,
+					podId,
+					threadIds: [threadId, childId],
+				}),
+			),
 		).toEqual(
 			[threadId, childId].flatMap((id) => [
 				{

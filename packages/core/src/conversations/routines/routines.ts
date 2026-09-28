@@ -119,6 +119,7 @@ export const make = Effect.gen(function* () {
 								)
 							: null;
 					const secret = input.trigger.kind === "webhook" ? generateSecret() : null;
+					const digest = secret ? yield* hashSecret(secret) : null;
 					const row = yield* repository.create({
 						workspaceId: owner.workspaceId,
 						agentId: owner.id,
@@ -129,7 +130,7 @@ export const make = Effect.gen(function* () {
 						cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
 						cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
 						nextScheduledAt: schedule,
-						webhookSecretDigest: secret ? hashSecret(secret) : null,
+						webhookSecretDigest: digest,
 						state,
 					});
 					return { routine: toRoutine(row), secret };
@@ -142,8 +143,11 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
+						// Held until the change is written, so an edit made meanwhile, or a
+						// secret replaced meanwhile, is read here rather than written over.
+						yield* lockTriggers(scope.routineId);
 						const [current] = yield* query((db) =>
-							db.select().from(routine).where(inScope(scope)).limit(1),
+							db.select().from(routine).where(inScope(scope)).limit(1).for("update"),
 						);
 						if (!current) return yield* new RoutineNotFound();
 						const trigger = input.trigger ?? toRoutine(current).trigger;
@@ -175,7 +179,7 @@ export const make = Effect.gen(function* () {
 								trigger.kind !== "webhook"
 									? null
 									: secret
-										? hashSecret(secret)
+										? yield* hashSecret(secret)
 										: current.webhookSecretDigest,
 						});
 						if (!row) return yield* new RoutineNotFound();
@@ -203,8 +207,9 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const scope = yield* scopeOf(authorization, addressed, "routine.manage");
 						const secret = generateSecret();
+						const digest = yield* hashSecret(secret);
 						yield* lockTriggers(scope.routineId);
-						if (yield* repository.replaceWebhookSecret(scope, hashSecret(secret))) return secret;
+						if (yield* repository.replaceWebhookSecret(scope, digest)) return secret;
 						const [exists] = yield* query((db) =>
 							db.select({ id: routine.id }).from(routine).where(inScope(scope)),
 						);

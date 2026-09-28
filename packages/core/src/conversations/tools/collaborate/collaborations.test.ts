@@ -18,13 +18,8 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
-import {
-	closeDatabase,
-	onDatabase,
-	onPostgres,
-	type Promised,
-	runOnPostgres,
-} from "../../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
+import { UserMessage } from "../../../user-message.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
@@ -46,9 +41,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	const conversations = await conversationsForTests(
 		EventBus.inProcess({ store: EventStore.inMemory() }),
 	);
-	const collaborations: Promised<Collaborations.Interface> = onPostgres(
-		Context.get(conversations, Collaborations.Service),
-	);
+	const { open, collectAnswer, answer } = Context.get(conversations, Collaborations.Service);
+	const collaborations = onPostgres({ open, collectAnswer, answer });
 	// `Conversations.layer` does not expose the repository, so it is built over the same events.
 	const repository = onPostgres(
 		await runOnPostgres(
@@ -422,6 +416,74 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
 	});
+	describe("when the collaborator's turn ends without answering, outside any routine", () => {
+		/** A collaboration the asker stopped waiting for, and the collaborator's turn on it, prepared. */
+		const aPendingCollaboration = async () => {
+			const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
+			await collaborations.collectAnswer(opened.collaboration.id);
+			return { opened, threadId: opened.collaboration.threadId };
+		};
+		const statusOf = async (collaborationId: string) => {
+			const [row] = await onDatabase((db) =>
+				db.select().from(collaboration).where(eq(collaboration.id, collaborationId)),
+			);
+			return row?.status;
+		};
+
+		it("fails the collaboration once the turn fails for good", async () => {
+			const { opened, threadId } = await aPendingCollaboration();
+			const collaborator = await openReply(threadId, helper.id);
+
+			const willRetry = await turnRecords.fail(
+				replyTurnOf(collaborator.prepared),
+				{ content: "", collaborations: [], toolCalls: [], acted: true },
+				UserMessage.of`The model could not be reached`,
+			);
+
+			expect(willRetry).toBe(false);
+			expect(await statusOf(opened.collaboration.id)).toBe("failed");
+		});
+
+		it("keeps the collaboration open while the failed turn runs again", async () => {
+			const { opened, threadId } = await aPendingCollaboration();
+			const collaborator = await openReply(threadId, helper.id);
+
+			const willRetry = await turnRecords.fail(
+				replyTurnOf(collaborator.prepared),
+				{ content: "", collaborations: [], toolCalls: [] },
+				UserMessage.of`The model could not be reached`,
+			);
+
+			expect(willRetry).toBe(true);
+			expect(await statusOf(opened.collaboration.id)).toBe("pending");
+		});
+
+		it("fails the collaboration once the turn is cancelled", async () => {
+			const { opened, threadId } = await aPendingCollaboration();
+			const collaborator = await openReply(threadId, helper.id);
+
+			await turnRecords.cancel(replyTurnOf(collaborator.prepared), {
+				content: "Let me",
+				collaborations: [],
+				toolCalls: [],
+			});
+
+			expect(await statusOf(opened.collaboration.id)).toBe("failed");
+		});
+
+		it("fails the collaboration when the collaborator's turn may not run", async () => {
+			const { opened, threadId } = await aPendingCollaboration();
+			await onDatabase((db) =>
+				db.update(agent).set({ model: null }).where(eq(agent.id, helper.id)),
+			);
+			const [run] = await runOnPostgres(runningTurns(threadId));
+			if (!run) throw new Error("no turn running");
+
+			expect(await turns.prepare(run)).toMatchObject({ _tag: "NotRunnable" });
+			expect(await statusOf(opened.collaboration.id)).toBe("failed");
+		});
+	});
+
 	it("tells the asking model a collaboration failed while it waited, rather than that an answer is coming", async () => {
 		const tool = collaborateTool({
 			from: {

@@ -4,6 +4,8 @@ import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contract
 import { Effect } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
+import { PodAudience } from "../database/events/pod-audience.ts";
+import type { UserMessage } from "../user-message.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
@@ -20,7 +22,8 @@ export const handler =
  *
  * A thread's events go on its own channel. The workspace channel, which feeds
  * the lists, hears `thread.changed` naming the thread whenever what a list
- * shows of it may have changed.
+ * shows of it may have changed, for the people who reach the thread's pod
+ * alone (see `PodAudience`).
  */
 function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 	return ConversationEvent.$match(event, {
@@ -34,7 +37,16 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			onThread(threadId, streamEvent("turn.started", { threadId, turnId, agentId })),
 			onThread(threadId, streamEvent("message.created", { threadId, message: reply })),
 		],
-		TurnCompleted: ({ threadId, workspaceId, turnId, messageId, content, usage, reportedCost }) => [
+		TurnCompleted: ({
+			threadId,
+			workspaceId,
+			podId,
+			turnId,
+			messageId,
+			content,
+			usage,
+			reportedCost,
+		}) => [
 			onThread(
 				threadId,
 				streamEvent("message.completed", { threadId, messageId, content, status: "complete" }),
@@ -43,10 +55,12 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				threadId,
 				streamEvent("turn.completed", { threadId, turnId, status: "done", usage, reportedCost }),
 			),
-			listedThreadChanged(workspaceId, threadId),
+			listedThreadChanged(workspaceId, podId, threadId),
 		],
-		TurnSuspended: ({ threadId, workspaceId }) => [listedThreadChanged(workspaceId, threadId)],
-		TurnFailed: ({ threadId, workspaceId, turnId, messageId, userMessage, willRetry }) => [
+		TurnSuspended: ({ threadId, workspaceId, podId }) => [
+			listedThreadChanged(workspaceId, podId, threadId),
+		],
+		TurnFailed: ({ threadId, workspaceId, podId, turnId, messageId, userMessage, willRetry }) => [
 			onThread(
 				threadId,
 				streamEvent("message.failed", {
@@ -58,39 +72,44 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 			// The thread stops working only once nobody runs the turn again.
-			...(willRetry ? [] : [listedThreadChanged(workspaceId, threadId)]),
+			...(willRetry ? [] : [listedThreadChanged(workspaceId, podId, threadId)]),
 		],
-		TurnCancelled: ({ threadId, workspaceId, turnId, messageId, content }) => [
+		TurnCancelled: ({ threadId, workspaceId, podId, turnId, messageId, content }) => [
 			onThread(
 				threadId,
 				streamEvent("message.completed", { threadId, messageId, content, status: "cancelled" }),
 			),
 			onThread(threadId, streamEvent("turn.completed", { threadId, turnId, status: "cancelled" })),
-			listedThreadChanged(workspaceId, threadId),
+			listedThreadChanged(workspaceId, podId, threadId),
 		],
 		TurnCancelRequested: ({ threadId, turnId }) => [
 			onThread(threadId, streamEvent("turn.cancel_requested", { threadId, turnId })),
 		],
-		// Watchers see nothing new in these; only routine settlement reacts to them.
-		TurnAbandoned: () => [],
+		// Nobody is shown a turn given up as cancelled: it was not wanted any more.
+		TurnAbandoned: ({ threadId, outcome }) =>
+			outcome.state === "failed" ? [notice(threadId, outcome.error)] : [],
+		// Watchers see nothing new in this; only routine settlement reacts to it.
 		LaneReleased: () => [],
-		FacilitationFailed: () => [],
+		FacilitationFailed: ({ threadId, userMessage }) => [notice(threadId, userMessage)],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallFinished: (change) => [toolCallEvent("tool_call.completed", change)],
 		CollaborationOpened: (opened) => [
 			collaborationUpdated(opened),
-			listedThreadChanged(opened.workspaceId, opened.collaboration.threadId),
+			listedThreadChanged(opened.workspaceId, opened.podId, opened.collaboration.threadId),
 			...(opened.recipientChatId
 				? [
 						{
 							channel: workspaceChannel(opened.workspaceId),
-							event: streamEvent("chat.thread_changed", {
-								chatId: opened.recipientChatId,
-								threadId: opened.collaboration.threadId,
-								threadType: "collaboration",
-							}),
+							event: PodAudience.forPod(
+								opened.podId,
+								streamEvent("chat.thread_changed", {
+									chatId: opened.recipientChatId,
+									threadId: opened.collaboration.threadId,
+									threadType: "collaboration",
+								}),
+							),
 						},
 					]
 				: []),
@@ -98,15 +117,17 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
 		CollaborationFailed: (change) => [collaborationUpdated(change)],
-		ThreadSummarised: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
-		ThreadCompacted: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
-		RoutineExecutionAccepted: ({ workspaceId, chatId, threadId }) => [
-			routineThreadChanged(workspaceId, chatId, threadId),
+		ThreadSummarised: ({ workspaceId, podId, threadId }) =>
+			threadChanged(workspaceId, podId, threadId),
+		ThreadCompacted: ({ workspaceId, podId, threadId }) =>
+			threadChanged(workspaceId, podId, threadId),
+		RoutineExecutionAccepted: ({ workspaceId, podId, chatId, threadId }) => [
+			routineThreadChanged(workspaceId, podId, chatId, threadId),
 		],
-		RoutineWorkCancelled: ({ workspaceId, threadIds }) =>
-			threadIds.flatMap((threadId) => threadChanged(workspaceId, threadId)),
-		RoutineExecutionSettled: ({ workspaceId, chatId, threadId }) => [
-			routineThreadChanged(workspaceId, chatId, threadId),
+		RoutineWorkCancelled: ({ workspaceId, podId, threadIds }) =>
+			threadIds.flatMap((threadId) => threadChanged(workspaceId, podId, threadId)),
+		RoutineExecutionSettled: ({ workspaceId, podId, chatId, threadId }) => [
+			routineThreadChanged(workspaceId, podId, chatId, threadId),
 		],
 	});
 }
@@ -115,25 +136,38 @@ function onThread(threadId: string, event: PendingEvent["event"]): PendingEvent 
 	return { channel: threadChannel(threadId), event };
 }
 
+/** Tells the thread's watchers why a reply they may be waiting for is not coming. */
+function notice(threadId: string, userMessage: UserMessage): PendingEvent {
+	return onThread(threadId, streamEvent("thread.notice", { threadId, notice: userMessage }));
+}
+
 /** For a change no more specific event on the thread's channel describes. */
-function threadChanged(workspaceId: string, threadId: string): PendingEvent[] {
+function threadChanged(workspaceId: string, podId: string, threadId: string): PendingEvent[] {
 	return [
 		onThread(threadId, streamEvent("thread.changed", { threadId })),
-		listedThreadChanged(workspaceId, threadId),
+		listedThreadChanged(workspaceId, podId, threadId),
 	];
 }
 
-function listedThreadChanged(workspaceId: string, threadId: string): PendingEvent {
+function listedThreadChanged(workspaceId: string, podId: string, threadId: string): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
-		event: streamEvent("thread.changed", { threadId }),
+		event: PodAudience.forPod(podId, streamEvent("thread.changed", { threadId })),
 	};
 }
 
-function routineThreadChanged(workspaceId: string, chatId: string, threadId: string): PendingEvent {
+function routineThreadChanged(
+	workspaceId: string,
+	podId: string,
+	chatId: string,
+	threadId: string,
+): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
-		event: streamEvent("chat.thread_changed", { chatId, threadId, threadType: "routine" }),
+		event: PodAudience.forPod(
+			podId,
+			streamEvent("chat.thread_changed", { chatId, threadId, threadType: "routine" }),
+		),
 	};
 }
 

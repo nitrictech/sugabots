@@ -1,6 +1,6 @@
 export * as RoutineWebhooks from "./routine-webhooks.ts";
 
-import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { AcceptedRoutineExecution, RoutineExecutionTrigger } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
@@ -41,6 +41,8 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineWebhooks");
 	const acceptTrigger = yield* makeAcceptTrigger;
+	// Checked against when there is no routine, so a missing one takes as long to refuse.
+	const dummyDigest = yield* hashSecret("not-a-routine-secret");
 	return Service.of({
 		accept: ({ routineId, secret, trigger }) =>
 			operation(
@@ -51,7 +53,7 @@ export const make = Effect.gen(function* () {
 					// deliberately slow hash runs.
 					const found = isUuid(routineId) ? yield* enabledWebhook(routineId) : undefined;
 					const valid = yield* Effect.promise(() =>
-						verifySecret(Redacted.value(secret), found?.digest ?? DUMMY_SECRET_DIGEST),
+						verifySecret(Redacted.value(secret), found?.digest ?? dummyDigest),
 					);
 					if (!valid || !found) return undefined;
 					return yield* transaction(
@@ -80,16 +82,20 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
 );
 
+const deriveKey = promisify(scrypt);
+
 /** A new webhook secret, which is shown once and stored only as {@link hashSecret}. */
 export function generateSecret() {
 	return randomBytes(32).toString("base64url");
 }
 
-export function hashSecret(secret: string) {
-	const salt = randomBytes(16);
-	const digest = scryptSync(secret, salt, 32);
-	return `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`;
-}
+/** The stored form of `secret`, derived off the event loop since scrypt is slow on purpose. */
+export const hashSecret = (secret: string) =>
+	Effect.promise(async () => {
+		const salt = randomBytes(16);
+		const digest = Buffer.from((await deriveKey(secret, salt, 32)) as ArrayBuffer);
+		return `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`;
+	});
 
 const enabledWebhook = (routineId: string) =>
 	Effect.map(
@@ -113,11 +119,6 @@ const enabledWebhook = (routineId: string) =>
 		),
 		([row]) => row,
 	);
-
-const deriveKey = promisify(scrypt);
-
-/** Checked against when there is no routine, so a missing one takes as long to refuse. */
-const DUMMY_SECRET_DIGEST = hashSecret("not-a-routine-secret");
 
 async function verifySecret(secret: string, encoded: string) {
 	const [algorithm, saltText, digestText] = encoded.split(":");

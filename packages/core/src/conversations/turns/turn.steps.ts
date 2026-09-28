@@ -108,6 +108,7 @@ export const turnStepsLayer = Layer.effect(
 						yield* emit([
 							ConversationEvent.TurnAbandoned({
 								threadId: request.threadId,
+								agentId: request.agentId,
 								outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
 							}),
 						]);
@@ -278,7 +279,14 @@ const generateReply = (
 				};
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
-				// and gives up waiting for an answer that lands a moment later.
+				// and gives up waiting for an answer that lands a moment later. The
+				// summary is asked for in it too, so a completed reply is never left
+				// out of its thread's summary.
+				const followUp = {
+					threadId: prepared.context.thread.id,
+					agentId: prepared.context.agent.id,
+					sourceMessageId: prepared.responseMessage.id,
+				};
 				yield* transaction(
 					Effect.gen(function* () {
 						// `answer` runs in a savepoint of this transaction, so a
@@ -301,20 +309,9 @@ const generateReply = (
 						if (!answered) {
 							yield* floor.giveFloor(replyFloorMessage(prepared, draft));
 						}
+						yield* requests.queueSummary(followUp);
 					}),
 				);
-				const followUp = {
-					threadId: prepared.context.thread.id,
-					agentId: prepared.context.agent.id,
-					sourceMessageId: prepared.responseMessage.id,
-				};
-				yield* requests
-					.queueSummary(followUp)
-					.pipe(
-						Effect.catchCause((cause) =>
-							Effect.logError("Queueing a thread summary failed", cause),
-						),
-					);
 				if (needsCompaction(accounting.contextTokens, prepared.context.windowTokens)) {
 					yield* requests
 						.queueCompaction({
@@ -520,14 +517,17 @@ const streamReply = (
 						atOffset,
 					}));
 				});
-				yield* Ref.update(reply, (draft) => ({
+				// Only the checkpoint's reply places the calls: they exist once the
+				// turn suspends, and a turn that may not suspend ends with the reply
+				// as it was.
+				const draft = yield* Ref.get(reply);
+				const suspendedReply: ReplyDraft = {
 					...draft,
 					toolCalls: [
 						...draft.toolCalls,
 						...pending.map((call) => ({ id: call.id, atOffset: call.atOffset })),
 					],
-				}));
-				const suspendedReply = yield* Ref.get(reply);
+				};
 				return {
 					kind: "suspended" as const,
 					approvals: pending,

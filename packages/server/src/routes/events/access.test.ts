@@ -207,6 +207,25 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		);
 	});
 
+	it("lets only people who reach a pod hear the workspace's events about it", async () => {
+		const { access, member, administrator, space, conversation } = await fixture();
+		const [elsewhere] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Elsewhere", email: `elsewhere-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!elsewhere) throw new Error("fixture did not insert");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
+		);
+
+		expect(await access(member.id).reachesPod(conversation.podId)).toBe(true);
+		expect(await access(administrator.id).reachesPod(conversation.podId)).toBe(true);
+		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
+		expect(await access(elsewhere.id).reachesPod(conversation.podId)).toBe(false);
+	});
+
 	it("takes the channel away once the administrator is demoted", async () => {
 		const { access, administrator, space, conversation } = await fixture();
 		await onDatabase((db) =>

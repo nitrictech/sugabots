@@ -3,7 +3,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import {
 	MAX_SEARCH_RESULTS,
-	type SearchBackend,
+	type SearchOutcome,
+	type SearchRequest,
 } from "../../providers/search-providers/backends.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
@@ -70,7 +71,9 @@ describe("native Effect tool schemas through the AI SDK", () => {
 
 	it("decodes search input before AI SDK execution", async () => {
 		const input = { query: "  Effect Schema  " };
-		const search = vi.fn<SearchBackend>(async () => ({ ok: true, results: [] }));
+		const search = vi.fn(
+			async (_request: SearchRequest): Promise<SearchOutcome> => ({ ok: true, results: [] }),
+		);
 		const model = new MockLanguageModelV4({
 			doGenerate: {
 				content: [

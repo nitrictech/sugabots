@@ -73,8 +73,8 @@ export interface Interface {
 	 * running, and `undefined` once it has ended.
 	 */
 	readonly start: (executionId: string) => Effect.Effect<schema.RoutineExecutionRow | undefined>;
-	/** Records how a running run is ending, or that nothing is ending it. */
-	readonly recordEnding: (executionId: string, ending: Ended | undefined) => Effect.Effect<void>;
+	/** Records how a running run is ending. */
+	readonly recordEnding: (executionId: string, ending: Ended) => Effect.Effect<void>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
 	 * was not running.
@@ -96,18 +96,18 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const runs = yield* RoutineRuns.Service;
 
-	/** The chat a run's thread is in, which lists the run. */
+	/** The chat a run's thread is in, which lists the run, and their pod. */
 	const chatOf = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
 			const [root] = yield* query((db) =>
 				db
-					.select({ chatId: thread.chatId })
+					.select({ chatId: thread.chatId, podId: thread.podId })
 					.from(thread)
 					.where(eq(thread.id, run.threadId))
 					.limit(1),
 			);
 			if (!root?.chatId) return yield* Effect.die(new Error("Routine thread has no Chat"));
-			return root.chatId;
+			return { chatId: root.chatId, podId: root.podId };
 		});
 
 	/** Tells the workspace that a run's thread changed because the run ended. */
@@ -116,7 +116,7 @@ export const make = Effect.gen(function* () {
 			yield* emit([
 				ConversationEvent.RoutineExecutionSettled({
 					workspaceId: run.workspaceId,
-					chatId: yield* chatOf(run),
+					...(yield* chatOf(run)),
 					threadId: run.threadId,
 				}),
 			]);
@@ -237,7 +237,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.RoutineExecutionAccepted({
 								workspaceId: accepted.workspaceId,
-								chatId: yield* chatOf(accepted),
+								...(yield* chatOf(accepted)),
 								threadId: accepted.threadId,
 							}),
 						]);
@@ -280,8 +280,8 @@ export const make = Effect.gen(function* () {
 					db
 						.update(routineExecution)
 						.set({
-							pendingTerminalState: ending?.state ?? null,
-							pendingTerminalError: ending?.state === "failed" ? ending.error : null,
+							pendingTerminalState: ending.state,
+							pendingTerminalError: ending.state === "failed" ? ending.error : null,
 						})
 						.where(
 							and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running")),

@@ -791,6 +791,36 @@ describe("a thread open beside the Chat", () => {
 		expect(within(panel).getByText(/18\+ age confirmation/)).toBeDefined();
 	});
 
+	it("says why a reply is not coming, until the thread moves on", async () => {
+		const updates = threadStream();
+		answerThread(() => Effect.succeed(collaboration));
+		mount(threadPage);
+		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
+		await within(panel).findByText(collaborationAnswer.content);
+
+		updates.emit(
+			streamEvent("thread.notice", {
+				threadId: collaborationId,
+				notice: "Helper has no model chosen, so it cannot reply.",
+			}),
+		);
+
+		const notices = within(panel).getByRole("status", { name: "Thread notices" });
+		expect(
+			await within(notices).findByText("Helper has no model chosen, so it cannot reply."),
+		).toBeDefined();
+
+		const messageId = "0199a3a0-0000-7000-8000-000000000102";
+		updates.emit(
+			streamEvent("message.created", {
+				threadId: collaborationId,
+				message: incoming(messageId, "Trying again"),
+			}),
+		);
+		await within(panel).findByText("Trying again");
+		expect(within(notices).queryByText(/has no model chosen/)).toBeNull();
+	});
+
 	it("says when the thread could not be loaded", async () => {
 		answerThread(() => Effect.fail(new Forbidden({ message: "Unavailable" })));
 		mount(threadPage);

@@ -184,7 +184,9 @@ export const make = Effect.gen(function* () {
 						messageId: message.id,
 						content: message.content,
 						threadId: turn.threadId,
+						agentId: turn.agentId,
 						workspaceId: thread.workspaceId,
+						podId: thread.podId,
 					})
 					.from(message)
 					.innerJoin(turn, eq(turn.id, message.turnId))
@@ -206,7 +208,12 @@ export const make = Effect.gen(function* () {
 	const lockAndTransition = (condition: SQL | undefined, event: TurnEvent) =>
 		Effect.map(lockedTurn(condition), (locked) =>
 			locked
-				? { id: locked.id, state: locked.state, decided: transition(locked.state, event) }
+				? {
+						id: locked.id,
+						agentId: locked.agentId,
+						state: locked.state,
+						decided: transition(locked.state, event),
+					}
 				: undefined,
 		);
 
@@ -439,6 +446,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnSuspended({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 							}),
 						]);
@@ -463,6 +471,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnCompleted({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 								messageId: reply.messageId,
 								content: draft.content,
@@ -492,7 +501,9 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnFailed({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
+								agentId: locked.agentId,
 								messageId: reply.messageId,
 								userMessage,
 								willRetry,
@@ -517,7 +528,9 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnCancelled({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
+								agentId: locked.agentId,
 								messageId: reply.messageId,
 								content: draft.content,
 							}),
@@ -688,6 +701,7 @@ export interface ReplyTurn {
 	readonly turnId: string;
 	readonly threadId: string;
 	readonly workspaceId: string;
+	readonly podId: string;
 	readonly messageId: string;
 }
 
@@ -868,13 +882,14 @@ const lockedTurn = (condition: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ ...stateColumns, threadId: turn.threadId })
+				.select({ ...stateColumns, threadId: turn.threadId, agentId: turn.agentId })
 				.from(turn)
 				.where(condition)
 				.limit(1)
 				.for("update"),
 		),
-		([row]) => row && { id: row.id, threadId: row.threadId, state: stateOf(row) },
+		([row]) =>
+			row && { id: row.id, threadId: row.threadId, agentId: row.agentId, state: stateOf(row) },
 	);
 
 function notRunnable(reason: string, ended?: Ended): NotRunnable {
@@ -887,6 +902,8 @@ function endAnnouncement(
 		turnId: string;
 		threadId: string;
 		workspaceId: string;
+		podId: string;
+		agentId: string;
 		messageId: string;
 		content: string;
 	},
@@ -896,7 +913,9 @@ function endAnnouncement(
 		? ConversationEvent.TurnFailed({
 				threadId: reply.threadId,
 				workspaceId: reply.workspaceId,
+				podId: reply.podId,
 				turnId: reply.turnId,
+				agentId: reply.agentId,
 				messageId: reply.messageId,
 				userMessage: ended.error,
 				willRetry: false,

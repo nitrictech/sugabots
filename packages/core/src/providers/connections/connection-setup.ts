@@ -297,6 +297,8 @@ export const make = Effect.gen(function* () {
 						startedByUserId: actor.userId,
 					}).pipe(Effect.tapError(() => connections.remove(workspaceId, pod.id, made.id)));
 					if ("authorized" in started) {
+						// Nothing to sign in to, so nothing the person asked for was made.
+						yield* connections.remove(workspaceId, pod.id, made.id);
 						return yield* new ConnectionNeededNoSignIn();
 					}
 					return { connectionId: made.id, authorizationUrl: started.authorizationUrl };

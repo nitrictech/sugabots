@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { EXA_FREE_SEARCH_URL } from "@sugabots/contracts";
-import { Schema } from "effect";
+import { Data, Effect, Schema } from "effect";
 import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
@@ -13,7 +13,7 @@ import type { SearchConnection } from "./search-connection.ts";
  * Every backend takes the same request and answers the same shape, so the
  * tool and the settings test are written once. A failure is an answer with a
  * reason, never a throw: the agent, or the admin testing the connection,
- * reads it as a sentence.
+ * reads it as a sentence, and what the service said goes only to the logs.
  */
 
 interface SearchResult {
@@ -24,16 +24,19 @@ interface SearchResult {
 	published: string | null;
 }
 
-type SearchOutcome = { ok: true; results: SearchResult[] } | { ok: false; reason: UserMessage };
+export type SearchOutcome =
+	| { ok: true; results: SearchResult[] }
+	| { ok: false; reason: UserMessage };
 
-interface SearchRequest {
+export interface SearchRequest {
 	query: string;
 	/** How many results to ask for; a backend may return fewer. */
 	count: number;
 	signal?: AbortSignal;
 }
 
-export type SearchBackend = (request: SearchRequest) => Promise<SearchOutcome>;
+/** Never fails: what goes wrong is an outcome, and its details are logged. */
+export type SearchBackend = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
 
 export const MAX_SEARCH_RESULTS = 10;
 const SEARCH_TIMEOUT_MS = 10_000;
@@ -83,7 +86,7 @@ const braveResponse = Schema.Struct({
 });
 
 function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
-	return async ({ query, count, signal }) => {
+	return ({ query, count, signal }) => {
 		const url = new URL(`${connection.baseUrl.replace(/\/$/, "")}/web/search`);
 		url.searchParams.set("q", query);
 		url.searchParams.set("count", String(count));
@@ -129,7 +132,7 @@ const exaResponse = Schema.Struct({
 });
 
 function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
-	return async ({ query, count, signal }) => {
+	return ({ query, count, signal }) => {
 		const url = `${connection.baseUrl.replace(/\/$/, "")}/search`;
 		return answer("Exa", signal, async (stop) => {
 			const response = await fetch(url, {
@@ -180,7 +183,7 @@ const tavilyResponse = Schema.Struct({
 });
 
 function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
-	return async ({ query, count, signal }) => {
+	return ({ query, count, signal }) => {
 		const url = `${connection.baseUrl.replace(/\/$/, "")}/search`;
 		return answer("Tavily", signal, async (stop) => {
 			const response = await fetch(url, {
@@ -219,7 +222,7 @@ function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): Se
  * is one short MCP session.
  */
 function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
-	return async ({ query, count, signal }) =>
+	return ({ query, count, signal }) =>
 		answer("Exa", signal, async (stop) => {
 			const client = new Client({ name: "sugabots", version: VERSION });
 			const transport = new StreamableHTTPClientTransport(new URL(EXA_FREE_SEARCH_URL), {
@@ -246,8 +249,10 @@ function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
 					.join("\n");
 				if (result.isError) {
 					// Exa's text is its own and may say anything, so it goes to the logs.
-					console.error("Exa refused a search", text);
-					return refused(UserMessage.of`Exa refused the search`);
+					throw new SearchRefused({
+						userMessage: UserMessage.of`Exa refused the search`,
+						detail: text,
+					});
 				}
 				return { ok: true, results: parseExaText(text).slice(0, count) };
 			} finally {
@@ -301,7 +306,7 @@ const searxngResponse = Schema.Struct({
 });
 
 function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
-	return async ({ query, count, signal }) => {
+	return ({ query, count, signal }) => {
 		const url = new URL(`${connection.baseUrl.replace(/\/$/, "")}/search`);
 		url.searchParams.set("q", query);
 		url.searchParams.set("format", "json");
@@ -343,29 +348,56 @@ function refused(reason: UserMessage): SearchOutcome {
 	return { ok: false, reason };
 }
 
+/**
+ * A service's answer that it would not search, thrown from inside a call so
+ * `answer` logs what it said and tells the caller only `userMessage`.
+ */
+class SearchRefused extends Data.TaggedError("SearchRefused")<{
+	readonly userMessage: UserMessage;
+	readonly detail: string;
+}> {}
+
+/** Whatever a call threw, to be turned into a reason. */
+class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
+
 /** Runs one call under the time budget, turning whatever goes wrong into a reason. */
-async function answer(
+function answer(
 	service: "Brave Search" | "Exa" | "Tavily" | "SearXNG",
 	signal: AbortSignal | undefined,
 	call: (stop: AbortSignal) => Promise<SearchOutcome>,
-): Promise<SearchOutcome> {
+): Effect.Effect<SearchOutcome> {
 	const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
 	const stop = signal ? AbortSignal.any([timeout, signal]) : timeout;
-	try {
-		return await call(stop);
-	} catch (cause) {
-		if (signal?.aborted) {
-			return refused(UserMessage.of`The turn was stopped before the search answered`);
-		}
-		if (timeout.aborted) {
-			return refused(
-				UserMessage.of`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`,
+	return Effect.tryPromise({
+		try: () => call(stop),
+		catch: (cause) => new CallFailed({ cause }),
+	}).pipe(
+		Effect.catch(({ cause }) => {
+			if (signal?.aborted) {
+				return Effect.succeed(
+					refused(UserMessage.of`The turn was stopped before the search answered`),
+				);
+			}
+			if (timeout.aborted) {
+				return Effect.succeed(
+					refused(
+						UserMessage.of`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`,
+					),
+				);
+			}
+			if (cause instanceof EgressRefused) return Effect.succeed(refused(cause.userMessage));
+			if (cause instanceof SearchRefused) {
+				return Effect.as(
+					Effect.logWarning(`${service} refused a search`, cause.detail),
+					refused(cause.userMessage),
+				);
+			}
+			// Anything else is a fault on our side or the service's: its details go to
+			// the logs, and the model is told only that the search did not answer.
+			return Effect.as(
+				Effect.logError(`Searching with ${service} failed`, cause),
+				refused(UserMessage.of`${service} could not be searched`),
 			);
-		}
-		if (cause instanceof EgressRefused) return refused(cause.userMessage);
-		// Anything else is a fault on our side or the service's: its details go to
-		// the logs, and the model is told only that the search did not answer.
-		console.error(`Searching with ${service} failed`, cause);
-		return refused(UserMessage.of`${service} could not be searched`);
-	}
+		}),
+	);
 }

@@ -57,16 +57,18 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 	const webFetch = webFetchTool({ fetchPage });
 	return {
 		forWorkspace: (workspaceId) =>
-			Effect.map(searchProviders.resolve(workspaceId), (connection): ToolSet => {
+			Effect.gen(function* (): Effect.fn.Return<ToolSet, never, Database> {
+				const connection = yield* searchProviders.resolve(workspaceId);
 				if (!connection) return {};
+				// The tool runs searches as promises; they log through the turn's services.
+				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
+				const search = searchBackend(
+					connection,
+					httpClients.for({ baseUrl: searchEndpoint(connection) }),
+				);
 				return {
 					[WEB_FETCH_TOOL]: webFetch,
-					[WEB_SEARCH_TOOL]: webSearchTool({
-						search: searchBackend(
-							connection,
-							httpClients.for({ baseUrl: searchEndpoint(connection) }),
-						),
-					}),
+					[WEB_SEARCH_TOOL]: webSearchTool({ search: (request) => runPromise(search(request)) }),
 				};
 			}),
 	};
