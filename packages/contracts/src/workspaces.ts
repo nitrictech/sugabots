@@ -83,6 +83,8 @@ export const workspacePermissionsSchema = Schema.Struct({
 	manageMembers: Schema.Boolean,
 	/** Choose the models the Scribe and the Facilitator run on. */
 	configureBuiltInAgents: Schema.Boolean,
+	/** See what the workspace's models cost, and limit it. */
+	manageUsage: Schema.Boolean,
 });
 
 export type WorkspacePermissions = typeof workspacePermissionsSchema.Type;

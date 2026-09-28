@@ -1,5 +1,6 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { Usage } from "@sugabots/core/accounting/usage";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -95,6 +96,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(SearchProviderSetup.Service),
 	unimplemented(ConnectionSetup.Service),
 	unimplemented(ModelTrials.Service),
+	unimplemented(Usage.Service),
 	unimplemented(Chats.Service),
 	unimplemented(ChatView.Service),
 	unimplemented(ThreadView.Service),

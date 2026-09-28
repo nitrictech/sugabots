@@ -259,6 +259,7 @@ const NOTHING_YET: WorkspacePermissions = {
 	manageProviders: false,
 	manageMembers: false,
 	configureBuiltInAgents: false,
+	manageUsage: false,
 };
 
 function useWorkspaceStanding() {

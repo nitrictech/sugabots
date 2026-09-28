@@ -1,4 +1,5 @@
 import { NodeRuntime } from "@effect/platform-node";
+import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -76,6 +77,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SearchProviderSetup.layer,
 	ConnectionSetup.layer,
 	ModelTrials.layer,
+	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));
 
 /**

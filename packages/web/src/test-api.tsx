@@ -387,6 +387,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				manageProviders: role === "admin",
 				manageMembers: role === "admin",
 				configureBuiltInAgents: role === "admin",
+				manageUsage: role === "admin",
 			},
 		}),
 	);
