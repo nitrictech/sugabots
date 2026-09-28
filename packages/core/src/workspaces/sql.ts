@@ -6,7 +6,7 @@ import type {
 	SystemAgentKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING, WORKSPACE_ROLES } from "@sugabots/contracts";
+import { DEFAULT_POD_ROUTING, DEFAULT_TIME_ZONE, WORKSPACE_ROLES } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
@@ -126,6 +126,8 @@ export const workspace = pgTable(
 		slug: text("slug").notNull(),
 		// Not yet settable.
 		logo: text("logo"),
+		/** An IANA time zone: where the workspace's days and months begin. */
+		timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},

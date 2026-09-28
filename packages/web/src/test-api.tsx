@@ -57,7 +57,7 @@ export const jye: SessionUser = {
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 
-export const workspace = { id: WORKSPACE, name: "Suga Workspace", slug: "suga" };
+export const workspace = { id: WORKSPACE, name: "Suga Workspace", slug: "suga", timeZone: "UTC" };
 
 /** Every pod permission, as an admin gets them. */
 const ADMIN_IN_POD: PodPermissions = {

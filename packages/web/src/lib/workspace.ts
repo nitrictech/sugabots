@@ -1,7 +1,13 @@
-import type { Workspace, WorkspacePermissions, WorkspaceRole } from "@sugabots/contracts";
+import {
+	type TimeZone,
+	timeZoneSchema,
+	type Workspace,
+	type WorkspacePermissions,
+	type WorkspaceRole,
+} from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
 
@@ -44,12 +50,23 @@ export function useCreateWorkspace() {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: ({ name, slug }: { name: string; slug: string }) =>
-			Effect.runPromise(client.api.workspaces.create({ payload: { name, slug } })),
+			Effect.runPromise(
+				client.api.workspaces.create({ payload: { name, slug, timeZone: browserTimeZone() } }),
+			),
 		onSuccess: async (workspace) => {
 			chooseWorkspace(workspace.id);
 			await queries.invalidateQueries({ queryKey: ["workspaces"] });
 		},
 	});
+}
+
+/**
+ * The time zone this browser is set to, which a new workspace takes. Undefined
+ * when the API would not accept it, and the workspace is then in the default.
+ */
+export function browserTimeZone(): TimeZone | undefined {
+	const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	return Schema.is(timeZoneSchema)(zone) ? zone : undefined;
 }
 
 export function useUpdateWorkspace(workspaceId: string | undefined) {

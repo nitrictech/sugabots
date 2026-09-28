@@ -44,6 +44,7 @@ export const storyWorkspace = {
 	id: firstPod.workspaceId,
 	name: "Nitric",
 	slug: "nitric",
+	timeZone: "UTC",
 };
 
 /** Every pod, with the viewer as the Personal pod's owner, and every bot. */

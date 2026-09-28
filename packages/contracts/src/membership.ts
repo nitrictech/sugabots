@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { sessionUserSchema } from "./api.ts";
 import { emailSchema } from "./email.ts";
 import { podSlugSchema } from "./pods.ts";
+import { timeZoneSchema } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 import { workspaceRoleSchema } from "./workspaces.ts";
@@ -13,6 +14,13 @@ export const workspaceSchema = Schema.Struct({
 	id: uuidSchema,
 	name: Schema.String,
 	slug: Schema.String,
+	/**
+	 * The IANA time zone where the workspace's days and months begin, such as
+	 * for what its models cost. Checked when it is set, not when it is read:
+	 * which zones exist depends on the runtime, and one this runtime doesn't
+	 * know must not stop the workspace loading.
+	 */
+	timeZone: Schema.String,
 });
 export type Workspace = typeof workspaceSchema.Type;
 
@@ -21,6 +29,13 @@ export const workspaceDetailsSchema = Schema.Struct({
 	slug: workspaceSlugSchema,
 });
 export type WorkspaceDetails = typeof workspaceDetailsSchema.Type;
+
+export const newWorkspaceSchema = Schema.Struct({
+	...workspaceDetailsSchema.fields,
+	/** The creator's own time zone. Without one, the workspace is in `DEFAULT_TIME_ZONE`. */
+	timeZone: Schema.optional(timeZoneSchema),
+});
+export type NewWorkspace = typeof newWorkspaceSchema.Type;
 
 /** `id` is the membership, which role changes and removal address. */
 export const workspaceMemberSchema = Schema.Struct({
