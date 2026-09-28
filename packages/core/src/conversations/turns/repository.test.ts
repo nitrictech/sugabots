@@ -2,13 +2,12 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
-import { type CommittedEvent, eventPublisher } from "../../database/events/publish.ts";
+import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
-import { composeConversations } from "../composition.ts";
-import { routineRunsForTests } from "../routines/testing.ts";
+import { conversationsForTests } from "../testing.ts";
 import { noToolApprovalStore } from "../tools/approvals/store.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
 import { noConnectionTools } from "../tools/connections.ts";
@@ -16,14 +15,7 @@ import { type PreparedTurn, replyTurnOf } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { ModelRequestFailed, type TurnModel } from "./model.ts";
 import type { TurnCheckpoint } from "./repository.ts";
-import {
-	aChatAwaitingReply,
-	prepareRunnable,
-	queueFacilitationForTests,
-	queueTurnForTests,
-	runningTurns,
-	turnSignalsForTests,
-} from "./testing.ts";
+import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { runSegment } from "./turn.steps.ts";
 
 /**
@@ -31,18 +23,12 @@ import { runSegment } from "./turn.steps.ts";
  * parks for approvals and ends, as the repository writes and announces it,
  * and a whole segment run through the real repository.
  */
-describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", () => {
+describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
-	const { repositories, stores } = composeConversations({
-		publishEvents: eventPublisher({
-			publishCommitted: async (events) => {
-				delivered.push(...events);
-			},
-		}),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
+	const { emit, repositories, stores } = await conversationsForTests({
+		publishCommitted: async (events) => {
+			delivered.push(...events);
+		},
 	});
 	const turns = onPostgres(repositories.turns);
 	const calls = onPostgres(repositories.toolCalls);
@@ -224,7 +210,8 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", () => {
 					builtInTools: noBuiltInTools,
 					connectionTools: noConnectionTools,
 					events,
-					queueSummary: vi.fn(() => Effect.void),
+					emit,
+					requests: { queueSummary: vi.fn(() => Effect.void) },
 				}),
 			);
 

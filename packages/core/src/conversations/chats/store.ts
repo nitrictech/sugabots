@@ -53,7 +53,7 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { giveFloor } from "../turns/floor.ts";
-import { type QueueFacilitation, type QueueTurn, respondingIn } from "../turns/queue.ts";
+import { respondingIn, TurnRequests } from "../turns/requests.ts";
 
 export class ChatPlacementRejected
 	extends Data.TaggedError("ChatPlacementRejected")
@@ -132,12 +132,9 @@ export interface ChatStore {
 	): Effect.Effect<Message | undefined, ChatMessageIdConflict | ChatAgentHasNoModel, Database>;
 }
 
-export function chatStore(
-	emit: DomainEvents.Emit<ConversationEvent>,
-	queueTurn: QueueTurn,
-	queueFacilitation: QueueFacilitation,
-): ChatStore {
-	return {
+export const chatStore = Effect.fnUntraced(function* (emit: DomainEvents.Emit<ConversationEvent>) {
+	const requests = yield* TurnRequests.Service;
+	const store: ChatStore = {
 		list: Effect.fn("ChatStore.list")(function* (input) {
 			yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
 			if (input.pod !== "all") {
@@ -275,7 +272,7 @@ export function chatStore(
 							.onConflictDoNothing(),
 					);
 					yield* giveFloor(
-						{ emit, queueTurn, queueFacilitation },
+						{ emit, requests },
 						{
 							id: created.id,
 							threadId: visible.mainThreadId,
@@ -291,7 +288,8 @@ export function chatStore(
 				}),
 			),
 	};
-}
+	return store;
+});
 
 const lock = (key: string) =>
 	query((db) => db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`));

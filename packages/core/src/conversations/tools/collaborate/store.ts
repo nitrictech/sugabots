@@ -1,6 +1,6 @@
 import type { CollaborationPart } from "@sugabots/contracts";
 import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../../database/database.ts";
 import type { DomainEvents } from "../../../database/events/domain-events.ts";
@@ -15,7 +15,7 @@ import {
 } from "../../../database/schema.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
-import type { QueueTurn } from "../../turns/queue.ts";
+import { TurnRequests } from "../../turns/requests.ts";
 
 /**
  * Collaboration: one crew agent asking another for help.
@@ -80,6 +80,12 @@ export interface CollaborationStore {
 		threadId: string;
 		answer: string;
 	}): Effect.Effect<boolean, never, Database>;
+	/**
+	 * Fails the collaborations asked for in these threads that are still
+	 * waiting or pending, because the routine run they work for ended. One
+	 * another transaction holds is skipped: its holder is moving it on.
+	 */
+	failUnder(threadIds: readonly string[]): Effect.Effect<void, never, Database>;
 }
 
 /** Policy said no. The reason goes back to the model as the tool's result. */
@@ -91,11 +97,11 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 	}
 }
 
-export function collaborationStore(
+export const collaborationStore = Effect.fnUntraced(function* (
 	emit: DomainEvents.Emit<ConversationEvent>,
-	queueTurn: QueueTurn,
-): CollaborationStore {
-	return {
+) {
+	const requests = yield* TurnRequests.Service;
+	const store: CollaborationStore = {
 		open: ({ from, to, brief }) =>
 			transaction(
 				Effect.gen(function* () {
@@ -171,7 +177,7 @@ export function collaborationStore(
 					if (!briefMessage) {
 						return yield* Effect.die(new Error("Message insert returned no row"));
 					}
-					yield* queueTurn({
+					yield* requests.queueTurn({
 						threadId: child.id,
 						agentId: collaborator.id,
 						triggerMessageId: briefMessage.id,
@@ -263,7 +269,7 @@ export function collaborationStore(
 					// The asking agent moved on; give it a turn to pick the answer up.
 					// While it was still waiting, the tool reads the answer itself.
 					if (current.row.status === "pending") {
-						yield* queueTurn({
+						yield* requests.queueTurn({
 							threadId: current.row.parentThreadId,
 							agentId: current.askingAgentId,
 							triggerMessageId: current.row.parentMessageId,
@@ -273,8 +279,40 @@ export function collaborationStore(
 					return true;
 				}),
 			),
+
+		failUnder: (threadIds) =>
+			transaction(
+				Effect.gen(function* () {
+					if (threadIds.length === 0) return;
+					const unanswered = yield* query((db) =>
+						db
+							.select({ collaboration, collaboratorName: agent.name })
+							.from(collaboration)
+							.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
+							.where(
+								and(
+									inArray(collaboration.parentThreadId, [...threadIds]),
+									inArray(collaboration.status, ["waiting", "pending"]),
+								),
+							)
+							.orderBy(collaboration.createdAt, collaboration.id)
+							.for("update", { of: collaboration, skipLocked: true }),
+					);
+					const failed = yield* Effect.forEach(unanswered, (row) =>
+						Effect.map(
+							query((db) => writeStatus(db, row.collaboration.id, { status: "failed" })),
+							(updated) =>
+								ConversationEvent.CollaborationFailed(
+									collaborationChange(updated, row.collaboratorName),
+								),
+						),
+					);
+					yield* emit(failed);
+				}),
+			),
 	};
-}
+	return store;
+});
 
 const loadThreadRow = Effect.fn("CollaborationStore.loadThreadRow")(function* (
 	db: Executor,

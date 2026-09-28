@@ -4,7 +4,7 @@ import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { DecidedApproval } from "../tools/calls/lifecycle.ts";
-import { turnSignals } from "./signals.ts";
+import { TurnSignals } from "./signals.ts";
 import {
 	type SegmentOutcome,
 	Turn,
@@ -20,7 +20,7 @@ const segment = vi.fn((_request: TurnRequest) =>
 const decide = vi.fn((_request: TurnRequest, _decided: DecidedApproval) => Effect.void);
 const stopWaiting = vi.fn((_request: TurnRequest) => Effect.void);
 const abandon = vi.fn((_request: TurnRequest) => Effect.void);
-const settleRoutine = vi.fn((_request: TurnRequest) => Effect.void);
+const announceReleased = vi.fn((_request: TurnRequest) => Effect.void);
 const release = vi.fn((_execution: { key: string; executionId: string }) => Effect.void);
 
 const runtime = ManagedRuntime.make(
@@ -28,7 +28,7 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(
 			Layer.succeed(
 				TurnSteps,
-				TurnSteps.of({ segment, decide, stopWaiting, abandon, settleRoutine }),
+				TurnSteps.of({ segment, decide, stopWaiting, abandon, announceReleased }),
 			),
 		),
 		Layer.provideMerge(
@@ -45,9 +45,7 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(TestClock.layer()),
 	),
 );
-const signals = turnSignals(
-	await runtime.runPromise(Effect.service(WorkflowEngine.WorkflowEngine)),
-);
+const signals = await runtime.runPromise(TurnSignals.make);
 
 afterAll(() => runtime.dispose());
 
@@ -66,7 +64,7 @@ const untilSuspended = (executionId: string) =>
 
 describe("the turn workflow", () => {
 	beforeEach(() => {
-		for (const step of [segment, decide, stopWaiting, abandon, settleRoutine, release]) {
+		for (const step of [segment, decide, stopWaiting, abandon, announceReleased, release]) {
 			step.mockClear();
 		}
 	});
@@ -83,7 +81,7 @@ describe("the turn workflow", () => {
 			await runtime.runPromise(TestClock.adjust(Duration.seconds(2)));
 			expect(segment).toHaveBeenCalledTimes(2);
 		});
-		await vi.waitFor(() => expect(settleRoutine).toHaveBeenCalledWith(asked));
+		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
 		expect(abandon).not.toHaveBeenCalled();
 	});
 
@@ -118,7 +116,7 @@ describe("the turn workflow", () => {
 		);
 		expect(decide.mock.calls.map(([, decided]) => decided.approvalId)).toEqual(["second", "first"]);
 		expect(segment).toHaveBeenCalledTimes(2);
-		expect(settleRoutine).toHaveBeenCalledWith(asked);
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 	});
 
 	it("records a cancel and ends while waiting", async () => {
@@ -146,7 +144,7 @@ describe("the turn workflow", () => {
 
 		await runtime.runPromise(Turn.execute(asked, { discard: true }));
 
-		await vi.waitFor(() => expect(settleRoutine).toHaveBeenCalledWith(asked));
+		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
 		expect(abandon).toHaveBeenCalledWith(asked);
 		expect(order).toEqual(["abandon", "release"]);
 	});

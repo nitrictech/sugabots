@@ -16,13 +16,13 @@ const attempt = vi.fn((_request: FacilitateRequest, _attempt: number) =>
 	Effect.succeed<AttemptOutcome>("decided"),
 );
 const abandon = vi.fn((_request: FacilitateRequest) => Effect.void);
-const settleRoutine = vi.fn((_request: FacilitateRequest) => Effect.void);
+const announceReleased = vi.fn((_request: FacilitateRequest) => Effect.void);
 const release = vi.fn((_execution: { key: string; executionId: string }) => Effect.void);
 
 const runtime = ManagedRuntime.make(
 	facilitateWorkflow.layer.pipe(
 		Layer.provideMerge(
-			Layer.succeed(FacilitateSteps, FacilitateSteps.of({ attempt, abandon, settleRoutine })),
+			Layer.succeed(FacilitateSteps, FacilitateSteps.of({ attempt, abandon, announceReleased })),
 		),
 		Layer.provideMerge(
 			Layer.succeed(
@@ -51,7 +51,7 @@ const passingTime = (check: () => void) =>
 
 describe("the facilitate workflow", () => {
 	beforeEach(() => {
-		for (const step of [attempt, abandon, settleRoutine, release]) step.mockClear();
+		for (const step of [attempt, abandon, announceReleased, release]) step.mockClear();
 	});
 
 	it("runs a failed attempt again after a delay, then frees the lane", async () => {
@@ -64,7 +64,7 @@ describe("the facilitate workflow", () => {
 			expect(release).toHaveBeenCalledWith({ key: facilitateLane(asked), executionId }),
 		);
 		expect(attempt.mock.calls.map(([, number]) => number)).toEqual([1, 2]);
-		expect(settleRoutine).toHaveBeenCalledWith(asked);
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(abandon).not.toHaveBeenCalled();
 	});
 

@@ -2,7 +2,6 @@ import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../../database/events/bus.ts";
-import { eventPublisher } from "../../../database/events/publish.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
 import {
 	agent,
@@ -24,33 +23,20 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
-import { composeConversations } from "../../composition.ts";
-import { routineRunsForTests } from "../../routines/testing.ts";
+import { conversationsForTests } from "../../testing.ts";
 import { modelPrompt } from "../../turns/context.ts";
 import { replyTurnOf } from "../../turns/execution.ts";
-import {
-	prepareRunnable,
-	queueFacilitationForTests,
-	queueTurnForTests,
-	releaseTurn,
-	runningTurns,
-	turnSignalsForTests,
-	waitingTurns,
-} from "../../turns/testing.ts";
+import { prepareRunnable, releaseTurn, runningTurns, waitingTurns } from "../../turns/testing.ts";
 import { CollaborationRefused, type CollaborationStore } from "./store.ts";
 
 /**
  * Collaboration against Postgres: what `open` writes, what policy refuses, and
  * how a collaboration moves between the asking agent and the answering one.
  */
-describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
-	const { repositories, stores } = composeConversations({
-		publishEvents: eventPublisher(createEventBus({ store: memoryEventStore() })),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
-	});
+describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", async () => {
+	const { repositories, stores } = await conversationsForTests(
+		createEventBus({ store: memoryEventStore() }),
+	);
 	const collaborations: Promised<CollaborationStore> = onPostgres(stores.collaborations);
 	const threads = onPostgres(stores.threads);
 	const chats = onPostgres(stores.chats);

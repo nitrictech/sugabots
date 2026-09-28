@@ -4,7 +4,6 @@ import { type Database, type Executor, query, transaction } from "../../database
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, thread, threadSummary, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
-import type { Lanes } from "../../workflows/lanes.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
@@ -15,7 +14,7 @@ import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { messageTextWithPlacedParts } from "../turns/context.ts";
 import type { ModelAccounting } from "../turns/model.ts";
 import type { TurnRepository } from "../turns/repository.ts";
-import { Summary, type SummaryRequest, summaryLane } from "./summary.workflow.ts";
+import type { SummaryRequest } from "./summary.workflow.ts";
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
 
@@ -77,20 +76,6 @@ export interface SummaryStore {
 	/** Ends the Scribe's turn as failed; `userMessage` is recorded on it for people to read. */
 	fail(prepared: PreparedSummary, userMessage: UserMessage): Effect.Effect<void, never, Database>;
 }
-
-/**
- * Requests a summary that covers the thread up to `sourceMessageId`. A request
- * already waiting for the thread is pointed at this newer message instead.
- */
-export const queueSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
-	lanes
-		.admit({
-			key: summaryLane(request),
-			workflow: Summary,
-			payload: request,
-			whenBusy: "replace",
-		})
-		.pipe(Effect.asVoid);
 
 export function summaryStore(
 	emit: DomainEvents.Emit<ConversationEvent>,

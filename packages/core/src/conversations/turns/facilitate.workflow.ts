@@ -38,17 +38,20 @@ export class FacilitateSteps extends Context.Service<
 			request: FacilitateRequest,
 			attempt: number,
 		) => Effect.Effect<AttemptOutcome>;
-		/** Settles the thread's routine run as failed when facilitation fails. */
+		/** Announces that facilitation failed, when every attempt did or the workflow failed. */
 		readonly abandon: (request: FacilitateRequest) => Effect.Effect<void>;
-		/** Settles the thread's routine run if facilitation was its last work; it cannot settle while facilitation holds its lane. */
-		readonly settleRoutine: (request: FacilitateRequest) => Effect.Effect<void>;
+		/**
+		 * Announces that the thread's facilitation lane is free. A routine run
+		 * cannot settle while any of its lanes is busy, so this may let it.
+		 */
+		readonly announceReleased: (request: FacilitateRequest) => Effect.Effect<void>;
 	}
 >()("@sugabots/core/FacilitateSteps") {}
 
 export const facilitateActivities = Activities.fromService<FacilitateRequest>()(FacilitateSteps, {
 	attempt: { input: Schema.Int, success: AttemptOutcome },
 	abandon: {},
-	settleRoutine: {},
+	announceReleased: {},
 });
 
 /** Attempts at deciding the floor before facilitation fails. */
@@ -82,5 +85,5 @@ export const facilitateWorkflow = Lanes.workflow(Facilitate, {
 			}
 		}),
 	onFailure: "abandon",
-	onReleased: "settleRoutine",
+	onReleased: "announceReleased",
 });

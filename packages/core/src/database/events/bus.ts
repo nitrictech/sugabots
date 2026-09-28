@@ -4,7 +4,7 @@ import {
 	resetEvent,
 	type StreamEvent,
 } from "@sugabots/contracts";
-import type { CommittedEvent } from "./publish.ts";
+import type { CommittedEvent } from "./outbox.ts";
 import type { EventRelay } from "./relay.ts";
 import type { EventStore } from "./store.ts";
 

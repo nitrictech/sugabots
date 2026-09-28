@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type CommittedEvent, eventPublisher } from "../../../database/events/publish.ts";
+import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import { connection, toolCall, turn, user, workspaceMember } from "../../../database/schema.ts";
 import {
 	closeDatabase,
@@ -13,19 +13,11 @@ import {
 } from "../../../database/testing.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
-import { composeConversations } from "../../composition.ts";
-import { routineRunsForTests } from "../../routines/testing.ts";
+import { conversationsForTests } from "../../testing.ts";
 import { type PreparedTurn, replyTurnOf } from "../../turns/execution.ts";
 import type { TurnCheckpoint } from "../../turns/repository.ts";
-import { turnSignals } from "../../turns/signals.ts";
-import {
-	aChatAwaitingReply,
-	prepareRunnable,
-	queueFacilitationForTests,
-	queueTurnForTests,
-	runningTurns,
-	turnSignalsForTests,
-} from "../../turns/testing.ts";
+import { TurnSignals } from "../../turns/signals.ts";
+import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../../turns/testing.ts";
 import {
 	type SegmentOutcome,
 	Turn,
@@ -50,20 +42,14 @@ import {
  * reads them back where they were made, how an approval is parked, decided and
  * run, and what a turn ending early does to calls still running.
  */
-describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () => {
+describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
-	const dependencies = {
-		publishEvents: eventPublisher({
-			publishCommitted: async (events) => {
-				delivered.push(...events);
-			},
-		}),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
+	const bus = {
+		publishCommitted: async (events: CommittedEvent[]) => {
+			delivered.push(...events);
+		},
 	};
-	const { repositories, stores } = composeConversations(dependencies);
+	const { repositories, stores } = await conversationsForTests(bus);
 	const calls: Promised<ToolCallRepository> = onPostgres(repositories.toolCalls);
 	const turns = onPostgres(repositories.turns);
 	const approvals: Promised<ToolApprovalStore> = onPostgres(stores.approvals);
@@ -377,7 +363,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
 			stopWaiting: (request) => Effect.promise(() => turns.stopWaiting(request)),
 			abandon: () => Effect.void,
-			settleRoutine: () => Effect.void,
+			announceReleased: () => Effect.void,
 		});
 		const workflows = ManagedRuntime.make(
 			turnWorkflow.layer.pipe(
@@ -411,8 +397,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 				db.update(turn).set({ owner: executionId }).where(eq(turn.id, prepared.turnId)),
 			);
 			await park(pending);
-			const engine = await workflows.runPromise(Effect.service(WorkflowEngine.WorkflowEngine));
-			return turnSignals(engine);
+			return workflows.runPromise(TurnSignals.make);
 		}
 
 		const workflowCall = () =>
@@ -422,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 
-			await onPostgres(composeConversations({ ...dependencies, signals }).stores.approvals).decide({
+			await onPostgres((await conversationsForTests(bus, signals)).stores.approvals).decide({
 				workspaceId,
 				podId,
 				toolCallId: pending.id,
@@ -440,9 +425,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		it("tells a second person the approval is already decided", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
-			const deciding = onPostgres(
-				composeConversations({ ...dependencies, signals }).stores.approvals,
-			);
+			const deciding = onPostgres((await conversationsForTests(bus, signals)).stores.approvals);
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ workspaceId, podId, toolCallId: pending.id, userId: memberId, decision });
 
@@ -455,9 +438,10 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			const signals = await parkInWorkflow(workflowCall());
 
 			expect(
-				await onPostgres(
-					composeConversations({ ...dependencies, signals }).stores.turns,
-				).requestCancel(prepared.turnId, memberId),
+				await onPostgres((await conversationsForTests(bus, signals)).stores.turns).requestCancel(
+					prepared.turnId,
+					memberId,
+				),
 			).toBe(true);
 
 			// Marked at once, so a segment starting as the signal lands stops too.

@@ -1,13 +1,22 @@
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, eq, inArray, ne, type SQL } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { type Database, query, type Transaction, transaction } from "../../../database/database.ts";
 import type { DomainEvents } from "../../../database/events/domain-events.ts";
-import { type ToolCallRow, toolCall, user } from "../../../database/schema.ts";
+import {
+	connection,
+	type ToolCallRow,
+	thread,
+	toolCall,
+	turn,
+	user,
+} from "../../../database/schema.ts";
 import type { UserMessage } from "../../../user-message.ts";
 import { ConversationEvent } from "../../events.ts";
+import { routineAcceptsWork } from "../../routines/execution.ts";
 import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
+import { mayRunTools } from "../../turns/lifecycle.ts";
 import {
 	type ApprovalDecision,
 	isFinished,
@@ -62,7 +71,12 @@ export interface ToolCallRepository {
 		approvalId: string;
 		decision: ApprovalDecision;
 	}): Effect.Effect<void, never, Database>;
-	/** Starts an allowed call, if it is exactly the call that was approved. */
+	/**
+	 * Starts an allowed call, if it is exactly the call that was approved, its
+	 * turn may still run tools, its connection is configured as it was when
+	 * approved, and its routine run, if any, still takes work (see
+	 * `routineAcceptsWork`).
+	 */
 	beginExecution(input: {
 		threadId: string;
 		messageId: string;
@@ -261,6 +275,43 @@ export function toolCallRepository(emit: DomainEvents.Emit<ConversationEvent>): 
 		beginExecution: (input) =>
 			transaction(
 				Effect.gen(function* (): Effect.fn.Return<BeganExecution, never, Database | Transaction> {
+					if (!(yield* routineAcceptsWork(input.threadId))) {
+						return refusedExecution("The routine run takes no more work");
+					}
+					const [scope] = yield* query((db) =>
+						db
+							.select({
+								workspaceId: thread.workspaceId,
+								podId: thread.podId,
+								status: turn.status,
+								cancelRequested: turn.cancelRequested,
+							})
+							.from(turn)
+							.innerJoin(thread, eq(thread.id, turn.threadId))
+							.where(and(eq(turn.id, input.turnId), eq(turn.threadId, input.threadId)))
+							.limit(1)
+							.for("update", { of: turn }),
+					);
+					if (!scope || !mayRunTools(scope)) return refusedExecution("The turn is not running");
+					const [approvedConnection] = yield* query((db) =>
+						db
+							.select({ id: connection.id })
+							.from(connection)
+							.where(
+								and(
+									eq(connection.id, input.connectionId),
+									eq(connection.workspaceId, scope.workspaceId),
+									eq(connection.podId, scope.podId),
+									ne(connection.access, "off"),
+									eq(connection.configurationRevision, input.connectionRevision),
+								),
+							)
+							.limit(1)
+							.for("update"),
+					);
+					if (!approvedConnection) {
+						return refusedExecution("The connection's configuration changed after approval");
+					}
 					const row = yield* lockedCall(
 						and(eq(toolCall.turnId, input.turnId), eq(toolCall.sdkToolCallId, input.sdkToolCallId)),
 					);

@@ -10,13 +10,11 @@ import {
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
-import type { UserMessage } from "../../user-message.ts";
 import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
 } from "../../workspaces/agents/system-agents.ts";
 import { ConversationEvent } from "../events.ts";
-import type { RoutineStore } from "../routines/store.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import {
 	type AttemptOutcome,
@@ -30,7 +28,7 @@ import {
 	type TurnModel,
 	type TurnModelInput,
 } from "./model.ts";
-import type { QueueTurn } from "./queue.ts";
+import { TurnRequests } from "./requests.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
@@ -51,32 +49,32 @@ export interface FacilitatorExecution {
 	model: TurnModel;
 	emit: DomainEvents.Emit<ConversationEvent>;
 	/** How the chosen agent's turn is asked for. */
-	queueTurn: QueueTurn;
-	routines?: Pick<RoutineStore, "settleThread">;
+	requests: Pick<TurnRequests.Interface, "queueTurn">;
 }
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = (execution: FacilitatorExecution) =>
+export const stepsLayer = (options: Omit<FacilitatorExecution, "requests">) =>
 	Layer.effect(
 		FacilitateSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
-			const settleRoutine = (
-				request: FacilitateRequest,
-				outcome?: { state: "failed"; error: UserMessage },
-			) =>
-				(execution.routines?.settleThread(request.threadId, outcome) ?? Effect.void).pipe(
-					Effect.asVoid,
-					Effect.provideService(Database, database),
-				);
+			const execution = { ...options, requests: yield* TurnRequests.Service };
+			const announce = (event: ConversationEvent) =>
+				transaction(execution.emit([event])).pipe(Effect.provideService(Database, database));
 			return FacilitateSteps.of({
 				attempt: (request, attempt) =>
 					attemptFacilitation(request, attempt, execution).pipe(
 						Effect.provideService(Database, database),
 					),
 				abandon: (request) =>
-					settleRoutine(request, { state: "failed", error: new FacilitationFailed().userMessage }),
-				settleRoutine: (request) => settleRoutine(request),
+					announce(
+						ConversationEvent.FacilitationFailed({
+							threadId: request.threadId,
+							userMessage: new FacilitationFailed().userMessage,
+						}),
+					),
+				announceReleased: (request) =>
+					announce(ConversationEvent.LaneReleased({ threadId: request.threadId })),
 			});
 		}),
 	);
@@ -106,7 +104,7 @@ export interface FacilitatorScope {
 export type FacilitatorDecision = { kind: "agent"; agentId: string } | { kind: "nobody" };
 
 /**
- * One attempt at deciding who speaks next, applied and settled. A failure is
+ * One attempt at deciding who speaks next, and applying it. A failure is
  * logged and reported as `failed`, having changed nothing. An interruption is
  * left to the workflow, which runs the attempt again when it resumes.
  */
@@ -122,10 +120,7 @@ export const attemptFacilitation = (
 		// No scope is a thread that has gone, or a workspace that has chosen no
 		// model for its Facilitator. Neither becomes true by waiting, so the
 		// facilitation is done rather than failed.
-		if (!scope?.routerEnabled || scope.threadType === "chat") {
-			if (execution.routines) yield* execution.routines.settleThread(request.threadId);
-			return decided;
-		}
+		if (!scope?.routerEnabled || scope.threadType === "chat") return decided;
 		const decision = yield* decide(scope, execution.model).pipe(
 			// After the last ask, nobody speaks. A facilitator that cannot be
 			// understood should not hold up the thread, and a person can always
@@ -156,32 +151,31 @@ const applyDecision = (
 	request: FacilitateRequest,
 	scope: FacilitatorScope,
 	decision: FacilitatorDecision,
-) =>
-	transaction(
+) => {
+	if (decision.kind === "nobody") return Effect.void;
+	return transaction(
 		Effect.gen(function* () {
-			if (decision.kind === "agent") {
-				const chosen = scope.crew.find((member) => member.id === decision.agentId);
-				if (chosen && !chosen.inThread) {
-					yield* query((db) =>
-						db
-							.insert(threadParticipant)
-							.values({ threadId: scope.threadId, agentId: chosen.id })
-							.onConflictDoNothing(),
-					);
-					yield* execution.emit([
-						ConversationEvent.AgentsJoined({ threadId: scope.threadId, agentIds: [chosen.id] }),
-					]);
-				}
-				yield* execution.queueTurn({
-					threadId: scope.threadId,
-					agentId: decision.agentId,
-					triggerMessageId: request.triggerMessageId,
-					reason: "facilitator",
-				});
+			const chosen = scope.crew.find((member) => member.id === decision.agentId);
+			if (chosen && !chosen.inThread) {
+				yield* query((db) =>
+					db
+						.insert(threadParticipant)
+						.values({ threadId: scope.threadId, agentId: chosen.id })
+						.onConflictDoNothing(),
+				);
+				yield* execution.emit([
+					ConversationEvent.AgentsJoined({ threadId: scope.threadId, agentIds: [chosen.id] }),
+				]);
 			}
-			if (execution.routines) yield* execution.routines.settleThread(request.threadId);
+			yield* execution.requests.queueTurn({
+				threadId: scope.threadId,
+				agentId: decision.agentId,
+				triggerMessageId: request.triggerMessageId,
+				reason: "facilitator",
+			});
 		}),
 	);
+};
 
 /** Asks the model, within the time limit, and reads its one-word answer. */
 const decide = (

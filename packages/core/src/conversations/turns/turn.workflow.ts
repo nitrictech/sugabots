@@ -73,10 +73,13 @@ export class TurnSteps extends Context.Service<
 		readonly decide: (request: TurnRequest, decided: DecidedApproval) => Effect.Effect<void>;
 		/** Records the waiting turn as cancelled. Does nothing if it is no longer waiting. */
 		readonly stopWaiting: (request: TurnRequest) => Effect.Effect<void>;
-		/** Ends the turn as failed, and its routine run with it, when its workflow fails. */
+		/** Ends the turn as failed when its workflow fails. */
 		readonly abandon: (request: TurnRequest) => Effect.Effect<void>;
-		/** Settles the thread's routine run if the turn was its last work; it cannot settle while the turn holds its lane. */
-		readonly settleRoutine: (request: TurnRequest) => Effect.Effect<void>;
+		/**
+		 * Announces that the turn's lane is free. A routine run cannot settle
+		 * while any of its lanes is busy, so this may let it.
+		 */
+		readonly announceReleased: (request: TurnRequest) => Effect.Effect<void>;
 	}
 >()("@sugabots/core/TurnSteps") {}
 
@@ -86,7 +89,7 @@ export const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
 	decide: { input: DecidedApproval },
 	stopWaiting: {},
 	abandon: {},
-	settleRoutine: {},
+	announceReleased: {},
 });
 
 /** How long a turn waits after a failed segment before running again. */
@@ -109,7 +112,7 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 			}
 		}),
 	onFailure: "abandon",
-	onReleased: "settleRoutine",
+	onReleased: "announceReleased",
 });
 
 const Awaited = Schema.Union([Schema.Literal("cancelled"), DecidedApproval]);

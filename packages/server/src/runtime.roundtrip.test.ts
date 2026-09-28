@@ -1,5 +1,5 @@
 import { composeConversations } from "@sugabots/core/conversations/composition";
-import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
+import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import {
@@ -9,12 +9,12 @@ import {
 } from "@sugabots/core/conversations/turns/facilitate.workflow";
 import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
-import { turnSignals } from "@sugabots/core/conversations/turns/signals";
+import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
+import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
 import { stepsLayer } from "@sugabots/core/conversations/turns/turn.steps";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
 import { createEventBus } from "@sugabots/core/database/events/bus";
-import { eventPublisher } from "@sugabots/core/database/events/publish";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
 import {
 	agent,
@@ -44,25 +44,23 @@ import { backgroundLayer } from "./runtime.ts";
  */
 const database = await databaseForTests.context();
 const eventStore = await databaseForTests.runPromise(postgresEventStore);
+const bus = createEventBus({ store: eventStore });
 const workflows = ManagedRuntime.make(
-	Lanes.layer([Turn, Facilitate]).pipe(
+	Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer).pipe(
+		Layer.provideMerge(Lanes.layer([Turn, Facilitate])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
+		Layer.merge(EventOutbox.layer(bus)),
 		Layer.provide(Layer.succeedContext(database)),
 	),
 );
-const engine = await workflows.context();
+const services = await workflows.context();
+const { emit, repositories, stores } = await workflows.runPromise(composeConversations);
 
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
-	const bus = createEventBus({ store: eventStore });
-	const lanes = Context.get(engine, Lanes.Service);
-	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
-	const queueTurn = queueTurnInLane(lanes);
-	const { emit, repositories, stores } = composeConversations({
-		publishEvents: eventPublisher(bus),
-		queueTurn,
-		queueFacilitation: queueFacilitationInLane(lanes),
-		signals: turnSignals(workflowEngine),
-		routineRuns: routineRunsInLanes(lanes, workflowEngine),
+	// The Scribe is left out: nothing here runs its workflow.
+	const withoutSummaries = Layer.succeed(TurnRequests.Service, {
+		...Context.get(services, TurnRequests.Service),
+		queueSummary: () => Effect.void,
 	});
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
@@ -88,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 
 	const background = backgroundLayer({ eventStore });
 	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
-		Layer.provideMerge(facilitateSteps({ model, emit, queueTurn })),
+		Layer.provideMerge(facilitateSteps({ model, emit })),
 		Layer.provideMerge(
 			stepsLayer({
 				execution: stores.turns,
@@ -100,10 +98,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 				approvals: stores.approvals,
 				builtInTools: noBuiltInTools,
 				connectionTools: noConnectionTools,
-				queueSummary: () => Effect.void,
+				emit,
 			}),
 		),
-		Layer.provide(Layer.succeedContext(engine)),
+		Layer.provide(withoutSummaries),
+		Layer.provide(Layer.succeedContext(services)),
 	);
 	const runtime = ManagedRuntime.make(
 		Layer.merge(background, workflowLayers).pipe(

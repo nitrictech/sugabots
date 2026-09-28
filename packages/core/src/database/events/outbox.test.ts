@@ -5,20 +5,20 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
 import { closeDatabase, runOnPostgres } from "../testing.ts";
-import { type CommittedEvent, eventPublisher, type PendingEvent } from "./publish.ts";
+import { type CommittedEvent, EventOutbox, type PendingEvent } from "./outbox.ts";
 
 class Abandoned extends Data.TaggedError("Abandoned") {}
 
 /**
- * The two promises `eventPublisher` makes: a row and its delivery stand or
+ * The two promises an `EventOutbox` makes: a row and its delivery stand or
  * fall with the transaction that published them, and a channel's deliveries
  * arrive in the order its transactions committed. Both need a real Postgres,
  * so the file skips without one, as `db/schema.test.ts` does.
  */
 
-describe.skipIf(!process.env.DATABASE_URL)("eventPublisher", () => {
+describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	const bus = { publishCommitted: vi.fn(async (_events: CommittedEvent[]) => {}) };
-	const publish = eventPublisher(bus);
+	const publish = EventOutbox.make(bus).publish;
 	let channel: Channel;
 
 	afterAll(closeDatabase);

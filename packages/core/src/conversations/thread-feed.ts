@@ -3,15 +3,15 @@ export * as ThreadFeed from "./thread-feed.ts";
 import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import { Effect } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
-import type { PendingEvent, PublishEvents } from "../database/events/publish.ts";
+import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
 export const handler =
-	(publishEvents: PublishEvents): DomainEvents.Handler<ConversationEvent> =>
+	(outbox: EventOutbox.Interface): DomainEvents.Handler<ConversationEvent> =>
 	(events) => {
 		const pending = events.flatMap(streamEventsFor);
-		return pending.length === 0 ? Effect.void : publishEvents(pending);
+		return pending.length === 0 ? Effect.void : outbox.publish(pending);
 	};
 
 /**
@@ -71,6 +71,10 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		TurnCancelRequested: ({ threadId, turnId }) => [
 			onThread(threadId, streamEvent("turn.cancel_requested", { threadId, turnId })),
 		],
+		// Watchers see nothing new in these; only routine settlement reacts to them.
+		TurnAbandoned: () => [],
+		LaneReleased: () => [],
+		FacilitationFailed: () => [],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
@@ -93,6 +97,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		],
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
+		CollaborationFailed: (change) => [collaborationUpdated(change)],
 		ThreadSummarised: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
 		RoutineExecutionAccepted: ({ workspaceId, chatId, threadId }) => [
 			routineThreadChanged(workspaceId, chatId, threadId),

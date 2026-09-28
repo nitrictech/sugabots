@@ -1,8 +1,9 @@
+import { Effect } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
-import type { PublishEvents } from "../database/events/publish.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import { chatStore } from "./chats/store.ts";
 import type { ConversationEvent } from "./events.ts";
-import type { RoutineRuns } from "./routines/runs.ts";
+import { RoutineSettlement } from "./routines/settlement.ts";
 import { routineStore } from "./routines/store.ts";
 import { summaryStore } from "./summaries/store.ts";
 import { ThreadFeed } from "./thread-feed.ts";
@@ -11,40 +12,40 @@ import { toolApprovalStore } from "./tools/approvals/store.ts";
 import { toolCallRepository } from "./tools/calls/repository.ts";
 import { collaborationStore } from "./tools/collaborate/store.ts";
 import { turnExecution } from "./turns/execution.ts";
-import type { QueueFacilitation, QueueTurn } from "./turns/queue.ts";
 import { turnRepository } from "./turns/repository.ts";
-import type { TurnSignals } from "./turns/signals.ts";
-
-export interface ConversationDependencies {
-	/** Where the stream events that show clients what happened are recorded. */
-	readonly publishEvents: PublishEvents;
-	readonly queueTurn: QueueTurn;
-	readonly queueFacilitation: QueueFacilitation;
-	readonly signals: TurnSignals;
-	readonly routineRuns: RoutineRuns;
-}
 
 /**
  * The conversation repositories and stores, and the handlers of the domain
- * events they emit, in order.
+ * events they emit, in order: the thread feed tells watching clients what
+ * happened, then routine settlement ends the runs that work finished.
  */
-export function composeConversations(dependencies: ConversationDependencies) {
-	const { publishEvents, queueTurn, queueFacilitation, signals, routineRuns } = dependencies;
-	const emit = DomainEvents.emitTo<ConversationEvent>([ThreadFeed.handler(publishEvents)]);
+export const composeConversations = Effect.gen(function* () {
+	const outbox = yield* EventOutbox.Service;
+	// Settlement acts through the repositories and stores, which emit, so
+	// `emit` hands their events to handlers built after them.
+	const emit: DomainEvents.Emit<ConversationEvent> = (events) => dispatch(events);
 	const toolCalls = toolCallRepository(emit);
 	const turns = turnRepository(emit, toolCalls);
+	const collaborations = yield* collaborationStore(emit);
+	const settlement = yield* RoutineSettlement.make(emit, turns, collaborations);
+	const dispatch = DomainEvents.emitTo<ConversationEvent>([
+		ThreadFeed.handler(outbox),
+		settlement.handler,
+	]);
 	return {
 		/** For recording conversation facts outside the stores, as the facilitator does. */
 		emit,
 		repositories: { turns, toolCalls },
+		/** For the routine workflow's steps. */
+		settlement,
 		stores: {
-			chats: chatStore(emit, queueTurn, queueFacilitation),
-			routines: routineStore(emit, turns, queueTurn, signals, routineRuns),
+			chats: yield* chatStore(emit),
+			routines: yield* routineStore(emit),
 			threads: threadStore(),
-			turns: turnExecution({ turns, emit, queueTurn, queueFacilitation, signals }),
+			turns: yield* turnExecution(turns, emit),
 			summaries: summaryStore(emit, turns),
-			collaborations: collaborationStore(emit, queueTurn),
-			approvals: toolApprovalStore(toolCalls, turns, signals),
+			collaborations,
+			approvals: yield* toolApprovalStore(toolCalls, turns),
 		},
 	};
-}
+});

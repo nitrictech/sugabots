@@ -39,6 +39,7 @@ function fakeStore(answer: () => string | undefined): CollaborationStore {
 		stopWaiting: vi.fn(() => Effect.succeed(answer() === undefined)),
 		readAnswer: vi.fn(() => Effect.succeed(answer())),
 		deliverAnswer: vi.fn(() => Effect.succeed(true)),
+		failUnder: vi.fn(() => Effect.void),
 	};
 }
 
