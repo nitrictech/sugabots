@@ -6,6 +6,7 @@ import {
 	forEachDelta,
 	type ModelAccounting,
 	type ModelRequestFailed,
+	Models,
 	type TurnModel,
 } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
@@ -17,18 +18,18 @@ import { compactionPrompt, MAX_COMPACTION_SUMMARY_CHARACTERS } from "./prompt.ts
 const COMPACTION_TIMEOUT = Duration.minutes(5);
 
 /** The compaction workflow's step, which its activity reaches through `CompactionSteps`. */
-export const stepsLayer = (options: { model: TurnModel }) =>
-	Layer.effect(
-		CompactionSteps,
-		Effect.gen(function* () {
-			const services = yield* Effect.context<
-				Compactions.Service | TurnRepository.Service | Database
-			>();
-			return CompactionSteps.of({
-				compact: (request) => compact(request, options.model).pipe(Effect.provideContext(services)),
-			});
-		}),
-	);
+export const stepsLayer = Layer.effect(
+	CompactionSteps,
+	Effect.gen(function* () {
+		const model = yield* Models;
+		const services = yield* Effect.context<
+			Compactions.Service | TurnRepository.Service | Database
+		>();
+		return CompactionSteps.of({
+			compact: (request) => compact(request, model).pipe(Effect.provideContext(services)),
+		});
+	}),
+);
 
 /**
  * Prepares, generates and records one compaction. Nothing to do is not an

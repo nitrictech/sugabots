@@ -1,10 +1,5 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { stepsLayer as compactionSteps } from "@sugabots/core/conversations/compaction/compaction.steps";
-import {
-	Compaction,
-	compactionWorkflow,
-} from "@sugabots/core/conversations/compaction/compaction.workflow";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
@@ -94,87 +89,6 @@ const WorkspacesAndProviders = Layer.mergeAll(
 const ConversationServices = Conversations.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
 );
-
-	// One model client for turns, summaries, compactions, facilitation, trials and settings.
-	const model = yield* Models;
-	// The conversations, over what they are composed from: how they start and
-	// signal durable workflows, on the engine WORKFLOW_ENGINE names, and where
-	// their stream events are recorded.
-	const conversations = yield* Layer.build(
-		Conversations.layer.pipe(
-			Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
-			Layer.provideMerge(Lanes.layer([Summary, Compaction, Turn, Facilitate, Routine])),
-			Layer.provideMerge(Workflows.engine),
-			Layer.provideMerge(EventOutbox.layer(bus)),
-		),
-	);
-	// A search goes to the workspace's own provider, so its client is bound to
-	// that address like a model provider's.
-	const builtInTools = builtInToolsFor({
-		fetchPage: pageFetcher({ fetch: egress.webFetch }),
-		searchProviders: yield* SearchProviderRepository.Service,
-		httpClients,
-	});
-
-	// A connection's session is bound to its own address the same way. One signed
-	// in with OAuth carries the tokens its row holds.
-	const connectionTools = connectionToolsFor({
-		connections: yield* ConnectionRepository.Service,
-		httpClients,
-		oauth: { clients: (yield* ConnectionSignIn.Service).clients, fetch: egress.oauth },
-	});
-
-	// Summaries, turns, facilitation and routine runs are workflows.
-	yield* Layer.build(
-		Layer.mergeAll(
-			summaryWorkflow.layer,
-			compactionWorkflow.layer,
-			turnWorkflow.layer,
-			facilitateWorkflow.layer,
-			routineWorkflow.layer,
-			Lanes.reconcileLayer,
-		).pipe(
-			Layer.provideMerge(summarySteps({ model })),
-			Layer.provideMerge(compactionSteps({ model })),
-			Layer.provideMerge(routineSteps),
-			Layer.provideMerge(facilitateSteps({ model })),
-			Layer.provideMerge(turnSteps({ model, events: bus, builtInTools, connectionTools })),
-			Layer.provide(Layer.succeedContext(conversations)),
-		),
-	);
-
-	yield* Layer.build(seedEveryWorkspaceLayer);
-	yield* Layer.build(
-		backgroundLayer(eventStore).pipe(Layer.provide(Layer.succeedContext(conversations))),
-	);
-	const api = apiLayer({
-		authentication,
-		installation,
-		events: {
-			bus,
-			access: channelAccess(yield* Authorization.Service, yield* Visibility.Service),
-		},
-	}).pipe(Layer.provide(Layer.succeedContext(conversations)));
-	const server = yield* Layer.build(
-		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
-			Layer.provide(requestSpanNames),
-			Layer.provideMerge(
-				NodeHttpServer.layerConfig(createServer, {
-					port: Config.Port("PORT").pipe(Config.withDefault(3000)),
-					gracefulShutdownTimeout: Config.succeed(SHUTDOWN_GRACE),
-				}),
-			),
-		),
-	);
-	// Added after the server so the event streams end before it closes. Each one
-	// holds a socket open for as long as its browser is there, and closing the
-	// server first would wait on clients that never hang up.
-	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
-	yield* HttpServer.addressFormattedWith((address) =>
-		Effect.sync(() => console.log(`sugabots ${VERSION} listening on ${address}`)),
-	).pipe(Effect.provide(server));
-	return yield* Effect.never;
-});
 
 /**
  * What runs without a request: the workflows, the routine scheduler, the

@@ -37,12 +37,6 @@ import { Workflows } from "./workflows.ts";
  * not when the wait expires.
  */
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
-	// The Scribe is left out: nothing here runs its workflow.
-	const withoutSummaries = Layer.succeed(TurnRequests.Service, {
-		...Context.get(services, TurnRequests.Service),
-		queueSummary: () => Effect.void,
-		queueCompaction: () => Effect.void,
-	});
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
 		stream: (input) =>
