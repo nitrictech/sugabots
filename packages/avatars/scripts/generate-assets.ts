@@ -4,6 +4,10 @@
  *
  * - assets/bot-crowd.svg: the loose row of faces in src/bot-crowd.ts.
  * - assets/sugabots-logo.svg: the mark in src/sugabots-logo.ts.
+ * - assets/sugabots-wordmark-light.svg and assets/sugabots-wordmark-dark.svg:
+ *   the mark beside "Sugabots" in Rubik ExtraBold, as the website's header
+ *   draws it, for light and dark backgrounds. The letters are outlined into
+ *   paths because places like GitHub READMEs cannot load web fonts.
  *
  * The palette in src/bot-colors.ts is hex already, which every SVG renderer
  * supports, so it is written as it is.
@@ -11,7 +15,8 @@
  * Run with `bun run --cwd packages/avatars generate:assets` after changing the
  * faces, the colours, the crowd or the logo.
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import opentype from "opentype.js";
 import { botColors } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
 import type { BotLook } from "../src/bot-face.tsx";
@@ -77,7 +82,7 @@ const LOGO_RADIUS_PX = 14;
 const LOGO_PADDING_PX = 6;
 const LOGO_GAP_PX = 2;
 
-function writeSugabotsLogo() {
+function sugabotsLogoElements(): string {
 	const dotPx = (LOGO_PX - LOGO_PADDING_PX * 2 - LOGO_GAP_PX) / 2;
 	const radius = dotPx / 2;
 	const centre = (cell: number) => LOGO_PADDING_PX + cell * (dotPx + LOGO_GAP_PX) + radius;
@@ -88,8 +93,70 @@ function writeSugabotsLogo() {
 	// The tint's eye colour: solid and dark, so the dots stand out on light and dark backgrounds.
 	const tile = botColors[sugabotsLogo.tint].eyes;
 	const background = `<rect width="${LOGO_PX}" height="${LOGO_PX}" rx="${LOGO_RADIUS_PX}" fill="${tile}"/>`;
-	writeAsset("sugabots-logo.svg", LOGO_PX, LOGO_PX, background + dots.join(""));
+	return background + dots.join("");
+}
+
+/*
+ * The website header's lockup (a 32px mark, an 8px gap and 20px text) scaled
+ * so the mark keeps its native 40px.
+ */
+const WORDMARK_SCALE = LOGO_PX / 32;
+const WORDMARK_GAP_PX = 8 * WORDMARK_SCALE;
+const WORDMARK_FONT_PX = 20 * WORDMARK_SCALE;
+/** Tailwind's `tracking-tight`, in em. */
+const WORDMARK_LETTER_SPACING_EM = -0.025;
+/** The website's `--foreground`: zinc-900 on light backgrounds, zinc-100 on dark ones. */
+const WORDMARK_TEXT_HEX = { light: "#18181b", dark: "#f4f4f5" };
+
+/**
+ * Outlines unshaped Latin text, applying the font's kerning and the wordmark's
+ * letter spacing. opentype.js's own layout rejects one of Rubik's substitution
+ * tables, and these letters need no substitutions.
+ */
+function latinTextPath(
+	font: opentype.Font,
+	text: string,
+	x: number,
+	baselineY: number,
+): opentype.Path {
+	const pxPerUnit = WORDMARK_FONT_PX / font.unitsPerEm;
+	const letterSpacingPx = WORDMARK_LETTER_SPACING_EM * WORDMARK_FONT_PX;
+	const glyphs = [...text].map((character) => font.charToGlyph(character));
+	const path = new opentype.Path();
+	let penX = x;
+	glyphs.forEach((glyph, index) => {
+		path.extend(glyph.getPath(penX, baselineY, WORDMARK_FONT_PX));
+		const next = glyphs[index + 1];
+		const kerningUnits = next ? font.getKerningValue(glyph, next) : 0;
+		penX += ((glyph.advanceWidth ?? 0) + kerningUnits) * pxPerUnit + letterSpacingPx;
+	});
+	return path;
+}
+
+function writeSugabotsWordmark() {
+	// opentype.js reads WOFF but not WOFF2.
+	const fontPath = new URL(
+		import.meta.resolve("@fontsource/rubik/files/rubik-latin-800-normal.woff"),
+	);
+	const fontFile = readFileSync(fontPath);
+	const font = opentype.parse(
+		fontFile.buffer.slice(fontFile.byteOffset, fontFile.byteOffset + fontFile.byteLength),
+	);
+	const text = "Sugabots";
+	const pxPerUnit = WORDMARK_FONT_PX / font.unitsPerEm;
+	// Centre the font's line box on the mark, as the header's flex row does.
+	const lineHeightPx = (font.ascender - font.descender) * pxPerUnit;
+	const baselineY = (LOGO_PX - lineHeightPx) / 2 + font.ascender * pxPerUnit;
+	const textX = LOGO_PX + WORDMARK_GAP_PX;
+	const path = latinTextPath(font, text, textX, baselineY);
+	const width = Math.ceil(path.getBoundingBox().x2);
+	const letters = path.toPathData(2);
+	for (const [scheme, textHex] of Object.entries(WORDMARK_TEXT_HEX)) {
+		const content = `${sugabotsLogoElements()}<path d="${letters}" fill="${textHex}"/>`;
+		writeAsset(`sugabots-wordmark-${scheme}.svg`, width, LOGO_PX, content);
+	}
 }
 
 writeBotCrowd();
-writeSugabotsLogo();
+writeAsset("sugabots-logo.svg", LOGO_PX, LOGO_PX, sugabotsLogoElements());
+writeSugabotsWordmark();
