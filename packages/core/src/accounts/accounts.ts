@@ -4,6 +4,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { Config, Context, Data, Effect, Layer } from "effect";
 import { Database, layer as databaseLayer, query } from "../database/database.ts";
 import { user, workspaceInvite } from "../database/schema.ts";
+import { type UserFacing, UserMessage } from "../user-message.ts";
 
 /** Who may have an account here. */
 export interface Interface {
@@ -39,9 +40,9 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(databaseLayer));
 
-export class SignUpClosed extends Data.TaggedError("SignUpClosed") {
-	override get message() {
-		return "Signups are invite only. Ask a member to invite you.";
+export class SignUpClosed extends Data.TaggedError("SignUpClosed") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`Signups are invite only. Ask a member to invite you.`;
 	}
 }
 

@@ -82,7 +82,10 @@ export const make = Effect.gen(function* () {
 							Effect.mapError(
 								accounts.admit(creating.email),
 								(closed) =>
-									new APIError("FORBIDDEN", { code: "SIGN_UP_CLOSED", message: closed.message }),
+									new APIError("FORBIDDEN", {
+										code: "SIGN_UP_CLOSED",
+										message: closed.userMessage,
+									}),
 							),
 						);
 					},

@@ -21,7 +21,10 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(
 			stepsLayer({
 				store,
-				model: { stream: () => Effect.fail(new ModelRequestFailed({ message: "unused" })) },
+				model: {
+					stream: () =>
+						Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
+				},
 			}),
 		),
 		Layer.provideMerge(Lanes.layer([Summary])),

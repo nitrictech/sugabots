@@ -77,7 +77,9 @@ describe("trying a model on the facilitator", () => {
 
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
-			scripted(() => new ModelRequestFailed({ message: "provider unavailable" })),
+			scripted(
+				() => new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+			),
 			"facilitate",
 		);
 

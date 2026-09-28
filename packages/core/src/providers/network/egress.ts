@@ -2,7 +2,7 @@ export * as Egress from "./egress.ts";
 
 import { lookup as nodeLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
-import { Config, Context, Effect, Layer } from "effect";
+import { Config, Context, Data, Effect, Layer } from "effect";
 import {
 	Agent,
 	type Dispatcher,
@@ -10,6 +10,7 @@ import {
 	fetch as undiciFetch,
 } from "undici";
 import { Installation } from "../../installation/installation.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 
 /** The clients the API reaches the outside world with, each under this installation's egress policy. */
 export interface Interface {
@@ -240,6 +241,45 @@ export function createEgressHttpClients(options: EgressOptions = {}): ClosableEg
 	};
 }
 
+/**
+ * The network policy refused a request before it was sent. Its `userMessage`
+ * is also fit for a model whose tool asked for the address.
+ */
+export class EgressRefused
+	extends Data.TaggedError("EgressRefused")<{ readonly reason: EgressRefusal }>
+	implements UserFacing
+{
+	override get message() {
+		return `Egress refused: ${this.userMessage}`;
+	}
+	get userMessage() {
+		return EGRESS_REFUSAL_USER_MESSAGES[this.reason];
+	}
+}
+
+type EgressRefusal =
+	| "outsideBaseUrl"
+	| "unresolved"
+	| "invalidAddress"
+	| "privateNetwork"
+	| "invalidUrl"
+	| "notHttp"
+	| "credentials"
+	| "fragment"
+	| "notHttps";
+
+const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserMessage> = {
+	outsideBaseUrl: UserMessage.of`That address is outside the provider's configured URL`,
+	unresolved: UserMessage.of`Hostname did not resolve`,
+	invalidAddress: UserMessage.of`Hostname resolved to an invalid address`,
+	privateNetwork: UserMessage.of`Address is on a private or reserved network`,
+	invalidUrl: UserMessage.of`URL is invalid`,
+	notHttp: UserMessage.of`URL must use HTTP or HTTPS`,
+	credentials: UserMessage.of`URL must not include credentials`,
+	fragment: UserMessage.of`URL must not include a fragment`,
+	notHttps: UserMessage.of`URL must use HTTPS`,
+};
+
 function requireUrlUnderBase(value: string, baseUrl: string) {
 	const base = egressUrl(baseUrl, { allowHttp: true });
 	const requested = egressUrl(value, { allowHttp: true });
@@ -248,7 +288,7 @@ function requireUrlUnderBase(value: string, baseUrl: string) {
 		requested.origin !== base.origin ||
 		(requested.pathname !== base.pathname && !requested.pathname.startsWith(path))
 	) {
-		throw new Error("Request left the client's base URL");
+		throw new EgressRefused({ reason: "outsideBaseUrl" });
 	}
 }
 
@@ -280,16 +320,16 @@ async function safeAddresses(
 	const addresses = addressFamily
 		? [{ address: hostname, family: addressFamily }]
 		: await lookup(hostname);
-	if (addresses.length === 0) throw new Error("Hostname did not resolve");
+	if (addresses.length === 0) throw new EgressRefused({ reason: "unresolved" });
 	return addresses.map(({ address, family }) => {
 		if (isIP(address) !== family || (family !== 4 && family !== 6)) {
-			throw new Error("Hostname resolved to an invalid address");
+			throw new EgressRefused({ reason: "invalidAddress" });
 		}
 		const blocked =
 			family === 4
 				? blockedIpv4Addresses.check(address, "ipv4")
 				: blockedIpv6Addresses.check(address, "ipv6");
-		if (blocked) throw new Error("Address is on a private or reserved network");
+		if (blocked) throw new EgressRefused({ reason: "privateNetwork" });
 		return { address, family };
 	});
 }
@@ -353,14 +393,14 @@ export function egressUrl(value: string, { allowHttp = false }: { allowHttp?: bo
 	try {
 		url = new URL(value);
 	} catch {
-		throw new Error("URL is invalid");
+		throw new EgressRefused({ reason: "invalidUrl" });
 	}
 	if (url.protocol !== "https:" && url.protocol !== "http:") {
-		throw new Error("URL must use HTTP or HTTPS");
+		throw new EgressRefused({ reason: "notHttp" });
 	}
-	if (url.username || url.password) throw new Error("URL must not include credentials");
-	if (url.hash) throw new Error("URL must not include a fragment");
-	if (url.protocol === "http:" && !allowHttp) throw new Error("URL must use HTTPS");
+	if (url.username || url.password) throw new EgressRefused({ reason: "credentials" });
+	if (url.hash) throw new EgressRefused({ reason: "fragment" });
+	if (url.protocol === "http:" && !allowHttp) throw new EgressRefused({ reason: "notHttps" });
 	return url;
 }
 

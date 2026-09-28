@@ -80,7 +80,10 @@ export function createTestApp(options: TestAppOptions): TestApp {
 			stream: options.events?.stream,
 		},
 		model: options.model ?? {
-			stream: () => Effect.fail(new ModelRequestFailed({ message: "This test app has no model" })),
+			stream: () =>
+				Effect.fail(
+					new ModelRequestFailed({ message: "This test app has no model", reason: "unavailable" }),
+				),
 		},
 		httpClients: options.httpClients ?? {
 			for: () => async () => new Response(null, { status: 503 }),

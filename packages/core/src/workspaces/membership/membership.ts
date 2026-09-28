@@ -26,6 +26,7 @@ import { user, workspace, workspaceInvite, workspaceMember } from "../../databas
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
 import { provisionDefaultSearchProvider } from "../../providers/search-providers/store.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type AuthorizationDenied, authorization, ResourceHidden } from "../access.ts";
 import { ensureSystemAgents } from "../agents/system-agents.ts";
 import { provisionPersonalPod } from "../pods/store.ts";
@@ -488,46 +489,49 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([databaseLayer, Installation.layer, Email.layer, Accounts.layer]),
 );
 
-export class SlugTaken extends Data.TaggedError("SlugTaken") {
-	override get message() {
-		return "That address is taken by another workspace";
+export class SlugTaken extends Data.TaggedError("SlugTaken") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`That address is taken by another workspace`;
 	}
 }
 
 /** The API reads a UUID-shaped workspace reference as an id, so such a slug would be unreachable. */
-export class SlugShapedLikeUuid extends Data.TaggedError("SlugShapedLikeUuid") {
-	override get message() {
-		return "A workspace address cannot be shaped like a UUID";
+export class SlugShapedLikeUuid
+	extends Data.TaggedError("SlugShapedLikeUuid")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`A workspace address cannot be shaped like a UUID`;
 	}
 }
 
-export class LastAdministrator extends Data.TaggedError("LastAdministrator") {
-	override get message() {
-		return "A workspace needs at least one administrator";
+export class LastAdministrator extends Data.TaggedError("LastAdministrator") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`A workspace needs at least one administrator`;
 	}
 }
 
-export class AlreadyMember extends Data.TaggedError("AlreadyMember") {
-	override get message() {
-		return "They are already in this workspace";
+export class AlreadyMember extends Data.TaggedError("AlreadyMember") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`They are already in this workspace`;
 	}
 }
 
-export class AlreadyInvited extends Data.TaggedError("AlreadyInvited") {
-	override get message() {
-		return "They have already been invited";
+export class AlreadyInvited extends Data.TaggedError("AlreadyInvited") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`They have already been invited`;
 	}
 }
 
-export class NotTheInvitee extends Data.TaggedError("NotTheInvitee") {
-	override get message() {
-		return "This invitation was sent to a different address";
+export class NotTheInvitee extends Data.TaggedError("NotTheInvitee") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`This invitation was sent to a different address`;
 	}
 }
 
-export class EmailUnverified extends Data.TaggedError("EmailUnverified") {
-	override get message() {
-		return "Verify your email address before accepting this invitation";
+export class EmailUnverified extends Data.TaggedError("EmailUnverified") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`Verify your email address before accepting this invitation`;
 	}
 }
 

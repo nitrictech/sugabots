@@ -7,24 +7,34 @@ import { searchProviderPreset } from "@sugabots/contracts";
 import { Data, Effect } from "effect";
 import { searchBackend, searchEndpoint } from "../../conversations/tools/web-search/backends.ts";
 import type { Database } from "../../database/database.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { EgressHttpClients, EgressUrlValidator } from "../network/egress.ts";
 import type { SearchProviderStore } from "./store.ts";
 
-export class SearchProviderNotFound extends Data.TaggedError("SearchProviderNotFound") {
-	override get message() {
-		return "This workspace has no search provider";
+export class SearchProviderNotFound
+	extends Data.TaggedError("SearchProviderNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This workspace has no search provider`;
 	}
 }
 
-export class SearchProviderUrlNotAllowed extends Data.TaggedError("SearchProviderUrlNotAllowed") {
-	override get message() {
-		return "Search provider URL is not allowed by the network policy";
+export class SearchProviderUrlNotAllowed
+	extends Data.TaggedError("SearchProviderUrlNotAllowed")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Search provider URL is not allowed by the network policy`;
 	}
 }
 
-export class SearchProviderApiKeyRequired extends Data.TaggedError("SearchProviderApiKeyRequired") {
-	override get message() {
-		return "Add an API key before enabling search";
+export class SearchProviderApiKeyRequired
+	extends Data.TaggedError("SearchProviderApiKeyRequired")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Add an API key before enabling search`;
 	}
 }
 

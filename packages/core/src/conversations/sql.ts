@@ -30,6 +30,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
+import type { UserMessage } from "../user-message.ts";
 import { agent, pod, user, workspace } from "../workspaces/sql.ts";
 
 export const routine = pgTable(
@@ -197,9 +198,9 @@ export const routineExecution = pgTable(
 		routineName: text("routine_name").notNull(),
 		instructions: text("instructions").notNull(),
 		state: text("state").$type<RoutineExecutionState>().notNull().default("queued"),
-		error: text("error"),
+		error: text("error").$type<UserMessage>(),
 		pendingTerminalState: text("pending_terminal_state").$type<"failed" | "cancelled">(),
-		pendingTerminalError: text("pending_terminal_error"),
+		pendingTerminalError: text("pending_terminal_error").$type<UserMessage>(),
 		acceptedAt: stamp("accepted_at"),
 		startedAt: timestamp("started_at", { withTimezone: true }),
 		finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -342,7 +343,7 @@ export const turn = pgTable(
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
 		// Why this agent got the turn, for reading a routing decision back later.
 		reason: text("reason").$type<TurnReason>(),
-		error: text("error"),
+		error: text("error").$type<UserMessage>(),
 		startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
 		finishedAt: timestamp("finished_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
@@ -480,7 +481,7 @@ export const toolCall = pgTable(
 		input: jsonb("input").$type<JsonValue>().notNull(),
 		output: jsonb("output").$type<JsonValue>(),
 		status: text("status").$type<ToolCallStatus>().notNull().default("running"),
-		error: text("error"),
+		error: text("error").$type<UserMessage>(),
 		/** Whether the tool may have changed something at the other end (ADR 002). */
 		mutating: boolean("mutating").notNull().default(false),
 		/** Where in the reply's text the call was made. */

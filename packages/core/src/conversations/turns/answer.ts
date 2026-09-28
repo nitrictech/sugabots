@@ -1,4 +1,5 @@
 import { Data, Duration, Effect, Schedule } from "effect";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 
 /**
  * Asking a model for an answer in a particular shape, and dealing with the
@@ -17,18 +18,33 @@ import { Data, Duration, Effect, Schedule } from "effect";
  */
 
 /** The model answered, but not in a shape we can use. */
-export class UnusableAnswer extends Data.TaggedError("UnusableAnswer")<{
-	readonly reason: string;
-}> {
+export class UnusableAnswer
+	extends Data.TaggedError("UnusableAnswer")<{
+		/** What was wrong with the answer. */
+		readonly reason: string;
+	}>
+	implements UserFacing
+{
 	override get message() {
 		return this.reason;
+	}
+	get userMessage() {
+		return UserMessage.of`The model's answer could not be used.`;
 	}
 }
 
 /** The model did not finish answering within the time allowed. */
-export class AnswerTimedOut extends Data.TaggedError("AnswerTimedOut")<{
-	readonly message: string;
-}> {}
+export class AnswerTimedOut
+	extends Data.TaggedError("AnswerTimedOut")<{
+		/** Which answer, and the limit it ran past. */
+		readonly message: string;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`The model did not answer in time.`;
+	}
+}
 
 /**
  * Three attempts, a moment apart.

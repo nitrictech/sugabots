@@ -1,13 +1,45 @@
 import { CronExpressionParser } from "cron-parser";
 import { Data, Effect } from "effect";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 
-export class InvalidRoutineSchedule extends Data.TaggedError("InvalidRoutineSchedule")<{
-	readonly detail: string;
-}> {
+/** A schedule that cannot run. People are told what to fix in our words, not the cron parser's. */
+export class InvalidRoutineSchedule
+	extends Data.TaggedError("InvalidRoutineSchedule")<{
+		readonly reason: ScheduleProblem;
+		/** What the cron parser threw, when it refused the expression. */
+		readonly cause?: unknown;
+	}>
+	implements UserFacing
+{
 	override get message() {
-		return this.detail;
+		return `Invalid routine schedule: ${this.reason}`;
+	}
+	get userMessage() {
+		return SCHEDULE_PROBLEM_USER_MESSAGES[this.reason];
 	}
 }
+
+type ScheduleProblem = "notFiveFields" | "unknownTimeZone" | "unparseable";
+
+const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserMessage> = {
+	notFiveFields: UserMessage.of`Use a five-field cron expression`,
+	unknownTimeZone: UserMessage.of`That time zone is not recognised`,
+	unparseable: UserMessage.of`That cron expression is invalid`,
+};
+
+function requireRunnable(expression: string, timezone: string) {
+	if (expression.trim().split(/\s+/).length !== 5) {
+		throw new InvalidRoutineSchedule({ reason: "notFiveFields" });
+	}
+	if (!Intl.supportedValuesOf("timeZone").includes(timezone) && timezone !== "UTC") {
+		throw new InvalidRoutineSchedule({ reason: "unknownTimeZone" });
+	}
+}
+
+const unparseable = (cause: unknown) =>
+	cause instanceof InvalidRoutineSchedule
+		? cause
+		: new InvalidRoutineSchedule({ reason: "unparseable", cause });
 
 export function upcomingOccurrences(
 	expression: string,
@@ -17,20 +49,14 @@ export function upcomingOccurrences(
 ): Effect.Effect<Date[], InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
-			if (expression.trim().split(/\s+/).length !== 5) {
-				throw new Error("Use a five-field cron expression");
-			}
-			new Intl.DateTimeFormat("en", { timeZone: timezone }).format(from);
+			requireRunnable(expression, timezone);
 			const interval = CronExpressionParser.parse(expression, {
 				currentDate: from,
 				tz: timezone,
 			});
 			return Array.from({ length: count }, () => interval.next().toDate());
 		},
-		catch: (cause) =>
-			new InvalidRoutineSchedule({
-				detail: cause instanceof Error ? cause.message : "That schedule is invalid",
-			}),
+		catch: unparseable,
 	});
 }
 
@@ -47,10 +73,7 @@ export function latestMissedAndNextOccurrence(
 ): Effect.Effect<{ latest: Date; next: Date }, InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
-			if (expression.trim().split(/\s+/).length !== 5) {
-				throw new Error("Use a five-field cron expression");
-			}
-			new Intl.DateTimeFormat("en", { timeZone: timezone }).format(now);
+			requireRunnable(expression, timezone);
 			const latest = CronExpressionParser.parse(expression, {
 				currentDate: new Date(now.getTime() + 1),
 				tz: timezone,
@@ -62,9 +85,6 @@ export function latestMissedAndNextOccurrence(
 				.toDate();
 			return { latest, next };
 		},
-		catch: (cause) =>
-			new InvalidRoutineSchedule({
-				detail: cause instanceof Error ? cause.message : "That schedule is invalid",
-			}),
+		catch: unparseable,
 	});
 }

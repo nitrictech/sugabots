@@ -53,6 +53,5 @@ export function threadRoutes({ threads, turns }: ThreadRoutesOptions) {
 }
 
 const threadErrors = {
-	InvalidThreadHistoryCursor: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
+	InvalidThreadHistoryCursor: BadRequest,
 };

@@ -9,78 +9,96 @@ import { Data, Effect } from "effect";
 import type { TurnModel } from "../../conversations/turns/model.ts";
 import { probeModel } from "../../conversations/turns/model.ts";
 import type { Database } from "../../database/database.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { EgressHttpClients, EgressUrlValidator } from "../network/egress.ts";
 import { fetchProviderModels, testProvider } from "./remote.ts";
 import type { ModelProviderStore } from "./store.ts";
 
-export class ModelProviderNotFound extends Data.TaggedError("ModelProviderNotFound") {
-	override get message() {
-		return "No such model provider";
+export class ModelProviderNotFound
+	extends Data.TaggedError("ModelProviderNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`No such model provider`;
 	}
 }
 
-export class ModelProviderUrlNotAllowed extends Data.TaggedError("ModelProviderUrlNotAllowed") {
-	override get message() {
-		return "Provider URL is not allowed by the network policy";
+export class ModelProviderUrlNotAllowed
+	extends Data.TaggedError("ModelProviderUrlNotAllowed")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Provider URL is not allowed by the network policy`;
 	}
 }
 
-export class ProviderModelsRequireApiKey extends Data.TaggedError("ProviderModelsRequireApiKey") {
-	override get message() {
-		return "Add an API key before managing models";
+export class ProviderModelsRequireApiKey
+	extends Data.TaggedError("ProviderModelsRequireApiKey")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Add an API key before managing models`;
 	}
 }
 
-export class ProviderActivationRequiresApiKey extends Data.TaggedError(
-	"ProviderActivationRequiresApiKey",
-) {
-	override get message() {
-		return "Add an API key before activating this provider";
+export class ProviderActivationRequiresApiKey
+	extends Data.TaggedError("ProviderActivationRequiresApiKey")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Add an API key before activating this provider`;
 	}
 }
 
-export class ModelProviderRemovalNotAllowed extends Data.TaggedError(
-	"ModelProviderRemovalNotAllowed",
-) {
-	override get message() {
-		return "Only custom providers can be removed";
+export class ModelProviderRemovalNotAllowed
+	extends Data.TaggedError("ModelProviderRemovalNotAllowed")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Only custom providers can be removed`;
 	}
 }
 
-export class ProviderModelAlreadyConfigured extends Data.TaggedError(
-	"ProviderModelAlreadyConfigured",
-) {
-	override get message() {
-		return "That model is already configured in this workspace";
+export class ProviderModelAlreadyConfigured
+	extends Data.TaggedError("ProviderModelAlreadyConfigured")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That model is already configured in this workspace`;
 	}
 }
 
-export class FetchedModelCapabilitiesImmutable extends Data.TaggedError(
-	"FetchedModelCapabilitiesImmutable",
-) {
-	override get message() {
-		return "The provider says what this model can do; switch capabilities off instead";
+export class FetchedModelCapabilitiesImmutable
+	extends Data.TaggedError("FetchedModelCapabilitiesImmutable")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`The provider says what this model can do; switch capabilities off instead`;
 	}
 }
 
-export class ProviderModelNotFound extends Data.TaggedError("ProviderModelNotFound") {
-	override get message() {
-		return "No such provider model";
+export class ProviderModelNotFound
+	extends Data.TaggedError("ProviderModelNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`No such provider model`;
 	}
 }
 
-export class ProviderModelRemovalNotAllowed extends Data.TaggedError(
-	"ProviderModelRemovalNotAllowed",
-) {
-	override get message() {
-		return "Only manually added models can be removed";
+export class ProviderModelRemovalNotAllowed
+	extends Data.TaggedError("ProviderModelRemovalNotAllowed")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Only manually added models can be removed`;
 	}
 }
 
 export interface ProviderTestOutcome {
 	reachable: boolean;
 	latencyMs: number;
-	error?: string;
+	error?: UserMessage;
 }
 
 export function modelProviderOperations({
@@ -141,7 +159,7 @@ export function modelProviderOperations({
 				return { ...listed, latencyMs: listed.latencyMs + (Date.now() - started) };
 			}
 
-			const error = `${enabled.modelId}: ${answered.failure.message}`;
+			const error = UserMessage.of`${UserMessage.unchecked(enabled.modelId)}: ${answered.failure.userMessage}`;
 			if (connection) {
 				yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
 					error,

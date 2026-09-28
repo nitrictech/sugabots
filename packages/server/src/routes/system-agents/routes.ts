@@ -2,10 +2,7 @@ import { systemAgentKeySchema } from "@sugabots/contracts";
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
 import { AgentModelNotEnabled } from "@sugabots/core/workspaces/agents/operations";
-import type {
-	SystemAgentMissing,
-	SystemAgentStore,
-} from "@sugabots/core/workspaces/agents/system-agent-store";
+import type { SystemAgentStore } from "@sugabots/core/workspaces/agents/system-agent-store";
 import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
@@ -56,7 +53,6 @@ export function systemAgentRoutes({ systemAgents, modelProviders }: SystemAgentR
 }
 
 const systemAgentErrors = {
-	AgentModelNotEnabled: (failure: AgentModelNotEnabled) =>
-		new BadRequest({ message: failure.message }),
-	SystemAgentMissing: (failure: SystemAgentMissing) => new NotFound({ message: failure.message }),
+	AgentModelNotEnabled: BadRequest,
+	SystemAgentMissing: NotFound,
 };

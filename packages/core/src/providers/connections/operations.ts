@@ -1,6 +1,7 @@
 import type { ConnectionTestResult, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
 import { Data, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { Authorization } from "../../workspaces/access.ts";
 import type { EgressHttpClient, EgressHttpClients, EgressUrlValidator } from "../network/egress.ts";
 import { listServerTools, type ServerTarget } from "./mcp.ts";
@@ -12,35 +13,51 @@ import type {
 } from "./oauth.ts";
 import type { ConnectionStore } from "./store.ts";
 
-export class ConnectionNotFound extends Data.TaggedError("ConnectionNotFound") {
-	override get message() {
-		return "No such connection";
+export class ConnectionNotFound
+	extends Data.TaggedError("ConnectionNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`No such connection`;
 	}
 }
 
-export class ConnectionUrlNotAllowed extends Data.TaggedError("ConnectionUrlNotAllowed") {
-	override get message() {
-		return "Connection URL is not allowed by the network policy";
+export class ConnectionUrlNotAllowed
+	extends Data.TaggedError("ConnectionUrlNotAllowed")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Connection URL is not allowed by the network policy`;
 	}
 }
 
-export class ConnectionOAuthStartFailed extends Data.TaggedError("ConnectionOAuthStartFailed")<{
-	readonly reason: string;
-}> {
+export class ConnectionOAuthStartFailed
+	extends Data.TaggedError("ConnectionOAuthStartFailed")<{ readonly reason: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `Could not start signing in: ${this.reason}`;
 	}
-}
-
-export class ConnectionDoesNotUseOAuth extends Data.TaggedError("ConnectionDoesNotUseOAuth") {
-	override get message() {
-		return "This connection uses a secret, not OAuth";
+	get userMessage() {
+		return UserMessage.of`Could not start signing in`;
 	}
 }
 
-export class ConnectionNeededNoSignIn extends Data.TaggedError("ConnectionNeededNoSignIn") {
-	override get message() {
-		return "The server needed no sign-in";
+export class ConnectionDoesNotUseOAuth
+	extends Data.TaggedError("ConnectionDoesNotUseOAuth")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This connection uses a secret, not OAuth`;
+	}
+}
+
+export class ConnectionNeededNoSignIn
+	extends Data.TaggedError("ConnectionNeededNoSignIn")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`The server needed no sign-in`;
 	}
 }
 

@@ -108,24 +108,14 @@ export function modelProviderRoutes({
 }
 
 const providerErrors = {
-	ModelProviderNameConflict: (failure: { message: string }) =>
-		new Conflict({ message: failure.message }),
-	ModelProviderNotFound: (failure: { message: string }) =>
-		new NotFound({ message: failure.message }),
-	ModelProviderUrlNotAllowed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ProviderModelsRequireApiKey: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ProviderActivationRequiresApiKey: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ModelProviderRemovalNotAllowed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ProviderModelAlreadyConfigured: (failure: { message: string }) =>
-		new Conflict({ message: failure.message }),
-	FetchedModelCapabilitiesImmutable: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ProviderModelNotFound: (failure: { message: string }) =>
-		new NotFound({ message: failure.message }),
-	ProviderModelRemovalNotAllowed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
+	ModelProviderNameConflict: Conflict,
+	ModelProviderNotFound: NotFound,
+	ModelProviderUrlNotAllowed: BadRequest,
+	ProviderModelsRequireApiKey: BadRequest,
+	ProviderActivationRequiresApiKey: BadRequest,
+	ModelProviderRemovalNotAllowed: BadRequest,
+	ProviderModelAlreadyConfigured: Conflict,
+	FetchedModelCapabilitiesImmutable: BadRequest,
+	ProviderModelNotFound: NotFound,
+	ProviderModelRemovalNotAllowed: BadRequest,
 };

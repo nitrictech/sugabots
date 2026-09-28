@@ -1,25 +1,30 @@
 import type { AgentUpdate, NewAgent } from "@sugabots/contracts";
 import { Data, Effect } from "effect";
 import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { AgentStore } from "./store.ts";
 
-export class AgentModelNotEnabled extends Data.TaggedError("AgentModelNotEnabled")<{
-	readonly model: string;
-}> {
+export class AgentModelNotEnabled
+	extends Data.TaggedError("AgentModelNotEnabled")<{ readonly model: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `This workspace does not offer the model "${this.model}"`;
 	}
-}
-
-export class EmptyAgentUpdate extends Data.TaggedError("EmptyAgentUpdate") {
-	override get message() {
-		return "Nothing to change";
+	get userMessage() {
+		return UserMessage.of`This workspace does not offer that model`;
 	}
 }
 
-export class AgentNotFound extends Data.TaggedError("AgentNotFound") {
-	override get message() {
-		return "No such agent";
+export class EmptyAgentUpdate extends Data.TaggedError("EmptyAgentUpdate") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`Nothing to change`;
+	}
+}
+
+export class AgentNotFound extends Data.TaggedError("AgentNotFound") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`No such agent`;
 	}
 }
 

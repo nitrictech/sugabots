@@ -1,4 +1,4 @@
-import type { EgressHttpClient } from "../../../providers/network/egress.ts";
+import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
 import { readablePage } from "./readable.ts";
 
 /**
@@ -111,7 +111,11 @@ export function pageFetcher({
 			if (timeout.aborted) {
 				return refused(`No answer within ${timeoutMs / 1000} seconds`);
 			}
-			return refused(cause instanceof Error ? cause.message : String(cause));
+			if (cause instanceof EgressRefused) return refused(cause.userMessage);
+			// Anything else is a fault on our side or the network's: its details go to
+			// the logs, and the model is told only that the page did not arrive.
+			console.error(`Fetching ${requested} failed`, cause);
+			return refused("The page could not be fetched");
 		}
 	};
 }

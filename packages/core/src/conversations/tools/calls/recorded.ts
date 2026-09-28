@@ -1,7 +1,7 @@
 import type { Tool } from "ai";
-import type { Effect } from "effect";
+import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
-import { describeFailure } from "../../failure.ts";
+import { UserMessage } from "../../../user-message.ts";
 import type { ToolApprovalStore } from "../approvals/store.ts";
 import type { ToolCallStore } from "./store.ts";
 
@@ -33,11 +33,20 @@ export interface RecordingOptions {
 	};
 }
 
-/** What the model is told when a tool throws, in place of the result it did not get. */
+/** What the model is told when a tool did not give a result, in place of the result. */
 export interface ToolFailedResult {
 	status: "failed";
-	error: string;
+	error: UserMessage;
 }
+
+/** What people, and the model, are told of a tool that threw. */
+const TOOL_THREW = UserMessage.of`The tool failed before it finished.`;
+
+/**
+ * What the model is told of an approved call that may no longer run, such as
+ * one whose connection changed after it was approved.
+ */
+const APPROVAL_NO_LONGER_APPLIES = UserMessage.of`The tool was not run: its approval no longer applies.`;
 
 /**
  * A tool whose every call is written down: opened with its input before it
@@ -46,7 +55,8 @@ export interface ToolFailedResult {
  * A tool that throws is recorded as failed and the model is told so as an
  * ordinary result (ADR 002), so the agent can recover or explain rather than
  * the turn dying. The SDK's own tool-error path would also reach the model,
- * but through a shape this codebase does not otherwise handle.
+ * but through a shape this codebase does not otherwise handle, and with
+ * whatever text was thrown.
  */
 export function recorded(key: string, tool: Tool, options: RecordingOptions): Tool {
 	const execute = tool.execute;
@@ -67,9 +77,9 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		...tool,
 		execute: async (input, callOptions) => {
 			const atOffset = replyLength();
-			const opened = approval
-				? await run(
-						approval.store.beginExecution({
+			const opening = approval
+				? approval.store
+						.beginExecution({
 							...from,
 							sdkToolCallId: callOptions.toolCallId,
 							tool: key,
@@ -78,9 +88,20 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 							connectionId: approval.connectionId,
 							connectionRevision: approval.connectionRevision,
 							remoteToolName: approval.remoteToolName,
-						}),
-					)
-				: await run(calls.open({ ...from, tool: key, input, atOffset, mutating }));
+						})
+						.pipe(
+							Effect.catchTag("ToolExecutionRefused", (refused) =>
+								Effect.as(
+									Effect.logWarning(`Approved tool ${key} was not run: ${refused.message}`),
+									undefined,
+								),
+							),
+						)
+				: calls.open({ ...from, tool: key, input, atOffset, mutating });
+			const opened = await run(opening);
+			if (!opened) {
+				return { status: "failed", error: APPROVAL_NO_LONGER_APPLIES } satisfies ToolFailedResult;
+			}
 			await run(noteToolCall({ id: opened.id, atOffset, mutating }));
 			try {
 				if (mutating && markActed) await run(markActed());
@@ -88,9 +109,12 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 				await run(calls.close(opened.id, { output }));
 				return output;
 			} catch (cause) {
-				const error = describeFailure(cause);
-				await run(calls.close(opened.id, { error }));
-				return { status: "failed", error } satisfies ToolFailedResult;
+				// A tool with a failure worth explaining returns it as its result. A
+				// throw is a fault in the tool or its connection: what was thrown
+				// goes to the logs, and people are told only that the call failed.
+				await run(Effect.logError(`Tool ${key} threw`, cause));
+				await run(calls.close(opened.id, { error: TOOL_THREW }));
+				return { status: "failed", error: TOOL_THREW } satisfies ToolFailedResult;
 			}
 		},
 	};

@@ -127,7 +127,12 @@ function routes(
 		validateProviderUrl: createEgressUrlValidator({ allowPrivateNetwork }),
 		model: {
 			stream: () =>
-				Effect.fail(new ModelRequestFailed({ message: "This case does not ask a model" })),
+				Effect.fail(
+					new ModelRequestFailed({
+						message: "This case does not ask a model",
+						reason: "unavailable",
+					}),
+				),
 		},
 	});
 	return {

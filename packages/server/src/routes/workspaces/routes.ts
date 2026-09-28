@@ -19,12 +19,12 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 			.handle("create", ({ payload }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.create({ userId: user.id, details: payload }),
-				).pipe(asHttpError({ SlugTaken: conflict, SlugShapedLikeUuid: badRequest })),
+				).pipe(asHttpError({ SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest })),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.update({ userId: user.id, workspace: params.workspace, details: payload }),
-				).pipe(asHttpError({ ...denied, SlugTaken: conflict, SlugShapedLikeUuid: badRequest })),
+				).pipe(asHttpError({ ...denied, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest })),
 			)
 			.handle("members", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
@@ -39,7 +39,7 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 						memberId: params.memberId,
 						role: payload.role,
 					}),
-				).pipe(asHttpError({ ...denied, LastAdministrator: badRequest })),
+				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
 			)
 			.handle("removeMember", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
@@ -48,12 +48,12 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 						workspace: params.workspace,
 						memberId: params.memberId,
 					}),
-				).pipe(asHttpError({ ...denied, LastAdministrator: badRequest })),
+				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
 			)
 			.handle("leave", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.leave({ userId: user.id, workspace: params.workspace }),
-				).pipe(asHttpError({ ...denied, LastAdministrator: badRequest })),
+				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
 			)
 			.handle("invitations", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
@@ -63,7 +63,7 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 			.handle("invite", ({ params, payload }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.invite({ userId: user.id, workspace: params.workspace, invitation: payload }),
-				).pipe(asHttpError({ ...denied, AlreadyMember: conflict, AlreadyInvited: conflict })),
+				).pipe(asHttpError({ ...denied, AlreadyMember: Conflict, AlreadyInvited: Conflict })),
 			)
 			.handle("cancelInvitation", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
@@ -73,18 +73,18 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
 			.handle("invitation", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.invitation({ userId: user.id, invitationId: params.invitationId }),
-				).pipe(asHttpError({ ResourceHidden: notFound, NotTheInvitee: forbidden })),
+				).pipe(asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden })),
 			)
 			.handle("acceptInvitation", ({ params }) =>
 				Effect.flatMap(CurrentUser, (user) =>
 					membership.accept({ userId: user.id, invitationId: params.invitationId }),
 				).pipe(
-					asHttpError({
-						ResourceHidden: notFound,
-						NotTheInvitee: forbidden,
-						EmailUnverified: (failure: { message: string }) =>
-							new Forbidden({ message: failure.message, details: EMAIL_UNVERIFIED }),
-					}),
+					Effect.catchTag("EmailUnverified", (unverified) =>
+						Effect.fail(
+							new Forbidden({ message: unverified.userMessage, details: EMAIL_UNVERIFIED }),
+						),
+					),
+					asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden }),
 				),
 			),
 	);
@@ -96,11 +96,4 @@ export function workspaceRoutes({ membership }: WorkspaceRoutesOptions) {
  */
 const EMAIL_UNVERIFIED = "EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION";
 
-const notFound = (failure: { message: string }) => new NotFound({ message: failure.message });
-const forbidden = (failure: { message: string }) => new Forbidden({ message: failure.message });
-const badRequest = (failure: { message: string }) => new BadRequest({ message: failure.message });
-const conflict = (failure: { message: string }) => new Conflict({ message: failure.message });
-const denied = {
-	ResourceHidden: notFound,
-	ActionForbidden: () => new Forbidden({ message: "You are not allowed to do that" }),
-};
+const denied = { ResourceHidden: NotFound, ActionForbidden: Forbidden };

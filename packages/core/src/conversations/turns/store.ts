@@ -33,6 +33,7 @@ import {
 	user,
 	workspace,
 } from "../../database/schema.ts";
+import { UserMessage } from "../../user-message.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../routines/execution.ts";
 import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
@@ -56,6 +57,9 @@ import type { TurnRequest } from "./turn.workflow.ts";
  * through the methods below, each of which writes the outcome and publishes it
  * in one transaction.
  */
+
+/** What people are told of a tool call cut short because its turn was cancelled. */
+const TURN_CANCELLED = UserMessage.of`Turn cancelled`;
 
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
@@ -84,7 +88,7 @@ export interface ClaimedTurn {
  */
 export class TurnNotRunnable extends Data.TaggedError("TurnNotRunnable")<{
 	readonly reason: string;
-	readonly terminalOutcome?: { state: "failed" | "cancelled"; error?: string };
+	readonly terminalOutcome?: { state: "failed" | "cancelled"; error?: UserMessage };
 }> {
 	override get message() {
 		return this.reason;
@@ -170,8 +174,11 @@ export interface TurnCheckpoint {
 }
 
 export interface TurnStore {
-	/** Ends as failed a turn its owner will not run again after preparing it failed. */
-	abandon(claimed: ClaimedTurn, error: string): Effect.Effect<void, never, Database>;
+	/**
+	 * Ends as failed a turn its owner will not run again after preparing it
+	 * failed. `userMessage` is recorded on the turn for people to read.
+	 */
+	abandon(claimed: ClaimedTurn, userMessage: UserMessage): Effect.Effect<void, never, Database>;
 	/**
 	 * Opens the turn: creates or reopens its `turn` row and reply message and
 	 * loads what the model needs. Fails when the thread is gone, or the agent is
@@ -199,11 +206,15 @@ export interface TurnStore {
 		prepared: PreparedTurn,
 		reply: ReplyDraft,
 	): Effect.Effect<FloorDecision, never, Database>;
-	/** `willRetry` is the owner's decision, which the failure event carries to the client. */
+	/**
+	 * `userMessage` is recorded on the turn and sent to the client, so it is
+	 * written for people. `willRetry` is the owner's decision, which the
+	 * failure event carries to the client.
+	 */
 	fail(
 		prepared: PreparedTurn,
 		reply: ReplyDraft,
-		error: string,
+		userMessage: UserMessage,
 		willRetry: boolean,
 	): Effect.Effect<void, never, Database>;
 	cancel(prepared: PreparedTurn, reply: ReplyDraft): Effect.Effect<void, never, Database>;
@@ -258,7 +269,7 @@ export function turnStore(
 					.set({ status: "cancelled" })
 					.where(eq(message.id, waitingTurn.messageId)),
 			);
-			const abandoned = yield* query((db) => abandonRunningToolCalls(db, turnId, "Turn cancelled"));
+			const abandoned = yield* query((db) => abandonRunningToolCalls(db, turnId, TURN_CANCELLED));
 			yield* publishEvents([
 				...abandoned,
 				{
@@ -287,7 +298,7 @@ export function turnStore(
 		});
 
 	return {
-		abandon: (claimed, error) =>
+		abandon: (claimed, userMessage) =>
 			query((db) =>
 				db
 					.select({ id: turn.id })
@@ -297,7 +308,7 @@ export function turnStore(
 			).pipe(
 				Effect.flatMap(([active]) =>
 					active
-						? query((db) => finishInterruptedTurn(db, active.id, "failed", error))
+						? query((db) => finishInterruptedTurn(db, active.id, "failed", userMessage))
 						: Effect.void,
 				),
 			),
@@ -593,7 +604,7 @@ export function turnStore(
 				},
 			),
 
-		fail: (prepared, reply, error, willRetry) =>
+		fail: (prepared, reply, userMessage, willRetry) =>
 			transaction(
 				Effect.gen(function* () {
 					yield* query((db) =>
@@ -605,11 +616,16 @@ export function turnStore(
 					yield* query((db) =>
 						db
 							.update(turn)
-							.set({ status: "failed", error, checkpoint: null, finishedAt: new Date() })
+							.set({
+								status: "failed",
+								error: userMessage,
+								checkpoint: null,
+								finishedAt: new Date(),
+							})
 							.where(eq(turn.id, prepared.turnId)),
 					);
 					const abandoned = yield* query((db) =>
-						abandonRunningToolCalls(db, prepared.turnId, error),
+						abandonRunningToolCalls(db, prepared.turnId, userMessage),
 					);
 					yield* publishEvents([
 						...abandoned,
@@ -620,7 +636,7 @@ export function turnStore(
 								messageId: prepared.responseMessage.id,
 								turnId: prepared.turnId,
 								willRetry,
-								error,
+								error: userMessage,
 							}),
 						},
 					]);
@@ -644,7 +660,7 @@ export function turnStore(
 							.where(eq(turn.id, prepared.turnId)),
 					);
 					const abandoned = yield* query((db) =>
-						abandonRunningToolCalls(db, prepared.turnId, "Turn cancelled"),
+						abandonRunningToolCalls(db, prepared.turnId, TURN_CANCELLED),
 					);
 					yield* publishEvents([
 						...abandoned,
@@ -861,7 +877,7 @@ const finishInterruptedTurn = Effect.fn("TurnStore.finishInterruptedTurn")(funct
 	db: Executor,
 	turnId: string,
 	status: "failed" | "cancelled",
-	error: string,
+	error: UserMessage,
 ) {
 	yield* db
 		.update(turn)
@@ -879,14 +895,17 @@ const finishInterruptedTurn = Effect.fn("TurnStore.finishInterruptedTurn")(funct
 const terminateClaimedTurn = Effect.fn("TurnStore.terminateClaimedTurn")(function* (
 	db: Executor,
 	owner: string,
-): Effect.fn.Return<{ state: "failed" | "cancelled"; error?: string } | undefined, QueryFailure> {
+): Effect.fn.Return<
+	{ state: "failed" | "cancelled"; error?: UserMessage } | undefined,
+	QueryFailure
+> {
 	const [active] = yield* db
 		.select({ id: turn.id, status: turn.status, error: turn.error })
 		.from(turn)
 		.where(and(eq(turn.owner, owner), inArray(turn.status, ["running", "waiting"])))
 		.limit(1);
 	if (!active) return undefined;
-	yield* finishInterruptedTurn(db, active.id, "cancelled", "Routine execution ended");
+	yield* finishInterruptedTurn(db, active.id, "cancelled", UserMessage.of`Routine execution ended`);
 	return { state: "cancelled" };
 });
 
@@ -930,7 +949,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 	  }
 	| {
 			notRunnableReason: string;
-			terminalOutcome?: { state: "failed" | "cancelled"; error?: string };
+			terminalOutcome?: { state: "failed" | "cancelled"; error?: UserMessage };
 	  },
 	QueryFailure
 > {
@@ -959,10 +978,9 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			return { notRunnableReason: "The turn has already ended" };
 		}
 		if (existing.cancelRequested) {
-			const error = "Turn cancelled";
-			yield* finishInterruptedTurn(db, existing.id, "cancelled", error);
+			yield* finishInterruptedTurn(db, existing.id, "cancelled", TURN_CANCELLED);
 			return {
-				notRunnableReason: error,
+				notRunnableReason: TURN_CANCELLED,
 				terminalOutcome: { state: "cancelled" },
 			};
 		}
@@ -978,7 +996,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			)
 			.limit(1);
 		if (existing.mutationStarted && (!existing.checkpoint || uncertainMutation)) {
-			const error = "A mutating tool may have run before the worker stopped";
+			const error = UserMessage.of`A mutating tool may have run before the worker stopped`;
 			yield* finishInterruptedTurn(db, existing.id, "failed", error);
 			return {
 				notRunnableReason: error,
@@ -986,7 +1004,7 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			};
 		}
 		if (existing.runs >= MAX_TURN_RUNS) {
-			const error = `The turn stopped ${existing.runs} times before it could finish`;
+			const error = UserMessage.of`The turn stopped ${existing.runs} times before it could finish`;
 			yield* finishInterruptedTurn(db, existing.id, "failed", error);
 			return {
 				notRunnableReason: error,

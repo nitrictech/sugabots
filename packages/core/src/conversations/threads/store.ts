@@ -14,6 +14,7 @@ import { type Database, type Executor, query } from "../../database/database.ts"
 import { isUuid } from "../../database/ids.ts";
 import type * as schema from "../../database/schema.ts";
 import { podMember, thread, threadSummary, workspaceMember } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { mayInPod } from "../../workspaces/permissions.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
@@ -49,9 +50,12 @@ export interface ThreadStore {
 	): Effect.Effect<ThreadActivity | undefined, never, Database>;
 }
 
-export class InvalidThreadHistoryCursor extends Data.TaggedError("InvalidThreadHistoryCursor") {
-	override get message() {
-		return "That thread history cursor is invalid";
+export class InvalidThreadHistoryCursor
+	extends Data.TaggedError("InvalidThreadHistoryCursor")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That thread history cursor is invalid`;
 	}
 }
 

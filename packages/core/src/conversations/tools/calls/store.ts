@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../../database/database.ts";
 import type { PendingEvent, PublishEvents } from "../../../database/events/publish.ts";
 import { type ToolCallRow, toolCall } from "../../../database/schema.ts";
+import type { UserMessage } from "../../../user-message.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
 
 /**
@@ -21,7 +22,7 @@ import { toToolCallPart } from "../../threads/tool-calls.ts";
 /** Stored inputs and outputs are cut at this many characters of JSON (ADR 002). */
 export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
-export type ToolCallOutcome = { output: unknown } | { error: string };
+export type ToolCallOutcome = { output: unknown } | { error: UserMessage };
 
 export interface ToolCallStore {
 	/** Records that the tool has been called, and tells the thread. */
@@ -92,12 +93,12 @@ export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
 }
 
 /**
- * Marks the turn's still-running calls failed, for a turn that ended before
- * its tools returned. Returns the events that announce it, for the caller's
- * own transaction to publish.
+ * Marks the turn's still-running calls failed with `error`, for a turn that
+ * ended before its tools returned. Returns the events that announce it, for
+ * the caller's own transaction to publish.
  */
 export const abandonRunningToolCalls = Effect.fn("ToolCallStore.abandonRunningToolCalls")(
-	function* (db: Executor, turnId: string, error: string) {
+	function* (db: Executor, turnId: string, error: UserMessage) {
 		const rows = yield* db
 			.update(toolCall)
 			.set({

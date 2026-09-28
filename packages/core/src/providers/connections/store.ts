@@ -12,6 +12,7 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { OAuthRecord } from "./oauth.ts";
 
 /** What it takes to call the server: where, and with which headers. */
@@ -32,9 +33,12 @@ export interface ConnectionTarget {
 /** What a test found: the server's tools, or why it could not be asked. */
 export type ConnectionTestOutcome = { tools: ConnectionTool[] } | { error: string };
 
-export class ConnectionNameTaken extends Data.TaggedError("ConnectionNameTaken") {
-	override get message() {
-		return "A connection with that name already exists";
+export class ConnectionNameTaken
+	extends Data.TaggedError("ConnectionNameTaken")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`A connection with that name already exists`;
 	}
 }
 

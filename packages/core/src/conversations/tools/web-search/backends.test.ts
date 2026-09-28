@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EgressRefused } from "../../../providers/network/egress.ts";
 import type { SearchConnection } from "../../../providers/search-providers/store.ts";
 import { parseExaText, searchBackend, searchEndpoint } from "./backends.ts";
 
@@ -235,9 +236,9 @@ describe("the SearXNG backend", () => {
 		});
 	});
 
-	it("turns a network failure into a reason", async () => {
+	it("passes on why the network policy refused it", async () => {
 		const fetch = vi.fn<FakeFetch>(async () => {
-			throw new Error("Address is on a private or reserved network");
+			throw new EgressRefused({ reason: "privateNetwork" });
 		});
 
 		expect(
@@ -249,6 +250,21 @@ describe("the SearXNG backend", () => {
 				count: 1,
 			}),
 		).toEqual({ ok: false, reason: "Address is on a private or reserved network" });
+	});
+
+	it("keeps any other failure's details out of its reason", async () => {
+		const fetch = vi.fn<FakeFetch>(async () => {
+			throw new Error("socket hang up at 10.0.0.4:8080");
+		});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const result = await backend(
+			{ preset: "searxng", baseUrl: "http://searx.local:8080" },
+			fetch,
+		)({ query: "q", count: 1 });
+
+		expect(result).toEqual({ ok: false, reason: "SearXNG could not be searched" });
+		error.mockRestore();
 	});
 });
 

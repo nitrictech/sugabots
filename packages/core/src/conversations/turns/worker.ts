@@ -8,23 +8,33 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Option,
 	Ref,
 	Schedule,
 	Semaphore,
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import { describeFailure } from "../failure.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import type { SummaryRequest } from "../summaries/summary.workflow.ts";
-import { noToolApprovalStore, type ToolApprovalStore } from "../tools/approvals/store.ts";
+import {
+	noToolApprovalStore,
+	type ToolApprovalStore,
+	type ToolApprovalsIncomplete,
+} from "../tools/approvals/store.ts";
 import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
 import type { ToolCallStore } from "../tools/calls/store.ts";
 import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
-import { forEachDelta, type ModelAccounting, type TurnModel } from "./model.ts";
+import {
+	forEachDelta,
+	type ModelAccounting,
+	type ModelRequestFailed,
+	type TurnModel,
+} from "./model.ts";
 import {
 	type ClaimedTurn,
 	type PreparedTurn,
@@ -68,9 +78,6 @@ export interface TurnExecution {
 	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
 }
 
-/** What people are told about a turn that ended because its workflow failed; the cause goes only to the logs. */
-const TURN_STOPPED_UNEXPECTEDLY = "The turn stopped unexpectedly";
-
 /** The turn workflow's run of its turn: the workflow execution owns the turn. */
 export const claimFor = (request: TurnRequest) =>
 	Effect.map(
@@ -92,7 +99,7 @@ export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalS
 		TurnSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
-			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: string }) =>
+			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: UserMessage }) =>
 				(execution.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
 			return TurnSteps.of({
 				segment: (request) =>
@@ -102,11 +109,9 @@ export const stepsLayer = (execution: TurnExecution & { approvals: ToolApprovalS
 				abandon: (request) =>
 					transaction(
 						Effect.gen(function* () {
-							yield* execution.store.abandon(yield* claimFor(request), TURN_STOPPED_UNEXPECTEDLY);
-							yield* settleRoutine(request.threadId, {
-								state: "failed",
-								error: TURN_STOPPED_UNEXPECTEDLY,
-							});
+							const error = new TurnStoppedUnexpectedly().userMessage;
+							yield* execution.store.abandon(yield* claimFor(request), error);
+							yield* settleRoutine(request.threadId, { state: "failed", error });
 						}),
 					).pipe(Effect.provideService(Database, database)),
 				decide: (request, decided) =>
@@ -160,22 +165,58 @@ type StreamOutcome =
 			approvals: import("../tools/approvals/store.ts").PendingToolApproval[];
 	  };
 
-/** Why a reply stopped streaming before the model finished. */
+/** Why a reply stopped streaming before the model finished, other than being cancelled. */
+type TurnFailure =
+	| ModelRequestFailed
+	| ToolApprovalsIncomplete
+	| TurnTimedOut
+	| ApprovedToolChanged
+	| TurnInterrupted
+	| TurnStoppedUnexpectedly;
+
 class TurnCancelled extends Data.TaggedError("TurnCancelled") {
 	override get message() {
 		return "Turn cancelled";
 	}
 }
-class TurnTimedOut extends Data.TaggedError("TurnTimedOut") {
+class TurnTimedOut extends Data.TaggedError("TurnTimedOut") implements UserFacing {
 	override get message() {
-		return "Turn timed out";
+		return `Turn exceeded ${Duration.format(TURN_TIMEOUT)}`;
+	}
+	get userMessage() {
+		return UserMessage.of`The reply took too long and was stopped.`;
 	}
 }
-class ApprovedToolChanged extends Data.TaggedError("ApprovedToolChanged")<{
-	readonly tool: string;
-}> {
+class ApprovedToolChanged
+	extends Data.TaggedError("ApprovedToolChanged")<{ readonly tool: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `Approved tool ${this.tool} no longer has the reviewed configuration`;
+	}
+	get userMessage() {
+		return UserMessage.of`A tool changed after it was approved, so it was not run.`;
+	}
+}
+/** The process running the turn stopped before the reply finished. */
+class TurnInterrupted extends Data.TaggedError("TurnInterrupted") implements UserFacing {
+	override get message() {
+		return "Turn interrupted by its process stopping";
+	}
+	get userMessage() {
+		return UserMessage.of`The reply was interrupted.`;
+	}
+}
+/** A defect ended the turn rather than a failure it expects; the defect itself is logged. */
+class TurnStoppedUnexpectedly
+	extends Data.TaggedError("TurnStoppedUnexpectedly")
+	implements UserFacing
+{
+	override get message() {
+		return "Turn ended by a defect";
+	}
+	get userMessage() {
+		return UserMessage.of`The reply stopped unexpectedly.`;
 	}
 }
 class ApprovalForUnknownTool extends Data.TaggedError("ApprovalForUnknownTool")<{
@@ -206,17 +247,27 @@ const generateReply = (
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, execution, reply)));
 			const draft = yield* Ref.get(reply);
 
-			/** Records the failure; the turn runs again only while that is safe. */
-			const failed = (error: string) =>
-				transaction(
-					Effect.gen(function* () {
-						const willRetry = runsAgainAfterFailure(prepared, draft);
-						yield* store.fail(prepared, draft, error, willRetry);
-						if (!willRetry && routines) {
-							yield* routines.settleThread(prepared.context.thread.id, { state: "failed", error });
-						}
-						return willRetry ? retry : finished;
-					}),
+			/**
+			 * Logs the failure and records what people are told of it; the turn
+			 * runs again only while that is safe.
+			 */
+			const failed = (failure: TurnFailure) =>
+				Effect.andThen(
+					logTurnFailure(prepared, failure.message),
+					transaction(
+						Effect.gen(function* () {
+							const error = failure.userMessage;
+							const willRetry = runsAgainAfterFailure(prepared, draft);
+							yield* store.fail(prepared, draft, error, willRetry);
+							if (!willRetry && routines) {
+								yield* routines.settleThread(prepared.context.thread.id, {
+									state: "failed",
+									error,
+								});
+							}
+							return willRetry ? retry : finished;
+						}),
+					),
 				);
 
 			if (Exit.isSuccess(streamed)) {
@@ -279,8 +330,10 @@ const generateReply = (
 			}
 
 			const cause = streamed.cause;
-			if (Cause.hasInterruptsOnly(cause)) return yield* failed("Worker stopped");
-			const failure = Cause.squash(cause);
+			if (Cause.hasInterruptsOnly(cause)) return yield* failed(new TurnInterrupted());
+			const expected = Cause.findErrorOption(cause);
+			if (Option.isNone(expected)) yield* Effect.logError("A turn's stream died", cause);
+			const failure = Option.getOrElse(expected, () => new TurnStoppedUnexpectedly());
 			if (failure instanceof TurnCancelled) {
 				return yield* transaction(
 					Effect.gen(function* () {
@@ -292,16 +345,14 @@ const generateReply = (
 					}),
 				);
 			}
-			const error = describeFailure(failure);
-			yield* logTurnFailure(prepared, error);
-			return yield* failed(error);
+			return yield* failed(failure);
 		}),
 	);
 
 /** Enough in the server log to find the turn and the provider it used. */
-const logTurnFailure = (prepared: PreparedTurn, error: string) =>
+const logTurnFailure = (prepared: PreparedTurn, why: string) =>
 	Effect.logError(
-		`Turn ${prepared.turnId} failed: ${error}`,
+		`Turn ${prepared.turnId} failed: ${why}`,
 		`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, model ${prepared.context.agent.model})`,
 	);
 
@@ -327,7 +378,11 @@ const streamReply = (
 		connectionTools = noConnectionTools,
 	}: TurnExecution,
 	reply: Ref.Ref<ReplyDraft>,
-): Effect.Effect<StreamOutcome, Error, Database> =>
+): Effect.Effect<
+	StreamOutcome,
+	ModelRequestFailed | ToolApprovalsIncomplete | TurnTimedOut | ApprovedToolChanged | TurnCancelled,
+	Database
+> =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const stop = new AbortController();

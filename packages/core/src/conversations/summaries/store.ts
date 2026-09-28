@@ -4,6 +4,7 @@ import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import { agent, message, thread, threadSummary, turn, user } from "../../database/schema.ts";
+import type { UserMessage } from "../../user-message.ts";
 import type { Lanes } from "../../workflows/lanes.ts";
 import {
 	findRunnableSystemAgent,
@@ -64,7 +65,8 @@ export interface SummaryStore {
 		result: { content: string; title?: string },
 		accounting: ModelAccounting,
 	): Effect.Effect<void, never, Database>;
-	fail(prepared: PreparedSummary, error: string): Effect.Effect<void, never, Database>;
+	/** Ends the Scribe's turn as failed; `userMessage` is recorded on it for people to read. */
+	fail(prepared: PreparedSummary, userMessage: UserMessage): Effect.Effect<void, never, Database>;
 }
 
 /**
@@ -230,11 +232,11 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 				}),
 			),
 
-		fail: (prepared, error) =>
+		fail: (prepared, userMessage) =>
 			query((db) =>
 				db
 					.update(turn)
-					.set({ status: "failed", error, finishedAt: new Date() })
+					.set({ status: "failed", error: userMessage, finishedAt: new Date() })
 					.where(eq(turn.id, prepared.turnId)),
 			).pipe(Effect.asVoid),
 	};

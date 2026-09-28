@@ -19,6 +19,7 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { UserMessage } from "../../user-message.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { turnStore as createTurnStore } from "../turns/store.ts";
 import {
@@ -604,7 +605,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 	});
 
 	it.each([
-		{ state: "failed" as const, collaborationStatus: "waiting" as const, error: "Model failed" },
+		{
+			state: "failed" as const,
+			collaborationStatus: "waiting" as const,
+			error: UserMessage.of`Model failed`,
+		},
 		{ state: "cancelled" as const, collaborationStatus: "pending" as const, error: undefined },
 	])(
 		"settles an execution as $state despite a $collaborationStatus collaboration",
@@ -769,7 +774,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 
 		expect(await store.settleThread(fixture.childThread.id)).toBe(false);
 		expect(
-			await store.settleThread(fixture.childThread.id, { state: "failed", error: "Model failed" }),
+			await store.settleThread(fixture.childThread.id, {
+				state: "failed",
+				error: UserMessage.of`Model failed`,
+			}),
 		).toBe(false);
 		expect(await runOnPostgres(waitingFacilitation(fixture.childThread.id))).toBeUndefined();
 
@@ -781,7 +789,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				.from(routineExecution)
 				.where(eq(routineExecution.id, fixture.accepted.executionId)),
 		);
-		expect(execution).toMatchObject({ state: "failed", error: "Model failed" });
+		expect(execution).toMatchObject({ state: "failed", error: UserMessage.of`Model failed` });
 	});
 
 	it("tells the workflows of waiting turns to stop when an execution ends", async () => {
@@ -823,7 +831,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		expect(
 			await store.settleThread(fixture.childThread.id, {
 				state: "failed",
-				error: "Child model failed",
+				error: UserMessage.of`Child model failed`,
 			}),
 		).toBe(false);
 
@@ -861,7 +869,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		);
 		expect(settledExecution).toMatchObject({
 			state: "failed",
-			error: "Child model failed",
+			error: UserMessage.of`Child model failed`,
 			pendingTerminalState: null,
 			pendingTerminalError: null,
 			finishedAt: expect.any(Date),
@@ -908,7 +916,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		expect(
 			await store.settleThread(fixture.childThread.id, {
 				state: "failed",
-				error: "Child model failed",
+				error: UserMessage.of`Child model failed`,
 			}),
 		).toBe(false);
 		const turns = onPostgres(

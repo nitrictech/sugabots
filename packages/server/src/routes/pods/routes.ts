@@ -1,13 +1,7 @@
 import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import type { ModelProviderStore } from "@sugabots/core/providers/model-providers/store";
-import {
-	type FacilitatorNotSetUp,
-	type PersonalPodFixed,
-	type PodStore,
-	podSeenBy,
-	type SlugTaken,
-} from "@sugabots/core/workspaces/pods/store";
+import { type PodStore, podSeenBy } from "@sugabots/core/workspaces/pods/store";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
@@ -130,9 +124,8 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 
 /** What each way a pod write can fail means over HTTP. */
 const podErrors = {
-	SlugTaken: (failure: SlugTaken) => new Conflict({ message: failure.message }),
-	PersonalPodFixed: (failure: PersonalPodFixed) => new BadRequest({ message: failure.message }),
-	FacilitatorNotSetUp: (failure: FacilitatorNotSetUp) =>
-		new BadRequest({ message: failure.message }),
-	PodGone: () => new NotFound({ message: "No such pod" }),
+	SlugTaken: Conflict,
+	PersonalPodFixed: BadRequest,
+	FacilitatorNotSetUp: BadRequest,
+	PodGone: NotFound,
 };

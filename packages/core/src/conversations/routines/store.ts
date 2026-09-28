@@ -37,6 +37,7 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
@@ -56,23 +57,53 @@ import {
 const deriveKey = promisify(scrypt);
 
 /** What people are told about a run whose workflow failed; the cause goes only to the logs. */
-const RUN_STOPPED_UNEXPECTEDLY = "The routine run stopped unexpectedly";
+const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;
 
 interface ExecutionCursor {
 	acceptedAt: Date;
 	id: string;
 }
 
-export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") {}
-export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") {}
-export class RoutineRequiresCrewAgent extends Data.TaggedError("RoutineRequiresCrewAgent") {}
-export class RoutineTriggerConflict extends Data.TaggedError("RoutineTriggerConflict") {}
-export class RoutineTriggerRejected extends Data.TaggedError("RoutineTriggerRejected") {}
-export class InvalidRoutineExecutionCursor extends Data.TaggedError(
-	"InvalidRoutineExecutionCursor",
-) {
-	override get message() {
-		return "That Routine execution cursor is invalid";
+export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`No such Routine`;
+	}
+}
+export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`A Routine with that name already exists`;
+	}
+}
+export class RoutineRequiresCrewAgent
+	extends Data.TaggedError("RoutineRequiresCrewAgent")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Only crew agents can own Routines`;
+	}
+}
+export class RoutineTriggerConflict
+	extends Data.TaggedError("RoutineTriggerConflict")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That trigger identity was already used with different data`;
+	}
+}
+export class RoutineTriggerRejected
+	extends Data.TaggedError("RoutineTriggerRejected")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That Routine cannot accept this trigger`;
+	}
+}
+export class InvalidRoutineExecutionCursor
+	extends Data.TaggedError("InvalidRoutineExecutionCursor")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That Routine execution cursor is invalid`;
 	}
 }
 
@@ -143,7 +174,7 @@ export interface RoutineStore {
 	startRun(run: RoutineRun): Effect.Effect<void, never, Database>;
 	settleThread(
 		threadId: string,
-		outcome?: { state: "failed" | "cancelled"; error?: string },
+		outcome?: { state: "failed" | "cancelled"; error?: UserMessage },
 	): Effect.Effect<boolean, never, Database>;
 	/** Settles the run if its work is done. Returns whether it has ended. */
 	settleRun(run: RoutineRun): Effect.Effect<boolean, never, Database>;
@@ -865,7 +896,7 @@ const workingChildThreads = sql`select child.id from ${thread} child join tree p
 
 function settleRoutineThread(
 	threadId: string,
-	outcome: { state: "failed" | "cancelled"; error?: string } | undefined,
+	outcome: { state: "failed" | "cancelled"; error?: UserMessage } | undefined,
 	publishEvents: PublishEvents,
 	signals: TurnSignals,
 	runs: RoutineRuns,
@@ -908,9 +939,9 @@ function settleRoutineThread(
 						workspace_id: string;
 						active: boolean;
 						last_turn_status: string | null;
-						last_turn_error: string | null;
+						last_turn_error: UserMessage | null;
 						pending_terminal_state: "failed" | "cancelled" | null;
-						pending_terminal_error: string | null;
+						pending_terminal_error: UserMessage | null;
 					}>(
 						sql`
 					with recursive tree as (

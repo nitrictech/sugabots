@@ -225,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
 				messageId,
 				content: "Anyone there?",
 			}),
-		).rejects.toThrow("has no model chosen");
+		).rejects.toMatchObject({ _tag: "ChatAgentHasNoModel" });
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
 		).toHaveLength(0);

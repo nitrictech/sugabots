@@ -164,14 +164,10 @@ export function connectionRoutes({
 }
 
 const connectionErrors = {
-	ConnectionNameTaken: (failure: { message: string }) => new Conflict({ message: failure.message }),
-	ConnectionNotFound: (failure: { message: string }) => new NotFound({ message: failure.message }),
-	ConnectionUrlNotAllowed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ConnectionOAuthStartFailed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ConnectionDoesNotUseOAuth: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ConnectionNeededNoSignIn: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
+	ConnectionNameTaken: Conflict,
+	ConnectionNotFound: NotFound,
+	ConnectionUrlNotAllowed: BadRequest,
+	ConnectionOAuthStartFailed: BadRequest,
+	ConnectionDoesNotUseOAuth: BadRequest,
+	ConnectionNeededNoSignIn: BadRequest,
 };

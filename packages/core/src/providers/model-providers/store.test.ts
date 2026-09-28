@@ -211,14 +211,15 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!configured) throw new Error("fixture");
 		await store.setModelEnabled(workspaceId, providerId, [configured.id], true);
 		const operations = operationsWithResponse(() => Response.json({ data: [] }), {
-			stream: () => Effect.fail(new ModelRequestFailed({ message: "API key rejected" })),
+			stream: () =>
+				Effect.fail(new ModelRequestFailed({ message: "API key rejected", reason: "rejected" })),
 		});
 
 		expect(await operations.test(workspaceId, providerId)).toMatchObject({ reachable: false });
 		expect(await store.get(workspaceId, providerId)).toMatchObject({
 			active: false,
 			status: "error",
-			lastTestError: "test-model: API key rejected",
+			lastTestError: "test-model: The model provider refused the request. Check its API key.",
 		});
 	});
 
