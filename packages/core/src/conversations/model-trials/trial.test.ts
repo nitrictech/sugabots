@@ -1,28 +1,24 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
-import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "../turns/model.ts";
+import { Models } from "../../providers/models/models.ts";
+import { chunks, streamed } from "../../providers/models/testing.ts";
 import { CASES } from "./cases.ts";
 import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial } from "./trial.ts";
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
-function scripted(answer: (input: TurnModelInput) => string | ModelRequestFailed): TurnModel {
-	return {
-		stream: (input) => {
-			const next = answer(input);
-			return next instanceof ModelRequestFailed
-				? Effect.fail(next)
-				: Effect.succeed({
-						text: (async function* () {
-							yield next;
-						})(),
-						accounting: Effect.succeed({ modelCalls: 1 }),
-					});
-		},
-	};
+function scripted(
+	answer: (input: Models.StreamRequest) => string | Models.RequestFailed,
+): Models.Interface {
+	return Models.fromStream((input) => {
+		const next = answer(input);
+		return next instanceof Models.RequestFailed
+			? Effect.fail(next)
+			: Effect.succeed(streamed(chunks(next)));
+	});
 }
 
-const trial = (model: TurnModel, systemAgentKey: "facilitate" | "summarise", attempts = 1) =>
+const trial = (model: Models.Interface, systemAgentKey: "facilitate" | "summarise", attempts = 1) =>
 	Effect.runPromise(
 		Effect.provide(
 			runTrial({ systemAgentKey, model: "under-trial", workspaceId: "w1", attempts }, model),
@@ -78,7 +74,7 @@ describe("trying a model on the facilitator", () => {
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
 			scripted(
-				() => new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+				() => new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 			),
 			"facilitate",
 		);
@@ -89,7 +85,7 @@ describe("trying a model on the facilitator", () => {
 
 	it("counts a model defect as a failed answer", async () => {
 		const report = await trial(
-			{ stream: () => Effect.die(new Error("model defect")) },
+			Models.fromStream(() => Effect.die(new Error("model defect"))),
 			"facilitate",
 		);
 
@@ -102,20 +98,20 @@ describe("trying a model on the facilitator", () => {
 		try {
 			const signals: AbortSignal[] = [];
 			const reportPromise = trial(
-				{
-					stream: (input) => {
-						signals.push(input.signal);
-						return Effect.succeed({
-							text: (async function* () {
+				Models.fromStream(() =>
+					Effect.gen(function* () {
+						const signal = yield* Effect.abortSignal;
+						signals.push(signal);
+						return streamed(
+							(async function* () {
 								await new Promise<void>((resolve) => {
-									input.signal.addEventListener("abort", () => resolve(), { once: true });
+									signal.addEventListener("abort", () => resolve(), { once: true });
 								});
 								yield "too late";
 							})(),
-							accounting: Effect.succeed({ modelCalls: 1 }),
-						});
-					},
-				},
+						);
+					}),
+				),
 				"facilitate",
 			);
 			await vi.advanceTimersByTimeAsync(0);
@@ -209,7 +205,7 @@ describe("what the report tells the person choosing", () => {
 });
 
 /** The answer the facilitator should give for whichever case this prompt is. */
-function answerFor(input: TurnModelInput): string {
+function answerFor(input: Models.StreamRequest): string {
 	const conversation = input.messages[0]?.content ?? "";
 	if (conversation.includes("do you want me to reopen it?")) return "nobody";
 	if (conversation.includes("It shows how much the order lifecycle matters")) return "nobody";

@@ -1,15 +1,8 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
+import { Cause, Data, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
+import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
-import {
-	forEachDelta,
-	type ModelAccounting,
-	type ModelRequestFailed,
-	Models,
-	type TurnModel,
-} from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
@@ -48,7 +41,7 @@ export const summaryStepsLayer = Layer.effect(
  */
 export const summarise = (
 	request: SummaryRequest,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
 	Effect.gen(function* () {
 		const summaries = yield* Summaries.Service;
@@ -62,7 +55,7 @@ export const summarise = (
  */
 const generateSummary = (
 	prepared: PreparedSummary,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
@@ -70,8 +63,8 @@ const generateSummary = (
 			const turns = yield* TurnRepository.Service;
 			const generated = yield* Effect.exit(restore(generate(prepared, model)));
 			if (Exit.isSuccess(generated)) {
-				const [result, accounting] = generated.value;
-				return yield* summaries.complete(prepared, result, accounting);
+				const [result, contextTokens] = generated.value;
+				return yield* summaries.complete(prepared, result, contextTokens);
 			}
 			const cause = generated.cause;
 			const expected = Cause.findErrorOption(cause);
@@ -90,49 +83,30 @@ const generateSummary = (
 /** The model's text, parsed into a summary (and a title, the first time), within the time limit. */
 const generate = (
 	prepared: PreparedSummary,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<
-	readonly [{ content: string; title?: string }, ModelAccounting],
+	readonly [{ content: string; title?: string }, contextTokens: number | undefined],
 	SummaryFailure,
 	Database
 > =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-
-			const generated = yield* model.stream({
-				...threadSummaryPrompt(prepared, stop.signal),
-				activity: {
-					purpose: "summary",
-					podId: prepared.podId,
-					threadId: prepared.threadId,
-					turnId: prepared.turnId,
-				},
-			});
-			const collected = yield* Ref.make("");
-			yield* forEachDelta(generated.text, stop, (text) =>
-				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
-					Effect.filterOrFail(
-						(soFar) => soFar.length <= MAX_GENERATED_CHARACTERS,
-						() => new UnusableAnswer({ reason: "Thread summary model returned too much text" }),
-					),
-					Effect.asVoid,
-				),
-			);
-			const content = yield* Ref.get(collected);
-			const result = yield* parseGenerated(content, prepared.previousContent === undefined);
-			const accounting = yield* generated.accounting;
-			return [result, accounting] as const;
-		}),
-	).pipe(
-		Effect.timeoutOrElse({
-			duration: SUMMARY_TIMEOUT,
-			orElse: () => Effect.fail(new AnswerTimedOut({ message: "Thread summary timed out" })),
-		}),
-		// The timeout is inside, so each attempt gets its own two minutes rather
-		// than the three of them sharing one.
-		retryUnusable,
+	Effect.gen(function* () {
+		const answer = yield* model.answer({
+			...threadSummaryPrompt(prepared),
+			purpose: "Thread summary",
+			activity: {
+				purpose: "summary",
+				podId: prepared.podId,
+				threadId: prepared.threadId,
+				turnId: prepared.turnId,
+			},
+			maxCharacters: MAX_GENERATED_CHARACTERS,
+			timeout: SUMMARY_TIMEOUT,
+		});
+		const result = yield* parseGenerated(answer.text, prepared.previousContent === undefined);
+		return [result, answer.contextTokens] as const;
+	}).pipe(
+		// Each attempt gets its own time limit rather than the three sharing one.
+		Models.retryUnusable,
 	);
 
 /**
@@ -146,25 +120,26 @@ const generate = (
 export function parseGenerated(
 	content: string,
 	includeTitle: boolean,
-): Effect.Effect<{ content: string; title?: string }, UnusableAnswer> {
+): Effect.Effect<{ content: string; title?: string }, Models.UnusableAnswer> {
 	const trimmed = content.trim();
 	if (!trimmed) {
-		return new UnusableAnswer({ reason: "Thread summary model returned no text" });
+		return new Models.UnusableAnswer({ reason: "Thread summary model returned no text" });
 	}
 	if (!includeTitle) {
 		return trimmed.length > MAX_THREAD_SUMMARY_CHARACTERS
-			? new UnusableAnswer({ reason: "Thread summary model returned too much text" })
+			? new Models.UnusableAnswer({ reason: "Thread summary model returned too much text" })
 			: Effect.succeed({ content: trimmed });
 	}
 	return Effect.try({
 		try: () => JSON.parse(stripFence(trimmed)) as unknown,
-		catch: () => new UnusableAnswer({ reason: "Thread summary model returned invalid JSON" }),
+		catch: () =>
+			new Models.UnusableAnswer({ reason: "Thread summary model returned invalid JSON" }),
 	}).pipe(
 		Effect.flatMap((parsed) =>
 			Schema.decodeUnknownEffect(firstSummarySchema)(parsed).pipe(
 				Effect.mapError(
 					() =>
-						new UnusableAnswer({
+						new Models.UnusableAnswer({
 							reason: "Thread summary model returned an invalid title or summary",
 						}),
 				),
@@ -184,7 +159,7 @@ function stripFence(text: string): string {
 }
 
 /** Why a summary failed. */
-type SummaryFailure = ModelRequestFailed | AnswerTimedOut | UnusableAnswer;
+type SummaryFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
 
 /** The process summarising stopped before the summary finished. */
 class SummaryInterrupted extends Data.TaggedError("SummaryInterrupted") implements UserFacing {

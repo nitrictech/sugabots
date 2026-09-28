@@ -13,7 +13,7 @@ const input: SummaryPromptInput = {
 
 describe("threadSummaryPrompt", () => {
 	it("asks for compact durable context on the first summary", () => {
-		const prompt = threadSummaryPrompt(input, new AbortController().signal);
+		const prompt = threadSummaryPrompt(input);
 
 		expect(prompt.system).toContain("only durable context needed to continue the work");
 		expect(prompt.system).toContain("Omit conversational back-and-forth");
@@ -22,10 +22,10 @@ describe("threadSummaryPrompt", () => {
 	});
 
 	it("keeps the same size limit when updating a summary", () => {
-		const prompt = threadSummaryPrompt(
-			{ ...input, previousContent: "Ryan needs a morning routine." },
-			new AbortController().signal,
-		);
+		const prompt = threadSummaryPrompt({
+			...input,
+			previousContent: "Ryan needs a morning routine.",
+		});
 
 		expect(prompt.system).toContain("no more than 50 words");
 		expect(prompt.system).toContain("correct any conflict");

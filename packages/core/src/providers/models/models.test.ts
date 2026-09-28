@@ -33,12 +33,12 @@ vi.mock("ai", async (importOriginal) => ({
 }));
 
 import { APICallError } from "ai";
-import { ModelRequestFailed, workspaceTurnModel } from "./model.ts";
+import { Models } from "./models.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
-describe("workspace turn model", () => {
+describe("models", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		sdk.createAnthropic.mockReturnValue(sdk.anthropicModel);
@@ -52,7 +52,7 @@ describe("workspace turn model", () => {
 		"injects the provider's http client into the %s SDK",
 		async (apiFormat) => {
 			const httpClient = vi.fn<typeof fetch>();
-			const model = workspaceTurnModel({
+			const model = Models.make({
 				modelProviders: {
 					renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 					resolve: () =>
@@ -72,14 +72,16 @@ describe("workspace turn model", () => {
 			});
 
 			await run(
-				model.stream({
-					workspaceId: "workspace-id",
-					activity: { purpose: "probe" },
-					model: "model-id",
-					system: "",
-					messages: [],
-					signal: new AbortController().signal,
-				}),
+				Effect.scoped(
+					model.stream({
+						workspaceId: "workspace-id",
+						activity: { purpose: "probe" },
+						model: "model-id",
+						system: "",
+						messages: [],
+						maxSteps: 1,
+					}),
+				),
 			);
 
 			const createProvider = apiFormat === "anthropic" ? sdk.createAnthropic : sdk.createOpenAI;
@@ -94,7 +96,7 @@ describe("workspace turn model", () => {
 			expiresAt: Date.now() + 60 * 60_000,
 			accountId: "account-1",
 		};
-		const model = workspaceTurnModel({
+		const model = Models.make({
 			modelProviders: {
 				renewChatgptTokens: (_workspaceId, _providerId, renew) => renew(tokens),
 				resolve: () =>
@@ -114,14 +116,16 @@ describe("workspace turn model", () => {
 		});
 
 		await run(
-			model.stream({
-				workspaceId: "workspace-id",
-				activity: { purpose: "probe" },
-				model: "gpt-5.5",
-				system: "You are Suga.",
-				messages: [{ role: "user", content: "Hello" }],
-				signal: new AbortController().signal,
-			}),
+			Effect.scoped(
+				model.stream({
+					workspaceId: "workspace-id",
+					activity: { purpose: "probe" },
+					model: "gpt-5.5",
+					system: "You are Suga.",
+					messages: [{ role: "user", content: "Hello" }],
+					maxSteps: 1,
+				}),
+			),
 		);
 
 		expect(sdk.createOpenAI).toHaveBeenCalledWith(
@@ -154,7 +158,7 @@ describe("a failed model request", () => {
 			}),
 		});
 
-		const failure = ModelRequestFailed.fromCause(refused);
+		const failure = Models.RequestFailed.fromCause(refused);
 
 		expect(failure.message).toBe(
 			"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
@@ -171,11 +175,11 @@ describe("a failed model request", () => {
 			responseBody: "<html>upstream timed out</html>",
 		});
 
-		expect(ModelRequestFailed.fromCause(opaque)).toMatchObject({
+		expect(Models.RequestFailed.fromCause(opaque)).toMatchObject({
 			message: "Provider returned 502: <html>upstream timed out</html>",
 			userMessage: "The model provider could not answer.",
 		});
-		expect(ModelRequestFailed.fromCause(new Error("socket hang up")).message).toBe(
+		expect(Models.RequestFailed.fromCause(new Error("socket hang up")).message).toBe(
 			"socket hang up",
 		);
 	});

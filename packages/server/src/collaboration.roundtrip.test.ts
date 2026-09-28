@@ -5,7 +5,6 @@ import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { facilitateLane } from "@sugabots/core/conversations/turns/facilitate.workflow";
-import { Models, type TurnModel } from "@sugabots/core/conversations/turns/model";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
 import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
@@ -24,6 +23,8 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
+import { Models } from "@sugabots/core/providers/models/models";
+import { streamed } from "@sugabots/core/providers/models/testing";
 import { lane } from "@sugabots/core/workflows/sql";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -40,10 +41,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	"a collaboration round trip through the turn workflows",
 	() => {
 		/** Host asks the helper through the tool; helper answers straight away. */
-		const model: TurnModel = {
-			stream: (input) =>
-				Effect.sync(() => ({
-					text: (async function* () {
+		const model = Models.fromStream((input) =>
+			Effect.sync(() =>
+				streamed(
+					(async function* () {
 						const collaborate = input.tools?.collaborate;
 						if (input.system.startsWith("You are Host") && collaborate?.execute) {
 							const result = (await collaborate.execute(
@@ -57,9 +58,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							yield "A dog named Krypto.";
 						}
 					})(),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				})),
-		};
+				),
+			),
+		);
 
 		// The server's tiers, over the test database and a workflow engine in
 		// memory, with the model above and no tools but collaboration. The routine

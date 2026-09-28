@@ -17,6 +17,7 @@ import {
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -41,7 +42,6 @@ import {
 } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
 import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
-import { forEachDelta, type ModelAccounting, type ModelRequestFailed, Models } from "./model.ts";
 import {
 	type ReplyDraft,
 	type ReplyTurn,
@@ -149,7 +149,7 @@ const retry: SegmentOutcome = { _tag: "Retry" };
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
 type StreamOutcome =
-	| { kind: "completed"; accounting: ModelAccounting }
+	| { kind: "completed"; contextTokens: number | undefined }
 	| {
 			kind: "suspended";
 			checkpoint: TurnCheckpoint;
@@ -158,7 +158,7 @@ type StreamOutcome =
 
 /** Why a reply stopped streaming before the model finished, other than being cancelled. */
 type TurnFailure =
-	| ModelRequestFailed
+	| Models.RequestFailed
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -273,10 +273,7 @@ const generateReply = (
 						}),
 					);
 				}
-				const accounting = {
-					...streamed.value.accounting,
-					contextCapacity: prepared.context.windowTokens,
-				};
+				const { contextTokens } = streamed.value;
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
 				// and gives up waiting for an answer that lands a moment later. The
@@ -303,7 +300,10 @@ const generateReply = (
 										),
 									)
 							: false;
-						yield* turns.complete(replyTurn, draft, accounting);
+						yield* turns.complete(replyTurn, draft, {
+							contextTokens,
+							contextCapacity: prepared.context.windowTokens,
+						});
 						// An answer to a brief goes back to the agent that asked, which
 						// carries on in the parent thread, so nobody speaks next here.
 						if (!answered) {
@@ -312,7 +312,7 @@ const generateReply = (
 						yield* requests.queueSummary(followUp);
 					}),
 				);
-				if (needsCompaction(accounting.contextTokens, prepared.context.windowTokens)) {
+				if (needsCompaction(contextTokens, prepared.context.windowTokens)) {
 					yield* requests
 						.queueCompaction({
 							...followUp,
@@ -352,15 +352,15 @@ const logTurnFailure = (prepared: PreparedTurn, why: string) =>
  *
  * Three things run alongside the stream and race it: a poll for a person
  * asking to cancel, a periodic save of the reply so far, and the time limit.
- * Whichever ends first, however it ends, interrupts the others, and the model
- * is told to stop through the abort signal it was given.
+ * Whichever ends first, however it ends, interrupts the others, and closing
+ * the scope aborts the model's request and the tools it is running.
  */
 const streamReply = (
 	prepared: PreparedTurn,
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
-	| ModelRequestFailed
+	| Models.RequestFailed
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -378,8 +378,7 @@ const streamReply = (
 			const toolCalls = yield* ToolCallRepository.Service;
 			const collaborations = yield* Collaborations.Service;
 			const approvals = yield* ApprovedToolCalls.Service;
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
+			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
 			// marking the reply must not interleave, or an older draft could land
@@ -447,7 +446,7 @@ const streamReply = (
 							Effect.andThen(Effect.provideContext(saveReply, context)),
 						),
 				},
-				signal: stop.signal,
+				signal,
 			});
 
 			const environment: TurnEnvironment = {
@@ -488,24 +487,22 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
-				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.modelCalls ?? 0)),
-				signal: stop.signal,
+				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
 			const consume = Effect.gen(function* () {
-				yield* consumeDeltas(prepared, generated.text, stop, events, reply, saveReply);
+				yield* consumeDeltas(prepared, generated.text, events, reply, saveReply);
 				yield* saveReply;
-				const accounting = yield* generated.accounting;
-				const terminal = generated.continuation ? yield* generated.continuation : undefined;
-				if (!terminal || terminal.approvalRequests.length === 0) {
-					return {
-						kind: "completed" as const,
-						accounting: addAccounting(prepared.checkpoint, accounting),
-					};
+				const finished = yield* generated.finished;
+				// A resumed segment starts with the earlier segment's tool results,
+				// so the first segment's prompt is the one measured.
+				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
+				if (finished.approvalRequests.length === 0) {
+					return { kind: "completed" as const, contextTokens };
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
-				const pending = yield* Effect.forEach(terminal.approvalRequests, (request) => {
+				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.requiresApproval) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
@@ -539,7 +536,7 @@ const streamReply = (
 					kind: "suspended" as const,
 					approvals: pending,
 					checkpoint: {
-						messages: [...segmentMessages, ...terminal.responseMessages],
+						messages: [...segmentMessages, ...finished.responseMessages],
 						approvals: pending.map((request) => ({
 							approvalId: request.approvalId,
 							tool: request.tool,
@@ -549,7 +546,8 @@ const streamReply = (
 						})),
 						modelInput,
 						reply: suspendedReply,
-						accounting: addAccounting(prepared.checkpoint, accounting),
+						modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
+						contextTokens,
 					},
 				};
 			});
@@ -613,7 +611,6 @@ const saveReplySoFar = (
 const consumeDeltas = (
 	prepared: PreparedTurn,
 	text: AsyncIterable<string>,
-	stop: AbortController,
 	events: Pick<EventBus.Interface, "publish">,
 	reply: Ref.Ref<ReplyDraft>,
 	saveReply: Effect.Effect<void, never, Database>,
@@ -634,7 +631,7 @@ const consumeDeltas = (
 			return delta ? publishDelta(prepared, offset, delta, events) : Effect.void;
 		});
 
-		yield* forEachDelta(text, stop, (delta) =>
+		yield* Models.forEachDelta(text, (delta) =>
 			Effect.gen(function* () {
 				const { content } = yield* Ref.updateAndGet(reply, (draft) => ({
 					...draft,
@@ -684,17 +681,3 @@ const publishDelta = (
 			}),
 		),
 	).pipe(Effect.catchCause((cause) => Effect.logError("Publishing a message delta failed", cause)));
-
-function addAccounting(
-	checkpoint: TurnCheckpoint | undefined,
-	segment: ModelAccounting,
-): ModelAccounting {
-	if (!checkpoint) return segment;
-	const prior = checkpoint.accounting;
-	return {
-		modelCalls: (prior.modelCalls ?? 0) + segment.modelCalls,
-		// A resumed segment starts with the earlier segment's tool results.
-		contextTokens: prior.contextTokens ?? segment.contextTokens,
-		contextCapacity: segment.contextCapacity,
-	};
-}

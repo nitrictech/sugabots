@@ -2,8 +2,9 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { Models } from "../../providers/models/models.ts";
+import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
@@ -42,13 +43,17 @@ describe("summarise", () => {
 		vi.useFakeTimers();
 		const { summaries, turns } = fakes();
 		let signal: AbortSignal | undefined;
-		const stream = vi.fn<TurnModel["stream"]>((input) => {
-			signal = input.signal;
-			return Effect.never;
-		});
+		const stream = vi.fn<Models.Interface["stream"]>(() =>
+			Effect.gen(function* () {
+				signal = yield* Effect.abortSignal;
+				return yield* Effect.never;
+			}),
+		);
 		try {
 			const execution = runWithServices(
-				summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+				summarise(request, Models.fromStream(stream)).pipe(
+					Effect.provide(services(summaries, turns)),
+				),
 			);
 			await vi.advanceTimersByTimeAsync(120_000);
 			await execution;
@@ -66,13 +71,13 @@ describe("summarise", () => {
 
 	it("persists the first generated title and summary", async () => {
 		const { summaries, turns } = fakes();
-		const model: TurnModel = {
-			stream: () =>
-				Effect.sync(() => ({
-					text: chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'),
-					accounting: Effect.succeed({ modelCalls: 1, contextTokens: 20 }),
-				})),
-		};
+		const model = Models.fromStream(() =>
+			Effect.sync(() =>
+				streamed(chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'), {
+					contextTokens: 20,
+				}),
+			),
+		);
 
 		await runWithServices(
 			summarise(request, model).pipe(Effect.provide(services(summaries, turns))),
@@ -81,22 +86,19 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Prepare release notes", content: "Notes are ready." },
-			{ modelCalls: 1, contextTokens: 20 },
+			20,
 		);
 		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 	});
 
 	it("asks again when the first summary is not the shape it asked for", async () => {
 		const { summaries, turns } = fakes();
-		const stream = vi.fn(() =>
-			Effect.sync(() => ({
-				text: chunks("Notes are ready."),
-				accounting: Effect.succeed({ modelCalls: 1 }),
-			})),
-		);
+		const stream = vi.fn(() => Effect.sync(() => streamed(chunks("Notes are ready."))));
 
 		await runWithServices(
-			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+			summarise(request, Models.fromStream(stream)).pipe(
+				Effect.provide(services(summaries, turns)),
+			),
 		);
 
 		// Three asks, then the thread is left without a summary rather than the
@@ -113,20 +115,16 @@ describe("summarise", () => {
 		const { summaries, turns } = fakes();
 		const stream = vi
 			.fn(() =>
-				Effect.sync(() => ({
-					text: chunks('{"title":"Release","summary":"Notes are ready."}'),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				})),
+				Effect.sync(() => streamed(chunks('{"title":"Release","summary":"Notes are ready."}'))),
 			)
 			.mockImplementationOnce(() =>
-				Effect.sync(() => ({
-					text: chunks("Here you go: Notes are ready."),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				})),
+				Effect.sync(() => streamed(chunks("Here you go: Notes are ready."))),
 			);
 
 		await runWithServices(
-			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+			summarise(request, Models.fromStream(stream)).pipe(
+				Effect.provide(services(summaries, turns)),
+			),
 		);
 
 		expect(stream).toHaveBeenCalledTimes(2);
@@ -134,7 +132,7 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
-			expect.anything(),
+			undefined,
 		);
 	});
 
@@ -145,20 +143,14 @@ describe("summarise", () => {
 		);
 
 		await runWithServices(
-			summarise(request, {
-				stream: () =>
-					Effect.sync(() => ({
-						text: chunks(fenced),
-						accounting: Effect.succeed({ modelCalls: 1 }),
-					})),
-			}).pipe(Effect.provide(services(summaries, turns))),
+			summarise(request, scriptedModel(fenced)).pipe(Effect.provide(services(summaries, turns))),
 		);
 
 		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
-			expect.anything(),
+			undefined,
 		);
 	});
 
@@ -166,12 +158,14 @@ describe("summarise", () => {
 		const { summaries, turns } = fakes();
 		const stream = vi.fn(() =>
 			Effect.fail(
-				new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+				new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 			),
 		);
 
 		await runWithServices(
-			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+			summarise(request, Models.fromStream(stream)).pipe(
+				Effect.provide(services(summaries, turns)),
+			),
 		);
 
 		// Asking again would cost the same and fail the same way. The thread's
@@ -237,17 +231,4 @@ function services(
 		unimplemented(Summaries.Service, summaries),
 		unimplemented(TurnRepository.Service, turns),
 	);
-}
-
-function unusedModel(): TurnModel {
-	return {
-		stream: () =>
-			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
-	};
-}
-
-async function* chunks(...values: string[]): AsyncIterable<string> {
-	for (const value of values) {
-		yield value;
-	}
 }

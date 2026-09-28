@@ -20,7 +20,6 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import type { ModelAccounting } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { SummaryRepository } from "./repository.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
@@ -48,7 +47,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
-		accounting: ModelAccounting,
+		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 }
 
@@ -142,7 +141,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, result, accounting) =>
+		complete: (prepared, result, contextTokens) =>
 			operation(
 				"complete",
 				transaction(
@@ -164,7 +163,7 @@ export const make = Effect.gen(function* () {
 							content: result.content,
 							sourceMessageId: prepared.sourceMessageId,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, accounting);
+						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
 			),

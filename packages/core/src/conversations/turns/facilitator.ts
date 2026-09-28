@@ -1,6 +1,6 @@
 import type { ThreadType } from "@sugabots/contracts";
 import { and, desc, eq } from "drizzle-orm";
-import { Duration, Effect, Layer, Ref } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import {
 	type Database,
 	type Executor,
@@ -9,6 +9,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
+import { Models } from "../../providers/models/models.ts";
 import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
@@ -17,20 +18,12 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { crewOf } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import {
 	type AttemptOutcome,
 	type FacilitateRequest,
 	FacilitateSteps,
 	FacilitationFailed,
 } from "./facilitate.workflow.ts";
-import {
-	forEachDelta,
-	type ModelRequestFailed,
-	Models,
-	type TurnModel,
-	type TurnModelPrompt,
-} from "./model.ts";
 import { TurnRequests } from "./requests.ts";
 
 /**
@@ -110,7 +103,7 @@ export type FacilitatorDecision = { kind: "agent"; agentId: string } | { kind: "
 export const attemptFacilitation = (
 	request: FacilitateRequest,
 	attempt: number,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<
 	AttemptOutcome,
 	never,
@@ -170,46 +163,30 @@ const applyDecision = (
 /** Asks the model, within the time limit, and reads its one-word answer. */
 const decide = (
 	scope: FacilitatorScope,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<
 	FacilitatorDecision,
-	ModelRequestFailed | AnswerTimedOut | UnusableAnswer,
+	Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer,
 	Database
 > =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* model.stream({
-				...facilitatorPrompt(scope, stop.signal),
-				activity: { purpose: "facilitation", podId: scope.podId, threadId: scope.threadId },
-			});
-			const collected = yield* Ref.make("");
-			yield* forEachDelta(generated.text, stop, (text) =>
-				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
-					Effect.filterOrFail(
-						(soFar) => soFar.length <= MAX_ANSWER_CHARACTERS,
-						() => new UnusableAnswer({ reason: "Facilitator returned too much text" }),
-					),
-					Effect.asVoid,
-				),
-			);
-			const answer = yield* Ref.get(collected);
-			const decision = parseDecision(answer, scope);
-			return decision === undefined
-				? yield* new UnusableAnswer({
-						reason: `Facilitator answered with something other than a handle: ${JSON.stringify(answer.slice(0, 60))}`,
-					})
-				: decision;
-		}),
-	).pipe(
-		Effect.timeoutOrElse({
-			duration: FACILITATOR_TIMEOUT,
-			orElse: () => Effect.fail(new AnswerTimedOut({ message: "Facilitator timed out" })),
-		}),
-		// The timeout is inside, so each attempt gets its own budget and a slow
-		// model is not asked three times over.
-		retryUnusable,
+	Effect.gen(function* () {
+		const answer = yield* model.answer({
+			...facilitatorPrompt(scope),
+			purpose: "Facilitator",
+			activity: { purpose: "facilitation", podId: scope.podId, threadId: scope.threadId },
+			maxCharacters: MAX_ANSWER_CHARACTERS,
+			timeout: FACILITATOR_TIMEOUT,
+		});
+		const decision = parseDecision(answer.text, scope);
+		return decision === undefined
+			? yield* new Models.UnusableAnswer({
+					reason: `Facilitator answered with something other than a handle: ${JSON.stringify(answer.text.slice(0, 60))}`,
+				})
+			: decision;
+	}).pipe(
+		// Each attempt gets its own time limit, so a slow model is not asked
+		// three times over one budget.
+		Models.retryUnusable,
 	);
 
 /**
@@ -256,7 +233,7 @@ export function parseDecision(
  * agent just spoke) has its own rule, and the message being decided about is
  * named instead of left at the end of a transcript.
  */
-export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal): TurnModelPrompt {
+export function facilitatorPrompt(scope: FacilitatorScope): Models.Prompt {
 	const agents = scope.crew.map(
 		(member) =>
 			`- @${member.handle}: ${member.name}, agent${member.inThread ? "" : " (not in the thread yet)"}${member.description ? `. ${member.description}` : ""}`,
@@ -272,7 +249,6 @@ export function facilitatorPrompt(scope: FacilitatorScope, signal: AbortSignal):
 	return {
 		workspaceId: scope.workspaceId,
 		model: scope.model,
-		signal,
 		system: [
 			"You decide who speaks next in a group conversation between people and agents.",
 			`Answer with exactly one of: ${[...scope.crew.map((member) => `@${member.handle}`), "nobody"].join(", ")}. No other words, no punctuation, no explanation.`,

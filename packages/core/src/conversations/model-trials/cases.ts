@@ -1,9 +1,9 @@
 import { DateTime, Effect, Exit } from "effect";
+import type { Models } from "../../providers/models/models.ts";
 import { COMPACTION_SUMMARY_WORDS, compactionPrompt } from "../compaction/prompt.ts";
 import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
 import { parseGenerated } from "../summaries/summary.steps.ts";
 import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../turns/facilitator.ts";
-import type { TurnModelPrompt } from "../turns/model.ts";
 
 /**
  * What a model has to get right to do a system agent's job.
@@ -22,7 +22,7 @@ import type { TurnModelPrompt } from "../turns/model.ts";
 export interface TrialCase {
 	/** What this checks, in the words a person choosing a model would use. */
 	readonly name: string;
-	readonly prompt: (model: string, workspaceId: string, signal: AbortSignal) => TurnModelPrompt;
+	readonly prompt: (model: string, workspaceId: string) => Models.Prompt;
 	/** Whether the answer is one the product could have used. */
 	readonly accepts: (answer: string) => boolean;
 }
@@ -64,8 +64,7 @@ const routerCase = (
 	wanted: "nobody" | (string & {}),
 ): TrialCase => ({
 	name,
-	prompt: (model, workspaceId, signal) =>
-		facilitatorPrompt({ ...scope, model, workspaceId }, signal),
+	prompt: (model, workspaceId) => facilitatorPrompt({ ...scope, model, workspaceId }),
 	accepts: (answer) => {
 		const decision = parseDecision(answer, scope);
 		if (!decision) {
@@ -170,26 +169,27 @@ const SUMMARISE_CASES: readonly TrialCase[] = [
 	{
 		// The failure people saw: prose where strict JSON was asked for.
 		name: "Returns a title and summary as strict JSON the first time",
-		prompt: (model, workspaceId, signal) =>
-			threadSummaryPrompt({ ...summary(), model, workspaceId }, signal),
+		prompt: (model, workspaceId) => threadSummaryPrompt({ ...summary(), model, workspaceId }),
 		accepts: (answer) => accepted(answer, true),
 	},
 	{
 		name: "Returns plain prose once a summary already exists",
-		prompt: (model, workspaceId, signal) =>
-			threadSummaryPrompt(
-				{ ...summary("Invoices are going out; two are on hold."), model, workspaceId },
-				signal,
-			),
+		prompt: (model, workspaceId) =>
+			threadSummaryPrompt({
+				...summary("Invoices are going out; two are on hold."),
+				model,
+				workspaceId,
+			}),
 		accepts: (answer) => accepted(answer, false),
 	},
 	{
 		name: "Keeps a summary within the length a thread panel can show",
-		prompt: (model, workspaceId, signal) =>
-			threadSummaryPrompt(
-				{ ...summary("Invoices are going out; two are on hold."), model, workspaceId },
-				signal,
-			),
+		prompt: (model, workspaceId) =>
+			threadSummaryPrompt({
+				...summary("Invoices are going out; two are on hold."),
+				model,
+				workspaceId,
+			}),
 		accepts: (answer) => accepted(answer, false) && answer.trim().split(/\s+/).length <= 160,
 	},
 ];
@@ -230,8 +230,7 @@ const compactionSectionNames = [
 export const COMPACT_CASES: readonly TrialCase[] = [
 	{
 		name: "Keeps the facts a bot needs within the length asked for",
-		prompt: (model, workspaceId, signal) =>
-			compactionPrompt(compaction(model, workspaceId), signal),
+		prompt: (model, workspaceId) => compactionPrompt(compaction(model, workspaceId)),
 		accepts: (answer) =>
 			answer.includes("Acme") &&
 			answer.includes("Orbit") &&
@@ -239,8 +238,7 @@ export const COMPACT_CASES: readonly TrialCase[] = [
 	},
 	{
 		name: "Writes every section, in order",
-		prompt: (model, workspaceId, signal) =>
-			compactionPrompt(compaction(model, workspaceId), signal),
+		prompt: (model, workspaceId) => compactionPrompt(compaction(model, workspaceId)),
 		accepts: (answer) => {
 			const positions = compactionSectionNames.map((name) => answer.indexOf(name));
 			return positions.every((position, index) => position > (positions[index - 1] ?? -1));
@@ -249,8 +247,7 @@ export const COMPACT_CASES: readonly TrialCase[] = [
 	{
 		// A thread has several people and bots; a fact moved to the wrong one misleads them all.
 		name: "Says who said what, and follows no instructions in the transcript",
-		prompt: (model, workspaceId, signal) =>
-			compactionPrompt(compaction(model, workspaceId), signal),
+		prompt: (model, workspaceId) => compactionPrompt(compaction(model, workspaceId)),
 		accepts: (answer) =>
 			answer.includes("Sam") && answer.includes("Ledger") && answer.trim() !== "OK",
 	},

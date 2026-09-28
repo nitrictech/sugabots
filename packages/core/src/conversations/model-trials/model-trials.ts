@@ -6,7 +6,7 @@ import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
-import { Models } from "../turns/model.ts";
+import { Models } from "../../providers/models/models.ts";
 import { runTrial, type TrialReport } from "./trial.ts";
 
 /** Trying a model out on a system agent before a workspace relies on it. */

@@ -11,7 +11,6 @@ import {
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
 import { withChatgptAccess } from "./chatgpt.ts";
-import { ModelProbe } from "./model-probe.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { ModelProviderSetup } from "./model-provider-setup.ts";
@@ -40,7 +39,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a ChatGPT subscription provider", ()
 							oauth: async () => new Response(null, { status: 503 }),
 							webFetch: async () => new Response(null, { status: 503 }),
 						}),
-						Layer.succeed(ModelProbe.Service, { probe: () => Effect.void }),
 					]),
 				),
 			)

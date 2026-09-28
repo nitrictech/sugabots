@@ -7,6 +7,8 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Models } from "../../providers/models/models.ts";
+import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
 import {
@@ -20,7 +22,6 @@ import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
-import { ModelRequestFailed, Models, type TurnModel, type TurnModelInput } from "./model.ts";
 import { type NotRunnable, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
 import { runSegment } from "./turn.steps.ts";
@@ -102,13 +103,9 @@ describe("runSegment", () => {
 		const { execution, turns } = fakes();
 		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
-		const model: TurnModel = {
-			stream: () =>
-				Effect.sync(() => ({
-					text: chunks("Release", " checked"),
-					accounting: Effect.succeed({ modelCalls: 1, contextTokens: 10 }),
-				})),
-		};
+		const model = Models.fromStream(() =>
+			Effect.sync(() => streamed(chunks("Release", " checked"), { contextTokens: 10 })),
+		);
 
 		await runWithServices(
 			segmentWith({
@@ -123,7 +120,6 @@ describe("runSegment", () => {
 		);
 
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
-			modelCalls: 1,
 			contextTokens: 10,
 			contextCapacity: 128_000,
 		});
@@ -149,13 +145,9 @@ describe("runSegment", () => {
 				segmentWith({
 					execution,
 					turns,
-					model: {
-						stream: () =>
-							Effect.sync(() => ({
-								text: chunks("Done"),
-								accounting: Effect.succeed({ modelCalls: 1, contextTokens }),
-							})),
-					},
+					model: Models.fromStream(() =>
+						Effect.sync(() => streamed(chunks("Done"), { contextTokens })),
+					),
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
@@ -187,13 +179,9 @@ describe("runSegment", () => {
 			segmentWith({
 				execution,
 				turns,
-				model: {
-					stream: () =>
-						Effect.succeed({
-							text: chunks("Done"),
-							accounting: Effect.succeed({ modelCalls: 1, contextTokens: 0 }),
-						}),
-				},
+				model: Models.fromStream(() =>
+					Effect.succeed(streamed(chunks("Done"), { contextTokens: 0 })),
+				),
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
@@ -235,10 +223,10 @@ describe("runSegment", () => {
 		});
 		// Stands in for the SDK: says a few words, calls the tool as the SDK
 		// would, and carries on.
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
-				Effect.sync(() => ({
-					text: (async function* () {
+		const model = Models.fromStream((input) =>
+			Effect.sync(() =>
+				streamed(
+					(async function* () {
 						yield "Looking. ";
 						const output = await input.tools?.probe?.execute?.(
 							{ q: "hi" } as never,
@@ -246,9 +234,9 @@ describe("runSegment", () => {
 						);
 						yield `Found ${JSON.stringify(output)}.`;
 					})(),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				})),
-		};
+				),
+			),
+		);
 
 		await runWithServices(
 			segmentWith({
@@ -282,7 +270,7 @@ describe("runSegment", () => {
 				collaborations: [],
 				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
 			},
-			{ modelCalls: 1, contextCapacity: 128_000 },
+			{ contextCapacity: 128_000 },
 		);
 	});
 
@@ -294,10 +282,10 @@ describe("runSegment", () => {
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async () => ({ content: [] }),
 		});
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
-				Effect.sync(() => ({
-					text: (async function* () {
+		const model = Models.fromStream((input) =>
+			Effect.sync(() =>
+				streamed(
+					(async function* () {
 						yield "Clearing. ";
 						await input.tools?.wiki__wipe?.execute?.(
 							{} as never,
@@ -308,9 +296,9 @@ describe("runSegment", () => {
 						);
 						yield "Done.";
 					})(),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				})),
-		};
+				),
+			),
+		);
 
 		await runWithServices(
 			segmentWith({
@@ -359,7 +347,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ modelCalls: 1, contextCapacity: 128_000 },
+			{ contextCapacity: 128_000 },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});
@@ -415,20 +403,15 @@ describe("runSegment", () => {
 					messages: [{ role: "user", content: "reviewed history" }],
 				},
 				reply: reply(""),
-				accounting: { modelCalls: 1 },
+				modelCalls: 1,
 			},
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
-		let received: TurnModelInput | undefined;
-		const model: TurnModel = {
-			stream: (input) => {
-				received = input;
-				return Effect.succeed({
-					text: chunks("Done"),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				});
-			},
-		};
+		let received: Models.StreamRequest | undefined;
+		const model = Models.fromStream((input) => {
+			received = input;
+			return Effect.succeed(streamed(chunks("Done")));
+		});
 
 		await runWithServices(
 			segmentWith({
@@ -467,16 +450,11 @@ describe("runSegment", () => {
 			connectionRevision: 1,
 			remoteToolName: name,
 		});
-		let received: TurnModelInput | undefined;
-		const model: TurnModel = {
-			stream: (input) => {
-				received = input;
-				return Effect.succeed({
-					text: chunks("Done"),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-				});
-			},
-		};
+		let received: Models.StreamRequest | undefined;
+		const model = Models.fromStream((input) => {
+			received = input;
+			return Effect.succeed(streamed(chunks("Done")));
+		});
 
 		await runWithServices(
 			segmentWith({
@@ -510,13 +488,12 @@ describe("runSegment", () => {
 			execute: async () => "ok",
 		});
 		const offered: string[][] = [];
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
-				Effect.sync(() => {
-					offered.push(Object.keys(input.tools ?? {}));
-					return { text: chunks("Done"), accounting: Effect.succeed({ modelCalls: 1 }) };
-				}),
-		};
+		const model = Models.fromStream((input) =>
+			Effect.sync(() => {
+				offered.push(Object.keys(input.tools ?? {}));
+				return streamed(chunks("Done"));
+			}),
+		);
 		vi.mocked(execution.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				...prepared,
@@ -593,12 +570,11 @@ describe("runSegment", () => {
 			segmentWith({
 				execution,
 				turns,
-				model: {
-					stream: () =>
-						Effect.fail(
-							new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
-						),
-				},
+				model: Models.fromStream(() =>
+					Effect.fail(
+						new Models.RequestFailed({ message: "provider down", reason: "unavailable" }),
+					),
+				),
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
@@ -621,13 +597,7 @@ describe("runSegment", () => {
 			segmentWith({
 				execution,
 				turns,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks("Done"),
-							accounting: Effect.succeed({ modelCalls: 1 }),
-						})),
-				},
+				model: scriptedModel("Done"),
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
@@ -647,13 +617,7 @@ describe("runSegment", () => {
 			segmentWith({
 				execution,
 				turns,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks("Done"),
-							accounting: Effect.succeed({ modelCalls: 1 }),
-						})),
-				},
+				model: scriptedModel("Done"),
 				events,
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
@@ -667,12 +631,11 @@ describe("runSegment", () => {
 
 	it("marks a failed generation for retry without duplicating its response", async () => {
 		const { execution, turns } = fakes();
-		const model: TurnModel = {
-			stream: () =>
-				Effect.fail(
-					new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
-				),
-		};
+		const model = Models.fromStream(() =>
+			Effect.fail(
+				new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+			),
+		);
 		const events = eventBus();
 
 		const outcome = await runWithServices(
@@ -704,13 +667,7 @@ describe("runSegment", () => {
 				segmentWith({
 					execution,
 					turns,
-					model: {
-						stream: () =>
-							Effect.sync(() => ({
-								text: delayedChunks(),
-								accounting: Effect.succeed({ modelCalls: 1 }),
-							})),
-					},
+					model: Models.fromStream(() => Effect.sync(() => streamed(delayedChunks()))),
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
@@ -736,13 +693,9 @@ describe("runSegment", () => {
 				segmentWith({
 					execution,
 					turns,
-					model: {
-						stream: (input) =>
-							Effect.sync(() => ({
-								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ modelCalls: 1 }),
-							})),
-					},
+					model: Models.fromStream(() =>
+						Effect.map(Effect.abortSignal, (signal) => streamed(chunksUntilAborted(signal))),
+					),
 					events,
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
@@ -772,13 +725,9 @@ describe("runSegment", () => {
 				segmentWith({
 					execution,
 					turns,
-					model: {
-						stream: (input) =>
-							Effect.sync(() => ({
-								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ modelCalls: 1 }),
-							})),
-					},
+					model: Models.fromStream(() =>
+						Effect.map(Effect.abortSignal, (signal) => streamed(chunksUntilAborted(signal))),
+					),
 					events: liveEventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
@@ -827,7 +776,7 @@ interface Given {
 	requests: Pick<TurnRequests.Interface, "queueSummary"> &
 		Partial<Pick<TurnRequests.Interface, "queueCompaction">>;
 	approvals?: ApprovedToolCalls.Interface;
-	model: TurnModel;
+	model: Models.Interface;
 	events: EventBus.Interface;
 	builtInTools?: BuiltInTools.Interface;
 	connectionTools?: ConnectionTools.Interface;
@@ -883,30 +832,25 @@ function segmentAskingApproval(
 	return segmentWith({
 		execution,
 		turns,
-		model: {
-			stream: () =>
-				Effect.succeed({
-					text: (async function* () {
-						yield "I need approval.";
-					})(),
-					accounting: Effect.succeed({ modelCalls: 1 }),
-					continuation: Effect.succeed({
-						approvalRequests: [
-							{
-								type: "tool-approval-request",
-								approvalId: "approval-1",
-								toolCall: {
-									type: "tool-call",
-									toolCallId: "sdk-1",
-									toolName: "wiki__wipe",
-									input: {},
-								},
+		model: Models.fromStream(() =>
+			Effect.succeed(
+				streamed(chunks("I need approval."), {
+					approvalRequests: [
+						{
+							type: "tool-approval-request",
+							approvalId: "approval-1",
+							toolCall: {
+								type: "tool-call",
+								toolCallId: "sdk-1",
+								toolName: "wiki__wipe",
+								input: {},
 							},
-						] as never,
-						responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
-					}),
+						},
+					] as never,
+					responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
 				}),
-		},
+			),
+		),
 		events: eventBus(),
 		collaborations: collaborations(),
 		toolCalls: toolCalls(),
@@ -999,12 +943,6 @@ function eventTypes(events: EventBus.Interface): string[] {
 const noSummary = () => Effect.void;
 const noCompaction = () => Effect.void;
 
-async function* chunks(...values: string[]): AsyncIterable<string> {
-	for (const value of values) {
-		yield value;
-	}
-}
-
 async function* delayedChunks(): AsyncIterable<string> {
 	yield "short";
 	await new Promise((resolve) => setTimeout(resolve, 1_100));
@@ -1020,11 +958,4 @@ async function* chunksUntilAborted(signal: AbortSignal): AsyncIterable<string> {
 		}
 		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 	});
-}
-
-function unusedModel(): TurnModel {
-	return {
-		stream: () =>
-			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
-	};
 }

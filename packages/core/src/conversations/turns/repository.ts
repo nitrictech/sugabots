@@ -39,7 +39,6 @@ import {
 	type TurnState,
 	transition,
 } from "./lifecycle.ts";
-import type { ModelAccounting } from "./model.ts";
 
 /**
  * The only writer of `turn`, and of a turn's reply message while the turn
@@ -84,7 +83,7 @@ export interface Interface {
 	readonly complete: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		accounting: ModelAccounting,
+		measured: ContextMeasurement,
 	) => Effect.Effect<void>;
 	/**
 	 * Records the run as failed, telling people `userMessage`, and returns
@@ -99,7 +98,7 @@ export interface Interface {
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
 	readonly completeSystemAgentTurn: (
 		turnId: string,
-		accounting: ModelAccounting,
+		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 	readonly failSystemAgentTurn: (turnId: string, userMessage: UserMessage) => Effect.Effect<void>;
 	/** Asks the turn to stop, and says who has to be told. */
@@ -148,7 +147,7 @@ export const make = Effect.gen(function* () {
 	const write = (
 		turnId: string,
 		next: TurnState,
-		recorded: Partial<Pick<typeof turn.$inferInsert, "checkpoint" | AccountingColumn>> = {},
+		recorded: Partial<Pick<typeof turn.$inferInsert, "checkpoint" | keyof ContextMeasurement>> = {},
 	) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
@@ -455,7 +454,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (reply, draft, accounting) =>
+		complete: (reply, draft, measured) =>
 			operation(
 				"complete",
 				transaction(
@@ -466,7 +465,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (locked?.decided._tag !== "Next") return;
 						yield* writeReply(reply, draft, "complete");
-						yield* write(locked.id, locked.decided.state, accountingColumns(accounting));
+						yield* write(locked.id, locked.decided.state, measurementColumns(measured));
 						yield* emit([
 							ConversationEvent.TurnCompleted({
 								threadId: reply.threadId,
@@ -537,14 +536,14 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		completeSystemAgentTurn: (turnId, accounting) =>
+		completeSystemAgentTurn: (turnId, contextTokens) =>
 			operation(
 				"completeSystemAgentTurn",
 				transaction(
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(eq(turn.id, turnId), TurnEvent.Complete());
 						if (locked?.decided._tag !== "Next") return;
-						yield* write(locked.id, locked.decided.state, accountingColumns(accounting));
+						yield* write(locked.id, locked.decided.state, measurementColumns({ contextTokens }));
 					}),
 				),
 			),
@@ -805,20 +804,24 @@ export const TurnCheckpoint = Schema.Struct({
 		),
 	}),
 	reply: ReplyDraft,
-	accounting: Schema.Struct({
-		modelCalls: OptionalCount,
-		contextTokens: OptionalCount,
-		contextCapacity: OptionalCount,
-	}),
+	/** The model calls made before the turn suspended, which cap the steps a resumed segment has left. */
+	modelCalls: OptionalCount,
+	/** The prompt's size at the turn's first model call, which a resumed segment keeps. */
+	contextTokens: OptionalCount,
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
-type AccountingColumn = "contextTokens" | "contextCapacity";
+/** How much of its model's context window a turn's prompt took. */
+export interface ContextMeasurement {
+	contextTokens?: number;
+	/** The window the prompt was read with. */
+	contextCapacity?: number;
+}
 
-function accountingColumns(accounting: ModelAccounting) {
+function measurementColumns(measured: ContextMeasurement) {
 	return {
-		contextTokens: accounting.contextTokens ?? null,
-		contextCapacity: accounting.contextCapacity ?? null,
+		contextTokens: measured.contextTokens ?? null,
+		contextCapacity: measured.contextCapacity ?? null,
 	};
 }
 

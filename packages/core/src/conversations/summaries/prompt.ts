@@ -1,4 +1,4 @@
-import type { TurnModelPrompt } from "../turns/model.ts";
+import type { Models } from "../../providers/models/models.ts";
 import type { PreparedSummary } from "./summaries.ts";
 
 /** What the prompt reads. Narrower than a `PreparedSummary` so a model trial can build one. */
@@ -7,10 +7,7 @@ export type SummaryPromptInput = Pick<
 	"workspaceId" | "model" | "threadTitle" | "previousContent" | "transcript"
 >;
 
-export function threadSummaryPrompt(
-	prepared: SummaryPromptInput,
-	signal: AbortSignal,
-): TurnModelPrompt {
+export function threadSummaryPrompt(prepared: SummaryPromptInput): Models.Prompt {
 	const previous = prepared.previousContent
 		? `Previous summary:\n${prepared.previousContent}`
 		: "There is no previous summary.";
@@ -21,7 +18,6 @@ export function threadSummaryPrompt(
 	return {
 		workspaceId: prepared.workspaceId,
 		model: prepared.model,
-		signal,
 		system: [
 			"Write a compact thread summary containing only durable context needed to continue the work.",
 			"Keep confirmed facts, decisions, results, unresolved questions, owners, and the immediate next step. Omit conversational back-and-forth, acknowledgements, apologies, superseded corrections, and repeated details.",

@@ -17,7 +17,6 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import type { ModelAccounting } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import type { CompactionRequest } from "./compaction.workflow.ts";
 import { loadContextWindow } from "./context-window.ts";
@@ -54,7 +53,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedCompaction,
 		summary: string,
-		accounting: ModelAccounting,
+		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 }
 
@@ -162,7 +161,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, summary, accounting) =>
+		complete: (prepared, summary, contextTokens) =>
 			operation(
 				"complete",
 				transaction(
@@ -175,7 +174,7 @@ export const make = Effect.gen(function* () {
 							historyStartsAt: prepared.historyStartsAt,
 							keptFrom: prepared.keptFrom,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, accounting);
+						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
 			),
