@@ -557,7 +557,12 @@ describe("runClaimedTurn", () => {
 		const outcome = await runWithServices(
 			runClaimedTurn(claimed, {
 				store,
-				model: { stream: () => Effect.fail(new ModelRequestFailed({ message: "provider down" })) },
+				model: {
+					stream: () =>
+						Effect.fail(
+							new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+						),
+				},
 				events: eventBus(),
 				collaborations: collaborations(),
 				calls: toolCalls(),
@@ -567,10 +572,15 @@ describe("runClaimedTurn", () => {
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(store.fail).toHaveBeenCalledWith(lastRun, reply(""), "provider down", false);
+		expect(store.fail).toHaveBeenCalledWith(
+			lastRun,
+			reply(""),
+			"The model provider could not answer.",
+			false,
+		);
 		expect(settleThread).toHaveBeenCalledWith(claimed.threadId, {
 			state: "failed",
-			error: "provider down",
+			error: "The model provider could not answer.",
 		});
 	});
 
@@ -626,7 +636,10 @@ describe("runClaimedTurn", () => {
 	it("marks a failed generation for retry without duplicating its response", async () => {
 		const store = turnStore();
 		const model: TurnModel = {
-			stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+			stream: () =>
+				Effect.fail(
+					new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+				),
 		};
 		const events = eventBus();
 
@@ -642,7 +655,12 @@ describe("runClaimedTurn", () => {
 		);
 
 		expect(outcome).toEqual({ _tag: "Retry" });
-		expect(store.fail).toHaveBeenCalledWith(prepared, reply(""), "provider unavailable", true);
+		expect(store.fail).toHaveBeenCalledWith(
+			prepared,
+			reply(""),
+			"The model provider could not answer.",
+			true,
+		);
 		expect(eventTypes(events)).toEqual([]);
 	});
 
@@ -842,6 +860,7 @@ async function* chunksUntilAborted(signal: AbortSignal): AsyncIterable<string> {
 
 function unusedModel(): TurnModel {
 	return {
-		stream: () => Effect.fail(new ModelRequestFailed({ message: "unused model" })),
+		stream: () =>
+			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
 	};
 }

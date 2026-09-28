@@ -95,7 +95,4 @@ export function authoriseLayer(authorization: Authorization) {
 	);
 }
 
-const denials = {
-	ResourceHidden: (hidden: { message: string }) => new NotFound({ message: hidden.message }),
-	ActionForbidden: () => new Forbidden({ message: "You are not allowed to do that" }),
-};
+const denials = { ResourceHidden: NotFound, ActionForbidden: Forbidden };

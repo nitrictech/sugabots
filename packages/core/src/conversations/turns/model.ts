@@ -16,6 +16,7 @@ import type { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
 import type { ModelProviderStore } from "../../providers/model-providers/store.ts";
 import type { EgressHttpClients } from "../../providers/network/egress.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 
 export interface ModelAccounting {
 	usage: TurnUsage;
@@ -68,10 +69,53 @@ export interface TurnModel {
 }
 
 /** The model could not be asked, or its provider failed the request. */
-export class ModelRequestFailed extends Data.TaggedError("ModelRequestFailed")<{
-	readonly message: string;
-	readonly cause?: unknown;
-}> {}
+export class ModelRequestFailed
+	extends Data.TaggedError("ModelRequestFailed")<{
+		/** Why, for the logs. It may quote the provider's own response. */
+		readonly message: string;
+		readonly reason: ModelRequestFailure;
+		readonly cause?: unknown;
+	}>
+	implements UserFacing
+{
+	/**
+	 * A request that failed with `cause`. A refused request carries its reason
+	 * in the response body, usually as `{"error":{"message":...}}`; that
+	 * sentence is the one worth logging, ahead of the SDK's own summary.
+	 */
+	static fromCause(cause: unknown): ModelRequestFailed {
+		if (!APICallError.isInstance(cause)) {
+			const message = cause instanceof Error ? cause.message : String(cause);
+			return new ModelRequestFailed({ message, reason: "unavailable", cause });
+		}
+		const status = cause.statusCode;
+		const said = providerSaid(cause.responseBody) ?? cause.message;
+		return new ModelRequestFailed({
+			message: `${status ? `Provider returned ${status}` : "Provider refused"}: ${said}`,
+			reason:
+				status === 401 || status === 403
+					? "rejected"
+					: status === 429
+						? "rateLimited"
+						: "unavailable",
+			cause,
+		});
+	}
+
+	get userMessage() {
+		return MODEL_REQUEST_USER_MESSAGES[this.reason];
+	}
+}
+
+type ModelRequestFailure = "noProvider" | "rejected" | "rateLimited" | "unavailable" | "timedOut";
+
+const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
+	noProvider: UserMessage.of`No active provider offers this model.`,
+	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
+	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
+	unavailable: UserMessage.of`The model provider could not answer.`,
+	timedOut: UserMessage.of`The model did not answer in time.`,
+};
 
 export interface TurnModelOptions {
 	modelProviders: Pick<ModelProviderStore, "resolve">;
@@ -86,6 +130,7 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				if (!connection) {
 					return yield* new ModelRequestFailed({
 						message: `No active provider offers the model "${input.model}"`,
+						reason: "noProvider",
 					});
 				}
 				const fetch = httpClients.for(connection);
@@ -108,7 +153,7 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 				// The SDK does not throw a provider's error into the text stream: it
 				// reports it here and ends the stream, and whatever is asked of the
 				// result afterwards fails with "No output generated". Keeping the
-				// first error is what lets the turn say what the provider said.
+				// first error is what lets the failure say why the provider refused.
 				let providerFailure: unknown;
 				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 				const result = streamText({
@@ -134,9 +179,7 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 					accounting: Effect.tryPromise({
 						try: async () => {
 							const [usage, steps] = await Promise.all([result.usage, result.steps]);
-							if (providerFailure !== undefined) {
-								throw new Error(describeModelFailure(providerFailure));
-							}
+							if (providerFailure !== undefined) throw providerFailure;
 							return {
 								usage: {
 									modelCalls: steps.length,
@@ -149,21 +192,14 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 								contextTokens: steps.at(-1)?.usage.inputTokens,
 							};
 						},
-						catch: (cause) => {
-							const failure = providerFailure === undefined ? cause : providerFailure;
-							return new ModelRequestFailed({
-								message: describeModelFailure(failure),
-								cause: failure,
-							});
-						},
+						catch: (cause) => ModelRequestFailed.fromCause(providerFailure ?? cause),
 					}),
 					continuation: Effect.tryPromise({
 						try: async () => ({
 							approvalRequests: [...approvalRequests],
 							responseMessages: await result.responseMessages,
 						}),
-						catch: (cause) =>
-							new ModelRequestFailed({ message: describeModelFailure(cause), cause }),
+						catch: (cause) => ModelRequestFailed.fromCause(cause),
 					}),
 				};
 			}),
@@ -199,26 +235,14 @@ export function probeModel(
 				duration: "30 seconds",
 				orElse: () =>
 					Effect.fail(
-						new ModelRequestFailed({ message: "Model did not answer within 30 seconds" }),
+						new ModelRequestFailed({
+							message: "Model did not answer within 30 seconds",
+							reason: "timedOut",
+						}),
 					),
 			}),
 		),
 	);
-}
-
-/**
- * What went wrong, in the provider's words where it had any. A refused
- * request carries its reason in the response body, usually as
- * `{"error":{"message":...}}`; that sentence is the one worth reading, ahead
- * of the SDK's own summary of the same response.
- */
-export function describeModelFailure(cause: unknown): string {
-	if (APICallError.isInstance(cause)) {
-		const status = cause.statusCode ? `Provider returned ${cause.statusCode}` : "Provider refused";
-		const said = providerSaid(cause.responseBody) ?? cause.message;
-		return `${status}: ${said}`;
-	}
-	return cause instanceof Error ? cause.message : String(cause);
 }
 
 function providerSaid(body: string | undefined): string | undefined {
@@ -253,15 +277,7 @@ export const forEachDelta = <E, R>(
 	const next = Effect.callback<IteratorResult<string>, ModelRequestFailed>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) =>
-				resume(
-					Effect.fail(
-						new ModelRequestFailed({
-							message: cause instanceof Error ? cause.message : String(cause),
-							cause,
-						}),
-					),
-				),
+			(cause) => resume(Effect.fail(ModelRequestFailed.fromCause(cause))),
 		);
 		return Effect.sync(() => stop.abort());
 	});

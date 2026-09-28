@@ -468,7 +468,7 @@ describe("connecting from the catalog", () => {
 		expect(harness.connection()?.auth).toBe("oauth");
 	});
 
-	it("leaves nothing behind when the sign-in cannot start", async () => {
+	it("leaves nothing behind, and keeps the reason out of the response, when the sign-in cannot start", async () => {
 		const harness = routes(true, undefined);
 		harness.begin.mockRejectedValueOnce(
 			new Error("Incompatible auth server: does not support dynamic client registration"),
@@ -481,9 +481,10 @@ describe("connecting from the catalog", () => {
 		});
 
 		expect(response.status).toBe(400);
-		expect(await response.json()).toMatchObject({
+		// The refusal's own message quotes the thrown error; only its user message may reach a client.
+		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: expect.stringContaining("does not support dynamic client registration"),
+			message: "Could not start signing in",
 		});
 		expect(harness.remove).toHaveBeenCalledWith(WORKSPACE_ID, POD_ID, CONNECTION_ID);
 		expect(harness.connection()).toBeUndefined();

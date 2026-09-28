@@ -24,6 +24,7 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
+import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
 import { chatStore } from "../../chats/store.ts";
 import { threadStore } from "../../threads/store.ts";
@@ -710,7 +711,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 	it("closes a failed call with the error and no output", async () => {
 		const opened = await calls.open(from(0));
 
-		const closed = await calls.close(opened.id, { error: "Host did not resolve" });
+		const closed = await calls.close(opened.id, { error: UserMessage.of`Host did not resolve` });
 
 		expect(closed).toMatchObject({ status: "failed", output: null, error: "Host did not resolve" });
 	});
@@ -756,13 +757,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 		expect(prepared.runs).toBe(1);
 		expect(runsAgainAfterFailure(prepared, empty)).toBe(true);
-		await turns.fail(prepared, empty, "provider down", true);
+		await turns.fail(prepared, empty, UserMessage.of`provider down`, true);
 		const second = await turns.prepare(prepared.claim);
 		expect(second).toMatchObject({ turnId: prepared.turnId, runs: 2 });
 		// Running again could act again, so the turn stops here for a person (ADR 002).
 		expect(runsAgainAfterFailure(second, { ...empty, acted: true })).toBe(false);
 
-		await turns.fail(second, empty, "provider down", true);
+		await turns.fail(second, empty, UserMessage.of`provider down`, true);
 		const last = await turns.prepare(prepared.claim);
 		expect(last.runs).toBe(MAX_TURN_RUNS);
 		expect(runsAgainAfterFailure(last, empty)).toBe(false);
@@ -773,7 +774,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		await turns.fail(
 			prepared,
 			{ content: "", collaborations: [], toolCalls: [] },
-			"provider down",
+			UserMessage.of`provider down`,
 			true,
 		);
 

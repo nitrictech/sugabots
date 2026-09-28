@@ -5,6 +5,7 @@ import { Effect, Schema } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, threadParticipant, user } from "../../database/schema.ts";
+import type { UserMessage } from "../../user-message.ts";
 import { toCollaborationPart } from "./collaborations.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
@@ -90,8 +91,8 @@ export function toMessage(
 	row: schema.MessageRow,
 	author: ParticipantRow,
 	placed: PlacedPartsOf = {},
-	/** Why the turn behind a failed reply failed, in the provider's words. */
-	error?: string | null,
+	/** What people are told of why the turn behind a failed reply failed. */
+	error?: UserMessage | null,
 ): Message {
 	const parts = row.parts.flatMap((part): MessagePart[] => {
 		if (part.type === "text") {
@@ -149,8 +150,8 @@ export interface MessageWithRelations extends schema.MessageRow {
 /** A message read with `messageRelations`, as the API shows it. */
 export function messageFromRelations(
 	stored: MessageWithRelations,
-	/** Why the turn behind a failed reply failed, in the provider's words. */
-	error?: string | null,
+	/** What people are told of why the turn behind a failed reply failed. */
+	error?: UserMessage | null,
 ): Message {
 	return toMessage(
 		stored,

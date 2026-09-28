@@ -48,7 +48,7 @@ describe("summarise", () => {
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(store.fail).toHaveBeenCalledWith(prepared, "Thread summary timed out");
+			expect(store.fail).toHaveBeenCalledWith(prepared, "The model did not answer in time.");
 			expect(store.complete).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
@@ -96,7 +96,7 @@ describe("summarise", () => {
 		// job being burned on one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(store.complete).not.toHaveBeenCalled();
-		expect(store.fail).toHaveBeenCalledWith(prepared, "Thread summary model returned invalid JSON");
+		expect(store.fail).toHaveBeenCalledWith(prepared, "The model's answer could not be used.");
 	});
 
 	it("takes the answer as soon as one of the asks comes back usable", async () => {
@@ -156,7 +156,9 @@ describe("summarise", () => {
 	it("does not re-ask a provider that is down, and records the failure", async () => {
 		const store = summaryStore();
 		const stream = vi.fn(() =>
-			Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+			Effect.fail(
+				new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+			),
 		);
 
 		await runWithServices(summarise(request, { store, model: { stream } }));
@@ -164,7 +166,7 @@ describe("summarise", () => {
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(store.fail).toHaveBeenCalledWith(prepared, "provider unavailable");
+		expect(store.fail).toHaveBeenCalledWith(prepared, "The model provider could not answer.");
 		expect(store.complete).not.toHaveBeenCalled();
 	});
 
@@ -202,7 +204,8 @@ function summaryStore(): SummaryStore {
 
 function unusedModel(): TurnModel {
 	return {
-		stream: () => Effect.fail(new ModelRequestFailed({ message: "unused model" })),
+		stream: () =>
+			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
 	};
 }
 

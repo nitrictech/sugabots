@@ -67,10 +67,8 @@ const noSuchChat = new NotFound({ message: "No such chat" });
 const noSuchPod = new NotFound({ message: "No such pod" });
 
 const chatErrors = {
-	ChatPlacementRejected: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	ChatMessageIdConflict: (failure: { message: string }) =>
-		new Conflict({ message: failure.message }),
-	ChatAgentHasNoModel: (failure: { message: string }) => new Conflict({ message: failure.message }),
-	InvalidChatCursor: (failure: { message: string }) => new BadRequest({ message: failure.message }),
+	ChatPlacementRejected: BadRequest,
+	ChatMessageIdConflict: Conflict,
+	ChatAgentHasNoModel: Conflict,
+	InvalidChatCursor: BadRequest,
 };

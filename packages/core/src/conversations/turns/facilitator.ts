@@ -10,6 +10,7 @@ import {
 } from "../../database/database.ts";
 import type { PublishEvents } from "../../database/events/publish.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
+import type { UserMessage } from "../../user-message.ts";
 import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
@@ -20,8 +21,14 @@ import {
 	type AttemptOutcome,
 	type FacilitateRequest,
 	FacilitateSteps,
+	FacilitationFailed,
 } from "./facilitate.workflow.ts";
-import { forEachDelta, type TurnModel, type TurnModelInput } from "./model.ts";
+import {
+	forEachDelta,
+	type ModelRequestFailed,
+	type TurnModel,
+	type TurnModelInput,
+} from "./model.ts";
 import type { QueueTurn } from "./queue.ts";
 
 /**
@@ -47,9 +54,6 @@ export interface FacilitatorExecution {
 	routines?: Pick<RoutineStore, "settleThread">;
 }
 
-/** What people are told when facilitation fails; the cause goes only to the logs. */
-const FACILITATION_FAILED = "The Facilitator could not choose who speaks next";
-
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
 export const stepsLayer = (execution: FacilitatorExecution) =>
 	Layer.effect(
@@ -58,7 +62,7 @@ export const stepsLayer = (execution: FacilitatorExecution) =>
 			const database = yield* Database;
 			const settleRoutine = (
 				request: FacilitateRequest,
-				outcome?: { state: "failed"; error: string },
+				outcome?: { state: "failed"; error: UserMessage },
 			) =>
 				(execution.routines?.settleThread(request.threadId, outcome) ?? Effect.void).pipe(
 					Effect.asVoid,
@@ -70,7 +74,7 @@ export const stepsLayer = (execution: FacilitatorExecution) =>
 						Effect.provideService(Database, database),
 					),
 				abandon: (request) =>
-					settleRoutine(request, { state: "failed", error: FACILITATION_FAILED }),
+					settleRoutine(request, { state: "failed", error: new FacilitationFailed().userMessage }),
 				settleRoutine: (request) => settleRoutine(request),
 			});
 		}),
@@ -185,7 +189,11 @@ const applyDecision = (
 const decide = (
 	scope: FacilitatorScope,
 	model: TurnModel,
-): Effect.Effect<FacilitatorDecision, Error | UnusableAnswer, Database> =>
+): Effect.Effect<
+	FacilitatorDecision,
+	ModelRequestFailed | AnswerTimedOut | UnusableAnswer,
+	Database
+> =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const stop = new AbortController();

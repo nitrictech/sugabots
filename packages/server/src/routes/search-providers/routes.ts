@@ -62,10 +62,7 @@ export function searchProviderRoutes({
 }
 
 const searchProviderErrors = {
-	SearchProviderNotFound: (failure: { message: string }) =>
-		new NotFound({ message: failure.message }),
-	SearchProviderUrlNotAllowed: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	SearchProviderApiKeyRequired: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
+	SearchProviderNotFound: NotFound,
+	SearchProviderUrlNotAllowed: BadRequest,
+	SearchProviderApiKeyRequired: BadRequest,
 };

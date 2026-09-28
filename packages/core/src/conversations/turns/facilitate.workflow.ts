@@ -7,6 +7,7 @@
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, Data, Duration, Effect, Schema } from "effect";
 import { DurableClock, Workflow } from "effect/unstable/workflow";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 
 export const FacilitateRequest = Schema.Struct({
@@ -56,9 +57,15 @@ const MAX_ATTEMPTS = 3;
 const RETRY_DELAY = Duration.seconds(1);
 
 /** Every attempt at deciding the floor failed. */
-class FacilitationFailed extends Data.TaggedError("FacilitationFailed") {
+export class FacilitationFailed
+	extends Data.TaggedError("FacilitationFailed")
+	implements UserFacing
+{
 	override get message() {
 		return `Facilitation failed ${MAX_ATTEMPTS} times`;
+	}
+	get userMessage() {
+		return UserMessage.of`The Facilitator could not choose who speaks next`;
 	}
 }
 

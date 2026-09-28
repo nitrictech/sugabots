@@ -38,6 +38,7 @@ import {
 	threadParticipant,
 	turn,
 } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import {
@@ -53,15 +54,21 @@ import {
 import { giveFloor } from "../turns/floor.ts";
 import { type QueueFacilitation, type QueueTurn, respondingIn } from "../turns/queue.ts";
 
-export class ChatPlacementRejected extends Data.TaggedError("ChatPlacementRejected") {
-	override get message() {
-		return "The agent and pod are not available for this chat";
+export class ChatPlacementRejected
+	extends Data.TaggedError("ChatPlacementRejected")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`The agent and pod are not available for this chat`;
 	}
 }
 
-export class ChatMessageIdConflict extends Data.TaggedError("ChatMessageIdConflict") {
-	override get message() {
-		return "That message ID is already used by a different message";
+export class ChatMessageIdConflict
+	extends Data.TaggedError("ChatMessageIdConflict")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That message ID is already used by a different message`;
 	}
 }
 
@@ -69,15 +76,18 @@ export class ChatMessageIdConflict extends Data.TaggedError("ChatMessageIdConfli
  * The chat's agent has no model, so nothing could answer. Refused before the
  * message is saved rather than kept with a turn that will never run.
  */
-export class ChatAgentHasNoModel extends Data.TaggedError("ChatAgentHasNoModel") {
-	override get message() {
-		return "This agent has no model chosen, so it cannot answer yet";
+export class ChatAgentHasNoModel
+	extends Data.TaggedError("ChatAgentHasNoModel")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This agent has no model chosen, so it cannot answer yet`;
 	}
 }
 
-export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") {
-	override get message() {
-		return "That chat cursor is invalid";
+export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`That chat cursor is invalid`;
 	}
 }
 

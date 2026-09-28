@@ -31,7 +31,7 @@ vi.mock("ai", async (importOriginal) => ({
 }));
 
 import { APICallError } from "ai";
-import { describeModelFailure, workspaceTurnModel } from "./model.ts";
+import { ModelRequestFailed, workspaceTurnModel } from "./model.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -79,8 +79,8 @@ describe("workspace turn model", () => {
 	);
 });
 
-describe("describing a model failure", () => {
-	it("repeats what the provider said, ahead of the SDK's summary of it", () => {
+describe("a failed model request", () => {
+	it("logs what the provider said, and tells people only what it means", () => {
 		const refused = new APICallError({
 			message: "Forbidden",
 			url: "https://openrouter.ai/api/v1/chat/completions",
@@ -94,12 +94,15 @@ describe("describing a model failure", () => {
 			}),
 		});
 
-		expect(describeModelFailure(refused)).toBe(
+		const failure = ModelRequestFailed.fromCause(refused);
+
+		expect(failure.message).toBe(
 			"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
 		);
+		expect(failure.userMessage).toBe("The model provider refused the request. Check its API key.");
 	});
 
-	it("falls back to the SDK's message when the body says nothing readable", () => {
+	it("logs the SDK's message when the body says nothing readable", () => {
 		const opaque = new APICallError({
 			message: "Bad Gateway",
 			url: "https://models.example/v1/chat/completions",
@@ -108,9 +111,12 @@ describe("describing a model failure", () => {
 			responseBody: "<html>upstream timed out</html>",
 		});
 
-		expect(describeModelFailure(opaque)).toBe(
-			"Provider returned 502: <html>upstream timed out</html>",
+		expect(ModelRequestFailed.fromCause(opaque)).toMatchObject({
+			message: "Provider returned 502: <html>upstream timed out</html>",
+			userMessage: "The model provider could not answer.",
+		});
+		expect(ModelRequestFailed.fromCause(new Error("socket hang up")).message).toBe(
+			"socket hang up",
 		);
-		expect(describeModelFailure(new Error("socket hang up"))).toBe("socket hang up");
 	});
 });

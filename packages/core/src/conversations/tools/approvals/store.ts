@@ -14,6 +14,7 @@ import {
 	turn,
 	user,
 } from "../../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { podStandingFor } from "../../../workspaces/access.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
@@ -76,12 +77,40 @@ export interface ToolApprovalStore {
 	}): Effect.Effect<void, never, Database>;
 }
 
-export class ToolApprovalNotFound extends Data.TaggedError("ToolApprovalNotFound") {}
-export class ToolApprovalConflict extends Data.TaggedError("ToolApprovalConflict") {}
-export class ToolApprovalForbidden extends Data.TaggedError("ToolApprovalForbidden") {}
-export class ToolApprovalsIncomplete extends Data.TaggedError("ToolApprovalsIncomplete")<{
-	readonly message: string;
-}> {}
+export class ToolApprovalNotFound
+	extends Data.TaggedError("ToolApprovalNotFound")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`No such pending tool approval`;
+	}
+}
+export class ToolApprovalConflict
+	extends Data.TaggedError("ToolApprovalConflict")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That tool approval has already been decided`;
+	}
+}
+export class ToolApprovalForbidden
+	extends Data.TaggedError("ToolApprovalForbidden")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`You are not allowed to make that decision`;
+	}
+}
+/** A resumed turn found its approvals not all decided, so it cannot continue. */
+export class ToolApprovalsIncomplete
+	extends Data.TaggedError("ToolApprovalsIncomplete")<{ readonly message: string }>
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`The reply could not continue: its tool approvals were not all decided.`;
+	}
+}
+/** An approved tool call may no longer run, so it was not started. */
 export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused")<{
 	readonly message: string;
 }> {}
@@ -237,7 +266,7 @@ export function toolApprovalStore(
 					);
 					if (!running)
 						return yield* new ToolExecutionRefused({
-							message: "Tool call execution was already claimed",
+							message: "Tool call was already claimed, or no longer matches what was approved",
 						});
 					if (running.mutating) yield* markMutationStarted(running.turnId);
 					const part = toToolCallPart(running);

@@ -6,6 +6,7 @@ import { query } from "../database/database.ts";
 import { isUuid } from "../database/ids.ts";
 import type * as schema from "../database/schema.ts";
 import { agent, pod, podMember, workspace, workspaceMember } from "../database/schema.ts";
+import { type UserFacing, UserMessage } from "../user-message.ts";
 import {
 	type Actor,
 	mayInPod,
@@ -66,20 +67,29 @@ export interface AgentStanding extends PodStanding {
  * as `not_found` over HTTP: telling the two apart lets a stranger enumerate
  * ids.
  */
-export class ResourceHidden extends Data.TaggedError("ResourceHidden")<{
-	readonly resource: "workspace" | "pod" | "agent" | "member" | "invitation";
-}> {
-	override get message() {
-		return `No such ${this.resource}`;
+export class ResourceHidden
+	extends Data.TaggedError("ResourceHidden")<{
+		readonly resource: "workspace" | "pod" | "agent" | "member" | "invitation";
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`No such ${this.resource}`;
 	}
 }
 
 /** The caller can see the resource and may not take this action on it. */
-export class ActionForbidden extends Data.TaggedError("ActionForbidden")<{
-	readonly permission: WorkspacePermission | PodPermission;
-}> {
+export class ActionForbidden
+	extends Data.TaggedError("ActionForbidden")<{
+		readonly permission: WorkspacePermission | PodPermission;
+	}>
+	implements UserFacing
+{
 	override get message() {
-		return "You cannot do that here";
+		return `Lacks the ${this.permission} permission`;
+	}
+	get userMessage() {
+		return UserMessage.of`You are not allowed to do that`;
 	}
 }
 

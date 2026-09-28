@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { EXA_FREE_SEARCH_URL } from "@sugabots/contracts";
 import { Schema } from "effect";
-import type { EgressHttpClient } from "../../../providers/network/egress.ts";
+import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
 import type { SearchConnection } from "../../../providers/search-providers/store.ts";
 import { VERSION } from "../../../version.ts";
 
@@ -353,6 +353,10 @@ async function answer(
 		if (timeout.aborted) {
 			return refused(`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`);
 		}
-		return refused(cause instanceof Error ? cause.message : String(cause));
+		if (cause instanceof EgressRefused) return refused(cause.userMessage);
+		// Anything else is a fault on our side or the service's: its details go to
+		// the logs, and the model is told only that the search did not answer.
+		console.error(`Searching with ${service} failed`, cause);
+		return refused(`${service} could not be searched`);
 	}
 }

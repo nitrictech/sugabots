@@ -51,7 +51,8 @@ const answering = (answer: string): FacilitatorExecution["model"] => ({
 });
 
 const unavailable: FacilitatorExecution["model"] = {
-	stream: () => Effect.fail(new ModelRequestFailed({ message: "provider unavailable" })),
+	stream: () =>
+		Effect.fail(new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" })),
 };
 
 const execution = (model: FacilitatorExecution["model"]): FacilitatorExecution => ({

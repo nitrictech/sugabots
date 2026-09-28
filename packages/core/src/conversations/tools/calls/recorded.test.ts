@@ -3,12 +3,13 @@ import { Effect, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
+import { noToolApprovalStore, ToolExecutionRefused } from "../approvals/store.ts";
 import { recorded } from "./recorded.ts";
 import type { ToolCallStore } from "./store.ts";
 
 /**
  * The wrapper against a fake store: what it writes before and after the tool
- * runs, and what the model is told when the tool throws.
+ * runs, and what the model is told when the tool throws or may not run.
  */
 
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -105,7 +106,7 @@ describe("a recorded tool", () => {
 		expect(noted).toEqual([expect.objectContaining({ mutating: true })]);
 	});
 
-	it("records a thrown error and hands the model a failed result instead", async () => {
+	it("records that a tool threw, but not what it threw", async () => {
 		const calls = store();
 		const probe = recorded(
 			"probe",
@@ -123,7 +124,54 @@ describe("a recorded tool", () => {
 
 		const output = await probe.execute?.({}, callOptions);
 
-		expect(output).toEqual({ status: "failed", error: "upstream said no" });
-		expect(calls.close).toHaveBeenCalledWith(callId, { error: "upstream said no" });
+		// What was thrown goes to the logs, not to people or the model.
+		expect(output).toEqual({ status: "failed", error: "The tool failed before it finished." });
+		expect(calls.close).toHaveBeenCalledWith(callId, {
+			error: "The tool failed before it finished.",
+		});
+	});
+
+	it("does not run an approved call its approval no longer covers, nor tell the model why", async () => {
+		const calls = store();
+		const execute = vi.fn(async () => ({ ok: true }));
+		const probe = recorded(
+			"probe",
+			tool({
+				inputSchema: Schema.Struct({}).pipe(
+					Schema.toStandardSchemaV1,
+					Schema.toStandardJSONSchemaV1,
+				),
+				execute,
+			}),
+			{
+				calls,
+				run,
+				from,
+				replyLength: () => 0,
+				noteToolCall: () => Effect.void,
+				approval: {
+					store: {
+						...noToolApprovalStore,
+						beginExecution: () =>
+							Effect.fail(
+								new ToolExecutionRefused({
+									message: "Connection configuration changed after approval",
+								}),
+							),
+					},
+					connectionId: "0199a3a0-0000-7000-8000-000000000021",
+					connectionRevision: 1,
+					remoteToolName: "probe",
+				},
+			},
+		);
+
+		const output = await probe.execute?.({}, callOptions);
+
+		expect(output).toEqual({
+			status: "failed",
+			error: "The tool was not run: its approval no longer applies.",
+		});
+		expect(execute).not.toHaveBeenCalled();
 	});
 });

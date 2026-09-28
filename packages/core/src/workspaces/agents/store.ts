@@ -11,6 +11,7 @@ import { type Database, query, queryCatching, transaction } from "../../database
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, pod } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../access.ts";
 
 /**
@@ -54,23 +55,38 @@ export interface AgentStore {
 }
 
 /** A name is taken in the workspace. The route makes it a `conflict`. */
-export class NameTaken extends Data.TaggedError("NameTaken")<{ readonly agentName: string }> {
+export class NameTaken
+	extends Data.TaggedError("NameTaken")<{ readonly agentName: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `An agent called "${this.agentName}" already exists in this workspace`;
+	}
+	get userMessage() {
+		return UserMessage.of`An agent with that name already exists in this workspace`;
 	}
 }
 
 /** A write names an agent that is no longer there. `not_found`. */
-export class AgentGone extends Data.TaggedError("AgentGone")<{ readonly agentId: string }> {
+export class AgentGone
+	extends Data.TaggedError("AgentGone")<{ readonly agentId: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `No agent with the id "${this.agentId}"`;
+	}
+	get userMessage() {
+		return UserMessage.of`No such agent`;
 	}
 }
 
 /** A placement names a pod in another workspace. */
-export class PodOutsideWorkspace extends Data.TaggedError("PodOutsideWorkspace") {
-	override get message() {
-		return "That is not a pod in this workspace";
+export class PodOutsideWorkspace
+	extends Data.TaggedError("PodOutsideWorkspace")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That is not a pod in this workspace`;
 	}
 }
 
@@ -79,9 +95,12 @@ export class PodOutsideWorkspace extends Data.TaggedError("PodOutsideWorkspace")
  * a pod. The one thing about one that changes — its model — is written through
  * the system agent store.
  */
-export class SystemAgentImmutable extends Data.TaggedError("SystemAgentImmutable") {
-	override get message() {
-		return "A system agent is configured for the workspace, not in a pod";
+export class SystemAgentImmutable
+	extends Data.TaggedError("SystemAgentImmutable")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`A system agent is configured for the workspace, not in a pod`;
 	}
 }
 

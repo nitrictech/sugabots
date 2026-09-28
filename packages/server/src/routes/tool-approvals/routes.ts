@@ -33,11 +33,9 @@ export function toolApprovalRoutes({ approvals }: ToolApprovalRoutesOptions) {
 }
 
 const approvalErrors = {
-	ToolApprovalNotFound: () => new NotFound({ message: "No such pending tool approval" }),
-	ToolApprovalConflict: () =>
-		new Conflict({ message: "That tool approval has already been decided" }),
-	ToolApprovalForbidden: () =>
-		new Forbidden({ message: "You are not allowed to make that decision" }),
+	ToolApprovalNotFound: NotFound,
+	ToolApprovalConflict: Conflict,
+	ToolApprovalForbidden: Forbidden,
 };
 
 const isUuid = (value: string) =>

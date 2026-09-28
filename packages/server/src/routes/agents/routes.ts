@@ -51,14 +51,11 @@ export function agentRoutes({ agents, modelProviders }: AgentRoutesOptions) {
 }
 
 const agentErrors = {
-	AgentModelNotEnabled: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	EmptyAgentUpdate: (failure: { message: string }) => new BadRequest({ message: failure.message }),
-	AgentNotFound: (failure: { message: string }) => new NotFound({ message: failure.message }),
-	NameTaken: (failure: { message: string }) => new Conflict({ message: failure.message }),
-	AgentGone: () => new NotFound({ message: "No such agent" }),
-	SystemAgentImmutable: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	PodOutsideWorkspace: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
+	AgentModelNotEnabled: BadRequest,
+	EmptyAgentUpdate: BadRequest,
+	AgentNotFound: NotFound,
+	NameTaken: Conflict,
+	AgentGone: NotFound,
+	SystemAgentImmutable: BadRequest,
+	PodOutsideWorkspace: BadRequest,
 };

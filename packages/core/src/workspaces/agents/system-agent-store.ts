@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../database/database.ts";
 import { agent, pod } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { FACILITATE_SYSTEM_AGENT, listSystemAgents } from "./system-agents.ts";
 
 /**
@@ -35,11 +36,12 @@ export interface SystemAgentStore {
  * refusal: every workspace is given one when it is created. The route answers
  * `not_found` so a caller is not told to retry something that will not change.
  */
-export class SystemAgentMissing extends Data.TaggedError("SystemAgentMissing")<{
-	readonly key: SystemAgentKey;
-}> {
-	override get message() {
-		return `This workspace has no ${this.key} agent`;
+export class SystemAgentMissing
+	extends Data.TaggedError("SystemAgentMissing")<{ readonly key: SystemAgentKey }>
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`This workspace has no ${this.key} agent`;
 	}
 }
 

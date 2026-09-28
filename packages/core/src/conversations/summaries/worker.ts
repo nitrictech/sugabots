@@ -1,9 +1,14 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { Cause, Duration, Effect, Exit, Layer, Ref, Schema } from "effect";
+import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
 import { Database } from "../../database/database.ts";
-import { describeFailure } from "../failure.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
-import { forEachDelta, type ModelAccounting, type TurnModel } from "../turns/model.ts";
+import {
+	forEachDelta,
+	type ModelAccounting,
+	type ModelRequestFailed,
+	type TurnModel,
+} from "../turns/model.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
 import type { PreparedSummary, SummaryStore } from "./store.ts";
 import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
@@ -69,10 +74,17 @@ const generateSummary = (
 				const [result, accounting] = generated.value;
 				return yield* store.complete(prepared, result, accounting);
 			}
-			const reason = Cause.hasInterruptsOnly(generated.cause)
-				? "Worker stopped"
-				: describeFailure(Cause.squash(generated.cause));
-			yield* store.fail(prepared, reason);
+			const cause = generated.cause;
+			const expected = Cause.findErrorOption(cause);
+			const failure = Option.isSome(expected)
+				? expected.value
+				: Cause.hasInterruptsOnly(cause)
+					? new SummaryInterrupted()
+					: new SummaryStoppedUnexpectedly();
+			yield* failure instanceof SummaryStoppedUnexpectedly
+				? Effect.logError("A summary died", cause)
+				: Effect.logWarning(`A summary failed: ${failure.message}`);
+			yield* store.fail(prepared, failure.userMessage);
 		}),
 	);
 
@@ -82,7 +94,7 @@ const generate = (
 	model: TurnModel,
 ): Effect.Effect<
 	readonly [{ content: string; title?: string }, ModelAccounting],
-	Error,
+	SummaryFailure,
 	Database
 > =>
 	Effect.scoped(
@@ -162,4 +174,30 @@ export function parseGenerated(
 function stripFence(text: string): string {
 	const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(text);
 	return fenced?.[1]?.trim() ?? text;
+}
+
+/** Why a summary failed. */
+type SummaryFailure = ModelRequestFailed | AnswerTimedOut | UnusableAnswer;
+
+/** The process summarising stopped before the summary finished. */
+class SummaryInterrupted extends Data.TaggedError("SummaryInterrupted") implements UserFacing {
+	override get message() {
+		return "Summary interrupted by its process stopping";
+	}
+	get userMessage() {
+		return UserMessage.of`The summary was interrupted.`;
+	}
+}
+
+/** A defect ended the summary rather than a failure it expects; the defect itself is logged. */
+class SummaryStoppedUnexpectedly
+	extends Data.TaggedError("SummaryStoppedUnexpectedly")
+	implements UserFacing
+{
+	override get message() {
+		return "Summary ended by a defect";
+	}
+	get userMessage() {
+		return UserMessage.of`The summary stopped unexpectedly.`;
+	}
 }

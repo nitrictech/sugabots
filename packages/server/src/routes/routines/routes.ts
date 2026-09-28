@@ -143,15 +143,11 @@ function isJson(contentType: string | undefined): boolean {
 const noSuchRoutine = new NotFound({ message: "No such Routine" });
 
 const routineErrors = {
-	InvalidRoutineExecutionCursor: () =>
-		new BadRequest({ message: "That Routine execution cursor is invalid" }),
-	InvalidRoutineSchedule: (failure: { message: string }) =>
-		new BadRequest({ message: failure.message }),
-	RoutineNameTaken: () => new Conflict({ message: "A Routine with that name already exists" }),
-	RoutineNotFound: () => noSuchRoutine,
-	RoutineRequiresCrewAgent: () => new BadRequest({ message: "Only crew agents can own Routines" }),
-	RoutineTriggerConflict: () =>
-		new Conflict({ message: "That trigger identity was already used with different data" }),
-	RoutineTriggerRejected: () =>
-		new BadRequest({ message: "That Routine cannot accept this trigger" }),
+	InvalidRoutineExecutionCursor: BadRequest,
+	InvalidRoutineSchedule: BadRequest,
+	RoutineNameTaken: Conflict,
+	RoutineNotFound: NotFound,
+	RoutineRequiresCrewAgent: BadRequest,
+	RoutineTriggerConflict: Conflict,
+	RoutineTriggerRejected: BadRequest,
 };

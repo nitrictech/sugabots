@@ -19,6 +19,7 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, queryCatching } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { modelProvider, providerModel } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 
 export interface ProviderConnection {
@@ -31,9 +32,12 @@ export interface ProviderConnection {
 	configurationUpdatedAt: Date;
 }
 
-export class ModelProviderNameConflict extends Data.TaggedError("ModelProviderNameConflict") {
-	override get message() {
-		return "A model provider with that name already exists";
+export class ModelProviderNameConflict
+	extends Data.TaggedError("ModelProviderNameConflict")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`A model provider with that name already exists`;
 	}
 }
 
@@ -74,7 +78,7 @@ export interface ModelProviderStore {
 		workspaceId: string,
 		providerId: string,
 		configurationUpdatedAt: Date,
-		outcome: { error: string } | { activateOnSuccess: boolean },
+		outcome: { error: UserMessage } | { activateOnSuccess: boolean },
 	): Effect.Effect<void, never, Database>;
 	addModels(
 		workspaceId: string,

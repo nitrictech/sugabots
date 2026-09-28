@@ -20,6 +20,7 @@ import {
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, pod, podMember, user, workspaceMember } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type PodStanding, podStanding, reachesPod } from "../access.ts";
 import { facilitatorIsSetUp } from "../agents/system-agent-store.ts";
 import { type Actor, podPermissions } from "../permissions.ts";
@@ -98,16 +99,28 @@ export interface PodStore {
 }
 
 /** The slug is taken in this workspace. The route makes it a `conflict`. */
-export class SlugTaken extends Data.TaggedError("SlugTaken")<{ readonly slug: string }> {
+export class SlugTaken
+	extends Data.TaggedError("SlugTaken")<{ readonly slug: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `A pod with the slug "${this.slug}" already exists in this workspace`;
+	}
+	get userMessage() {
+		return UserMessage.of`A pod with that slug already exists in this workspace`;
 	}
 }
 
 /** A write names a pod that is no longer there. `not_found`. */
-export class PodGone extends Data.TaggedError("PodGone")<{ readonly podId: string }> {
+export class PodGone
+	extends Data.TaggedError("PodGone")<{ readonly podId: string }>
+	implements UserFacing
+{
 	override get message() {
 		return `No pod with the id "${this.podId}"`;
+	}
+	get userMessage() {
+		return UserMessage.of`No such pod`;
 	}
 }
 
@@ -120,13 +133,14 @@ export class PodGone extends Data.TaggedError("PodGone")<{ readonly podId: strin
  * domain refusing an impossible request, which is why the route makes it a
  * `bad_request` and not a `forbidden`.
  */
-export class PersonalPodFixed extends Data.TaggedError("PersonalPodFixed")<{
-	readonly attempted: "rename" | "delete";
-}> {
-	override get message() {
+export class PersonalPodFixed
+	extends Data.TaggedError("PersonalPodFixed")<{ readonly attempted: "rename" | "delete" }>
+	implements UserFacing
+{
+	get userMessage() {
 		return this.attempted === "rename"
-			? "A Personal pod's name, address and colour cannot be changed"
-			: "Personal pods cannot be deleted";
+			? UserMessage.of`A Personal pod's name, address and colour cannot be changed`
+			: UserMessage.of`Personal pods cannot be deleted`;
 	}
 }
 
@@ -136,9 +150,12 @@ export class PersonalPodFixed extends Data.TaggedError("PersonalPodFixed")<{
  * above: an impossible request rather than a permission refusal, so the route
  * makes it a `bad_request`.
  */
-export class FacilitatorNotSetUp extends Data.TaggedError("FacilitatorNotSetUp") {
-	override get message() {
-		return "Choose a model for the Facilitator before a pod can route through it";
+export class FacilitatorNotSetUp
+	extends Data.TaggedError("FacilitatorNotSetUp")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Choose a model for the Facilitator before a pod can route through it`;
 	}
 }
 

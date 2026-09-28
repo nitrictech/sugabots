@@ -481,7 +481,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 		]);
 		await expect(
 			store.getVisible(details.thread.id, memberId, { limit: 50, cursor: "not-a-cursor" }),
-		).rejects.toThrow("cursor is invalid");
+		).rejects.toMatchObject({ _tag: "InvalidThreadHistoryCursor" });
 	});
 
 	it("replays a committed message after reconnect", async () => {
