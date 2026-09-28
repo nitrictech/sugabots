@@ -18,7 +18,7 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { mayInPod } from "../../workspaces/permissions.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
-import { respondingIn } from "../turns/queue.ts";
+import { respondingIn } from "../turns/requests.ts";
 import {
 	agentColumns,
 	authorRow,

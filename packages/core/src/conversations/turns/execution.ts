@@ -18,7 +18,6 @@ import {
 import { visibleThread } from "../threads/visibility.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import { ROUTINE_EXECUTION_ENDED, TURN_CANCELLED } from "./lifecycle.ts";
-import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 import type {
 	NotRunnable,
 	ReplyDraft,
@@ -26,7 +25,8 @@ import type {
 	TurnCheckpoint,
 	TurnRepository,
 } from "./repository.ts";
-import type { TurnSignals } from "./signals.ts";
+import { TurnRequests } from "./requests.ts";
+import { TurnSignals } from "./signals.ts";
 import { Turn, type TurnRequest } from "./turn.workflow.ts";
 
 /**
@@ -123,14 +123,12 @@ export interface TurnContext {
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
 
-export function turnExecution(dependencies: {
-	turns: TurnRepository;
-	emit: DomainEvents.Emit<ConversationEvent>;
-	queueTurn: QueueTurn;
-	queueFacilitation: QueueFacilitation;
-	signals: TurnSignals;
-}): TurnExecution {
-	const { turns, emit, queueTurn, queueFacilitation, signals } = dependencies;
+export const turnExecution = Effect.fnUntraced(function* (
+	turns: TurnRepository,
+	emit: DomainEvents.Emit<ConversationEvent>,
+) {
+	const requests = yield* TurnRequests.Service;
+	const signals = yield* TurnSignals.Service;
 
 	/** Ends the turn the run holds, if any, because the run may not go on. */
 	const refuseRun = (run: TurnRun, reason: string, userMessage: UserMessage) =>
@@ -139,7 +137,7 @@ export function turnExecution(dependencies: {
 			(ended): NotRunnable => ({ _tag: "NotRunnable", reason, ended }),
 		);
 
-	return {
+	const execution: TurnExecution = {
 		prepare: (run) =>
 			transaction(
 				Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
@@ -224,7 +222,7 @@ export function turnExecution(dependencies: {
 
 		giveFloor: (prepared, reply) =>
 			giveFloor(
-				{ emit, queueTurn, queueFacilitation },
+				{ emit, requests },
 				{
 					id: prepared.responseMessage.id,
 					threadId: prepared.context.thread.id,
@@ -255,7 +253,8 @@ export function turnExecution(dependencies: {
 				}),
 			),
 	};
-}
+	return execution;
+});
 
 function notRunnable(reason: string): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended: undefined };

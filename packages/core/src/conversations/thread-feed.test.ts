@@ -7,7 +7,7 @@ import {
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
-import type { PendingEvent } from "../database/events/publish.ts";
+import type { PendingEvent } from "../database/events/outbox.ts";
 import { noDatabase } from "../database/testing.ts";
 import { UserMessage } from "../user-message.ts";
 import { ConversationEvent } from "./events.ts";
@@ -20,11 +20,12 @@ import { ThreadFeed } from "./thread-feed.ts";
  */
 describe("the thread feed", () => {
 	let published: PendingEvent[] = [];
-	const feed = ThreadFeed.handler((pending) =>
-		Effect.sync(() => {
-			published.push(...pending);
-		}),
-	);
+	const feed = ThreadFeed.handler({
+		publish: (pending) =>
+			Effect.sync(() => {
+				published.push(...pending);
+			}),
+	});
 	const workspaceId = crypto.randomUUID();
 	const threadId = crypto.randomUUID();
 	const turnId = crypto.randomUUID();

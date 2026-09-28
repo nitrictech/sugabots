@@ -6,7 +6,8 @@ import { layer as databaseLayer, query } from "../../database/database.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
 import { ModelRequestFailed } from "../turns/model.ts";
-import { queueSummary, type SummaryStore } from "./store.ts";
+import { TurnRequests } from "../turns/requests.ts";
+import type { SummaryStore } from "./store.ts";
 import { stepsLayer } from "./summary.steps.ts";
 import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
 
@@ -44,7 +45,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the summary workflow", () => {
 		};
 
 		await runtime.runPromise(
-			Effect.flatMap(Effect.service(Lanes.Service), (lanes) => queueSummary(lanes, request)),
+			Effect.flatMap(TurnRequests.make, (requests) => requests.queueSummary(request)),
 		);
 
 		const idle = await runtime.runPromise(

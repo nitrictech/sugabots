@@ -115,7 +115,7 @@ describe("runSegment", () => {
 					events,
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary,
+					requests: { queueSummary },
 				}),
 			),
 		);
@@ -186,7 +186,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: calls,
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
 				}),
 			).pipe(Effect.provideService(toolContext, "turn-context")),
@@ -251,7 +251,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: calls,
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					connectionTools: {
 						forPod: () =>
 							Effect.succeed({
@@ -335,7 +335,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					connectionTools: {
 						forPod: () =>
 							Effect.succeed({
@@ -423,7 +423,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					approvals: {
 						responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 						beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
@@ -472,7 +472,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					connectionTools: {
 						forPod: () =>
 							Effect.succeed({
@@ -524,7 +524,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
 				}),
 			),
@@ -548,7 +548,7 @@ describe("runSegment", () => {
 						events: eventBus(),
 						collaborations: collaborations(),
 						toolCalls: toolCalls(),
-						queueSummary: noSummary,
+						requests: { queueSummary: noSummary },
 					}),
 				),
 			),
@@ -573,7 +573,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					routines: { settleThread },
 				}),
 			),
@@ -603,7 +603,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 					routines: { settleThread },
 				}),
 			),
@@ -640,7 +640,7 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary,
+					requests: { queueSummary },
 				}),
 			),
 		);
@@ -669,7 +669,7 @@ describe("runSegment", () => {
 					events,
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 				}),
 			),
 		);
@@ -698,7 +698,7 @@ describe("runSegment", () => {
 					events,
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					queueSummary: noSummary,
+					requests: { queueSummary: noSummary },
 				}),
 			),
 		);
@@ -732,7 +732,7 @@ describe("runSegment", () => {
 						events: eventBus(),
 						collaborations: collaborations(),
 						toolCalls: toolCalls(),
-						queueSummary: noSummary,
+						requests: { queueSummary: noSummary },
 					}),
 				),
 			);
@@ -767,7 +767,7 @@ describe("runSegment", () => {
 						events,
 						collaborations: collaborations(),
 						toolCalls: toolCalls(),
-						queueSummary: noSummary,
+						requests: { queueSummary: noSummary },
 					}),
 				),
 			);
@@ -806,7 +806,7 @@ describe("runSegment", () => {
 						events: liveEventBus(),
 						collaborations: collaborations(),
 						toolCalls: toolCalls(),
-						queueSummary: noSummary,
+						requests: { queueSummary: noSummary },
 					}),
 				),
 			);

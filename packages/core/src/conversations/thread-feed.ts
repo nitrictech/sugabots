@@ -3,15 +3,15 @@ export * as ThreadFeed from "./thread-feed.ts";
 import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import { Effect } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
-import type { PendingEvent, PublishEvents } from "../database/events/publish.ts";
+import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
 export const handler =
-	(publishEvents: PublishEvents): DomainEvents.Handler<ConversationEvent> =>
+	(outbox: EventOutbox.Interface): DomainEvents.Handler<ConversationEvent> =>
 	(events) => {
 		const pending = events.flatMap(streamEventsFor);
-		return pending.length === 0 ? Effect.void : publishEvents(pending);
+		return pending.length === 0 ? Effect.void : outbox.publish(pending);
 	};
 
 /**

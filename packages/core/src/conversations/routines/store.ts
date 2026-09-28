@@ -39,13 +39,13 @@ import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../turns/facilitate.workflow.ts";
-import type { QueueTurn } from "../turns/queue.ts";
 import type { TurnRepository } from "../turns/repository.ts";
-import type { TurnSignals } from "../turns/signals.ts";
+import { TurnRequests } from "../turns/requests.ts";
+import { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
 import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
-import type { RoutineRuns } from "./runs.ts";
+import { RoutineRuns } from "./runs.ts";
 import {
 	type InvalidRoutineSchedule,
 	latestMissedAndNextOccurrence,
@@ -205,13 +205,13 @@ export interface RoutineStore {
 	>;
 }
 
-export function routineStore(
+export const routineStore = Effect.fnUntraced(function* (
 	emit: DomainEvents.Emit<ConversationEvent>,
 	turns: Pick<TurnRepository, "cancelUnder">,
-	queueTurn: QueueTurn,
-	signals: TurnSignals,
-	runs: RoutineRuns,
-): RoutineStore {
+) {
+	const requests = yield* TurnRequests.Service;
+	const signals = yield* TurnSignals.Service;
+	const runs = yield* RoutineRuns.Service;
 	const store: RoutineStore = {
 		listInWorkspace: (workspaceId, userId) =>
 			query((db) =>
@@ -607,7 +607,7 @@ export function routineStore(
 					}
 					// Asking again for a turn already asked for joins it, so a start
 					// repeated after a crash does not run the turn twice.
-					yield* queueTurn({
+					yield* requests.queueTurn({
 						threadId: execution.threadId,
 						agentId: execution.agentId,
 						triggerMessageId: triggerMessage.id,
@@ -808,7 +808,7 @@ export function routineStore(
 			),
 	};
 	return store;
-}
+});
 
 const routineScope = (workspaceId: string, agentId: string, routineId: string) =>
 	and(
@@ -896,8 +896,8 @@ function settleRoutineThread(
 	outcome: { state: "failed" | "cancelled"; error?: UserMessage } | undefined,
 	emit: DomainEvents.Emit<ConversationEvent>,
 	turns: Pick<TurnRepository, "cancelUnder">,
-	signals: TurnSignals,
-	runs: RoutineRuns,
+	signals: TurnSignals.Interface,
+	runs: RoutineRuns.Interface,
 ) {
 	return transaction(
 		Effect.gen(function* () {

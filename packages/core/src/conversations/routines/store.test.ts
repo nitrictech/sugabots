@@ -5,7 +5,6 @@ import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, query, transaction } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
-import { eventPublisher } from "../../database/events/publish.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import {
 	agent,
@@ -24,14 +23,13 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { composeConversations } from "../composition.ts";
+import { conversationsForTests } from "../testing.ts";
 import {
 	queueFacilitationForTests,
 	queueTurnForTests,
 	releaseFacilitation,
 	releaseTurn,
 	runningTurns,
-	turnSignalsForTests,
 	waitingFacilitation,
 } from "../turns/testing.ts";
 import { Turn, turnLane } from "../turns/turn.workflow.ts";
@@ -40,17 +38,11 @@ import {
 	RoutineRequiresCrewAgent,
 	RoutineTriggerConflict,
 } from "./store.ts";
-import { releaseRun, routineRunsForTests, runningRun } from "./testing.ts";
+import { releaseRun, runningRun } from "./testing.ts";
 
-describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
-	const dependencies = {
-		publishEvents: eventPublisher(createEventBus({ store: memoryEventStore() })),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
-	};
-	const { stores } = composeConversations(dependencies);
+describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
+	const bus = createEventBus({ store: memoryEventStore() });
+	const { stores } = await conversationsForTests(bus);
 	const routineEffects = stores.routines;
 	const store = onPostgres(routineEffects);
 	/** Starts the routine's run holding its lane, as its workflow's first step does. */
@@ -807,8 +799,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		);
 		const cancel = vi.fn(() => Effect.void);
 		const ending = onPostgres(
-			composeConversations({ ...dependencies, signals: { decide: () => Effect.void, cancel } })
-				.stores.routines,
+			(await conversationsForTests(bus, { decide: () => Effect.void, cancel })).stores.routines,
 		);
 
 		expect(await ending.settleThread(fixture.childThread.id, { state: "cancelled" })).toBe(true);

@@ -2,7 +2,6 @@ import { type ChatMessageItem, handleFromName } from "@sugabots/contracts";
 import { eq, like } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
-import { eventPublisher } from "../../database/events/publish.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
 import {
 	agent,
@@ -21,25 +20,13 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { composeConversations } from "../composition.ts";
-import { routineRunsForTests } from "../routines/testing.ts";
-import {
-	queueFacilitationForTests,
-	queueTurnForTests,
-	runningTurns,
-	turnSignalsForTests,
-} from "../turns/testing.ts";
+import { conversationsForTests } from "../testing.ts";
+import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 
 const eventStore = await runOnPostgres(postgresEventStore);
 
-describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", () => {
-	const { stores } = composeConversations({
-		publishEvents: eventPublisher(createEventBus({ store: eventStore })),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
-	});
+describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
+	const { stores } = await conversationsForTests(createEventBus({ store: eventStore }));
 	const store = onPostgres(stores.chats);
 	const routines = onPostgres(stores.routines);
 	let workspaceId: string;

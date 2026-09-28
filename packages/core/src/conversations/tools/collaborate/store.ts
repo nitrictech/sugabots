@@ -15,7 +15,7 @@ import {
 } from "../../../database/schema.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
-import type { QueueTurn } from "../../turns/queue.ts";
+import { TurnRequests } from "../../turns/requests.ts";
 
 /**
  * Collaboration: one crew agent asking another for help.
@@ -91,11 +91,11 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 	}
 }
 
-export function collaborationStore(
+export const collaborationStore = Effect.fnUntraced(function* (
 	emit: DomainEvents.Emit<ConversationEvent>,
-	queueTurn: QueueTurn,
-): CollaborationStore {
-	return {
+) {
+	const requests = yield* TurnRequests.Service;
+	const store: CollaborationStore = {
 		open: ({ from, to, brief }) =>
 			transaction(
 				Effect.gen(function* () {
@@ -171,7 +171,7 @@ export function collaborationStore(
 					if (!briefMessage) {
 						return yield* Effect.die(new Error("Message insert returned no row"));
 					}
-					yield* queueTurn({
+					yield* requests.queueTurn({
 						threadId: child.id,
 						agentId: collaborator.id,
 						triggerMessageId: briefMessage.id,
@@ -263,7 +263,7 @@ export function collaborationStore(
 					// The asking agent moved on; give it a turn to pick the answer up.
 					// While it was still waiting, the tool reads the answer itself.
 					if (current.row.status === "pending") {
-						yield* queueTurn({
+						yield* requests.queueTurn({
 							threadId: current.row.parentThreadId,
 							agentId: current.askingAgentId,
 							triggerMessageId: current.row.parentMessageId,
@@ -274,7 +274,8 @@ export function collaborationStore(
 				}),
 			),
 	};
-}
+	return store;
+});
 
 const loadThreadRow = Effect.fn("CollaborationStore.loadThreadRow")(function* (
 	db: Executor,

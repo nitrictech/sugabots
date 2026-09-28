@@ -17,7 +17,6 @@ import { Database, effectRunner, transaction } from "../../database/database.ts"
 import type { EventBus } from "../../database/events/bus.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { RoutineStore } from "../routines/store.ts";
-import type { SummaryRequest } from "../summaries/summary.workflow.ts";
 import type { ToolApprovalStore, ToolApprovalsIncomplete } from "../tools/approvals/store.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { PendingToolApproval, ToolCallRepository } from "../tools/calls/repository.ts";
@@ -40,6 +39,7 @@ import {
 	type TurnModel,
 } from "./model.ts";
 import type { ReplyDraft, ReplyTurn, TurnCheckpoint, TurnRepository } from "./repository.ts";
+import { TurnRequests } from "./requests.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -85,15 +85,16 @@ export interface TurnStepsDependencies {
 	events: Pick<EventBus, "publish" | "subscribe">;
 	routines?: Pick<RoutineStore, "settleThread">;
 	/** Asks the Scribe to catch up on the thread after a completed reply. */
-	queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
+	requests: Pick<TurnRequests.Interface, "queueSummary">;
 }
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
-export const stepsLayer = (dependencies: TurnStepsDependencies) =>
+export const stepsLayer = (options: Omit<TurnStepsDependencies, "requests">) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
+			const dependencies = { ...options, requests: yield* TurnRequests.Service };
 			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: UserMessage }) =>
 				(dependencies.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
 			return TurnSteps.of({
@@ -320,7 +321,7 @@ const generateReply = (
 						if (routines) yield* routines.settleThread(prepared.context.thread.id);
 					}),
 				);
-				yield* dependencies
+				yield* dependencies.requests
 					.queueSummary({
 						threadId: prepared.context.thread.id,
 						agentId: prepared.context.agent.id,

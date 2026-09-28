@@ -17,7 +17,7 @@ import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines
 import { toToolCallPart } from "../../threads/tool-calls.ts";
 import { awaitsDecisions, mayRunTools } from "../../turns/lifecycle.ts";
 import type { TurnRepository } from "../../turns/repository.ts";
-import type { TurnSignals } from "../../turns/signals.ts";
+import { TurnSignals } from "../../turns/signals.ts";
 import { awaitsDecision } from "../calls/lifecycle.ts";
 import type { ToolCallRepository } from "../calls/repository.ts";
 
@@ -93,12 +93,12 @@ export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused
 	readonly message: string;
 }> {}
 
-export function toolApprovalStore(
+export const toolApprovalStore = Effect.fnUntraced(function* (
 	toolCalls: ToolCallRepository,
 	turns: Pick<TurnRepository, "markActed">,
-	signals: TurnSignals,
-): ToolApprovalStore {
-	return {
+) {
+	const signals = yield* TurnSignals.Service;
+	const store: ToolApprovalStore = {
 		responsesForTurn: (turnId, approvalIds) =>
 			Effect.flatMap(
 				query((db) =>
@@ -284,7 +284,8 @@ export function toolApprovalStore(
 				}),
 			),
 	};
-}
+	return store;
+});
 
 /** No connection approvals, for turns that are offered no connection tools. */
 export const noToolApprovalStore: ToolApprovalStore = {

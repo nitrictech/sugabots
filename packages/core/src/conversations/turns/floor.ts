@@ -18,7 +18,7 @@ import {
 	threadParticipant,
 } from "../../database/schema.ts";
 import { ConversationEvent } from "../events.ts";
-import type { QueueFacilitation, QueueTurn } from "./queue.ts";
+import type { TurnRequests } from "./requests.ts";
 
 /**
  * Who has the floor: which agent, if any, speaks after a message (ADR 004).
@@ -133,8 +133,7 @@ export interface FloorMessage {
 export const giveFloor = (
 	effects: {
 		readonly emit: DomainEvents.Emit<ConversationEvent>;
-		readonly queueTurn: QueueTurn;
-		readonly queueFacilitation: QueueFacilitation;
+		readonly requests: TurnRequests.Interface;
 	},
 	committed: FloorMessage,
 ): Effect.Effect<FloorDecision, never, Database> =>
@@ -148,7 +147,7 @@ export const giveFloor = (
 			});
 
 			if (decision.kind === "facilitate") {
-				yield* effects.queueFacilitation({
+				yield* effects.requests.queueFacilitation({
 					threadId: committed.threadId,
 					triggerMessageId: committed.id,
 				});
@@ -176,7 +175,7 @@ export const giveFloor = (
 				]);
 			}
 			for (const { agentId, reason } of decision.agents) {
-				yield* effects.queueTurn({
+				yield* effects.requests.queueTurn({
 					threadId: committed.threadId,
 					agentId,
 					triggerMessageId: committed.id,

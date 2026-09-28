@@ -1,4 +1,6 @@
-import { Effect, type Schema } from "effect";
+export * as TurnSignals from "./signals.ts";
+
+import { Context, Effect, Layer, type Schema } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import type { ApprovalDecision } from "../tools/calls/lifecycle.ts";
 import { approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
@@ -9,7 +11,7 @@ import { approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
  * sent is the one that stands, so a repeated or late signal changes nothing.
  * `owner` is the turn's execution id.
  */
-export interface TurnSignals {
+export interface Interface {
 	readonly decide: (signal: {
 		readonly owner: string;
 		readonly approvalId: string;
@@ -18,12 +20,15 @@ export interface TurnSignals {
 	readonly cancel: (owner: string) => Effect.Effect<void>;
 }
 
-export const turnSignals = (engine: WorkflowEngine.WorkflowEngine["Service"]): TurnSignals => {
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/TurnSignals") {}
+
+export const make = Effect.gen(function* () {
+	const engine = yield* WorkflowEngine.WorkflowEngine;
 	const tokenFor = <Success extends Schema.Constraint>(
 		deferred: DurableDeferred.DurableDeferred<Success>,
 		executionId: string,
 	) => DurableDeferred.tokenFromExecutionId(deferred, { workflow: Turn, executionId });
-	return {
+	return Service.of({
 		decide: (signal) => {
 			const decided = approvalDecided(signal.approvalId);
 			return DurableDeferred.succeed(decided, {
@@ -36,5 +41,7 @@ export const turnSignals = (engine: WorkflowEngine.WorkflowEngine["Service"]): T
 				token: tokenFor(cancelRequested, owner),
 				value: undefined,
 			}).pipe(Effect.provideService(WorkflowEngine.WorkflowEngine, engine)),
-	};
-};
+	});
+});
+
+export const layer = Layer.effect(Service, make);

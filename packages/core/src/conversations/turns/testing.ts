@@ -13,17 +13,11 @@ import {
 } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { engineForTests, lanesForTests } from "../../workflows/testing.ts";
+import { lanesForTests, workflowsForTests } from "../../workflows/testing.ts";
 import type { ChatStore } from "../chats/store.ts";
 import { type PreparedTurn, type TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
 import { Facilitate, FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
-import {
-	type QueueFacilitation,
-	type QueueTurn,
-	queueFacilitationInLane,
-	queueTurnInLane,
-} from "./queue.ts";
-import { turnSignals } from "./signals.ts";
+import { TurnRequests } from "./requests.ts";
 import { Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**
@@ -34,13 +28,13 @@ import { Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
  */
 const lanes = lanesForTests;
 
-export const turnSignalsForTests = turnSignals(engineForTests);
+const requests = TurnRequests.make.pipe(Effect.provide(workflowsForTests));
 
-export const queueTurnForTests: QueueTurn = (request) =>
-	Effect.flatMap(lanes, (service) => queueTurnInLane(service)(request));
+export const queueTurnForTests = (request: TurnRequest) =>
+	Effect.flatMap(requests, (service) => service.queueTurn(request));
 
-export const queueFacilitationForTests: QueueFacilitation = (request) =>
-	Effect.flatMap(lanes, (service) => queueFacilitationInLane(service)(request));
+export const queueFacilitationForTests = (request: FacilitateRequest) =>
+	Effect.flatMap(requests, (service) => service.queueFacilitation(request));
 
 /** The turns running in the thread, each as its workflow runs it. */
 export const runningTurns = (threadId: string) =>

@@ -4,7 +4,7 @@ import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { DecidedApproval } from "../tools/calls/lifecycle.ts";
-import { turnSignals } from "./signals.ts";
+import { TurnSignals } from "./signals.ts";
 import {
 	type SegmentOutcome,
 	Turn,
@@ -45,9 +45,7 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(TestClock.layer()),
 	),
 );
-const signals = turnSignals(
-	await runtime.runPromise(Effect.service(WorkflowEngine.WorkflowEngine)),
-);
+const signals = await runtime.runPromise(TurnSignals.make);
 
 afterAll(() => runtime.dispose());
 

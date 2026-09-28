@@ -3,7 +3,6 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
-import { eventPublisher } from "../../database/events/publish.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
 import {
 	agent,
@@ -21,33 +20,19 @@ import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../data
 import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
-import { composeConversations } from "../composition.ts";
-import { routineRunsForTests } from "../routines/testing.ts";
+import { conversationsForTests } from "../testing.ts";
 import { replyTurnOf } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
-import {
-	prepareRunnable,
-	queueFacilitationForTests,
-	queueTurnForTests,
-	releaseTurn,
-	runningTurns,
-	turnSignalsForTests,
-} from "../turns/testing.ts";
+import { prepareRunnable, queueTurnForTests, releaseTurn, runningTurns } from "../turns/testing.ts";
 
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
 
 const eventStore = await runOnPostgres(postgresEventStore);
 
-describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
+describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async () => {
 	const eventBus = createEventBus({ store: eventStore });
-	const { repositories, stores } = composeConversations({
-		publishEvents: eventPublisher(eventBus),
-		queueTurn: queueTurnForTests,
-		queueFacilitation: queueFacilitationForTests,
-		signals: turnSignalsForTests,
-		routineRuns: routineRunsForTests,
-	});
+	const { repositories, stores } = await conversationsForTests(eventBus);
 	const store = onPostgres(stores.threads);
 	const chats = onPostgres(stores.chats);
 	const turns = onPostgres(stores.turns);

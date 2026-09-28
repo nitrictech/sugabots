@@ -30,7 +30,7 @@ import {
 	type TurnModel,
 	type TurnModelInput,
 } from "./model.ts";
-import type { QueueTurn } from "./queue.ts";
+import { TurnRequests } from "./requests.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
@@ -51,16 +51,17 @@ export interface FacilitatorExecution {
 	model: TurnModel;
 	emit: DomainEvents.Emit<ConversationEvent>;
 	/** How the chosen agent's turn is asked for. */
-	queueTurn: QueueTurn;
+	requests: Pick<TurnRequests.Interface, "queueTurn">;
 	routines?: Pick<RoutineStore, "settleThread">;
 }
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = (execution: FacilitatorExecution) =>
+export const stepsLayer = (options: Omit<FacilitatorExecution, "requests">) =>
 	Layer.effect(
 		FacilitateSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
+			const execution = { ...options, requests: yield* TurnRequests.Service };
 			const settleRoutine = (
 				request: FacilitateRequest,
 				outcome?: { state: "failed"; error: UserMessage },
@@ -172,7 +173,7 @@ const applyDecision = (
 						ConversationEvent.AgentsJoined({ threadId: scope.threadId, agentIds: [chosen.id] }),
 					]);
 				}
-				yield* execution.queueTurn({
+				yield* execution.requests.queueTurn({
 					threadId: scope.threadId,
 					agentId: decision.agentId,
 					triggerMessageId: request.triggerMessageId,
