@@ -11,10 +11,21 @@ export const siteMeta = {
 	ogImagePath: "/og.png",
 } as const;
 
+/** What the docs home says about the docs, in its page head and in its Markdown version. */
+export const docsMeta = {
+	title: "Sugabots docs",
+	description: "How Sugabots works: pods, agents, tools and models, and how to run it yourself.",
+} as const;
+
 /**
  * A page's address on the live site. Pages are prerendered to `<path>.html`,
  * which Cloudflare serves without a trailing slash, so the address has none.
  */
 export function pageUrl(pathname: string) {
 	return `${siteMeta.url}${pathname.replace(/\/+$/, "") || "/"}`;
+}
+
+/** A file's address on the live site, such as `/llms.txt` or `/docs/quickstart.md`. */
+export function fileUrl(path: string) {
+	return `${siteMeta.url}${path}`;
 }
