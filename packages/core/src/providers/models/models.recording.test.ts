@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { forEachDelta, type TurnModelInput, workspaceTurnModel } from "./model.ts";
+import { Models } from "./models.ts";
 
 /** The fake provider never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -60,7 +60,7 @@ type Recorded = ModelRequests.Started &
 function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Response>) {
 	const recorded: Recorded[] = [];
 	const answers = [...responses];
-	const model = workspaceTurnModel({
+	const model = Models.make({
 		modelProviders: {
 			renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 			resolve: () =>
@@ -91,7 +91,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 	return { model, recorded };
 }
 
-const input: Omit<TurnModelInput, "signal"> = {
+const input: Omit<Models.Input, "signal"> = {
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
 	activity,
 	model: "gpt-test",
@@ -113,7 +113,7 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"]) =>
 			Effect.gen(function* () {
 				const stop = new AbortController();
 				const generated = yield* model.stream({ ...input, signal: stop.signal });
-				yield* forEachDelta(generated.text, stop, () => Effect.void);
+				yield* Models.forEachDelta(generated.text, stop, () => Effect.void);
 				return yield* Effect.exit(generated.accounting);
 			}),
 		),

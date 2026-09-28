@@ -33,12 +33,12 @@ vi.mock("ai", async (importOriginal) => ({
 }));
 
 import { APICallError } from "ai";
-import { ModelRequestFailed, workspaceTurnModel } from "./model.ts";
+import { Models } from "./models.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
-describe("workspace turn model", () => {
+describe("models", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		sdk.createAnthropic.mockReturnValue(sdk.anthropicModel);
@@ -52,7 +52,7 @@ describe("workspace turn model", () => {
 		"injects the provider's http client into the %s SDK",
 		async (apiFormat) => {
 			const httpClient = vi.fn<typeof fetch>();
-			const model = workspaceTurnModel({
+			const model = Models.make({
 				modelProviders: {
 					renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 					resolve: () =>
@@ -94,7 +94,7 @@ describe("workspace turn model", () => {
 			expiresAt: Date.now() + 60 * 60_000,
 			accountId: "account-1",
 		};
-		const model = workspaceTurnModel({
+		const model = Models.make({
 			modelProviders: {
 				renewChatgptTokens: (_workspaceId, _providerId, renew) => renew(tokens),
 				resolve: () =>
@@ -154,7 +154,7 @@ describe("a failed model request", () => {
 			}),
 		});
 
-		const failure = ModelRequestFailed.fromCause(refused);
+		const failure = Models.ModelRequestFailed.fromCause(refused);
 
 		expect(failure.message).toBe(
 			"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
@@ -171,11 +171,11 @@ describe("a failed model request", () => {
 			responseBody: "<html>upstream timed out</html>",
 		});
 
-		expect(ModelRequestFailed.fromCause(opaque)).toMatchObject({
+		expect(Models.ModelRequestFailed.fromCause(opaque)).toMatchObject({
 			message: "Provider returned 502: <html>upstream timed out</html>",
 			userMessage: "The model provider could not answer.",
 		});
-		expect(ModelRequestFailed.fromCause(new Error("socket hang up")).message).toBe(
+		expect(Models.ModelRequestFailed.fromCause(new Error("socket hang up")).message).toBe(
 			"socket hang up",
 		);
 	});

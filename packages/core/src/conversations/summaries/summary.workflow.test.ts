@@ -3,10 +3,10 @@ import { Duration, Effect, Layer, ManagedRuntime, Schedule } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { layer as databaseLayer, query } from "../../database/database.ts";
+import { Models } from "../../providers/models/models.ts";
 import { unimplemented } from "../../testing.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
-import { ModelRequestFailed, Models } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { Summaries } from "./summaries.ts";
@@ -24,7 +24,9 @@ const runtime = ManagedRuntime.make(
 				Layer.provide(
 					Layer.succeed(Models.Service, {
 						stream: () =>
-							Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
+							Effect.fail(
+								new Models.ModelRequestFailed({ message: "unused", reason: "unavailable" }),
+							),
 					}),
 				),
 			),

@@ -1,4 +1,4 @@
-import type { TurnModelPrompt } from "../turns/model.ts";
+import type { Models } from "../../providers/models/models.ts";
 import type { PreparedSummary } from "./summaries.ts";
 
 /** What the prompt reads. Narrower than a `PreparedSummary` so a model trial can build one. */
@@ -10,7 +10,7 @@ export type SummaryPromptInput = Pick<
 export function threadSummaryPrompt(
 	prepared: SummaryPromptInput,
 	signal: AbortSignal,
-): TurnModelPrompt {
+): Models.Prompt {
 	const previous = prepared.previousContent
 		? `Previous summary:\n${prepared.previousContent}`
 		: "There is no previous summary.";

@@ -7,7 +7,6 @@ import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { RoutineScheduler } from "@sugabots/core/conversations/routines/scheduler";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { Models } from "@sugabots/core/conversations/turns/model";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
 import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
@@ -23,6 +22,7 @@ import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
+import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
@@ -62,7 +62,6 @@ const Infrastructure = Layer.mergeAll(
 const Integrations = Layer.mergeAll(
 	Email.layer,
 	Models.layer,
-	Models.probeLayer,
 	BuiltInTools.layer,
 	ConnectionTools.layer,
 );

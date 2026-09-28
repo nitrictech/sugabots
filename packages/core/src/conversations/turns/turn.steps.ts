@@ -17,6 +17,7 @@ import {
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -41,7 +42,6 @@ import {
 } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
 import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
-import { forEachDelta, type ModelAccounting, type ModelRequestFailed, Models } from "./model.ts";
 import {
 	type ReplyDraft,
 	type ReplyTurn,
@@ -149,7 +149,7 @@ const retry: SegmentOutcome = { _tag: "Retry" };
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
 type StreamOutcome =
-	| { kind: "completed"; accounting: ModelAccounting }
+	| { kind: "completed"; accounting: Models.Accounting }
 	| {
 			kind: "suspended";
 			checkpoint: TurnCheckpoint;
@@ -158,7 +158,7 @@ type StreamOutcome =
 
 /** Why a reply stopped streaming before the model finished, other than being cancelled. */
 type TurnFailure =
-	| ModelRequestFailed
+	| Models.ModelRequestFailed
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -360,7 +360,7 @@ const streamReply = (
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
-	| ModelRequestFailed
+	| Models.ModelRequestFailed
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -634,7 +634,7 @@ const consumeDeltas = (
 			return delta ? publishDelta(prepared, offset, delta, events) : Effect.void;
 		});
 
-		yield* forEachDelta(text, stop, (delta) =>
+		yield* Models.forEachDelta(text, stop, (delta) =>
 			Effect.gen(function* () {
 				const { content } = yield* Ref.updateAndGet(reply, (draft) => ({
 					...draft,
@@ -687,8 +687,8 @@ const publishDelta = (
 
 function addAccounting(
 	checkpoint: TurnCheckpoint | undefined,
-	segment: ModelAccounting,
-): ModelAccounting {
+	segment: Models.Accounting,
+): Models.Accounting {
 	if (!checkpoint) return segment;
 	const prior = checkpoint.accounting;
 	return {

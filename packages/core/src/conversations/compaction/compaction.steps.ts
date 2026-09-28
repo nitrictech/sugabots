@@ -1,14 +1,7 @@
 import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref } from "effect";
 import type { Database } from "../../database/database.ts";
+import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
-import {
-	forEachDelta,
-	type ModelAccounting,
-	type ModelRequestFailed,
-	Models,
-	type TurnModel,
-} from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { type CompactionRequest, CompactionSteps } from "./compaction.workflow.ts";
 import { Compactions, type PreparedCompaction } from "./compactions.ts";
@@ -38,7 +31,7 @@ export const compactionStepsLayer = Layer.effect(
  */
 export const compact = (
 	request: CompactionRequest,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<void, never, Compactions.Service | TurnRepository.Service | Database> =>
 	Effect.gen(function* () {
 		const compactions = yield* Compactions.Service;
@@ -52,7 +45,7 @@ export const compact = (
  */
 const generateCompaction = (
 	prepared: PreparedCompaction,
-	model: TurnModel,
+	model: Models.Interface,
 ): Effect.Effect<void, never, Compactions.Service | TurnRepository.Service | Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
@@ -80,8 +73,8 @@ const generateCompaction = (
 /** The model's summary, within the time and length limits. */
 const generate = (
 	prepared: PreparedCompaction,
-	model: TurnModel,
-): Effect.Effect<readonly [string, ModelAccounting], CompactionFailure, Database> =>
+	model: Models.Interface,
+): Effect.Effect<readonly [string, Models.Accounting], CompactionFailure, Database> =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const stop = new AbortController();
@@ -97,18 +90,18 @@ const generate = (
 				},
 			});
 			const collected = yield* Ref.make("");
-			yield* forEachDelta(generated.text, stop, (text) =>
+			yield* Models.forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
 					Effect.filterOrFail(
 						(soFar) => soFar.length <= MAX_COMPACTION_SUMMARY_CHARACTERS,
-						() => new UnusableAnswer({ reason: "Compaction model returned too much text" }),
+						() => new Models.UnusableAnswer({ reason: "Compaction model returned too much text" }),
 					),
 					Effect.asVoid,
 				),
 			);
 			const summary = (yield* Ref.get(collected)).trim();
 			if (!summary) {
-				return yield* new UnusableAnswer({ reason: "Compaction model returned no text" });
+				return yield* new Models.UnusableAnswer({ reason: "Compaction model returned no text" });
 			}
 			const accounting = yield* generated.accounting;
 			return [summary, accounting] as const;
@@ -116,16 +109,16 @@ const generate = (
 	).pipe(
 		Effect.timeoutOrElse({
 			duration: COMPACTION_TIMEOUT,
-			orElse: () => Effect.fail(new AnswerTimedOut({ message: "Compaction timed out" })),
+			orElse: () => Effect.fail(new Models.AnswerTimedOut({ message: "Compaction timed out" })),
 		}),
 		// The timeout is inside, so each attempt gets its own time.
-		retryUnusable,
+		Models.retryUnusable,
 	);
 
 /**
  * Why a compaction failed.
  */
-type CompactionFailure = ModelRequestFailed | AnswerTimedOut | UnusableAnswer;
+type CompactionFailure = Models.ModelRequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
 
 /** The process compacting stopped before the compaction finished. */
 class CompactionInterrupted

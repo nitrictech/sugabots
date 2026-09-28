@@ -17,10 +17,8 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
-import { ModelProbe } from "./model-probe.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { ModelProviderSetup } from "./model-provider-setup.ts";
@@ -44,12 +42,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 	/**
 	 * The setup as the workspace's administrator, with every provider
-	 * answering `respond` for whichever address was asked, and a model that
-	 * answers a probe as `probe` does.
+	 * answering `respond` for whichever address was asked.
 	 */
 	const setupWith = async (
 		respond: (url: string) => Response | Promise<Response>,
-		probe: ModelProbe.Interface["probe"] = () => Effect.void,
 		{ allowPrivateNetwork = true, as = userId } = {},
 	) =>
 		(
@@ -63,7 +59,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 							oauth: async () => new Response(null, { status: 503 }),
 							webFetch: async () => new Response(null, { status: 503 }),
 						}),
-						Layer.succeed(ModelProbe.Service, { probe }),
 					]),
 				),
 			)
@@ -273,13 +268,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!configured) throw new Error("fixture");
 		await repository.setModelEnabled(workspaceId, providerId, [configured.id], true);
 		// The listing answers; asking the model refuses the key.
-		const setup = await setupWith(
-			() => Response.json({ data: [] }),
-			() =>
-				Effect.fail({
-					message: "Provider returned 401: API key rejected",
-					userMessage: UserMessage.of`The model provider refused the request. Check its API key.`,
-				}),
+		const setup = await setupWith((url) =>
+			url.endsWith("/chat/completions")
+				? Response.json({ error: { message: "API key rejected" } }, { status: 401 })
+				: Response.json({ data: [] }),
 		);
 
 		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
@@ -345,7 +337,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: sam.id, role: "member" }),
 		);
-		const setup = await setupWith(() => Response.json({ data: [] }), undefined, { as: sam.id });
+		const setup = await setupWith(() => Response.json({ data: [] }), { as: sam.id });
 
 		expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 			models: [],
@@ -358,7 +350,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 	describe("under an egress policy that forbids private addresses", () => {
 		const forbidding = () =>
-			setupWith(() => Response.json({ data: [] }), undefined, { allowPrivateNetwork: false });
+			setupWith(() => Response.json({ data: [] }), { allowPrivateNetwork: false });
 
 		it("refuses a local preset, and stores nothing", async () => {
 			const setup = await forbidding();

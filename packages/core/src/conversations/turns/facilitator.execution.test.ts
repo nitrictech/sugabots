@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Database, transactional } from "../../database/database.ts";
 import { unimplemented } from "../../testing.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { ModelRequestFailed, type TurnModel } from "./model.ts";
 import { TurnRequests } from "./requests.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +19,7 @@ vi.mock("../../database/database.ts", async (importOriginal) => {
 	};
 });
 
+import { Models } from "../../providers/models/models.ts";
 import type { FacilitateRequest } from "./facilitate.workflow.ts";
 import { attemptFacilitation, type FacilitatorScope } from "./facilitator.ts";
 
@@ -45,14 +45,16 @@ const scope: FacilitatorScope = {
 	recent: [],
 };
 
-const answering = (answer: string): TurnModel => ({
+const answering = (answer: string): Models.Interface => ({
 	stream: () =>
 		Effect.succeed({ text: chunks(answer), accounting: Effect.succeed({ modelCalls: 1 }) }),
 });
 
-const unavailable: TurnModel = {
+const unavailable: Models.Interface = {
 	stream: () =>
-		Effect.fail(new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" })),
+		Effect.fail(
+			new Models.ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+		),
 };
 
 describe("an attempt at facilitation", () => {

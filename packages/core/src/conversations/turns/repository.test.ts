@@ -6,6 +6,7 @@ import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { agent, message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { Models } from "../../providers/models/models.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -15,7 +16,6 @@ import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
-import { ModelRequestFailed, Models, type TurnModel } from "./model.ts";
 import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
@@ -240,7 +240,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		const events = EventBus.inProcess({ store: EventStore.inMemory() });
 		// The real services, with the Scribe asked for nothing after a reply.
 		const requests = Context.get(conversations, TurnRequests.Service);
-		const segmentWith = (model: TurnModel) =>
+		const segmentWith = (model: Models.Interface) =>
 			runOnPostgres(
 				runSegment(prepared.run).pipe(
 					Effect.provide(
@@ -288,7 +288,9 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		it("records a failed run, which the workflow runs again", async () => {
 			const outcome = await segmentWith({
 				stream: () =>
-					Effect.fail(new ModelRequestFailed({ message: "provider down", reason: "unavailable" })),
+					Effect.fail(
+						new Models.ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+					),
 			});
 
 			expect(outcome).toEqual({ _tag: "Retry" });

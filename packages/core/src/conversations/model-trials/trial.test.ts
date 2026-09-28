@@ -1,16 +1,18 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
-import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "../turns/model.ts";
+import { Models } from "../../providers/models/models.ts";
 import { CASES } from "./cases.ts";
 import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial } from "./trial.ts";
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
-function scripted(answer: (input: TurnModelInput) => string | ModelRequestFailed): TurnModel {
+function scripted(
+	answer: (input: Models.Input) => string | Models.ModelRequestFailed,
+): Models.Interface {
 	return {
 		stream: (input) => {
 			const next = answer(input);
-			return next instanceof ModelRequestFailed
+			return next instanceof Models.ModelRequestFailed
 				? Effect.fail(next)
 				: Effect.succeed({
 						text: (async function* () {
@@ -22,7 +24,7 @@ function scripted(answer: (input: TurnModelInput) => string | ModelRequestFailed
 	};
 }
 
-const trial = (model: TurnModel, systemAgentKey: "facilitate" | "summarise", attempts = 1) =>
+const trial = (model: Models.Interface, systemAgentKey: "facilitate" | "summarise", attempts = 1) =>
 	Effect.runPromise(
 		Effect.provide(
 			runTrial({ systemAgentKey, model: "under-trial", workspaceId: "w1", attempts }, model),
@@ -78,7 +80,8 @@ describe("trying a model on the facilitator", () => {
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
 			scripted(
-				() => new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+				() =>
+					new Models.ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 			),
 			"facilitate",
 		);
@@ -209,7 +212,7 @@ describe("what the report tells the person choosing", () => {
 });
 
 /** The answer the facilitator should give for whichever case this prompt is. */
-function answerFor(input: TurnModelInput): string {
+function answerFor(input: Models.Input): string {
 	const conversation = input.messages[0]?.content ?? "";
 	if (conversation.includes("do you want me to reopen it?")) return "nobody";
 	if (conversation.includes("It shows how much the order lifecycle matters")) return "nobody";

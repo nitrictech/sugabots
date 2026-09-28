@@ -1,7 +1,6 @@
 import { Duration, Effect, Ref } from "effect";
 import type { Database } from "../../database/database.ts";
-import { UnusableAnswer } from "../turns/answer.ts";
-import { forEachDelta, type TurnModel } from "../turns/model.ts";
+import { Models } from "../../providers/models/models.ts";
 import { CASES, type TrialCase, type TrialSystemAgent } from "./cases.ts";
 
 /**
@@ -184,7 +183,7 @@ interface TrialOptions {
 /** Runs every case for a system agent and reports how the model did. */
 export const runTrial = (
 	{ systemAgentKey, model, workspaceId, attempts = ATTEMPTS }: TrialOptions,
-	turnModel: TurnModel,
+	turnModel: Models.Interface,
 ): Effect.Effect<TrialReport, never, Database> =>
 	Effect.gen(function* () {
 		const cases = yield* Effect.forEach(
@@ -236,7 +235,7 @@ export const runTrial = (
 const runCase = (
 	trialCase: TrialCase,
 	{ model, workspaceId, attempts }: { model: string; workspaceId: string; attempts: number },
-	turnModel: TurnModel,
+	turnModel: Models.Interface,
 ): Effect.Effect<{ result: TrialCaseResult; timings: number[] }, never, Database> =>
 	Effect.gen(function* () {
 		let passed = 0;
@@ -279,7 +278,7 @@ const ask = (
 	trialCase: TrialCase,
 	model: string,
 	workspaceId: string,
-	turnModel: TurnModel,
+	turnModel: Models.Interface,
 ): Effect.Effect<string | undefined, never, Database> =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -290,12 +289,14 @@ const ask = (
 				activity: { purpose: "trial" },
 			});
 			const collected = yield* Ref.make("");
-			yield* forEachDelta(generated.text, stop, (text) =>
+			yield* Models.forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
 					Effect.filterOrFail(
 						(soFar) => soFar.length <= MAX_ANSWER_CHARACTERS,
 						() =>
-							new UnusableAnswer({ reason: "The model kept going well past any usable answer" }),
+							new Models.UnusableAnswer({
+								reason: "The model kept going well past any usable answer",
+							}),
 					),
 				),
 			);

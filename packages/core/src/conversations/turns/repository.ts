@@ -20,6 +20,7 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import type { Models } from "../../providers/models/models.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -39,7 +40,6 @@ import {
 	type TurnState,
 	transition,
 } from "./lifecycle.ts";
-import type { ModelAccounting } from "./model.ts";
 
 /**
  * The only writer of `turn`, and of a turn's reply message while the turn
@@ -84,7 +84,7 @@ export interface Interface {
 	readonly complete: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		accounting: ModelAccounting,
+		accounting: Models.Accounting,
 	) => Effect.Effect<void>;
 	/**
 	 * Records the run as failed, telling people `userMessage`, and returns
@@ -99,7 +99,7 @@ export interface Interface {
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
 	readonly completeSystemAgentTurn: (
 		turnId: string,
-		accounting: ModelAccounting,
+		accounting: Models.Accounting,
 	) => Effect.Effect<void>;
 	readonly failSystemAgentTurn: (turnId: string, userMessage: UserMessage) => Effect.Effect<void>;
 	/** Asks the turn to stop, and says who has to be told. */
@@ -815,7 +815,7 @@ export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
 type AccountingColumn = "contextTokens" | "contextCapacity";
 
-function accountingColumns(accounting: ModelAccounting) {
+function accountingColumns(accounting: Models.Accounting) {
 	return {
 		contextTokens: accounting.contextTokens ?? null,
 		contextCapacity: accounting.contextCapacity ?? null,

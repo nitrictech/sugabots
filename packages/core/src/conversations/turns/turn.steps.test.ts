@@ -7,6 +7,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { Ids } from "../../ids/ids.ts";
+import { Models } from "../../providers/models/models.ts";
 import { unimplemented } from "../../testing.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
 import {
@@ -20,7 +21,6 @@ import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
-import { ModelRequestFailed, Models, type TurnModel, type TurnModelInput } from "./model.ts";
 import { type NotRunnable, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
 import { runSegment } from "./turn.steps.ts";
@@ -102,7 +102,7 @@ describe("runSegment", () => {
 		const { execution, turns } = fakes();
 		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
-		const model: TurnModel = {
+		const model: Models.Interface = {
 			stream: () =>
 				Effect.sync(() => ({
 					text: chunks("Release", " checked"),
@@ -235,8 +235,8 @@ describe("runSegment", () => {
 		});
 		// Stands in for the SDK: says a few words, calls the tool as the SDK
 		// would, and carries on.
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
+		const model: Models.Interface = {
+			stream: (input: Models.Input) =>
 				Effect.sync(() => ({
 					text: (async function* () {
 						yield "Looking. ";
@@ -294,8 +294,8 @@ describe("runSegment", () => {
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async () => ({ content: [] }),
 		});
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
+		const model: Models.Interface = {
+			stream: (input: Models.Input) =>
 				Effect.sync(() => ({
 					text: (async function* () {
 						yield "Clearing. ";
@@ -419,8 +419,8 @@ describe("runSegment", () => {
 			},
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
-		let received: TurnModelInput | undefined;
-		const model: TurnModel = {
+		let received: Models.Input | undefined;
+		const model: Models.Interface = {
 			stream: (input) => {
 				received = input;
 				return Effect.succeed({
@@ -467,8 +467,8 @@ describe("runSegment", () => {
 			connectionRevision: 1,
 			remoteToolName: name,
 		});
-		let received: TurnModelInput | undefined;
-		const model: TurnModel = {
+		let received: Models.Input | undefined;
+		const model: Models.Interface = {
 			stream: (input) => {
 				received = input;
 				return Effect.succeed({
@@ -510,8 +510,8 @@ describe("runSegment", () => {
 			execute: async () => "ok",
 		});
 		const offered: string[][] = [];
-		const model: TurnModel = {
-			stream: (input: TurnModelInput) =>
+		const model: Models.Interface = {
+			stream: (input: Models.Input) =>
 				Effect.sync(() => {
 					offered.push(Object.keys(input.tools ?? {}));
 					return { text: chunks("Done"), accounting: Effect.succeed({ modelCalls: 1 }) };
@@ -596,7 +596,7 @@ describe("runSegment", () => {
 				model: {
 					stream: () =>
 						Effect.fail(
-							new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+							new Models.ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
 						),
 				},
 				events: eventBus(),
@@ -667,10 +667,10 @@ describe("runSegment", () => {
 
 	it("marks a failed generation for retry without duplicating its response", async () => {
 		const { execution, turns } = fakes();
-		const model: TurnModel = {
+		const model: Models.Interface = {
 			stream: () =>
 				Effect.fail(
-					new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+					new Models.ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 				),
 		};
 		const events = eventBus();
@@ -827,7 +827,7 @@ interface Given {
 	requests: Pick<TurnRequests.Interface, "queueSummary"> &
 		Partial<Pick<TurnRequests.Interface, "queueCompaction">>;
 	approvals?: ApprovedToolCalls.Interface;
-	model: TurnModel;
+	model: Models.Interface;
 	events: EventBus.Interface;
 	builtInTools?: BuiltInTools.Interface;
 	connectionTools?: ConnectionTools.Interface;
@@ -1022,9 +1022,11 @@ async function* chunksUntilAborted(signal: AbortSignal): AsyncIterable<string> {
 	});
 }
 
-function unusedModel(): TurnModel {
+function unusedModel(): Models.Interface {
 	return {
 		stream: () =>
-			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
+			Effect.fail(
+				new Models.ModelRequestFailed({ message: "unused model", reason: "unavailable" }),
+			),
 	};
 }

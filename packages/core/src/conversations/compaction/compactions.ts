@@ -10,6 +10,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { threadCompaction } from "../../database/schema.ts";
+import type { Models } from "../../providers/models/models.ts";
 import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
@@ -17,7 +18,6 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import type { ModelAccounting } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import type { CompactionRequest } from "./compaction.workflow.ts";
 import { loadContextWindow } from "./context-window.ts";
@@ -54,7 +54,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedCompaction,
 		summary: string,
-		accounting: ModelAccounting,
+		accounting: Models.Accounting,
 	) => Effect.Effect<void>;
 }
 

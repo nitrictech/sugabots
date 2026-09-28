@@ -2,8 +2,8 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { Models } from "../../providers/models/models.ts";
 import { unimplemented } from "../../testing.ts";
-import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
@@ -42,7 +42,7 @@ describe("summarise", () => {
 		vi.useFakeTimers();
 		const { summaries, turns } = fakes();
 		let signal: AbortSignal | undefined;
-		const stream = vi.fn<TurnModel["stream"]>((input) => {
+		const stream = vi.fn<Models.Interface["stream"]>((input) => {
 			signal = input.signal;
 			return Effect.never;
 		});
@@ -66,7 +66,7 @@ describe("summarise", () => {
 
 	it("persists the first generated title and summary", async () => {
 		const { summaries, turns } = fakes();
-		const model: TurnModel = {
+		const model: Models.Interface = {
 			stream: () =>
 				Effect.sync(() => ({
 					text: chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'),
@@ -166,7 +166,7 @@ describe("summarise", () => {
 		const { summaries, turns } = fakes();
 		const stream = vi.fn(() =>
 			Effect.fail(
-				new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
+				new Models.ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 			),
 		);
 
@@ -239,10 +239,12 @@ function services(
 	);
 }
 
-function unusedModel(): TurnModel {
+function unusedModel(): Models.Interface {
 	return {
 		stream: () =>
-			Effect.fail(new ModelRequestFailed({ message: "unused model", reason: "unavailable" })),
+			Effect.fail(
+				new Models.ModelRequestFailed({ message: "unused model", reason: "unavailable" }),
+			),
 	};
 }
 

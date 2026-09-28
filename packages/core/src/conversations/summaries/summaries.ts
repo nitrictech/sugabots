@@ -10,6 +10,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { threadSummary } from "../../database/schema.ts";
+import type { Models } from "../../providers/models/models.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
@@ -20,7 +21,6 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import type { ModelAccounting } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { SummaryRepository } from "./repository.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
@@ -48,7 +48,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
-		accounting: ModelAccounting,
+		accounting: Models.Accounting,
 	) => Effect.Effect<void>;
 }
 

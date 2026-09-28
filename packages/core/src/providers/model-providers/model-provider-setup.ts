@@ -19,6 +19,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { Models } from "../models/models.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
@@ -28,7 +29,6 @@ import {
 	redeemDeviceCode,
 	requestDeviceCode,
 } from "./chatgpt.ts";
-import { ModelProbe } from "./model-probe.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./remote.ts";
@@ -191,7 +191,7 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const providers = yield* ModelProviderRepository.Service;
 	const egress = yield* Egress.Service;
-	const probe = yield* ModelProbe.Service;
+	const models = yield* Models.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
 	const cipher = yield* Credentials.Service;
 	const chatgptAuth = egress.providers.for({ baseUrl: CHATGPT_ISSUER });
@@ -270,7 +270,9 @@ export const make = Effect.gen(function* () {
 
 			const endpoint = yield* providers.endpoint(workspaceId, providerId);
 			const started = yield* Clock.currentTimeMillis;
-			const answered = yield* probe.probe(workspaceId, enabled.modelId).pipe(Effect.result);
+			const answered = yield* Models.probe(models, workspaceId, enabled.modelId).pipe(
+				Effect.result,
+			);
 			const latencyMs = listed.latencyMs + ((yield* Clock.currentTimeMillis) - started);
 			if (answered._tag === "Success") {
 				return { ...listed, latencyMs };
@@ -507,9 +509,8 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/** Needs a `ModelProbe`, which the conversations module implements. */
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderRepository.layer]),
+	Layer.provide([Authorization.layer, ModelProviderRepository.layer, Models.layer]),
 );
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */

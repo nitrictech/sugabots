@@ -15,7 +15,6 @@ import { ThreadView } from "./conversations/threads/thread-view.ts";
 import { ToolApprovals } from "./conversations/tools/approvals/tool-approvals.ts";
 import { TurnCancellation } from "./conversations/turns/cancellation.ts";
 import { TurnExecution } from "./conversations/turns/execution.ts";
-import { Models } from "./conversations/turns/model.ts";
 import { prepareRunnable, runningTurns } from "./conversations/turns/testing.ts";
 import { query } from "./database/database.ts";
 import { EventBus } from "./database/events/bus.ts";
@@ -51,8 +50,8 @@ import {
 import { Email } from "./email/email.ts";
 import { Installation } from "./installation/installation.ts";
 import { ConnectionSetup } from "./providers/connections/connection-setup.ts";
-import { ModelProbe } from "./providers/model-providers/model-probe.ts";
 import { ModelProviderSetup } from "./providers/model-providers/model-provider-setup.ts";
+import { Models } from "./providers/models/models.ts";
 import { Egress } from "./providers/network/egress.ts";
 import { SearchProviderSetup } from "./providers/search-providers/search-provider-setup.ts";
 import { unimplemented } from "./testing.ts";
@@ -426,7 +425,6 @@ const workspaceServices = Layer.mergeAll(
 				},
 			},
 		}),
-		unimplemented(ModelProbe.Service),
 		unimplemented(Models.Service),
 		unimplemented(Email.Service),
 		Layer.succeed(
