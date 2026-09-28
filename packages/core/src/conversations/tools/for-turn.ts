@@ -4,10 +4,10 @@ import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { PreparedTurn } from "../turns/execution.ts";
-import type { ToolApprovalStore } from "./approvals/store.ts";
+import type { ToolApprovals } from "./approvals/tool-approvals.ts";
 import { type RecordingOptions, recorded } from "./calls/recorded.ts";
 import type { ToolCallRepository } from "./calls/repository.ts";
-import type { CollaborationStore } from "./collaborate/store.ts";
+import type { Collaborations } from "./collaborate/collaborations.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import type { OfferedTool } from "./connections.ts";
 
@@ -23,10 +23,10 @@ import type { OfferedTool } from "./connections.ts";
  */
 
 export interface ToolDependencies {
-	collaborations: CollaborationStore;
+	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** Where a built-in tool's calls are written down. */
-	calls: Pick<ToolCallRepository, "open" | "close">;
-	approvals: ToolApprovalStore;
+	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
+	approvals: Pick<ToolApprovals.Interface, "beginExecution">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
@@ -35,7 +35,7 @@ export interface ToolDependencies {
 	connections?: Record<string, OfferedTool>;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus, "subscribe">;
-	/** Runs a store Effect from inside the SDK's promise-shaped tool call. */
+	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
 	run: RunEffect;
 	/** The reply being written, for tools that leave a mark in it. */
 	reply: {
@@ -79,7 +79,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			...(offered.requiresApproval || approvalBound
 				? {
 						approval: {
-							store: deps.approvals,
+							approvals: deps.approvals,
 							connectionId: offered.connectionId,
 							connectionRevision: offered.connectionRevision,
 							remoteToolName: offered.remoteToolName,

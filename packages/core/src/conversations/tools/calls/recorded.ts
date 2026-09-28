@@ -2,7 +2,7 @@ import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { UserMessage } from "../../../user-message.ts";
-import type { ToolApprovalStore } from "../approvals/store.ts";
+import type { ToolApprovals } from "../approvals/tool-approvals.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
@@ -13,8 +13,8 @@ export interface RecordingTurn {
 }
 
 export interface RecordingOptions {
-	calls: Pick<ToolCallRepository, "open" | "close">;
-	/** Runs a store Effect from the tool's promise. */
+	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
+	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
 	from: RecordingTurn;
 	/** How much of the reply has been written so far, which is where the call sits. */
@@ -26,7 +26,7 @@ export interface RecordingOptions {
 	/** Whether the tool may change something at the other end (ADR 002). Built-in tools do not. */
 	mutating?: boolean;
 	approval?: {
-		store: ToolApprovalStore;
+		approvals: Pick<ToolApprovals.Interface, "beginExecution">;
 		connectionId: string;
 		connectionRevision: number;
 		remoteToolName: string;
@@ -78,7 +78,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		execute: async (input, callOptions) => {
 			const atOffset = replyLength();
 			const opening = approval
-				? approval.store
+				? approval.approvals
 						.beginExecution({
 							...from,
 							sdkToolCallId: callOptions.toolCallId,

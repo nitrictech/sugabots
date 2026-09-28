@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -7,14 +7,16 @@ import { memoryEventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
-import { noToolApprovalStore } from "../tools/approvals/store.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
+import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { noConnectionTools } from "../tools/connections.ts";
-import { type PreparedTurn, replyTurnOf } from "./execution.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { ModelRequestFailed, type TurnModel } from "./model.ts";
-import type { TurnCheckpoint } from "./repository.ts";
+import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
+import { TurnRequests } from "./requests.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { runSegment } from "./turn.steps.ts";
 
@@ -25,15 +27,15 @@ import { runSegment } from "./turn.steps.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
-	const { emit, repositories, stores } = await conversationsForTests({
+	const conversations = await conversationsForTests({
 		publishCommitted: async (events) => {
 			delivered.push(...events);
 		},
 	});
-	const turns = onPostgres(repositories.turns);
-	const calls = onPostgres(repositories.toolCalls);
-	const chats = onPostgres(stores.chats);
-	const execution = onPostgres(stores.turns);
+	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
+	const calls = onPostgres(Context.get(conversations, ToolCallRepository.Service));
+	const chats = onPostgres(Context.get(conversations, Chats.Service));
+	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
 	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
 	const providerDown = UserMessage.of`The model provider could not answer.`;
 	let threadId: string;
@@ -187,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
 		delivered = [];
 
-		await turns.stopWaiting(prepared.run.request);
+		await turns.cancelWaiting(prepared.run.request);
 
 		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
 		expect(deliveredEvents()).toContainEqual(
@@ -198,21 +200,22 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	describe("a segment", () => {
 		const events = createEventBus({ store: memoryEventStore() });
+		// The real services, with the Scribe asked for nothing after a reply.
+		const requests = Context.get(conversations, TurnRequests.Service);
 		const segmentWith = (model: TurnModel) =>
 			runOnPostgres(
 				runSegment(prepared.run, {
-					execution: stores.turns,
-					turns: repositories.turns,
-					toolCalls: repositories.toolCalls,
 					model,
-					collaborations: stores.collaborations,
-					approvals: noToolApprovalStore,
 					builtInTools: noBuiltInTools,
 					connectionTools: noConnectionTools,
 					events,
-					emit,
-					requests: { queueSummary: vi.fn(() => Effect.void) },
-				}),
+				}).pipe(
+					Effect.provideService(
+						TurnRequests.Service,
+						TurnRequests.Service.of({ ...requests, queueSummary: vi.fn(() => Effect.void) }),
+					),
+					Effect.provideContext(conversations),
+				),
 			);
 
 		it("prepares, streams and completes the reply, and tells the thread", async () => {

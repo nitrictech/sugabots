@@ -1,14 +1,16 @@
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { unimplemented } from "../../testing.ts";
 import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
-import type { PreparedSummary, SummaryStore } from "./store.ts";
+import { TurnRepository } from "../turns/repository.ts";
+import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
 
 /**
- * The stores and models in these cases never query, so the database they run
+ * The services and models in these cases never query, so the database they run
  * against is one nothing reaches. The real one is the app runtime.
  */
 const runWithServices = effectRunner(ManagedRuntime.make(noDatabase));
@@ -37,27 +39,32 @@ const prepared: PreparedSummary = {
 describe("summarise", () => {
 	it("records a timeout rather than a shutdown and aborts without retrying", async () => {
 		vi.useFakeTimers();
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		let signal: AbortSignal | undefined;
 		const stream = vi.fn<TurnModel["stream"]>((input) => {
 			signal = input.signal;
 			return Effect.never;
 		});
 		try {
-			const execution = runWithServices(summarise(request, { store, model: { stream } }));
+			const execution = runWithServices(
+				summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+			);
 			await vi.advanceTimersByTimeAsync(120_000);
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(store.fail).toHaveBeenCalledWith(prepared, "The model did not answer in time.");
-			expect(store.complete).not.toHaveBeenCalled();
+			expect(turns.failScribeTurn).toHaveBeenCalledWith(
+				prepared.turnId,
+				"The model did not answer in time.",
+			);
+			expect(summaries.complete).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}
 	});
 
 	it("persists the first generated title and summary", async () => {
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		const model: TurnModel = {
 			stream: () =>
 				Effect.sync(() => ({
@@ -69,9 +76,11 @@ describe("summarise", () => {
 				})),
 		};
 
-		await runWithServices(summarise(request, { store, model }));
+		await runWithServices(
+			summarise(request, model).pipe(Effect.provide(services(summaries, turns))),
+		);
 
-		expect(store.complete).toHaveBeenCalledWith(
+		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Prepare release notes", content: "Notes are ready." },
 			{
@@ -79,11 +88,11 @@ describe("summarise", () => {
 				reportedCost: 0.002,
 			},
 		);
-		expect(store.fail).not.toHaveBeenCalled();
+		expect(turns.failScribeTurn).not.toHaveBeenCalled();
 	});
 
 	it("asks again when the first summary is not the shape it asked for", async () => {
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		const stream = vi.fn(() =>
 			Effect.sync(() => ({
 				text: chunks("Notes are ready."),
@@ -91,17 +100,22 @@ describe("summarise", () => {
 			})),
 		);
 
-		await runWithServices(summarise(request, { store, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		// Three asks, then the thread is left without a summary rather than the
 		// job being burned on one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
-		expect(store.complete).not.toHaveBeenCalled();
-		expect(store.fail).toHaveBeenCalledWith(prepared, "The model's answer could not be used.");
+		expect(summaries.complete).not.toHaveBeenCalled();
+		expect(turns.failScribeTurn).toHaveBeenCalledWith(
+			prepared.turnId,
+			"The model's answer could not be used.",
+		);
 	});
 
 	it("takes the answer as soon as one of the asks comes back usable", async () => {
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		const stream = vi
 			.fn(() =>
 				Effect.sync(() => ({
@@ -116,11 +130,13 @@ describe("summarise", () => {
 				})),
 			);
 
-		await runWithServices(summarise(request, { store, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		expect(stream).toHaveBeenCalledTimes(2);
-		expect(store.fail).not.toHaveBeenCalled();
-		expect(store.complete).toHaveBeenCalledWith(
+		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
 			expect.anything(),
@@ -128,26 +144,23 @@ describe("summarise", () => {
 	});
 
 	it("reads a first summary the model wrapped in a markdown fence", async () => {
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		const fenced = ["```json", '{"title":"Release","summary":"Notes are ready."}', "```"].join(
 			"\n",
 		);
 
 		await runWithServices(
 			summarise(request, {
-				store,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks(fenced),
-							accounting: Effect.succeed({ usage: {} }),
-						})),
-				},
-			}),
+				stream: () =>
+					Effect.sync(() => ({
+						text: chunks(fenced),
+						accounting: Effect.succeed({ usage: {} }),
+					})),
+			}).pipe(Effect.provide(services(summaries, turns))),
 		);
 
-		expect(store.fail).not.toHaveBeenCalled();
-		expect(store.complete).toHaveBeenCalledWith(
+		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
 			expect.anything(),
@@ -155,53 +168,76 @@ describe("summarise", () => {
 	});
 
 	it("does not re-ask a provider that is down, and records the failure", async () => {
-		const store = summaryStore();
+		const { summaries, turns } = fakes();
 		const stream = vi.fn(() =>
 			Effect.fail(
 				new ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
 			),
 		);
 
-		await runWithServices(summarise(request, { store, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(store.fail).toHaveBeenCalledWith(prepared, "The model provider could not answer.");
-		expect(store.complete).not.toHaveBeenCalled();
+		expect(turns.failScribeTurn).toHaveBeenCalledWith(
+			prepared.turnId,
+			"The model provider could not answer.",
+		);
+		expect(summaries.complete).not.toHaveBeenCalled();
 	});
 
 	it("does nothing when the summary is no longer needed", async () => {
-		const store = summaryStore();
-		vi.mocked(store.prepare).mockReturnValueOnce(
+		const { summaries, turns } = fakes();
+		vi.mocked(summaries.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				_tag: "Skipped",
 				reason: "The thread is already summarised to this message",
 			}),
 		);
 
-		await runWithServices(summarise(request, { store, model: unusedModel() }));
+		await runWithServices(
+			summarise(request, unusedModel()).pipe(Effect.provide(services(summaries, turns))),
+		);
 
-		expect(store.complete).not.toHaveBeenCalled();
-		expect(store.fail).not.toHaveBeenCalled();
+		expect(summaries.complete).not.toHaveBeenCalled();
+		expect(turns.failScribeTurn).not.toHaveBeenCalled();
 	});
 
 	it("leaves a transient failure to the engine, which retries the activity", async () => {
-		const store = summaryStore();
-		vi.mocked(store.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
+		const { summaries, turns } = fakes();
+		vi.mocked(summaries.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
 		await expect(
-			runWithServices(summarise(request, { store, model: unusedModel() })),
+			runWithServices(
+				summarise(request, unusedModel()).pipe(Effect.provide(services(summaries, turns))),
+			),
 		).rejects.toThrow("database unavailable");
 	});
 });
 
-function summaryStore(): SummaryStore {
+/** Prepares `prepared` and records nothing; the cases check what was asked to be recorded. */
+function fakes() {
 	return {
-		prepare: vi.fn(() => Effect.succeed(prepared)),
-		complete: vi.fn(() => Effect.void),
-		fail: vi.fn(() => Effect.void),
+		summaries: {
+			prepare: vi.fn<Summaries.Interface["prepare"]>(() => Effect.succeed(prepared)),
+			complete: vi.fn<Summaries.Interface["complete"]>(() => Effect.void),
+		},
+		turns: { failScribeTurn: vi.fn<TurnRepository.Interface["failScribeTurn"]>(() => Effect.void) },
 	};
+}
+
+/** The services a summary runs on, doing only what `summaries` and `turns` do. */
+function services(
+	summaries: Partial<Summaries.Interface>,
+	turns: Partial<TurnRepository.Interface>,
+) {
+	return Layer.mergeAll(
+		unimplemented(Summaries.Service, summaries),
+		unimplemented(TurnRepository.Service, turns),
+	);
 }
 
 function unusedModel(): TurnModel {

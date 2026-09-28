@@ -1,5 +1,5 @@
 import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contracts";
-import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
+import type { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import type { Database } from "@sugabots/core/database/database";
 import type { Authorization } from "@sugabots/core/workspaces/access";
 import { Effect } from "effect";
@@ -29,7 +29,7 @@ export interface ChannelAccess {
 
 export function channelAccess(
 	authorization: Authorization,
-	threads: Pick<ThreadStore, "visibleThreadId">,
+	threads: Pick<ThreadView.Interface, "visibleThreadId">,
 ): ChannelAccess {
 	return {
 		workspace: (userId, workspaceRef) =>

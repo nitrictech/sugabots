@@ -1,14 +1,7 @@
 import { mentionedHandles, type PodRouting, type ThreadType } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import {
-	type Database,
-	type Executor,
-	type QueryFailure,
-	query,
-	transaction,
-} from "../../database/database.ts";
-import type { DomainEvents } from "../../database/events/domain-events.ts";
+import type { Executor, QueryFailure } from "../../database/database.ts";
 import {
 	agent,
 	message,
@@ -17,15 +10,14 @@ import {
 	thread,
 	threadParticipant,
 } from "../../database/schema.ts";
-import { ConversationEvent } from "../events.ts";
-import type { TurnRequests } from "./requests.ts";
+import { crewOf } from "../threads/participants.ts";
 
 /**
  * Who has the floor: which agent, if any, speaks after a message (ADR 004).
  *
  * The decision is a pure function of the message and the thread, so it can be
- * read and tested on its own; `giveFloor` loads what it needs, applies it, and
- * queues the turns. Precedence, top wins:
+ * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
+ * applies it, and asks for the turns. Precedence, top wins:
  *
  * 1. A person mentioning only people: nobody. They are talking to each other.
  * 2. A person writing in a chat: the chat's agent, whichever agents they
@@ -126,68 +118,14 @@ export interface FloorMessage {
 }
 
 /**
- * Applies the decision for a committed message: queues the turns or the
- * facilitation, and brings any newly addressed crew agent into the thread as a
- * participant. Runs in the caller's transaction, so it commits with the message.
+ * What `decideFloor` needs from the database, for one thread and message.
+ *
+ * `crew` is the pod's whole crew rather than the thread's participants: a
+ * person may mention an agent who has not joined the thread yet, and reading
+ * the mention against who is already in it would leave every first mention
+ * unrecognised.
  */
-export const giveFloor = (
-	effects: {
-		readonly emit: DomainEvents.Emit<ConversationEvent>;
-		readonly requests: TurnRequests.Interface;
-	},
-	committed: FloorMessage,
-): Effect.Effect<FloorDecision, never, Database> =>
-	transaction(
-		Effect.gen(function* () {
-			const scope = yield* query((db) => loadFloorScope(db, committed));
-			const decision = decideFloor({
-				...scope,
-				content: committed.content,
-				author: committed.author,
-			});
-
-			if (decision.kind === "facilitate") {
-				yield* effects.requests.queueFacilitation({
-					threadId: committed.threadId,
-					triggerMessageId: committed.id,
-				});
-				return decision;
-			}
-			if (decision.kind !== "turns") {
-				return decision;
-			}
-
-			const joining = decision.agents.filter(
-				({ agentId }) => !scope.agentParticipantIds.has(agentId),
-			);
-			if (joining.length > 0) {
-				yield* query((db) =>
-					db
-						.insert(threadParticipant)
-						.values(joining.map(({ agentId }) => ({ threadId: committed.threadId, agentId })))
-						.onConflictDoNothing(),
-				);
-				yield* effects.emit([
-					ConversationEvent.AgentsJoined({
-						threadId: committed.threadId,
-						agentIds: joining.map(({ agentId }) => agentId),
-					}),
-				]);
-			}
-			for (const { agentId, reason } of decision.agents) {
-				yield* effects.requests.queueTurn({
-					threadId: committed.threadId,
-					agentId,
-					triggerMessageId: committed.id,
-					reason,
-				});
-			}
-			return decision;
-		}),
-	);
-
-/** What `decideFloor` needs from the database, for one thread and message. */
-const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
+export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
 ): Effect.fn.Return<Omit<FloorInput, "content" | "author">, QueryFailure> {
@@ -201,7 +139,7 @@ const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 			crew: sql<Array<{ id: string; handle: string }>>`(
 				select coalesce(json_agg(json_build_object('id', ${agent.id}, 'handle', ${agent.handle})), '[]'::json)
 				from ${agent}
-				where ${agent.podId} = ${thread.podId} and ${agent.systemAgentKey} is null
+				where ${crewOf(thread.podId)}
 			)`,
 			participantAgentIds: sql<string[]>`(
 				select coalesce(json_agg(${threadParticipant.agentId}) filter (where ${threadParticipant.agentId} is not null), '[]'::json)

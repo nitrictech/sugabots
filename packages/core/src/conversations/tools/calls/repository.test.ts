@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
@@ -13,9 +13,11 @@ import {
 } from "../../../database/testing.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
+import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
-import { type PreparedTurn, replyTurnOf } from "../../turns/execution.ts";
-import type { TurnCheckpoint } from "../../turns/repository.ts";
+import { ThreadView } from "../../threads/thread-view.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution } from "../../turns/execution.ts";
+import { type TurnCheckpoint, TurnRepository } from "../../turns/repository.ts";
 import { TurnSignals } from "../../turns/signals.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../../turns/testing.ts";
 import {
@@ -28,13 +30,13 @@ import {
 import {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
-	type ToolApprovalStore,
-} from "../approvals/store.ts";
+	ToolApprovals,
+} from "../approvals/tool-approvals.ts";
 import {
 	boundedJson,
 	MAX_STORED_JSON_CHARACTERS,
 	type PendingToolApproval,
-	type ToolCallRepository,
+	ToolCallRepository,
 } from "./repository.ts";
 
 /**
@@ -49,13 +51,17 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			delivered.push(...events);
 		},
 	};
-	const { repositories, stores } = await conversationsForTests(bus);
-	const calls: Promised<ToolCallRepository> = onPostgres(repositories.toolCalls);
-	const turns = onPostgres(repositories.turns);
-	const approvals: Promised<ToolApprovalStore> = onPostgres(stores.approvals);
-	const threads = onPostgres(stores.threads);
-	const chats = onPostgres(stores.chats);
-	const execution = onPostgres(stores.turns);
+	const conversations = await conversationsForTests(bus);
+	const calls: Promised<ToolCallRepository.Interface> = onPostgres(
+		Context.get(conversations, ToolCallRepository.Service),
+	);
+	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
+	const approvals: Promised<ToolApprovals.Interface> = onPostgres(
+		Context.get(conversations, ToolApprovals.Service),
+	);
+	const threads = onPostgres(Context.get(conversations, ThreadView.Service));
+	const chats = onPostgres(Context.get(conversations, Chats.Service));
+	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -361,7 +367,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			segment,
 			decide: (request, decided) =>
 				Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
-			stopWaiting: (request) => Effect.promise(() => turns.stopWaiting(request)),
+			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
 		});
@@ -407,7 +413,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 
-			await onPostgres((await conversationsForTests(bus, signals)).stores.approvals).decide({
+			await onPostgres(
+				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+			).decide({
 				workspaceId,
 				podId,
 				toolCallId: pending.id,
@@ -425,7 +433,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		it("tells a second person the approval is already decided", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
-			const deciding = onPostgres((await conversationsForTests(bus, signals)).stores.approvals);
+			const deciding = onPostgres(
+				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+			);
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ workspaceId, podId, toolCallId: pending.id, userId: memberId, decision });
 
@@ -438,10 +448,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const signals = await parkInWorkflow(workflowCall());
 
 			expect(
-				await onPostgres((await conversationsForTests(bus, signals)).stores.turns).requestCancel(
-					prepared.turnId,
-					memberId,
-				),
+				await onPostgres(
+					Context.get(await conversationsForTests(bus, signals), TurnExecution.Service),
+				).requestCancel(prepared.turnId, memberId),
 			).toBe(true);
 
 			// Marked at once, so a segment starting as the signal lands stops too.

@@ -18,7 +18,7 @@ const segment = vi.fn((_request: TurnRequest) =>
 	Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 );
 const decide = vi.fn((_request: TurnRequest, _decided: DecidedApproval) => Effect.void);
-const stopWaiting = vi.fn((_request: TurnRequest) => Effect.void);
+const cancelWaiting = vi.fn((_request: TurnRequest) => Effect.void);
 const abandon = vi.fn((_request: TurnRequest) => Effect.void);
 const announceReleased = vi.fn((_request: TurnRequest) => Effect.void);
 const release = vi.fn((_execution: { key: string; executionId: string }) => Effect.void);
@@ -28,7 +28,7 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(
 			Layer.succeed(
 				TurnSteps,
-				TurnSteps.of({ segment, decide, stopWaiting, abandon, announceReleased }),
+				TurnSteps.of({ segment, decide, cancelWaiting, abandon, announceReleased }),
 			),
 		),
 		Layer.provideMerge(
@@ -64,7 +64,7 @@ const untilSuspended = (executionId: string) =>
 
 describe("the turn workflow", () => {
 	beforeEach(() => {
-		for (const step of [segment, decide, stopWaiting, abandon, announceReleased, release]) {
+		for (const step of [segment, decide, cancelWaiting, abandon, announceReleased, release]) {
 			step.mockClear();
 		}
 	});
@@ -130,7 +130,7 @@ describe("the turn workflow", () => {
 		await vi.waitFor(() =>
 			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),
 		);
-		expect(stopWaiting).toHaveBeenCalledWith(asked);
+		expect(cancelWaiting).toHaveBeenCalledWith(asked);
 		expect(decide).not.toHaveBeenCalled();
 		expect(segment).toHaveBeenCalledTimes(1);
 	});

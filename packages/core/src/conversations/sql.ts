@@ -399,7 +399,7 @@ export type StoredMessagePart =
 
 /**
  * One agent asking another for help mid-reply. The reply is `parentMessage`;
- * the collaborator answers in `childThread`. See `tools/collaborate/store.ts`.
+ * the collaborator answers in `childThread`. See `tools/collaborate/collaborations.ts`.
  */
 export const collaboration = pgTable(
 	"collaboration",

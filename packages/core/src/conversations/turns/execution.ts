@@ -1,16 +1,19 @@
+export * as TurnExecution from "./execution.ts";
+
 import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import {
 	afterCommit,
 	type Database,
 	type Executor,
 	query,
+	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
-import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { type TurnReason, turn } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import {
 	agentColumns,
@@ -21,16 +24,15 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { visibleThread } from "../threads/visibility.ts";
-import { type FloorDecision, giveFloor } from "./floor.ts";
+import type { FloorMessage } from "./floor.ts";
 import { TURN_CANCELLED } from "./lifecycle.ts";
-import type {
-	NotRunnable,
-	ReplyDraft,
-	ReplyTurn,
-	TurnCheckpoint,
+import {
+	type NotRunnable,
+	type ReplyDraft,
+	type ReplyTurn,
+	type TurnCheckpoint,
 	TurnRepository,
 } from "./repository.ts";
-import { TurnRequests } from "./requests.ts";
 import { TurnSignals } from "./signals.ts";
 import { Turn, type TurnRequest } from "./turn.workflow.ts";
 
@@ -39,11 +41,10 @@ import { Turn, type TurnRequest } from "./turn.workflow.ts";
  *
  * A turn is asked for when a person posts and run by the turn workflow (see
  * `turn.workflow.ts`), one segment at a time. Each segment starts here, with
- * the turn opened through `TurnRepository` and what the model is told loaded;
- * a completed reply comes back here to decide who speaks next. A person asking
- * a turn to stop is heard here too.
+ * the turn opened through `TurnRepository` and what the model is told loaded.
+ * A person asking a turn to stop is heard here too.
  */
-export interface TurnExecution {
+export interface Interface {
 	/**
 	 * Opens the turn for this run and loads what the model needs, or says why
 	 * it may not run: its thread or agent is gone, its routine run takes no
@@ -52,15 +53,146 @@ export interface TurnExecution {
 	 * ending back. A refusal that ends no turn announces `TurnAbandoned`, as
 	 * cancelled.
 	 */
-	prepare(run: TurnRun): Effect.Effect<PreparedTurn | NotRunnable, never, Database>;
-	/** Decides who speaks after this completed reply, and queues them (ADR 004). */
-	giveFloor(
-		prepared: PreparedTurn,
-		reply: ReplyDraft,
-	): Effect.Effect<FloorDecision, never, Database>;
+	readonly prepare: (run: TurnRun) => Effect.Effect<PreparedTurn | NotRunnable>;
 	/** Asks a turn to stop for `userId`. `false` when there is no running turn they may see. */
-	requestCancel(turnId: string, userId: string): Effect.Effect<boolean, never, Database>;
+	readonly requestCancel: (turnId: string, userId: string) => Effect.Effect<boolean>;
 }
+
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/core/TurnExecution",
+) {}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("TurnExecution");
+	const { emit } = yield* ConversationEvents.Service;
+	const turns = yield* TurnRepository.Service;
+	const signals = yield* TurnSignals.Service;
+
+	/** Ends the turn the run holds, if any, because the run may not go on. */
+	const refuseRun = (run: TurnRun, reason: string, userMessage: UserMessage) =>
+		Effect.map(
+			turns.abandon(run.executionId, { status: "cancelled", userMessage }),
+			(ended): NotRunnable => ({ _tag: "NotRunnable", reason, ended }),
+		);
+
+	return Service.of({
+		prepare: (run) =>
+			operation(
+				"prepare",
+				transaction(
+					Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
+						const request = run.request;
+						const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
+						// The agent has to be crew placed in the thread's pod, not the
+						// thread's host. A shared thread gives the floor to whoever the
+						// facilitator or a mention picks, and that is rarely the host.
+						// Pod membership is still a real check: it is what stops a turn
+						// request naming an agent from another pod or another workspace.
+						const speaker = loaded?.pod.agents.find(({ id }) => id === request.agentId);
+						if (!loaded || !speaker) {
+							return notRunnable(
+								"The thread is gone, or this agent is not a crew agent in its pod",
+							);
+						}
+						// An agent whose model has been cleared does not fall back to
+						// another one: it stops, and says so, until somebody chooses.
+						// Read out here so what opens the turn is handed a model rather
+						// than an agent that might not carry one.
+						const model = speaker.model;
+						if (model === null) return notRunnable(`${speaker.name} has no model chosen`);
+						if (loaded.type === "chat" && request.reason === "facilitator") {
+							return yield* refuseRun(run, "The Facilitator does not route Chats", TURN_CANCELLED);
+						}
+						const opened = yield* turns.openReplyTurn({
+							threadId: loaded.id,
+							agentId: speaker.id,
+							triggerMessageId: request.triggerMessageId,
+							model,
+							reason: request.reason,
+							owner: run.executionId,
+							author: authorRow(null, speaker),
+						});
+						if (opened._tag === "NotRunnable") return opened;
+						return {
+							_tag: "Prepared",
+							run,
+							turnId: opened.turnId,
+							responseMessage: opened.reply,
+							context: {
+								thread: {
+									id: loaded.id,
+									workspaceId: loaded.workspaceId,
+									title: loaded.title,
+									type: loaded.type,
+									parentThreadId: loaded.parentThreadId,
+								},
+								agent: {
+									id: speaker.id,
+									name: speaker.name,
+									handle: speaker.handle,
+									model,
+									prompt: speaker.prompt,
+									disabledTools: speaker.disabledTools,
+									podId: loaded.podId,
+								},
+								reason: request.reason,
+								routing: loaded.pod.routing,
+								podName: loaded.pod.name,
+								workspaceName: loaded.workspace.name,
+								crew: loaded.pod.agents
+									.filter(({ id }) => id !== speaker.id)
+									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
+								participants: loaded.participants.map(({ user, agent }) =>
+									toParticipant(authorRow(user, agent)),
+								),
+								messages: loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
+							},
+							...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
+						};
+					}).pipe(
+						Effect.tap((preparation) =>
+							preparation._tag === "NotRunnable" && !preparation.ended
+								? emit([
+										ConversationEvent.TurnAbandoned({
+											threadId: run.request.threadId,
+											outcome: { state: "cancelled" },
+										}),
+									])
+								: Effect.void,
+						),
+					),
+				),
+			),
+
+		requestCancel: (turnId, userId) =>
+			operation(
+				"requestCancel",
+				transaction(
+					Effect.gen(function* () {
+						const [candidate] = yield* query((db) =>
+							db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, turnId)).limit(1),
+						);
+						if (!candidate) return false;
+						if (!(yield* query((db) => visibleThread(db, candidate.threadId, userId))))
+							return false;
+						const requested = yield* turns.requestCancel(turnId);
+						if (requested._tag === "Refused") return false;
+						// Telling the workflow is the cancellation; it records it. The flag
+						// set with it stops the next segment instead if the workflow has
+						// just stopped waiting, since the signal would then go unheard.
+						if (requested._tag === "SignalOwner") {
+							yield* afterCommit(signals.cancel(requested.owner));
+						}
+						return true;
+					}),
+				),
+			),
+	});
+});
+
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(Layer.provide(TurnRepository.layer));
 
 /** One run of a turn, by the workflow execution `executionId`, which owns the turn. */
 export interface TurnRun {
@@ -91,6 +223,20 @@ export function replyTurnOf(prepared: PreparedTurn): ReplyTurn {
 		threadId: prepared.context.thread.id,
 		workspaceId: prepared.context.thread.workspaceId,
 		messageId: prepared.responseMessage.id,
+	};
+}
+
+/** The completed reply as the floor reads it, to decide who speaks next. */
+export function replyFloorMessage(prepared: PreparedTurn, reply: ReplyDraft): FloorMessage {
+	return {
+		id: prepared.responseMessage.id,
+		threadId: prepared.context.thread.id,
+		content: reply.content,
+		author: {
+			kind: "agent",
+			agentId: prepared.context.agent.id,
+			spokeBecause: prepared.run.request.reason,
+		},
 	};
 }
 
@@ -129,142 +275,6 @@ export interface TurnContext {
 
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
-
-export const turnExecution = Effect.fnUntraced(function* (
-	turns: TurnRepository,
-	emit: DomainEvents.Emit<ConversationEvent>,
-) {
-	const requests = yield* TurnRequests.Service;
-	const signals = yield* TurnSignals.Service;
-
-	/** Ends the turn the run holds, if any, because the run may not go on. */
-	const refuseRun = (run: TurnRun, reason: string, userMessage: UserMessage) =>
-		Effect.map(
-			turns.abandon(run.executionId, { status: "cancelled", userMessage }),
-			(ended): NotRunnable => ({ _tag: "NotRunnable", reason, ended }),
-		);
-
-	const execution: TurnExecution = {
-		prepare: (run) =>
-			transaction(
-				Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
-					const request = run.request;
-					const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
-					// The agent has to be crew placed in the thread's pod, not the
-					// thread's host. A shared thread gives the floor to whoever the
-					// facilitator or a mention picks, and that is rarely the host.
-					// Pod membership is still a real check: it is what stops a turn
-					// request naming an agent from another pod or another workspace.
-					const speaker = loaded?.pod.agents.find(({ id }) => id === request.agentId);
-					if (!loaded || !speaker) {
-						return notRunnable("The thread is gone, or this agent is not a crew agent in its pod");
-					}
-					// An agent whose model has been cleared does not fall back to
-					// another one: it stops, and says so, until somebody chooses.
-					// Read out here so what opens the turn is handed a model rather
-					// than an agent that might not carry one.
-					const model = speaker.model;
-					if (model === null) return notRunnable(`${speaker.name} has no model chosen`);
-					if (loaded.type === "chat" && request.reason === "facilitator") {
-						return yield* refuseRun(run, "The Facilitator does not route Chats", TURN_CANCELLED);
-					}
-					const opened = yield* turns.openReplyTurn({
-						threadId: loaded.id,
-						agentId: speaker.id,
-						triggerMessageId: request.triggerMessageId,
-						model,
-						reason: request.reason,
-						owner: run.executionId,
-						author: authorRow(null, speaker),
-					});
-					if (opened._tag === "NotRunnable") return opened;
-					return {
-						_tag: "Prepared",
-						run,
-						turnId: opened.turnId,
-						responseMessage: opened.reply,
-						context: {
-							thread: {
-								id: loaded.id,
-								workspaceId: loaded.workspaceId,
-								title: loaded.title,
-								type: loaded.type,
-								parentThreadId: loaded.parentThreadId,
-							},
-							agent: {
-								id: speaker.id,
-								name: speaker.name,
-								handle: speaker.handle,
-								model,
-								prompt: speaker.prompt,
-								disabledTools: speaker.disabledTools,
-								podId: loaded.podId,
-							},
-							reason: request.reason,
-							routing: loaded.pod.routing,
-							podName: loaded.pod.name,
-							workspaceName: loaded.workspace.name,
-							crew: loaded.pod.agents
-								.filter(({ id }) => id !== speaker.id)
-								.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
-							participants: loaded.participants.map(({ user, agent }) =>
-								toParticipant(authorRow(user, agent)),
-							),
-							messages: loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
-						},
-						...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
-					};
-				}).pipe(
-					Effect.tap((preparation) =>
-						preparation._tag === "NotRunnable" && !preparation.ended
-							? emit([
-									ConversationEvent.TurnAbandoned({
-										threadId: run.request.threadId,
-										outcome: { state: "cancelled" },
-									}),
-								])
-							: Effect.void,
-					),
-				),
-			),
-
-		giveFloor: (prepared, reply) =>
-			giveFloor(
-				{ emit, requests },
-				{
-					id: prepared.responseMessage.id,
-					threadId: prepared.context.thread.id,
-					content: reply.content,
-					author: {
-						kind: "agent",
-						agentId: prepared.context.agent.id,
-						spokeBecause: prepared.run.request.reason,
-					},
-				},
-			),
-
-		requestCancel: (turnId, userId) =>
-			transaction(
-				Effect.gen(function* () {
-					const [candidate] = yield* query((db) =>
-						db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, turnId)).limit(1),
-					);
-					if (!candidate) return false;
-					if (!(yield* query((db) => visibleThread(db, candidate.threadId, userId)))) return false;
-					const requested = yield* turns.requestCancel(turnId);
-					if (requested._tag === "Refused") return false;
-					// Telling the workflow is the cancellation; it records it. The flag
-					// set with it stops the next segment instead if the workflow has
-					// just stopped waiting, since the signal would then go unheard.
-					if (requested._tag === "SignalOwner") {
-						yield* afterCommit(signals.cancel(requested.owner));
-					}
-					return true;
-				}),
-			),
-	};
-	return execution;
-});
 
 function notRunnable(reason: string): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended: undefined };

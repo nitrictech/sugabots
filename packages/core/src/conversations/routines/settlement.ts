@@ -1,26 +1,28 @@
 export * as RoutineSettlement from "./settlement.ts";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { DateTime, Effect } from "effect";
-import { afterCommit, type Database, query, transaction } from "../../database/database.ts";
+import { Context, Effect, Layer } from "effect";
+import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	collaboration,
 	type RoutineExecutionRow,
 	routineExecution,
-	thread,
 	turn,
 } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
 import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import type { CollaborationStore } from "../tools/collaborate/store.ts";
+import { workingThreadsOf } from "../threads/tree.ts";
+import { CollaborationRepository } from "../tools/collaborate/repository.ts";
 import { Facilitate } from "../turns/facilitate.workflow.ts";
 import type { Ended } from "../turns/lifecycle.ts";
-import type { TurnRepository } from "../turns/repository.ts";
+import { TurnRepository } from "../turns/repository.ts";
 import { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
 import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
+import { RoutineRepository } from "./repository.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { RoutineRuns } from "./runs.ts";
 
@@ -41,21 +43,25 @@ export interface Interface {
 	 * Settles the run if its work is done, for the run's workflow to check in
 	 * case a signal was lost. Returns whether the run has ended.
 	 */
-	readonly settleRun: (run: RoutineRun) => Effect.Effect<boolean, never, Database>;
+	readonly settleRun: (run: RoutineRun) => Effect.Effect<boolean>;
 	/**
 	 * Records a run that has not ended as failed, at once, and stops its work.
 	 * People are told only that it stopped unexpectedly. Does nothing once the
 	 * run has ended.
 	 */
-	readonly failRun: (run: RoutineRun) => Effect.Effect<void, never, Database>;
+	readonly failRun: (run: RoutineRun) => Effect.Effect<void>;
 }
 
-/** Settlement cancelling work through `turns` and `collaborations`, and recording what happened on `emit`. */
-export const make = Effect.fnUntraced(function* (
-	emit: DomainEvents.Emit<ConversationEvent>,
-	turns: Pick<TurnRepository, "cancelUnder">,
-	collaborations: Pick<CollaborationStore, "failUnder">,
-) {
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/core/RoutineSettlement",
+) {}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("RoutineSettlement");
+	const { emit } = yield* ConversationEvents.Service;
+	const turns = yield* TurnRepository.Service;
+	const collaborations = yield* CollaborationRepository.Service;
+	const routines = yield* RoutineRepository.Service;
 	const signals = yield* TurnSignals.Service;
 	const runs = yield* RoutineRuns.Service;
 
@@ -89,7 +95,7 @@ export const make = Effect.fnUntraced(function* (
 				const work = yield* workingThreads(run.threadId);
 				const wasEnding = endingOf(run);
 				const ending = endingAfter(wasEnding, outcome);
-				if (ending !== wasEnding) yield* recordEnding(run.id, ending);
+				if (ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
 				if (ending) yield* cancelWork(work);
 				if (ending && !wasEnding) {
 					yield* emit([
@@ -100,28 +106,13 @@ export const make = Effect.fnUntraced(function* (
 					]);
 				}
 				if (yield* stillBusy(work, ending !== undefined)) return;
-
-				const settled = settledAs(ending, yield* lastTurnIn(work));
-				const finishedAt = yield* DateTime.nowAsDate;
-				const [recorded] = yield* query((db) =>
-					db
-						.update(routineExecution)
-						.set({
-							...settled,
-							finishedAt,
-							pendingTerminalState: null,
-							pendingTerminalError: null,
-						})
-						.where(and(eq(routineExecution.id, run.id), eq(routineExecution.state, "running")))
-						.returning({ id: routineExecution.id }),
-				);
-				if (!recorded) return;
-				yield* runs.settled({ routineId: run.routineId, executionId: run.id });
-				yield* announceRunEnded(emit, run);
+				if (yield* routines.settle(run.id, settledAs(ending, yield* lastTurnIn(work)))) {
+					yield* runs.settled({ routineId: run.routineId, executionId: run.id });
+				}
 			}),
 		);
 
-	return {
+	return Service.of({
 		handler: (events) =>
 			Effect.forEach(
 				events.flatMap(settlementFor),
@@ -130,54 +121,47 @@ export const make = Effect.fnUntraced(function* (
 			),
 
 		settleRun: (run) =>
-			Effect.gen(function* () {
-				const threadId = yield* executionThread(run.executionId);
-				if (!threadId) return true;
-				yield* settle(threadId);
-				const [after] = yield* query((db) =>
-					db
-						.select({ state: routineExecution.state })
-						.from(routineExecution)
-						.where(eq(routineExecution.id, run.executionId))
-						.limit(1),
-				);
-				return after?.state !== "running";
-			}),
-
-		failRun: (run) =>
-			transaction(
+			operation(
+				"settleRun",
 				Effect.gen(function* () {
-					yield* lockRoutineSettlement(run.executionId);
 					const threadId = yield* executionThread(run.executionId);
-					if (threadId) {
-						yield* settle(threadId, { state: "failed", error: RUN_STOPPED_UNEXPECTEDLY });
-					}
-					// Settling waits for work that is still stopping, but the run ends
-					// now: its routine's next run cannot start while it is running.
-					const finishedAt = yield* DateTime.nowAsDate;
-					const [failed] = yield* query((db) =>
+					if (!threadId) return true;
+					yield* settle(threadId);
+					const [after] = yield* query((db) =>
 						db
-							.update(routineExecution)
-							.set({
-								state: "failed",
-								error: RUN_STOPPED_UNEXPECTEDLY,
-								finishedAt,
-								pendingTerminalState: null,
-								pendingTerminalError: null,
-							})
-							.where(
-								and(
-									eq(routineExecution.id, run.executionId),
-									inArray(routineExecution.state, ["queued", "running"]),
-								),
-							)
-							.returning(),
+							.select({ state: routineExecution.state })
+							.from(routineExecution)
+							.where(eq(routineExecution.id, run.executionId))
+							.limit(1),
 					);
-					if (failed) yield* announceRunEnded(emit, failed);
+					return after?.state !== "running";
 				}),
 			),
-	} satisfies Interface;
+
+		failRun: (run) =>
+			operation(
+				"failRun",
+				transaction(
+					Effect.gen(function* () {
+						yield* lockRoutineSettlement(run.executionId);
+						const threadId = yield* executionThread(run.executionId);
+						if (threadId) {
+							yield* settle(threadId, { state: "failed", error: RUN_STOPPED_UNEXPECTEDLY });
+						}
+						// Settling waits for work that is still stopping, but the run ends
+						// now: its routine's next run cannot start while it is running.
+						yield* routines.fail(run.executionId, RUN_STOPPED_UNEXPECTEDLY);
+					}),
+				),
+			),
+	});
 });
+
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(
+	Layer.provide([TurnRepository.layer, CollaborationRepository.layer, RoutineRepository.layer]),
+);
 
 /** What people are told about a run whose workflow failed; the cause goes only to the logs. */
 const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;
@@ -222,12 +206,15 @@ function endingAfter(ending: Ended | undefined, outcome: Ended | undefined): End
 function settledAs(
 	ending: Ended | undefined,
 	lastTurn: { status: string; error: UserMessage | null } | undefined,
-): { state: "completed" | "failed" | "cancelled"; error: UserMessage | null } {
-	if (ending?.state === "failed") return { state: "failed", error: ending.error };
-	if (ending?.state === "cancelled") return { state: "cancelled", error: null };
-	if (lastTurn?.status === "failed") return { state: "failed", error: lastTurn.error };
-	if (lastTurn?.status === "cancelled") return { state: "cancelled", error: null };
-	return { state: "completed", error: null };
+): RoutineRepository.Settled {
+	if (ending) return ending;
+	if (lastTurn?.status === "failed") {
+		// `turn.error` is nullable in the schema; a failure recorded without one
+		// reads as having stopped unexpectedly.
+		return { state: "failed", error: lastTurn.error ?? RUN_STOPPED_UNEXPECTEDLY };
+	}
+	if (lastTurn?.status === "cancelled") return { state: "cancelled" };
+	return { state: "completed" };
 }
 
 /** The run, if it is still running. */
@@ -254,17 +241,6 @@ function endingOf(run: RoutineExecutionRow): Ended | undefined {
 	return undefined;
 }
 
-const recordEnding = (executionId: string, ending: Ended | undefined) =>
-	query((db) =>
-		db
-			.update(routineExecution)
-			.set({
-				pendingTerminalState: ending?.state ?? null,
-				pendingTerminalError: ending?.state === "failed" ? ending.error : null,
-			})
-			.where(and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running"))),
-	);
-
 const executionThread = (executionId: string) =>
 	Effect.map(
 		query((db) =>
@@ -277,26 +253,12 @@ const executionThread = (executionId: string) =>
 		([row]) => row?.threadId,
 	);
 
-/**
- * The threads a run's work happens in: its own thread and the collaborations
- * under it. A system agent's thread (the Scribe's summaries) hangs off the
- * thread it serves but is not part of the run, so its turns neither keep the
- * run open nor decide how it ended.
- */
+/** The threads a run's work happens in, under its own thread `rootThreadId` (see `workingThreadsOf`). */
 const workingThreads = (rootThreadId: string) =>
 	Effect.map(
 		query((db) =>
 			db.execute<{ id: string }>(
-				sql`
-					with recursive tree as (
-						select id from ${thread} where id = ${rootThreadId}
-						union all
-						select child.id from ${thread} child
-						join tree parent on child.parent_thread_id = parent.id
-						where child.type <> 'system_agent'
-					)
-					select id from tree
-				`,
+				sql`select id from ${workingThreadsOf(sql`${rootThreadId}`)} as work`,
 				"objects",
 			),
 		),
@@ -360,22 +322,3 @@ const lastTurnIn = (work: readonly string[]) =>
 		),
 		([row]) => row,
 	);
-
-/** Tells the workspace that a routine run's thread changed because the run ended. */
-const announceRunEnded = (
-	emit: DomainEvents.Emit<ConversationEvent>,
-	run: { readonly workspaceId: string; readonly threadId: string },
-) =>
-	Effect.gen(function* () {
-		const [root] = yield* query((db) =>
-			db.select({ chatId: thread.chatId }).from(thread).where(eq(thread.id, run.threadId)).limit(1),
-		);
-		if (!root?.chatId) return yield* Effect.die(new Error("Routine thread has no Chat"));
-		yield* emit([
-			ConversationEvent.RoutineExecutionSettled({
-				workspaceId: run.workspaceId,
-				chatId: root.chatId,
-				threadId: run.threadId,
-			}),
-		]);
-	});

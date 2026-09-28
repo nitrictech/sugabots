@@ -12,7 +12,7 @@ import type { CollaborationChange } from "../events.ts";
  * A message stores a collaboration by id only (`StoredMessagePart`); the status and
  * answer live on the `collaboration` row, which the collaborator's turn updates without
  * touching the reply. These two functions put the row back into the part the
- * API hands out. Writing collaborations is `tools/collaborate/store.ts`.
+ * API hands out. Writing collaborations is `tools/collaborate/repository.ts`.
  */
 
 /** The collaborations made in each of these messages, keyed by message id. */

@@ -187,13 +187,13 @@ describe("cancelling", () => {
 
 	it("records a waiting turn as cancelled when its workflow stops waiting", () => {
 		expect(
-			transition(turn({ status: "waiting", checkpointed: true }), TurnEvent.StopWaiting()),
+			transition(turn({ status: "waiting", checkpointed: true }), TurnEvent.CancelWaiting()),
 		).toEqual({
 			_tag: "Next",
 			state: turn({ status: "cancelled", cancelRequested: true }),
 			followUp: FollowUp.End({ userMessage: TURN_CANCELLED }),
 		});
-		expect(transition(turn(), TurnEvent.StopWaiting())._tag).toBe("Refused");
+		expect(transition(turn(), TurnEvent.CancelWaiting())._tag).toBe("Refused");
 	});
 
 	it("cancels a waiting turn when its routine run ends, and only asks a running one to stop", () => {

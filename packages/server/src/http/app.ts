@@ -1,9 +1,4 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
-import type { ChatStore } from "@sugabots/core/conversations/chats/store";
-import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
-import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
-import type { ToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
-import type { TurnExecution } from "@sugabots/core/conversations/turns/execution";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
@@ -52,19 +47,10 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The workspace and provider routes take their services from the layer's
- * context; the rest take their dependencies here. `createTestApp` in
- * `app.test-support.ts` drives the same routes with fakes.
+ * The routes take their services from the layer's context, and the events
+ * and model trials take theirs here. `createTestApp` in `app.test-support.ts`
+ * drives the same routes with fakes.
  */
-
-/** What the route table reads and writes. */
-export interface Stores {
-	threads: ThreadStore;
-	chats: ChatStore;
-	routines: RoutineStore;
-	turns: Pick<TurnExecution, "requestCancel">;
-	approvals: ToolApprovalStore;
-}
 
 export interface AppOptions {
 	/** Mounted under `/auth`, and asked who a token belongs to. */
@@ -73,7 +59,6 @@ export interface AppOptions {
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
-	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
 	/** Runs a model, for trying one out on a system agent before choosing it. */
@@ -84,7 +69,6 @@ export function apiLayer({
 	authentication,
 	installation,
 	authorization,
-	stores,
 	events,
 	model,
 }: AppOptions) {
@@ -100,10 +84,10 @@ export function apiLayer({
 		searchProviderRoutes,
 		connectionRoutes({ webAppUrl: installation.webAppUrl }),
 		agentRoutes,
-		chatRoutes({ chats: stores.chats }),
-		routineRoutes({ routines: stores.routines }),
-		toolApprovalRoutes({ approvals: stores.approvals }),
-		threadRoutes({ threads: stores.threads, turns: stores.turns }),
+		chatRoutes,
+		routineRoutes,
+		toolApprovalRoutes,
+		threadRoutes,
 	);
 	const middleware = Layer.mergeAll(
 		sessionLayer(authentication.identify),

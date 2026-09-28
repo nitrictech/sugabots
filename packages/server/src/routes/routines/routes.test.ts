@@ -1,4 +1,6 @@
-import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
+import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
+import { Routines } from "@sugabots/core/conversations/routines/routines";
+import { unimplemented } from "@sugabots/core/testing";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -16,35 +18,23 @@ const POD_ID = "0199a3a0-0000-7000-8000-000000000009";
 const MEMBER_ID = "0199a3a0-0000-7000-8000-00000000000a";
 const STRANGER_ID = "0199a3a0-0000-7000-8000-00000000000b";
 function webhookApp() {
-	const acceptTrigger = vi.fn<RoutineStore["acceptTrigger"]>(() =>
+	const acceptTrigger = vi.fn<Routines.Interface["acceptTrigger"]>(() =>
 		Effect.succeed({ executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }),
 	);
-	const acceptWebhook = vi.fn<RoutineStore["acceptWebhook"]>((routineId, secret) =>
+	const acceptWebhook = vi.fn<Routines.Interface["acceptWebhook"]>((routineId, secret) =>
 		Effect.succeed(
 			routineId === ROUTINE_ID && secret === "good-secret"
 				? { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }
 				: undefined,
 		),
 	);
-	const routines: RoutineStore = {
-		listInWorkspace: () => Effect.succeed([]),
-		list: () => Effect.succeed([]),
-		get: () => Effect.undefined,
-		create: () => Effect.die("not used"),
-		update: () => Effect.die("not used"),
-		remove: () => Effect.void,
-		acceptTrigger,
-		listExecutions: () => Effect.undefined,
-		startRun: () => Effect.void,
-		processNextDue: () => Effect.undefined,
-		rotateSecret: () => Effect.die("not used"),
-		acceptWebhook,
-	};
 	return {
-		app: createTestApp({ resolveUser: async () => null, stores: { routines } }),
+		app: createTestApp({
+			resolveUser: async () => null,
+			services: unimplemented(Routines.Service, { acceptTrigger, acceptWebhook }),
+		}),
 		acceptTrigger,
 		acceptWebhook,
-		routines,
 	};
 }
 
@@ -157,8 +147,7 @@ const authorization = testAuthorization({
 	agents: [{ id: AGENT_ID, podId: POD_ID, name: "Alerts", handle: "alerts" }],
 });
 
-function historyApp(userId: string, listExecutions: RoutineStore["listExecutions"]) {
-	const base = webhookApp();
+function historyApp(userId: string, listExecutions: RoutineView.Interface["listExecutions"]) {
 	return createTestApp({
 		resolveUser: async () => ({
 			id: userId,
@@ -167,11 +156,11 @@ function historyApp(userId: string, listExecutions: RoutineStore["listExecutions
 			image: null,
 		}),
 		authorization,
-		stores: { routines: { ...base.routines, listExecutions } },
+		services: unimplemented(RoutineView.Service, { listExecutions }),
 	});
 }
 
-const executionsFor = (userId: string, listExecutions: RoutineStore["listExecutions"]) =>
+const executionsFor = (userId: string, listExecutions: RoutineView.Interface["listExecutions"]) =>
 	historyApp(userId, listExecutions).request(
 		`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/executions`,
 		{ headers: { authorization: "Bearer session" } },
@@ -179,7 +168,7 @@ const executionsFor = (userId: string, listExecutions: RoutineStore["listExecuti
 
 describe("Routine execution history", () => {
 	it("shows an administrator the history of a pod they are not in", async () => {
-		const listExecutions = vi.fn<RoutineStore["listExecutions"]>(() =>
+		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
 			Effect.succeed({ items: [], nextCursor: null }),
 		);
 
@@ -190,7 +179,7 @@ describe("Routine execution history", () => {
 	});
 
 	it("shows a member of the pod its history", async () => {
-		const listExecutions = vi.fn<RoutineStore["listExecutions"]>(() =>
+		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
 			Effect.succeed({ items: [], nextCursor: null }),
 		);
 
@@ -201,7 +190,7 @@ describe("Routine execution history", () => {
 	});
 
 	it("does not expose execution snapshots to a member outside the pod", async () => {
-		const listExecutions = vi.fn<RoutineStore["listExecutions"]>(() =>
+		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
 			Effect.succeed({ items: [], nextCursor: null }),
 		);
 
@@ -212,10 +201,9 @@ describe("Routine execution history", () => {
 	});
 
 	it("refuses a member starting a Routine by hand", async () => {
-		const acceptTrigger = vi.fn<RoutineStore["acceptTrigger"]>(() =>
+		const acceptTrigger = vi.fn<Routines.Interface["acceptTrigger"]>(() =>
 			Effect.succeed({ executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }),
 		);
-		const base = webhookApp();
 		const app = createTestApp({
 			resolveUser: async () => ({
 				id: MEMBER_ID,
@@ -224,7 +212,7 @@ describe("Routine execution history", () => {
 				image: null,
 			}),
 			authorization,
-			stores: { routines: { ...base.routines, acceptTrigger } },
+			services: unimplemented(Routines.Service, { acceptTrigger }),
 		});
 
 		const response = await app.request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/run`, {
@@ -239,7 +227,7 @@ describe("Routine execution history", () => {
 });
 
 describe("the workspace's routines", () => {
-	const listFor = (userId: string, listInWorkspace: RoutineStore["listInWorkspace"]) =>
+	const listFor = (userId: string, listInWorkspace: RoutineView.Interface["listInWorkspace"]) =>
 		createTestApp({
 			resolveUser: async () => ({
 				id: userId,
@@ -248,13 +236,15 @@ describe("the workspace's routines", () => {
 				image: null,
 			}),
 			authorization,
-			stores: { routines: { ...webhookApp().routines, listInWorkspace } },
+			services: unimplemented(RoutineView.Service, { listInWorkspace }),
 		}).request(`/workspaces/${WORKSPACE_ID}/routines`, {
 			headers: { authorization: "Bearer session" },
 		});
 
-	it("lists what the store finds for the person asking", async () => {
-		const listInWorkspace = vi.fn<RoutineStore["listInWorkspace"]>(() => Effect.succeed([]));
+	it("lists what the view finds for the person asking", async () => {
+		const listInWorkspace = vi.fn<RoutineView.Interface["listInWorkspace"]>(() =>
+			Effect.succeed([]),
+		);
 
 		const response = await listFor(MEMBER_ID, listInWorkspace);
 
@@ -264,7 +254,9 @@ describe("the workspace's routines", () => {
 	});
 
 	it("does not list another workspace's routines", async () => {
-		const listInWorkspace = vi.fn<RoutineStore["listInWorkspace"]>(() => Effect.succeed([]));
+		const listInWorkspace = vi.fn<RoutineView.Interface["listInWorkspace"]>(() =>
+			Effect.succeed([]),
+		);
 
 		const response = await listFor("0199a3a0-0000-7000-8000-0000000000ff", listInWorkspace);
 

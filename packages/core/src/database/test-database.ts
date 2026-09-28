@@ -1,7 +1,7 @@
 /**
  * Which database the tests are allowed to write to.
  *
- * The store tests are about what the SQL does — joins, constraints, cascades,
+ * The repository tests are about what the SQL does — joins, constraints, cascades,
  * what a transaction rolls back — so they run against a real Postgres and
  * leave rows behind. That is fine in a database kept for them and not fine in
  * the one a dev server is using, where the rows pile up in the sidebar and
@@ -26,7 +26,7 @@ const SUFFIX = "_test";
 
 /**
  * The database the tests run against, or `undefined` when none is configured
- * and none can be derived — the store tests skip themselves in that case.
+ * and none can be derived — the repository tests skip themselves in that case.
  */
 export function testDatabaseUrl(env: {
 	DATABASE_URL?: string | undefined;

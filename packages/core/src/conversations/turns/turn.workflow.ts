@@ -72,7 +72,7 @@ export class TurnSteps extends Context.Service<
 		/** Records a decision on one of the turn's approvals. Recording one already decided does nothing. */
 		readonly decide: (request: TurnRequest, decided: DecidedApproval) => Effect.Effect<void>;
 		/** Records the waiting turn as cancelled. Does nothing if it is no longer waiting. */
-		readonly stopWaiting: (request: TurnRequest) => Effect.Effect<void>;
+		readonly cancelWaiting: (request: TurnRequest) => Effect.Effect<void>;
 		/** Ends the turn as failed when its workflow fails. */
 		readonly abandon: (request: TurnRequest) => Effect.Effect<void>;
 		/**
@@ -87,7 +87,7 @@ export class TurnSteps extends Context.Service<
 export const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
 	segment: { input: Schema.Int, success: SegmentOutcome },
 	decide: { input: DecidedApproval },
-	stopWaiting: {},
+	cancelWaiting: {},
 	abandon: {},
 	announceReleased: {},
 });
@@ -108,7 +108,7 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 					continue;
 				}
 				const cancelled = yield* waitForApprovals(request, run, outcome.approvals);
-				if (cancelled) return yield* turnActivities.activity("stopWaiting", request);
+				if (cancelled) return yield* turnActivities.activity("cancelWaiting", request);
 			}
 		}),
 	onFailure: "abandon",

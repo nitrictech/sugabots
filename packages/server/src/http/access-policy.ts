@@ -9,7 +9,7 @@ import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
  * `workspace`, `pod` and `agent` name the permission to check against the
  * `:workspace`, `:podId` or `:agentId` in the path. `reach` is for an
  * endpoint addressed at something narrower — a thread, a chat, a turn — whose
- * store scopes the query to the pods the caller reaches; the string says
+ * service scopes the query to the pods the caller reaches; the string says
  * where, because that claim has to stay true.
  */
 export type AccessRule =
@@ -120,15 +120,15 @@ export const accessPolicy: AccessPolicy = {
 	chats: {
 		list: { workspace: "workspace.read" },
 		getOrCreate: { workspace: "workspace.read" },
-		messages: { reach: "chats/store.ts scopes by visibleChat" },
-		history: { reach: "chats/store.ts scopes by visibleChat" },
-		send: { reach: "chats/store.ts scopes by visibleChat" },
+		messages: { reach: "ChatView.messages scopes by reachesPod" },
+		history: { reach: "ChatView.history scopes by reachesPod" },
+		send: { reach: "Chats.post scopes by visibleChat" },
 	},
 	threads: {
 		list: { workspace: "workspace.read" },
-		get: { reach: "threads/store.ts scopes by reachesPod" },
-		activity: { reach: "threads/store.ts scopes by reachesPod" },
-		cancelTurn: { reach: "turns/execution.ts scopes by visibleThread" },
+		get: { reach: "ThreadView.getVisible scopes by reachesPod" },
+		activity: { reach: "ThreadView.activity scopes by reachesPod" },
+		cancelTurn: { reach: "TurnExecution.requestCancel scopes by visibleThread" },
 	},
 	toolApprovals: {
 		decide: { pod: "approval.decide" },

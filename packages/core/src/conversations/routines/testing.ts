@@ -15,7 +15,7 @@ import { lane } from "../../workflows/sql.ts";
 import { lanesForTests } from "../../workflows/testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Routine, RoutineRun, routineLane } from "./routine.workflow.ts";
-import type { RoutineStore } from "./store.ts";
+import type { Routines } from "./routines.ts";
 
 /** The routine's run holding its lane, if any. */
 export const runningRun = (routineId: string) =>
@@ -108,7 +108,7 @@ export async function aRoutineOwner() {
 
 /** Starts the routine's run holding its lane, as its workflow's first step does. */
 export async function startRunning(
-	routines: Pick<Promised<RoutineStore>, "startRun">,
+	routines: Pick<Promised<Routines.Interface>, "startRun">,
 	routineId: string,
 ) {
 	const run = await runOnPostgres(runningRun(routineId));
