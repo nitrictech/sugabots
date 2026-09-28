@@ -106,10 +106,7 @@ describe("runSegment", () => {
 			stream: () =>
 				Effect.sync(() => ({
 					text: chunks("Release", " checked"),
-					accounting: Effect.succeed({
-						usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-						reportedCost: 0.001,
-					}),
+					accounting: Effect.succeed({ modelCalls: 1, contextTokens: 10 }),
 				})),
 		};
 
@@ -126,8 +123,8 @@ describe("runSegment", () => {
 		);
 
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
-			usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-			reportedCost: 0.001,
+			modelCalls: 1,
+			contextTokens: 10,
 			contextCapacity: 128_000,
 		});
 		expect(turns.fail).not.toHaveBeenCalled();
@@ -156,7 +153,7 @@ describe("runSegment", () => {
 						stream: () =>
 							Effect.sync(() => ({
 								text: chunks("Done"),
-								accounting: Effect.succeed({ usage: {}, contextTokens }),
+								accounting: Effect.succeed({ modelCalls: 1, contextTokens }),
 							})),
 					},
 					events: eventBus(),
@@ -194,7 +191,7 @@ describe("runSegment", () => {
 					stream: () =>
 						Effect.succeed({
 							text: chunks("Done"),
-							accounting: Effect.succeed({ usage: {}, contextTokens: 0 }),
+							accounting: Effect.succeed({ modelCalls: 1, contextTokens: 0 }),
 						}),
 				},
 				events: eventBus(),
@@ -249,7 +246,7 @@ describe("runSegment", () => {
 						);
 						yield `Found ${JSON.stringify(output)}.`;
 					})(),
-					accounting: Effect.succeed({ usage: {} }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 				})),
 		};
 
@@ -285,7 +282,7 @@ describe("runSegment", () => {
 				collaborations: [],
 				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
 			},
-			{ usage: {}, contextCapacity: 128_000 },
+			{ modelCalls: 1, contextCapacity: 128_000 },
 		);
 	});
 
@@ -311,7 +308,7 @@ describe("runSegment", () => {
 						);
 						yield "Done.";
 					})(),
-					accounting: Effect.succeed({ usage: {} }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 				})),
 		};
 
@@ -362,7 +359,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ usage: {}, contextCapacity: 128_000 },
+			{ modelCalls: 1, contextCapacity: 128_000 },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});
@@ -418,7 +415,7 @@ describe("runSegment", () => {
 					messages: [{ role: "user", content: "reviewed history" }],
 				},
 				reply: reply(""),
-				accounting: { usage: { modelCalls: 1 } },
+				accounting: { modelCalls: 1 },
 			},
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
@@ -426,7 +423,10 @@ describe("runSegment", () => {
 		const model: TurnModel = {
 			stream: (input) => {
 				received = input;
-				return Effect.succeed({ text: chunks("Done"), accounting: Effect.succeed({ usage: {} }) });
+				return Effect.succeed({
+					text: chunks("Done"),
+					accounting: Effect.succeed({ modelCalls: 1 }),
+				});
 			},
 		};
 
@@ -471,7 +471,10 @@ describe("runSegment", () => {
 		const model: TurnModel = {
 			stream: (input) => {
 				received = input;
-				return Effect.succeed({ text: chunks("Done"), accounting: Effect.succeed({ usage: {} }) });
+				return Effect.succeed({
+					text: chunks("Done"),
+					accounting: Effect.succeed({ modelCalls: 1 }),
+				});
 			},
 		};
 
@@ -511,7 +514,7 @@ describe("runSegment", () => {
 			stream: (input: TurnModelInput) =>
 				Effect.sync(() => {
 					offered.push(Object.keys(input.tools ?? {}));
-					return { text: chunks("Done"), accounting: Effect.succeed({ usage: {} }) };
+					return { text: chunks("Done"), accounting: Effect.succeed({ modelCalls: 1 }) };
 				}),
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(
@@ -622,7 +625,7 @@ describe("runSegment", () => {
 					stream: () =>
 						Effect.sync(() => ({
 							text: chunks("Done"),
-							accounting: Effect.succeed({ usage: {} }),
+							accounting: Effect.succeed({ modelCalls: 1 }),
 						})),
 				},
 				events: eventBus(),
@@ -648,7 +651,7 @@ describe("runSegment", () => {
 					stream: () =>
 						Effect.sync(() => ({
 							text: chunks("Done"),
-							accounting: Effect.succeed({ usage: {} }),
+							accounting: Effect.succeed({ modelCalls: 1 }),
 						})),
 				},
 				events,
@@ -705,7 +708,7 @@ describe("runSegment", () => {
 						stream: () =>
 							Effect.sync(() => ({
 								text: delayedChunks(),
-								accounting: Effect.succeed({ usage: {} }),
+								accounting: Effect.succeed({ modelCalls: 1 }),
 							})),
 					},
 					events: eventBus(),
@@ -737,7 +740,7 @@ describe("runSegment", () => {
 						stream: (input) =>
 							Effect.sync(() => ({
 								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ usage: {} }),
+								accounting: Effect.succeed({ modelCalls: 1 }),
 							})),
 					},
 					events,
@@ -773,7 +776,7 @@ describe("runSegment", () => {
 						stream: (input) =>
 							Effect.sync(() => ({
 								text: chunksUntilAborted(input.signal),
-								accounting: Effect.succeed({ usage: {} }),
+								accounting: Effect.succeed({ modelCalls: 1 }),
 							})),
 					},
 					events: liveEventBus(),
@@ -886,7 +889,7 @@ function segmentAskingApproval(
 					text: (async function* () {
 						yield "I need approval.";
 					})(),
-					accounting: Effect.succeed({ usage: { modelCalls: 1 } }),
+					accounting: Effect.succeed({ modelCalls: 1 }),
 					continuation: Effect.succeed({
 						approvalRequests: [
 							{

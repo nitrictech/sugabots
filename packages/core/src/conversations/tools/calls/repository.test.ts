@@ -116,7 +116,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		approvals: [],
 		modelInput: { model: "test", system: "test", messages: [] },
 		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
-		accounting: { usage: {} },
+		accounting: { modelCalls: 1 },
 		...overrides,
 	});
 

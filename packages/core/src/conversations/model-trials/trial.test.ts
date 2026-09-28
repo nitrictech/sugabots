@@ -16,7 +16,7 @@ function scripted(answer: (input: TurnModelInput) => string | ModelRequestFailed
 						text: (async function* () {
 							yield next;
 						})(),
-						accounting: Effect.succeed({ usage: {} }),
+						accounting: Effect.succeed({ modelCalls: 1 }),
 					});
 		},
 	};
@@ -112,7 +112,7 @@ describe("trying a model on the facilitator", () => {
 								});
 								yield "too late";
 							})(),
-							accounting: Effect.succeed({ usage: {} }),
+							accounting: Effect.succeed({ modelCalls: 1 }),
 						});
 					},
 				},
