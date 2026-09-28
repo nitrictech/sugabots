@@ -34,6 +34,13 @@ list** to fetch new ones, or **Add model** to type in a model ID.
 Each model also says what it can do, like tools, vision or reasoning. Bots use
 tools, so pick models that support them.
 
+## Behind-the-scenes model
+
+Sugabots also uses a model for its own work: summarising and titling
+conversations, and deciding which bot replies when nobody was addressed. It
+starts with none. An admin picks one under **Default → System agents use**. A
+fast, cheap model is best. Until then, chats have no summaries or titles.
+
 ## Models on your own machine
 
 Ollama, LM Studio, llama.cpp and vLLM run on your own hardware, so your messages
