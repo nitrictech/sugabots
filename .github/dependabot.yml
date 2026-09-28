@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # What the API knows about models it isn't told by their provider, including
+  # every price it estimates costs with, is the models.dev snapshot bundled in
+  # @opencode-ai/models. models.dev publishes a new one daily; until the package
+  # is bumped, a model newer than ours has no price and its requests go unpriced.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    allow:
+      - dependency-name: "@opencode-ai/models"
+    groups:
+      models-dev:
+        patterns: ["@opencode-ai/models"]
+    commit-message:
+      prefix: chore
+      include: scope
