@@ -28,12 +28,13 @@ const KEPT_SHARE = 0.25;
  * The most history a turn is shown whether or not the thread has been
  * compacted, below the window so the system text, tools and reply still fit.
  * Compaction keeps a thread well under this; it is what stops a thread from
- * overflowing when the Compaction agent has no model or has not caught up.
+ * overflowing when there is no model to compact it with or compaction has
+ * not caught up.
  */
 const HISTORY_LIMIT_SHARE = 0.9;
 
 /**
- * How much of its own window the Compaction agent's model may be given to
+ * How much of its own window the model compacting a thread may be given to
  * summarise. The rest holds its instructions, the previous summary, the
  * summary it writes, and the error in estimating tokens.
  */
@@ -106,8 +107,8 @@ export interface CompactionPlan<Message> {
  *
  * What is kept and summarised is sized to the window of the bot reading the
  * thread: at the compaction line, the bot read about what is kept plus what is
- * summarised. What is summarised is also capped to what the Compaction agent's
- * own model can read.
+ * summarised. What is summarised is also capped to what the model summarising
+ * it can read.
  */
 export function planCompaction<Message extends { createdAt: Date; tokens: number }>(
 	history: readonly Message[],

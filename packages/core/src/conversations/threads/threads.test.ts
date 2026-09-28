@@ -897,7 +897,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		// Kept word for word: the newest six long messages and the short one,
 		// about a quarter of the window. Summarised: the eleven before them.
-		expect(prepared.model).toBe(SYSTEM_AGENT_MODEL);
+		expect(prepared.model).toBe("claude-opus-4-1-20250805");
 		expect(prepared.keptFrom).toEqual(earlier[14]?.createdAt);
 		expect(prepared.historyStartsAt).toEqual(earlier[3]?.createdAt);
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
@@ -1065,7 +1065,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(await found("river")).toEqual([said[0], said[4]]);
 	});
 
-	it("sizes compaction to the bot's model, and caps it to what the Compaction agent's model can read", async () => {
+	/**
+	 * A thread of twenty long messages, about 10K tokens each, before its
+	 * first, with the bot's model given a 128K window and the system agents'
+	 * a 64K one.
+	 */
+	async function threadWithLongHistory() {
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -1081,7 +1086,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		if (!provider) throw new Error("Could not create the model provider");
 		await onDatabase((db) =>
 			db.insert(providerModel).values([
-				// The bot's model and the Compaction agent's, both smaller than the 256K ceiling.
+				// Both smaller than the 256K ceiling.
 				{
 					workspaceId,
 					providerId: provider.id,
@@ -1124,6 +1129,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				)
 				.returning({ createdAt: message.createdAt }),
 		);
+		return { details, earlier };
+	}
+
+	it("compacts on the bot's model, sized to its window", async () => {
+		const { details, earlier } = await threadWithLongHistory();
 
 		const prepared = await preparedCompaction({
 			threadId: details.thread.id,
@@ -1132,11 +1142,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			readKeptFrom: null,
 		});
 
+		expect(prepared.model).toBe("claude-opus-4-1-20250805");
 		// A quarter of the bot's 128K is kept: the three newest long messages.
 		expect(prepared.keptFrom).toEqual(earlier[17]?.createdAt);
-		// The 64K Compaction agent is given at most 60% of its window, three
-		// messages, rather than the 57.6K the bot's window alone would allow.
+		// Up to the 89.6K compaction line less what is kept is summarised.
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual([
+			"Message 13",
+			"Message 14",
 			"Message 15",
 			"Message 16",
 			"Message 17",
@@ -1153,6 +1165,29 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			windowTokens: 128_000,
 			compactionLineTokens: 89_600,
 		});
+	});
+
+	it("compacts for a bot without a model on the system agents' model, capped to its window", async () => {
+		const { details, earlier } = await threadWithLongHistory();
+		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
+
+		const prepared = await preparedCompaction({
+			threadId: details.thread.id,
+			agentId,
+			sourceMessageId: details.messages[0]?.id ?? "",
+			readKeptFrom: null,
+		});
+
+		expect(prepared.model).toBe(SYSTEM_AGENT_MODEL);
+		// A quarter of the 256K ceiling is kept: the six newest long messages.
+		expect(prepared.keptFrom).toEqual(earlier[14]?.createdAt);
+		// The 64K model is given at most 60% of its window, three messages,
+		// rather than the 115.2K the reader's window alone would allow.
+		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual([
+			"Message 12",
+			"Message 13",
+			"Message 14",
+		]);
 	});
 
 	it("treats a malformed thread id as absent", async () => {

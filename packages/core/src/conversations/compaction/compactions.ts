@@ -10,10 +10,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { threadCompaction } from "../../database/schema.ts";
-import {
-	COMPACT_SYSTEM_AGENT,
-	findRunnableSystemAgent,
-} from "../../workspaces/agents/system-agents.ts";
+import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
 	loadSystemAgentScope,
@@ -35,14 +32,16 @@ import { estimatedTokens, MAX_CONTEXT_WINDOW_TOKENS, planCompaction } from "./wi
  * before the newest messages, and from then on a bot in the thread reads that
  * summary and the newest messages instead of the whole thread. People still
  * see every message. Like the Scribe, its turns live in a child thread of the
- * one it works on.
+ * one it works on. It runs on the model of the bot whose reply asked for it,
+ * so a thread is summarised as well as it is read, and falls back to the
+ * system agents' model for a bot with none.
  */
 export interface Interface {
 	/**
 	 * Opens the Compaction agent's turn and loads what it summarises, or says
-	 * why there is nothing to do: the thread is gone, the Compaction agent has
-	 * no model, the turn that asked was measured before the latest compaction,
-	 * or there is nothing new to summarise.
+	 * why there is nothing to do: the thread is gone, neither the bot nor the
+	 * Compaction agent has a model, the turn that asked was measured before
+	 * the latest compaction, or there is nothing new to summarise.
 	 */
 	readonly prepare: (
 		request: CompactionRequest,
@@ -83,10 +82,12 @@ export const make = Effect.gen(function* () {
 							return skipped("The thread, the agent that triggered it, or its message is gone");
 						}
 						const compactor = yield* query((db) =>
-							findRunnableSystemAgent(db, scope.workspaceId, COMPACT_SYSTEM_AGENT),
+							findSystemAgent(db, scope.workspaceId, COMPACT_SYSTEM_AGENT),
 						);
-						if (!compactor) {
-							return skipped("This workspace has chosen no model for the Compaction agent");
+						if (!compactor) return skipped("This workspace has no Compaction agent");
+						const model = scope.agentModel ?? compactor.model;
+						if (model === null) {
+							return skipped("Neither the bot nor the Compaction agent has a model");
 						}
 
 						const previous = yield* query((db) => loadCompaction(db, scope.threadId));
@@ -101,15 +102,16 @@ export const make = Effect.gen(function* () {
 								entry ? [{ ...entry, createdAt, tokens: estimatedTokens(entry.content) }] : [],
 							);
 						// Sized to the bot that reads the thread next, and capped to what
-						// the Compaction agent's own model can read.
+						// the model summarising it can read.
 						const readerModel = scope.agentModel;
 						const readerTokens =
 							readerModel === null
 								? MAX_CONTEXT_WINDOW_TOKENS
 								: yield* query((db) => loadContextWindow(db, scope.workspaceId, readerModel));
-						const summariserTokens = yield* query((db) =>
-							loadContextWindow(db, scope.workspaceId, compactor.model),
-						);
+						const summariserTokens =
+							model === readerModel
+								? readerTokens
+								: yield* query((db) => loadContextWindow(db, scope.workspaceId, model));
 						const plan = planCompaction(history, previous?.keptFrom, {
 							readerTokens,
 							summariserTokens,
@@ -131,7 +133,7 @@ export const make = Effect.gen(function* () {
 							threadId: systemAgentThreadId,
 							agentId: compactor.id,
 							triggerMessageId: request.sourceMessageId,
-							model: compactor.model,
+							model,
 						});
 						if (opened._tag === "NotRunnable") return skipped(opened.reason);
 
@@ -142,7 +144,7 @@ export const make = Effect.gen(function* () {
 							threadId: scope.threadId,
 							workspaceId: scope.workspaceId,
 							threadTitle: scope.threadTitle,
-							model: compactor.model,
+							model,
 							transcript: plan.summarised.map(({ author, kind, content, createdAt }) => ({
 								author,
 								kind,
