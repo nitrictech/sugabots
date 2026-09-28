@@ -702,7 +702,8 @@ function addAccounting(
 			cachedInputTokens: add(prior.usage.cachedInputTokens, segment.usage.cachedInputTokens),
 		},
 		reportedCost: add(prior.reportedCost, segment.reportedCost),
-		contextTokens: segment.contextTokens,
+		// A resumed segment starts with the earlier segment's tool results.
+		contextTokens: prior.contextTokens ?? segment.contextTokens,
 		contextCapacity: segment.contextCapacity,
 	};
 }

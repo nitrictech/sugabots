@@ -23,6 +23,11 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 export interface ModelAccounting {
 	usage: TurnUsage;
 	reportedCost?: number;
+	/**
+	 * The prompt's size at the turn's first model call: its history, system
+	 * text and tools. What its tool calls return is left out, since the next
+	 * turn keeps only a short record of it.
+	 */
 	contextTokens?: number;
 	contextCapacity?: number;
 }
@@ -210,7 +215,7 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 									reasoningTokens: usage.outputTokenDetails.reasoningTokens,
 									cachedInputTokens: usage.inputTokenDetails.cacheReadTokens,
 								},
-								contextTokens: steps.at(-1)?.usage.inputTokens,
+								contextTokens: steps[0]?.usage.inputTokens,
 							};
 						},
 						catch: (cause) => ModelRequestFailed.fromCause(providerFailure ?? cause),
