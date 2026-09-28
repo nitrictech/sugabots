@@ -2,15 +2,7 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import {
-	agent,
-	connection,
-	pod,
-	podMember,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { agent, connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import type { Chats } from "../chats/chats.ts";
@@ -142,7 +134,6 @@ export async function aChatAwaitingReply(
 	);
 	if (!room) throw new Error("fixture");
 	const podId = room.id;
-	await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 	const [host] = await onDatabase((db) =>
 		db
 			.insert(agent)

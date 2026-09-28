@@ -285,6 +285,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					email: storyUser.email,
 					image: null,
 					addedAt: "2026-09-01T00:00:00.000Z",
+					removable: false,
 				},
 			]),
 		),

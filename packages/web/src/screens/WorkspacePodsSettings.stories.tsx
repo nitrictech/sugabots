@@ -29,7 +29,12 @@ const people = [
 		email: "mara@nitric.io",
 		image: null,
 	},
-].map((person) => ({ ...person, addedAt: "2026-09-02T00:00:00.000Z" }));
+].map((person, index) => ({
+	...person,
+	addedAt: "2026-09-02T00:00:00.000Z",
+	// The first two are administrators, as the workspace roster below says.
+	removable: index > 1,
+}));
 
 function connection(
 	n: number,
@@ -106,7 +111,11 @@ export const List = meta.story({
 	},
 });
 
-/** A shared pod: its bots, its people, the apps they share, and deleting it. */
+/**
+ * A shared pod: its bots, its people, the apps they share, and deleting it.
+ * Administrators are in every shared pod, so only Mara, a member, can be taken
+ * out.
+ */
 export const SharedPod = meta.story({
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
@@ -115,6 +124,10 @@ export const SharedPod = meta.story({
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Jay Young")).toBeInTheDocument();
 		await expect(await canvas.findByText("Admin")).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Remove Mara Kent" }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Remove Jay Young" })).toBeNull();
 		await expect(await canvas.findByText("HubSpot")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Delete pod" })).toBeInTheDocument();
 	},
@@ -155,6 +168,7 @@ export const AsAMember = meta.story({
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Add people" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Remove Mara Kent" })).toBeNull();
 	},
 });
 

@@ -1,5 +1,4 @@
 import type { WorkspaceRole } from "@sugabots/contracts";
-import { WORKSPACE_ROLES } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	type Actor,
@@ -8,7 +7,6 @@ import {
 	type PodFacts,
 	type PodPermission,
 	podPermissions,
-	sharedPodReach,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -28,16 +26,16 @@ const actor = (workspaceRole: WorkspaceRole | undefined, userId = ALICE): Actor 
 	workspaceRole,
 });
 
-const sharedPod = (isExplicitMember: boolean): PodFacts => ({
+const sharedPod = (isMember: boolean): PodFacts => ({
 	kind: "shared",
 	ownerId: null,
-	isExplicitMember,
+	isMember,
 });
 
 const personalPodOf = (ownerId: string): PodFacts => ({
 	kind: "personal",
 	ownerId,
-	isExplicitMember: ownerId === ALICE,
+	isMember: ownerId === ALICE,
 });
 
 /**
@@ -120,8 +118,12 @@ describe("workspace actions", () => {
 });
 
 describe("shared pods", () => {
-	it.each(POD_PERMISSIONS)("an admin may %s without being a member of the pod", (permission) => {
-		expect(mayInPod(actor("admin"), permission, sharedPod(false))).toBe(true);
+	it.each(POD_PERMISSIONS)("an admin in the pod may %s", (permission) => {
+		expect(mayInPod(actor("admin"), permission, sharedPod(true))).toBe(true);
+	});
+
+	it.each(POD_PERMISSIONS)("an admin outside the pod may not %s", (permission) => {
+		expect(mayInPod(actor("admin"), permission, sharedPod(false))).toBe(false);
 	});
 
 	it.each(POD_PERMISSIONS)("a member in the pod may %s only when granted", (permission) => {
@@ -227,21 +229,8 @@ describe("what the API tells a client", () => {
 	});
 
 	it("lets an admin rename and staff a shared pod", () => {
-		const resolved = podPermissions(actor("admin"), sharedPod(false));
+		const resolved = podPermissions(actor("admin"), sharedPod(true));
 		expect(resolved.rename).toBe(true);
 		expect(resolved.manageMembers).toBe(true);
-	});
-});
-
-describe("shared pod reach", () => {
-	it("matches what a direct read of an unjoined shared pod decides", () => {
-		for (const role of WORKSPACE_ROLES) {
-			const reachesUnjoined = mayInPod(actor(role), "pod.read", sharedPod(false));
-			expect(sharedPodReach(role)).toBe(reachesUnjoined ? "all" : "joined");
-		}
-	});
-
-	it("reaches nothing without a workspace role", () => {
-		expect(sharedPodReach(undefined)).toBe("none");
 	});
 });

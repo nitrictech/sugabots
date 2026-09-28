@@ -1,10 +1,4 @@
-import {
-	type Agent,
-	type Pod,
-	type PodMember,
-	type WorkspaceRole,
-	workspaceRoleLabel,
-} from "@sugabots/contracts";
+import { type Agent, type Pod, type PodMember, workspaceRoleLabel } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
 import { type ReactNode, useDeferredValue, useId, useState } from "react";
@@ -331,26 +325,10 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 	);
 }
 
-/**
- * What coming off the roster costs, which is the role's answer rather than the
- * pod's: an administrator reaches every shared pod without a membership row,
- * so the roster is all they lose. Administering is also what lets somebody
- * manage members at all, which is why leaving never costs the person leaving.
- * The grants are in `packages/core/src/authorization/permissions.ts`.
- */
-function removalCost(role: WorkspaceRole | undefined, isYou: boolean): string {
-	if (role !== "admin") {
-		return "They lose this pod, its bots, and their chats. You can add them back at any time.";
-	}
-	return isYou
-		? "You come off this pod's member list. As an administrator you still reach the pod and everything in it."
-		: "They come off this pod's member list. As an administrator they still reach the pod and everything in it.";
-}
-
 /*
  * The people who can see into the pod. Anyone in the workspace can be added;
  * the label after a name is their standing in the workspace, since a pod has
- * no roles of its own.
+ * no roles of its own. Who can be taken out is the API's answer.
  */
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
@@ -363,7 +341,6 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
-	const leaving = removing !== undefined && isYou(removing.userId);
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
 
 	let rows: ReactNode;
@@ -389,11 +366,11 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								: // Said once the workspace roster has answered, not guessed before it.
 									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
 						</SettingsValue>
-						{canManageMembers && (
-							<Tooltip label={isYou(member.userId) ? "Leave pod" : "Remove from pod"}>
+						{canManageMembers && member.removable && (
+							<Tooltip label="Remove from pod">
 								<button
 									type="button"
-									aria-label={isYou(member.userId) ? `Leave ${pod.name}` : `Remove ${member.name}`}
+									aria-label={`Remove ${member.name}`}
 									disabled={remove.isPending}
 									onClick={() => setRemoving(member)}
 									className="focus-ring grid size-7 shrink-0 place-items-center rounded-full text-destructive-text transition-colors hover:bg-destructive-hover"
@@ -452,13 +429,9 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 				onOpenChange={(open) => {
 					if (!open) setRemoving(undefined);
 				}}
-				title={
-					leaving
-						? `Leave ${pod.name}?`
-						: `Remove ${removing?.name ?? "this person"} from ${pod.name}?`
-				}
-				description={removalCost(removing && roleOf(removing.userId), leaving)}
-				confirmLabel={leaving ? "Leave" : "Remove"}
+				title={`Remove ${removing?.name ?? "this person"} from ${pod.name}?`}
+				description="They lose this pod, its bots, and their chats. You can add them back at any time."
+				confirmLabel="Remove"
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={async () => {
