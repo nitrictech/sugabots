@@ -66,8 +66,9 @@ export default defineConfig({
 		// Each page is written as `<path>.html`, not `<path>/index.html`, so Cloudflare serves it
 		// at the address the site links to, without redirecting to add a trailing slash. Route
 		// discovery is off because it lists `/docs/` beside `/docs`, a second copy of the page.
+		// The sitemap is listed because no page links to it, so the crawl can't find it.
 		tanstackStart({
-			pages: [{ path: "/" }, { path: "/docs" }],
+			pages: [{ path: "/" }, { path: "/docs" }, { path: "/sitemap.xml" }],
 			prerender: {
 				enabled: true,
 				crawlLinks: true,
