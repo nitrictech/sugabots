@@ -16,8 +16,8 @@ import { crewOf } from "../threads/participants.ts";
  * Who has the floor: which agent, if any, speaks after a message (ADR 004).
  *
  * The decision is a pure function of the message and the thread, so it can be
- * read and tested on its own; `Chats.giveFloor` loads what it needs, applies
- * it, and asks for the turns. Precedence, top wins:
+ * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
+ * applies it, and asks for the turns. Precedence, top wins:
  *
  * 1. A person mentioning only people: nobody. They are talking to each other.
  * 2. A person writing in a chat: the chat's agent, whichever agents they
@@ -117,7 +117,14 @@ export interface FloorMessage {
 	author: FloorInput["author"];
 }
 
-/** What `decideFloor` needs from the database, for one thread and message. */
+/**
+ * What `decideFloor` needs from the database, for one thread and message.
+ *
+ * `crew` is the pod's whole crew rather than the thread's participants: a
+ * person may mention an agent who has not joined the thread yet, and reading
+ * the mention against who is already in it would leave every first mention
+ * unrecognised.
+ */
 export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,

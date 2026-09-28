@@ -10,6 +10,7 @@ import {
 	serviceOperations,
 	type Transaction,
 	transaction,
+	writtenRow,
 } from "../../../database/database.ts";
 import {
 	connection,
@@ -126,7 +127,7 @@ export const make = Effect.gen(function* () {
 		if (decided._tag === "Refused") return undefined;
 		const next = decided.state;
 		const now = yield* DateTime.nowAsDate;
-		const [updated] = yield* query((db) =>
+		return yield* query((db) =>
 			db
 				.update(toolCall)
 				.set({
@@ -141,9 +142,7 @@ export const make = Effect.gen(function* () {
 				})
 				.where(eq(toolCall.id, row.id))
 				.returning(),
-		);
-		if (!updated) return yield* Effect.die(new Error("A locked tool call could not be updated"));
-		return updated;
+		).pipe(Effect.flatMap(writtenRow("tool_call")));
 	});
 
 	return Service.of({
@@ -153,7 +152,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const startedAt = yield* DateTime.nowAsDate;
-						const [row] = yield* query((db) =>
+						const row = yield* query((db) =>
 							db
 								.insert(toolCall)
 								.values({
@@ -167,8 +166,7 @@ export const make = Effect.gen(function* () {
 									startedAt,
 								})
 								.returning(),
-						);
-						if (!row) return yield* Effect.die(new Error("Tool call insert returned no row"));
+						).pipe(Effect.flatMap(writtenRow("tool_call")));
 						yield* emit([ConversationEvent.ToolCallStarted(toolCallChange(row))]);
 						return toToolCallPart(row);
 					}),

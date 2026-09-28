@@ -23,7 +23,7 @@ import type { OfferedTool } from "./connections.ts";
  */
 
 export interface ToolDependencies {
-	collaborations: Pick<Collaborations.Interface, "open" | "stopWaiting">;
+	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** Where a built-in tool's calls are written down. */
 	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	approvals: Pick<ToolApprovals.Interface, "beginExecution">;

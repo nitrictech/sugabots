@@ -3,7 +3,7 @@ import type { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { runOnPostgres } from "../database/testing.ts";
 import { workflowsForTests } from "../workflows/testing.ts";
-import { Conversations } from "./composition.ts";
+import { Conversations } from "./conversations.ts";
 import { RoutineRuns } from "./routines/runs.ts";
 import { TurnRequests } from "./turns/requests.ts";
 import { TurnSignals } from "./turns/signals.ts";

@@ -2,9 +2,16 @@ export * as CollaborationRepository from "./repository.ts";
 
 import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { query, serviceOperations, transaction } from "../../../database/database.ts";
+import {
+	type Database,
+	query,
+	serviceOperations,
+	type Transaction,
+	transaction,
+	writtenRow,
+} from "../../../database/database.ts";
 import type * as schema from "../../../database/schema.ts";
-import { agent, collaboration, message } from "../../../database/schema.ts";
+import { agent, chat, collaboration, message, thread } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
@@ -29,18 +36,13 @@ export interface Interface {
 		brief: string;
 		/** How far into the asking reply's text the collaboration was made. */
 		atOffset: number;
-		/** For the announcement: the parent thread's workspace. */
-		workspaceId: string;
-		/** For the announcement: the collaborator's chat in the pod, whose history now lists the thread. */
-		recipientChatId: string | null;
 	}) => Effect.Effect<schema.CollaborationRow>;
 	/**
-	 * Marks that the asking turn stopped waiting. `false` when the
-	 * collaboration is no longer waiting, such as when it was answered.
+	 * Marks that the asking turn stopped waiting, so the answer resumes it
+	 * later, unless the collaboration has already ended; returns which. A
+	 * collaboration that is gone reads as failed.
 	 */
-	readonly stopWaiting: (collaborationId: string) => Effect.Effect<boolean>;
-	/** The collaborator's reply, once recorded. */
-	readonly answerOf: (collaborationId: string) => Effect.Effect<string | undefined>;
+	readonly stopWaiting: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
 	 * Records `answer` as the reply to the collaboration whose thread is
 	 * `childThreadId`. `undefined` when there is none outstanding.
@@ -68,7 +70,7 @@ export const make = Effect.gen(function* () {
 				"open",
 				transaction(
 					Effect.gen(function* () {
-						const [opened] = yield* query((db) =>
+						const opened = yield* query((db) =>
 							db
 								.insert(collaboration)
 								.values({
@@ -81,15 +83,28 @@ export const make = Effect.gen(function* () {
 									atOffset: input.atOffset,
 								})
 								.returning(),
+						).pipe(Effect.flatMap(writtenRow("collaboration")));
+						// The collaborator's chat in the pod, if it has one, lists the new
+						// thread in its history, so it is told too.
+						const [address] = yield* query((db) =>
+							db
+								.select({ workspaceId: thread.workspaceId, recipientChatId: chat.id })
+								.from(thread)
+								.leftJoin(
+									chat,
+									and(eq(chat.podId, thread.podId), eq(chat.hostAgentId, input.collaborator.id)),
+								)
+								.where(eq(thread.id, input.parentThreadId))
+								.limit(1),
 						);
-						if (!opened) {
-							return yield* Effect.die(new Error("Collaboration insert returned no row"));
+						if (!address) {
+							return yield* Effect.die(new Error("A collaboration's parent thread is gone"));
 						}
 						yield* emit([
 							ConversationEvent.CollaborationOpened({
 								...collaborationChange(opened, input.collaborator.name),
-								workspaceId: input.workspaceId,
-								recipientChatId: input.recipientChatId,
+								workspaceId: address.workspaceId,
+								recipientChatId: address.recipientChatId,
 							}),
 						]);
 						return opened;
@@ -101,32 +116,22 @@ export const make = Effect.gen(function* () {
 			operation(
 				"stopWaiting",
 				transaction(
-					Effect.gen(function* () {
+					Effect.gen(function* (): Effect.fn.Return<WaitOutcome, never, Database | Transaction> {
 						const current = yield* locked(eq(collaboration.id, collaborationId));
-						if (current?.row.status !== "waiting") return false;
+						if (!current) return { _tag: "Failed" };
+						const status = current.row.status;
+						if (status === "answered")
+							return { _tag: "Answered", answer: current.row.answer ?? "" };
+						if (status === "failed") return { _tag: "Failed" };
+						if (status === "pending") return { _tag: "MovedOn" };
 						const updated = yield* writeStatus(current.row.id, { status: "pending" });
 						yield* emit([
 							ConversationEvent.CollaborationStoppedWaiting(
 								collaborationChange(updated, current.collaboratorName),
 							),
 						]);
-						return true;
+						return { _tag: "MovedOn" };
 					}),
-				),
-			),
-
-		answerOf: (collaborationId) =>
-			operation(
-				"answerOf",
-				Effect.map(
-					query((db) =>
-						db
-							.select({ answer: collaboration.answer })
-							.from(collaboration)
-							.where(eq(collaboration.id, collaborationId))
-							.limit(1),
-					),
-					([row]) => row?.answer ?? undefined,
 				),
 			),
 
@@ -190,6 +195,16 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
+/**
+ * How the asking turn's wait for a collaboration ended: with the
+ * collaborator's answer, by moving on so the answer resumes it later, or with
+ * the collaboration failed, so no answer is coming.
+ */
+export type WaitOutcome =
+	| { readonly _tag: "Answered"; readonly answer: string }
+	| { readonly _tag: "MovedOn" }
+	| { readonly _tag: "Failed" };
+
 /** A collaboration answered, and who asked for it. */
 export interface Answered {
 	readonly collaboration: schema.CollaborationRow;
@@ -233,12 +248,6 @@ const writeStatus = (
 	change: Pick<schema.CollaborationRow, "status"> &
 		Partial<Pick<schema.CollaborationRow, "answer">>,
 ) =>
-	Effect.flatMap(
-		query((db) =>
-			db.update(collaboration).set(change).where(eq(collaboration.id, collaborationId)).returning(),
-		),
-		([updated]) =>
-			updated
-				? Effect.succeed(updated)
-				: Effect.die(new Error("Collaboration disappeared during update")),
-	);
+	query((db) =>
+		db.update(collaboration).set(change).where(eq(collaboration.id, collaborationId)).returning(),
+	).pipe(Effect.flatMap(writtenRow("collaboration")));

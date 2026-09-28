@@ -6,7 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
 import type * as schema from "../../../database/schema.ts";
-import { agent, chat, collaboration, thread } from "../../../database/schema.ts";
+import { agent, collaboration, thread } from "../../../database/schema.ts";
 import { toCollaborationPart } from "../../threads/collaborations.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
@@ -44,11 +44,12 @@ export interface Interface {
 		brief: string;
 	}) => Effect.Effect<Opened, CollaborationRefused>;
 	/**
-	 * Stops the asking turn waiting, and returns the answer instead if the
-	 * collaborator has already given one. Once it has stopped waiting, the
-	 * answer resumes it in a turn of its own.
+	 * Ends the asking turn's wait: returns the answer if the collaborator has
+	 * given one, or says the collaboration failed and no answer is coming.
+	 * Otherwise the turn moves on, and the answer resumes it later in a turn
+	 * of its own.
 	 */
-	readonly stopWaiting: (collaborationId: string) => Effect.Effect<string | undefined>;
+	readonly collectAnswer: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
 	 * Hands the collaborator's reply in its thread `threadId` back to the
 	 * agent that asked. An agent that stopped waiting gets a turn in the
@@ -70,7 +71,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Collaborations");
 	const threads = yield* ThreadRepository.Service;
-	const records = yield* CollaborationRepository.Service;
+	const repository = yield* CollaborationRepository.Service;
 	const requests = yield* TurnRequests.Service;
 
 	return Service.of({
@@ -126,7 +127,7 @@ export const make = Effect.gen(function* () {
 							triggerMessageId: child.briefMessageId,
 							reason: "collaboration",
 						});
-						const opened = yield* records.open({
+						const opened = yield* repository.open({
 							parentThreadId: parent.id,
 							parentMessageId: from.messageId,
 							turnId: from.turnId,
@@ -134,31 +135,21 @@ export const make = Effect.gen(function* () {
 							collaborator,
 							brief,
 							atOffset: from.atOffset,
-							workspaceId: parent.workspaceId,
-							recipientChatId: yield* chatOf(parent.podId, collaborator.id),
 						});
 						return { collaboration: toCollaborationPart(opened, collaborator.name), collaborator };
 					}),
 				),
 			),
 
-		stopWaiting: (collaborationId) =>
-			operation(
-				"stopWaiting",
-				transaction(
-					Effect.gen(function* () {
-						if (yield* records.stopWaiting(collaborationId)) return undefined;
-						return yield* records.answerOf(collaborationId);
-					}),
-				),
-			),
+		collectAnswer: (collaborationId) =>
+			operation("collectAnswer", repository.stopWaiting(collaborationId)),
 
 		answer: ({ threadId, answer }) =>
 			operation(
 				"answer",
 				transaction(
 					Effect.gen(function* () {
-						const answered = yield* records.answer(threadId, answer);
+						const answered = yield* repository.answer(threadId, answer);
 						if (!answered) return false;
 						// While it was still waiting, the asking tool reads the answer itself.
 						if (answered.askerMovedOn) {
@@ -184,6 +175,8 @@ export const layer = layerNoDeps.pipe(
 
 /** How deep collaboration may nest: a root thread, a child, and a grandchild. */
 const MAX_DEPTH = 2;
+
+export type WaitOutcome = CollaborationRepository.WaitOutcome;
 
 export interface Opened {
 	collaboration: CollaborationPart;
@@ -241,19 +234,6 @@ const hasCollaborated = (turnId: string) =>
 				.limit(1),
 		),
 		([existing]) => existing !== undefined,
-	);
-
-/** The chat between the pod and `hostAgentId`, if one has been opened. */
-const chatOf = (podId: string, hostAgentId: string) =>
-	Effect.map(
-		query((db) =>
-			db
-				.select({ id: chat.id })
-				.from(chat)
-				.where(and(eq(chat.podId, podId), eq(chat.hostAgentId, hostAgentId)))
-				.limit(1),
-		),
-		([row]) => row?.id ?? null,
 	);
 
 function firstLine(text: string): string {

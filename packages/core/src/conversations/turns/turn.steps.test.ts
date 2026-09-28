@@ -1,21 +1,27 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
-import { Context, Effect, ManagedRuntime, Schema } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { unimplemented } from "../../testing.ts";
 import {
+	ToolApprovals,
 	ToolApprovalsIncomplete,
 	ToolExecutionRefused,
 } from "../tools/approvals/tool-approvals.ts";
-import { noBuiltInTools } from "../tools/built-in.ts";
-import { noConnectionTools } from "../tools/connections.ts";
-import { type PreparedTurn, replyTurnOf, type TurnRun } from "./execution.ts";
+import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
+import { ToolCallRepository } from "../tools/calls/repository.ts";
+import { Collaborations } from "../tools/collaborate/collaborations.ts";
+import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
+import { FloorControl } from "./floor-control.ts";
 import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
-import type { NotRunnable } from "./repository.ts";
-import { runSegment, type TurnStepsDependencies } from "./turn.steps.ts";
+import { type NotRunnable, TurnRepository } from "./repository.ts";
+import { TurnRequests } from "./requests.ts";
+import { runSegment } from "./turn.steps.ts";
 
 /**
  * The repositories and models in these cases are fakes that never query, so
@@ -104,18 +110,15 @@ describe("runSegment", () => {
 		};
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events,
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events,
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary },
+			}),
 		);
 
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
@@ -175,19 +178,16 @@ describe("runSegment", () => {
 		};
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: calls,
-					requests: { queueSummary: noSummary },
-					builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
-				}),
-			).pipe(Effect.provideService(toolContext, "turn-context")),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: calls,
+				requests: { queueSummary: noSummary },
+				builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
+			}).pipe(Effect.provideService(toolContext, "turn-context")),
 		);
 
 		expect(calls.open).toHaveBeenCalledWith({
@@ -240,47 +240,44 @@ describe("runSegment", () => {
 		};
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: calls,
-					requests: { queueSummary: noSummary },
-					connectionTools: {
-						forPod: () =>
-							Effect.succeed({
-								tools: {
-									wiki__wipe: {
-										tool: wipe,
-										mutating: true,
-										requiresApproval: true,
-										connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
-										connectionRevision: 1,
-										remoteToolName: "wipe",
-									},
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: calls,
+				requests: { queueSummary: noSummary },
+				connectionTools: {
+					forPod: () =>
+						Effect.succeed({
+							tools: {
+								wiki__wipe: {
+									tool: wipe,
+									mutating: true,
+									requiresApproval: true,
+									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+									connectionRevision: 1,
+									remoteToolName: "wipe",
 								},
-								close,
-							}),
-					},
-					approvals: {
-						responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-						beginExecution: ({ atOffset }) =>
-							calls.open({
-								threadId: prepared.context.thread.id,
-								messageId: prepared.responseMessage.id,
-								turnId: prepared.turnId,
-								tool: "wiki__wipe",
-								input: {},
-								atOffset,
-								mutating: true,
-							}),
-					},
-				}),
-			),
+							},
+							close,
+						}),
+				},
+				approvals: {
+					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+					beginExecution: ({ atOffset }) =>
+						calls.open({
+							threadId: prepared.context.thread.id,
+							messageId: prepared.responseMessage.id,
+							turnId: prepared.turnId,
+							tool: "wiki__wipe",
+							input: {},
+							atOffset,
+							mutating: true,
+						}),
+				},
+			}),
 		);
 
 		expect(calls.open).toHaveBeenCalledWith(
@@ -323,45 +320,42 @@ describe("runSegment", () => {
 		};
 
 		const outcome = await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-					connectionTools: {
-						forPod: () =>
-							Effect.succeed({
-								tools: {
-									wiki__wipe: {
-										tool: tool({
-											inputSchema: Schema.Struct({}).pipe(
-												Schema.toStandardSchemaV1,
-												Schema.toStandardJSONSchemaV1,
-											),
-											execute,
-										}),
-										mutating: true,
-										requiresApproval: true,
-										connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
-										connectionRevision: 1,
-										remoteToolName: "wipe",
-									},
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+				connectionTools: {
+					forPod: () =>
+						Effect.succeed({
+							tools: {
+								wiki__wipe: {
+									tool: tool({
+										inputSchema: Schema.Struct({}).pipe(
+											Schema.toStandardSchemaV1,
+											Schema.toStandardJSONSchemaV1,
+										),
+										execute,
+									}),
+									mutating: true,
+									requiresApproval: true,
+									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+									connectionRevision: 1,
+									remoteToolName: "wipe",
 								},
-								close: async () => undefined,
-							}),
-					},
-					approvals: {
-						responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-						beginExecution: () =>
-							Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
-					},
-				}),
-			),
+							},
+							close: async () => undefined,
+						}),
+				},
+				approvals: {
+					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
+					beginExecution: () =>
+						Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
+				},
+			}),
 		);
 
 		expect(execute).not.toHaveBeenCalled();
@@ -410,22 +404,19 @@ describe("runSegment", () => {
 		};
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-					approvals: {
-						responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
-						beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
-					},
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+				approvals: {
+					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
+					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
+				},
+			}),
 		);
 
 		expect(received).toMatchObject({
@@ -458,28 +449,25 @@ describe("runSegment", () => {
 		};
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-					connectionTools: {
-						forPod: () =>
-							Effect.succeed({
-								tools: {
-									wiki__lookup: offered("lookup", false),
-									notes__lookup: offered("lookup", true),
-								},
-								close: async () => undefined,
-							}),
-					},
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+				connectionTools: {
+					forPod: () =>
+						Effect.succeed({
+							tools: {
+								wiki__lookup: offered("lookup", false),
+								notes__lookup: offered("lookup", true),
+							},
+							close: async () => undefined,
+						}),
+				},
+			}),
 		);
 
 		expect(received?.toolApproval).toEqual({ notes__lookup: "user-approval" });
@@ -510,19 +498,16 @@ describe("runSegment", () => {
 		);
 
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-					builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+				builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
+			}),
 		);
 
 		expect(offered).toEqual([["other"]]);
@@ -534,18 +519,15 @@ describe("runSegment", () => {
 
 		await expect(
 			runWithServices(
-				runSegment(
-					run,
-					dependencies({
-						execution,
-						turns,
-						model: unusedModel(),
-						events: eventBus(),
-						collaborations: collaborations(),
-						toolCalls: toolCalls(),
-						requests: { queueSummary: noSummary },
-					}),
-				),
+				segmentWith({
+					execution,
+					turns,
+					model: unusedModel(),
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					requests: { queueSummary: noSummary },
+				}),
 			),
 		).rejects.toThrow("database unavailable");
 		expect(turns.abandon).not.toHaveBeenCalled();
@@ -558,18 +540,15 @@ describe("runSegment", () => {
 		);
 
 		const outcome = await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model: unusedModel(),
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model: unusedModel(),
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+			}),
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
@@ -581,23 +560,20 @@ describe("runSegment", () => {
 		vi.mocked(turns.fail).mockReturnValueOnce(Effect.succeed(false));
 
 		const outcome = await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model: {
-						stream: () =>
-							Effect.fail(
-								new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
-							),
-					},
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model: {
+					stream: () =>
+						Effect.fail(
+							new ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+						),
+				},
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+			}),
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
@@ -612,24 +588,21 @@ describe("runSegment", () => {
 		const { execution, turns } = fakes();
 		const queueSummary = () => Effect.die(new Error("database unavailable"));
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model: {
-						stream: () =>
-							Effect.sync(() => ({
-								text: chunks("Done"),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model: {
+					stream: () =>
+						Effect.sync(() => ({
+							text: chunks("Done"),
+							accounting: Effect.succeed({ usage: {} }),
+						})),
+				},
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary },
+			}),
 		);
 
 		expect(turns.complete).toHaveBeenCalledOnce();
@@ -641,24 +614,21 @@ describe("runSegment", () => {
 		const events = eventBus();
 		vi.mocked(events.publish).mockRejectedValueOnce(new Error("subscriber unavailable"));
 		await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model: {
-						stream: () =>
-							Effect.sync(() => ({
-								text: chunks("Done"),
-								accounting: Effect.succeed({ usage: {} }),
-							})),
-					},
-					events,
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model: {
+					stream: () =>
+						Effect.sync(() => ({
+							text: chunks("Done"),
+							accounting: Effect.succeed({ usage: {} }),
+						})),
+				},
+				events,
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+			}),
 		);
 
 		expect(turns.complete).toHaveBeenCalledOnce();
@@ -676,18 +646,15 @@ describe("runSegment", () => {
 		const events = eventBus();
 
 		const outcome = await runWithServices(
-			runSegment(
-				run,
-				dependencies({
-					execution,
-					turns,
-					model,
-					events,
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
-				}),
-			),
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events,
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				requests: { queueSummary: noSummary },
+			}),
 		);
 
 		expect(outcome).toEqual({ _tag: "Retry" });
@@ -704,24 +671,21 @@ describe("runSegment", () => {
 		try {
 			const { execution, turns } = fakes();
 			const segment = runWithServices(
-				runSegment(
-					run,
-					dependencies({
-						execution,
-						turns,
-						model: {
-							stream: () =>
-								Effect.sync(() => ({
-									text: delayedChunks(),
-									accounting: Effect.succeed({ usage: {} }),
-								})),
-						},
-						events: eventBus(),
-						collaborations: collaborations(),
-						toolCalls: toolCalls(),
-						requests: { queueSummary: noSummary },
-					}),
-				),
+				segmentWith({
+					execution,
+					turns,
+					model: {
+						stream: () =>
+							Effect.sync(() => ({
+								text: delayedChunks(),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					requests: { queueSummary: noSummary },
+				}),
 			);
 
 			await vi.advanceTimersByTimeAsync(1_000);
@@ -739,24 +703,21 @@ describe("runSegment", () => {
 			const { execution, turns } = fakes();
 			const events = liveEventBus();
 			const segment = runWithServices(
-				runSegment(
-					run,
-					dependencies({
-						execution,
-						turns,
-						model: {
-							stream: (input) =>
-								Effect.sync(() => ({
-									text: chunksUntilAborted(input.signal),
-									accounting: Effect.succeed({ usage: {} }),
-								})),
-						},
-						events,
-						collaborations: collaborations(),
-						toolCalls: toolCalls(),
-						requests: { queueSummary: noSummary },
-					}),
-				),
+				segmentWith({
+					execution,
+					turns,
+					model: {
+						stream: (input) =>
+							Effect.sync(() => ({
+								text: chunksUntilAborted(input.signal),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events,
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					requests: { queueSummary: noSummary },
+				}),
 			);
 
 			await vi.advanceTimersByTimeAsync(5_000);
@@ -778,24 +739,21 @@ describe("runSegment", () => {
 		try {
 			const { execution, turns } = fakes();
 			const segment = runWithServices(
-				runSegment(
-					run,
-					dependencies({
-						execution,
-						turns,
-						model: {
-							stream: (input) =>
-								Effect.sync(() => ({
-									text: chunksUntilAborted(input.signal),
-									accounting: Effect.succeed({ usage: {} }),
-								})),
-						},
-						events: liveEventBus(),
-						collaborations: collaborations(),
-						toolCalls: toolCalls(),
-						requests: { queueSummary: noSummary },
-					}),
-				),
+				segmentWith({
+					execution,
+					turns,
+					model: {
+						stream: (input) =>
+							Effect.sync(() => ({
+								text: chunksUntilAborted(input.signal),
+								accounting: Effect.succeed({ usage: {} }),
+							})),
+					},
+					events: liveEventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					requests: { queueSummary: noSummary },
+				}),
 			);
 
 			await vi.advanceTimersByTimeAsync(0);
@@ -811,52 +769,79 @@ describe("runSegment", () => {
 
 /** Prepares `prepared` and records nothing; the cases check what was asked to be recorded. */
 function fakes() {
-	const execution: TurnStepsDependencies["execution"] = {
+	const execution: Given["execution"] = {
 		prepare: vi.fn(() => Effect.succeed<PreparedTurn | NotRunnable>(prepared)),
 	};
-	const turns: TurnStepsDependencies["turns"] = {
+	const turns: Given["turns"] = {
 		saveReply: vi.fn(() => Effect.void),
 		suspend: vi.fn(() => Effect.succeed(true)),
 		complete: vi.fn(() => Effect.void),
 		fail: vi.fn(() => Effect.succeed(true)),
 		cancel: vi.fn(() => Effect.void),
 		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
-		stopWaiting: vi.fn(() => Effect.void),
 		abandon: vi.fn(() => Effect.undefined),
 	};
 	return { execution, turns };
 }
 
-type Defaulted = "approvals" | "chats" | "builtInTools" | "connectionTools" | "emit";
+/** What a case gives its segment: the doubles of the services it runs on, and its options. */
+interface Given {
+	execution: Pick<TurnExecution.Interface, "prepare">;
+	turns: Pick<
+		TurnRepository.Interface,
+		"saveReply" | "suspend" | "complete" | "fail" | "cancel" | "isCancellationRequested" | "abandon"
+	>;
+	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
+	collaborations: Partial<Collaborations.Interface>;
+	requests: Pick<TurnRequests.Interface, "queueSummary">;
+	approvals?: Pick<ToolApprovals.Interface, "responsesForTurn" | "beginExecution">;
+	model: TurnModel;
+	events: EventBus;
+	builtInTools?: BuiltInTools;
+	connectionTools?: ConnectionTools;
+}
 
 /**
- * What a segment runs on, with no approvals, built-in tools or connection
- * tools unless given, and nobody given the floor after a reply.
+ * Runs a segment of `run` on `given`, with no approvals, built-in tools or
+ * connection tools unless given, and nobody given the floor after a reply.
  */
-function dependencies(
-	given: Omit<TurnStepsDependencies, Defaulted> & Partial<Pick<TurnStepsDependencies, Defaulted>>,
-): TurnStepsDependencies {
-	return {
-		approvals: {
-			responsesForTurn: () =>
-				Effect.fail(new ToolApprovalsIncomplete({ message: "These cases ask for no approvals" })),
-			beginExecution: () =>
-				Effect.fail(new ToolExecutionRefused({ message: "These cases ask for no approvals" })),
-		},
-		chats: {
-			giveFloor: vi.fn(() =>
-				Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
+function segmentWith(given: Given) {
+	return runSegment(run, {
+		model: given.model,
+		events: given.events,
+		builtInTools: given.builtInTools ?? noBuiltInTools,
+		connectionTools: given.connectionTools ?? noConnectionTools,
+	}).pipe(
+		Effect.provide(
+			Layer.mergeAll(
+				unimplemented(TurnExecution.Service, given.execution),
+				unimplemented(TurnRepository.Service, given.turns),
+				unimplemented(ToolCallRepository.Service, given.toolCalls),
+				unimplemented(Collaborations.Service, given.collaborations),
+				unimplemented(
+					ToolApprovals.Service,
+					given.approvals ?? {
+						responsesForTurn: () =>
+							Effect.fail(
+								new ToolApprovalsIncomplete({ message: "These cases ask for no approvals" }),
+							),
+						beginExecution: () =>
+							Effect.fail(
+								new ToolExecutionRefused({ message: "These cases ask for no approvals" }),
+							),
+					},
+				),
+				unimplemented(FloorControl.Service, {
+					giveFloor: () => Effect.succeed({ kind: "nobody", why: "exchange-over" }),
+				}),
+				unimplemented(TurnRequests.Service, given.requests),
 			),
-		},
-		builtInTools: noBuiltInTools,
-		connectionTools: noConnectionTools,
-		emit: () => Effect.void,
-		...given,
-	};
+		),
+	);
 }
 
 /** Records nothing; the cases that call a tool check what it was asked to record. */
-function toolCalls(): TurnStepsDependencies["toolCalls"] {
+function toolCalls(): Given["toolCalls"] {
 	const part = (id: string, atOffset: number) => ({
 		type: "tool_call" as const,
 		id,
@@ -875,14 +860,12 @@ function toolCalls(): TurnStepsDependencies["toolCalls"] {
 			Effect.succeed(part("0199a3a0-0000-7000-8000-0000000000aa", atOffset)),
 		),
 		close: vi.fn(() => Effect.undefined),
-		recordDecision: vi.fn(() => Effect.void),
 	};
 }
 
-/** No case here collaborates, so every method dies if reached. */
-function collaborations(): TurnStepsDependencies["collaborations"] {
-	const unused = () => Effect.die(new Error("These cases do not collaborate"));
-	return { open: unused, stopWaiting: unused, answer: unused };
+/** No case here collaborates, so it has no collaborations to offer; reaching one dies. */
+function collaborations(): Given["collaborations"] {
+	return {};
 }
 
 function eventBus(): EventBus {

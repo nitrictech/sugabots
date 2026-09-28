@@ -1,5 +1,5 @@
 import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { Conversations } from "@sugabots/core/conversations/composition";
+import { Conversations } from "@sugabots/core/conversations/conversations";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";

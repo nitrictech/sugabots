@@ -1,4 +1,4 @@
-export * as Conversations from "./composition.ts";
+export * as Conversations from "./conversations.ts";
 
 import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
@@ -17,8 +17,8 @@ import { ThreadView } from "./threads/thread-view.ts";
 import { ToolApprovals } from "./tools/approvals/tool-approvals.ts";
 import { ToolCallRepository } from "./tools/calls/repository.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
-import { CollaborationRepository } from "./tools/collaborate/repository.ts";
 import { TurnExecution } from "./turns/execution.ts";
+import { FloorControl } from "./turns/floor-control.ts";
 import { TurnRepository } from "./turns/repository.ts";
 
 const services = Layer.mergeAll(
@@ -32,11 +32,13 @@ const services = Layer.mergeAll(
 	ChatView.layer,
 	ThreadView.layer,
 	RoutineView.layer,
-	// For the workflows' steps, which record a turn's progress directly.
+	FloorControl.layer,
+	// The repositories workflow steps write through: a turn's steps record its
+	// reply and tool calls, a summary's failure is recorded on the Scribe's
+	// turn, and the Facilitator brings the agent it picks into the thread.
 	TurnRepository.layer,
 	ToolCallRepository.layer,
 	ThreadRepository.layer,
-	CollaborationRepository.layer,
 );
 
 /** Everything `layer` provides. */

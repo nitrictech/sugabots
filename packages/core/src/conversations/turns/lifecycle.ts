@@ -81,7 +81,7 @@ export type TurnEvent = Data.TaggedEnum<{
 	/** A person asked the turn to stop. */
 	RequestCancel: Record<never, never>;
 	/** The workflow of a waiting turn heard the cancellation, and stops waiting. */
-	StopWaiting: Record<never, never>;
+	CancelWaiting: Record<never, never>;
 	/** The routine run the turn works for ended. */
 	RoutineEnded: Record<never, never>;
 }>;
@@ -145,7 +145,7 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 			}
 			return refused("The turn is not running");
 		},
-		StopWaiting: () =>
+		CancelWaiting: () =>
 			state.status === "waiting"
 				? next(
 						{ ...cancelled(state), cancelRequested: true },

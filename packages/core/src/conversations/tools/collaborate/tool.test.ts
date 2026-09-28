@@ -34,12 +34,18 @@ const answered = streamEvent("collaboration.updated", {
 	collaboration: { ...collaboration, status: "answered", answer: "All good." },
 });
 
-type FakeCollaborations = Pick<Collaborations.Interface, "open" | "stopWaiting">;
+type FakeCollaborations = Pick<Collaborations.Interface, "open" | "collectAnswer">;
 
+/** Collaborations answered with `answer()` once it returns one, and otherwise still waiting. */
 function fakeCollaborations(answer: () => string | undefined): FakeCollaborations {
 	return {
 		open: vi.fn(() => Effect.succeed(opened)),
-		stopWaiting: vi.fn(() => Effect.succeed(answer())),
+		collectAnswer: vi.fn(() =>
+			Effect.sync((): Collaborations.WaitOutcome => {
+				const given = answer();
+				return given === undefined ? { _tag: "MovedOn" } : { _tag: "Answered", answer: given };
+			}),
+		),
 	};
 }
 
@@ -124,7 +130,7 @@ describe("collaborate tool", () => {
 		const result = await call(tool, { to: "Helper", brief: "Look" });
 
 		expect(result).toMatchObject({ status: "pending", threadId: "t-child" });
-		expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
+		expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
 	});
 
 	it("hands a refusal back to the model rather than failing the turn", async () => {
@@ -162,7 +168,7 @@ describe("collaborate tool", () => {
 				controller.abort();
 			}
 			expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
-			expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
+			expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
 			if (alreadyAborted) {
 				expect(subscribe).not.toHaveBeenCalled();
 			} else {
@@ -170,14 +176,4 @@ describe("collaborate tool", () => {
 			}
 		},
 	);
-
-	it("reads an answer that arrives between timeout and stopping the wait", async () => {
-		const collaborations = fakeCollaborations(() => "Just finished.");
-		const { tool } = toolWith(collaborations, { wait: 1 });
-		expect(await call(tool, { to: "Helper", brief: "Look" })).toEqual({
-			status: "answered",
-			answer: "Just finished.",
-		});
-		expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
-	});
 });

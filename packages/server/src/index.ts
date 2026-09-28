@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Conversations } from "@sugabots/core/conversations/composition";
+import { Conversations } from "@sugabots/core/conversations/conversations";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";

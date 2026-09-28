@@ -1,11 +1,12 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
 import {
 	agent,
+	collaboration,
 	event,
 	message,
 	pod,
@@ -34,6 +35,7 @@ import { TurnRepository } from "../../turns/repository.ts";
 import { prepareRunnable, releaseTurn, runningTurns, waitingTurns } from "../../turns/testing.ts";
 import { CollaborationRefused, Collaborations } from "./collaborations.ts";
 import { CollaborationRepository } from "./repository.ts";
+import { collaborateTool } from "./tool.ts";
 
 /**
  * Collaboration against Postgres: what `open` writes, what policy refuses, and
@@ -44,7 +46,15 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	const collaborations: Promised<Collaborations.Interface> = onPostgres(
 		Context.get(conversations, Collaborations.Service),
 	);
-	const records = onPostgres(Context.get(conversations, CollaborationRepository.Service));
+	// `Conversations.layer` does not expose the repository, so it is built over the same events.
+	const repository = onPostgres(
+		await runOnPostgres(
+			Effect.provide(
+				CollaborationRepository.Service,
+				CollaborationRepository.layer.pipe(Layer.provide(Layer.succeedContext(conversations))),
+			),
+		),
+	);
 	const threads = onPostgres(Context.get(conversations, ThreadView.Service));
 	const chats = onPostgres(Context.get(conversations, Chats.Service));
 	const chatView = onPostgres(Context.get(conversations, ChatView.Service));
@@ -302,14 +312,16 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 	it("records the answer without a resume turn while the asker is still waiting", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
-		expect(await records.answerOf(opened.collaboration.id)).toBeUndefined();
 
 		await collaborations.answer({
 			threadId: opened.collaboration.threadId,
 			answer: "Nothing alarming.",
 		});
 
-		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe("Nothing alarming.");
+		expect(await collaborations.collectAnswer(opened.collaboration.id)).toEqual({
+			_tag: "Answered",
+			answer: "Nothing alarming.",
+		});
 		expect(
 			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
 		).toHaveLength(0);
@@ -393,7 +405,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 	it("queues a turn for the asker when the answer arrives after it stopped waiting", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
-		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBeUndefined();
+		expect(await collaborations.collectAnswer(opened.collaboration.id)).toEqual({
+			_tag: "MovedOn",
+		});
 
 		await collaborations.answer({
 			threadId: opened.collaboration.threadId,
@@ -405,5 +419,36 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		).toMatchObject([{ agentId: host.id, triggerMessageId: reply.messageId }]);
 		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
+	});
+	it("tells the asking model a collaboration failed while it waited, rather than that an answer is coming", async () => {
+		const tool = collaborateTool({
+			from: {
+				threadId: rootThreadId,
+				agentId: host.id,
+				turnId: reply.turnId,
+				messageId: reply.messageId,
+			},
+			collaborations: Context.get(conversations, Collaborations.Service),
+			bus: createEventBus({ store: memoryEventStore() }),
+			run: runOnPostgres,
+			replyLength: () => 0,
+			// The routine run it works for ends as soon as it is opened.
+			noteCollaboration: () => Effect.promise(() => repository.failUnder([rootThreadId])),
+			signal: new AbortController().signal,
+			wait: "50 millis",
+		});
+
+		const result = await tool.execute?.({ to: helper.name, brief: "Look" }, {
+			toolCallId: "call",
+			messages: [],
+		} as unknown as Parameters<NonNullable<typeof tool.execute>>[1]);
+
+		expect(result).toMatchObject({ status: "failed" });
+		const [made] = await onDatabase((db) =>
+			db.select().from(collaboration).where(eq(collaboration.parentThreadId, rootThreadId)),
+		);
+		expect(made?.status).toBe("failed");
+		if (!made) throw new Error("no collaboration");
+		expect(await collaborations.collectAnswer(made.id)).toEqual({ _tag: "Failed" });
 	});
 });

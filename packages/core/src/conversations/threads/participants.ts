@@ -258,15 +258,8 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 )`;
 
 /**
- * The agents a thread may mention or collaborate with, as a condition on
- * `agent`: its pod's crew, whether or not they have spoken yet.
- *
- * Wider than the participants on purpose. Somebody writing `@aquaman` — a
- * person composing — may name an agent who has not joined yet, and reading
- * that name against who has already spoken would leave every first mention
- * unrecognised.
- *
- * Every agent placed in a pod is crew: `agent_placement_check` keeps system
- * agents, a Scribe or a facilitator, out of pods, so they are never listed.
+ * crewOf is the condition on `agent` that selects the crew of the pod `podId`:
+ * every agent placed in it. `agent_placement_check` keeps system agents, a
+ * Scribe or a Facilitator, out of pods, so they are never selected.
  */
 export const crewOf = (podId: SQLWrapper | string) => eq(agent.podId, podId);

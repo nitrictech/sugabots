@@ -67,7 +67,7 @@ const noSuchPod = new NotFound({ message: "No such pod" });
 
 const chatErrors = {
 	ChatPlacementRejected: BadRequest,
-	ChatMessageIdConflict: Conflict,
+	MessageIdConflict: Conflict,
 	ChatAgentHasNoModel: Conflict,
 	InvalidChatCursor: BadRequest,
 };

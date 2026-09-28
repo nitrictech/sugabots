@@ -367,7 +367,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			segment,
 			decide: (request, decided) =>
 				Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
-			stopWaiting: (request) => Effect.promise(() => turns.stopWaiting(request)),
+			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
 		});

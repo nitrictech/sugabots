@@ -60,7 +60,8 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		prepare: (request) =>
 			operation(
-				"prepare", // One transaction, so the system-agent thread and its turn are created
+				"prepare",
+				// One transaction, so the system-agent thread and its turn are created
 				// together or not at all.
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<

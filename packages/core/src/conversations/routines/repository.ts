@@ -16,6 +16,8 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import type { Ended } from "../turns/lifecycle.ts";
+import { inScope, type Scope } from "./routine.ts";
+import { RoutineRuns } from "./runs.ts";
 
 /**
  * The only writer of `routine` and `routine_execution`: what a crew agent
@@ -37,8 +39,9 @@ export interface Interface {
 		definition: Definition,
 	) => Effect.Effect<schema.RoutineRow | undefined, RoutineNameTaken>;
 	/**
-	 * Removes a routine, pausing it and cancelling the runs still queued.
-	 * `false` when there is no such routine.
+	 * Removes a routine, pausing it and cancelling the runs still queued, and
+	 * announces each of those runs ended. `false` when there is no such
+	 * routine.
 	 */
 	readonly remove: (scope: Scope) => Effect.Effect<boolean>;
 	/** Replaces a webhook routine's secret. `false` when there is no such webhook routine. */
@@ -49,7 +52,7 @@ export interface Interface {
 	 */
 	readonly lockNextDue: (now: Date) => Effect.Effect<schema.RoutineRow | undefined>;
 	readonly scheduleNext: (routineId: string, next: Date) => Effect.Effect<void>;
-	/** Records a queued run whose thread is open in the agent's chat `chatId`, and announces it. */
+	/** Records a queued run whose thread is open in the agent's chat, and announces it. */
 	readonly accept: (
 		run: Pick<
 			schema.RoutineExecutionRow,
@@ -63,7 +66,7 @@ export interface Interface {
 			| "routineName"
 			| "instructions"
 			| "acceptedAt"
-		> & { chatId: string },
+		>,
 	) => Effect.Effect<schema.RoutineExecutionRow>;
 	/**
 	 * Marks a queued run running. Returns the run while it is queued or
@@ -91,9 +94,10 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineRepository");
 	const { emit } = yield* ConversationEvents.Service;
+	const runs = yield* RoutineRuns.Service;
 
-	/** Tells the workspace that a run's thread changed because the run ended. */
-	const announceEnded = (run: schema.RoutineExecutionRow) =>
+	/** The chat a run's thread is in, which lists the run. */
+	const chatOf = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
 			const [root] = yield* query((db) =>
 				db
@@ -103,10 +107,16 @@ export const make = Effect.gen(function* () {
 					.limit(1),
 			);
 			if (!root?.chatId) return yield* Effect.die(new Error("Routine thread has no Chat"));
+			return root.chatId;
+		});
+
+	/** Tells the workspace that a run's thread changed because the run ended. */
+	const announceEnded = (run: schema.RoutineExecutionRow) =>
+		Effect.gen(function* () {
 			yield* emit([
 				ConversationEvent.RoutineExecutionSettled({
 					workspaceId: run.workspaceId,
-					chatId: root.chatId,
+					chatId: yield* chatOf(run),
 					threadId: run.threadId,
 				}),
 			]);
@@ -148,7 +158,7 @@ export const make = Effect.gen(function* () {
 								.returning({ id: routine.id }),
 						);
 						if (!removed) return false;
-						yield* query((db) =>
+						const cancelled = yield* query((db) =>
 							db
 								.update(routineExecution)
 								.set({ state: "cancelled", finishedAt: now })
@@ -157,8 +167,13 @@ export const make = Effect.gen(function* () {
 										eq(routineExecution.routineId, removed.id),
 										eq(routineExecution.state, "queued"),
 									),
-								),
+								)
+								.returning(),
 						);
+						for (const run of cancelled) {
+							yield* announceEnded(run);
+							yield* runs.settled({ routineId: run.routineId, executionId: run.id });
+						}
 						return true;
 					}),
 				),
@@ -211,7 +226,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.asVoid),
 			),
 
-		accept: ({ chatId, ...run }) =>
+		accept: (run) =>
 			operation(
 				"accept",
 				transaction(
@@ -222,7 +237,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.RoutineExecutionAccepted({
 								workspaceId: accepted.workspaceId,
-								chatId,
+								chatId: yield* chatOf(accepted),
 								threadId: accepted.threadId,
 							}),
 						]);
@@ -284,7 +299,8 @@ export const make = Effect.gen(function* () {
 							db
 								.update(routineExecution)
 								.set({
-									...settled,
+									state: settled.state,
+									error: settled.state === "failed" ? settled.error : null,
 									finishedAt,
 									pendingTerminalState: null,
 									pendingTerminalError: null,
@@ -334,13 +350,6 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** A routine on an agent in a workspace. */
-export interface Scope {
-	readonly workspaceId: string;
-	readonly agentId: string;
-	readonly routineId: string;
-}
-
 /** What a routine is: its name, what it tells the agent, and what starts it. */
 export type Definition = Pick<
 	schema.RoutineRow,
@@ -355,19 +364,10 @@ export type Definition = Pick<
 >;
 
 /** How a run's work ended. */
-export type Settled = { state: "completed" | "failed" | "cancelled"; error: UserMessage | null };
+export type Settled = Ended | { readonly state: "completed" };
 
 export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") implements UserFacing {
 	get userMessage() {
 		return UserMessage.of`A Routine with that name already exists`;
 	}
 }
-
-/** The routine `scope` names, unless it has been removed. */
-export const inScope = (scope: Scope) =>
-	and(
-		eq(routine.id, scope.routineId),
-		eq(routine.workspaceId, scope.workspaceId),
-		eq(routine.agentId, scope.agentId),
-		isNull(routine.deletedAt),
-	);

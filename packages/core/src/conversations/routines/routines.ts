@@ -19,8 +19,8 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { RoutineRepository } from "./repository.ts";
+import { inScope, type Scope, toRoutine } from "./routine.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
-import { toRoutine } from "./routine-view.ts";
 import { RoutineRuns } from "./runs.ts";
 import {
 	type InvalidRoutineSchedule,
@@ -50,16 +50,16 @@ export interface Interface {
 	>;
 	/** Changes a routine. Switching it to a webhook returns its new secret. */
 	readonly update: (
-		scope: RoutineRepository.Scope,
+		scope: Scope,
 		input: RoutineUpdate,
 	) => Effect.Effect<
 		Defined,
 		RoutineNotFound | RoutineRepository.RoutineNameTaken | InvalidRoutineSchedule
 	>;
-	readonly remove: (scope: RoutineRepository.Scope) => Effect.Effect<void, RoutineNotFound>;
+	readonly remove: (scope: Scope) => Effect.Effect<void, RoutineNotFound>;
 	/** A new secret for a webhook routine, replacing the old one. */
 	readonly rotateSecret: (
-		scope: RoutineRepository.Scope,
+		scope: Scope,
 	) => Effect.Effect<string, RoutineNotFound | RoutineTriggerRejected>;
 	/**
 	 * Accepts a run of the routine: opens its thread, posts the trigger, and
@@ -67,7 +67,7 @@ export interface Interface {
 	 * run again, as a duplicate.
 	 */
 	readonly acceptTrigger: (
-		input: RoutineRepository.Scope & {
+		input: Scope & {
 			trigger: RoutineExecutionTrigger;
 			triggerIdentity: string | null;
 		},
@@ -106,7 +106,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Routines");
-	const records = yield* RoutineRepository.Service;
+	const repository = yield* RoutineRepository.Service;
 	const threads = yield* ThreadRepository.Service;
 	const requests = yield* TurnRequests.Service;
 	const runs = yield* RoutineRuns.Service;
@@ -123,7 +123,7 @@ export const make = Effect.gen(function* () {
 							agent,
 							and(eq(agent.id, routine.agentId), eq(agent.workspaceId, routine.workspaceId)),
 						)
-						.where(RoutineRepository.inScope(input))
+						.where(inScope(input))
 						.limit(1),
 				);
 				// A routine runs a crew agent, which is one in a pod.
@@ -162,7 +162,7 @@ export const make = Effect.gen(function* () {
 					chatId: chat.id,
 					title: executionTitle(definition.routine.name, acceptedAt),
 				});
-				const execution = yield* records.accept({
+				const execution = yield* repository.accept({
 					routineId: input.routineId,
 					workspaceId: input.workspaceId,
 					agentId: input.agentId,
@@ -173,7 +173,6 @@ export const make = Effect.gen(function* () {
 					routineName: definition.routine.name,
 					instructions: definition.routine.instructions,
 					acceptedAt,
-					chatId: chat.id,
 				});
 				yield* threads.postRoutineTrigger({
 					threadId: runThread.id,
@@ -211,7 +210,7 @@ export const make = Effect.gen(function* () {
 									.limit(1),
 							);
 							if (!owning?.podId) return yield* new RoutineRequiresCrewAgent();
-							const row = yield* records.create({
+							const row = yield* repository.create({
 								...owner,
 								name: input.name,
 								instructions: input.instructions,
@@ -234,7 +233,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const [current] = yield* query((db) =>
-							db.select().from(routine).where(RoutineRepository.inScope(scope)).limit(1),
+							db.select().from(routine).where(inScope(scope)).limit(1),
 						);
 						if (!current) return yield* new RoutineNotFound();
 						const trigger = input.trigger ?? toRoutine(current).trigger;
@@ -250,7 +249,7 @@ export const make = Effect.gen(function* () {
 						const switchedToWebhook =
 							input.trigger?.kind === "webhook" && current.triggerKind !== "webhook";
 						const secret = switchedToWebhook ? generateSecret() : null;
-						const row = yield* records.update(scope, {
+						const row = yield* repository.update(scope, {
 							name: input.name ?? current.name,
 							instructions: input.instructions ?? current.instructions,
 							state,
@@ -277,7 +276,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						yield* lockTriggers(scope.routineId);
-						if (!(yield* records.remove(scope))) return yield* new RoutineNotFound();
+						if (!(yield* repository.remove(scope))) return yield* new RoutineNotFound();
 					}),
 				),
 			),
@@ -289,9 +288,9 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const secret = generateSecret();
 						yield* lockTriggers(scope.routineId);
-						if (yield* records.replaceWebhookSecret(scope, hashSecret(secret))) return secret;
+						if (yield* repository.replaceWebhookSecret(scope, hashSecret(secret))) return secret;
 						const [exists] = yield* query((db) =>
-							db.select({ id: routine.id }).from(routine).where(RoutineRepository.inScope(scope)),
+							db.select({ id: routine.id }).from(routine).where(inScope(scope)),
 						);
 						if (!exists) return yield* new RoutineNotFound();
 						return yield* new RoutineTriggerRejected();
@@ -329,7 +328,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const at = now ?? (yield* DateTime.nowAsDate);
-						const due = yield* records.lockNextDue(at);
+						const due = yield* repository.lockNextDue(at);
 						if (!due) return undefined;
 						if (!due.cronExpression || !due.cronTimezone) {
 							return yield* Effect.die(new Error("Cron Routine has incomplete schedule data"));
@@ -347,7 +346,7 @@ export const make = Effect.gen(function* () {
 							triggerIdentity: scheduledAt,
 							trigger: { kind: "cron", scheduledAt, acceptedAt: at.toISOString() },
 						});
-						yield* records.scheduleNext(due.id, occurrence.next);
+						yield* repository.scheduleNext(due.id, occurrence.next);
 						return accepted;
 					}),
 				),
@@ -358,7 +357,7 @@ export const make = Effect.gen(function* () {
 				"startRun",
 				transaction(
 					Effect.gen(function* () {
-						const execution = yield* records.start(run.executionId);
+						const execution = yield* repository.start(run.executionId);
 						if (!execution) return;
 						const [triggerMessage] = yield* query((db) =>
 							db

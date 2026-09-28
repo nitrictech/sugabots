@@ -2,10 +2,11 @@ export * as ThreadRepository from "./repository.ts";
 
 import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { chat, message, thread, threadParticipant } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { personAuthor, toMessage } from "./participants.ts";
@@ -30,14 +31,19 @@ export interface Interface {
 		hostAgentId: string;
 		initiatorUserId: string | null;
 	}) => Effect.Effect<schema.ChatRow>;
-	/** Posts a person's message, making them a participant, and announces it. */
+	/**
+	 * Posts a person's message, making them a participant, and announces it.
+	 * Posting a message again with the same `id` returns the one already
+	 * posted, unchanged and unannounced; an `id` already used by a different
+	 * message fails.
+	 */
 	readonly post: (input: {
 		/** The id the person's client chose, which makes sending it again safe to detect. */
 		id: string;
 		threadId: string;
 		author: { id: string; name: string; image: string | null };
 		content: string;
-	}) => Effect.Effect<schema.MessageRow>;
+	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict>;
 	/** Brings agents into the thread, announcing the ones who were not there yet. */
 	readonly addAgents: (threadId: string, agentIds: readonly string[]) => Effect.Effect<void>;
 	/**
@@ -156,6 +162,26 @@ export const make = Effect.gen(function* () {
 				"post",
 				transaction(
 					Effect.gen(function* () {
+						// Two sends of one message wait here for each other, so the second
+						// finds the first rather than failing on its primary key.
+						yield* query((db) =>
+							db.execute(
+								sql`select pg_advisory_xact_lock(hashtextextended(${`message:${input.id}`}, 0))`,
+							),
+						);
+						const [existing] = yield* query((db) =>
+							db.select().from(message).where(eq(message.id, input.id)).limit(1),
+						);
+						if (existing) {
+							if (
+								existing.threadId !== input.threadId ||
+								existing.authorUserId !== input.author.id ||
+								existing.content !== input.content
+							) {
+								return yield* new MessageIdConflict();
+							}
+							return { _tag: "AlreadyPosted", message: existing } as const;
+						}
 						const created = yield* query((db) =>
 							db
 								.insert(message)
@@ -191,7 +217,7 @@ export const make = Effect.gen(function* () {
 								message: toMessage(created, author),
 							}),
 						]);
-						return created;
+						return { _tag: "Posted", message: created } as const;
 					}),
 				),
 			),
@@ -384,3 +410,24 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
+
+/** A message posted now, and announced. */
+export interface Posted {
+	readonly _tag: "Posted";
+	readonly message: schema.MessageRow;
+}
+
+/** A message posted before with the same id and content, returned as it was. */
+export interface AlreadyPosted {
+	readonly _tag: "AlreadyPosted";
+	readonly message: schema.MessageRow;
+}
+
+export class MessageIdConflict extends Data.TaggedError("MessageIdConflict") implements UserFacing {
+	override get message() {
+		return "A message id was reused for a different message";
+	}
+	get userMessage() {
+		return UserMessage.of`That message ID is already used by a different message`;
+	}
+}

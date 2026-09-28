@@ -1,6 +1,6 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
-import { Database } from "../../database/database.ts";
+import type { Database } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "../turns/answer.ts";
 import {
@@ -27,27 +27,17 @@ const firstSummarySchema = Schema.Struct({
 	),
 });
 
-export interface SummaryExecution {
-	summaries: Pick<Summaries.Interface, "prepare" | "complete">;
-	/** Where a failed summary is recorded, on the Scribe's turn. */
-	turns: Pick<TurnRepository.Interface, "failScribeTurn">;
-	model: TurnModel;
-}
-
 /** The summary workflow's step, which its activity reaches through `SummarySteps`. */
-export const stepsLayer = (options: Pick<SummaryExecution, "model">) =>
+export const stepsLayer = (options: { model: TurnModel }) =>
 	Layer.effect(
 		SummarySteps,
 		Effect.gen(function* () {
-			const database = yield* Database;
-			const execution: SummaryExecution = {
-				...options,
-				summaries: yield* Summaries.Service,
-				turns: yield* TurnRepository.Service,
-			};
+			const services = yield* Effect.context<
+				Summaries.Service | TurnRepository.Service | Database
+			>();
 			return SummarySteps.of({
 				summarise: (request) =>
-					summarise(request, execution).pipe(Effect.provideService(Database, database)),
+					summarise(request, options.model).pipe(Effect.provideContext(services)),
 			});
 		}),
 	);
@@ -60,11 +50,13 @@ export const stepsLayer = (options: Pick<SummaryExecution, "model">) =>
  */
 export const summarise = (
 	request: SummaryRequest,
-	execution: SummaryExecution,
-): Effect.Effect<void, never, Database> =>
-	Effect.flatMap(execution.summaries.prepare(request), (preparation) =>
-		preparation._tag === "Prepared" ? generateSummary(preparation, execution) : Effect.void,
-	);
+	model: TurnModel,
+): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
+	Effect.gen(function* () {
+		const summaries = yield* Summaries.Service;
+		const preparation = yield* summaries.prepare(request);
+		if (preparation._tag === "Prepared") yield* generateSummary(preparation, model);
+	});
 
 /**
  * Generates the summary and records how it went. As in a turn's segment, only
@@ -72,10 +64,12 @@ export const summarise = (
  */
 const generateSummary = (
 	prepared: PreparedSummary,
-	{ summaries, turns, model }: SummaryExecution,
-): Effect.Effect<void, never, Database> =>
+	model: TurnModel,
+): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
+			const summaries = yield* Summaries.Service;
+			const turns = yield* TurnRepository.Service;
 			const generated = yield* Effect.exit(restore(generate(prepared, model)));
 			if (Exit.isSuccess(generated)) {
 				const [result, accounting] = generated.value;

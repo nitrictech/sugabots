@@ -207,11 +207,14 @@ function settledAs(
 	ending: Ended | undefined,
 	lastTurn: { status: string; error: UserMessage | null } | undefined,
 ): RoutineRepository.Settled {
-	if (ending?.state === "failed") return { state: "failed", error: ending.error };
-	if (ending?.state === "cancelled") return { state: "cancelled", error: null };
-	if (lastTurn?.status === "failed") return { state: "failed", error: lastTurn.error };
-	if (lastTurn?.status === "cancelled") return { state: "cancelled", error: null };
-	return { state: "completed", error: null };
+	if (ending) return ending;
+	if (lastTurn?.status === "failed") {
+		// `turn.error` is nullable in the schema; a failure recorded without one
+		// reads as having stopped unexpectedly.
+		return { state: "failed", error: lastTurn.error ?? RUN_STOPPED_UNEXPECTEDLY };
+	}
+	if (lastTurn?.status === "cancelled") return { state: "cancelled" };
+	return { state: "completed" };
 }
 
 /** The run, if it is still running. */

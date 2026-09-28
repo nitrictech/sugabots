@@ -17,7 +17,7 @@ const readThreadUpdate = Schema.decodeUnknownOption(threadUpdateEventSchema);
 export interface CollaborateToolOptions {
 	/** The turn the tool runs in: its thread, its agent, its turn and its reply. */
 	from: { threadId: string; agentId: string; turnId: string; messageId: string };
-	collaborations: Pick<Collaborations.Interface, "open" | "stopWaiting">;
+	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** For noticing the collaboration being answered. */
 	bus: Pick<EventBus, "subscribe">;
 	/** Runs a service's Effect from the tool's promise. */
@@ -36,6 +36,7 @@ export interface CollaborateToolOptions {
 export type CollaborateResult =
 	| { status: "answered"; answer: string }
 	| { status: "pending"; threadId: string; note: string }
+	| { status: "failed"; threadId: string; note: string }
 	| { status: "refused"; reason: string };
 
 /**
@@ -43,8 +44,9 @@ export type CollaborateResult =
  *
  * Opening the collaboration is one transaction. Waiting for the answer is
  * not: it watches the asking thread's channel for the collaboration to be
- * answered, up to `wait`, then takes the answer if there is one, or records
- * that the asking agent moved on so the answer resumes it later.
+ * answered, up to `wait`, then takes the answer if there is one, reports a
+ * collaboration that failed, or records that the asking agent moved on so the
+ * answer resumes it later.
  */
 export function collaborateTool({
 	from,
@@ -81,9 +83,16 @@ export function collaborateTool({
 			const { collaboration, collaborator } = opened.opened;
 
 			await waitUntilSettled(bus, from.threadId, collaboration.id, wait, signal);
-			const answer = await run(collaborations.stopWaiting(collaboration.id));
-			if (answer !== undefined) {
-				return { status: "answered", answer };
+			const outcome = await run(collaborations.collectAnswer(collaboration.id));
+			if (outcome._tag === "Answered") {
+				return { status: "answered", answer: outcome.answer };
+			}
+			if (outcome._tag === "Failed") {
+				return {
+					status: "failed",
+					threadId: collaboration.threadId,
+					note: `${collaborator.name} will not answer: the collaboration was stopped. Carry on without their answer.`,
+				};
 			}
 			return {
 				status: "pending",

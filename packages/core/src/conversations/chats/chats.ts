@@ -1,23 +1,17 @@
 export * as Chats from "./chats.ts";
 
 import type { Chat, Message } from "@sugabots/contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { agent, chat, message, pod } from "../../database/schema.ts";
+import { agent, chat, pod } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import {
-	decideFloor,
-	type FloorDecision,
-	type FloorMessage,
-	loadFloorScope,
-} from "../turns/floor.ts";
-import { TurnRequests } from "../turns/requests.ts";
+import { FloorControl } from "../turns/floor-control.ts";
 
 /**
  * Talking to a crew agent: a person opens a chat with an agent in a pod and
@@ -45,13 +39,10 @@ export interface Interface {
 		author: { id: string; name: string; image: string | null };
 		messageId: string;
 		content: string;
-	}) => Effect.Effect<Message | undefined, ChatMessageIdConflict | ChatAgentHasNoModel>;
-	/**
-	 * Decides who speaks after a committed message and asks for them (ADR
-	 * 004), bringing any newly addressed crew agent into the thread. Runs in
-	 * the caller's transaction, so it commits with the message.
-	 */
-	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<FloorDecision>;
+	}) => Effect.Effect<
+		Message | undefined,
+		ThreadRepository.MessageIdConflict | ChatAgentHasNoModel
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Chats") {}
@@ -59,39 +50,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Chats");
 	const threads = yield* ThreadRepository.Service;
-	const requests = yield* TurnRequests.Service;
-
-	const giveFloor = (committed: FloorMessage) =>
-		transaction(
-			Effect.gen(function* () {
-				const scope = yield* query((db) => loadFloorScope(db, committed));
-				const decision = decideFloor({
-					...scope,
-					content: committed.content,
-					author: committed.author,
-				});
-				if (decision.kind === "facilitate") {
-					yield* requests.queueFacilitation({
-						threadId: committed.threadId,
-						triggerMessageId: committed.id,
-					});
-				}
-				if (decision.kind !== "turns") return decision;
-				yield* threads.addAgents(
-					committed.threadId,
-					decision.agents.map(({ agentId }) => agentId),
-				);
-				for (const { agentId, reason } of decision.agents) {
-					yield* requests.queueTurn({
-						threadId: committed.threadId,
-						agentId,
-						triggerMessageId: committed.id,
-						reason,
-					});
-				}
-				return decision;
-			}),
-		);
+	const floor = yield* FloorControl.Service;
 
 	return Service.of({
 		open: (input) =>
@@ -124,51 +83,34 @@ export const make = Effect.gen(function* () {
 							userName: input.author.name,
 							userImage: input.author.image,
 						});
-						yield* query((db) =>
-							db.execute(
-								sql`select pg_advisory_xact_lock(hashtextextended(${`chat-message:${input.messageId}`}, 0))`,
-							),
-						);
-						const [existing] = yield* query((db) =>
-							db.select().from(message).where(eq(message.id, input.messageId)).limit(1),
-						);
-						if (existing) {
-							if (
-								existing.threadId !== visible.mainThreadId ||
-								existing.authorUserId !== input.author.id ||
-								existing.content !== input.content
-							) {
-								return yield* new ChatMessageIdConflict();
-							}
-							return toMessage(existing, author);
-						}
-						if ((yield* hostModelOf(visible.hostAgentId)) === null) {
-							return yield* new ChatAgentHasNoModel();
-						}
 						const posted = yield* threads.post({
 							id: input.messageId,
 							threadId: visible.mainThreadId,
 							author: input.author,
 							content: input.content,
 						});
-						yield* giveFloor({
-							id: posted.id,
+						if (posted._tag === "AlreadyPosted") return toMessage(posted.message, author);
+						// Checked once the message is known to be new, so sending it again
+						// still returns it; refusing here rolls the post back.
+						if ((yield* hostModelOf(visible.hostAgentId)) === null) {
+							return yield* new ChatAgentHasNoModel();
+						}
+						yield* floor.giveFloor({
+							id: posted.message.id,
 							threadId: visible.mainThreadId,
-							content: posted.content,
+							content: posted.message.content,
 							author: { kind: "person" },
 						});
-						return toMessage(posted, author);
+						return toMessage(posted.message, author);
 					}),
 				),
 			),
-
-		giveFloor: (committed) => operation("giveFloor", giveFloor(committed)),
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
+export const layer = layerNoDeps.pipe(Layer.provide([ThreadRepository.layer, FloorControl.layer]));
 
 export class ChatPlacementRejected
 	extends Data.TaggedError("ChatPlacementRejected")
@@ -179,18 +121,9 @@ export class ChatPlacementRejected
 	}
 }
 
-export class ChatMessageIdConflict
-	extends Data.TaggedError("ChatMessageIdConflict")
-	implements UserFacing
-{
-	get userMessage() {
-		return UserMessage.of`That message ID is already used by a different message`;
-	}
-}
-
 /**
- * The chat's agent has no model, so nothing could answer. Refused before the
- * message is saved rather than kept with a turn that will never run.
+ * The chat's agent has no model, so nothing could answer. The message is not
+ * kept, rather than kept with a turn that will never run.
  */
 export class ChatAgentHasNoModel
 	extends Data.TaggedError("ChatAgentHasNoModel")

@@ -1,10 +1,11 @@
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { unimplemented } from "../../testing.ts";
 import { ModelRequestFailed, type TurnModel } from "../turns/model.ts";
-import type { PreparedSummary } from "./summaries.ts";
-import type { SummaryExecution } from "./summary.steps.ts";
+import { TurnRepository } from "../turns/repository.ts";
+import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
 
@@ -46,7 +47,7 @@ describe("summarise", () => {
 		});
 		try {
 			const execution = runWithServices(
-				summarise(request, { summaries, turns, model: { stream } }),
+				summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
 			);
 			await vi.advanceTimersByTimeAsync(120_000);
 			await execution;
@@ -75,7 +76,9 @@ describe("summarise", () => {
 				})),
 		};
 
-		await runWithServices(summarise(request, { summaries, turns, model }));
+		await runWithServices(
+			summarise(request, model).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
@@ -97,7 +100,9 @@ describe("summarise", () => {
 			})),
 		);
 
-		await runWithServices(summarise(request, { summaries, turns, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		// Three asks, then the thread is left without a summary rather than the
 		// job being burned on one bad answer.
@@ -125,7 +130,9 @@ describe("summarise", () => {
 				})),
 			);
 
-		await runWithServices(summarise(request, { summaries, turns, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		expect(stream).toHaveBeenCalledTimes(2);
 		expect(turns.failScribeTurn).not.toHaveBeenCalled();
@@ -144,16 +151,12 @@ describe("summarise", () => {
 
 		await runWithServices(
 			summarise(request, {
-				summaries,
-				turns,
-				model: {
-					stream: () =>
-						Effect.sync(() => ({
-							text: chunks(fenced),
-							accounting: Effect.succeed({ usage: {} }),
-						})),
-				},
-			}),
+				stream: () =>
+					Effect.sync(() => ({
+						text: chunks(fenced),
+						accounting: Effect.succeed({ usage: {} }),
+					})),
+			}).pipe(Effect.provide(services(summaries, turns))),
 		);
 
 		expect(turns.failScribeTurn).not.toHaveBeenCalled();
@@ -172,7 +175,9 @@ describe("summarise", () => {
 			),
 		);
 
-		await runWithServices(summarise(request, { summaries, turns, model: { stream } }));
+		await runWithServices(
+			summarise(request, { stream }).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
@@ -193,7 +198,9 @@ describe("summarise", () => {
 			}),
 		);
 
-		await runWithServices(summarise(request, { summaries, turns, model: unusedModel() }));
+		await runWithServices(
+			summarise(request, unusedModel()).pipe(Effect.provide(services(summaries, turns))),
+		);
 
 		expect(summaries.complete).not.toHaveBeenCalled();
 		expect(turns.failScribeTurn).not.toHaveBeenCalled();
@@ -204,20 +211,33 @@ describe("summarise", () => {
 		vi.mocked(summaries.prepare).mockReturnValueOnce(Effect.die(new Error("database unavailable")));
 
 		await expect(
-			runWithServices(summarise(request, { summaries, turns, model: unusedModel() })),
+			runWithServices(
+				summarise(request, unusedModel()).pipe(Effect.provide(services(summaries, turns))),
+			),
 		).rejects.toThrow("database unavailable");
 	});
 });
 
 /** Prepares `prepared` and records nothing; the cases check what was asked to be recorded. */
-function fakes(): Pick<SummaryExecution, "summaries" | "turns"> {
+function fakes() {
 	return {
 		summaries: {
-			prepare: vi.fn(() => Effect.succeed(prepared)),
-			complete: vi.fn(() => Effect.void),
+			prepare: vi.fn<Summaries.Interface["prepare"]>(() => Effect.succeed(prepared)),
+			complete: vi.fn<Summaries.Interface["complete"]>(() => Effect.void),
 		},
-		turns: { failScribeTurn: vi.fn(() => Effect.void) },
+		turns: { failScribeTurn: vi.fn<TurnRepository.Interface["failScribeTurn"]>(() => Effect.void) },
 	};
+}
+
+/** The services a summary runs on, doing only what `summaries` and `turns` do. */
+function services(
+	summaries: Partial<Summaries.Interface>,
+	turns: Partial<TurnRepository.Interface>,
+) {
+	return Layer.mergeAll(
+		unimplemented(Summaries.Service, summaries),
+		unimplemented(TurnRepository.Service, turns),
+	);
 }
 
 function unusedModel(): TurnModel {

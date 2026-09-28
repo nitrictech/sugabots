@@ -8,17 +8,15 @@ import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { Chats } from "../chats/chats.ts";
-import { ConversationEvents } from "../conversation-events.ts";
 import { conversationsForTests } from "../testing.ts";
-import { ToolApprovals } from "../tools/approvals/tool-approvals.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
-import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { noConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { ModelRequestFailed, type TurnModel } from "./model.ts";
 import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
+import { TurnRequests } from "./requests.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { runSegment } from "./turn.steps.ts";
 
@@ -191,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
 		delivered = [];
 
-		await turns.stopWaiting(prepared.run.request);
+		await turns.cancelWaiting(prepared.run.request);
 
 		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
 		expect(deliveredEvents()).toContainEqual(
@@ -202,22 +200,22 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	describe("a segment", () => {
 		const events = createEventBus({ store: memoryEventStore() });
+		// The real services, with the Scribe asked for nothing after a reply.
+		const requests = Context.get(conversations, TurnRequests.Service);
 		const segmentWith = (model: TurnModel) =>
 			runOnPostgres(
 				runSegment(prepared.run, {
-					execution: Context.get(conversations, TurnExecution.Service),
-					turns: Context.get(conversations, TurnRepository.Service),
-					toolCalls: Context.get(conversations, ToolCallRepository.Service),
 					model,
-					collaborations: Context.get(conversations, Collaborations.Service),
-					approvals: Context.get(conversations, ToolApprovals.Service),
-					chats: Context.get(conversations, Chats.Service),
 					builtInTools: noBuiltInTools,
 					connectionTools: noConnectionTools,
 					events,
-					emit: Context.get(conversations, ConversationEvents.Service).emit,
-					requests: { queueSummary: vi.fn(() => Effect.void) },
-				}),
+				}).pipe(
+					Effect.provideService(
+						TurnRequests.Service,
+						TurnRequests.Service.of({ ...requests, queueSummary: vi.fn(() => Effect.void) }),
+					),
+					Effect.provideContext(conversations),
+				),
 			);
 
 		it("prepares, streams and completes the reply, and tells the thread", async () => {

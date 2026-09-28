@@ -10,6 +10,7 @@ import {
 	serviceOperations,
 	type Transaction,
 	transaction,
+	writtenRow,
 } from "../../database/database.ts";
 import {
 	message,
@@ -102,7 +103,7 @@ export interface Interface {
 	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
 	readonly isCancellationRequested: (turnId: string) => Effect.Effect<boolean>;
 	/** Records a turn waiting for approvals as cancelled. Does nothing once it stopped waiting. */
-	readonly stopWaiting: (request: {
+	readonly cancelWaiting: (request: {
 		agentId: string;
 		triggerMessageId: string;
 	}) => Effect.Effect<void>;
@@ -261,7 +262,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const startedAt = yield* DateTime.nowAsDate;
-			const [created] = yield* query((db) =>
+			const created = yield* query((db) =>
 				db
 					.insert(turn)
 					.values({
@@ -276,8 +277,7 @@ export const make = Effect.gen(function* () {
 						startedAt,
 					})
 					.returning({ id: turn.id }),
-			);
-			if (!created) return yield* Effect.die(new Error("Turn insert returned no row"));
+			).pipe(Effect.flatMap(writtenRow("turn")));
 			return created.id;
 		});
 
@@ -337,7 +337,7 @@ export const make = Effect.gen(function* () {
 						if (!acceptsWork) return yield* endForEndedRoutine(existing);
 						if (!existing) {
 							const turnId = yield* insertTurn(request);
-							const [created] = yield* query((db) =>
+							const created = yield* query((db) =>
 								db
 									.insert(message)
 									.values({
@@ -350,9 +350,7 @@ export const make = Effect.gen(function* () {
 										turnId,
 									})
 									.returning(),
-							);
-							if (!created)
-								return yield* Effect.die(new Error("Reply message insert returned no row"));
+							).pipe(Effect.flatMap(writtenRow("message")));
 							const reply = toMessage(created, request.author);
 							yield* announceStart(request, turnId, reply);
 							return { _tag: "Opened", turnId, reply, checkpoint: undefined };
@@ -589,13 +587,13 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		stopWaiting: (request) =>
+		cancelWaiting: (request) =>
 			operation(
-				"stopWaiting",
+				"cancelWaiting",
 				transaction(
 					Effect.gen(function* () {
 						yield* lockRoutineSettlementOfTurn(onTrigger(request));
-						const locked = yield* lockAndTransition(onTrigger(request), TurnEvent.StopWaiting());
+						const locked = yield* lockAndTransition(onTrigger(request), TurnEvent.CancelWaiting());
 						if (locked?.decided._tag !== "Next") return;
 						yield* write(locked.id, locked.decided.state);
 						if (locked.decided.followUp?._tag === "End") {

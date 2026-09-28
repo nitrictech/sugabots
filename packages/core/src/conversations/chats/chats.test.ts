@@ -1,5 +1,5 @@
-import { type ChatMessageItem, handleFromName } from "@sugabots/contracts";
-import { eq, like } from "drizzle-orm";
+import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/contracts";
+import { and, eq, like } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
@@ -8,6 +8,7 @@ import {
 	agent,
 	chat,
 	collaboration,
+	event,
 	laneRequest,
 	message,
 	pod,
@@ -228,20 +229,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("retries the same message without creating another message or turn", async () => {
 		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
-		const messageId = crypto.randomUUID();
-		const first = await chats.post({
+		const send = {
 			chatId: current.id,
 			author: { id: userId, name: "Chat member", image: null },
-			messageId,
+			messageId: crypto.randomUUID(),
 			content: "A simple question",
-		});
-		const retried = await chats.post({
-			chatId: current.id,
-			author: { id: userId, name: "Chat member", image: null },
-			messageId,
-			content: "A simple question",
-		});
+		};
+		const messageId = send.messageId;
+		const [first, retried] = await Promise.all([chats.post(send), chats.post(send)]);
 		expect(retried).toEqual(first);
+		await expect(chats.post({ ...send, content: "Another question" })).rejects.toMatchObject({
+			_tag: "MessageIdConflict",
+		});
 		expect(
 			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
 		).toHaveLength(1);
@@ -254,6 +253,40 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.where(like(laneRequest.laneKey, `turn:${current.mainThreadId}:%`)),
 			),
 		).toHaveLength(0);
+	});
+
+	it("announces a person's message before the agent it brings into the thread", async () => {
+		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		// The chat's agent has not joined its thread yet, so the message brings it in.
+		await onDatabase((db) =>
+			db
+				.delete(threadParticipant)
+				.where(
+					and(
+						eq(threadParticipant.threadId, current.mainThreadId),
+						eq(threadParticipant.agentId, agentId),
+					),
+				),
+		);
+
+		await chats.post({
+			chatId: current.id,
+			author: { id: userId, name: "Chat member", image: null },
+			messageId: crypto.randomUUID(),
+			content: "Are you there?",
+		});
+
+		const announced = await onDatabase((db) =>
+			db
+				.select({ type: event.type })
+				.from(event)
+				.where(eq(event.channel, threadChannel(current.mainThreadId)))
+				.orderBy(event.seq),
+		);
+		expect(announced.slice(0, 2).map(({ type }) => type)).toEqual([
+			"message.created",
+			"thread.changed",
+		]);
 	});
 
 	it("includes Routine runs in the main Chat timeline", async () => {
