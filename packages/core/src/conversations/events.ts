@@ -1,6 +1,7 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
+import type { TurnReason } from "./sql.ts";
 import type { Turns } from "./turns/turns.ts";
 
 /**
@@ -32,8 +33,18 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly podId: string;
 		readonly turnId: string;
+		readonly agentId: string;
+		/** Why the agent was asked to speak. */
+		readonly reason: TurnReason | undefined;
 		readonly messageId: string;
 		readonly content: string;
+		/** The prompt's size, and the window it was read with. */
+		readonly contextTokens: number | undefined;
+		readonly contextCapacity: number;
+		/** Where the compaction the turn read from kept history from, if it read one. */
+		readonly readKeptFrom: string | null;
+		/** The reply answered a brief, so it goes back to the agent that asked. */
+		readonly answeredCollaboration: boolean;
 	};
 	/** The turn parked until people decide the tool approvals it asked for. */
 	TurnSuspended: {

@@ -4,7 +4,7 @@
  * `compaction.steps.ts`.
  */
 import { Activities } from "@sugabots/workflow/activities";
-import { Context, type Effect, Schema } from "effect";
+import { Context, Effect, Schema } from "effect";
 import { Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 
@@ -31,6 +31,20 @@ export const Compaction = Workflow.make("compaction", {
 /** One compaction per thread at a time; a newer request replaces one still waiting. */
 export const compactionLane = (request: Pick<CompactionRequest, "threadId">) =>
 	`compaction:${request.threadId}`;
+
+/**
+ * Asks for the thread to be compacted up to `sourceMessageId`. A request
+ * still waiting for the thread is pointed at this newer message instead.
+ */
+export const admitCompaction = (lanes: Lanes.Interface, request: CompactionRequest) =>
+	lanes
+		.admit({
+			key: compactionLane(request),
+			workflow: Compaction,
+			payload: request,
+			whenBusy: "replace",
+		})
+		.pipe(Effect.asVoid);
 
 export class CompactionSteps extends Context.Service<
 	CompactionSteps,

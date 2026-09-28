@@ -4,7 +4,7 @@
  * `summary.steps.ts`.
  */
 import { Activities } from "@sugabots/workflow/activities";
-import { Context, type Effect, Schema } from "effect";
+import { Context, Effect, Schema } from "effect";
 import { Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 
@@ -25,6 +25,15 @@ export const Summary = Workflow.make("summary", {
 /** One summary per thread at a time; a newer request replaces one still waiting. */
 export const summaryLane = (request: Pick<SummaryRequest, "threadId">) =>
 	`summary:${request.threadId}`;
+
+/**
+ * Asks for a summary covering the thread up to `sourceMessageId`. A request
+ * still waiting for the thread is pointed at this newer message instead.
+ */
+export const admitSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
+	lanes
+		.admit({ key: summaryLane(request), workflow: Summary, payload: request, whenBusy: "replace" })
+		.pipe(Effect.asVoid);
 
 export class SummarySteps extends Context.Service<
 	SummarySteps,

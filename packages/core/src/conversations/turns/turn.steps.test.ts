@@ -2,7 +2,7 @@ import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { afterCommit, effectRunner, type RunEffect } from "../../database/database.ts";
+import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
@@ -10,8 +10,6 @@ import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { compactionLineTokens } from "../compaction/window.ts";
-import { FloorControl } from "../floor/floor-control.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -22,7 +20,6 @@ import {
 } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 import { type NotRunnable, TurnRepository } from "./repository.ts";
-import { TurnRequests } from "./requests.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { runSegment } from "./turn.steps.ts";
 
@@ -101,7 +98,6 @@ const reply = (content: string) => ({ content, collaborations: [], toolCalls: []
 describe("runSegment", () => {
 	it("persists a streamed reply and publishes only ephemeral deltas", async () => {
 		const { execution, turns } = fakes();
-		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
 		const model = Models.fromStream(() =>
 			Effect.sync(() => streamed(chunks("Release", " checked"), { contextTokens: 10 })),
@@ -115,84 +111,48 @@ describe("runSegment", () => {
 				events,
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary },
 			}),
 		);
 
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
 			contextTokens: 10,
 			contextCapacity: 128_000,
+			readKeptFrom: null,
+			answeredCollaboration: false,
 		});
 		expect(turns.fail).not.toHaveBeenCalled();
-		expect(queueSummary).toHaveBeenCalledWith({
-			threadId: prepared.context.thread.id,
-			agentId: prepared.context.agent.id,
-			sourceMessageId: prepared.responseMessage.id,
-		});
 		expect(eventTypes(events)).toEqual(["message.delta", "message.delta"]);
 	});
 
-	it.each([
-		// A 128K model compacts at 70% of its own window, not of the 256K ceiling.
-		{ contextTokens: compactionLineTokens(128_000) - 1, queued: false },
-		{ contextTokens: compactionLineTokens(128_000), queued: true },
-	])(
-		"queues a compaction only once the prompt reaches the compaction line ($contextTokens tokens)",
-		async ({ contextTokens, queued }) => {
-			const { execution, turns } = fakes();
-			const queueCompaction = vi.fn(noCompaction);
-			await runWithServices(
-				segmentWith({
-					execution,
-					turns,
-					model: Models.fromStream(() =>
-						Effect.sync(() => streamed(chunks("Done"), { contextTokens })),
-					),
-					events: eventBus(),
-					collaborations: collaborations(),
-					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary, queueCompaction },
-				}),
-			);
-
-			if (queued) {
-				expect(queueCompaction).toHaveBeenCalledWith({
-					threadId: prepared.context.thread.id,
-					agentId: prepared.context.agent.id,
-					sourceMessageId: prepared.responseMessage.id,
-					readKeptFrom: null,
-				});
-			} else {
-				expect(queueCompaction).not.toHaveBeenCalled();
-			}
-		},
-	);
-
-	it("asks for the thread's summary in the transaction that completes the reply", async () => {
+	it("completes the reply with where the compaction it read kept history from", async () => {
 		const { execution, turns } = fakes();
-		const happened: string[] = [];
-		vi.mocked(turns.complete).mockReturnValue(
-			afterCommit(Effect.sync(() => happened.push("reply completed"))),
+		const keptFrom = new Date("2026-09-10T03:00:00.000Z");
+		vi.mocked(execution.prepare).mockReturnValueOnce(
+			Effect.succeed({
+				...prepared,
+				context: {
+					...prepared.context,
+					compaction: { summary: "Earlier work.", historyStartsAt: keptFrom, keptFrom },
+				},
+			}),
 		);
 
 		await runWithServices(
 			segmentWith({
 				execution,
 				turns,
-				model: Models.fromStream(() =>
-					Effect.succeed(streamed(chunks("Done"), { contextTokens: 0 })),
-				),
+				model: scriptedModel("Done"),
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: {
-					queueSummary: () => Effect.sync(() => happened.push("summary asked for")),
-					queueCompaction: noCompaction,
-				},
 			}),
 		);
 
-		expect(happened).toEqual(["summary asked for", "reply completed"]);
+		expect(turns.complete).toHaveBeenCalledWith(
+			replyTurn,
+			reply("Done"),
+			expect.objectContaining({ readKeptFrom: keptFrom.toISOString() }),
+		);
 	});
 
 	it("records a built-in tool's call where the reply made it", async () => {
@@ -246,7 +206,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: calls,
-				requests: { queueSummary: noSummary },
 				builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
 			}).pipe(Effect.provideService(toolContext, "turn-context")),
 		);
@@ -270,7 +229,7 @@ describe("runSegment", () => {
 				collaborations: [],
 				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
 			},
-			{ contextCapacity: 128_000 },
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 	});
 
@@ -308,7 +267,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: calls,
-				requests: { queueSummary: noSummary },
 				connectionTools: {
 					forPod: () =>
 						Effect.succeed({
@@ -347,7 +305,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ contextCapacity: 128_000 },
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});
@@ -421,7 +379,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 				approvals: {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
@@ -464,7 +421,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 				connectionTools: {
 					forPod: () =>
 						Effect.succeed({
@@ -512,7 +468,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 				builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
 			}),
 		);
@@ -533,7 +488,6 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
 				}),
 			),
 		).rejects.toThrow("database unavailable");
@@ -554,7 +508,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 			}),
 		);
 
@@ -578,7 +531,6 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 			}),
 		);
 
@@ -588,25 +540,6 @@ describe("runSegment", () => {
 			reply(""),
 			"The model provider could not answer.",
 		);
-	});
-
-	it("lets a failure to ask for the summary escape, so the completion rolls back with it", async () => {
-		const { execution, turns } = fakes();
-		const queueSummary = () => Effect.die(new Error("database unavailable"));
-		const segment = runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model: scriptedModel("Done"),
-				events: eventBus(),
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-				requests: { queueSummary },
-			}),
-		);
-
-		await expect(segment).rejects.toThrow("database unavailable");
-		expect(turns.fail).not.toHaveBeenCalled();
 	});
 
 	it("keeps a turn successful when an ephemeral delta cannot be published", async () => {
@@ -621,7 +554,6 @@ describe("runSegment", () => {
 				events,
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 			}),
 		);
 
@@ -646,7 +578,6 @@ describe("runSegment", () => {
 				events,
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				requests: { queueSummary: noSummary },
 			}),
 		);
 
@@ -671,7 +602,6 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
 				}),
 			);
 
@@ -699,7 +629,6 @@ describe("runSegment", () => {
 					events,
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
 				}),
 			);
 
@@ -731,7 +660,6 @@ describe("runSegment", () => {
 					events: liveEventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					requests: { queueSummary: noSummary },
 				}),
 			);
 
@@ -772,9 +700,6 @@ interface Given {
 	>;
 	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	collaborations: Partial<Collaborations.Interface>;
-	/** A compaction is only asked for past the compaction line, so a case below it need not give one. */
-	requests: Pick<TurnRequests.Interface, "queueSummary"> &
-		Partial<Pick<TurnRequests.Interface, "queueCompaction">>;
 	approvals?: ApprovedToolCalls.Interface;
 	model: Models.Interface;
 	events: EventBus.Interface;
@@ -784,7 +709,7 @@ interface Given {
 
 /**
  * Runs a segment of `run` on `given`, with no approvals, built-in tools or
- * connection tools unless given, and nobody given the floor after a reply.
+ * connection tools unless given.
  */
 function segmentWith(given: Given) {
 	return runSegment(run).pipe(
@@ -811,10 +736,6 @@ function segmentWith(given: Given) {
 							),
 					},
 				),
-				unimplemented(FloorControl.Service, {
-					giveFloor: () => Effect.succeed({ kind: "nobody", why: "exchange-over" }),
-				}),
-				unimplemented(TurnRequests.Service, given.requests),
 				Ids.layer,
 			),
 		),
@@ -854,7 +775,6 @@ function segmentAskingApproval(
 		events: eventBus(),
 		collaborations: collaborations(),
 		toolCalls: toolCalls(),
-		requests: { queueSummary: noSummary },
 		connectionTools: {
 			forPod: () =>
 				Effect.succeed({
@@ -939,9 +859,6 @@ function requestCancellation(events: EventBus.Interface) {
 function eventTypes(events: EventBus.Interface): string[] {
 	return vi.mocked(events.publish).mock.calls.map(([, event]) => event.type);
 }
-
-const noSummary = () => Effect.void;
-const noCompaction = () => Effect.void;
 
 async function* delayedChunks(): AsyncIterable<string> {
 	yield "short";

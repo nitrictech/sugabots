@@ -19,7 +19,6 @@ import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
-import { TurnRepository } from "./turns/repository.ts";
 import { Turns } from "./turns/turns.ts";
 
 /**
@@ -40,10 +39,7 @@ const services = Layer.mergeAll(
 	ThreadView.layer,
 	RoutineView.layer,
 	FloorControl.layer,
-	// The repositories workflow steps write through: a summary's failure is
-	// recorded on the Scribe's turn, as is a compaction's, and the Facilitator
-	// brings the agent it picks into the thread.
-	TurnRepository.layer,
+	// The Facilitator's workflow step brings the agent it picks into the thread.
 	ThreadRepository.layer,
 ).pipe(Layer.provideMerge(Turns.layer));
 
@@ -53,8 +49,10 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
 /**
  * The conversation services, with `ConversationEvents` handing what they
  * emit to its handlers, in order: the thread feed tells watching clients what
- * happened, routine settlement ends the runs that work finished, and
- * collaborations whose collaborator stopped without answering fail.
+ * happened, routine settlement ends the runs that work finished,
+ * collaborations whose collaborator stopped without answering fail, the floor
+ * passes after each completed reply, and the reply asks for its thread's
+ * summary and, past the compaction line, its compaction once it commits.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
@@ -70,6 +68,9 @@ export const layer = Layer.effectContext(
 			ThreadFeed.handler(outbox),
 			Context.get(built, RoutineSettlement.Service).handler,
 			Context.get(built, Collaborations.Service).handler,
+			Context.get(built, FloorControl.Service).handler,
+			Context.get(built, Summaries.Service).handler,
+			Context.get(built, Compactions.Service).handler,
 		]);
 		return Context.add(built, ConversationEvents.Service, events);
 	}),

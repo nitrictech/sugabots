@@ -15,6 +15,7 @@ import {
 import { lanesForTests } from "../testing.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
+import { TurnRepository } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { admitTurn, Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
 
@@ -22,7 +23,6 @@ import { admitTurn, Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
 export { modelPrompt } from "./context.ts";
 export { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 export { type TurnCheckpoint, TurnRepository } from "./repository.ts";
-export { TurnRequests } from "./requests.ts";
 export { TurnSignals } from "./signals.ts";
 export { ToolCallRepository } from "./tool-calls/repository.ts";
 export { Turn, turnLane } from "./turn.workflow.ts";
@@ -33,6 +33,7 @@ export { Turn, turnLane } from "./turn.workflow.ts";
  */
 export const turnInternalsForTests = Layer.mergeAll(
 	TurnExecution.layer,
+	TurnRepository.layer,
 	ToolCallRepository.layer,
 	ApprovedToolCalls.layer,
 );

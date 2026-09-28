@@ -3,26 +3,29 @@ export * as Summaries from "./summaries.ts";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
+	afterCommit,
 	type Database,
 	type Executor,
 	query,
 	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { threadSummary } from "../../database/schema.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
 } from "../../workspaces/agents/system-agents.ts";
+import type { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
 	loadSystemAgentScope,
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import { TurnRepository } from "../turns/repository.ts";
 import { SummaryRepository } from "./repository.ts";
-import type { SummaryRequest } from "./summary.workflow.ts";
+import { admitSummary, type SummaryRequest } from "./summary.workflow.ts";
 
 /**
  * Thread summaries, written by the `summarise` system agent.
@@ -35,35 +38,34 @@ import type { SummaryRequest } from "./summary.workflow.ts";
  */
 export interface Interface {
 	/**
-	 * Opens the Scribe's turn and loads the transcript, or says why there is
-	 * nothing to do. A turn that opening ended stays ended, so skipping is a
-	 * result rather than a failure that would roll the ending back.
+	 * Opens the Scribe's thread and loads the transcript, or says why there is
+	 * nothing to do.
 	 */
 	readonly prepare: (request: SummaryRequest) => Effect.Effect<PreparedSummary | SummarySkipped>;
-	/**
-	 * Records the summary, and titles the thread on its first, completing the
-	 * Scribe's turn. A failed one is recorded on the turn (`TurnRepository.failSystemAgentTurn`).
-	 */
+	/** Records the summary, and titles the thread on its first. */
 	readonly complete: (
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
-		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
+	/**
+	 * Asks for a summary after each completed reply, once it commits. A request
+	 * still waiting for the thread is pointed at the newer reply instead. One
+	 * that can't be asked for is logged and lost: the next reply asks again.
+	 */
+	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Summaries") {}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Summaries");
-	const turns = yield* TurnRepository.Service;
+	const lanes = yield* Lanes.Service;
 	const threads = yield* ThreadRepository.Service;
 	const summaries = yield* SummaryRepository.Service;
 	return Service.of({
 		prepare: (request) =>
 			operation(
 				"prepare",
-				// One transaction, so the system-agent thread and its turn are created
-				// together or not at all.
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<
 						PreparedSummary | SummarySkipped,
@@ -111,18 +113,10 @@ export const make = Effect.gen(function* () {
 							systemAgentKey: SUMMARISE_SYSTEM_AGENT,
 							title: summariesTitle(scope.threadTitle),
 						});
-						const opened = yield* turns.openSystemAgentTurn({
-							threadId: systemAgentThreadId,
-							agentId: summariser.id,
-							triggerMessageId: request.sourceMessageId,
-							model: summariser.model,
-						});
-						if (opened._tag === "NotRunnable") return skipped(opened.reason);
-
 						return {
 							_tag: "Prepared",
 							request,
-							turnId: opened.turnId,
+							scribe: { threadId: systemAgentThreadId, agentId: summariser.id },
 							threadId: scope.threadId,
 							workspaceId: scope.workspaceId,
 							podId: scope.podId,
@@ -141,7 +135,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, result, contextTokens) =>
+		complete: (prepared, result) =>
 			operation(
 				"complete",
 				transaction(
@@ -163,9 +157,24 @@ export const make = Effect.gen(function* () {
 							content: result.content,
 							sourceMessageId: prepared.sourceMessageId,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
+			),
+
+		handler: (events) =>
+			Effect.forEach(
+				events,
+				(event) =>
+					event._tag === "TurnCompleted"
+						? afterCommit(
+								admitSummary(lanes, {
+									threadId: event.threadId,
+									agentId: event.agentId,
+									sourceMessageId: event.messageId,
+								}),
+							)
+						: Effect.void,
+				{ discard: true },
 			),
 	});
 });
@@ -173,7 +182,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([TurnRepository.layer, ThreadRepository.layer, SummaryRepository.layer]),
+	Layer.provide([ThreadRepository.layer, SummaryRepository.layer]),
 );
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
@@ -187,11 +196,12 @@ interface SummarySkipped {
 	readonly reason: string;
 }
 
-/** A requested summary with its turn opened and its input loaded. */
+/** A requested summary with its input loaded. */
 export interface PreparedSummary {
 	readonly _tag: "Prepared";
 	request: SummaryRequest;
-	turnId: string;
+	/** The Scribe, and the thread its turns are recorded in. */
+	scribe: { threadId: string; agentId: string };
 	threadId: string;
 	workspaceId: string;
 	podId: string;

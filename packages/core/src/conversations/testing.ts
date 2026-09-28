@@ -7,7 +7,7 @@ import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
 import { Conversations } from "./conversations.ts";
 import { RoutineRuns } from "./routines/runs.ts";
-import { TurnRequests, TurnSignals, turnInternalsForTests } from "./turns/testing.ts";
+import { TurnSignals, turnInternalsForTests } from "./turns/testing.ts";
 import { Turns } from "./turns/turns.ts";
 import { ConversationWorkflows } from "./workflows.ts";
 
@@ -48,7 +48,6 @@ export const conversationsForTests = (
 	signals?: TurnSignals.Interface,
 ) => {
 	const composedFrom = Layer.mergeAll(
-		TurnRequests.layer,
 		signals ? Layer.succeed(TurnSignals.Service, signals) : Turns.signalsLayer,
 		RoutineRuns.layer,
 	).pipe(

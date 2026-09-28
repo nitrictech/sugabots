@@ -17,7 +17,6 @@ import { loadContextWindow } from "../compaction/context-window.ts";
 import { estimatedTokens, historyLimitTokens, newestWithinLimit } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import type { FloorMessage } from "../floor/floor.ts";
 import { messageTextWithPlacedParts } from "../threads/message-text.ts";
 import {
 	agentColumns,
@@ -30,7 +29,6 @@ import {
 import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import {
 	type NotRunnable,
-	type ReplyDraft,
 	type ReplyTurn,
 	type TurnCheckpoint,
 	TurnRepository,
@@ -249,21 +247,9 @@ export function replyTurnOf(prepared: PreparedTurn): ReplyTurn {
 		threadId: prepared.context.thread.id,
 		workspaceId: prepared.context.thread.workspaceId,
 		podId: prepared.context.agent.podId,
+		agentId: prepared.context.agent.id,
+		reason: prepared.run.request.reason,
 		messageId: prepared.responseMessage.id,
-	};
-}
-
-/** The completed reply as the floor reads it, to decide who speaks next. */
-export function replyFloorMessage(prepared: PreparedTurn, reply: ReplyDraft): FloorMessage {
-	return {
-		id: prepared.responseMessage.id,
-		threadId: prepared.context.thread.id,
-		content: reply.content,
-		author: {
-			kind: "agent",
-			agentId: prepared.context.agent.id,
-			spokeBecause: prepared.run.request.reason,
-		},
 	};
 }
 

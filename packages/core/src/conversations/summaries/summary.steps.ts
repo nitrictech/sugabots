@@ -1,9 +1,8 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { Cause, Data, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
+import { Duration, Effect, Layer, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { TurnRepository } from "../turns/repository.ts";
+import { Turns } from "../turns/turns.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
@@ -26,7 +25,7 @@ export const summaryStepsLayer = Layer.effect(
 	SummarySteps,
 	Effect.gen(function* () {
 		const model = yield* Models.Service;
-		const services = yield* Effect.context<Summaries.Service | TurnRepository.Service | Database>();
+		const services = yield* Effect.context<Summaries.Service | Turns.Service | Database>();
 		return SummarySteps.of({
 			summarise: (request) => summarise(request, model).pipe(Effect.provideContext(services)),
 		});
@@ -34,55 +33,40 @@ export const summaryStepsLayer = Layer.effect(
 );
 
 /**
- * Prepares, generates and records one summary. Nothing to do (the thread is
- * gone, or already summarised this far) is not an error. A failed generation
- * is recorded on the Scribe's turn and not retried: the thread's next turn
- * asks for a summary again.
+ * Prepares, generates and records one summary, as the Scribe's turn. Nothing
+ * to do (the thread is gone, or already summarised this far) is not an
+ * error. A failed generation is recorded on the turn and not retried: the
+ * thread's next reply asks for a summary again.
  */
 export const summarise = (
 	request: SummaryRequest,
 	model: Models.Interface,
-): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
+): Effect.Effect<void, never, Summaries.Service | Turns.Service | Database> =>
 	Effect.gen(function* () {
 		const summaries = yield* Summaries.Service;
-		const preparation = yield* summaries.prepare(request);
-		if (preparation._tag === "Prepared") yield* generateSummary(preparation, model);
+		const turns = yield* Turns.Service;
+		const prepared = yield* summaries.prepare(request);
+		if (prepared._tag === "Skipped") return;
+		yield* turns.recordSystemTurn(
+			{
+				...prepared.scribe,
+				triggerMessageId: prepared.sourceMessageId,
+				model: prepared.model,
+				name: "summary",
+			},
+			(turnId) =>
+				Effect.gen(function* () {
+					const [result, contextTokens] = yield* generate(prepared, turnId, model);
+					yield* summaries.complete(prepared, result);
+					return { value: undefined, contextTokens };
+				}),
+		);
 	});
-
-/**
- * Generates the summary and records how it went. As in a turn's segment, only
- * the generation may be interrupted; the outcome is always written.
- */
-const generateSummary = (
-	prepared: PreparedSummary,
-	model: Models.Interface,
-): Effect.Effect<void, never, Summaries.Service | TurnRepository.Service | Database> =>
-	Effect.uninterruptibleMask((restore) =>
-		Effect.gen(function* () {
-			const summaries = yield* Summaries.Service;
-			const turns = yield* TurnRepository.Service;
-			const generated = yield* Effect.exit(restore(generate(prepared, model)));
-			if (Exit.isSuccess(generated)) {
-				const [result, contextTokens] = generated.value;
-				return yield* summaries.complete(prepared, result, contextTokens);
-			}
-			const cause = generated.cause;
-			const expected = Cause.findErrorOption(cause);
-			const failure = Option.isSome(expected)
-				? expected.value
-				: Cause.hasInterruptsOnly(cause)
-					? new SummaryInterrupted()
-					: new SummaryStoppedUnexpectedly();
-			yield* failure instanceof SummaryStoppedUnexpectedly
-				? Effect.logError("A summary died", cause)
-				: Effect.logWarning(`A summary failed: ${failure.message}`);
-			yield* turns.failSystemAgentTurn(prepared.turnId, failure.userMessage);
-		}),
-	);
 
 /** The model's text, parsed into a summary (and a title, the first time), within the time limit. */
 const generate = (
 	prepared: PreparedSummary,
+	turnId: string,
 	model: Models.Interface,
 ): Effect.Effect<
 	readonly [{ content: string; title?: string }, contextTokens: number | undefined],
@@ -96,7 +80,7 @@ const generate = (
 				purpose: "summary",
 				podId: prepared.podId,
 				threadId: prepared.threadId,
-				turnId: prepared.turnId,
+				turnId,
 			},
 			maxCharacters: MAX_GENERATED_CHARACTERS,
 			timeout: SUMMARY_TIMEOUT,
@@ -159,26 +143,3 @@ function stripFence(text: string): string {
 
 /** Why a summary failed. */
 type SummaryFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
-
-/** The process summarising stopped before the summary finished. */
-class SummaryInterrupted extends Data.TaggedError("SummaryInterrupted") implements UserFacing {
-	override get message() {
-		return "Summary interrupted by its process stopping";
-	}
-	get userMessage() {
-		return UserMessage.of`The summary was interrupted.`;
-	}
-}
-
-/** A defect ended the summary rather than a failure it expects; the defect itself is logged. */
-class SummaryStoppedUnexpectedly
-	extends Data.TaggedError("SummaryStoppedUnexpectedly")
-	implements UserFacing
-{
-	override get message() {
-		return "Summary ended by a defect";
-	}
-	get userMessage() {
-		return UserMessage.of`The summary stopped unexpectedly.`;
-	}
-}

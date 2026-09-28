@@ -593,7 +593,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await turns.complete(
 			replyTurnOf(prepared),
 			{ content: "Done.", collaborations: [], toolCalls: [] },
-			{},
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 
 		const types = delivered.map(({ event }) => event.type);

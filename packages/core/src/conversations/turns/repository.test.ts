@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -17,7 +17,6 @@ import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
-import { TurnRequests } from "./requests.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { runSegment } from "./turn.steps.ts";
@@ -239,8 +238,6 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	describe("a segment", () => {
 		const events = EventBus.inProcess({ store: EventStore.inMemory() });
-		// The real services, with the Scribe asked for nothing after a reply.
-		const requests = Context.get(conversations, TurnRequests.Service);
 		const segmentWith = (model: Models.Interface) =>
 			runOnPostgres(
 				runSegment(prepared.run).pipe(
@@ -250,10 +247,6 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 							Layer.succeed(EventBus.Service, events),
 							Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
 							Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
-							Layer.succeed(
-								TurnRequests.Service,
-								TurnRequests.Service.of({ ...requests, queueSummary: vi.fn(() => Effect.void) }),
-							),
 						),
 					),
 					Effect.provideContext(conversations),

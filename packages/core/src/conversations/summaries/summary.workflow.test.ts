@@ -8,10 +8,16 @@ import { unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
-import { TurnRepository, TurnRequests } from "../turns/testing.ts";
+import { Turns } from "../turns/turns.ts";
 import { Summaries } from "./summaries.ts";
 import { summaryStepsLayer } from "./summary.steps.ts";
-import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
+import {
+	admitSummary,
+	Summary,
+	type SummaryRequest,
+	summaryLane,
+	summaryWorkflow,
+} from "./summary.workflow.ts";
 
 const prepare = vi.fn(() =>
 	Effect.succeed({ _tag: "Skipped" as const, reason: "already summarised" }),
@@ -23,7 +29,7 @@ const runtime = ManagedRuntime.make(
 			summaryStepsLayer.pipe(Layer.provide(Layer.succeed(Models.Service, unusedModel()))),
 		),
 		Layer.provide(unimplemented(Summaries.Service, { prepare })),
-		Layer.provide(unimplemented(TurnRepository.Service)),
+		Layer.provide(unimplemented(Turns.Service)),
 		Layer.provideMerge(Lanes.layerFor([Summary])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
@@ -41,7 +47,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the summary workflow", () => {
 		};
 
 		await runtime.runPromise(
-			Effect.flatMap(TurnRequests.make, (requests) => requests.queueSummary(request)),
+			Effect.gen(function* () {
+				const lanes = yield* Lanes.Service;
+				yield* admitSummary(lanes, request);
+			}),
 		);
 
 		const idle = await runtime.runPromise(

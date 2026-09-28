@@ -3,25 +3,33 @@ export * as Compactions from "./compactions.ts";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
+	afterCommit,
 	type Database,
 	type Executor,
 	query,
 	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { threadCompaction } from "../../database/schema.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
+import type { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
 	loadSystemAgentScope,
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import { TurnRepository } from "../turns/repository.ts";
-import type { CompactionRequest } from "./compaction.workflow.ts";
+import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
 import { loadContextWindow } from "./context-window.ts";
 import { CompactionRepository } from "./repository.ts";
-import { estimatedTokens, MAX_CONTEXT_WINDOW_TOKENS, planCompaction } from "./window.ts";
+import {
+	estimatedTokens,
+	MAX_CONTEXT_WINDOW_TOKENS,
+	needsCompaction,
+	planCompaction,
+} from "./window.ts";
 
 /**
  * Thread compaction, done by the `compact` system agent, Compaction.
@@ -37,7 +45,7 @@ import { estimatedTokens, MAX_CONTEXT_WINDOW_TOKENS, planCompaction } from "./wi
  */
 export interface Interface {
 	/**
-	 * Opens the Compaction agent's turn and loads what it summarises, or says
+	 * Opens the Compaction agent's thread and loads what it summarises, or says
 	 * why there is nothing to do: the thread is gone, neither the bot nor the
 	 * Compaction agent has a model, the turn that asked was measured before
 	 * the latest compaction, or there is nothing new to summarise.
@@ -45,31 +53,27 @@ export interface Interface {
 	readonly prepare: (
 		request: CompactionRequest,
 	) => Effect.Effect<PreparedCompaction | CompactionSkipped>;
+	/** Records the summary as what the thread's bots read from now on. */
+	readonly complete: (prepared: PreparedCompaction, summary: string) => Effect.Effect<void>;
 	/**
-	 * Records the summary as what the thread's bots read from now on,
-	 * completing the Compaction agent's turn. A failed one is recorded on the
-	 * turn (`TurnRepository.failSystemAgentTurn`).
+	 * Asks for a compaction once a completed reply's prompt reaches the
+	 * compaction line, after it commits. One that can't be asked for is logged
+	 * and lost: the next reply past the line asks again.
 	 */
-	readonly complete: (
-		prepared: PreparedCompaction,
-		summary: string,
-		contextTokens: number | undefined,
-	) => Effect.Effect<void>;
+	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Compactions") {}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Compactions");
-	const turns = yield* TurnRepository.Service;
+	const lanes = yield* Lanes.Service;
 	const threads = yield* ThreadRepository.Service;
 	const compactions = yield* CompactionRepository.Service;
 	return Service.of({
 		prepare: (request) =>
 			operation(
 				"prepare",
-				// One transaction, so the Compaction agent's thread and its turn are
-				// created together or not at all.
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<
 						PreparedCompaction | CompactionSkipped,
@@ -128,18 +132,10 @@ export const make = Effect.gen(function* () {
 							systemAgentKey: COMPACT_SYSTEM_AGENT,
 							title: `Compactions of ${scope.threadTitle}`,
 						});
-						const opened = yield* turns.openSystemAgentTurn({
-							threadId: systemAgentThreadId,
-							agentId: compactor.id,
-							triggerMessageId: request.sourceMessageId,
-							model,
-						});
-						if (opened._tag === "NotRunnable") return skipped(opened.reason);
-
 						return {
 							_tag: "Prepared",
 							request,
-							turnId: opened.turnId,
+							compactor: { threadId: systemAgentThreadId, agentId: compactor.id },
 							threadId: scope.threadId,
 							workspaceId: scope.workspaceId,
 							podId: scope.podId,
@@ -161,7 +157,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, summary, contextTokens) =>
+		complete: (prepared, summary) =>
 			operation(
 				"complete",
 				transaction(
@@ -174,9 +170,26 @@ export const make = Effect.gen(function* () {
 							historyStartsAt: prepared.historyStartsAt,
 							keptFrom: prepared.keptFrom,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
+			),
+
+		handler: (events) =>
+			Effect.forEach(
+				events,
+				(event) =>
+					event._tag === "TurnCompleted" &&
+					needsCompaction(event.contextTokens, event.contextCapacity)
+						? afterCommit(
+								admitCompaction(lanes, {
+									threadId: event.threadId,
+									agentId: event.agentId,
+									sourceMessageId: event.messageId,
+									readKeptFrom: event.readKeptFrom,
+								}),
+							)
+						: Effect.void,
+				{ discard: true },
 			),
 	});
 });
@@ -184,7 +197,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([TurnRepository.layer, ThreadRepository.layer, CompactionRepository.layer]),
+	Layer.provide([ThreadRepository.layer, CompactionRepository.layer]),
 );
 
 /**
@@ -201,7 +214,8 @@ export interface CompactionSkipped {
 export interface PreparedCompaction {
 	readonly _tag: "Prepared";
 	request: CompactionRequest;
-	turnId: string;
+	/** The Compaction agent, and the thread its turns are recorded in. */
+	compactor: { threadId: string; agentId: string };
 	threadId: string;
 	workspaceId: string;
 	podId: string;
