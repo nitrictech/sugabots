@@ -8,10 +8,11 @@ import {
 	type Executor,
 	query,
 	serviceOperations,
+	type Transaction,
 	transaction,
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
-import type { UserMessage } from "../../user-message.ts";
+import { UserMessage } from "../../user-message.ts";
 import { loadContextWindow } from "../compaction/context-window.ts";
 import { estimatedTokens, historyLimitTokens, newestWithinLimit } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -26,7 +27,7 @@ import {
 } from "../threads/participants.ts";
 import { messageTextWithPlacedParts } from "./context.ts";
 import type { FloorMessage } from "./floor.ts";
-import { TURN_CANCELLED } from "./lifecycle.ts";
+import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import {
 	type NotRunnable,
 	type ReplyDraft,
@@ -49,11 +50,13 @@ import { Turn, type TurnRequest } from "./turn.workflow.ts";
 export interface Interface {
 	/**
 	 * Opens the turn for this run and loads what the model needs, or says why
-	 * it may not run: its thread or agent is gone, its routine run takes no
-	 * more work, or newer work made it pointless. A turn this ends stays ended,
-	 * so the refusal is a result rather than a failure that would roll the
-	 * ending back. A refusal that ends no turn announces `TurnAbandoned`, as
-	 * cancelled.
+	 * it may not run: its thread or agent is gone, its agent has no model, its
+	 * routine run takes no more work, or newer work made it pointless. A turn
+	 * this ends stays ended, so the refusal is a result rather than a failure
+	 * that would roll the ending back. A refusal that ends no turn announces
+	 * `TurnAbandoned`: as failed, telling people why, when they asked for a
+	 * reply that cannot come, and otherwise as cancelled. Every refusal's
+	 * reason is logged.
 	 */
 	readonly prepare: (run: TurnRun) => Effect.Effect<PreparedTurn | NotRunnable>;
 }
@@ -67,40 +70,71 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* TurnRepository.Service;
 
-	/** Ends the turn the run holds, if any, because the run may not go on. */
-	const refuseRun = (run: TurnRun, reason: string, userMessage: UserMessage) =>
-		Effect.map(
-			turns.abandon(run.executionId, { status: "cancelled", userMessage }),
-			(ended): NotRunnable => ({ _tag: "NotRunnable", reason, ended }),
-		);
+	/**
+	 * Ends the turn the run holds, if any, because the run may not go on, as
+	 * `ending` says. With no turn to end, people are told of a failure as a
+	 * notice in the thread, so nobody waits on a reply that cannot come.
+	 */
+	const refuseRun = (
+		run: TurnRun,
+		reason: string,
+		ending: { status: "failed" | "cancelled"; userMessage: UserMessage },
+	) =>
+		Effect.gen(function* () {
+			const ended = yield* turns.abandon(run.executionId, ending);
+			if (!ended) {
+				yield* emit([
+					ConversationEvent.TurnAbandoned({
+						threadId: run.request.threadId,
+						agentId: run.request.agentId,
+						outcome:
+							ending.status === "failed"
+								? { state: "failed", error: ending.userMessage }
+								: { state: "cancelled" },
+					}),
+				]);
+			}
+			return notRunnable(reason, ended);
+		});
 
 	return Service.of({
 		prepare: (run) =>
 			operation(
 				"prepare",
 				transaction(
-					Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
+					Effect.gen(function* (): Effect.fn.Return<
+						PreparedTurn | NotRunnable,
+						never,
+						Database | Transaction
+					> {
 						const request = run.request;
 						const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
+						if (!loaded) return yield* refuseRun(run, "The thread is gone", CANCELLED);
 						// The agent has to be crew placed in the thread's pod, not the
 						// thread's host. A shared thread gives the floor to whoever the
 						// facilitator or a mention picks, and that is rarely the host.
 						// Pod membership is still a real check: it is what stops a turn
 						// request naming an agent from another pod or another workspace.
-						const speaker = loaded?.pod.agents.find(({ id }) => id === request.agentId);
-						if (!loaded || !speaker) {
-							return notRunnable(
-								"The thread is gone, or this agent is not a crew agent in its pod",
-							);
+						const speaker = loaded.pod.agents.find(({ id }) => id === request.agentId);
+						if (!speaker) {
+							return yield* refuseRun(run, "The agent is not a crew agent in the thread's pod", {
+								status: "failed",
+								userMessage: NOT_IN_POD,
+							});
 						}
 						// An agent whose model has been cleared does not fall back to
 						// another one: it stops, and says so, until somebody chooses.
 						// Read out here so what opens the turn is handed a model rather
 						// than an agent that might not carry one.
 						const model = speaker.model;
-						if (model === null) return notRunnable(`${speaker.name} has no model chosen`);
+						if (model === null) {
+							return yield* refuseRun(run, "The agent has no model chosen", {
+								status: "failed",
+								userMessage: UserMessage.of`${UserMessage.unchecked(speaker.name)} has no model chosen, so it cannot reply. Choose one in its settings.`,
+							});
+						}
 						if (loaded.type === "chat" && request.reason === "facilitator") {
-							return yield* refuseRun(run, "The Facilitator does not route Chats", TURN_CANCELLED);
+							return yield* refuseRun(run, "The Facilitator does not route Chats", CANCELLED);
 						}
 						const opened = yield* turns.openReplyTurn({
 							threadId: loaded.id,
@@ -111,7 +145,18 @@ export const make = Effect.gen(function* () {
 							owner: run.executionId,
 							author: authorRow(null, speaker),
 						});
-						if (opened._tag === "NotRunnable") return opened;
+						if (opened._tag === "NotRunnable") {
+							if (!opened.ended) {
+								yield* emit([
+									ConversationEvent.TurnAbandoned({
+										threadId: request.threadId,
+										agentId: request.agentId,
+										outcome: { state: "cancelled" },
+									}),
+								]);
+							}
+							return opened;
+						}
 						const windowTokens = yield* query((db) =>
 							loadContextWindow(db, loaded.workspaceId, model),
 						);
@@ -159,14 +204,10 @@ export const make = Effect.gen(function* () {
 						};
 					}).pipe(
 						Effect.tap((preparation) =>
-							preparation._tag === "NotRunnable" && !preparation.ended
-								? emit([
-										ConversationEvent.TurnAbandoned({
-											threadId: run.request.threadId,
-											agentId: run.request.agentId,
-											outcome: { state: "cancelled" },
-										}),
-									])
+							preparation._tag === "NotRunnable"
+								? Effect.logInfo(
+										`Turn of agent ${run.request.agentId} in thread ${run.request.threadId} may not run: ${preparation.reason}`,
+									)
 								: Effect.void,
 						),
 					),
@@ -280,8 +321,14 @@ export interface TurnCompaction {
  */
 const MAX_HISTORY_MESSAGES = 1_000;
 
-function notRunnable(reason: string): NotRunnable {
-	return { _tag: "NotRunnable", reason, ended: undefined };
+/** How a run is refused whose reply nobody needs any more. */
+const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
+
+/** What people are told when an agent asked to reply in a thread is not in its pod. */
+const NOT_IN_POD = UserMessage.of`The agent asked to reply is not in this pod, so it cannot reply.`;
+
+function notRunnable(reason: string, ended?: Ended): NotRunnable {
+	return { _tag: "NotRunnable", reason, ended };
 }
 
 /**

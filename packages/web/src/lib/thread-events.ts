@@ -9,7 +9,7 @@ import {
 	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
-import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useEffect } from "react";
 import { client } from "@/api.ts";
@@ -27,6 +27,31 @@ export function useThreadEvents(threadId: string | undefined): void {
 		return () => stream.close();
 	}, [queries, threadId]);
 }
+
+/** Something the thread's events told its watchers that no message records. */
+export interface ThreadNotice {
+	id: string;
+	text: string;
+}
+
+/**
+ * What the thread's events have said since its last new message that no
+ * message records, oldest first: why a reply somebody asked for is not
+ * coming. Kept only while the thread is watched, since the server keeps
+ * notices in no thread's history.
+ */
+export function useThreadNotices(threadId: string | undefined): readonly ThreadNotice[] {
+	return (
+		useQuery({
+			queryKey: noticesKey(threadId ?? ""),
+			queryFn: (): ThreadNotice[] => [],
+			enabled: threadId !== undefined,
+			staleTime: Number.POSITIVE_INFINITY,
+		}).data ?? []
+	);
+}
+
+const noticesKey = (threadId: string) => ["thread-notices", threadId] as const;
 
 export function useWorkspaceEvents(): void {
 	const queries = useQueryClient();
@@ -86,6 +111,18 @@ async function applyThreadEvent(
 	const update = parsed.success;
 	if ("threadId" in update && update.threadId !== threadId) {
 		return;
+	}
+	if (update.type === "thread.notice") {
+		const notice = { id: crypto.randomUUID(), text: update.notice };
+		queries.setQueryData<ThreadNotice[]>(noticesKey(threadId), (notices = []) => [
+			...notices,
+			notice,
+		]);
+		return;
+	}
+	// A new message moves the thread on, past what its notices were about.
+	if (update.type === "message.created") {
+		queries.setQueryData<ThreadNotice[]>(noticesKey(threadId), []);
 	}
 	await queries.cancelQueries({ queryKey: ["thread", threadId] });
 	if (!queries.getQueryData(["thread", threadId])) {

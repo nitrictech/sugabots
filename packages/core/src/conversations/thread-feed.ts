@@ -4,6 +4,7 @@ import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contract
 import { Effect } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
+import type { UserMessage } from "../user-message.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
@@ -71,10 +72,12 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		TurnCancelRequested: ({ threadId, turnId }) => [
 			onThread(threadId, streamEvent("turn.cancel_requested", { threadId, turnId })),
 		],
-		// Watchers see nothing new in these; only routine settlement reacts to them.
-		TurnAbandoned: () => [],
+		// Nobody is shown a turn given up as cancelled: it was not wanted any more.
+		TurnAbandoned: ({ threadId, outcome }) =>
+			outcome.state === "failed" ? [notice(threadId, outcome.error)] : [],
+		// Watchers see nothing new in this; only routine settlement reacts to it.
 		LaneReleased: () => [],
-		FacilitationFailed: () => [],
+		FacilitationFailed: ({ threadId, userMessage }) => [notice(threadId, userMessage)],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
@@ -113,6 +116,11 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 
 function onThread(threadId: string, event: PendingEvent["event"]): PendingEvent {
 	return { channel: threadChannel(threadId), event };
+}
+
+/** Tells the thread's watchers why a reply they may be waiting for is not coming. */
+function notice(threadId: string, userMessage: UserMessage): PendingEvent {
+	return onThread(threadId, streamEvent("thread.notice", { threadId, notice: userMessage }));
 }
 
 /** For a change no more specific event on the thread's channel describes. */

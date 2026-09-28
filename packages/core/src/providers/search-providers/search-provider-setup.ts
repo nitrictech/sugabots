@@ -162,12 +162,10 @@ export const make = Effect.gen(function* () {
 						};
 					}
 					const started = yield* Clock.currentTimeMillis;
-					const outcome = yield* Effect.promise(() =>
-						searchBackend(
-							connection,
-							egress.providers.for({ baseUrl: searchEndpoint(connection) }),
-						)({ query: TEST_QUERY, count: 3 }),
-					);
+					const outcome = yield* searchBackend(
+						connection,
+						egress.providers.for({ baseUrl: searchEndpoint(connection) }),
+					)({ query: TEST_QUERY, count: 3 });
 					const latencyMs = (yield* Clock.currentTimeMillis) - started;
 					const error = outcome.ok ? undefined : outcome.reason;
 					yield* providers.recordTest(workspaceId, connection.configurationUpdatedAt, error);

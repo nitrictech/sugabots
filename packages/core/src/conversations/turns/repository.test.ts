@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { message, turn } from "../../database/schema.ts";
+import { agent, message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
@@ -199,6 +199,40 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "turn.completed", status: "cancelled" }),
 		);
+	});
+
+	describe("an agent with no model chosen", () => {
+		const noModel = async () => {
+			const [host] = await onDatabase((db) =>
+				db
+					.update(agent)
+					.set({ model: null })
+					.where(eq(agent.id, prepared.run.request.agentId))
+					.returning({ name: agent.name }),
+			);
+			if (!host) throw new Error("no host");
+			return UserMessage.of`${UserMessage.unchecked(host.name)} has no model chosen, so it cannot reply. Choose one in its settings.`;
+		};
+
+		it("fails the turn it was running, saying why", async () => {
+			const told = await noModel();
+
+			expect(await execution.prepare(prepared.run)).toMatchObject({ _tag: "NotRunnable" });
+			expect(await storedTurn()).toMatchObject({ status: "failed", error: told });
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({ type: "message.failed", willRetry: false, error: told }),
+			);
+		});
+
+		it("tells the thread why it cannot reply when it has no turn to end", async () => {
+			const told = await noModel();
+			const unowned = { ...prepared.run, executionId: crypto.randomUUID() };
+
+			expect(await execution.prepare(unowned)).toMatchObject({ _tag: "NotRunnable" });
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({ type: "thread.notice", threadId, notice: told }),
+			);
+		});
 	});
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.

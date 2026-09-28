@@ -1,17 +1,20 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { EgressRefused } from "../network/egress.ts";
-import { parseExaText, searchBackend, searchEndpoint } from "./backends.ts";
+import { parseExaText, type SearchRequest, searchBackend, searchEndpoint } from "./backends.ts";
 import type { SearchConnection } from "./search-connection.ts";
 
 type FakeFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 const at = new Date("2026-09-14T00:00:00.000Z");
 
+/** The connection's backend, answering as a promise. */
 function backend(connection: Omit<SearchConnection, "configurationUpdatedAt">, fetch: FakeFetch) {
-	return searchBackend(
+	const search = searchBackend(
 		{ ...connection, configurationUpdatedAt: at },
 		fetch as typeof globalThis.fetch,
 	);
+	return (request: SearchRequest) => Effect.runPromise(search(request));
 }
 
 describe("the Brave backend", () => {

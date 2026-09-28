@@ -1,11 +1,12 @@
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Context, Effect, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
-import { transaction } from "../../database/database.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
+import { query, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -18,6 +19,7 @@ import {
 	routineExecution,
 	thread,
 	toolCall,
+	turn,
 	user,
 	workspaceMember,
 } from "../../database/schema.ts";
@@ -277,6 +279,56 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await holding;
 
 		expect(refused).toBeUndefined();
+	});
+
+	it("keeps a secret replaced while the routine is being edited", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Alerts", instructions: "Handle input.", trigger: { kind: "webhook" } },
+		);
+		const addressed = { agentId, routineId: created.routine.id };
+		let releaseRotation = () => {};
+		const rotationHeld = new Promise<void>((resolve) => {
+			releaseRotation = resolve;
+		});
+		let rotated = (_secret: string) => {};
+		const rotatedSecret = new Promise<string>((resolve) => {
+			rotated = resolve;
+		});
+		// The new secret is written but not committed until the edit is waiting.
+		const rotation = runOnPostgres(
+			transaction(
+				Context.get(conversations, Routines.Service)
+					.rotateSecret(addressed)
+					.pipe(
+						Effect.tap((secret) => Effect.sync(() => rotated(secret))),
+						Effect.andThen(Effect.promise(() => rotationHeld)),
+					),
+			).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
+		);
+		const secret = await rotatedSecret;
+
+		const edit = routines.update(addressed, { name: "Renamed alerts" });
+		await waitUntilBlocked();
+		releaseRotation();
+		await Promise.all([rotation, edit]);
+
+		const delivery = {
+			kind: "webhook" as const,
+			idempotencyKey: null,
+			payload: {},
+			receivedAt: new Date().toISOString(),
+		};
+		expect(
+			await webhooks.accept({
+				routineId: created.routine.id,
+				secret: Redacted.make(secret),
+				trigger: delivery,
+			}),
+		).toMatchObject({
+			duplicate: false,
+		});
+		expect(await view.get(addressed)).toMatchObject({ name: "Renamed alerts" });
 	});
 
 	it("refuses a run to a member who may not run routines, whoever asks for it", async () => {
@@ -635,7 +687,70 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			);
 			expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
 		});
+
+		it("decides a run's approval without waiting on its turn, which settling locks first", async () => {
+			const routine = await aRoutineWithARun();
+			await startRunning(runner, routine.routineId);
+			const [executionThread] = await onDatabase((db) =>
+				db
+					.select({ id: routineExecution.threadId })
+					.from(routineExecution)
+					.where(eq(routineExecution.routineId, routine.routineId)),
+			);
+			if (!executionThread) throw new Error("The run has no thread");
+			const [run] = await runOnPostgres(runningTurns(executionThread.id));
+			if (!run) throw new Error("The run asked for no turn");
+			const prepared = await prepareRunnable(execution, run);
+			const pending = await parkForApproval(prepared);
+			let releaseTurn = () => {};
+			const turnHeld = new Promise<void>((resolve) => {
+				releaseTurn = resolve;
+			});
+			let locked = () => {};
+			const turnLocked = new Promise<void>((resolve) => {
+				locked = resolve;
+			});
+			const holding = runOnPostgres(
+				transaction(
+					Effect.gen(function* () {
+						yield* query((db) =>
+							db.select().from(turn).where(eq(turn.id, prepared.turnId)).for("update"),
+						);
+						locked();
+						yield* Effect.promise(() => turnHeld);
+					}),
+				),
+			);
+			await turnLocked;
+
+			const decided = await Promise.race([
+				onPostgresAs(userId)(Context.get(conversations, ToolApprovals.Service))
+					.decide({ podId, toolCallId: pending.id, decision: "allow_once" })
+					.then(() => "decided"),
+				new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
+			]);
+			releaseTurn();
+			await holding;
+
+			expect(decided).toBe("decided");
+		});
 	});
+
+	/** Waits until another connection to the test database is waiting on a lock. */
+	async function waitUntilBlocked() {
+		for (let attempt = 0; attempt < 100; attempt++) {
+			const [waiting] = await onDatabase((db) =>
+				db.execute<{ count: number }>(
+					sql`select count(*)::int as count from pg_stat_activity
+						where datname = current_database() and wait_event_type = 'Lock'`,
+					"objects",
+				),
+			);
+			if ((waiting?.count ?? 0) > 0) return;
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		}
+		throw new Error("Nothing waited on a lock");
+	}
 
 	/** Parks one call to a new connection in the pod for approval, as the turn's reply. */
 	async function parkForApproval(prepared: PreparedTurn) {

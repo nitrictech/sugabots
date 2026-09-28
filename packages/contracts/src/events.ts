@@ -74,6 +74,12 @@ export const eventPayloadSchemas = {
 		usage: Schema.optional(Schema.Unknown),
 		reportedCost: Schema.optional(Schema.Finite),
 	}),
+	/**
+	 * What people watching the thread should know that no message in it
+	 * records, such as why an agent they asked did not reply. `notice` is
+	 * written for people; it is not kept in the thread's history.
+	 */
+	"thread.notice": Schema.Struct({ threadId, notice: Schema.String }),
 	"thread.created": Schema.Struct({ threadId }),
 	/**
 	 * Something about the thread no more specific event describes. On the
@@ -123,6 +129,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"turn.started",
 	"turn.cancel_requested",
 	"turn.completed",
+	"thread.notice",
 	"thread.created",
 	"thread.changed",
 	"chat.thread_changed",
@@ -238,6 +245,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),
 	withEnvelope("thread.changed", P["thread.changed"]),
+	withEnvelope("thread.notice", P["thread.notice"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),
 	withEnvelope("reset", P.reset.schema),

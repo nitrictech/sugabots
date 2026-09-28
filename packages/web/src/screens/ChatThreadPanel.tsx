@@ -11,7 +11,7 @@ import { useEffect, useRef } from "react";
 import { useAgentWithPod } from "@/lib/agents.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useThreadEvents } from "@/lib/thread-events.ts";
+import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -19,6 +19,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
+import { ThreadNotices } from "./ThreadNotices.tsx";
 import { PinnedApproval } from "./ToolApprovalCard.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
@@ -50,6 +51,7 @@ export function ChatThreadPanel({
 }) {
 	const query = useThread(threadId);
 	useThreadEvents(threadId);
+	const notices = useThreadNotices(threadId);
 	const heading = useRef<HTMLHeadingElement>(null);
 	const timeline = useRef<HTMLDivElement>(null);
 	const details = query.data;
@@ -213,7 +215,8 @@ export function ChatThreadPanel({
 									: details.messages
 							}
 							host={host}
-							isRunning={details.thread.status === "running"}
+							// A notice says the reply is not coming, so nobody is shown typing it.
+							isRunning={details.thread.status === "running" && notices.length === 0}
 							participants={[...details.participants, ...details.crew]}
 							user={user}
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
@@ -223,6 +226,7 @@ export function ChatThreadPanel({
 							compact
 							approvalsPinned
 						/>
+						<ThreadNotices notices={notices} />
 					</div>
 					{waiting && (
 						<div className="shrink-0 md:hidden">

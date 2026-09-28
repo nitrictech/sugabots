@@ -95,7 +95,7 @@ export const make = Effect.gen(function* () {
 				const work = yield* workingThreads(run.threadId);
 				const wasEnding = endingOf(run);
 				const ending = endingAfter(wasEnding, outcome);
-				if (ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
+				if (ending && ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
 				if (ending) yield* cancelWork(work);
 				if (ending && !wasEnding) {
 					yield* emit([

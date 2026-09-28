@@ -101,8 +101,10 @@ export type FacilitatorDecision = { kind: "agent"; agentId: string } | { kind: "
 
 /**
  * One attempt at deciding who speaks next, and applying it. A failure is
- * logged and reported as `failed`, having changed nothing. An interruption is
- * left to the workflow, which runs the attempt again when it resumes.
+ * logged and reported as `failed`, having changed nothing. A defect and an
+ * interruption are left to the workflow: a defect is a bug another attempt
+ * would repeat, so the workflow fails, and an interrupted attempt runs again
+ * when it resumes.
  */
 export const attemptFacilitation = (
 	request: FacilitateRequest,
@@ -133,10 +135,7 @@ export const attemptFacilitation = (
 		);
 		yield* applyDecision(request, scope, decision);
 		return decided;
-	}).pipe(
-		Effect.catch((failure) => attemptFailed(attempt, failure)),
-		Effect.catchDefect((defect) => attemptFailed(attempt, defect)),
-	);
+	}).pipe(Effect.catch((failure) => attemptFailed(attempt, failure)));
 
 const decided: AttemptOutcome = "decided";
 

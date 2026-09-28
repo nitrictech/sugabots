@@ -92,6 +92,14 @@ describe("an attempt at facilitation", () => {
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
 	});
 
+	it("leaves a defect to the workflow rather than reporting it as a failed attempt", async () => {
+		mocks.queueTurn.mockReturnValue(Effect.die(new Error("database unavailable")));
+
+		await expect(
+			runWithoutDatabase(attemptFacilitation(request, 1, answering("@host-agent"))),
+		).rejects.toThrow("database unavailable");
+	});
+
 	it("reports a failed attempt, having queued no turn", async () => {
 		const outcome = await runWithoutDatabase(attemptFacilitation(request, 3, unavailable));
 

@@ -84,6 +84,7 @@ describe("envelope", () => {
 		"turn.started",
 		"turn.completed",
 		"thread.changed",
+		"thread.notice",
 		"collaboration.updated",
 	])("recognizes the known thread update %s", (type) => {
 		const ids = {
@@ -109,6 +110,7 @@ describe("envelope", () => {
 			"tool_call.started": { ...ids, messageId: "m1", toolCall: toolCall("running") },
 			"tool_call.completed": { ...ids, messageId: "m1", toolCall: toolCall("completed") },
 			"turn.completed": { ...ids, status: "done" },
+			"thread.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
 			"collaboration.updated": {
 				...ids,
 				messageId: "00000000-0000-4000-8000-000000000004",

@@ -159,7 +159,7 @@ describe("fetching a page", () => {
 
 		expect(await fetcher(fetch)("https://example.com/report.pdf")).toEqual({
 			ok: false,
-			reason: "The page is application/pdf, which cannot be read as text",
+			reason: "The page is of a type that cannot be read as text",
 		});
 	});
 

@@ -73,8 +73,8 @@ export interface Interface {
 	 * running, and `undefined` once it has ended.
 	 */
 	readonly start: (executionId: string) => Effect.Effect<schema.RoutineExecutionRow | undefined>;
-	/** Records how a running run is ending, or that nothing is ending it. */
-	readonly recordEnding: (executionId: string, ending: Ended | undefined) => Effect.Effect<void>;
+	/** Records how a running run is ending. */
+	readonly recordEnding: (executionId: string, ending: Ended) => Effect.Effect<void>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
 	 * was not running.
@@ -280,8 +280,8 @@ export const make = Effect.gen(function* () {
 					db
 						.update(routineExecution)
 						.set({
-							pendingTerminalState: ending?.state ?? null,
-							pendingTerminalError: ending?.state === "failed" ? ending.error : null,
+							pendingTerminalState: ending.state,
+							pendingTerminalError: ending.state === "failed" ? ending.error : null,
 						})
 						.where(
 							and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running")),

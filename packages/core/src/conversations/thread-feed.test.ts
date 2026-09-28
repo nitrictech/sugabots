@@ -152,6 +152,37 @@ describe("the thread feed", () => {
 		]);
 	});
 
+	it("tells the thread why a reply it asked for is not coming", () => {
+		const noModel = UserMessage.of`Ada has no model chosen, so it cannot reply.`;
+		const noChoice = UserMessage.of`The Facilitator could not choose who speaks next`;
+
+		expect(
+			sent(
+				ConversationEvent.TurnAbandoned({
+					threadId,
+					agentId,
+					outcome: { state: "failed", error: noModel },
+				}),
+				ConversationEvent.FacilitationFailed({ threadId, userMessage: noChoice }),
+			),
+		).toEqual([
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noModel }),
+			},
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noChoice }),
+			},
+		]);
+	});
+
+	it("shows nothing of a turn given up as cancelled", () => {
+		expect(
+			sent(ConversationEvent.TurnAbandoned({ threadId, agentId, outcome: { state: "cancelled" } })),
+		).toEqual([]);
+	});
+
 	it("tells the reply's thread how each tool call stands", () => {
 		const change = { threadId, messageId: "m1", toolCall };
 

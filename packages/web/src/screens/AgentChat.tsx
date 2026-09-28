@@ -18,7 +18,7 @@ import {
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useThreadEvents } from "@/lib/thread-events.ts";
+import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -29,6 +29,7 @@ import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
+import { ThreadNotices } from "./ThreadNotices.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -55,6 +56,7 @@ export function AgentChat({
 	const history = useChatHistory(chat.data?.id);
 	const mainThread = useThread(chat.data?.mainThreadId);
 	useThreadEvents(chat.data?.mainThreadId);
+	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
 	const [draft, setDraft] = useState("");
@@ -214,6 +216,7 @@ export function AgentChat({
 								)}
 							</Fragment>
 						))}
+						<ThreadNotices notices={notices} />
 					</div>
 				</div>
 				<div className="shrink-0 px-4 pt-2.5 pb-[18px] md:px-[22px]">
