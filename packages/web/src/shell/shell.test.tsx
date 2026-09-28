@@ -147,7 +147,7 @@ describe("the conversation list", () => {
 		mount(linearPage);
 
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
-		const rows = await within(list).findAllByRole("link");
+		const rows = await within(await within(list).findByRole("list")).findAllByRole("link");
 		expect(rows.map((row) => row.textContent)).toEqual([
 			expect.stringContaining("You: File the timeout as a bug"),
 			expect.stringContaining("Issue Triager"),
@@ -169,10 +169,24 @@ describe("the conversation list", () => {
 		});
 
 		expect(
-			within(list)
+			within(within(list).getByRole("list"))
 				.getAllByRole("link")
 				.map((row) => row.textContent),
 		).toEqual([expect.stringContaining("Issue Triager")]);
+	});
+
+	it("opens its pod's settings and leads back to the Chat", async () => {
+		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
+		const router = mount(chat);
+
+		const list = await screen.findByRole("region", { name: "Suga-Team" });
+		fireEvent.click(within(list).getByRole("link", { name: "Pod settings" }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/suga/settings/pods/suga-team"),
+		);
+		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
 	});
 
 	it("opens chats from All under All, and asks for every shared pod", async () => {
