@@ -30,6 +30,7 @@ services:
       # mount goes at /var/lib/postgresql, NOT the /data path 17 and earlier
       # used. An 18 image refuses to start against the old layout.
       - sugabots_postgres_data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         - CMD-SHELL
