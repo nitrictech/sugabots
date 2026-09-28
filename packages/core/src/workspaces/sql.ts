@@ -261,7 +261,7 @@ export const pod = pgTable(
  * added it (`20260922010506_productive_dreadnoughts`) and is named here
  * because this is where somebody checking what constrains these rows looks.
  *
- * The admin rows are written by triggers too, in `20260928023650_admins_pod_membership_trigger`:
+ * The admin rows are written by triggers too, in `20260928013544_admins_in_every_pod`:
  * `shared_pod_administrators` adds every admin to a new shared pod, and
  * `administrator_shared_pods` adds a new admin to every shared pod. Both take
  * `lock_pod_membership(workspace_id)`, as must anything that removes a row
