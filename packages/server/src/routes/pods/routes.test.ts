@@ -287,6 +287,28 @@ describe("pod membership", () => {
 		expect(response.status).toBe(400);
 	});
 
+	it("takes the person the session belongs to out of the pod", async () => {
+		let asked: unknown;
+		const response = await app({
+			leave: (input) =>
+				Effect.map(CurrentActor.Service, ({ userId }) => {
+					asked = { ...input, userId };
+				}),
+		}).request(`/pods/${POD}/membership`, as("admin-token", { method: "DELETE" }));
+
+		expect(response.status).toBe(204);
+		expect(asked).toEqual({ podId: POD, userId: admin.id });
+	});
+
+	it("reports the refusal to leave a Personal pod as a bad request", async () => {
+		const response = await app({
+			leave: () =>
+				Effect.fail(new PodAdministration.PersonalPodMembershipFixed({ attempted: "remove" })),
+		}).request(`/pods/${POD}/membership`, as("admin-token", { method: "DELETE" }));
+
+		expect(response.status).toBe(400);
+	});
+
 	it("reports the refusal to staff a Personal pod as a bad request", async () => {
 		const response = await app({
 			addMember: () =>

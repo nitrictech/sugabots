@@ -68,6 +68,9 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 				pods
 					.removeMember({ podId: params.podId, userId: params.userId })
 					.pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("leave", ({ params }) =>
+				pods.leave({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
 			);
 	}),
 );

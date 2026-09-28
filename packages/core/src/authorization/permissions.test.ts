@@ -50,6 +50,7 @@ const POD_PERMISSIONS = Object.keys({
 	"pod.update": true,
 	"pod.delete": true,
 	"pod.members.manage": true,
+	"pod.leave": true,
 	"agent.read": true,
 	"agent.create": true,
 	"agent.update": true,
@@ -67,6 +68,7 @@ const POD_PERMISSIONS = Object.keys({
 /** What a Member holds in a shared pod they have been added to. */
 const MEMBER_IN_JOINED_POD: PodPermission[] = [
 	"pod.read",
+	"pod.leave",
 	"agent.read",
 	"agent.create",
 	"agent.update",
@@ -79,6 +81,7 @@ const MEMBER_IN_JOINED_POD: PodPermission[] = [
 /** What a Viewer holds there: reading, taking part, and nothing else. */
 const VIEWER_IN_JOINED_POD: PodPermission[] = [
 	"pod.read",
+	"pod.leave",
 	"agent.read",
 	"connection.read",
 	"routine.read",
@@ -118,8 +121,8 @@ describe("workspace actions", () => {
 });
 
 describe("shared pods", () => {
-	it.each(POD_PERMISSIONS)("an admin in the pod may %s", (permission) => {
-		expect(mayInPod(actor("admin"), permission, sharedPod(true))).toBe(true);
+	it.each(POD_PERMISSIONS)("an admin in the pod may %s unless it is leaving", (permission) => {
+		expect(mayInPod(actor("admin"), permission, sharedPod(true))).toBe(permission !== "pod.leave");
 	});
 
 	it.each(POD_PERMISSIONS)("an admin outside the pod may not %s", (permission) => {
@@ -228,9 +231,15 @@ describe("what the API tells a client", () => {
 		expect(resolved.changeRouting).toBe(true);
 	});
 
-	it("lets an admin rename and staff a shared pod", () => {
+	it("lets an admin rename and staff a shared pod, and not leave it", () => {
 		const resolved = podPermissions(actor("admin"), sharedPod(true));
 		expect(resolved.rename).toBe(true);
 		expect(resolved.manageMembers).toBe(true);
+		expect(resolved.leave).toBe(false);
+	});
+
+	it("lets a member leave a shared pod but never their Personal pod", () => {
+		expect(podPermissions(actor("member"), sharedPod(true)).leave).toBe(true);
+		expect(podPermissions(actor("member"), personalPodOf(ALICE)).leave).toBe(false);
 	});
 });

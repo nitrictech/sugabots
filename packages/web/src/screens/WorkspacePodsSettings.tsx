@@ -7,6 +7,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
 	useDeletePod,
+	useLeavePod,
 	usePlacePodMember,
 	usePodMembers,
 	usePods,
@@ -328,20 +329,48 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 /*
  * The people who can see into the pod. Anyone in the workspace can be added;
  * the label after a name is their standing in the workspace, since a pod has
- * no roles of its own. Who can be taken out is the API's answer.
+ * no roles of its own. Who can be taken out, and whether you may leave, is
+ * the API's answer.
  */
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
 	const workspaceMembers = useWorkspaceMembers(pod.workspaceId);
 	const invite = usePlacePodMember(pod.id);
 	const remove = usePlacePodMember(pod.id);
+	const leave = useLeavePod(pod.id);
+	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<PodMember>();
 	const { session } = useRouteContext({ from: "__root__" });
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
+	const mayTakeOut = (member: PodMember) =>
+		isYou(member.userId) ? pod.permissions.leave : canManageMembers && member.removable;
+	const leaving = removing !== undefined && isYou(removing.userId);
+	const pending = leaving ? leave : remove;
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
+
+	async function takeOut(member: PodMember) {
+		const isLeaving = isYou(member.userId);
+		try {
+			if (isLeaving) {
+				await leave.mutateAsync();
+			} else {
+				await remove.mutateAsync({ userId: member.userId, member: false });
+			}
+		} catch {
+			return;
+		}
+		setRemoving(undefined);
+		if (isLeaving) {
+			await navigate({
+				from: "/$workspace",
+				to: "./settings/$section",
+				params: { section: "pods" },
+			});
+		}
+	}
 
 	let rows: ReactNode;
 	if (members.isError) {
@@ -366,12 +395,12 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								: // Said once the workspace roster has answered, not guessed before it.
 									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
 						</SettingsValue>
-						{canManageMembers && member.removable && (
-							<Tooltip label="Remove from pod">
+						{mayTakeOut(member) && (
+							<Tooltip label={isYou(member.userId) ? "Leave pod" : "Remove from pod"}>
 								<button
 									type="button"
-									aria-label={`Remove ${member.name}`}
-									disabled={remove.isPending}
+									aria-label={isYou(member.userId) ? `Leave ${pod.name}` : `Remove ${member.name}`}
+									disabled={remove.isPending || leave.isPending}
 									onClick={() => setRemoving(member)}
 									className="focus-ring grid size-7 shrink-0 place-items-center rounded-full text-destructive-text transition-colors hover:bg-destructive-hover"
 								>
@@ -429,19 +458,21 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 				onOpenChange={(open) => {
 					if (!open) setRemoving(undefined);
 				}}
-				title={`Remove ${removing?.name ?? "this person"} from ${pod.name}?`}
-				description="They lose this pod, its bots, and their chats. You can add them back at any time."
-				confirmLabel="Remove"
-				pending={remove.isPending}
-				error={remove.error ? failureMessage(remove.error) : undefined}
+				title={
+					leaving
+						? `Leave ${pod.name}?`
+						: `Remove ${removing?.name ?? "this person"} from ${pod.name}?`
+				}
+				description={
+					leaving
+						? "You lose this pod, its bots, and your chats. An administrator can add you back."
+						: "They lose this pod, its bots, and their chats. You can add them back at any time."
+				}
+				confirmLabel={leaving ? "Leave" : "Remove"}
+				pending={pending.isPending}
+				error={pending.error ? failureMessage(pending.error) : undefined}
 				onDelete={async () => {
-					if (!removing) return;
-					try {
-						await remove.mutateAsync({ userId: removing.userId, member: false });
-					} catch {
-						return;
-					}
-					setRemoving(undefined);
+					if (removing) await takeOut(removing);
 				}}
 			/>
 		</SettingsGroup>

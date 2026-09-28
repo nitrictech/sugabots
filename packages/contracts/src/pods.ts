@@ -102,6 +102,8 @@ export const podPermissionsSchema = Schema.Struct({
 	changeRouting: Schema.Boolean,
 	/** Add and remove members. Never on a Personal pod, which is one person's. */
 	manageMembers: Schema.Boolean,
+	/** Take yourself out of the pod. Never for an administrator, who is in every shared pod. */
+	leave: Schema.Boolean,
 	createAgents: Schema.Boolean,
 	updateAgents: Schema.Boolean,
 	deleteAgents: Schema.Boolean,

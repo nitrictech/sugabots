@@ -7,6 +7,7 @@ import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { serviceOperations } from "../../database/database.ts";
+import type * as schema from "../../database/schema.ts";
 import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
@@ -82,6 +83,14 @@ export interface Interface {
 		AuthorizationDenied | PersonalPodMembershipFixed | AdministratorInEverySharedPod | NotInPod,
 		CurrentActor.Service
 	>;
+	/** Takes the caller out of the pod, on the same terms as {@link Interface.removeMember}. */
+	readonly leave: (input: {
+		podId: string;
+	}) => Effect.Effect<
+		void,
+		AuthorizationDenied | PersonalPodMembershipFixed | AdministratorInEverySharedPod | NotInPod,
+		CurrentActor.Service
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -95,6 +104,21 @@ export const make = Effect.gen(function* () {
 	const pods = yield* PodRepository.Service;
 	const agents = yield* AgentRepository.Service;
 	const personalPods = yield* PersonalPods.Service;
+
+	const takeOut = (pod: schema.PodRow, userId: string) =>
+		Effect.gen(function* () {
+			const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, userId);
+			switch (outcome) {
+				case "removed":
+					return;
+				case "personal_pod":
+					return yield* new PersonalPodMembershipFixed({ attempted: "remove" });
+				case "administrator":
+					return yield* new AdministratorInEverySharedPod();
+				case "not_a_member":
+					return yield* new NotInPod();
+			}
+		});
 
 	return Service.of({
 		list: (input) =>
@@ -193,17 +217,16 @@ export const make = Effect.gen(function* () {
 				"removeMember",
 				Effect.gen(function* () {
 					const { pod } = yield* authorization.pod(podId, "pod.members.manage");
-					const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, userId);
-					switch (outcome) {
-						case "removed":
-							return;
-						case "personal_pod":
-							return yield* new PersonalPodMembershipFixed({ attempted: "remove" });
-						case "administrator":
-							return yield* new AdministratorInEverySharedPod();
-						case "not_a_member":
-							return yield* new NotInPod();
-					}
+					return yield* takeOut(pod, userId);
+				}),
+			),
+
+		leave: ({ podId }) =>
+			operation(
+				"leave",
+				Effect.gen(function* () {
+					const { pod, actor } = yield* authorization.pod(podId, "pod.leave");
+					return yield* takeOut(pod, actor.userId);
 				}),
 			),
 	});

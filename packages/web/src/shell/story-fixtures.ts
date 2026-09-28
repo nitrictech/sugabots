@@ -11,6 +11,7 @@ const PERMISSIONS: PodPermissions = {
 	rename: true,
 	changeRouting: true,
 	manageMembers: true,
+	leave: false,
 	createAgents: true,
 	updateAgents: true,
 	deleteAgents: true,
