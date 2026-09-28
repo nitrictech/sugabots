@@ -15,8 +15,8 @@ Sugabots has presets for these. Pick one and it fills in the address for you.
 
 <ProviderGrid />
 
-Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed.
-Paste a key to use a hosted provider. Local servers need an address, not a key.
+Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed, plus
+any provider you picked during onboarding. Paste a key to use a hosted provider. Local servers need an address, not a key.
 
 <Tip title="Anything else">
 
@@ -28,8 +28,7 @@ headers if it needs them.
 
 ## Choose which models bots can use
 
-Each provider lists its models. Switch on the ones you want with **Bots can use
-…**, and only those show up when someone picks a bot's model. Use **Refresh
+Each provider lists its models. Switch on the ones you want, and only those show up when someone picks a bot's model. Use **Refresh
 list** to fetch new ones, or **Add model** to type in a model ID.
 
 Each model also says what it can do, like tools, vision or reasoning. Bots use
@@ -44,8 +43,7 @@ never leave it.
 
 When `NODE_ENV=production`, Sugabots won't reach providers at private or
 plain-HTTP addresses unless you set
-[`ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK=true`](/docs/configuration#network). Set
-it on a self-hosted install that uses local models.
+[`ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK=true`](/docs/configuration#network).
 
 </Careful>
 
