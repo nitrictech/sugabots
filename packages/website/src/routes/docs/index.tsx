@@ -11,18 +11,15 @@ import { SiteFooter } from "@/components/site-footer";
 import { buttonVariants } from "@/components/ui/button";
 import { type DocGroup, docGroups } from "@/docs/nav";
 import { docPages, findDocPage } from "@/docs/pages";
-
-const DOCS_TITLE = "Sugabots docs";
-const DOCS_DESCRIPTION =
-	"How Sugabots works: pods, agents, tools and models, and how to run it yourself.";
+import { docsMeta } from "@/site-meta";
 
 export const Route = createFileRoute("/docs/")({
 	head: () => ({
 		meta: [
-			{ title: DOCS_TITLE },
-			{ name: "description", content: DOCS_DESCRIPTION },
-			{ property: "og:title", content: DOCS_TITLE },
-			{ property: "og:description", content: DOCS_DESCRIPTION },
+			{ title: docsMeta.title },
+			{ name: "description", content: docsMeta.description },
+			{ property: "og:title", content: docsMeta.title },
+			{ property: "og:description", content: docsMeta.description },
 		],
 	}),
 	component: DocsHome,

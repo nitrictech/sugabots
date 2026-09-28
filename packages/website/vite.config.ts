@@ -9,6 +9,8 @@ import remarkGfm from "remark-gfm";
 import remarkMdxFrontmatter from "remark-mdx-frontmatter";
 import type { ShikiTransformer } from "shiki";
 import { defineConfig, type Plugin } from "vite";
+import { markdownPath } from "./src/markdown.ts";
+import { sitePagePaths } from "./src/site-pages.ts";
 
 /** Puts a code block's language, and any `title="…"` from its fence, on its `<pre>` for the docs' code frame. */
 const codeBlockLabels: ShikiTransformer = {
@@ -51,6 +53,17 @@ function docsMdx(): Plugin {
 	};
 }
 
+/**
+ * The files written beside the pages: the sitemap, `llms.txt` and each page's
+ * Markdown version for AI agents. No page links to them, so the crawl can't
+ * find them.
+ */
+function textFiles() {
+	return ["/sitemap.xml", "/llms.txt", "/llms-full.txt", ...sitePagePaths.map(markdownPath)].map(
+		(path) => ({ path }),
+	);
+}
+
 export default defineConfig({
 	resolve: { tsconfigPaths: true },
 	server: {
@@ -66,9 +79,8 @@ export default defineConfig({
 		// Each page is written as `<path>.html`, not `<path>/index.html`, so Cloudflare serves it
 		// at the address the site links to, without redirecting to add a trailing slash. Route
 		// discovery is off because it lists `/docs/` beside `/docs`, a second copy of the page.
-		// The sitemap is listed because no page links to it, so the crawl can't find it.
 		tanstackStart({
-			pages: [{ path: "/" }, { path: "/docs" }, { path: "/sitemap.xml" }],
+			pages: [{ path: "/" }, { path: "/docs" }, ...textFiles()],
 			prerender: {
 				enabled: true,
 				crawlLinks: true,
