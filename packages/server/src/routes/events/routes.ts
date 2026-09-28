@@ -1,10 +1,11 @@
 import type { Channel } from "@sugabots/contracts";
-import { CurrentUser, NotFound } from "@sugabots/contracts/http";
-import type { Database } from "@sugabots/core/database/database";
+import { NotFound } from "@sugabots/contracts/http";
 import type { Delivery, EventBus } from "@sugabots/core/database/events/bus";
+import type { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import type { ChannelAccess } from "./access.ts";
 
@@ -53,11 +54,10 @@ export interface EventRoutesOptions {
 export function eventRoutes({ bus, access, stream }: EventRoutesOptions) {
 	const streamFor = (
 		request: HttpServerRequest.HttpServerRequest,
-		resolve: (user: CurrentUser["Service"]) => Effect.Effect<Channel | undefined, never, Database>,
+		channelFor: () => Effect.Effect<Channel | undefined, never, CurrentActor.Service>,
 	) =>
 		Effect.gen(function* () {
-			const user = yield* CurrentUser;
-			const channel = yield* resolve(user);
+			const channel = yield* channelFor();
 			if (!channel) {
 				return yield* new NotFound({ message: "No such stream" });
 			}
@@ -72,19 +72,17 @@ export function eventRoutes({ bus, access, stream }: EventRoutesOptions) {
 				channel,
 				since: resumeFrom(request.headers["last-event-id"]),
 				options: stream,
-				stillAuthorized: Effect.suspend(() => resolve(user)).pipe(
-					Effect.map((current) => current === channel),
-				),
+				stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
 			});
-		});
+		}).pipe(asSessionUser);
 
 	return HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 		handlers
 			.handle("workspace", ({ params, request }) =>
-				streamFor(request, (user) => access.workspace(user.id, params.workspace)),
+				streamFor(request, () => access.workspace(params.workspace)),
 			)
 			.handle("thread", ({ params, request }) =>
-				streamFor(request, (user) => access.thread(user.id, params.threadId)),
+				streamFor(request, () => access.thread(params.threadId)),
 			),
 	);
 }
@@ -116,14 +114,15 @@ const streamChannel = Effect.fnUntraced(function* ({
 	since: number | undefined;
 	options?: StreamOptions | undefined;
 	/**
-	 * Re-asked before every event. It is the only thing that notices access
-	 * being revoked mid-stream, which is why it is required.
+	 * Re-asked before every event, as the actor the stream was opened for. It
+	 * is the only thing that notices access being revoked mid-stream, which is
+	 * why it is required.
 	 */
-	stillAuthorized: Effect.Effect<boolean, never, Database>;
+	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
 }) {
 	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
 	const ready = yield* Deferred.make<void>();
-	const runPromise = Effect.runPromiseWith(yield* Effect.context<Database>());
+	const runPromise = Effect.runPromiseWith(yield* Effect.context<CurrentActor.Service>());
 	// Each re-check is a trace of its own, linked to the stream's request. As a
 	// child of the request it would sit under a span that is not exported until
 	// the stream closes, up to `maxAge` later.

@@ -1,7 +1,8 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Authorise, Session } from "../middleware.ts";
+import { NotFound } from "../errors.ts";
+import { Session } from "../middleware.ts";
 
 /**
  * Live updates as Server-Sent Events: one stream per open thread, one per
@@ -17,11 +18,12 @@ export class EventsApi extends HttpApiGroup.make("events")
 		HttpApiEndpoint.get("workspace", "/workspaces/:workspace/events", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: eventStream,
+			error: NotFound,
 		}),
 		HttpApiEndpoint.get("thread", "/threads/:threadId/events", {
 			params: { threadId: Schema.String },
 			success: eventStream,
+			error: NotFound,
 		}),
 	)
-	.middleware(Authorise)
 	.middleware(Session) {}

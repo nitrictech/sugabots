@@ -1,14 +1,7 @@
 import { Context } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import type { SessionUser } from "../api.ts";
-import {
-	BadRequest,
-	Forbidden,
-	InternalServerError,
-	NotFound,
-	PayloadTooLarge,
-	Unauthorized,
-} from "./errors.ts";
+import { BadRequest, InternalServerError, PayloadTooLarge, Unauthorized } from "./errors.ts";
 
 /** The person whose bearer token or cookie the request carried. */
 export class CurrentUser extends Context.Service<CurrentUser, SessionUser>()(
@@ -24,19 +17,6 @@ export class CurrentUser extends Context.Service<CurrentUser, SessionUser>()(
 export class Session extends HttpApiMiddleware.Service<Session, { provides: CurrentUser }>()(
 	"sugabots/http/Session",
 	{ error: Unauthorized },
-) {}
-
-/**
- * Checks what the endpoint lets the caller do before its request is decoded.
- * The rules are the server's (`packages/server/src/http/access-policy.ts`).
- *
- * Anything the caller cannot reach is `NotFound`, never `Forbidden`, because
- * `Forbidden` confirms an id exists. `Forbidden` is for something the caller
- * can see and is refused an action on.
- */
-export class Authorise extends HttpApiMiddleware.Service<Authorise, { requires: CurrentUser }>()(
-	"sugabots/http/Authorise",
-	{ error: [NotFound, Forbidden] },
 ) {}
 
 /**

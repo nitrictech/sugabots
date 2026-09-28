@@ -1,9 +1,10 @@
-import { BadRequest, CurrentUser } from "@sugabots/contracts/http";
+import { BadRequest } from "@sugabots/contracts/http";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 /** Whether the signed-in person has finished setting up, and marking that they have. */
 export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (handlers) =>
@@ -11,38 +12,28 @@ export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (h
 		const onboarding = yield* Onboarding.Service;
 		return handlers
 			.handle("status", () =>
-				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					return { completed: yield* onboarding.isCompleted(user.id) };
-				}),
+				onboarding.isCompleted.pipe(
+					Effect.map((completed) => ({ completed })),
+					asSessionUser,
+				),
 			)
 			.handle("complete", ({ payload }) =>
-				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					yield* onboarding
-						.complete({
-							userId: user.id,
-							workspaceId: payload.workspaceId,
-							podId: payload.podId,
-							agentId: payload.agentId,
-						})
-						.pipe(asHttpError(onboardingErrors));
-					return { completed: true };
-				}),
+				onboarding
+					.complete(payload)
+					.pipe(Effect.as({ completed: true }), asSessionUser, asHttpError(onboardingErrors)),
 			)
 			.handle("completeInvite", ({ payload }) =>
-				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					const workspaceId = yield* onboarding
-						.completeAcceptedInvite({ userId: user.id, invitationId: payload.invitationId })
-						.pipe(asHttpError(onboardingErrors));
-					return { workspaceId };
-				}),
+				onboarding.completeAcceptedInvite(payload).pipe(
+					Effect.map((workspaceId) => ({ workspaceId })),
+					asSessionUser,
+					asHttpError(onboardingErrors),
+				),
 			);
 	}),
 );
 
 const onboardingErrors = {
+	...refusals,
 	NotReadyToFinish: BadRequest,
 	InvitationNotAccepted: BadRequest,
 	ModelNotEnabled: BadRequest,

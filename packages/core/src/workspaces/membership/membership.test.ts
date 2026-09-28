@@ -13,6 +13,7 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
+import { CurrentActor } from "../current-actor.ts";
 import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";
@@ -60,16 +61,23 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		runtimes.push(runtime);
 		return {
-			/** The operation's value, or the tag it failed with. */
+			/** The operation's value when `userId` asks for it, or the tag it failed with. */
 			run: <A, E extends { _tag: string }>(
-				operation: (membership: Membership.Interface) => Effect.Effect<A, E>,
+				userId: string,
+				operation: (membership: Membership.Interface) => Effect.Effect<A, E, CurrentActor.Service>,
 			) =>
-				runtime.runPromiseExit(Effect.flatMap(Membership.Service, operation)).then((exit) => {
-					if (Exit.isSuccess(exit)) return exit.value;
-					const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
-					if (!failure) throw new Error(`Unexpected defect: ${String(exit.cause)}`);
-					return { failed: (failure.error as E)._tag };
-				}),
+				runtime
+					.runPromiseExit(
+						Effect.flatMap(Membership.Service, operation).pipe(
+							CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
+						),
+					)
+					.then((exit) => {
+						if (Exit.isSuccess(exit)) return exit.value;
+						const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
+						if (!failure) throw new Error(`Unexpected defect: ${String(exit.cause)}`);
+						return { failed: (failure.error as E)._tag };
+					}),
 		};
 	}
 
@@ -101,8 +109,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	/** A workspace Ada administers. */
 	async function workspaceOfAda() {
 		const ada = await person("Ada");
-		const created = await run((m) =>
-			m.create({ userId: ada.id, details: { name: "Nitric", slug: `nitric-${unique()}` } }),
+		const created = await run(ada.id, (m) =>
+			m.create({ details: { name: "Nitric", slug: `nitric-${unique()}` } }),
 		);
 		if ("failed" in created) throw new Error(created.failed);
 		return { ada, workspace: created };
@@ -114,16 +122,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		invitee: { id: string; email: string },
 		role: "admin" | "member" | "viewer" = "member",
 	) {
-		const invitation = await run((m) =>
+		const invitation = await run(inviterId, (m) =>
 			m.invite({
-				userId: inviterId,
 				workspace: workspaceId,
 				invitation: { email: invitee.email, role },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
-		await run((m) => m.accept({ userId: invitee.id, invitationId: invitation.id }));
-		const members = await run((m) => m.members({ userId: inviterId, workspace: workspaceId }));
+		await run(invitee.id, (m) => m.accept({ invitationId: invitation.id }));
+		const members = await run(inviterId, (m) => m.members({ workspace: workspaceId }));
 		if ("failed" in members) throw new Error(members.failed);
 		const member = members.find((one) => one.user.id === invitee.id);
 		if (!member) throw new Error("The invitee did not join");
@@ -133,7 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("makes the creator its administrator, and provisions the workspace and their Personal pod", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 
-		expect(await run((m) => m.members({ userId: ada.id, workspace: workspace.id }))).toEqual([
+		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual([
 			expect.objectContaining({ role: "admin", user: expect.objectContaining({ id: ada.id }) }),
 		]);
 		expect(
@@ -160,32 +167,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					.where(and(eq(pod.workspaceId, workspace.id), eq(pod.kind, "personal"))),
 			),
 		).toEqual([{ ownerId: ada.id }]);
-		expect(await run((m) => m.workspaces({ userId: ada.id }))).toEqual([workspace]);
+		expect(await run(ada.id, (m) => m.workspaces)).toEqual([workspace]);
 	});
 
 	it("refuses a slug shaped like a UUID, or one another workspace has", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 
 		expect(
-			await run((m) =>
-				m.create({ userId: ada.id, details: { name: "Nitric", slug: crypto.randomUUID() } }),
+			await run(ada.id, (m) =>
+				m.create({ details: { name: "Nitric", slug: crypto.randomUUID() } }),
 			),
 		).toEqual({
 			failed: "SlugShapedLikeUuid",
 		});
 		expect(
-			await run((m) =>
+			await run(ada.id, (m) =>
 				m.update({
-					userId: ada.id,
 					workspace: workspace.id,
 					details: { name: "Nitric", slug: crypto.randomUUID() },
 				}),
 			),
 		).toEqual({ failed: "SlugShapedLikeUuid" });
 		expect(
-			await run((m) =>
-				m.create({ userId: ada.id, details: { name: "Again", slug: workspace.slug } }),
-			),
+			await run(ada.id, (m) => m.create({ details: { name: "Again", slug: workspace.slug } })),
 		).toEqual({
 			failed: "SlugTaken",
 		});
@@ -195,9 +199,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 
-		const invitation = await run((m) =>
+		const invitation = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email, role: "member" },
 			}),
@@ -210,18 +213,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			replyTo: { email: ada.email, name: "Ada" },
 		});
 		expect(sent.at(-1)?.text).toContain(`${WEB_APP_URL}/invite/${invitation.id}`);
-		expect(await run((m) => m.invitation({ userId: bob.id, invitationId: invitation.id }))).toEqual(
-			{
-				workspaceName: "Nitric",
-				inviterName: "Ada",
-			},
-		);
-		expect(await run((m) => m.accept({ userId: bob.id, invitationId: invitation.id }))).toEqual({
+		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
+			workspaceName: "Nitric",
+			inviterName: "Ada",
+		});
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
 		});
-		expect(await run((m) => m.members({ userId: bob.id, workspace: workspace.id }))).toHaveLength(
-			2,
-		);
+		expect(await run(bob.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(2);
 		expect(
 			await onDatabase((db) =>
 				db
@@ -236,21 +235,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const eve = await person("Eve");
-		const invitation = await run((m) =>
+		const invitation = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email, role: "member" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
-		expect(await run((m) => m.invitation({ userId: eve.id, invitationId: invitation.id }))).toEqual(
-			{
-				failed: "NotTheInvitee",
-			},
-		);
-		expect(await run((m) => m.accept({ userId: eve.id, invitationId: invitation.id }))).toEqual({
+		expect(await run(eve.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
+			failed: "NotTheInvitee",
+		});
+		expect(await run(eve.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			failed: "NotTheInvitee",
 		});
 	});
@@ -258,9 +254,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("requires a proven address to accept only where the installation requires one", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob", { verified: false });
-		const invitation = await run((m) =>
+		const invitation = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email, role: "member" },
 			}),
@@ -268,13 +263,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
 		expect(
-			await membershipWith(true).run((m) =>
-				m.accept({ userId: bob.id, invitationId: invitation.id }),
-			),
+			await membershipWith(true).run(bob.id, (m) => m.accept({ invitationId: invitation.id })),
 		).toEqual({
 			failed: "EmailUnverified",
 		});
-		expect(await run((m) => m.accept({ userId: bob.id, invitationId: invitation.id }))).toEqual({
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
 		});
 	});
@@ -282,9 +275,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("refuses a second invitation to the same address unless it is a resend, and one to a member", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
-		const first = await run((m) =>
+		const first = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email, role: "member" },
 			}),
@@ -292,9 +284,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		if ("failed" in first) throw new Error(first.failed);
 
 		expect(
-			await run((m) =>
+			await run(ada.id, (m) =>
 				m.invite({
-					userId: ada.id,
 					workspace: workspace.id,
 					invitation: { email: bob.email, role: "member" },
 				}),
@@ -303,18 +294,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			failed: "AlreadyInvited",
 		});
 		expect(
-			await run((m) =>
+			await run(ada.id, (m) =>
 				m.invite({
-					userId: ada.id,
 					workspace: workspace.id,
 					invitation: { email: bob.email, role: "viewer", resend: true },
 				}),
 			),
 		).toMatchObject({ id: first.id, role: "viewer" });
 		expect(
-			await run((m) =>
+			await run(ada.id, (m) =>
 				m.invite({
-					userId: ada.id,
 					workspace: workspace.id,
 					invitation: { email: ada.email, role: "member" },
 				}),
@@ -327,23 +316,56 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("stops a cancelled invitation's link working", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
-		const invitation = await run((m) =>
+		const invitation = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email, role: "member" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
-		await run((m) => m.cancelInvitation({ userId: ada.id, invitationId: invitation.id }));
+		await run(ada.id, (m) => m.cancelInvitation({ invitationId: invitation.id }));
 
-		expect(await run((m) => m.invitations({ userId: ada.id, workspace: workspace.id }))).toEqual(
-			[],
-		);
-		expect(await run((m) => m.accept({ userId: bob.id, invitationId: invitation.id }))).toEqual({
+		expect(await run(ada.id, (m) => m.invitations({ workspace: workspace.id }))).toEqual([]);
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			failed: "ResourceHidden",
 		});
+	});
+
+	it("answers an invitation to another workspace as it answers one that does not exist", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const eve = await person("Eve");
+		const invitation = await run(ada.id, (m) =>
+			m.invite({ workspace: workspace.id, invitation: { email: eve.email, role: "member" } }),
+		);
+		if ("failed" in invitation) throw new Error(invitation.failed);
+		const refusalOf = (invitationId: string) =>
+			run(eve.id, (m) => m.cancelInvitation({ invitationId }).pipe(Effect.flip, Effect.orDie));
+
+		const elsewhere = await refusalOf(invitation.id);
+		const nowhere = await refusalOf(crypto.randomUUID());
+
+		expect(elsewhere).toEqual(nowhere);
+		expect(elsewhere).toMatchObject({ _tag: "ResourceHidden", resource: "invitation" });
+		expect(await run(ada.id, (m) => m.invitations({ workspace: workspace.id }))).toHaveLength(1);
+	});
+
+	it("refuses to cancel an invitation for a member who may not manage members", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		await join(workspace.id, ada.id, bob);
+		const invitation = await run(ada.id, (m) =>
+			m.invite({
+				workspace: workspace.id,
+				invitation: { email: "someone@example.com", role: "member" },
+			}),
+		);
+		if ("failed" in invitation) throw new Error(invitation.failed);
+
+		expect(await run(bob.id, (m) => m.cancelInvitation({ invitationId: invitation.id }))).toEqual({
+			failed: "ActionForbidden",
+		});
+		expect(await run(ada.id, (m) => m.invitations({ workspace: workspace.id }))).toHaveLength(1);
 	});
 
 	it("promotes and demotes, and lets a viewer read the roster and administer nobody", async () => {
@@ -353,33 +375,28 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const bobMember = await join(workspace.id, ada.id, bob);
 		await join(workspace.id, ada.id, kim, "viewer");
 
-		await run((m) =>
+		await run(ada.id, (m) =>
 			m.changeRole({
-				userId: ada.id,
 				workspace: workspace.id,
 				memberId: bobMember.id,
 				role: "admin",
 			}),
 		);
-		expect(await run((m) => m.members({ userId: ada.id, workspace: workspace.id }))).toContainEqual(
+		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toContainEqual(
 			expect.objectContaining({ id: bobMember.id, role: "admin" }),
 		);
-		await run((m) =>
+		await run(ada.id, (m) =>
 			m.changeRole({
-				userId: ada.id,
 				workspace: workspace.id,
 				memberId: bobMember.id,
 				role: "member",
 			}),
 		);
 
-		expect(await run((m) => m.members({ userId: kim.id, workspace: workspace.id }))).toHaveLength(
-			3,
-		);
+		expect(await run(kim.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(3);
 		expect(
-			await run((m) =>
+			await run(kim.id, (m) =>
 				m.invite({
-					userId: kim.id,
 					workspace: workspace.id,
 					invitation: { email: "nope@example.com", role: "member" },
 				}),
@@ -388,16 +405,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			failed: "ActionForbidden",
 		});
 		expect(
-			await run((m) =>
-				m.remove({ userId: kim.id, workspace: workspace.id, memberId: bobMember.id }),
-			),
+			await run(kim.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id })),
 		).toEqual({
 			failed: "ActionForbidden",
 		});
 		expect(
-			await run((m) =>
+			await run(kim.id, (m) =>
 				m.changeRole({
-					userId: kim.id,
 					workspace: workspace.id,
 					memberId: bobMember.id,
 					role: "admin",
@@ -412,22 +426,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		await join(workspace.id, ada.id, bob);
-		const members = await run((m) => m.members({ userId: ada.id, workspace: workspace.id }));
+		const members = await run(ada.id, (m) => m.members({ workspace: workspace.id }));
 		if ("failed" in members) throw new Error(members.failed);
 		const adaMember = members.find((one) => one.user.id === ada.id);
 		if (!adaMember) throw new Error("Ada is missing");
 
 		expect(
-			await run((m) =>
-				m.remove({ userId: ada.id, workspace: workspace.id, memberId: adaMember.id }),
-			),
+			await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: adaMember.id })),
 		).toEqual({
 			failed: "LastAdministrator",
 		});
 		expect(
-			await run((m) =>
+			await run(ada.id, (m) =>
 				m.changeRole({
-					userId: ada.id,
 					workspace: workspace.id,
 					memberId: adaMember.id,
 					role: "member",
@@ -436,7 +447,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		).toEqual({
 			failed: "LastAdministrator",
 		});
-		expect(await run((m) => m.leave({ userId: ada.id, workspace: workspace.id }))).toEqual({
+		expect(await run(ada.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
 			failed: "LastAdministrator",
 		});
 	});
@@ -445,7 +456,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { workspace } = await workspaceOfAda();
 		const eve = await person("Eve");
 
-		expect(await run((m) => m.members({ userId: eve.id, workspace: workspace.id }))).toEqual({
+		expect(await run(eve.id, (m) => m.members({ workspace: workspace.id }))).toEqual({
 			failed: "ResourceHidden",
 		});
 	});
@@ -470,7 +481,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			db.insert(podMember).values({ workspaceId: workspace.id, podId: shared.id, userId: bob.id }),
 		);
 
-		await run((m) => m.remove({ userId: ada.id, workspace: workspace.id, memberId: bobMember.id }));
+		await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id }));
 		await join(workspace.id, ada.id, bob);
 
 		expect(
@@ -509,7 +520,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		if (!shared) throw new Error("The pod was not created");
 
-		expect(await run((m) => m.leave({ userId: bob.id, workspace: workspace.id }))).toBeUndefined();
+		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 		expect(
 			await onDatabase((db) => db.select().from(pod).where(eq(pod.id, shared.id))),
 		).toHaveLength(1);
@@ -518,9 +529,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("matches an invitation to an address whatever its case", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
-		const invitation = await run((m) =>
+		const invitation = await run(ada.id, (m) =>
 			m.invite({
-				userId: ada.id,
 				workspace: workspace.id,
 				invitation: { email: bob.email.toUpperCase(), role: "member" },
 			}),
@@ -535,8 +545,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					.where(eq(workspaceInvite.id, invitation.id)),
 			),
 		).toEqual([{ email: bob.email }]);
-		expect(await run((m) => m.accept({ userId: bob.id, invitationId: invitation.id }))).toEqual({
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
+		});
+	});
+
+	it("says what a member may do in the workspace, and hides it from anybody else", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const eve = await person("Eve");
+		await join(workspace.id, ada.id, bob, "viewer");
+
+		expect(await run(ada.id, (m) => m.access({ workspace: workspace.slug }))).toMatchObject({
+			role: "admin",
+			permissions: { manageMembers: true, createPods: true },
+		});
+		expect(await run(bob.id, (m) => m.access({ workspace: workspace.id }))).toMatchObject({
+			role: "viewer",
+			permissions: { manageMembers: false, createPods: false },
+		});
+		expect(await run(eve.id, (m) => m.access({ workspace: workspace.id }))).toEqual({
+			failed: "ResourceHidden",
 		});
 	});
 });

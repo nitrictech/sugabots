@@ -1,46 +1,33 @@
-import { BadRequest, CurrentUser, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
+import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedWorkspace } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers) =>
 	Effect.gen(function* () {
 		const threads = yield* ThreadView.Service;
-		const turns = yield* TurnExecution.Service;
+		const cancellation = yield* TurnCancellation.Service;
 		return handlers
-			.handle("list", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					threads.listVisible(workspaceId, actor.userId),
-				),
+			.handle("list", ({ params }) =>
+				threads.list(params.workspace).pipe(asSessionUser, asHttpError(threadErrors)),
 			)
 			.handle("get", ({ params, query, request }) =>
-				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					const details = yield* threads
-						.getVisible(
-							params.threadId,
-							user.id,
-							request.method === "HEAD" ? { ...query, limit: 1 } : query,
-						)
-						.pipe(asHttpError(threadErrors));
-					return details ?? (yield* new NotFound({ message: "No such thread" }));
-				}),
+				threads
+					.get(params.threadId, request.method === "HEAD" ? { ...query, limit: 1 } : query)
+					.pipe(asSessionUser, asHttpError(threadErrors)),
 			)
 			.handle("activity", ({ params }) =>
-				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					const activity = yield* threads.activity(params.threadId, user.id);
-					return activity ?? (yield* new NotFound({ message: "No such thread" }));
-				}),
+				threads.activity(params.threadId).pipe(asSessionUser, asHttpError(threadErrors)),
 			)
 			.handle("cancelTurn", ({ params }) =>
 				Effect.gen(function* () {
-					const user = yield* CurrentUser;
-					const cancelled = yield* turns.requestCancel(params.turnId, user.id);
+					const cancelled = yield* cancellation
+						.request(params.turnId)
+						.pipe(asSessionUser, asHttpError(threadErrors));
 					if (!cancelled) {
 						return yield* new NotFound({ message: "No active turn" });
 					}
@@ -50,5 +37,6 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 );
 
 const threadErrors = {
+	...refusals,
 	InvalidThreadHistoryCursor: BadRequest,
 };

@@ -3,7 +3,7 @@ import { Effect, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
-import { ToolExecutionRefused } from "../approvals/tool-approvals.ts";
+import { ToolExecutionRefused } from "../approvals/approved-calls.ts";
 import { recorded } from "./recorded.ts";
 import type { ToolCallRepository } from "./repository.ts";
 

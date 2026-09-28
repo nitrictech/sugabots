@@ -11,7 +11,10 @@ import { Clock, Context, Data, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { authorization } from "../../workspaces/access.ts";
+import type { AuthorizationDenied } from "../../workspaces/access.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import { CurrentActor } from "../../workspaces/current-actor.ts";
+import type { PodPermission } from "../../workspaces/permissions.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { connectionIn, connectionsIn, toConnection } from "./connection-reads.ts";
@@ -22,58 +25,83 @@ import { listServerTools } from "./mcp.ts";
 /**
  * Connecting a pod to MCP servers: checking an address against the egress
  * policy before it is stored, learning a server's tools, and signing in to one
- * through its own OAuth.
+ * through its own OAuth. Seeing a pod's connections takes the current actor's
+ * `connection.read` there, and changing them `connection.manage`.
  */
 export interface Interface {
-	readonly list: (pod: InPod) => Effect.Effect<Connection[]>;
-	readonly get: (input: InConnection) => Effect.Effect<Connection, ConnectionNotFound>;
+	readonly list: (
+		pod: InPod,
+	) => Effect.Effect<Connection[], AuthorizationDenied, CurrentActor.Service>;
+	readonly get: (
+		input: InConnection,
+	) => Effect.Effect<Connection, AuthorizationDenied | ConnectionNotFound, CurrentActor.Service>;
 	/** Learns a server's tools straight away, unless it waits on a sign-in. */
 	readonly create: (
-		input: InPod & { createdById: string; connection: NewConnection },
+		input: InPod & { connection: NewConnection },
 	) => Effect.Effect<
 		Connection,
-		UrlNotAllowed | ConnectionRepository.ConnectionNameTaken | ConnectionNotFound
+		| AuthorizationDenied
+		| UrlNotAllowed
+		| ConnectionRepository.ConnectionNameTaken
+		| ConnectionNotFound,
+		CurrentActor.Service
 	>;
 	/** A new address or secret sends the connection back to learn its tools. */
 	readonly update: (
 		input: InConnection & { changes: ConnectionUpdate },
 	) => Effect.Effect<
 		Connection,
-		ConnectionNotFound | UrlNotAllowed | ConnectionRepository.ConnectionNameTaken
+		| AuthorizationDenied
+		| ConnectionNotFound
+		| UrlNotAllowed
+		| ConnectionRepository.ConnectionNameTaken,
+		CurrentActor.Service
 	>;
-	readonly remove: (input: InConnection) => Effect.Effect<void, ConnectionNotFound>;
+	readonly remove: (
+		input: InConnection,
+	) => Effect.Effect<void, AuthorizationDenied | ConnectionNotFound, CurrentActor.Service>;
 	/** Asks the server for its tools, and records what it said against the configuration asked. */
-	readonly test: (input: InConnection) => Effect.Effect<ConnectionTestResult, ConnectionNotFound>;
+	readonly test: (
+		input: InConnection,
+	) => Effect.Effect<
+		ConnectionTestResult,
+		AuthorizationDenied | ConnectionNotFound,
+		CurrentActor.Service
+	>;
 	/** Adds a catalogued server, which signs in with OAuth, and starts its sign-in. */
 	readonly connectFromCatalog: (
-		input: InPod & { createdById: string; server: { name: string; url: string } },
+		input: InPod & { server: { name: string; url: string } },
 	) => Effect.Effect<
 		{ connectionId: string; authorizationUrl: string },
+		| AuthorizationDenied
 		| UrlNotAllowed
 		| ConnectionRepository.ConnectionNameTaken
 		| ConnectionOAuthStartFailed
-		| ConnectionNeededNoSignIn
+		| ConnectionNeededNoSignIn,
+		CurrentActor.Service
 	>;
 	/** Where to send the browser to sign in, or `null` when the server is already signed in to. */
 	readonly startOAuth: (
 		input: InConnection,
 	) => Effect.Effect<
 		{ authorizationUrl: string | null },
-		ConnectionNotFound | ConnectionDoesNotUseOAuth | ConnectionOAuthStartFailed
+		| AuthorizationDenied
+		| ConnectionNotFound
+		| ConnectionDoesNotUseOAuth
+		| ConnectionOAuthStartFailed,
+		CurrentActor.Service
 	>;
 	/**
-	 * Finishes a sign-in with what the authorization server sent back, for
-	 * `userId` only while they may still manage the pod's connections.
+	 * Finishes a sign-in with what the authorization server sent back, only for
+	 * the actor who started it and only while they may still manage the pod's
+	 * connections.
 	 */
 	readonly completeOAuth: (input: {
-		userId: string;
 		callback: { code?: string; state?: string; error?: string; errorDescription?: string };
-	}) => Effect.Effect<SignInOutcome, ConnectionNotFound>;
+	}) => Effect.Effect<SignInOutcome, ConnectionNotFound, CurrentActor.Service>;
 }
 
-/** A pod, by its workspace and its own id. */
 export interface InPod {
-	workspaceId: string;
 	podId: string;
 }
 
@@ -82,11 +110,24 @@ export interface InConnection extends InPod {
 	connectionId: string;
 }
 
+/** A pod, by its workspace and its own id. */
+export interface PodLocation {
+	workspaceId: string;
+	podId: string;
+}
+
+/** One of a pod's connections, by its workspace, its pod and its own id. */
+interface ConnectionLocation extends PodLocation {
+	connectionId: string;
+}
+
 /**
  * How a sign-in ended. `pod` is there once the sign-in is known to be for a
  * pod the caller manages, so the browser can be sent back to it.
  */
-export type SignInOutcome = { pod: InPod } | { failure: ConnectionSignInFailure; pod?: InPod };
+export type SignInOutcome =
+	| { pod: PodLocation }
+	| { failure: ConnectionSignInFailure; pod?: PodLocation };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConnectionSetup",
@@ -94,19 +135,31 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ConnectionSetup");
+	const authorization = yield* Authorization.Service;
 	const connections = yield* ConnectionRepository.Service;
 	const signIn = yield* ConnectionSignIn.Service;
 	const egress = yield* Egress.Service;
 	const cipher = yield* Credentials.Service;
 
-	const requireConnection = ({ workspaceId, podId, connectionId }: InConnection) =>
+	/** Where the connection is, once the actor may take `permission` in its pod. */
+	const locate = ({ podId, connectionId }: InConnection, permission: PodPermission) =>
+		Effect.map(
+			authorization.pod(podId, permission),
+			({ pod }): ConnectionLocation => ({
+				workspaceId: pod.workspaceId,
+				podId: pod.id,
+				connectionId,
+			}),
+		);
+
+	const requireConnection = ({ workspaceId, podId, connectionId }: ConnectionLocation) =>
 		Effect.filterOrFail(
 			connectionIn(workspaceId, podId, connectionId, cipher),
 			(found) => found !== undefined,
 			() => new ConnectionNotFound(),
 		);
 
-	const test = (at: InConnection) =>
+	const test = (at: ConnectionLocation) =>
 		Effect.gen(function* () {
 			const target = yield* connections.target(at.workspaceId, at.podId, at.connectionId);
 			if (!target) {
@@ -143,14 +196,14 @@ export const make = Effect.gen(function* () {
 		});
 
 	/** A test whose outcome is recorded on the connection rather than returned. */
-	const discoverQuietly = (at: InConnection) =>
+	const discoverQuietly = (at: ConnectionLocation) =>
 		test(at).pipe(
 			Effect.asVoid,
 			Effect.catchTag("ConnectionNotFound", () => Effect.void),
 		);
 
-	const startSignIn = (workspaceId: string, connectionId: string, url: string) =>
-		signIn.begin(workspaceId, connectionId, url).pipe(
+	const startSignIn = (input: Parameters<ConnectionSignIn.Interface["begin"]>[0]) =>
+		signIn.begin(input).pipe(
 			Effect.tapError((failure) =>
 				Effect.logWarning("A connection's sign-in did not start", failure),
 			),
@@ -158,17 +211,25 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		list: ({ workspaceId, podId }) => operation("list", connectionsIn(workspaceId, podId, cipher)),
+		list: ({ podId }) =>
+			operation(
+				"list",
+				Effect.flatMap(authorization.pod(podId, "connection.read"), ({ pod }) =>
+					connectionsIn(pod.workspaceId, pod.id, cipher),
+				),
+			),
 
-		get: (at) => operation("get", requireConnection(at)),
+		get: (input) =>
+			operation("get", Effect.flatMap(locate(input, "connection.read"), requireConnection)),
 
-		create: ({ workspaceId, podId, createdById, connection }) =>
+		create: ({ podId, connection }) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
+					const { pod, actor } = yield* authorization.pod(podId, "connection.manage");
 					yield* requireAllowedUrl(egress, connection.url);
-					const made = yield* connections.create(workspaceId, podId, createdById, connection);
-					const at = { workspaceId, podId, connectionId: made.id };
+					const made = yield* connections.create(pod.workspaceId, pod.id, actor.userId, connection);
+					const at = { workspaceId: pod.workspaceId, podId: pod.id, connectionId: made.id };
 					if (connection.auth !== "oauth") {
 						yield* discoverQuietly(at);
 					}
@@ -176,10 +237,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: ({ changes, ...at }) =>
+		update: ({ changes, ...input }) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const at = yield* locate(input, "connection.manage");
 					if (changes.url) {
 						yield* requireAllowedUrl(egress, changes.url);
 					}
@@ -204,30 +266,36 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: ({ workspaceId, podId, connectionId }) =>
+		remove: (input) =>
 			operation(
 				"remove",
-				Effect.filterOrFail(
-					connections.remove(workspaceId, podId, connectionId),
-					(removed) => removed,
-					() => new ConnectionNotFound(),
-				).pipe(Effect.asVoid),
+				Effect.gen(function* () {
+					const at = yield* locate(input, "connection.manage");
+					if (!(yield* connections.remove(at.workspaceId, at.podId, at.connectionId))) {
+						return yield* new ConnectionNotFound();
+					}
+				}),
 			),
 
-		test: (at) => operation("test", test(at)),
+		test: (input) => operation("test", Effect.flatMap(locate(input, "connection.manage"), test)),
 
-		connectFromCatalog: ({ workspaceId, podId, createdById, server }) =>
+		connectFromCatalog: ({ podId, server }) =>
 			operation(
 				"connectFromCatalog",
 				Effect.gen(function* () {
+					const { pod, actor } = yield* authorization.pod(podId, "connection.manage");
+					const workspaceId = pod.workspaceId;
 					yield* requireAllowedUrl(egress, server.url);
-					const made = yield* connections.create(workspaceId, podId, createdById, {
+					const made = yield* connections.create(workspaceId, pod.id, actor.userId, {
 						...server,
 						auth: "oauth",
 					});
-					const started = yield* startSignIn(workspaceId, made.id, made.url).pipe(
-						Effect.tapError(() => connections.remove(workspaceId, podId, made.id)),
-					);
+					const started = yield* startSignIn({
+						workspaceId,
+						connectionId: made.id,
+						serverUrl: made.url,
+						startedByUserId: actor.userId,
+					}).pipe(Effect.tapError(() => connections.remove(workspaceId, pod.id, made.id)));
 					if ("authorized" in started) {
 						return yield* new ConnectionNeededNoSignIn();
 					}
@@ -235,15 +303,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		startOAuth: (at) =>
+		startOAuth: (input) =>
 			operation(
 				"startOAuth",
 				Effect.gen(function* () {
+					const at = yield* locate(input, "connection.manage");
 					const found = yield* requireConnection(at);
 					if (found.auth !== "oauth") {
 						return yield* new ConnectionDoesNotUseOAuth();
 					}
-					const started = yield* startSignIn(at.workspaceId, at.connectionId, found.url);
+					const { userId } = yield* CurrentActor.Service;
+					const started = yield* startSignIn({
+						workspaceId: at.workspaceId,
+						connectionId: at.connectionId,
+						serverUrl: found.url,
+						startedByUserId: userId,
+					});
 					if ("authorized" in started) {
 						yield* discoverQuietly(at);
 						return { authorizationUrl: null };
@@ -252,20 +327,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		completeOAuth: ({ userId, callback }) =>
+		completeOAuth: ({ callback }) =>
 			operation(
 				"completeOAuth",
 				Effect.gen(function* () {
 					if (!callback.state) return { failure: "missing_state" as const };
 					const owner = yield* connections.byOauthState(callback.state);
 					if (!owner) return { failure: "unknown_state" as const };
+					// Somebody else's browser bringing the callback would otherwise store
+					// the credential they signed in with on a connection they never chose.
+					const { userId } = yield* CurrentActor.Service;
+					if (owner.startedByUserId !== userId) return { failure: "not_allowed" as const };
 					// Asked again rather than carried over from the request that started
 					// the sign-in: authority can be withdrawn while the person is away at
 					// the authorization server, and completing would store a credential
 					// they may no longer manage.
-					const allowed = yield* Effect.result(
-						authorization.pod(userId, owner.podId, "connection.manage"),
-					);
+					const allowed = yield* Effect.result(authorization.pod(owner.podId, "connection.manage"));
 					if (allowed._tag === "Failure") return { failure: "not_allowed" as const };
 
 					const pod = { workspaceId: owner.workspaceId, podId: owner.podId };
@@ -305,7 +382,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([ConnectionRepository.layer, ConnectionSignIn.layer]),
+	Layer.provide([Authorization.layer, ConnectionRepository.layer, ConnectionSignIn.layer]),
 );
 
 export class ConnectionNotFound

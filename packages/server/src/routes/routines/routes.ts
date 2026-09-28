@@ -1,104 +1,64 @@
 import { MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
+import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { upcomingOccurrences } from "@sugabots/core/conversations/routines/schedule";
 import { DateTime, Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { bearerToken } from "../../auth/middleware.ts";
+import { asSessionUser, bearerToken } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedAgent, grantedWorkspace } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handlers) =>
 	Effect.gen(function* () {
 		const routines = yield* Routines.Service;
 		const view = yield* RoutineView.Service;
+		const webhooks = yield* RoutineWebhooks.Service;
 		return (
 			handlers
-				.handle("listInWorkspace", () =>
-					Effect.gen(function* () {
-						const { workspaceId, actor } = yield* grantedWorkspace;
-						const items = yield* view.listInWorkspace(workspaceId, actor.userId);
-						return { items };
-					}),
-				)
-				.handle("list", () =>
-					Effect.flatMap(grantedAgent, ({ agent }) =>
-						view.list({ workspaceId: agent.workspaceId, agentId: agent.id }),
+				.handle("listInWorkspace", ({ params }) =>
+					view.listInWorkspace(params.workspace).pipe(
+						Effect.map((items) => ({ items })),
+						asSessionUser,
+						asHttpError(routineErrors),
 					),
 				)
-				.handle("create", ({ payload }) =>
-					Effect.gen(function* () {
-						const { agent, actor } = yield* grantedAgent;
-						return yield* routines
-							.create(
-								{ workspaceId: agent.workspaceId, agentId: agent.id, createdById: actor.userId },
-								payload,
-							)
-							.pipe(asHttpError(routineErrors));
-					}),
+				.handle("list", ({ params }) =>
+					view.list(params).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
-				.handle("previewSchedule", ({ payload }) =>
-					upcomingOccurrences(payload.expression, payload.timezone).pipe(
+				.handle("create", ({ params, payload }) =>
+					routines.create(params, payload).pipe(asSessionUser, asHttpError(routineErrors)),
+				)
+				.handle("previewSchedule", ({ params, payload }) =>
+					routines.previewSchedule({ agentId: params.agentId, ...payload }).pipe(
 						Effect.map((dates) => dates.map((date) => date.toISOString())),
+						asSessionUser,
 						asHttpError(routineErrors),
 					),
 				)
 				.handle("get", ({ params }) =>
-					Effect.gen(function* () {
-						const { agent } = yield* grantedAgent;
-						const found = yield* view.get(scopeOf(agent, params.routineId));
-						return found ?? (yield* noSuchRoutine);
-					}),
+					view.get(params).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
-					Effect.flatMap(grantedAgent, ({ agent }) =>
-						routines
-							.update(scopeOf(agent, params.routineId), payload)
-							.pipe(asHttpError(routineErrors)),
-					),
+					routines.update(params, payload).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("remove", ({ params }) =>
-					Effect.flatMap(grantedAgent, ({ agent }) =>
-						routines.remove(scopeOf(agent, params.routineId)).pipe(asHttpError(routineErrors)),
-					),
+					routines.remove(params).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("run", ({ params, payload }) =>
-					Effect.gen(function* () {
-						const { agent, actor } = yield* grantedAgent;
-						const requestedAt = DateTime.formatIso(yield* DateTime.now);
-						return yield* routines
-							.acceptTrigger({
-								...scopeOf(agent, params.routineId),
-								triggerIdentity: payload.requestId,
-								trigger: {
-									kind: "manual",
-									requestId: payload.requestId,
-									requestedAt,
-									requestedByUserId: actor.userId,
-								},
-							})
-							.pipe(asHttpError(routineErrors));
-					}),
+					routines
+						.run({ ...params, requestId: payload.requestId })
+						.pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("rotateSecret", ({ params }) =>
-					Effect.gen(function* () {
-						const { agent } = yield* grantedAgent;
-						const secret = yield* routines
-							.rotateSecret(scopeOf(agent, params.routineId))
-							.pipe(asHttpError(routineErrors));
-						return { secret };
-					}),
+					routines.rotateSecret(params).pipe(
+						Effect.map((secret) => ({ secret })),
+						asSessionUser,
+						asHttpError(routineErrors),
+					),
 				)
 				.handle("executions", ({ params, query }) =>
-					Effect.gen(function* () {
-						const { agent } = yield* grantedAgent;
-						const executions = yield* view
-							.listExecutions(scopeOf(agent, params.routineId), query)
-							.pipe(asHttpError(routineErrors));
-						return executions ?? (yield* noSuchRoutine);
-					}),
+					view.listExecutions(params, query).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				// Raw, so a body that is not JSON is refused with the reason rather
 				// than the generic unsupported-content-type answer.
@@ -119,9 +79,10 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 						}
 						const secret = bearerToken(request.headers.authorization);
 						const receivedAt = DateTime.formatIso(yield* DateTime.now);
+						// Deliberately without a session: the routine's secret is what admits the run.
 						const accepted = secret
-							? yield* routines
-									.acceptWebhook(params.routineId, secret, {
+							? yield* webhooks
+									.accept(params.routineId, secret, {
 										kind: "webhook",
 										idempotencyKey,
 										payload,
@@ -139,24 +100,17 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 	}),
 );
 
-/** The routine `routineId` on the agent the route was granted. */
-function scopeOf(agent: { workspaceId: string; id: string }, routineId: string) {
-	return { workspaceId: agent.workspaceId, agentId: agent.id, routineId };
-}
-
 function isJson(contentType: string | undefined): boolean {
 	const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
 	return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
 }
 
-const noSuchRoutine = new NotFound({ message: "No such Routine" });
-
 const routineErrors = {
+	...refusals,
 	InvalidRoutineExecutionCursor: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
 	RoutineNameTaken: Conflict,
 	RoutineNotFound: NotFound,
-	RoutineRequiresCrewAgent: BadRequest,
 	RoutineTriggerConflict: Conflict,
 	RoutineTriggerRejected: BadRequest,
 };

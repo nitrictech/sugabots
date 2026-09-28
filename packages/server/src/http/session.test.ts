@@ -1,26 +1,19 @@
-import { Api, Authorise, Session } from "@sugabots/contracts/http";
+import { Api, Session } from "@sugabots/contracts/http";
 import { HttpApi } from "effect/unstable/httpapi";
 import { describe, expect, it } from "vitest";
-import { type AccessRule, accessRuleFor } from "./access-policy.ts";
 import { createTestApp } from "./app.test-support.ts";
 
 /**
- * Every endpoint fails closed, and every endpoint says what it lets somebody do.
+ * Every endpoint fails closed without a session.
  *
  * The other HTTP tests each check one route they know about. This one reads
- * the API definition, so an endpoint added without a session check, or
- * without a rule in `accessPolicy`, fails here rather than shipping. "Which routes did
- * we forget to authorise?" is the question that breaches a multi-tenant
- * product.
+ * the API definition, so an endpoint added without a session check fails here
+ * rather than shipping. What a signed-in person may do is decided by the use
+ * case each endpoint calls, which refuses in core whoever called it.
  */
 
 /** Public by intent. Anything else reaching here without credentials is a bug. */
 const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
-
-/** Groups whose service checks every action itself: behind `Session` only, with no rule in `accessPolicy`. */
-const CHECKED_BY_THEIR_SERVICE = new Set(["workspaces"]);
-
-const STRANGER = "0199a3a0-0000-7000-8000-0000000000ee";
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspace: "0199a3a0-0000-7000-8000-000000000001",
@@ -55,27 +48,21 @@ function fill(pattern: string): string {
 
 interface Endpoint {
 	name: string;
-	group: string;
 	method: string;
 	path: string;
 	behindSession: boolean;
-	behindAuthorise: boolean;
-	rule: AccessRule | undefined;
 }
 
 function declaredEndpoints(): Endpoint[] {
 	const endpoints: Endpoint[] = [];
 	HttpApi.reflect(Api, {
 		onGroup: () => {},
-		onEndpoint: ({ group, endpoint, middleware }) => {
+		onEndpoint: ({ endpoint, middleware }) => {
 			endpoints.push({
 				name: `${endpoint.method} ${endpoint.path}`,
-				group: group.identifier,
 				method: endpoint.method,
 				path: endpoint.path,
 				behindSession: [...middleware].some(({ key }) => key === Session.key),
-				behindAuthorise: [...middleware].some(({ key }) => key === Authorise.key),
-				rule: accessRuleFor(group.identifier, endpoint.identifier),
 			});
 		},
 	});
@@ -85,16 +72,6 @@ function declaredEndpoints(): Endpoint[] {
 const protectedEndpoints = declaredEndpoints()
 	.filter((endpoint) => !OPEN_ENDPOINTS.has(endpoint.name))
 	.map((endpoint) => [endpoint.name, endpoint] as const);
-
-const authorisedAtTheEdge = protectedEndpoints.filter(
-	([, { group }]) => !CHECKED_BY_THEIR_SERVICE.has(group),
-);
-const checkedByTheirService = protectedEndpoints.filter(([, { group }]) =>
-	CHECKED_BY_THEIR_SERVICE.has(group),
-);
-
-/** An endpoint whose rule names a permission, checked against an id in its path. */
-const idAddressed = protectedEndpoints.filter(([, { rule }]) => rule && !("reach" in rule));
 
 function requestTo({ method, path }: Endpoint) {
 	return {
@@ -110,14 +87,8 @@ describe("every endpoint requires a session", () => {
 		expect(protectedEndpoints.length).toBeGreaterThan(20);
 	});
 
-	it.each(authorisedAtTheEdge)("%s is behind Session and Authorise", (_name, endpoint) => {
+	it.each(protectedEndpoints)("%s is behind Session", (_name, endpoint) => {
 		expect(endpoint.behindSession).toBe(true);
-		expect(endpoint.behindAuthorise).toBe(true);
-	});
-
-	it.each(checkedByTheirService)("%s is behind Session", (_name, endpoint) => {
-		expect(endpoint.behindSession).toBe(true);
-		expect(endpoint.rule).toBeUndefined();
 	});
 
 	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
@@ -133,32 +104,4 @@ describe("every endpoint requires a session", () => {
 		const declared = new Set(declaredEndpoints().map(({ name }) => name));
 		expect([...OPEN_ENDPOINTS].filter((name) => !declared.has(name))).toEqual([]);
 	});
-});
-
-describe("every endpoint says what it lets somebody do", () => {
-	it.each(authorisedAtTheEdge)("%s has a rule in accessPolicy", (_name, { rule }) => {
-		expect(rule).toBeDefined();
-		if (rule && "reach" in rule) {
-			expect(rule.reach, "a reach rule names where the endpoint is scoped").not.toBe("");
-		}
-	});
-
-	it.each(idAddressed)(
-		"%s refuses a signed-in stranger before reading the request",
-		async (_name, endpoint) => {
-			const app = createTestApp({
-				resolveUser: async () => ({
-					id: STRANGER,
-					email: "stranger@example.com",
-					name: "Stranger",
-					image: null,
-				}),
-			});
-			const { path, ...init } = requestTo(endpoint);
-
-			const response = await app.request(path, init);
-
-			expect(response.status).toBe(404);
-		},
-	);
 });

@@ -1,17 +1,15 @@
 export * as TurnExecution from "./execution.ts";
 
 import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
-	afterCommit,
 	type Database,
 	type Executor,
 	query,
 	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
-import { type TurnReason, turn } from "../../database/schema.ts";
+import type { TurnReason } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -23,7 +21,6 @@ import {
 	personColumns,
 	toParticipant,
 } from "../threads/participants.ts";
-import { visibleThread } from "../threads/visibility.ts";
 import type { FloorMessage } from "./floor.ts";
 import { TURN_CANCELLED } from "./lifecycle.ts";
 import {
@@ -33,7 +30,6 @@ import {
 	type TurnCheckpoint,
 	TurnRepository,
 } from "./repository.ts";
-import { TurnSignals } from "./signals.ts";
 import { Turn, type TurnRequest } from "./turn.workflow.ts";
 
 /**
@@ -42,7 +38,9 @@ import { Turn, type TurnRequest } from "./turn.workflow.ts";
  * A turn is asked for when a person posts and run by the turn workflow (see
  * `turn.workflow.ts`), one segment at a time. Each segment starts here, with
  * the turn opened through `TurnRepository` and what the model is told loaded.
- * A person asking a turn to stop is heard here too.
+ * It runs for the workflow, not for a person, so it asks for no actor and is
+ * never handed to a route; a person asking a turn to stop is
+ * `TurnCancellation`.
  */
 export interface Interface {
 	/**
@@ -54,8 +52,6 @@ export interface Interface {
 	 * cancelled.
 	 */
 	readonly prepare: (run: TurnRun) => Effect.Effect<PreparedTurn | NotRunnable>;
-	/** Asks a turn to stop for `userId`. `false` when there is no running turn they may see. */
-	readonly requestCancel: (turnId: string, userId: string) => Effect.Effect<boolean>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -66,7 +62,6 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("TurnExecution");
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* TurnRepository.Service;
-	const signals = yield* TurnSignals.Service;
 
 	/** Ends the turn the run holds, if any, because the run may not go on. */
 	const refuseRun = (run: TurnRun, reason: string, userMessage: UserMessage) =>
@@ -161,30 +156,6 @@ export const make = Effect.gen(function* () {
 								: Effect.void,
 						),
 					),
-				),
-			),
-
-		requestCancel: (turnId, userId) =>
-			operation(
-				"requestCancel",
-				transaction(
-					Effect.gen(function* () {
-						const [candidate] = yield* query((db) =>
-							db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, turnId)).limit(1),
-						);
-						if (!candidate) return false;
-						if (!(yield* query((db) => visibleThread(db, candidate.threadId, userId))))
-							return false;
-						const requested = yield* turns.requestCancel(turnId);
-						if (requested._tag === "Refused") return false;
-						// Telling the workflow is the cancellation; it records it. The flag
-						// set with it stops the next segment instead if the workflow has
-						// just stopped waiting, since the signal would then go unheard.
-						if (requested._tag === "SignalOwner") {
-							yield* afterCommit(signals.cancel(requested.owner));
-						}
-						return true;
-					}),
 				),
 			),
 	});

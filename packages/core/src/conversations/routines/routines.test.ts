@@ -1,34 +1,65 @@
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { transaction } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import {
 	agent,
+	connection,
 	message,
 	pod,
 	podMember,
 	routine,
 	routineExecution,
 	thread,
+	toolCall,
+	user,
+	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../../database/testing.ts";
+import { ActionForbidden, ResourceHidden } from "../../workspaces/access.ts";
+import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ToolApprovalForbidden, ToolApprovals } from "../tools/approvals/tool-approvals.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution } from "../turns/execution.ts";
+import { TurnRepository } from "../turns/repository.ts";
+import { prepareRunnable, runningTurns } from "../turns/testing.ts";
+import { lockTriggers } from "./acceptance.ts";
+import { RoutineTriggerConflict } from "./routine.ts";
+import { RoutineRunner } from "./routine-runner.ts";
 import { InvalidRoutineExecutionCursor, RoutineView } from "./routine-view.ts";
-import { RoutineRequiresCrewAgent, Routines, RoutineTriggerConflict } from "./routines.ts";
+import { RoutineWebhooks } from "./routine-webhooks.ts";
+import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
 	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
-	const routines = onPostgres(Context.get(conversations, Routines.Service));
-	const view = onPostgres(Context.get(conversations, RoutineView.Service));
+	const routinesAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Routines.Service));
+	/** As the routines' owner, who administers their workspace. */
+	let routines: Promised<Routines.Interface>;
+	let view: Promised<RoutineView.Interface>;
+	const webhooks = onPostgres(Context.get(conversations, RoutineWebhooks.Service));
+	const turns = onPostgres({ suspend: Context.get(conversations, TurnRepository.Service).suspend });
+	const execution = onPostgres({
+		prepare: Context.get(conversations, TurnExecution.Service).prepare,
+	});
+	const runner = onPostgres(Context.get(conversations, RoutineRunner.Service));
 	const settlement = onPostgres({
 		settleRun: Context.get(conversations, RoutineSettlement.Service).settleRun,
 	});
 	let workspaceId: string;
+	let podId: string;
 	let agentId: string;
 	let userId: string;
 
@@ -37,10 +68,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, agentId, userId } = await aRoutineOwner());
+		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
+		routines = routinesAs(userId);
+		view = onPostgresAs(userId)(Context.get(conversations, RoutineView.Service));
 	});
 
 	it("lists the workspace's routines on bots in pods the person reaches, by name", async () => {
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Pod member", email: `member-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!member) throw new Error("Could not create the member");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
+		);
 		const [joined] = await onDatabase((db) =>
 			db
 				.insert(pod)
@@ -56,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		);
 		if (!joined) throw new Error("Could not create the joined pod");
 		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId: joined.id, userId }),
+			db.insert(podMember).values({ workspaceId, podId: joined.id, userId: member.id }),
 		);
 		const [helper] = await onDatabase((db) =>
 			db
@@ -76,7 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		if (!helper) throw new Error("Could not create the joined agent");
 		const webhook = { kind: "webhook" as const };
 		await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Unreached",
 				instructions: "In a pod this member is not in.",
@@ -84,7 +127,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		const later = await routines.create(
-			{ workspaceId, agentId: helper.id, createdById: userId },
+			{ agentId: helper.id },
 			{
 				name: "Weekly report",
 				instructions: "Summarise the week.",
@@ -92,7 +135,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		const sooner = await routines.create(
-			{ workspaceId, agentId: helper.id, createdById: userId },
+			{ agentId: helper.id },
 			{
 				name: "Morning brief",
 				instructions: "Plan the day.",
@@ -100,16 +143,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		const removed = await routines.create(
-			{ workspaceId, agentId: helper.id, createdById: userId },
+			{ agentId: helper.id },
 			{
 				name: "Removed",
 				instructions: "Gone.",
 				trigger: webhook,
 			},
 		);
-		await routines.remove({ workspaceId, agentId: helper.id, routineId: removed.routine.id });
+		await routines.remove({ agentId: helper.id, routineId: removed.routine.id });
 
-		const listed = await view.listInWorkspace(workspaceId, userId);
+		const listed = await onPostgresAs(member.id)(
+			Context.get(conversations, RoutineView.Service),
+		).listInWorkspace(workspaceId);
 
 		expect(listed.map((item) => item.routine.id)).toEqual([sooner.routine.id, later.routine.id]);
 		expect(listed[0]?.agent).toMatchObject({ id: helper.id, name: "Joined Agent", color: "sky" });
@@ -118,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 	it("creates scoped cron and webhook definitions without exposing secret hashes", async () => {
 		const cron = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Weekday briefing",
 				instructions: "Summarise the overnight changes.",
@@ -132,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		});
 
 		const webhook = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Incoming alert",
 				instructions: "Investigate the alert.",
@@ -146,33 +191,94 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			payload: { event: "created" },
 			receivedAt: new Date().toISOString(),
 		};
-		expect(
-			await routines.acceptWebhook(webhook.routine.id, webhook.secret ?? "", delivery),
-		).toEqual({
+		expect(await webhooks.accept(webhook.routine.id, webhook.secret ?? "", delivery)).toEqual({
 			executionId: expect.any(String),
 			threadId: expect.any(String),
 			duplicate: false,
 		});
-		expect(await routines.acceptWebhook(webhook.routine.id, "incorrect", delivery)).toBeUndefined();
-		const rotatedSecret = await routines.rotateSecret({
-			workspaceId,
-			agentId,
-			routineId: webhook.routine.id,
-		});
+		expect(await webhooks.accept(webhook.routine.id, "incorrect", delivery)).toBeUndefined();
+		const rotatedSecret = await routines.rotateSecret({ agentId, routineId: webhook.routine.id });
 		expect(
-			await routines.acceptWebhook(webhook.routine.id, webhook.secret ?? "", delivery),
+			await webhooks.accept(webhook.routine.id, webhook.secret ?? "", delivery),
 		).toBeUndefined();
 		expect(
-			await routines.acceptWebhook(webhook.routine.id, rotatedSecret, {
+			await webhooks.accept(webhook.routine.id, rotatedSecret, {
 				...delivery,
 				idempotencyKey: "after-rotation",
 			}),
 		).toMatchObject({ duplicate: false });
-		expect(await routines.acceptWebhook("not-a-uuid", "incorrect", delivery)).toBeUndefined();
-		expect(await view.list({ workspaceId, agentId })).toHaveLength(2);
+		expect(await webhooks.accept("not-a-uuid", "incorrect", delivery)).toBeUndefined();
+		expect(await view.list({ agentId })).toHaveLength(2);
 	});
 
-	it("rejects system agents as Routine owners", async () => {
+	it("refuses a wrong webhook secret without waiting on the routine's other triggers", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Busy", instructions: "Handle input.", trigger: { kind: "webhook" } },
+		);
+		let release = () => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let locked = () => {};
+		const lockHeld = new Promise<void>((resolve) => {
+			locked = resolve;
+		});
+		const holding = runOnPostgres(
+			transaction(
+				lockTriggers(created.routine.id).pipe(
+					Effect.tap(() => Effect.sync(locked)),
+					Effect.andThen(Effect.promise(() => released)),
+				),
+			),
+		);
+		await lockHeld;
+
+		const refused = await Promise.race([
+			webhooks.accept(created.routine.id, "incorrect", {
+				kind: "webhook",
+				idempotencyKey: null,
+				payload: {},
+				receivedAt: new Date().toISOString(),
+			}),
+			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
+		]);
+		release();
+		await holding;
+
+		expect(refused).toBeUndefined();
+	});
+
+	it("refuses a run to a member who may not run routines, whoever asks for it", async () => {
+		// Called directly, with no route in front: what a new entry point that
+		// forgot to check would reach.
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Nightly", instructions: "Run nightly.", trigger: { kind: "webhook" } },
+		);
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Pod member", email: `member-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!member) throw new Error("Could not create the member");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
+		);
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: member.id }),
+		);
+		const routine = { agentId, routineId: created.routine.id };
+
+		await expect(
+			routinesAs(member.id).run({ ...routine, requestId: crypto.randomUUID() }),
+		).rejects.toThrow(ActionForbidden);
+		await expect(routinesAs(member.id).remove(routine)).rejects.toThrow(ActionForbidden);
+		expect((await view.listExecutions(routine))?.items).toEqual([]);
+	});
+
+	it("hides a system agent, which sits in no pod, from a Routine", async () => {
 		const suffix = crypto.randomUUID();
 		// A system agent belongs to the workspace and sits in no pod, which is
 		// itself why a Routine cannot name one: a Routine runs in a pod.
@@ -195,43 +301,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		if (!systemAgent) throw new Error("Could not create system agent");
 		await expect(
 			routines.create(
-				{ workspaceId, agentId: systemAgent.id, createdById: userId },
+				{ agentId: systemAgent.id },
 				{
 					name: "Forbidden",
 					instructions: "Should not run.",
 					trigger: { kind: "webhook" },
 				},
 			),
-		).rejects.toThrow(RoutineRequiresCrewAgent);
+		).rejects.toThrow(ResourceHidden);
 	});
 
 	it("accepts a manual trigger once and keeps instructions as an execution snapshot", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Check reports",
 				instructions: "Use the original instructions.",
 				trigger: { kind: "webhook" },
 			},
 		);
-		const requestId = crypto.randomUUID();
-		const trigger = {
-			kind: "manual" as const,
-			requestId,
-			requestedAt: new Date().toISOString(),
-			requestedByUserId: userId,
-		};
-		const input = {
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger,
-		};
-		const [first, retried] = await Promise.all([
-			routines.acceptTrigger(input),
-			routines.acceptTrigger(input),
-		]);
+		const input = { agentId, routineId: created.routine.id, requestId: crypto.randomUUID() };
+		const [first, retried] = await Promise.all([routines.run(input), routines.run(input)]);
 		const original = first.duplicate ? retried : first;
 		const duplicate = first.duplicate ? first : retried;
 		expect(duplicate).toEqual({ ...original, duplicate: true });
@@ -245,20 +335,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		).toHaveLength(1);
 
 		await routines.update(
-			{ workspaceId, agentId, routineId: created.routine.id },
+			{ agentId, routineId: created.routine.id },
 			{
 				instructions: "Use changed instructions.",
 			},
 		);
 		const [execution] =
-			(await view.listExecutions({ workspaceId, agentId, routineId: created.routine.id }))?.items ??
-			[];
+			(await view.listExecutions({ agentId, routineId: created.routine.id }))?.items ?? [];
 		expect(execution?.instructions).toBe("Use the original instructions.");
 	});
 
 	it("bounds execution titles derived from maximum-length Routine names", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "R".repeat(80),
 				instructions: "Keep the title valid.",
@@ -266,18 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: {
-				kind: "manual",
-				requestId,
-				requestedAt: new Date().toISOString(),
-				requestedByUserId: userId,
-			},
-		});
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
 		const [executionThread] = await onDatabase((db) =>
 			db.select().from(thread).where(eq(thread.id, accepted.threadId)),
 		);
@@ -286,45 +364,28 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 	it("rejects reuse of a trigger identity with different data", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Webhook",
 				instructions: "Handle input.",
 				trigger: { kind: "webhook" },
 			},
 		);
-		const key = "delivery-1";
-		await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: key,
-			trigger: {
-				kind: "webhook",
-				idempotencyKey: key,
-				payload: { amount: 1 },
-				receivedAt: new Date().toISOString(),
-			},
+		const delivery = (amount: number) => ({
+			kind: "webhook" as const,
+			idempotencyKey: "delivery-1",
+			payload: { amount },
+			receivedAt: new Date().toISOString(),
 		});
+		await webhooks.accept(created.routine.id, created.secret ?? "", delivery(1));
 		await expect(
-			routines.acceptTrigger({
-				workspaceId,
-				agentId,
-				routineId: created.routine.id,
-				triggerIdentity: key,
-				trigger: {
-					kind: "webhook",
-					idempotencyKey: key,
-					payload: { amount: 2 },
-					receivedAt: new Date().toISOString(),
-				},
-			}),
+			webhooks.accept(created.routine.id, created.secret ?? "", delivery(2)),
 		).rejects.toThrow(RoutineTriggerConflict);
 	});
 
 	it("runs a routine's executions in order while allowing a separate Routine to run", async () => {
 		const firstRoutine = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "First queue",
 				instructions: "Run in order.",
@@ -332,7 +393,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			},
 		);
 		const secondRoutine = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Second queue",
 				instructions: "Run independently.",
@@ -346,23 +407,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			secondRoutine.routine.id,
 		]) {
 			const requestId = crypto.randomUUID();
-			accepted.push(
-				await routines.acceptTrigger({
-					workspaceId,
-					agentId,
-					routineId,
-					triggerIdentity: requestId,
-					trigger: {
-						kind: "manual",
-						requestId,
-						requestedAt: new Date().toISOString(),
-						requestedByUserId: userId,
-					},
-				}),
-			);
+			accepted.push(await routines.run({ agentId, routineId, requestId }));
 		}
-		const first = await startRunning(routines, firstRoutine.routine.id);
-		const second = await startRunning(routines, secondRoutine.routine.id);
+		const first = await startRunning(runner, firstRoutine.routine.id);
+		const second = await startRunning(runner, secondRoutine.routine.id);
 		expect(first.execution.id).toBe(accepted[0]?.executionId);
 		expect(second.execution.state).toBe("running");
 		const [waiting] = await onDatabase((db) =>
@@ -375,7 +423,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await finishTurnsIn(first.execution.threadId);
 		expect(await settlement.settleRun(first.run)).toBe(true);
 		await runOnPostgres(releaseRun(first.run));
-		const third = await startRunning(routines, firstRoutine.routine.id);
+		const third = await startRunning(runner, firstRoutine.routine.id);
 		expect(third.execution.id).toBe(accepted[1]?.executionId);
 		const queued = await onDatabase((db) =>
 			db
@@ -393,7 +441,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 	it("accepts only the latest missed cron occurrence and advances into the future", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Quarter hourly",
 				instructions: "Check recent activity.",
@@ -407,11 +455,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				.where(eq(routine.id, created.routine.id)),
 		);
 		const now = new Date("2026-09-18T12:37:40Z");
-		const accepted = await routines.processNextDue(now);
+		const accepted = await runner.processNextDue(now);
 		expect(accepted?.duplicate).toBe(false);
 		const [execution] =
-			(await view.listExecutions({ workspaceId, agentId, routineId: created.routine.id }))?.items ??
-			[];
+			(await view.listExecutions({ agentId, routineId: created.routine.id }))?.items ?? [];
 		expect(execution?.trigger).toMatchObject({
 			kind: "cron",
 			scheduledAt: "2026-09-18T12:30:00.000Z",
@@ -420,12 +467,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			db.select().from(routine).where(eq(routine.id, created.routine.id)),
 		);
 		expect(updated?.nextScheduledAt?.toISOString()).toBe("2026-09-18T12:45:00.000Z");
-		expect(await routines.processNextDue(now)).toBeUndefined();
+		expect(await runner.processNextDue(now)).toBeUndefined();
 	});
 
 	it("pages execution history with opaque cursors", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Paged runs",
 				instructions: "Run repeatedly.",
@@ -434,22 +481,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		);
 		for (let index = 0; index < 3; index += 1) {
 			const requestId = crypto.randomUUID();
-			await routines.acceptTrigger({
-				workspaceId,
-				agentId,
-				routineId: created.routine.id,
-				triggerIdentity: requestId,
-				trigger: {
-					kind: "manual",
-					requestId,
-					requestedAt: new Date().toISOString(),
-					requestedByUserId: userId,
-				},
-			});
+			await routines.run({ agentId, routineId: created.routine.id, requestId });
 		}
 
 		const first = await view.listExecutions(
-			{ workspaceId, agentId, routineId: created.routine.id },
+			{ agentId, routineId: created.routine.id },
 			{
 				limit: 2,
 			},
@@ -458,7 +494,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(first?.nextCursor).toEqual(expect.any(String));
 		if (!first?.nextCursor) throw new Error("First execution page has no cursor");
 		const second = await view.listExecutions(
-			{ workspaceId, agentId, routineId: created.routine.id },
+			{ agentId, routineId: created.routine.id },
 			{
 				limit: 2,
 				cursor: first.nextCursor,
@@ -469,7 +505,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(second?.items[0]?.id).not.toBe(first?.items[1]?.id);
 		await expect(
 			view.listExecutions(
-				{ workspaceId, agentId, routineId: created.routine.id },
+				{ agentId, routineId: created.routine.id },
 				{
 					limit: 2,
 					cursor: "not-a-cursor",
@@ -477,4 +513,135 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			),
 		).rejects.toThrow(InvalidRoutineExecutionCursor);
 	});
+
+	describe("who reaches a routine", () => {
+		/** A person with `role` in the workspace, and in the routine's pod if `inPod`. */
+		const somebody = async (role: "admin" | "member", inPod: boolean) => {
+			const [person] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: role, email: `${role}-${crypto.randomUUID()}@example.com` })
+					.returning(),
+			);
+			if (!person) throw new Error("Could not create the person");
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: person.id, role }),
+			);
+			if (inPod) {
+				await onDatabase((db) =>
+					db.insert(podMember).values({ workspaceId, podId, userId: person.id }),
+				);
+			}
+			return person.id;
+		};
+		const aRoutineWithARun = async () => {
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Reached", instructions: "Run.", trigger: { kind: "webhook" } },
+			);
+			const routine = { agentId, routineId: created.routine.id };
+			await routines.run({ ...routine, requestId: crypto.randomUUID() });
+			return routine;
+		};
+		const viewAs = (personId: string) =>
+			onPostgresAs(personId)(Context.get(conversations, RoutineView.Service));
+
+		it("lets an administrator read a routine and its history in a pod they are not in", async () => {
+			const routine = await aRoutineWithARun();
+			const admin = viewAs(await somebody("admin", false));
+
+			expect((await admin.listExecutions(routine)).items).toHaveLength(1);
+			expect(await admin.get(routine)).toMatchObject({ id: routine.routineId });
+			expect(await admin.list({ agentId })).toHaveLength(1);
+		});
+
+		it("hides a routine and its history from a member outside its pod", async () => {
+			const routine = await aRoutineWithARun();
+			const outsider = viewAs(await somebody("member", false));
+
+			await expect(outsider.listExecutions(routine)).rejects.toThrow(ResourceHidden);
+			await expect(outsider.get(routine)).rejects.toThrow(ResourceHidden);
+			await expect(outsider.list({ agentId })).rejects.toThrow(ResourceHidden);
+		});
+
+		it("refuses a member the approval a routine's run asks for, which only an administrator gives", async () => {
+			const routine = await aRoutineWithARun();
+			await startRunning(runner, routine.routineId);
+			const [executionThread] = await onDatabase((db) =>
+				db
+					.select({ id: routineExecution.threadId })
+					.from(routineExecution)
+					.where(eq(routineExecution.routineId, routine.routineId)),
+			);
+			if (!executionThread) throw new Error("The run has no thread");
+			const [run] = await runOnPostgres(runningTurns(executionThread.id));
+			if (!run) throw new Error("The run asked for no turn");
+			const prepared = await prepareRunnable(execution, run);
+			const pending = await parkForApproval(prepared);
+			const decision = { podId, toolCallId: pending.id, decision: "allow_once" as const };
+			const approvalsAs = (personId: string) =>
+				onPostgresAs(personId)(Context.get(conversations, ToolApprovals.Service));
+
+			await expect(
+				approvalsAs(await somebody("member", true)).decide(decision),
+			).rejects.toBeInstanceOf(ToolApprovalForbidden);
+			const [undecided] = await onDatabase((db) =>
+				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+			);
+			expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
+		});
+	});
+
+	/** Parks one call to a new connection in the pod for approval, as the turn's reply. */
+	async function parkForApproval(prepared: PreparedTurn) {
+		const [connected] = await onDatabase((db) =>
+			db
+				.insert(connection)
+				.values({
+					workspaceId,
+					podId,
+					name: `Linear ${crypto.randomUUID()}`,
+					handle: `linear-${crypto.randomUUID().slice(0, 8)}`,
+					url: "https://linear.example.com/mcp",
+					authKind: "header",
+					access: "allow",
+					createdById: userId,
+				})
+				.returning({ id: connection.id }),
+		);
+		if (!connected) throw new Error("Could not create the connection");
+		const pending = {
+			id: crypto.randomUUID(),
+			approvalId: `approval-${crypto.randomUUID()}`,
+			sdkToolCallId: "sdk-routine",
+			tool: "linear__create_issue",
+			input: { title: "From the routine" },
+			connectionId: connected.id,
+			connectionRevision: 1,
+			remoteToolName: "create_issue",
+			mutating: true,
+			atOffset: 0,
+		};
+		const parked = await turns.suspend(
+			replyTurnOf(prepared),
+			{
+				messages: [],
+				approvals: [
+					{
+						approvalId: pending.approvalId,
+						tool: pending.tool,
+						connectionId: connected.id,
+						connectionRevision: 1,
+						remoteToolName: pending.remoteToolName,
+					},
+				],
+				modelInput: { model: "test", system: "test", messages: [] },
+				reply: { content: "", collaborations: [], toolCalls: [{ id: pending.id, atOffset: 0 }] },
+				accounting: { usage: {} },
+			},
+			[pending],
+		);
+		if (!parked) throw new Error("The turn did not park");
+		return pending;
+	}
 });

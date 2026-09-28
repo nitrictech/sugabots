@@ -11,8 +11,8 @@ import {
 	newConnectionSchema,
 } from "../../connections.ts";
 import { uuidSchema } from "../../uuid.ts";
-import { BadRequest, Conflict } from "../errors.ts";
-import { Authorise, Session } from "../middleware.ts";
+import { BadRequest, Conflict, NotFound, refused } from "../errors.ts";
+import { Session } from "../middleware.ts";
 
 const root = "/pods/:podId/connections";
 const pod = { podId: uuidSchema };
@@ -23,27 +23,33 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 		HttpApiEndpoint.get("list", root, {
 			params: pod,
 			success: Schema.Array(connectionSchema),
+			error: refused,
 		}),
 		HttpApiEndpoint.post("create", root, {
 			params: pod,
 			payload: newConnectionSchema,
 			success: connectionSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.get("get", `${root}/:connectionId`, {
 			params: connection,
 			success: connectionSchema,
+			error: refused,
 		}),
 		HttpApiEndpoint.patch("update", `${root}/:connectionId`, {
 			params: connection,
 			payload: connectionUpdateSchema,
 			success: connectionSchema,
-			error: [BadRequest, Conflict],
+			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.delete("remove", `${root}/:connectionId`, { params: connection }),
+		HttpApiEndpoint.delete("remove", `${root}/:connectionId`, {
+			params: connection,
+			error: refused,
+		}),
 		HttpApiEndpoint.post("test", `${root}/:connectionId/test`, {
 			params: connection,
 			success: connectionTestResultSchema,
+			error: refused,
 		}),
 		// Makes the connection and starts its sign-in in one request, so a
 		// catalog entry is one click.
@@ -51,12 +57,12 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 			params: pod,
 			payload: connectFromCatalogSchema,
 			success: connectFromCatalogResultSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("startOAuth", `${root}/:connectionId/oauth/start`, {
 			params: connection,
 			success: connectionOauthStartSchema,
-			error: BadRequest,
+			error: [BadRequest, ...refused],
 		}),
 		// Where the authorization server sends the browser back. It answers with
 		// a redirect to the web app, success or not, since a browser is reading it.
@@ -68,7 +74,7 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 				error_description: Schema.optional(Schema.String),
 			},
 			success: HttpApiSchema.Empty(302),
+			error: NotFound,
 		}),
 	)
-	.middleware(Authorise)
 	.middleware(Session) {}

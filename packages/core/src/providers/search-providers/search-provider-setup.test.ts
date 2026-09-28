@@ -1,7 +1,9 @@
 import { Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, servedOnPostgres } from "../../database/testing.ts";
+import { user, workspace, workspaceMember } from "../../database/schema.ts";
+import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { ActionForbidden } from "../../workspaces/access.ts";
+import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { SearchProviderSetup } from "./search-provider-setup.ts";
 
@@ -11,25 +13,32 @@ import { SearchProviderSetup } from "./search-provider-setup.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres", () => {
 	let workspaceId: string;
+	let adminId: string;
+	let memberId: string;
 
-	/** The setup under an egress policy allowing private addresses or not, every search answered by `search`. */
-	const setupWith = (
+	/**
+	 * The setup as the workspace's administrator, under an egress policy
+	 * allowing private addresses or not, every search answered by `search`.
+	 */
+	const setupWith = async (
 		search: (url: string) => Promise<Response>,
-		{ allowPrivateNetwork = true } = {},
+		{ allowPrivateNetwork = true, as = adminId } = {},
 	) =>
-		servedOnPostgres(
-			SearchProviderSetup.Service,
-			SearchProviderSetup.layer.pipe(
-				Layer.provide(
-					Layer.succeed(Egress.Service, {
-						providers: { for: () => (url) => search(String(url)) },
-						validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
-						oauth: fetch,
-						webFetch: fetch,
-					}),
+		(
+			await servedOnPostgresAs(
+				SearchProviderSetup.Service,
+				SearchProviderSetup.layer.pipe(
+					Layer.provide(
+						Layer.succeed(Egress.Service, {
+							providers: { for: () => (url) => search(String(url)) },
+							validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
+							oauth: fetch,
+							webFetch: fetch,
+						}),
+					),
 				),
-			),
-		);
+			)
+		)(as);
 
 	const answering = () =>
 		vi.fn(async () => Response.json({ web: { results: [{ title: "t", url: "https://r" }] } }));
@@ -46,8 +55,25 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 				.values({ name: `Search ${suffix}`, slug: `search-setup-${suffix}` })
 				.returning(),
 		);
-		if (!space) throw new Error("fixture");
+		const [admin, member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values([
+					{ name: "Ada", email: `ada-${suffix}@example.com` },
+					{ name: "Sam", email: `sam-${suffix}@example.com` },
+				])
+				.returning(),
+		);
+		if (!space || !admin || !member) throw new Error("fixture");
 		workspaceId = space.id;
+		adminId = admin.id;
+		memberId = member.id;
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId: adminId, role: "admin" },
+				{ workspaceId, userId: memberId, role: "member" },
+			]),
+		);
 	});
 
 	it("refuses a local address where the installation forbids private ones", async () => {
@@ -55,8 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 
 		await expect(
 			setup.replace({
-				workspaceId,
-				createdById: null as unknown as string,
+				workspace: workspaceId,
 				provider: { preset: "searxng", baseUrl: "http://127.0.0.1:8080" },
 			}),
 		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
@@ -67,8 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		const search = answering();
 		const setup = await setupWith(search);
 		await setup.replace({
-			workspaceId,
-			createdById: null as unknown as string,
+			workspace: workspaceId,
 			provider: { preset: "brave", apiKey: "k" },
 		});
 
@@ -82,8 +106,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 			async () => new Response("quota exceeded for key k", { status: 429 }),
 		);
 		await setup.replace({
-			workspaceId,
-			createdById: null as unknown as string,
+			workspace: workspaceId,
 			provider: { preset: "brave", apiKey: "k" },
 		});
 
@@ -101,8 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		const search = answering();
 		const setup = await setupWith(search);
 		await setup.replace({
-			workspaceId,
-			createdById: null as unknown as string,
+			workspace: workspaceId,
 			provider: { preset: "brave" },
 		});
 
@@ -120,5 +142,13 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		await expect(setup.remove(workspaceId)).rejects.toBeInstanceOf(
 			SearchProviderSetup.SearchProviderNotFound,
 		);
+	});
+
+	it("lets a member ask whether the web tools are on, and change nothing", async () => {
+		const setup = await setupWith(answering(), { as: memberId });
+
+		expect(await setup.webAccess(workspaceId)).toBe(false);
+		await expect(setup.get(workspaceId)).rejects.toBeInstanceOf(ActionForbidden);
+		await expect(setup.remove(workspaceId)).rejects.toBeInstanceOf(ActionForbidden);
 	});
 });

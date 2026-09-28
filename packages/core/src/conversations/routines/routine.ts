@@ -1,7 +1,17 @@
 import type { Routine } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
+import { Data, Effect } from "effect";
 import type * as schema from "../../database/schema.ts";
 import { routine } from "../../database/schema.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { Authorization } from "../../workspaces/authorization.ts";
+import type { PodPermission } from "../../workspaces/permissions.ts";
+
+/** A routine, by the crew agent it belongs to and its own id. */
+export interface OnAgent {
+	agentId: string;
+	routineId: string;
+}
 
 /** A routine on an agent in a workspace. */
 export interface Scope {
@@ -9,6 +19,20 @@ export interface Scope {
 	readonly agentId: string;
 	readonly routineId: string;
 }
+
+/**
+ * The scope of the routine named, once the current actor may take
+ * `permission` on its agent.
+ */
+export const scopeOf = (
+	authorization: Authorization.Interface,
+	{ agentId, routineId }: OnAgent,
+	permission: PodPermission,
+) =>
+	Effect.map(
+		authorization.agent(agentId, permission),
+		({ agent }): Scope => ({ workspaceId: agent.workspaceId, agentId: agent.id, routineId }),
+	);
 
 /** The routine `scope` names, as a condition on `routine`, unless it has been removed. */
 export const inScope = (scope: Scope) =>
@@ -40,4 +64,28 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
+}
+
+export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`No such Routine`;
+	}
+}
+
+export class RoutineTriggerConflict
+	extends Data.TaggedError("RoutineTriggerConflict")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That trigger identity was already used with different data`;
+	}
+}
+
+export class RoutineTriggerRejected
+	extends Data.TaggedError("RoutineTriggerRejected")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`That Routine cannot accept this trigger`;
+	}
 }

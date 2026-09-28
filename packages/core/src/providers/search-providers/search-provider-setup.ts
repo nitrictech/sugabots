@@ -10,6 +10,9 @@ import { searchProviderPreset } from "@sugabots/contracts";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { AuthorizationDenied } from "../../workspaces/access.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { searchBackend, searchEndpoint } from "./backends.ts";
@@ -19,32 +22,49 @@ import { SearchProviderRepository } from "./search-provider-repository.ts";
 /**
  * Choosing where a workspace's `web_search` goes: checking an address against
  * the egress policy before it is stored, and trying the service with a query.
+ * The workspace is named by its id or its slug. Configuring the provider takes
+ * the current actor's `workspace.providers.manage`; asking whether the web
+ * tools are on takes only `workspace.read`.
  */
 export interface Interface {
 	/** The workspace's provider, or nothing when it has none. */
-	readonly get: (workspaceId: string) => Effect.Effect<SearchProvider | undefined>;
+	readonly get: (
+		workspace: string,
+	) => Effect.Effect<SearchProvider | undefined, AuthorizationDenied, CurrentActor.Service>;
 	/** Whether the workspace's bots are offered the web tools. */
-	readonly webAccess: (workspaceId: string) => Effect.Effect<boolean>;
+	readonly webAccess: (
+		workspace: string,
+	) => Effect.Effect<boolean, AuthorizationDenied, CurrentActor.Service>;
 	readonly replace: (input: {
-		workspaceId: string;
-		createdById: string;
+		workspace: string;
 		provider: NewSearchProvider;
 	}) => Effect.Effect<
 		SearchProvider,
-		UrlNotAllowed | SearchProviderRepository.SearchProviderApiKeyRequired
+		AuthorizationDenied | UrlNotAllowed | SearchProviderRepository.SearchProviderApiKeyRequired,
+		CurrentActor.Service
 	>;
 	readonly update: (input: {
-		workspaceId: string;
+		workspace: string;
 		changes: SearchProviderUpdate;
 	}) => Effect.Effect<
 		SearchProvider,
-		SearchProviderNotFound | UrlNotAllowed | SearchProviderRepository.SearchProviderApiKeyRequired
+		| AuthorizationDenied
+		| SearchProviderNotFound
+		| UrlNotAllowed
+		| SearchProviderRepository.SearchProviderApiKeyRequired,
+		CurrentActor.Service
 	>;
-	readonly remove: (workspaceId: string) => Effect.Effect<void, SearchProviderNotFound>;
+	readonly remove: (
+		workspace: string,
+	) => Effect.Effect<void, AuthorizationDenied | SearchProviderNotFound, CurrentActor.Service>;
 	/** Sends a query, and records what came back against the configuration that sent it. */
 	readonly test: (
-		workspaceId: string,
-	) => Effect.Effect<SearchProviderTestResult, SearchProviderNotFound>;
+		workspace: string,
+	) => Effect.Effect<
+		SearchProviderTestResult,
+		AuthorizationDenied | SearchProviderNotFound,
+		CurrentActor.Service
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -53,8 +73,16 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviderSetup");
+	const authorization = yield* Authorization.Service;
 	const providers = yield* SearchProviderRepository.Service;
 	const egress = yield* Egress.Service;
+
+	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
+	const managed = (workspace: string) =>
+		Effect.map(
+			authorization.workspace(workspace, "workspace.providers.manage"),
+			({ workspaceId }) => workspaceId,
+		);
 
 	const requireProvider = (workspaceId: string) =>
 		Effect.filterOrFail(
@@ -64,30 +92,40 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		get: (workspaceId) => operation("get", searchProviderOf(workspaceId)),
+		get: (workspace) => operation("get", Effect.flatMap(managed(workspace), searchProviderOf)),
 
-		webAccess: (workspaceId) =>
+		webAccess: (workspace) =>
 			operation(
 				"webAccess",
-				Effect.map(providers.resolve(workspaceId), (connection) => connection !== undefined),
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+					return (yield* providers.resolve(workspaceId)) !== undefined;
+				}),
 			),
 
-		replace: ({ workspaceId, createdById, provider }) =>
+		replace: ({ workspace, provider }) =>
 			operation(
 				"replace",
 				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.providers.manage",
+					);
 					yield* requireAllowedUrl(
 						egress,
 						provider.baseUrl ?? searchProviderPreset(provider.preset).baseUrl,
 					);
-					return toSearchProvider(yield* providers.replace(workspaceId, { createdById, provider }));
+					return toSearchProvider(
+						yield* providers.replace(workspaceId, { createdById: actor.userId, provider }),
+					);
 				}),
 			),
 
-		update: ({ workspaceId, changes }) =>
+		update: ({ workspace, changes }) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
@@ -99,20 +137,21 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: (workspaceId) =>
+		remove: (workspace) =>
 			operation(
 				"remove",
-				Effect.filterOrFail(
-					providers.remove(workspaceId),
-					(removed) => removed,
-					() => new SearchProviderNotFound(),
-				).pipe(Effect.asVoid),
+				Effect.gen(function* () {
+					if (!(yield* providers.remove(yield* managed(workspace)))) {
+						return yield* new SearchProviderNotFound();
+					}
+				}),
 			),
 
-		test: (workspaceId) =>
+		test: (workspace) =>
 			operation(
 				"test",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					yield* requireProvider(workspaceId);
 					const connection = yield* providers.connection(workspaceId);
 					if (!connection) {
@@ -144,7 +183,9 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(SearchProviderRepository.layer));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([Authorization.layer, SearchProviderRepository.layer]),
+);
 
 export class SearchProviderNotFound
 	extends Data.TaggedError("SearchProviderNotFound")

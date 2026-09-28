@@ -2,12 +2,13 @@ import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
+import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
+import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
-import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
-import { ModelRequestFailed, type TurnModel } from "@sugabots/core/conversations/turns/model";
+import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
@@ -16,7 +17,6 @@ import { ConnectionSetup } from "@sugabots/core/providers/connections/connection
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { unimplemented } from "@sugabots/core/testing";
-import { type Authorization, closedAuthorization } from "@sugabots/core/workspaces/access";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
@@ -27,6 +27,7 @@ import type { Authentication } from "../auth/authentication.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
 import { apiLayer } from "./app.ts";
+import type { HttpServices } from "./services.ts";
 
 type TestIdentity =
 	| { authentication: Authentication.Interface; resolveUser?: never }
@@ -36,10 +37,8 @@ type TestAppOptions<Provided> = TestIdentity & {
 	/** Where the web app is served, when a case needs it apart from the API. */
 	webAppUrl?: string;
 	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
-	authorization?: Authorization;
 	/** The services a case is about, in place of the unimplemented ones. */
 	services?: Layer.Layer<Provided>;
-	model?: TurnModel;
 };
 
 /** The test API's address. */
@@ -55,10 +54,10 @@ export interface TestApp {
 }
 
 /**
- * The complete route table over fakes that grant nothing, reach nothing and
- * store nothing, so a case supplies only what it is about.
+ * The complete route table over fakes that reach nothing and store nothing,
+ * so a case supplies only what it is about.
  */
-export function createTestApp<Provided extends Layer.Success<typeof emptyServices> = never>(
+export function createTestApp<Provided extends HttpServices = never>(
 	options: TestAppOptions<Provided>,
 ): TestApp {
 	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
@@ -69,17 +68,10 @@ export function createTestApp<Provided extends Layer.Success<typeof emptyService
 			publicUrl: BASE_URL,
 			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
 		}),
-		authorization: options.authorization ?? closedAuthorization(),
 		events: {
 			bus,
 			access: options.events?.access ?? closedChannelAccess(),
 			stream: options.events?.stream,
-		},
-		model: options.model ?? {
-			stream: () =>
-				Effect.fail(
-					new ModelRequestFailed({ message: "This test app has no model", reason: "unavailable" }),
-				),
 		},
 	}).pipe(
 		Layer.provide(Layer.merge(emptyServices, options.services ?? Layer.empty)),
@@ -104,7 +96,7 @@ function authenticationForResolver(resolveUser: UserResolver): Authentication.In
  * Services whose every method dies naming itself, so a case supplies, through
  * `services`, exactly the ones it is about.
  */
-const emptyServices = Layer.mergeAll(
+const emptyServices: Layer.Layer<HttpServices> = Layer.mergeAll(
 	unimplemented(Membership.Service),
 	unimplemented(PodAdministration.Service),
 	unimplemented(AgentAdministration.Service),
@@ -112,13 +104,15 @@ const emptyServices = Layer.mergeAll(
 	unimplemented(ModelProviderSetup.Service),
 	unimplemented(SearchProviderSetup.Service),
 	unimplemented(ConnectionSetup.Service),
+	unimplemented(ModelTrials.Service),
 	unimplemented(Chats.Service),
 	unimplemented(ChatView.Service),
 	unimplemented(ThreadView.Service),
-	unimplemented(TurnExecution.Service),
+	unimplemented(TurnCancellation.Service),
 	unimplemented(ToolApprovals.Service),
 	unimplemented(Routines.Service),
 	unimplemented(RoutineView.Service),
+	unimplemented(RoutineWebhooks.Service),
 );
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */

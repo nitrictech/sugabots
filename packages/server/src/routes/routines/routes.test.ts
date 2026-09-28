@@ -1,8 +1,10 @@
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
+import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
-import { Effect } from "effect";
+import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/access";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp } from "../../http/app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
@@ -14,14 +16,9 @@ const AGENT_ID = "0199a3a0-0000-7000-8000-000000000007";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000008";
 const EXECUTION_ID = "0199a3a0-0000-7000-8000-000000000004";
 const THREAD_ID = "0199a3a0-0000-7000-8000-000000000005";
-const POD_ID = "0199a3a0-0000-7000-8000-000000000009";
-const MEMBER_ID = "0199a3a0-0000-7000-8000-00000000000a";
-const STRANGER_ID = "0199a3a0-0000-7000-8000-00000000000b";
+
 function webhookApp() {
-	const acceptTrigger = vi.fn<Routines.Interface["acceptTrigger"]>(() =>
-		Effect.succeed({ executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }),
-	);
-	const acceptWebhook = vi.fn<Routines.Interface["acceptWebhook"]>((routineId, secret) =>
+	const accept = vi.fn<RoutineWebhooks.Interface["accept"]>((routineId, secret) =>
 		Effect.succeed(
 			routineId === ROUTINE_ID && secret === "good-secret"
 				? { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }
@@ -31,10 +28,9 @@ function webhookApp() {
 	return {
 		app: createTestApp({
 			resolveUser: async () => null,
-			services: unimplemented(Routines.Service, { acceptTrigger, acceptWebhook }),
+			services: unimplemented(RoutineWebhooks.Service, { accept }),
 		}),
-		acceptTrigger,
-		acceptWebhook,
+		accept,
 	};
 }
 
@@ -62,7 +58,7 @@ function deliver(
 
 describe("Routine webhooks", () => {
 	it("authenticates the secret and accepts JSON trigger data", async () => {
-		const { app, acceptWebhook } = webhookApp();
+		const { app, accept } = webhookApp();
 
 		const response = await deliver(app, {
 			secret: "good-secret",
@@ -74,7 +70,7 @@ describe("Routine webhooks", () => {
 			executionId: EXECUTION_ID,
 			duplicate: false,
 		});
-		expect(acceptWebhook).toHaveBeenCalledWith(
+		expect(accept).toHaveBeenCalledWith(
 			ROUTINE_ID,
 			"good-secret",
 			expect.objectContaining({
@@ -86,7 +82,7 @@ describe("Routine webhooks", () => {
 	});
 
 	it("does not reveal whether a Routine exists when authentication fails", async () => {
-		const { app, acceptTrigger } = webhookApp();
+		const { app } = webhookApp();
 
 		const missing = await deliver(app);
 		const invalid = await deliver(app, { secret: "wrong-secret" });
@@ -99,11 +95,10 @@ describe("Routine webhooks", () => {
 		expect(malformed.status).toBe(401);
 		expect(await missing.json()).toEqual(await invalid.json());
 		expect(await unknown.json()).toEqual(await malformed.json());
-		expect(acceptTrigger).not.toHaveBeenCalled();
 	});
 
 	it("rejects non-JSON content before authenticating", async () => {
-		const { app, acceptWebhook } = webhookApp();
+		const { app, accept } = webhookApp();
 
 		const response = await deliver(app, {
 			secret: "good-secret",
@@ -111,11 +106,11 @@ describe("Routine webhooks", () => {
 		});
 
 		expect(response.status).toBe(400);
-		expect(acceptWebhook).not.toHaveBeenCalled();
+		expect(accept).not.toHaveBeenCalled();
 	});
 
 	it("rejects oversized JSON before accepting a trigger", async () => {
-		const { app, acceptTrigger } = webhookApp();
+		const { app, accept } = webhookApp();
 
 		const response = await deliver(app, {
 			secret: "good-secret",
@@ -123,11 +118,11 @@ describe("Routine webhooks", () => {
 		});
 
 		expect(response.status).toBe(413);
-		expect(acceptTrigger).not.toHaveBeenCalled();
+		expect(accept).not.toHaveBeenCalled();
 	});
 
 	it("rejects overlong idempotency keys before accepting a trigger", async () => {
-		const { app, acceptTrigger } = webhookApp();
+		const { app, accept } = webhookApp();
 
 		const response = await deliver(app, {
 			secret: "good-secret",
@@ -135,132 +130,105 @@ describe("Routine webhooks", () => {
 		});
 
 		expect(response.status).toBe(400);
-		expect(acceptTrigger).not.toHaveBeenCalled();
+		expect(accept).not.toHaveBeenCalled();
 	});
 });
 
-/** Ada administers the workspace from outside the pod; Sam is in it; Kim is not. */
-const authorization = testAuthorization({
-	id: WORKSPACE_ID,
-	roles: { [USER_ID]: "admin", [MEMBER_ID]: "member", [STRANGER_ID]: "member" },
-	pods: [{ id: POD_ID, kind: "shared", members: [MEMBER_ID] }],
-	agents: [{ id: AGENT_ID, podId: POD_ID, name: "Alerts", handle: "alerts" }],
-});
-
-function historyApp(userId: string, listExecutions: RoutineView.Interface["listExecutions"]) {
+/** The app as Ada, with `routines` and `view` as the only routine methods it has. */
+function appAs(
+	services: { routines?: Partial<Routines.Interface>; view?: Partial<RoutineView.Interface> } = {},
+) {
 	return createTestApp({
-		resolveUser: async () => ({
-			id: userId,
-			name: "Somebody",
-			email: "somebody@example.com",
-			image: null,
-		}),
-		authorization,
-		services: unimplemented(RoutineView.Service, { listExecutions }),
+		resolveUser: async () => ({ id: USER_ID, name: "Ada", email: "ada@example.com", image: null }),
+		services: Layer.merge(
+			unimplemented(Routines.Service, services.routines),
+			unimplemented(RoutineView.Service, services.view),
+		),
 	});
 }
 
-const executionsFor = (userId: string, listExecutions: RoutineView.Interface["listExecutions"]) =>
-	historyApp(userId, listExecutions).request(
-		`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/executions`,
-		{ headers: { authorization: "Bearer session" } },
-	);
+const session = { authorization: "Bearer session", "content-type": "application/json" };
 
-describe("Routine execution history", () => {
-	it("shows an administrator the history of a pod they are not in", async () => {
-		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
-			Effect.succeed({ items: [], nextCursor: null }),
-		);
-
-		const response = await executionsFor(USER_ID, listExecutions);
-
-		expect(response.status).toBe(200);
-		expect(listExecutions).toHaveBeenCalled();
+/** The actor a double was called as, alongside what it was given. */
+const asked = <Input>(calls: Array<{ input: Input; userId: string }>, input: Input) =>
+	Effect.map(CurrentActor.Service, ({ userId }) => {
+		calls.push({ input, userId });
 	});
 
-	it("shows a member of the pod its history", async () => {
-		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
-			Effect.succeed({ items: [], nextCursor: null }),
-		);
-
-		const response = await executionsFor(MEMBER_ID, listExecutions);
+describe("a Routine's runs", () => {
+	it("reads the history of the routine in the path, as the person asking", async () => {
+		const calls: Array<{ input: unknown; userId: string }> = [];
+		const response = await appAs({
+			view: {
+				listExecutions: (routine) =>
+					Effect.as(asked(calls, routine), { items: [], nextCursor: null }),
+			},
+		}).request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/executions`, { headers: session });
 
 		expect(response.status).toBe(200);
-		expect(listExecutions).toHaveBeenCalled();
+		expect(calls).toEqual([
+			{ input: { agentId: AGENT_ID, routineId: ROUTINE_ID }, userId: USER_ID },
+		]);
 	});
 
-	it("does not expose execution snapshots to a member outside the pod", async () => {
-		const listExecutions = vi.fn<RoutineView.Interface["listExecutions"]>(() =>
-			Effect.succeed({ items: [], nextCursor: null }),
-		);
-
-		const response = await executionsFor(STRANGER_ID, listExecutions);
+	it("answers a routine hidden from the caller as not found", async () => {
+		const response = await appAs({
+			view: { listExecutions: () => Effect.fail(new ResourceHidden({ resource: "agent" })) },
+		}).request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/executions`, { headers: session });
 
 		expect(response.status).toBe(404);
-		expect(listExecutions).not.toHaveBeenCalled();
 	});
 
-	it("refuses a member starting a Routine by hand", async () => {
-		const acceptTrigger = vi.fn<Routines.Interface["acceptTrigger"]>(() =>
-			Effect.succeed({ executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }),
-		);
-		const app = createTestApp({
-			resolveUser: async () => ({
-				id: MEMBER_ID,
-				name: "Sam",
-				email: "sam@example.com",
-				image: null,
-			}),
-			authorization,
-			services: unimplemented(Routines.Service, { acceptTrigger }),
+	it("starts a run by hand as the person asking", async () => {
+		const calls: Array<{ input: unknown; userId: string }> = [];
+		const requestId = "0199a3a0-0000-7000-8000-0000000000c1";
+		const response = await appAs({
+			routines: {
+				run: (input) =>
+					Effect.as(asked(calls, input), {
+						executionId: EXECUTION_ID,
+						threadId: THREAD_ID,
+						duplicate: false,
+					}),
+			},
+		}).request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/run`, {
+			method: "POST",
+			headers: session,
+			body: JSON.stringify({ requestId }),
 		});
 
-		const response = await app.request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/run`, {
+		expect(response.status).toBe(202);
+		expect(calls).toEqual([
+			{ input: { agentId: AGENT_ID, routineId: ROUTINE_ID, requestId }, userId: USER_ID },
+		]);
+	});
+
+	it("answers a run the caller may not start as forbidden", async () => {
+		const response = await appAs({
+			routines: { run: () => Effect.fail(new ActionForbidden({ permission: "routine.run" })) },
+		}).request(`/agents/${AGENT_ID}/routines/${ROUTINE_ID}/run`, {
 			method: "POST",
-			headers: { authorization: "Bearer session", "content-type": "application/json" },
+			headers: session,
 			body: JSON.stringify({ requestId: "0199a3a0-0000-7000-8000-0000000000c1" }),
 		});
 
 		expect(response.status).toBe(403);
-		expect(acceptTrigger).not.toHaveBeenCalled();
 	});
 });
 
 describe("the workspace's routines", () => {
-	const listFor = (userId: string, listInWorkspace: RoutineView.Interface["listInWorkspace"]) =>
-		createTestApp({
-			resolveUser: async () => ({
-				id: userId,
-				name: "Somebody",
-				email: "somebody@example.com",
-				image: null,
-			}),
-			authorization,
-			services: unimplemented(RoutineView.Service, { listInWorkspace }),
-		}).request(`/workspaces/${WORKSPACE_ID}/routines`, {
-			headers: { authorization: "Bearer session" },
-		});
-
-	it("lists what the view finds for the person asking", async () => {
+	it("lists what the view finds in the workspace in the path", async () => {
 		const listInWorkspace = vi.fn<RoutineView.Interface["listInWorkspace"]>(() =>
 			Effect.succeed([]),
 		);
 
-		const response = await listFor(MEMBER_ID, listInWorkspace);
+		const response = await appAs({ view: { listInWorkspace } }).request(
+			`/workspaces/${WORKSPACE_ID}/routines`,
+			{ headers: session },
+		);
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ items: [] });
-		expect(listInWorkspace).toHaveBeenCalledWith(WORKSPACE_ID, MEMBER_ID);
-	});
-
-	it("does not list another workspace's routines", async () => {
-		const listInWorkspace = vi.fn<RoutineView.Interface["listInWorkspace"]>(() =>
-			Effect.succeed([]),
-		);
-
-		const response = await listFor("0199a3a0-0000-7000-8000-0000000000ff", listInWorkspace);
-
-		expect(response.status).toBe(404);
-		expect(listInWorkspace).not.toHaveBeenCalled();
+		expect(listInWorkspace).toHaveBeenCalledWith(WORKSPACE_ID);
 	});
 });

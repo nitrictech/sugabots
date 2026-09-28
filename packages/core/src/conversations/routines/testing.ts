@@ -15,7 +15,7 @@ import { lane } from "../../workflows/sql.ts";
 import { lanesForTests } from "../../workflows/testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Routine, RoutineRun, routineLane } from "./routine.workflow.ts";
-import type { Routines } from "./routines.ts";
+import type { RoutineRunner } from "./routine-runner.ts";
 
 /** The routine's run holding its lane, if any. */
 export const runningRun = (routineId: string) =>
@@ -44,9 +44,9 @@ export const releaseRun = (run: RoutineRun) =>
 	);
 
 /**
- * A person in a new workspace with a shared pod whose crew agent owns
- * routines, and the queued runs other cases left cancelled, so a routine's
- * next run is the one a case asks for.
+ * A person administering a new workspace with a shared pod whose crew agent
+ * owns routines, and the queued runs other cases left cancelled, so a
+ * routine's next run is the one a case asks for.
  */
 export async function aRoutineOwner() {
 	await onDatabase((db) =>
@@ -71,7 +71,9 @@ export async function aRoutineOwner() {
 	if (!person || !space) throw new Error("Could not create Routine test identity");
 	const userId = person.id;
 	const workspaceId = space.id;
-	await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId }));
+	await onDatabase((db) =>
+		db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
+	);
 	const [room] = await onDatabase((db) =>
 		db
 			.insert(pod)
@@ -108,12 +110,12 @@ export async function aRoutineOwner() {
 
 /** Starts the routine's run holding its lane, as its workflow's first step does. */
 export async function startRunning(
-	routines: Pick<Promised<Routines.Interface>, "startRun">,
+	runner: Pick<Promised<RoutineRunner.Interface>, "startRun">,
 	routineId: string,
 ) {
 	const run = await runOnPostgres(runningRun(routineId));
 	if (!run) throw new Error("No run of the routine is running");
-	await routines.startRun(run);
+	await runner.startRun(run);
 	const [execution] = await onDatabase((db) =>
 		db.select().from(routineExecution).where(eq(routineExecution.id, run.executionId)),
 	);

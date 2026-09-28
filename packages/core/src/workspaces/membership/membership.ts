@@ -7,6 +7,7 @@ import type {
 	WorkspaceDetails,
 	WorkspaceInvitation,
 	WorkspaceMember,
+	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
@@ -27,64 +28,86 @@ import { Installation } from "../../installation/installation.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { type AuthorizationDenied, authorization, ResourceHidden } from "../access.ts";
+import { type AuthorizationDenied, ResourceHidden } from "../access.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
-import { PodAdministration } from "../pods/pod-administration.ts";
+import { Authorization } from "../authorization.ts";
+import { CurrentActor } from "../current-actor.ts";
+import { workspacePermissions } from "../permissions.ts";
+import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**
- * Every operation takes the id of the person asking and checks what they may do
- * itself. Anything the caller may not know about is `ResourceHidden`.
+ * The workspaces the current actor is in, and who else is. Every operation
+ * checks what the actor may do itself; anything they may not know about is
+ * `ResourceHidden`.
  */
 export interface Interface {
 	/** In the order they joined them. */
-	readonly workspaces: (input: { userId: string }) => Effect.Effect<readonly Workspace[]>;
+	readonly workspaces: Effect.Effect<readonly Workspace[], never, CurrentActor.Service>;
 	/** Administered by the person who created it. */
 	readonly create: (input: {
-		userId: string;
 		details: WorkspaceDetails;
-	}) => Effect.Effect<Workspace, SlugTaken | SlugShapedLikeUuid>;
+	}) => Effect.Effect<Workspace, SlugTaken | SlugShapedLikeUuid, CurrentActor.Service>;
 	readonly update: (
 		input: InWorkspace & { details: WorkspaceDetails },
-	) => Effect.Effect<Workspace, AuthorizationDenied | SlugTaken | SlugShapedLikeUuid>;
+	) => Effect.Effect<
+		Workspace,
+		AuthorizationDenied | SlugTaken | SlugShapedLikeUuid,
+		CurrentActor.Service
+	>;
+	/** The actor's role in the workspace and what it lets them do there. */
+	readonly access: (
+		input: InWorkspace,
+	) => Effect.Effect<
+		{ role: WorkspaceRole; permissions: WorkspacePermissions },
+		AuthorizationDenied,
+		CurrentActor.Service
+	>;
 	readonly members: (
 		input: InWorkspace,
-	) => Effect.Effect<readonly WorkspaceMember[], AuthorizationDenied>;
+	) => Effect.Effect<readonly WorkspaceMember[], AuthorizationDenied, CurrentActor.Service>;
 	readonly changeRole: (
 		input: InWorkspace & { memberId: string; role: WorkspaceRole },
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator>;
+	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
 	/** Their Personal pod and pod memberships go with them. */
 	readonly remove: (
 		input: InWorkspace & { memberId: string },
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator>;
+	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
 	readonly leave: (
 		input: InWorkspace,
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator>;
+	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
 	/** The invitations still waiting to be accepted. */
 	readonly invitations: (
 		input: InWorkspace,
-	) => Effect.Effect<readonly WorkspaceInvitation[], AuthorizationDenied>;
+	) => Effect.Effect<readonly WorkspaceInvitation[], AuthorizationDenied, CurrentActor.Service>;
 	readonly invite: (
 		input: InWorkspace & { invitation: NewWorkspaceInvitation },
-	) => Effect.Effect<WorkspaceInvitation, AuthorizationDenied | AlreadyMember | AlreadyInvited>;
-	readonly cancelInvitation: (input: ForInvitation) => Effect.Effect<void, AuthorizationDenied>;
+	) => Effect.Effect<
+		WorkspaceInvitation,
+		AuthorizationDenied | AlreadyMember | AlreadyInvited,
+		CurrentActor.Service
+	>;
+	readonly cancelInvitation: (
+		input: ForInvitation,
+	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/** For the person the invitation was sent to. */
 	readonly invitation: (
 		input: ForInvitation,
-	) => Effect.Effect<InvitationPreview, ResourceHidden | NotTheInvitee>;
+	) => Effect.Effect<InvitationPreview, ResourceHidden | NotTheInvitee, CurrentActor.Service>;
 	readonly accept: (
 		input: ForInvitation,
-	) => Effect.Effect<{ workspaceId: string }, ResourceHidden | NotTheInvitee | EmailUnverified>;
+	) => Effect.Effect<
+		{ workspaceId: string },
+		ResourceHidden | NotTheInvitee | EmailUnverified,
+		CurrentActor.Service
+	>;
 }
 
-/** `userId` is who is asking; `workspace` is the workspace's id or slug. */
+/** `workspace` is the workspace's id or slug. */
 export interface InWorkspace {
-	userId: string;
 	workspace: string;
 }
 
-/** `userId` is who is asking. */
 export interface ForInvitation {
-	userId: string;
 	invitationId: string;
 }
 
@@ -92,11 +115,12 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Membership");
+	const authorization = yield* Authorization.Service;
 	const accounts = yield* Accounts.Service;
 	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
-	const pods = yield* PodAdministration.Service;
+	const personalPods = yield* PersonalPods.Service;
 	const agents = yield* AgentRepository.Service;
 	const searchProviders = yield* SearchProviderRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
@@ -135,23 +159,25 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		workspaces: (input) =>
-			operation(
-				"workspaces",
+		workspaces: operation(
+			"workspaces",
+			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
 				query((db) =>
 					db
 						.select({ id: workspace.id, name: workspace.name, slug: workspace.slug })
 						.from(workspaceMember)
 						.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
-						.where(eq(workspaceMember.userId, input.userId))
+						.where(eq(workspaceMember.userId, userId))
 						.orderBy(asc(workspaceMember.createdAt)),
 				),
 			),
+		),
 
 		create: (input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
+					const { userId } = yield* CurrentActor.Service;
 					yield* requireSlugUnlikeUuid(input.details.slug);
 					return yield* transaction(
 						Effect.gen(function* () {
@@ -167,15 +193,12 @@ export const make = Effect.gen(function* () {
 							yield* query((db) =>
 								db
 									.insert(workspaceMember)
-									.values({ workspaceId: created.id, userId: input.userId, role: "admin" }),
+									.values({ workspaceId: created.id, userId, role: "admin" }),
 							);
-							yield* agents.ensureSystemAgents({
-								workspaceId: created.id,
-								createdById: input.userId,
-							});
-							yield* searchProviders.provisionDefault(created.id, input.userId);
+							yield* agents.ensureSystemAgents({ workspaceId: created.id, createdById: userId });
+							yield* searchProviders.provisionDefault(created.id, userId);
 							yield* modelProviders.seedPresets(created.id);
-							yield* pods.provisionPersonal({ workspaceId: created.id, userId: input.userId });
+							yield* personalPods.provision({ workspaceId: created.id, userId });
 							return created;
 						}),
 					);
@@ -186,11 +209,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const standing = yield* authorization.workspace(
-						input.userId,
-						input.workspace,
-						"workspace.update",
-					);
+					const standing = yield* authorization.workspace(input.workspace, "workspace.update");
 					yield* requireSlugUnlikeUuid(input.details.slug);
 					const [updated] = yield* queryCatching(
 						(db) =>
@@ -206,15 +225,20 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		access: (input) =>
+			operation(
+				"access",
+				Effect.map(authorization.workspace(input.workspace, "workspace.read"), ({ actor }) => ({
+					role: actor.workspaceRole,
+					permissions: workspacePermissions(actor),
+				})),
+			),
+
 		members: (input) =>
 			operation(
 				"members",
 				Effect.gen(function* () {
-					const standing = yield* authorization.workspace(
-						input.userId,
-						input.workspace,
-						"workspace.read",
-					);
+					const standing = yield* authorization.workspace(input.workspace, "workspace.read");
 					const rows = yield* query((db) =>
 						db
 							.select({
@@ -238,7 +262,6 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
-							input.userId,
 							input.workspace,
 							"workspace.members.manage",
 						);
@@ -263,7 +286,6 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
-							input.userId,
 							input.workspace,
 							"workspace.members.manage",
 						);
@@ -282,12 +304,9 @@ export const make = Effect.gen(function* () {
 				"leave",
 				transaction(
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(
-							input.userId,
-							input.workspace,
-							"workspace.read",
-						);
+						const standing = yield* authorization.workspace(input.workspace, "workspace.read");
 						yield* lockWorkspace(standing.workspaceId);
+						const { userId } = standing.actor;
 						const [own] = yield* query((db) =>
 							db
 								.select({ id: workspaceMember.id, role: workspaceMember.role })
@@ -295,7 +314,7 @@ export const make = Effect.gen(function* () {
 								.where(
 									and(
 										eq(workspaceMember.workspaceId, standing.workspaceId),
-										eq(workspaceMember.userId, input.userId),
+										eq(workspaceMember.userId, userId),
 									),
 								),
 						);
@@ -312,11 +331,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"invitations",
 				Effect.gen(function* () {
-					const standing = yield* authorization.workspace(
-						input.userId,
-						input.workspace,
-						"workspace.read",
-					);
+					const standing = yield* authorization.workspace(input.workspace, "workspace.read");
 					const rows = yield* query((db) =>
 						db
 							.select({
@@ -344,11 +359,11 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const standing = yield* authorization.workspace(
-							input.userId,
 							input.workspace,
 							"workspace.members.manage",
 						);
 						const workspaceId = standing.workspaceId;
+						const inviterId = standing.actor.userId;
 						const address = input.invitation.email.toLowerCase();
 						yield* lockWorkspace(workspaceId);
 						const [member] = yield* query((db) =>
@@ -385,7 +400,7 @@ export const make = Effect.gen(function* () {
 							? yield* query((db) =>
 									db
 										.update(workspaceInvite)
-										.set({ role: input.invitation.role, expiresAt, inviterId: input.userId })
+										.set({ role: input.invitation.role, expiresAt, inviterId })
 										.where(eq(workspaceInvite.id, outstanding.id))
 										.returning(),
 								)
@@ -399,13 +414,13 @@ export const make = Effect.gen(function* () {
 											workspaceId,
 											email: address,
 											role: input.invitation.role,
-											inviterId: input.userId,
+											inviterId,
 											expiresAt,
 										})
 										.returning(),
 								);
 						if (!row) return yield* Effect.die(new Error("The invitation was not saved"));
-						yield* sendInvitation(row.id, address, workspaceId, input.userId);
+						yield* sendInvitation(row.id, address, workspaceId, inviterId);
 						return invitationView(row);
 					}),
 				),
@@ -415,10 +430,22 @@ export const make = Effect.gen(function* () {
 			operation(
 				"cancelInvitation",
 				Effect.gen(function* () {
+					const { userId } = yield* CurrentActor.Service;
+					const hidden = new ResourceHidden({ resource: "invitation" });
+					if (!isUuid(input.invitationId)) return yield* hidden;
+					// Sought only in the workspaces the actor is in, so an invitation to
+					// any other is answered exactly as one that does not exist.
 					const [invitation] = yield* query((db) =>
 						db
 							.select({ workspaceId: workspaceInvite.workspaceId })
 							.from(workspaceInvite)
+							.innerJoin(
+								workspaceMember,
+								and(
+									eq(workspaceMember.workspaceId, workspaceInvite.workspaceId),
+									eq(workspaceMember.userId, userId),
+								),
+							)
 							.where(
 								and(
 									eq(workspaceInvite.id, input.invitationId),
@@ -426,12 +453,10 @@ export const make = Effect.gen(function* () {
 								),
 							),
 					);
-					if (!invitation) return yield* new ResourceHidden({ resource: "invitation" });
-					yield* authorization.workspace(
-						input.userId,
-						invitation.workspaceId,
-						"workspace.members.manage",
-					);
+					if (!invitation) return yield* hidden;
+					yield* authorization
+						.workspace(invitation.workspaceId, "workspace.members.manage")
+						.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
 					yield* query((db) =>
 						db
 							.update(workspaceInvite)
@@ -445,7 +470,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"invitation",
 				Effect.gen(function* () {
-					const invitation = yield* invitationFor(input.userId, input.invitationId);
+					const { userId } = yield* CurrentActor.Service;
+					const invitation = yield* invitationFor(userId, input.invitationId);
 					return { workspaceName: invitation.workspaceName, inviterName: invitation.inviterName };
 				}),
 			),
@@ -455,7 +481,8 @@ export const make = Effect.gen(function* () {
 				"accept",
 				transaction(
 					Effect.gen(function* () {
-						const invitation = yield* invitationFor(input.userId, input.invitationId);
+						const { userId } = yield* CurrentActor.Service;
+						const invitation = yield* invitationFor(userId, input.invitationId);
 						if (accounts.requireEmailVerification && !invitation.inviteeVerified) {
 							return yield* new EmailUnverified();
 						}
@@ -465,7 +492,7 @@ export const make = Effect.gen(function* () {
 									.insert(workspaceMember)
 									.values({
 										workspaceId: invitation.workspaceId,
-										userId: input.userId,
+										userId,
 										role: invitation.role,
 									})
 									.onConflictDoNothing();
@@ -475,10 +502,7 @@ export const make = Effect.gen(function* () {
 									.where(eq(workspaceInvite.id, input.invitationId));
 							}),
 						);
-						yield* pods.provisionPersonal({
-							workspaceId: invitation.workspaceId,
-							userId: input.userId,
-						});
+						yield* personalPods.provision({ workspaceId: invitation.workspaceId, userId });
 						return { workspaceId: invitation.workspaceId };
 					}),
 				),
@@ -490,7 +514,8 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
-		PodAdministration.layer,
+		Authorization.layer,
+		PersonalPods.layer,
 		AgentRepository.layer,
 		SearchProviderRepository.layer,
 		ModelProviderRepository.layer,

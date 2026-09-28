@@ -28,6 +28,8 @@ export interface OAuthRecord {
 	/** Of a sign-in under way. */
 	codeVerifier?: string;
 	state?: string;
+	/** Who started the sign-in under way, the only person who may finish it. */
+	startedByUserId?: string;
 }
 
 /** Where a connection's record lives. */
@@ -40,6 +42,12 @@ export interface OAuthProviderOptions {
 	/** Where the authorization server sends the browser back: the API's callback route. */
 	redirectUrl: string;
 	clientName: string;
+	/**
+	 * Who is starting a sign-in, recorded with its `state`. Left out by a
+	 * provider that only uses or refreshes tokens, so a sign-in it starts
+	 * cannot be finished by anybody.
+	 */
+	startedByUserId?: string;
 }
 
 /** The SDK's provider, plus the authorization URL it was asked to send the browser to. */
@@ -49,7 +57,7 @@ export interface StoredOAuthProvider extends OAuthClientProvider {
 
 export function storedOAuthProvider(
 	storage: OAuthStorage,
-	{ redirectUrl, clientName }: OAuthProviderOptions,
+	{ redirectUrl, clientName, startedByUserId }: OAuthProviderOptions,
 ): StoredOAuthProvider {
 	let cached: OAuthRecord | undefined;
 	let authorizationUrl: URL | undefined;
@@ -89,7 +97,7 @@ export function storedOAuthProvider(
 		},
 		saveCodeVerifier: (codeVerifier) => change({ codeVerifier }),
 		state: () => randomBytes(24).toString("base64url"),
-		saveState: (state) => change({ state }),
+		saveState: (state) => change({ state, startedByUserId }),
 		storedState: async () => (await record()).state,
 		redirectToAuthorization: (url) => {
 			authorizationUrl = url;

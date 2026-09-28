@@ -12,6 +12,9 @@ import { presetRequiresApiKey, providerPreset } from "@sugabots/contracts";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { AuthorizationDenied } from "../../workspaces/access.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { ModelProbe } from "./model-probe.ts";
@@ -22,20 +25,34 @@ import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./
 /**
  * Connecting a workspace to model providers: checking an address against the
  * egress policy before it is stored, learning what a provider offers, and
- * trying it before it is switched on.
+ * trying it before it is switched on. Configuring them takes the current
+ * actor's `workspace.providers.manage`; seeing which models are offered takes
+ * only `workspace.read`.
  */
 export interface Interface {
-	readonly list: (workspaceId: string) => Effect.Effect<ModelProvider[]>;
-	readonly listEnabledModels: (workspaceId: string) => Effect.Effect<WorkspaceModelsResponse>;
-	readonly get: (input: InProvider) => Effect.Effect<ModelProvider, ModelProviderNotFound>;
-	/** Discovers the new provider's models straight away when it has a key. */
-	readonly create: (input: {
-		workspaceId: string;
-		createdById: string;
-		provider: NewModelProvider;
-	}) => Effect.Effect<
+	readonly list: (
+		input: InWorkspace,
+	) => Effect.Effect<ModelProvider[], AuthorizationDenied, CurrentActor.Service>;
+	readonly listEnabledModels: (
+		input: InWorkspace,
+	) => Effect.Effect<WorkspaceModelsResponse, AuthorizationDenied, CurrentActor.Service>;
+	readonly get: (
+		input: InProvider,
+	) => Effect.Effect<
 		ModelProvider,
-		UrlNotAllowed | ModelProviderRepository.ModelProviderNameConflict | ModelProviderNotFound
+		AuthorizationDenied | ModelProviderNotFound,
+		CurrentActor.Service
+	>;
+	/** Discovers the new provider's models straight away when it has a key. */
+	readonly create: (
+		input: InWorkspace & { provider: NewModelProvider },
+	) => Effect.Effect<
+		ModelProvider,
+		| AuthorizationDenied
+		| UrlNotAllowed
+		| ModelProviderRepository.ModelProviderNameConflict
+		| ModelProviderNotFound,
+		CurrentActor.Service
 	>;
 	/**
 	 * A new key sends the provider back through discovery, and switching it on
@@ -45,14 +62,31 @@ export interface Interface {
 		input: InProvider & { changes: ModelProviderUpdate },
 	) => Effect.Effect<
 		ModelProvider,
-		ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresApiKey
+		AuthorizationDenied | ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresApiKey,
+		CurrentActor.Service
 	>;
-	readonly remove: (input: InProvider) => Effect.Effect<void, ModelProviderRemovalNotAllowed>;
+	readonly remove: (
+		input: InProvider,
+	) => Effect.Effect<
+		void,
+		AuthorizationDenied | ModelProviderRemovalNotAllowed,
+		CurrentActor.Service
+	>;
 	/** Lists the provider's models, then asks an enabled one for a word, and records the result. */
-	readonly test: (input: InProvider) => Effect.Effect<TestOutcome, ModelProviderNotFound>;
+	readonly test: (
+		input: InProvider,
+	) => Effect.Effect<
+		TestOutcome,
+		AuthorizationDenied | ModelProviderNotFound,
+		CurrentActor.Service
+	>;
 	readonly fetchModels: (
 		input: InProvider,
-	) => Effect.Effect<{ added: number; updated: number; unchanged: number }, ModelDiscoveryFailed>;
+	) => Effect.Effect<
+		{ added: number; updated: number; unchanged: number },
+		AuthorizationDenied | ModelDiscoveryFailed,
+		CurrentActor.Service
+	>;
 	readonly addModel: (
 		input: InProvider & {
 			model: Pick<ProviderModel, "modelId" | "capabilities"> &
@@ -60,28 +94,46 @@ export interface Interface {
 		},
 	) => Effect.Effect<
 		ModelProvider,
-		ModelProviderNotFound | ProviderModelsRequireApiKey | ProviderModelAlreadyConfigured
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| ProviderModelsRequireApiKey
+		| ProviderModelAlreadyConfigured,
+		CurrentActor.Service
 	>;
 	readonly setModelsEnabled: (
 		input: InProvider & { modelIds: string[]; enabled: boolean },
-	) => Effect.Effect<number, ModelProviderNotFound | ProviderModelsRequireApiKey>;
+	) => Effect.Effect<
+		number,
+		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireApiKey,
+		CurrentActor.Service
+	>;
 	readonly updateModel: (
 		input: InProvider & { modelId: string; changes: ProviderModelUpdate },
 	) => Effect.Effect<
 		number,
+		| AuthorizationDenied
 		| ModelProviderNotFound
 		| ProviderModelsRequireApiKey
 		| FetchedModelCapabilitiesImmutable
-		| ProviderModelNotFound
+		| ProviderModelNotFound,
+		CurrentActor.Service
 	>;
 	readonly removeModel: (
 		input: InProvider & { modelId: string },
-	) => Effect.Effect<void, ProviderModelRemovalNotAllowed>;
+	) => Effect.Effect<
+		void,
+		AuthorizationDenied | ProviderModelRemovalNotAllowed,
+		CurrentActor.Service
+	>;
+}
+
+/** A workspace, by its id or its slug. */
+export interface InWorkspace {
+	workspace: string;
 }
 
 /** One of a workspace's model providers. */
-export interface InProvider {
-	workspaceId: string;
+export interface InProvider extends InWorkspace {
 	providerId: string;
 }
 
@@ -91,9 +143,17 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderSetup");
+	const authorization = yield* Authorization.Service;
 	const providers = yield* ModelProviderRepository.Service;
 	const egress = yield* Egress.Service;
 	const probe = yield* ModelProbe.Service;
+
+	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
+	const managed = (workspace: string) =>
+		Effect.map(
+			authorization.workspace(workspace, "workspace.providers.manage"),
+			({ workspaceId }) => workspaceId,
+		);
 
 	const requireProvider = (workspaceId: string, providerId: string) =>
 		Effect.filterOrFail(
@@ -147,23 +207,41 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		list: (workspaceId) => operation("list", providersIn(workspaceId)),
+		list: ({ workspace }) => operation("list", Effect.flatMap(managed(workspace), providersIn)),
 
-		listEnabledModels: (workspaceId) => operation("listEnabledModels", offeredModels(workspaceId)),
+		listEnabledModels: ({ workspace }) =>
+			operation(
+				"listEnabledModels",
+				Effect.flatMap(authorization.workspace(workspace, "workspace.read"), ({ workspaceId }) =>
+					offeredModels(workspaceId),
+				),
+			),
 
-		get: ({ workspaceId, providerId }) =>
-			operation("get", requireProvider(workspaceId, providerId)),
+		get: ({ workspace, providerId }) =>
+			operation(
+				"get",
+				Effect.flatMap(managed(workspace), (workspaceId) =>
+					requireProvider(workspaceId, providerId),
+				),
+			),
 
-		create: ({ workspaceId, createdById, provider }) =>
+		create: ({ workspace, provider }) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.providers.manage",
+					);
 					yield* requireAllowedUrl(
 						egress,
 						provider.baseUrl ??
 							("preset" in provider ? providerPreset(provider.preset).baseUrl : ""),
 					);
-					const created = yield* providers.create(workspaceId, { createdById, provider });
+					const created = yield* providers.create(workspaceId, {
+						createdById: actor.userId,
+						provider,
+					});
 					if (created.apiKeyEncrypted !== null) {
 						yield* discoverModelsQuietly(workspaceId, created.id, true);
 					}
@@ -171,10 +249,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: ({ workspaceId, providerId, changes }) =>
+		update: ({ workspace, providerId, changes }) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					const current = yield* requireProvider(workspaceId, providerId);
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
@@ -204,20 +283,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: ({ workspaceId, providerId }) =>
+		remove: ({ workspace, providerId }) =>
 			operation(
 				"remove",
-				Effect.filterOrFail(
-					providers.remove(workspaceId, providerId),
-					(removed) => removed,
-					() => new ModelProviderRemovalNotAllowed(),
-				).pipe(Effect.asVoid),
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					if (!(yield* providers.remove(workspaceId, providerId))) {
+						return yield* new ModelProviderRemovalNotAllowed();
+					}
+				}),
 			),
 
-		test: ({ workspaceId, providerId }) =>
+		test: ({ workspace, providerId }) =>
 			operation(
 				"test",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
 					const listed = yield* testProvider(providers, workspaceId, providerId, egress.providers);
 					if (!listed.reachable) return listed;
@@ -225,16 +306,19 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		fetchModels: ({ workspaceId, providerId }) =>
+		fetchModels: ({ workspace, providerId }) =>
 			operation(
 				"fetchModels",
-				fetchProviderModels(providers, workspaceId, providerId, egress.providers),
+				Effect.flatMap(managed(workspace), (workspaceId) =>
+					fetchProviderModels(providers, workspaceId, providerId, egress.providers),
+				),
 			),
 
-		addModel: ({ workspaceId, providerId, model }) =>
+		addModel: ({ workspace, providerId, model }) =>
 			operation(
 				"addModel",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					yield* requireConnectedProvider(workspaceId, providerId);
 					const added = yield* providers.addModels(workspaceId, providerId, [
 						{
@@ -251,19 +335,21 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		setModelsEnabled: ({ workspaceId, providerId, modelIds, enabled }) =>
+		setModelsEnabled: ({ workspace, providerId, modelIds, enabled }) =>
 			operation(
 				"setModelsEnabled",
-				Effect.andThen(
-					requireConnectedProvider(workspaceId, providerId),
-					providers.setModelEnabled(workspaceId, providerId, modelIds, enabled),
-				),
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					yield* requireConnectedProvider(workspaceId, providerId);
+					return yield* providers.setModelEnabled(workspaceId, providerId, modelIds, enabled);
+				}),
 			),
 
-		updateModel: ({ workspaceId, providerId, modelId, changes }) =>
+		updateModel: ({ workspace, providerId, modelId, changes }) =>
 			operation(
 				"updateModel",
 				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
 					const provider = yield* requireConnectedProvider(workspaceId, providerId);
 					const configured = provider.models.find((candidate) => candidate.id === modelId);
 					if (changes.capabilities !== undefined && configured?.source === "fetched") {
@@ -277,14 +363,15 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeModel: ({ workspaceId, providerId, modelId }) =>
+		removeModel: ({ workspace, providerId, modelId }) =>
 			operation(
 				"removeModel",
-				Effect.filterOrFail(
-					providers.removeModel(workspaceId, providerId, modelId),
-					(removed) => removed,
-					() => new ProviderModelRemovalNotAllowed(),
-				).pipe(Effect.asVoid),
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					if (!(yield* providers.removeModel(workspaceId, providerId, modelId))) {
+						return yield* new ProviderModelRemovalNotAllowed();
+					}
+				}),
 			),
 	});
 });
@@ -292,7 +379,9 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 /** Needs a `ModelProbe`, which the conversations module implements. */
-export const layer = layerNoDeps.pipe(Layer.provide(ModelProviderRepository.layer));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([Authorization.layer, ModelProviderRepository.layer]),
+);
 
 export interface TestOutcome {
 	reachable: boolean;

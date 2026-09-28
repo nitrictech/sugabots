@@ -4,7 +4,7 @@ import type { ChannelAccess } from "./access.ts";
 
 export function openChannelAccess(): ChannelAccess {
 	return {
-		workspace: (_session, workspaceId) => Effect.succeed(workspaceChannel(workspaceId)),
-		thread: (_session, threadId) => Effect.succeed(threadChannel(threadId)),
+		workspace: (workspaceId) => Effect.succeed(workspaceChannel(workspaceId)),
+		thread: (threadId) => Effect.succeed(threadChannel(threadId)),
 	};
 }

@@ -1,84 +1,75 @@
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
+import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
+import { unimplemented } from "@sugabots/core/testing";
+import { ActionForbidden } from "@sugabots/core/workspaces/access";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
+/**
+ * The trial route, over a double of `ModelTrials`. How a model is judged is
+ * `model-trials/trial.test.ts`'s.
+ */
+
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
-const user = {
+
+const resolveUser: UserResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Ada",
 	email: "ada@example.com",
 	image: null,
-};
-
-const resolveUser: UserResolver = async (headers) =>
-	headers.get("authorization") === "Bearer admin-token" ? user : null;
-
-const asRole = (role: "admin" | "member") =>
-	testAuthorization({ id: WORKSPACE, roles: { [user.id]: role } });
-
-const answering = (text: string): TurnModel => ({
-	stream: () =>
-		Effect.succeed({
-			text: (async function* () {
-				yield text;
-			})(),
-			accounting: Effect.succeed({ usage: {} }),
-		}),
 });
 
-const trial = (app: ReturnType<typeof createTestApp>, body: unknown) =>
-	app.request(`/workspaces/${WORKSPACE}/model-trials`, {
-		method: "POST",
-		headers: { authorization: "Bearer admin-token", "content-type": "application/json" },
-		body: JSON.stringify(body),
-	});
+const trial = (run: ModelTrials.Interface["run"], body: unknown) =>
+	createTestApp({ resolveUser, services: unimplemented(ModelTrials.Service, { run }) }).request(
+		`/workspaces/${WORKSPACE}/model-trials`,
+		{
+			method: "POST",
+			headers: { authorization: "Bearer admin-token", "content-type": "application/json" },
+			body: JSON.stringify(body),
+		},
+	);
+
+const report = {
+	systemAgentKey: "facilitate" as const,
+	model: "llama3.2:3b",
+	rating: "terrible" as const,
+	accuracy: { passed: 0, attempts: 3, share: 0, needed: 0.9, rating: "terrible" as const },
+	speed: { typicalMs: 0, slowestMs: 0, budgetMs: 2_000, rating: "excellent" as const },
+	cases: [],
+	verdict: [],
+};
 
 describe("trying a model on a system agent", () => {
-	it("reports how often the model did what the system agent needs", async () => {
-		const app = createTestApp({
-			resolveUser,
-			authorization: asRole("admin"),
-			model: answering("nobody"),
-		});
+	it("tries the model in the workspace in the path, and returns the report", async () => {
+		const run = vi.fn<ModelTrials.Interface["run"]>(() => Effect.succeed(report));
 
-		const response = await trial(app, {
+		const response = await trial(run, { systemAgentKey: "facilitate", model: "llama3.2:3b" });
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ rating: "terrible" });
+		expect(run).toHaveBeenCalledWith({
+			workspace: WORKSPACE,
 			systemAgentKey: "facilitate",
 			model: "llama3.2:3b",
 		});
-
-		expect(response.status).toBe(200);
-		const report = (await response.json()) as { rating: string; cases: unknown[] };
-		// Always answering nobody passes the two "stay quiet" cases and fails the
-		// three that need an agent: two in five, which is terrible — a facilitator
-		// that never routes is no more useful than one that never stops.
-		expect(report.rating).toBe("terrible");
-		expect(report.cases).toHaveLength(6);
 	});
 
-	it("refuses a member, since choosing a system agent's model is an admin's decision", async () => {
-		const app = createTestApp({
-			resolveUser,
-			authorization: asRole("member"),
-			model: answering("nobody"),
-		});
-
-		expect((await trial(app, { systemAgentKey: "facilitate", model: "llama3.2:3b" })).status).toBe(
-			403,
+	it("answers somebody who may not choose the workspace's models as forbidden", async () => {
+		const response = await trial(
+			() => Effect.fail(new ActionForbidden({ permission: "workspace.providers.manage" })),
+			{ systemAgentKey: "facilitate", model: "llama3.2:3b" },
 		);
+
+		expect(response.status).toBe(403);
 	});
 
 	it("refuses a system agent it does not have cases for", async () => {
-		const app = createTestApp({
-			resolveUser,
-			authorization: asRole("admin"),
-			model: answering("nobody"),
-		});
+		const run = vi.fn<ModelTrials.Interface["run"]>(() => Effect.succeed(report));
 
-		expect((await trial(app, { systemAgentKey: "handwriting", model: "llama3.2:3b" })).status).toBe(
-			400,
-		);
+		const response = await trial(run, { systemAgentKey: "handwriting", model: "llama3.2:3b" });
+
+		expect(response.status).toBe(400);
+		expect(run).not.toHaveBeenCalled();
 	});
 });

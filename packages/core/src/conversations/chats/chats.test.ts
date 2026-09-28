@@ -1,6 +1,6 @@
 import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq, like } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
@@ -21,7 +21,9 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
+import { onPostgresAs } from "../../workspaces/testing.ts";
+import { Visibility } from "../../workspaces/visibility.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
@@ -32,9 +34,11 @@ const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
 	const conversations = await conversationsForTests(createEventBus({ store: eventStore }));
-	const chats = onPostgres(Context.get(conversations, Chats.Service));
-	const view = onPostgres(Context.get(conversations, ChatView.Service));
-	const routines = onPostgres(Context.get(conversations, Routines.Service));
+	/** As the member the chats are with. */
+	let chats: Promised<Chats.Interface>;
+	let view: Promised<ChatView.Interface>;
+	/** As an administrator, who may define and run the agents' routines. */
+	let routines: Promised<Routines.Interface>;
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -47,10 +51,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	beforeEach(async () => {
 		const suffix = crypto.randomUUID();
-		const [person] = await onDatabase((db) =>
+		const [person, administrator] = await onDatabase((db) =>
 			db
 				.insert(user)
-				.values({ name: "Chat member", email: `chat-${suffix}@example.com` })
+				.values([
+					{ name: "Chat member", email: `chat-${suffix}@example.com` },
+					{ name: "Chat admin", email: `chat-admin-${suffix}@example.com` },
+				])
 				.returning(),
 		);
 		const [space] = await onDatabase((db) =>
@@ -59,10 +66,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values({ name: "Chat workspace", slug: `chat-${suffix}` })
 				.returning(),
 		);
-		if (!person || !space) throw new Error("Could not create chat test identity");
+		if (!person || !administrator || !space) throw new Error("Could not create chat test identity");
 		userId = person.id;
 		workspaceId = space.id;
-		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId }));
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId },
+				{ workspaceId, userId: administrator.id, role: "admin" },
+			]),
+		);
+		chats = onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+		view = onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
+		routines = onPostgresAs(administrator.id)(Context.get(conversations, Routines.Service));
 		const [room] = await onDatabase((db) =>
 			db
 				.insert(pod)
@@ -111,16 +126,45 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		recipientAgentId = recipient.id;
 	});
 
+	it("shows a chat to whoever reaches its pod, and to nobody else", async () => {
+		const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const [outsider, stranger] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values([
+					{ name: "Outside the pod", email: `outsider-${crypto.randomUUID()}@example.com` },
+					{ name: "Outside the workspace", email: `stranger-${crypto.randomUUID()}@example.com` },
+				])
+				.returning(),
+		);
+		if (!outsider || !stranger) throw new Error("Could not create the people");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: outsider.id, role: "member" }),
+		);
+		const visibility = await runOnPostgres(Effect.provide(Visibility.Service, Visibility.layer));
+		const visibilityAs = (personId: string) => onPostgresAs(personId)({ chat: visibility.chat });
+
+		expect(await visibilityAs(userId).chat(opened.id)).toMatchObject({ id: opened.id });
+		for (const personId of [outsider.id, stranger.id]) {
+			await expect(visibilityAs(personId).chat(opened.id)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "chat",
+			});
+		}
+		await expect(visibilityAs(userId).chat("not-a-uuid")).rejects.toMatchObject({
+			_tag: "ResourceHidden",
+		});
+	});
+
 	it("lists a pod's bots newest message first, with bots nobody has messaged last", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		await chats.post({
 			chatId: current.id,
-			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "\n  Budget   review is Friday\nand bring the numbers",
 		});
 
-		const list = await view.list({ workspaceId, userId, pod: podId });
+		const list = await view.list({ workspace: workspaceId, pod: podId });
 
 		expect(list?.items).toEqual([
 			{
@@ -177,17 +221,19 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			),
 		);
 
-		const all = await view.list({ workspaceId, userId, pod: "all" });
+		const all = await view.list({ workspace: workspaceId, pod: "all" });
 
 		expect(all?.items.map((item) => item.agent.id).sort()).toEqual(
 			[agentId, recipientAgentId].sort(),
 		);
-		expect(await view.list({ workspaceId, userId, pod: unjoined.id })).toBeUndefined();
-		expect((await view.list({ workspaceId, userId, pod: personal.id }))?.items).toHaveLength(1);
+		await expect(view.list({ workspace: workspaceId, pod: unjoined.id })).rejects.toMatchObject({
+			_tag: "ResourceHidden",
+		});
+		expect((await view.list({ workspace: workspaceId, pod: personal.id }))?.items).toHaveLength(1);
 	});
 
 	it("keeps one chat per pod and host and queues top-level messages in the main Chat", async () => {
-		const input = { workspaceId, podId, hostAgentId: agentId, userId };
+		const input = { workspace: workspaceId, podId, hostAgentId: agentId };
 		const [first, retried] = await Promise.all([chats.open(input), chats.open(input)]);
 		expect(retried.id).toBe(first.id);
 		expect(
@@ -196,27 +242,23 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const sent = await chats.post({
 			chatId: first.id,
-			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Investigate this over several steps",
 		});
 		expect(sent?.threadId).toBe(first.mainThreadId);
 		expect(await runOnPostgres(runningTurns(first.mainThreadId))).toHaveLength(1);
-		expect((await view.history(first.id, userId))?.items).toHaveLength(0);
-		expect((await view.messages(first.id, userId))?.items.map((item) => item.kind)).toEqual([
-			"message",
-		]);
+		expect((await view.history(first.id))?.items).toHaveLength(0);
+		expect((await view.messages(first.id))?.items.map((item) => item.kind)).toEqual(["message"]);
 	});
 
 	it("refuses a message to an agent with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const messageId = crypto.randomUUID();
 
 		await expect(
 			chats.post({
 				chatId: current.id,
-				author: { id: userId, name: "Chat member", image: null },
 				messageId,
 				content: "Anyone there?",
 			}),
@@ -228,10 +270,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("retries the same message without creating another message or turn", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const send = {
 			chatId: current.id,
-			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "A simple question",
 		};
@@ -256,7 +297,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("announces a person's message before the agent it brings into the thread", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		// The chat's agent has not joined its thread yet, so the message brings it in.
 		await onDatabase((db) =>
 			db
@@ -271,7 +312,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		await chats.post({
 			chatId: current.id,
-			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Are you there?",
 		});
@@ -290,9 +330,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("includes Routine runs in the main Chat timeline", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -300,20 +340,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: {
-				kind: "manual",
-				requestId,
-				requestedAt: new Date().toISOString(),
-				requestedByUserId: userId,
-			},
-		});
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
 
-		expect((await view.messages(current.id, userId))?.items).toEqual([
+		expect((await view.messages(current.id))?.items).toEqual([
 			expect.objectContaining({
 				kind: "routine",
 				id: accepted.executionId,
@@ -325,9 +354,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("paginates interleaved messages and Routine runs without gaps", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -335,18 +364,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: {
-				kind: "manual",
-				requestId,
-				requestedAt: "2026-09-18T10:00:00.000Z",
-				requestedByUserId: userId,
-			},
-		});
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
 		const olderMessageId = crypto.randomUUID();
 		const newerMessageId = crypto.randomUUID();
 		await onDatabase((db) =>
@@ -380,12 +398,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.where(eq(routineExecution.id, accepted.executionId)),
 		);
 
-		const firstPage = await view.messages(current.id, userId, { limit: 2 });
+		const firstPage = await view.messages(current.id, { limit: 2 });
 		expect(firstPage?.items.map(timelineItemId)).toEqual([accepted.executionId, newerMessageId]);
 		expect(firstPage?.nextCursor).toBeTypeOf("string");
 		if (!firstPage?.nextCursor) throw new Error("Expected another Chat timeline page");
 
-		const secondPage = await view.messages(current.id, userId, {
+		const secondPage = await view.messages(current.id, {
 			limit: 2,
 			cursor: firstPage.nextCursor,
 		});
@@ -395,20 +413,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("shows an agent collaboration in both agents' Chats", async () => {
 		const initiatorChat = await chats.open({
-			workspaceId,
+			workspace: workspaceId,
 			podId,
 			hostAgentId: agentId,
-			userId,
 		});
 		const recipientChat = await chats.open({
-			workspaceId,
+			workspace: workspaceId,
 			podId,
 			hostAgentId: recipientAgentId,
-			userId,
 		});
 		const trigger = await chats.post({
 			chatId: initiatorChat.id,
-			author: { id: userId, name: "Chat member", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Ask Impersonal Agent",
 		});
@@ -480,8 +495,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		const outbound = await view.messages(initiatorChat.id, userId);
-		const inbound = await view.messages(recipientChat.id, userId);
+		const outbound = await view.messages(initiatorChat.id);
+		const inbound = await view.messages(recipientChat.id);
 		expect(outbound?.items.at(-1)).toMatchObject({
 			kind: "message",
 			message: { parts: [{ type: "collaboration", threadId: child.id }] },
@@ -494,15 +509,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				initiator: expect.objectContaining({ id: agentId, name: "Personal Agent" }),
 			}),
 		]);
-		expect((await view.history(recipientChat.id, userId))?.items).toEqual([
+		expect((await view.history(recipientChat.id))?.items).toEqual([
 			expect.objectContaining({ threadId: child.id, type: "collaboration" }),
 		]);
 	});
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {
-		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -510,14 +525,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const requestedAt = new Date().toISOString();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: { kind: "manual", requestId, requestedAt, requestedByUserId: userId },
-		});
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
 		const [failed, running] = await onDatabase((db) =>
 			db
 				.insert(thread)
@@ -573,7 +581,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			queueFacilitationForTests({ threadId: running.id, triggerMessageId: crypto.randomUUID() }),
 		);
 
-		const items = (await view.history(current.id, userId))?.items ?? [];
+		const items = (await view.history(current.id))?.items ?? [];
 		const entry = (threadId: string) => items.find((item) => item.threadId === threadId);
 		expect(items).toHaveLength(3);
 		expect(entry(failed.id)).toMatchObject({
@@ -597,7 +605,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				routineId: created.routine.id,
 				routineName: "Overnight review",
 				triggerKind: "manual",
-				triggeredAt: requestedAt,
+				triggeredAt: expect.any(String),
 			},
 		});
 	});

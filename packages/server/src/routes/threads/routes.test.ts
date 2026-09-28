@@ -1,9 +1,10 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
+import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
 import { unimplemented } from "@sugabots/core/testing";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
+import { ResourceHidden } from "@sugabots/core/workspaces/access";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -72,44 +73,52 @@ const details: ThreadDetails = {
 	],
 };
 
-const authorization = testAuthorization({ id: WORKSPACE, roles: { [USER]: "member" } });
+/**
+ * Answers as the view would for Sam, who can see `THREAD`, and hides
+ * everything from anybody else, so a case can tell who it was asked as.
+ */
+const seenBy = <A>(threadId: string, seen: A) =>
+	Effect.flatMap(CurrentActor.Service, ({ userId }) =>
+		threadId === THREAD && userId === USER
+			? Effect.succeed(seen)
+			: Effect.fail(new ResourceHidden({ resource: "thread" })),
+	);
 
 let view: ThreadView.Interface;
 let cancellation: { turnId: string; userId: string } | undefined;
-let requestedHistory: Parameters<ThreadView.Interface["getVisible"]>[2] | undefined;
+let requestedHistory: Parameters<ThreadView.Interface["get"]>[1] | undefined;
 
 beforeEach(() => {
 	cancellation = undefined;
 	requestedHistory = undefined;
 	view = {
-		listVisible: (_workspaceId, userId) => Effect.succeed(userId === USER ? [thread] : []),
-		visibleThreadId: (threadId, userId) =>
-			Effect.succeed(threadId === THREAD && userId === USER ? THREAD : undefined),
-		getVisible: (threadId, userId, history) =>
-			Effect.sync(() => {
-				requestedHistory = history;
-				return threadId === THREAD && userId === USER ? details : undefined;
-			}),
-		activity: (threadId, userId) =>
-			Effect.succeed(
-				threadId === THREAD && userId === USER
-					? { summary: null, recentParticipants: details.participants }
-					: undefined,
+		list: () =>
+			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
+				userId === USER
+					? Effect.succeed([thread])
+					: Effect.fail(new ResourceHidden({ resource: "workspace" })),
 			),
+		get: (threadId, history) => {
+			requestedHistory = history;
+			return seenBy(threadId, details);
+		},
+		activity: (threadId) =>
+			seenBy(threadId, { summary: null, recentParticipants: details.participants }),
 	};
 });
 
 const app = () =>
 	createTestApp({
 		resolveUser,
-		authorization,
 		services: Layer.merge(
 			Layer.succeed(ThreadView.Service, view),
-			unimplemented(TurnExecution.Service, {
-				requestCancel: (turnId, userId) =>
-					Effect.sync(() => {
+			unimplemented(TurnCancellation.Service, {
+				request: (turnId) =>
+					Effect.flatMap(CurrentActor.Service, ({ userId }) => {
 						cancellation = { turnId, userId };
-						return turnId === THREAD && userId === USER;
+						return userId === USER
+							? Effect.succeed(turnId === THREAD)
+							: Effect.fail(new ResourceHidden({ resource: "turn" }));
 					}),
 			}),
 		),
@@ -188,10 +197,16 @@ describe("thread routes", () => {
 		expect(accepted.status).toBe(202);
 		expect(cancellation).toEqual({ turnId: THREAD, userId: USER });
 
+		const ended = await app().request(
+			`/turns/${AGENT}/cancel`,
+			as("member-token", { method: "POST" }),
+		);
+		expect(await ended.json()).toEqual({ _tag: "NotFound", message: "No active turn" });
+
 		const hidden = await app().request(
 			`/turns/${AGENT}/cancel`,
 			as("outsider-token", { method: "POST" }),
 		);
-		expect(hidden.status).toBe(404);
+		expect(await hidden.json()).toEqual({ _tag: "NotFound", message: "No such turn" });
 	});
 });

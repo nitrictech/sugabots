@@ -1,5 +1,5 @@
 import { Duration, Effect, Layer } from "effect";
-import { Routines } from "./routines.ts";
+import { RoutineRunner } from "./routine-runner.ts";
 
 /** How long the scheduler waits to look again when no routine was due. */
 const POLL_INTERVAL = Duration.seconds(15);
@@ -7,8 +7,8 @@ const POLL_INTERVAL = Duration.seconds(15);
 /** Accepts the runs of cron routines as they fall due. */
 export const routineSchedulerLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
-		const routines = yield* Routines.Service;
-		const iteration = Effect.suspend(() => routines.processNextDue()).pipe(
+		const runner = yield* RoutineRunner.Service;
+		const iteration = Effect.suspend(() => runner.processNextDue()).pipe(
 			Effect.flatMap((accepted) => (accepted ? Effect.void : Effect.sleep(POLL_INTERVAL))),
 			Effect.catchCause((cause) =>
 				Effect.logError("Routine scheduler iteration failed", cause).pipe(

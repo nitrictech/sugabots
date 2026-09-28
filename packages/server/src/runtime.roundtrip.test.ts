@@ -32,6 +32,7 @@ import {
 import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
 import { Lanes } from "@sugabots/core/workflows/lanes";
 import { lane } from "@sugabots/core/workflows/sql";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -201,14 +202,18 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		userId: string;
 		content: string;
 	}) {
-		const opened = await runtime.runPromise(chats.open(input));
+		const asPerson = CurrentActor.provide(
+			CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
+		);
+		const opened = await runtime.runPromise(
+			chats
+				.open({ workspace: input.workspaceId, podId: input.podId, hostAgentId: input.hostAgentId })
+				.pipe(asPerson),
+		);
 		await runtime.runPromise(
-			chats.post({
-				chatId: opened.id,
-				author: { id: input.userId, name: "Sam", image: null },
-				messageId: crypto.randomUUID(),
-				content: input.content,
-			}),
+			chats
+				.post({ chatId: opened.id, messageId: crypto.randomUUID(), content: input.content })
+				.pipe(asPerson),
 		);
 		return opened;
 	}

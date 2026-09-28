@@ -8,7 +8,6 @@ import {
 	type PodFacts,
 	type PodPermission,
 	podPermissions,
-	rolesWith,
 	sharedPodReach,
 	type WorkspacePermission,
 } from "./permissions.ts";
@@ -229,19 +228,6 @@ describe("what the API tells a client", () => {
 		const resolved = podPermissions(actor("admin"), sharedPod(false));
 		expect(resolved.rename).toBe(true);
 		expect(resolved.manageMembers).toBe(true);
-	});
-});
-
-describe("the roles holding a permission", () => {
-	it.each(WORKSPACE_PERMISSIONS)("agrees with mayInWorkspace about %s", (permission) => {
-		for (const role of WORKSPACE_ROLES) {
-			expect(rolesWith(permission).includes(role)).toBe(mayInWorkspace(actor(role), permission));
-		}
-	});
-
-	it("names the administrator for the actions only they hold", () => {
-		expect(rolesWith("workspace.providers.manage")).toEqual(["admin"]);
-		expect(rolesWith("workspace.read")).toEqual([...WORKSPACE_ROLES]);
 	});
 });
 

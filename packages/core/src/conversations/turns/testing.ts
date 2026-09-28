@@ -104,7 +104,9 @@ export async function prepareRunnable(
  * A shared pod with a connection, whose admin has asked its host agent
  * something in a chat, so the host's turn is asked for in the chat's thread.
  */
-export async function aChatAwaitingReply(chats: Pick<Promised<Chats.Interface>, "open" | "post">) {
+export async function aChatAwaitingReply(
+	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "open" | "post">,
+) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
 		db
@@ -172,15 +174,10 @@ export async function aChatAwaitingReply(chats: Pick<Promised<Chats.Interface>, 
 			.returning({ id: connection.id }),
 	);
 	if (!host || !connected) throw new Error("fixture");
-	const opened = await chats.open({
-		workspaceId,
-		podId,
-		hostAgentId: host.id,
-		userId: memberId,
-	});
+	const chats = chatsAs(memberId);
+	const opened = await chats.open({ workspace: workspaceId, podId, hostAgentId: host.id });
 	await chats.post({
 		chatId: opened.id,
-		author: { id: memberId, name: "Sam", image: null },
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
 	});

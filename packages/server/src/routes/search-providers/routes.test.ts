@@ -4,7 +4,8 @@ import { SearchProviderRepository } from "@sugabots/core/providers/search-provid
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
+import { ActionForbidden } from "@sugabots/core/workspaces/access";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -26,8 +27,6 @@ const resolveUser: UserResolver = async (requestHeaders) =>
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
-const authorization = testAuthorization({ id: WORKSPACE_ID, roles: { [USER_ID]: "admin" } });
-
 const brave: SearchProvider = {
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	workspaceId: WORKSPACE_ID,
@@ -46,7 +45,6 @@ const brave: SearchProvider = {
 const app = (search: Partial<SearchProviderSetup.Interface>) =>
 	createTestApp({
 		resolveUser,
-		authorization,
 		services: unimplemented(SearchProviderSetup.Service, search),
 	});
 
@@ -59,7 +57,13 @@ describe("a workspace's search provider", () => {
 	});
 
 	it("sets a provider from the catalog as the person asking", async () => {
-		const replace = vi.fn<SearchProviderSetup.Interface["replace"]>(() => Effect.succeed(brave));
+		let askedAs: string | undefined;
+		const replace = vi.fn<SearchProviderSetup.Interface["replace"]>(() =>
+			Effect.map(CurrentActor.Service, ({ userId }) => {
+				askedAs = userId;
+				return brave;
+			}),
+		);
 
 		const response = await app({ replace }).request(root, {
 			method: "PUT",
@@ -69,10 +73,10 @@ describe("a workspace's search provider", () => {
 
 		expect(response.status).toBe(201);
 		expect(replace).toHaveBeenCalledWith({
-			workspaceId: WORKSPACE_ID,
-			createdById: USER_ID,
+			workspace: WORKSPACE_ID,
 			provider: { preset: "brave", apiKey: "brave-key" },
 		});
+		expect(askedAs).toBe(USER_ID);
 	});
 
 	it("reports an address the network policy refuses as a bad request", async () => {
@@ -96,6 +100,14 @@ describe("a workspace's search provider", () => {
 			_tag: "BadRequest",
 			message: "Add an API key before enabling search",
 		});
+	});
+
+	it("answers a change the caller may not make as forbidden", async () => {
+		const response = await app({
+			remove: () => Effect.fail(new ActionForbidden({ permission: "workspace.providers.manage" })),
+		}).request(root, { method: "DELETE", headers });
+
+		expect(response.status).toBe(403);
 	});
 
 	it("says when there was no provider to remove", async () => {

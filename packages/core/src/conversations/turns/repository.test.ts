@@ -7,6 +7,7 @@ import { memoryEventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
@@ -34,8 +35,11 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
 	const calls = onPostgres(Context.get(conversations, ToolCallRepository.Service));
-	const chats = onPostgres(Context.get(conversations, Chats.Service));
-	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const chatsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const execution = onPostgres({
+		prepare: Context.get(conversations, TurnExecution.Service).prepare,
+	});
 	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
 	const providerDown = UserMessage.of`The model provider could not answer.`;
 	let threadId: string;
@@ -46,7 +50,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	beforeEach(async () => {
-		({ threadId } = await aChatAwaitingReply(chats));
+		({ threadId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(threadId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);

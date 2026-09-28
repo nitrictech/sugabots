@@ -25,6 +25,7 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
+import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
@@ -55,10 +56,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			),
 		),
 	);
-	const threads = onPostgres(Context.get(conversations, ThreadView.Service));
-	const chats = onPostgres(Context.get(conversations, Chats.Service));
-	const chatView = onPostgres(Context.get(conversations, ChatView.Service));
-	const turns = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const threadsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+	const chatsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const chatViewAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
+	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	let workspaceId: string;
 	let podId: string;
@@ -142,25 +146,22 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		if (!hostRow || !helperRow) throw new Error("fixture");
 		host = hostRow;
 		helper = helperRow;
-		const opened = await chats.open({
-			workspaceId,
+		const opened = await chatsAs(memberId).open({
+			workspace: workspaceId,
 			podId,
 			hostAgentId: host.id,
-			userId: memberId,
 		});
 		hostChatId = opened.id;
-		await chats.post({
+		await chatsAs(memberId).post({
 			chatId: opened.id,
-			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
 		rootThreadId = opened.mainThreadId;
-		const helperChat = await chats.open({
-			workspaceId,
+		const helperChat = await chatsAs(memberId).open({
+			workspace: workspaceId,
 			podId,
 			hostAgentId: helper.id,
-			userId: memberId,
 		});
 		helperChatId = helperChat.id;
 		helperMainThreadId = helperChat.mainThreadId;
@@ -206,7 +207,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			answer: null,
 			atOffset: 7,
 		});
-		const child = await threads.getVisible(opened.collaboration.threadId, memberId);
+		const child = await threadsAs(memberId).get(opened.collaboration.threadId);
 		expect(child?.thread).toMatchObject({
 			parentThreadId: rootThreadId,
 			hostAgentId: helper.id,
@@ -221,20 +222,20 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		]);
 		expect(child?.participants.map(({ id }) => id)).toEqual([host.id, helper.id]);
 		// Child threads hang off their parent rather than appearing beside either Chat.
-		const visibleThreadIds = (await threads.listVisible(workspaceId, memberId)).map(({ id }) => id);
+		const visibleThreadIds = (await threadsAs(memberId).list(workspaceId)).map(({ id }) => id);
 		expect(visibleThreadIds).toEqual(expect.arrayContaining([rootThreadId, helperMainThreadId]));
 		expect(visibleThreadIds).toHaveLength(2);
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
 			{ request: { agentId: helper.id } },
 		]);
-		expect((await chatView.messages(helperChatId, memberId))?.items).toEqual([
+		expect((await chatViewAs(memberId).messages(helperChatId))?.items).toEqual([
 			expect.objectContaining({
 				kind: "collaboration",
 				threadId: opened.collaboration.threadId,
 				initiator: expect.objectContaining({ id: host.id }),
 			}),
 		]);
-		expect((await chatView.history(helperChatId, memberId))?.items).toEqual([
+		expect((await chatViewAs(memberId).history(helperChatId))?.items).toEqual([
 			expect.objectContaining({ threadId: opened.collaboration.threadId }),
 		]);
 		const recipientEvents = await onDatabase((db) =>
@@ -260,7 +261,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			toolCalls: [],
 		});
 
-		const parent = await threads.getVisible(rootThreadId, memberId);
+		const parent = await threadsAs(memberId).get(rootThreadId);
 		const replyMessage = parent?.messages.find(({ id }) => id === reply.messageId);
 		expect(replyMessage?.parts).toEqual([
 			{ type: "text", text: "Hello." },
@@ -361,9 +362,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				content: "The release was checked.",
 			}),
 		);
-		await chats.post({
+		await chatsAs(memberId).post({
 			chatId: hostChatId,
-			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});

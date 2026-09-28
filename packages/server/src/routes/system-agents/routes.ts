@@ -3,9 +3,9 @@ import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedWorkspace } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 /**
  * The workspace's system agents, addressed by key. `SystemAgentsApi` says why
@@ -15,8 +15,10 @@ export const systemAgentRoutes = HttpApiBuilder.group(ServerApi, "systemAgents",
 	Effect.gen(function* () {
 		const agents = yield* AgentAdministration.Service;
 		return handlers
-			.handle("list", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId }) => agents.systemAgents(workspaceId)),
+			.handle("list", ({ params }) =>
+				agents
+					.systemAgents({ workspace: params.workspace })
+					.pipe(asSessionUser, asHttpError(systemAgentErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
@@ -24,16 +26,20 @@ export const systemAgentRoutes = HttpApiBuilder.group(ServerApi, "systemAgents",
 					if (key._tag === "None") {
 						return yield* new NotFound({ message: "No such built-in agent" });
 					}
-					const { workspaceId } = yield* grantedWorkspace;
 					return yield* agents
-						.setSystemAgentModel({ workspaceId, key: key.value, model: payload.model })
-						.pipe(asHttpError(systemAgentErrors));
+						.setSystemAgentModel({
+							workspace: params.workspace,
+							key: key.value,
+							model: payload.model,
+						})
+						.pipe(asSessionUser, asHttpError(systemAgentErrors));
 				}),
 			);
 	}),
 );
 
 const systemAgentErrors = {
+	...refusals,
 	ModelNotEnabled: BadRequest,
 	SystemAgentMissing: NotFound,
 };
