@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { beforeCommit, type Database, query, transaction } from "../../database/database.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -14,11 +14,12 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
-import { replyTurnOf } from "../turns/execution.ts";
+import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
 import type { Ended } from "../turns/lifecycle.ts";
-import type { TurnCheckpoint } from "../turns/repository.ts";
+import { type TurnCheckpoint, TurnRepository } from "../turns/repository.ts";
 import {
 	prepareRunnable,
 	queueFacilitationForTests,
@@ -29,11 +30,13 @@ import {
 	waitingFacilitation,
 } from "../turns/testing.ts";
 import { Turn, turnLane } from "../turns/turn.workflow.ts";
+import { RoutineSettlement } from "./settlement.ts";
+import { routineStore } from "./store.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 /**
  * Routine settlement against Postgres, driven by the events that settle a
- * run, as the stores and workflows emit them.
+ * run, as the services and workflows emit them.
  */
 describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
@@ -43,16 +46,14 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		},
 	};
 	const conversations = await conversationsForTests(bus);
-	const routines = onPostgres(conversations.stores.routines);
-	const settlement = onPostgres({
-		settleRun: conversations.settlement.settleRun,
-		failRun: conversations.settlement.failRun,
-	});
-	const turns = onPostgres(conversations.repositories.turns);
-	const execution = onPostgres(conversations.stores.turns);
-	/** Emits `events` in a transaction of their own, as a store would. */
-	const announce = (...events: ConversationEvent[]) =>
-		runOnPostgres(transaction(conversations.emit(events)));
+	const { emit } = Context.get(conversations, ConversationEvents.Service);
+	const routines = onPostgres(await runOnPostgres(Effect.provide(routineStore, conversations)));
+	const { settleRun, failRun } = Context.get(conversations, RoutineSettlement.Service);
+	const settlement = onPostgres({ settleRun, failRun });
+	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
+	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
+	/** Emits `events` in a transaction of their own, as a service would. */
+	const announce = (...events: ConversationEvent[]) => runOnPostgres(transaction(emit(events)));
 	/** An event ending the thread's routine run early, as `outcome`. */
 	const ended = (threadId: string, outcome: Ended) =>
 		ConversationEvent.TurnAbandoned({ threadId, outcome });
@@ -438,7 +439,9 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await runOnPostgres(
 			transaction(
 				Effect.gen(function* () {
-					yield* ending.emit([ended(fixture.childThread.id, { state: "cancelled" })]);
+					yield* Context.get(ending, ConversationEvents.Service).emit([
+						ended(fixture.childThread.id, { state: "cancelled" }),
+					]);
 					// Queued behind the handlers, so it runs after settlement and before the commit.
 					yield* beforeCommit(Effect.sync(() => sentBeforeCommit.push(cancel.mock.calls.length)));
 				}),
@@ -682,7 +685,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 						arrivals += 1;
 						if (arrivals === 2) release?.();
 						yield* Effect.promise(() => bothWorkersFinished);
-						yield* conversations.emit([ConversationEvent.LaneReleased({ threadId })]);
+						yield* emit([ConversationEvent.LaneReleased({ threadId })]);
 					}),
 				),
 			);

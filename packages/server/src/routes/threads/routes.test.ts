@@ -1,8 +1,10 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
-import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
+import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
+import { unimplemented } from "@sugabots/core/testing";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
@@ -72,14 +74,14 @@ const details: ThreadDetails = {
 
 const authorization = testAuthorization({ id: WORKSPACE, roles: { [USER]: "member" } });
 
-let store: ThreadStore;
+let view: ThreadView.Interface;
 let cancellation: { turnId: string; userId: string } | undefined;
-let requestedHistory: Parameters<ThreadStore["getVisible"]>[2] | undefined;
+let requestedHistory: Parameters<ThreadView.Interface["getVisible"]>[2] | undefined;
 
 beforeEach(() => {
 	cancellation = undefined;
 	requestedHistory = undefined;
-	store = {
+	view = {
 		listVisible: (_workspaceId, userId) => Effect.succeed(userId === USER ? [thread] : []),
 		visibleThreadId: (threadId, userId) =>
 			Effect.succeed(threadId === THREAD && userId === USER ? THREAD : undefined),
@@ -101,16 +103,16 @@ const app = () =>
 	createTestApp({
 		resolveUser,
 		authorization,
-		stores: {
-			threads: store,
-			turns: {
+		services: Layer.merge(
+			Layer.succeed(ThreadView.Service, view),
+			unimplemented(TurnExecution.Service, {
 				requestCancel: (turnId, userId) =>
 					Effect.sync(() => {
 						cancellation = { turnId, userId };
 						return turnId === THREAD && userId === USER;
 					}),
-			},
-		},
+			}),
+		),
 	});
 
 const as = (token: string, init: RequestInit = {}) => ({

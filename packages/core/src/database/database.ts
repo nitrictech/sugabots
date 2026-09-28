@@ -180,6 +180,18 @@ export const transaction = <A, E, R>(
 	Effect.flatMap(Database, ({ transaction: run }) => run(use));
 
 /**
+ * The one row a write returned, for a write that always returns one: an
+ * insert, or an update of a row the transaction holds. None is a defect,
+ * naming `table`.
+ */
+export const writtenRow =
+	(table: string) =>
+	<Row>([row]: readonly Row[]) =>
+		row === undefined
+			? Effect.die(new Error(`Writing ${table} returned no row`))
+			: Effect.succeed(row);
+
+/**
  * A query whose failure may be an answer rather than a fault.
  *
  * `recognise` gets the driver's failure and returns the domain error it

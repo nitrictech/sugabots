@@ -1,5 +1,5 @@
 import { handleFromName } from "@sugabots/contracts";
-import { threadStore } from "@sugabots/core/conversations/threads/store";
+import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import {
 	agent,
 	pod,
@@ -9,7 +9,13 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { closeDatabase, noDatabase, onDatabase, onPostgres } from "@sugabots/core/database/testing";
+import {
+	closeDatabase,
+	noDatabase,
+	onDatabase,
+	onPostgres,
+	runOnPostgres,
+} from "@sugabots/core/database/testing";
 import { authorization } from "@sugabots/core/workspaces/access";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -140,7 +146,12 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		return {
 			// The real store, over the real database, since that is what the
 			// visibility joins are being checked against.
-			access: onPostgres(channelAccess(authorization, threadStore())),
+			access: onPostgres(
+				channelAccess(
+					authorization,
+					await runOnPostgres(Effect.provide(ThreadView.Service, ThreadView.layer)),
+				),
+			),
 			member,
 			administrator,
 			outsider,

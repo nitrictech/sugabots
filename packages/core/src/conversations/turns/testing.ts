@@ -14,7 +14,7 @@ import {
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { lanesForTests, workflowsForTests } from "../../workflows/testing.ts";
-import type { ChatStore } from "../chats/store.ts";
+import type { Chats } from "../chats/chats.ts";
 import { type PreparedTurn, type TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
 import { Facilitate, FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
 import { TurnRequests } from "./requests.ts";
@@ -90,7 +90,7 @@ export const releaseFacilitation = (request: FacilitateRequest) =>
 
 /** Prepares the run, for a case that needs its turn to run. */
 export async function prepareRunnable(
-	execution: Pick<Promised<TurnExecution>, "prepare">,
+	execution: Pick<Promised<TurnExecution.Interface>, "prepare">,
 	run: TurnRun,
 ): Promise<PreparedTurn> {
 	const preparation = await execution.prepare(run);
@@ -104,9 +104,7 @@ export async function prepareRunnable(
  * A shared pod with a connection, whose admin has asked its host agent
  * something in a chat, so the host's turn is asked for in the chat's thread.
  */
-export async function aChatAwaitingReply(
-	chats: Pick<Promised<ChatStore>, "getOrCreate" | "sendMain">,
-) {
+export async function aChatAwaitingReply(chats: Pick<Promised<Chats.Interface>, "open" | "post">) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
 		db
@@ -174,13 +172,13 @@ export async function aChatAwaitingReply(
 			.returning({ id: connection.id }),
 	);
 	if (!host || !connected) throw new Error("fixture");
-	const opened = await chats.getOrCreate({
+	const opened = await chats.open({
 		workspaceId,
 		podId,
 		hostAgentId: host.id,
 		userId: memberId,
 	});
-	await chats.sendMain({
+	await chats.post({
 		chatId: opened.id,
 		author: { id: memberId, name: "Sam", image: null },
 		messageId: crypto.randomUUID(),

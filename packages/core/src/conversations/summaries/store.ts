@@ -1,19 +1,20 @@
 import { and, asc, eq } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
-import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, thread, threadSummary, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
 } from "../../workspaces/agents/system-agents.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
+import { ThreadRepository } from "../threads/repository.ts";
 import { messageTextWithPlacedParts } from "../turns/context.ts";
 import type { ModelAccounting } from "../turns/model.ts";
-import type { TurnRepository } from "../turns/repository.ts";
+import { TurnRepository } from "../turns/repository.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
@@ -77,11 +78,11 @@ export interface SummaryStore {
 	fail(prepared: PreparedSummary, userMessage: UserMessage): Effect.Effect<void, never, Database>;
 }
 
-export function summaryStore(
-	emit: DomainEvents.Emit<ConversationEvent>,
-	turns: Pick<TurnRepository, "openScribeTurn" | "completeScribeTurn" | "failScribeTurn">,
-): SummaryStore {
-	return {
+export const summaryStore = Effect.gen(function* () {
+	const { emit } = yield* ConversationEvents.Service;
+	const turns = yield* TurnRepository.Service;
+	const threads = yield* ThreadRepository.Service;
+	const store: SummaryStore = {
 		prepare: (request) =>
 			// One transaction, so the system-agent thread and its turn are created
 			// together or not at all.
@@ -119,9 +120,17 @@ export function summaryStore(
 						return skipped("The thread is already summarised to this message");
 					}
 
-					const systemAgentThreadId = yield* query((db) =>
-						systemAgentThreadFor(db, scope, summariser.id),
-					);
+					const systemAgentThreadId = yield* threads.openSystemAgentThread({
+						served: {
+							id: scope.threadId,
+							workspaceId: scope.workspaceId,
+							podId: scope.podId,
+							initiatorUserId: scope.initiatorUserId,
+						},
+						systemAgentId: summariser.id,
+						systemAgentKey: SUMMARISE_SYSTEM_AGENT,
+						title: summariesTitle(scope.threadTitle),
+					});
 					const opened = yield* turns.openScribeTurn({
 						threadId: systemAgentThreadId,
 						agentId: summariser.id,
@@ -155,25 +164,14 @@ export function summaryStore(
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					if (result.title) {
-						yield* query((db) =>
-							db
-								.update(thread)
-								.set({ title: result.title, updatedAt: now })
-								.where(eq(thread.id, prepared.threadId)),
-						);
+						yield* threads.retitle(prepared.threadId, result.title);
 						// The thread holding the summaries is named after this one, which
 						// had no real title until the first summary gave it one.
-						yield* query((db) =>
-							db
-								.update(thread)
-								.set({ title: summariesTitle(result.title ?? ""), updatedAt: now })
-								.where(
-									and(
-										eq(thread.parentThreadId, prepared.threadId),
-										eq(thread.systemAgentKey, SUMMARISE_SYSTEM_AGENT),
-									),
-								),
-						);
+						yield* threads.retitleSystemAgentThread({
+							servedThreadId: prepared.threadId,
+							systemAgentKey: SUMMARISE_SYSTEM_AGENT,
+							title: summariesTitle(result.title),
+						});
 					}
 					yield* query((db) =>
 						db
@@ -204,19 +202,11 @@ export function summaryStore(
 
 		fail: (prepared, userMessage) => turns.failScribeTurn(prepared.turnId, userMessage),
 	};
-}
+	return store;
+});
 
 function skipped(reason: string): SummarySkipped {
 	return { _tag: "Skipped", reason };
-}
-
-/** The thread being summarised, as much of it as preparing a summary needs. */
-interface SummarisedThread {
-	threadId: string;
-	podId: string;
-	workspaceId: string;
-	threadTitle: string;
-	initiatorUserId: string | null;
 }
 
 /** The thread, if it still exists with this host and this source message. */
@@ -301,50 +291,3 @@ const loadTranscript = Effect.fn("SummaryStore.loadTranscript")(function* (
 function summariesTitle(threadTitle: string): string {
 	return `Summaries of ${threadTitle}`;
 }
-
-/**
- * The system agent's own thread under the one being summarised: one per system agent per
- * thread, created on first use.
- */
-const systemAgentThreadFor = Effect.fn("SummaryStore.systemAgentThreadFor")(function* (
-	db: Executor,
-	scope: SummarisedThread,
-	summariserId: string,
-) {
-	const [created] = yield* db
-		.insert(thread)
-		.values({
-			workspaceId: scope.workspaceId,
-			// The summaries stay in the pod whose conversation they are about,
-			// even though the Scribe hosting them belongs to the workspace.
-			podId: scope.podId,
-			hostAgentId: summariserId,
-			chatId: null,
-			type: "system_agent",
-			title: summariesTitle(scope.threadTitle),
-			systemAgentKey: SUMMARISE_SYSTEM_AGENT,
-			parentThreadId: scope.threadId,
-			initiatorUserId: scope.initiatorUserId,
-		})
-		.onConflictDoNothing({ target: [thread.parentThreadId, thread.systemAgentKey] })
-		.returning({ id: thread.id });
-	if (created) {
-		return created.id;
-	}
-	const [existing] = yield* db
-		.select({ id: thread.id })
-		.from(thread)
-		.where(
-			and(
-				eq(thread.parentThreadId, scope.threadId),
-				eq(thread.systemAgentKey, SUMMARISE_SYSTEM_AGENT),
-			),
-		)
-		.limit(1);
-	if (!existing) {
-		return yield* Effect.die(
-			new Error("Preparing a thread summary returned no system-agent thread"),
-		);
-	}
-	return existing.id;
-});

@@ -5,12 +5,13 @@ import { effectRunner } from "../../../database/database.ts";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
 import { noDatabase } from "../../../database/testing.ts";
-import { CollaborationRefused, type CollaborationStore } from "./store.ts";
+import { CollaborationRefused, type Collaborations } from "./collaborations.ts";
 import { collaborateTool } from "./tool.ts";
 
 /**
- * The tool over a fake store and a real in-memory bus: the store decides what
- * is written; this is about waiting for the answer and giving up gracefully.
+ * The tool over fake collaborations and a real in-memory bus: they decide
+ * what is written; this is about waiting for the answer and giving up
+ * gracefully.
  */
 
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -33,18 +34,17 @@ const answered = streamEvent("collaboration.updated", {
 	collaboration: { ...collaboration, status: "answered", answer: "All good." },
 });
 
-function fakeStore(answer: () => string | undefined): CollaborationStore {
+type FakeCollaborations = Pick<Collaborations.Interface, "open" | "stopWaiting">;
+
+function fakeCollaborations(answer: () => string | undefined): FakeCollaborations {
 	return {
 		open: vi.fn(() => Effect.succeed(opened)),
-		stopWaiting: vi.fn(() => Effect.succeed(answer() === undefined)),
-		readAnswer: vi.fn(() => Effect.succeed(answer())),
-		deliverAnswer: vi.fn(() => Effect.succeed(true)),
-		failUnder: vi.fn(() => Effect.void),
+		stopWaiting: vi.fn(() => Effect.succeed(answer())),
 	};
 }
 
 function toolWith(
-	store: CollaborationStore,
+	collaborations: FakeCollaborations,
 	options: {
 		bus?: ReturnType<typeof createEventBus>;
 		wait?: Duration.Input;
@@ -54,7 +54,7 @@ function toolWith(
 	const noted: Array<Pick<CollaborationPart, "id" | "atOffset">> = [];
 	const tool = collaborateTool({
 		from,
-		collaborations: store,
+		collaborations,
 		bus: options.bus ?? createEventBus({ store: memoryEventStore() }),
 		run,
 		replyLength: () => 12,
@@ -79,8 +79,8 @@ describe("collaborate tool", () => {
 	it("returns the answer when the collaboration is answered in time, and marks the reply", async () => {
 		const bus = createEventBus({ store: memoryEventStore() });
 		let answer: string | undefined;
-		const store = fakeStore(() => answer);
-		const { tool, noted } = toolWith(store, { bus });
+		const collaborations = fakeCollaborations(() => answer);
+		const { tool, noted } = toolWith(collaborations, { bus });
 
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
@@ -88,7 +88,7 @@ describe("collaborate tool", () => {
 		await bus.publish(threadChannel("t-root"), answered);
 
 		expect(await pending).toEqual({ status: "answered", answer: "All good." });
-		expect(store.open).toHaveBeenCalledWith({
+		expect(collaborations.open).toHaveBeenCalledWith({
 			from: { ...from, atOffset: 12 },
 			to: "Helper",
 			brief: "Look",
@@ -98,8 +98,9 @@ describe("collaborate tool", () => {
 
 	it("keeps waiting through updates that do not answer the collaboration", async () => {
 		const bus = createEventBus({ store: memoryEventStore() });
-		const store = fakeStore(() => undefined);
-		const { tool } = toolWith(store, { bus, wait: "200 millis" });
+		const collaborations = fakeCollaborations(() => undefined);
+		const { tool } = toolWith(collaborations, { bus, wait: "200 millis" });
+		const started = Date.now();
 
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
@@ -113,25 +114,25 @@ describe("collaborate tool", () => {
 		});
 
 		expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
-		expect(store.readAnswer).not.toHaveBeenCalled();
+		expect(Date.now() - started).toBeGreaterThanOrEqual(190);
 	});
 
 	it("gives up after the wait and says the answer is still coming", async () => {
-		const store = fakeStore(() => undefined);
-		const { tool } = toolWith(store, { wait: "20 millis" });
+		const collaborations = fakeCollaborations(() => undefined);
+		const { tool } = toolWith(collaborations, { wait: "20 millis" });
 
 		const result = await call(tool, { to: "Helper", brief: "Look" });
 
 		expect(result).toMatchObject({ status: "pending", threadId: "t-child" });
-		expect(store.stopWaiting).toHaveBeenCalledWith("d-1");
+		expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
 	});
 
 	it("hands a refusal back to the model rather than failing the turn", async () => {
-		const store = fakeStore(() => undefined);
-		vi.mocked(store.open).mockReturnValueOnce(
+		const collaborations = fakeCollaborations(() => undefined);
+		vi.mocked(collaborations.open).mockReturnValueOnce(
 			Effect.fail(new CollaborationRefused({ reason: "An agent cannot collaborate with itself" })),
 		);
-		const { tool, noted } = toolWith(store);
+		const { tool, noted } = toolWith(collaborations);
 
 		expect(await call(tool, { to: "Host", brief: "Look" })).toEqual({
 			status: "refused",
@@ -146,8 +147,12 @@ describe("collaborate tool", () => {
 			const controller = new AbortController();
 			const bus = createEventBus({ store: memoryEventStore() });
 			const subscribe = vi.spyOn(bus, "subscribe");
-			const store = fakeStore(() => undefined);
-			const { tool } = toolWith(store, { bus, signal: controller.signal, wait: "1 minute" });
+			const collaborations = fakeCollaborations(() => undefined);
+			const { tool } = toolWith(collaborations, {
+				bus,
+				signal: controller.signal,
+				wait: "1 minute",
+			});
 			if (alreadyAborted) {
 				controller.abort();
 			}
@@ -157,7 +162,7 @@ describe("collaborate tool", () => {
 				controller.abort();
 			}
 			expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
-			expect(store.stopWaiting).toHaveBeenCalledWith("d-1");
+			expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
 			if (alreadyAborted) {
 				expect(subscribe).not.toHaveBeenCalled();
 			} else {
@@ -167,12 +172,12 @@ describe("collaborate tool", () => {
 	);
 
 	it("reads an answer that arrives between timeout and stopping the wait", async () => {
-		const store = fakeStore(() => "Just finished.");
-		const { tool } = toolWith(store, { wait: 1 });
+		const collaborations = fakeCollaborations(() => "Just finished.");
+		const { tool } = toolWith(collaborations, { wait: 1 });
 		expect(await call(tool, { to: "Helper", brief: "Look" })).toEqual({
 			status: "answered",
 			answer: "Just finished.",
 		});
-		expect(store.stopWaiting).toHaveBeenCalledWith("d-1");
+		expect(collaborations.stopWaiting).toHaveBeenCalledWith("d-1");
 	});
 });

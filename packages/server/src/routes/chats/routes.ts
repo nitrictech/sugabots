@@ -1,22 +1,21 @@
 import { BadRequest, Conflict, CurrentUser, NotFound } from "@sugabots/contracts/http";
-import type { ChatStore } from "@sugabots/core/conversations/chats/store";
+import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
+import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface ChatRoutesOptions {
-	chats: ChatStore;
-}
-
-export function chatRoutes({ chats }: ChatRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
-		handlers
+export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
+	Effect.gen(function* () {
+		const chats = yield* Chats.Service;
+		const view = yield* ChatView.Service;
+		return handlers
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* grantedWorkspace;
-					const list = yield* chats.list({ workspaceId, userId: actor.userId, pod: query.pod });
+					const list = yield* view.list({ workspaceId, userId: actor.userId, pod: query.pod });
 					return list ?? (yield* noSuchPod);
 				}),
 			)
@@ -24,14 +23,14 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* grantedWorkspace;
 					return yield* chats
-						.getOrCreate({ ...payload, workspaceId, userId: actor.userId })
+						.open({ ...payload, workspaceId, userId: actor.userId })
 						.pipe(asHttpError(chatErrors));
 				}),
 			)
 			.handle("messages", ({ params, query }) =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
-					const page = yield* chats
+					const page = yield* view
 						.messages(params.chatId, user.id, query)
 						.pipe(asHttpError(chatErrors));
 					return page ?? (yield* noSuchChat);
@@ -40,7 +39,7 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 			.handle("history", ({ params, query }) =>
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
-					const page = yield* chats
+					const page = yield* view
 						.history(params.chatId, user.id, query)
 						.pipe(asHttpError(chatErrors));
 					return page ?? (yield* noSuchChat);
@@ -50,7 +49,7 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 				Effect.gen(function* () {
 					const user = yield* CurrentUser;
 					const message = yield* chats
-						.sendMain({
+						.post({
 							chatId: params.chatId,
 							author: { id: user.id, name: user.name, image: user.image },
 							messageId: payload.id,
@@ -59,9 +58,9 @@ export function chatRoutes({ chats }: ChatRoutesOptions) {
 						.pipe(asHttpError(chatErrors));
 					return message ?? (yield* noSuchChat);
 				}),
-			),
-	);
-}
+			);
+	}),
+);
 
 const noSuchChat = new NotFound({ message: "No such chat" });
 const noSuchPod = new NotFound({ message: "No such pod" });

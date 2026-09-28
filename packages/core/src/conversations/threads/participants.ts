@@ -1,6 +1,6 @@
 import type { AgentColor, Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
-import { and, asc, eq, inArray, isNull, type SQLWrapper, sql } from "drizzle-orm";
+import { asc, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
@@ -258,36 +258,15 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 )`;
 
 /**
- * The agents a thread may mention or collaborate with: its pod's crew, whether
- * or not they have spoken yet.
+ * The agents a thread may mention or collaborate with, as a condition on
+ * `agent`: its pod's crew, whether or not they have spoken yet.
  *
  * Wider than the participants on purpose. Somebody writing `@aquaman` — a
  * person composing — may name an agent who has not joined yet, and reading
  * that name against who has already spoken would leave every first mention
  * unrecognised.
  *
- * System agents are left out: a Scribe or a facilitator is not somebody you talk to.
+ * Every agent placed in a pod is crew: `agent_placement_check` keeps system
+ * agents, a Scribe or a facilitator, out of pods, so they are never listed.
  */
-export const loadCrew = Effect.fn("Participants.loadCrew")(function* (
-	db: Executor,
-	pod: { id: string; workspaceId: string },
-) {
-	const rows = yield* db
-		.select({
-			id: agent.id,
-			name: agent.name,
-			handle: agent.handle,
-			color: agent.color,
-			face: agent.face,
-		})
-		.from(agent)
-		.where(
-			and(
-				eq(agent.podId, pod.id),
-				eq(agent.workspaceId, pod.workspaceId),
-				isNull(agent.systemAgentKey),
-			),
-		)
-		.orderBy(asc(agent.name));
-	return rows.map((row): ThreadParticipant => ({ kind: "agent", ...row }));
-});
+export const crewOf = (podId: SQLWrapper | string) => eq(agent.podId, podId);

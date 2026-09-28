@@ -1,20 +1,17 @@
 import { BadRequest, CurrentUser, NotFound } from "@sugabots/contracts/http";
-import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
-import type { TurnExecution } from "@sugabots/core/conversations/turns/execution";
+import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedWorkspace } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface ThreadRoutesOptions {
-	threads: ThreadStore;
-	turns: Pick<TurnExecution, "requestCancel">;
-}
-
-export function threadRoutes({ threads, turns }: ThreadRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "threads", (handlers) =>
-		handlers
+export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers) =>
+	Effect.gen(function* () {
+		const threads = yield* ThreadView.Service;
+		const turns = yield* TurnExecution.Service;
+		return handlers
 			.handle("list", () =>
 				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
 					threads.listVisible(workspaceId, actor.userId),
@@ -48,9 +45,9 @@ export function threadRoutes({ threads, turns }: ThreadRoutesOptions) {
 						return yield* new NotFound({ message: "No active turn" });
 					}
 				}),
-			),
-	);
-}
+			);
+	}),
+);
 
 const threadErrors = {
 	InvalidThreadHistoryCursor: BadRequest,

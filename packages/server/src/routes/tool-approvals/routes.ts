@@ -1,18 +1,15 @@
 import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import type { ToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
+import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { ServerApi } from "../../http/api.ts";
 import { grantedPod } from "../../http/authorisation.ts";
 import { asHttpError } from "../../http/errors.ts";
 
-export interface ToolApprovalRoutesOptions {
-	approvals: ToolApprovalStore;
-}
-
-export function toolApprovalRoutes({ approvals }: ToolApprovalRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "toolApprovals", (handlers) =>
-		handlers.handle("decide", ({ params, payload }) =>
+export const toolApprovalRoutes = HttpApiBuilder.group(ServerApi, "toolApprovals", (handlers) =>
+	Effect.gen(function* () {
+		const approvals = yield* ToolApprovals.Service;
+		return handlers.handle("decide", ({ params, payload }) =>
 			Effect.gen(function* () {
 				const { pod, actor } = yield* grantedPod;
 				if (!isUuid(params.toolCallId)) {
@@ -28,9 +25,9 @@ export function toolApprovalRoutes({ approvals }: ToolApprovalRoutesOptions) {
 					})
 					.pipe(asHttpError(approvalErrors));
 			}),
-		),
-	);
-}
+		);
+	}),
+);
 
 const approvalErrors = {
 	ToolApprovalNotFound: NotFound,

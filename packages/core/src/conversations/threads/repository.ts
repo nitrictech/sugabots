@@ -1,0 +1,386 @@
+export * as ThreadRepository from "./repository.ts";
+
+import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
+import { and, eq, sql } from "drizzle-orm";
+import { Context, DateTime, Effect, Layer } from "effect";
+import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
+import type * as schema from "../../database/schema.ts";
+import { chat, message, thread, threadParticipant } from "../../database/schema.ts";
+import { ConversationEvents } from "../conversation-events.ts";
+import { ConversationEvent } from "../events.ts";
+import { personAuthor, toMessage } from "./participants.ts";
+
+/**
+ * The only writer of `thread`, `thread_participant` and `chat`, and of the
+ * messages posted into threads. A turn's reply is the exception: it is
+ * `TurnRepository`'s while the turn writes it.
+ *
+ * Commands take the ids and facts they write, and return rows. Whether
+ * somebody may ask for any of this is decided by the caller.
+ */
+export interface Interface {
+	/**
+	 * The chat between the pod and its crew agent `hostAgentId`, with its main
+	 * thread, created on first use. The agent is in the main thread, and so is
+	 * `initiatorUserId` when a person opened it.
+	 */
+	readonly openChat: (placement: {
+		workspaceId: string;
+		podId: string;
+		hostAgentId: string;
+		initiatorUserId: string | null;
+	}) => Effect.Effect<schema.ChatRow>;
+	/** Posts a person's message, making them a participant, and announces it. */
+	readonly post: (input: {
+		/** The id the person's client chose, which makes sending it again safe to detect. */
+		id: string;
+		threadId: string;
+		author: { id: string; name: string; image: string | null };
+		content: string;
+	}) => Effect.Effect<schema.MessageRow>;
+	/** Brings agents into the thread, announcing the ones who were not there yet. */
+	readonly addAgents: (threadId: string, agentIds: readonly string[]) => Effect.Effect<void>;
+	/**
+	 * Opens the collaborator's thread under `parent`, with both agents in it
+	 * and the brief as its first message, written by the asking agent.
+	 */
+	readonly openCollaborationThread: (input: {
+		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId" | "chatId" | "initiatorUserId">;
+		askingAgentId: string;
+		collaboratorId: string;
+		title: string;
+		brief: string;
+	}) => Effect.Effect<{ threadId: string; briefMessageId: string }>;
+	/** Opens a routine run's thread in the agent's chat, with the agent in it. */
+	readonly openRoutineThread: (input: {
+		workspaceId: string;
+		podId: string;
+		agentId: string;
+		chatId: string;
+		title: string;
+	}) => Effect.Effect<schema.ThreadRow>;
+	/** Posts what started a routine run into its thread, as the run's first message. */
+	readonly postRoutineTrigger: (input: {
+		threadId: string;
+		trigger: RoutineTriggerAuthor;
+		content: string;
+	}) => Effect.Effect<schema.MessageRow>;
+	/**
+	 * The thread the system agent `systemAgentKey` works in under `served`,
+	 * hosted by `systemAgentId`: one per system agent per thread, created on
+	 * first use.
+	 */
+	readonly openSystemAgentThread: (input: {
+		served: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId" | "initiatorUserId">;
+		systemAgentId: string;
+		systemAgentKey: SystemAgentKey;
+		title: string;
+	}) => Effect.Effect<string>;
+	readonly retitle: (threadId: string, title: string) => Effect.Effect<void>;
+	/** Retitles the thread the system agent `systemAgentKey` works in under `servedThreadId`. */
+	readonly retitleSystemAgentThread: (input: {
+		servedThreadId: string;
+		systemAgentKey: SystemAgentKey;
+		title: string;
+	}) => Effect.Effect<void>;
+}
+
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/core/ThreadRepository",
+) {}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("ThreadRepository");
+	const { emit } = yield* ConversationEvents.Service;
+
+	return Service.of({
+		openChat: (placement) =>
+			operation(
+				"openChat",
+				transaction(
+					Effect.gen(function* () {
+						yield* query((db) =>
+							db.execute(
+								sql`select pg_advisory_xact_lock(hashtextextended(${`chat:${placement.podId}:${placement.hostAgentId}`}, 0))`,
+							),
+						);
+						const [existing] = yield* query((db) =>
+							db
+								.select()
+								.from(chat)
+								.where(
+									and(eq(chat.podId, placement.podId), eq(chat.hostAgentId, placement.hostAgentId)),
+								)
+								.limit(1),
+						);
+						if (existing) return existing;
+						const main = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									workspaceId: placement.workspaceId,
+									podId: placement.podId,
+									hostAgentId: placement.hostAgentId,
+									type: "chat",
+									title: "Chat",
+									initiatorUserId: placement.initiatorUserId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						const created = yield* query((db) =>
+							db
+								.insert(chat)
+								.values({ ...placement, mainThreadId: main.id })
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("chat")));
+						yield* query((db) =>
+							db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
+						);
+						yield* query((db) =>
+							db
+								.insert(threadParticipant)
+								.values([
+									...(placement.initiatorUserId
+										? [{ threadId: main.id, userId: placement.initiatorUserId }]
+										: []),
+									{ threadId: main.id, agentId: placement.hostAgentId },
+								]),
+						);
+						return created;
+					}),
+				),
+			),
+
+		post: (input) =>
+			operation(
+				"post",
+				transaction(
+					Effect.gen(function* () {
+						const created = yield* query((db) =>
+							db
+								.insert(message)
+								.values({
+									id: input.id,
+									threadId: input.threadId,
+									authorUserId: input.author.id,
+									kind: "text",
+									status: "complete",
+									parts: [{ type: "text", text: input.content }],
+									content: input.content,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("message")));
+						const now = yield* DateTime.nowAsDate;
+						yield* query((db) =>
+							db.update(thread).set({ updatedAt: now }).where(eq(thread.id, input.threadId)),
+						);
+						yield* query((db) =>
+							db
+								.insert(threadParticipant)
+								.values({ threadId: input.threadId, userId: input.author.id })
+								.onConflictDoNothing(),
+						);
+						const author = personAuthor({
+							userId: input.author.id,
+							userName: input.author.name,
+							userImage: input.author.image,
+						});
+						yield* emit([
+							ConversationEvent.MessagePosted({
+								threadId: input.threadId,
+								message: toMessage(created, author),
+							}),
+						]);
+						return created;
+					}),
+				),
+			),
+
+		addAgents: (threadId, agentIds) =>
+			operation(
+				"addAgents",
+				transaction(
+					Effect.gen(function* () {
+						if (agentIds.length === 0) return;
+						const inserted = yield* query((db) =>
+							db
+								.insert(threadParticipant)
+								.values(agentIds.map((agentId) => ({ threadId, agentId })))
+								.onConflictDoNothing()
+								.returning({ agentId: threadParticipant.agentId }),
+						);
+						const joined = new Set(inserted.map((row) => row.agentId));
+						if (joined.size === 0) return;
+						yield* emit([
+							ConversationEvent.AgentsJoined({
+								threadId,
+								agentIds: agentIds.filter((agentId) => joined.has(agentId)),
+							}),
+						]);
+					}),
+				),
+			),
+
+		openCollaborationThread: (input) =>
+			operation(
+				"openCollaborationThread",
+				transaction(
+					Effect.gen(function* () {
+						const child = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									workspaceId: input.parent.workspaceId,
+									podId: input.parent.podId,
+									hostAgentId: input.collaboratorId,
+									chatId: input.parent.chatId,
+									type: "collaboration",
+									title: input.title,
+									parentThreadId: input.parent.id,
+									initiatorUserId: input.parent.initiatorUserId,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						yield* query((db) =>
+							db.insert(threadParticipant).values([
+								{ threadId: child.id, agentId: input.askingAgentId },
+								{ threadId: child.id, agentId: input.collaboratorId },
+							]),
+						);
+						const brief = yield* query((db) =>
+							db
+								.insert(message)
+								.values({
+									threadId: child.id,
+									authorAgentId: input.askingAgentId,
+									kind: "text",
+									status: "complete",
+									parts: [{ type: "text", text: input.brief }],
+									content: input.brief,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("message")));
+						return { threadId: child.id, briefMessageId: brief.id };
+					}),
+				),
+			),
+
+		openRoutineThread: (input) =>
+			operation(
+				"openRoutineThread",
+				transaction(
+					Effect.gen(function* () {
+						const created = yield* query((db) =>
+							db
+								.insert(thread)
+								.values({
+									workspaceId: input.workspaceId,
+									podId: input.podId,
+									hostAgentId: input.agentId,
+									chatId: input.chatId,
+									type: "routine",
+									title: input.title,
+									initiatorUserId: null,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						yield* query((db) =>
+							db.insert(threadParticipant).values({ threadId: created.id, agentId: input.agentId }),
+						);
+						return created;
+					}),
+				),
+			),
+
+		postRoutineTrigger: (input) =>
+			operation(
+				"postRoutineTrigger",
+				query((db) =>
+					db
+						.insert(message)
+						.values({
+							threadId: input.threadId,
+							routineTrigger: input.trigger,
+							kind: "text",
+							status: "complete",
+							parts: [{ type: "text", text: input.content }],
+							content: input.content,
+						})
+						.returning(),
+				).pipe(Effect.flatMap(writtenRow("message"))),
+			),
+
+		openSystemAgentThread: (input) =>
+			operation(
+				"openSystemAgentThread",
+				Effect.gen(function* () {
+					const [created] = yield* query((db) =>
+						db
+							.insert(thread)
+							.values({
+								workspaceId: input.served.workspaceId,
+								// It stays in the pod whose conversation it serves, even though
+								// the system agent hosting it belongs to the workspace.
+								podId: input.served.podId,
+								hostAgentId: input.systemAgentId,
+								chatId: null,
+								type: "system_agent",
+								title: input.title,
+								systemAgentKey: input.systemAgentKey,
+								parentThreadId: input.served.id,
+								initiatorUserId: input.served.initiatorUserId,
+							})
+							.onConflictDoNothing({ target: [thread.parentThreadId, thread.systemAgentKey] })
+							.returning({ id: thread.id }),
+					);
+					if (created) return created.id;
+					const [existing] = yield* query((db) =>
+						db
+							.select({ id: thread.id })
+							.from(thread)
+							.where(
+								and(
+									eq(thread.parentThreadId, input.served.id),
+									eq(thread.systemAgentKey, input.systemAgentKey),
+								),
+							)
+							.limit(1),
+					);
+					if (!existing) {
+						return yield* Effect.die(new Error("Opening a system agent's thread returned none"));
+					}
+					return existing.id;
+				}),
+			),
+
+		retitle: (threadId, title) =>
+			operation(
+				"retitle",
+				Effect.flatMap(DateTime.nowAsDate, (now) =>
+					query((db) =>
+						db.update(thread).set({ title, updatedAt: now }).where(eq(thread.id, threadId)),
+					),
+				).pipe(Effect.asVoid),
+			),
+
+		retitleSystemAgentThread: (input) =>
+			operation(
+				"retitleSystemAgentThread",
+				Effect.flatMap(DateTime.nowAsDate, (now) =>
+					query((db) =>
+						db
+							.update(thread)
+							.set({ title: input.title, updatedAt: now })
+							.where(
+								and(
+									eq(thread.parentThreadId, input.servedThreadId),
+									eq(thread.systemAgentKey, input.systemAgentKey),
+								),
+							),
+					),
+				).pipe(Effect.asVoid),
+			),
+	});
+});
+
+export const layer = Layer.effect(Service, make);

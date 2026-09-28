@@ -7,7 +7,7 @@ import { tool } from "ai";
 import { Duration, Effect, Option, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { EventBus } from "../../../database/events/bus.ts";
-import type { CollaborationStore } from "./store.ts";
+import type { Collaborations } from "./collaborations.ts";
 
 /** How long the asking agent's turn waits for the collaborator before moving on. */
 const DEFAULT_WAIT = Duration.seconds(120);
@@ -17,10 +17,10 @@ const readThreadUpdate = Schema.decodeUnknownOption(threadUpdateEventSchema);
 export interface CollaborateToolOptions {
 	/** The turn the tool runs in: its thread, its agent, its turn and its reply. */
 	from: { threadId: string; agentId: string; turnId: string; messageId: string };
-	collaborations: CollaborationStore;
+	collaborations: Pick<Collaborations.Interface, "open" | "stopWaiting">;
 	/** For noticing the collaboration being answered. */
 	bus: Pick<EventBus, "subscribe">;
-	/** Runs a store Effect from the tool's promise. */
+	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
 	/** How much of the reply has been written so far, which is where the collaboration sits. */
 	replyLength: () => number;
@@ -41,10 +41,10 @@ export type CollaborateResult =
 /**
  * The `collaborate` tool, bound to one turn.
  *
- * Opening the collaboration is one transaction in the store. Waiting for the
- * answer is not: it watches the asking thread's channel for the collaboration
- * to be answered, up to `wait`, then either reads the answer or records that
- * the asking agent moved on so the answer resumes it later.
+ * Opening the collaboration is one transaction. Waiting for the answer is
+ * not: it watches the asking thread's channel for the collaboration to be
+ * answered, up to `wait`, then takes the answer if there is one, or records
+ * that the asking agent moved on so the answer resumes it later.
  */
 export function collaborateTool({
 	from,
@@ -80,20 +80,10 @@ export function collaborateTool({
 			}
 			const { collaboration, collaborator } = opened.opened;
 
-			const settled = await settledIn(bus, from.threadId, collaboration.id, wait, signal);
-			if (settled) {
-				const answer = await run(collaborations.readAnswer(collaboration.id));
-				if (answer !== undefined) {
-					return { status: "answered", answer };
-				}
-			}
-			const stopped = await run(collaborations.stopWaiting(collaboration.id));
-			if (!stopped) {
-				// Answered between the timeout and the update; take the answer.
-				const answer = await run(collaborations.readAnswer(collaboration.id));
-				if (answer !== undefined) {
-					return { status: "answered", answer };
-				}
+			await waitUntilSettled(bus, from.threadId, collaboration.id, wait, signal);
+			const answer = await run(collaborations.stopWaiting(collaboration.id));
+			if (answer !== undefined) {
+				return { status: "answered", answer };
 			}
 			return {
 				status: "pending",
@@ -105,18 +95,18 @@ export function collaborateTool({
 }
 
 /**
- * Whether the collaboration, made in `threadId`, was answered or failed within
- * `wait`, or before `signal` aborted.
+ * Waits until the collaboration, made in `threadId`, is answered or failed,
+ * `wait` passes, or `signal` aborts.
  */
-async function settledIn(
+async function waitUntilSettled(
 	bus: Pick<EventBus, "subscribe">,
 	threadId: string,
 	collaborationId: string,
 	wait: Duration.Input,
 	signal: AbortSignal,
-): Promise<boolean> {
+): Promise<void> {
 	if (signal.aborted) {
-		return false;
+		return;
 	}
 	const giveUp = new AbortController();
 	const timer = setTimeout(() => giveUp.abort(), Duration.toMillis(Duration.fromInputUnsafe(wait)));
@@ -132,10 +122,9 @@ async function settledIn(
 				update.collaboration.id === collaborationId &&
 				(update.collaboration.status === "answered" || update.collaboration.status === "failed")
 			) {
-				return true;
+				return;
 			}
 		}
-		return false;
 	} finally {
 		clearTimeout(timer);
 		signal.removeEventListener("abort", onAbort);

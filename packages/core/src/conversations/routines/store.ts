@@ -18,23 +18,15 @@ import { and, asc, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type * as schema from "../../database/schema.ts";
-import {
-	agent,
-	chat,
-	message,
-	pod,
-	routine,
-	routineExecution,
-	thread,
-	threadParticipant,
-} from "../../database/schema.ts";
+import { agent, message, pod, routine, routineExecution } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { ThreadRepository } from "../threads/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { toRoutineExecution } from "./execution.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
@@ -183,9 +175,9 @@ export interface RoutineStore {
 	>;
 }
 
-export const routineStore = Effect.fnUntraced(function* (
-	emit: DomainEvents.Emit<ConversationEvent>,
-) {
+export const routineStore = Effect.gen(function* () {
+	const { emit } = yield* ConversationEvents.Service;
+	const threads = yield* ThreadRepository.Service;
 	const requests = yield* TurnRequests.Service;
 	const runs = yield* RoutineRuns.Service;
 	const store: RoutineStore = {
@@ -421,24 +413,20 @@ export const routineStore = Effect.fnUntraced(function* (
 						}
 					}
 
-					const currentChat = yield* ensureAutomatedChat(input.workspaceId, podId, input.agentId);
+					const currentChat = yield* threads.openChat({
+						workspaceId: input.workspaceId,
+						podId,
+						hostAgentId: input.agentId,
+						initiatorUserId: null,
+					});
 					const acceptedAt = new Date();
-					const [executionThread] = yield* query((db) =>
-						db
-							.insert(thread)
-							.values({
-								workspaceId: input.workspaceId,
-								podId,
-								hostAgentId: input.agentId,
-								chatId: currentChat.id,
-								type: "routine",
-								title: executionTitle(definition.routine.name, acceptedAt),
-								initiatorUserId: null,
-							})
-							.returning(),
-					);
-					if (!executionThread)
-						return yield* Effect.die(new Error("Routine thread insert returned no row"));
+					const executionThread = yield* threads.openRoutineThread({
+						workspaceId: input.workspaceId,
+						podId,
+						agentId: input.agentId,
+						chatId: currentChat.id,
+						title: executionTitle(definition.routine.name, acceptedAt),
+					});
 					const [execution] = yield* query((db) =>
 						db
 							.insert(routineExecution)
@@ -458,32 +446,16 @@ export const routineStore = Effect.fnUntraced(function* (
 					);
 					if (!execution)
 						return yield* Effect.die(new Error("Routine execution insert returned no row"));
-					yield* query((db) =>
-						db
-							.insert(threadParticipant)
-							.values({ threadId: executionThread.id, agentId: input.agentId }),
-					);
-					const content = triggerMessageContent(definition.routine.instructions, input.trigger);
-					const [triggerMessage] = yield* query((db) =>
-						db
-							.insert(message)
-							.values({
-								threadId: executionThread.id,
-								routineTrigger: {
-									kind: "routine_trigger",
-									executionId: execution.id,
-									routineName: definition.routine.name,
-									triggerKind: input.trigger.kind,
-								},
-								kind: "text",
-								status: "complete",
-								parts: [{ type: "text", text: content }],
-								content,
-							})
-							.returning({ id: message.id }),
-					);
-					if (!triggerMessage)
-						return yield* Effect.die(new Error("Routine message insert returned no row"));
+					yield* threads.postRoutineTrigger({
+						threadId: executionThread.id,
+						trigger: {
+							kind: "routine_trigger",
+							executionId: execution.id,
+							routineName: definition.routine.name,
+							triggerKind: input.trigger.kind,
+						},
+						content: triggerMessageContent(definition.routine.instructions, input.trigger),
+					});
 					yield* runs.queue({ routineId: input.routineId, executionId: execution.id });
 					yield* emit([
 						ConversationEvent.RoutineExecutionAccepted({
@@ -722,48 +694,6 @@ const routineScope = (workspaceId: string, agentId: string, routineId: string) =
 
 const lock = (key: string) =>
 	query((db) => db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`));
-
-function ensureAutomatedChat(workspaceId: string, podId: string, hostAgentId: string) {
-	return Effect.gen(function* () {
-		yield* lock(`chat:${podId}:${hostAgentId}`);
-		const [existing] = yield* query((db) =>
-			db
-				.select()
-				.from(chat)
-				.where(and(eq(chat.podId, podId), eq(chat.hostAgentId, hostAgentId)))
-				.limit(1),
-		);
-		if (existing) return existing;
-		const [main] = yield* query((db) =>
-			db
-				.insert(thread)
-				.values({
-					workspaceId,
-					podId,
-					hostAgentId,
-					type: "chat",
-					title: "Chat",
-					initiatorUserId: null,
-				})
-				.returning(),
-		);
-		if (!main) return yield* Effect.die(new Error("Automated chat thread insert returned no row"));
-		const [created] = yield* query((db) =>
-			db
-				.insert(chat)
-				.values({ workspaceId, podId, hostAgentId, mainThreadId: main.id, initiatorUserId: null })
-				.returning(),
-		);
-		if (!created) return yield* Effect.die(new Error("Automated chat insert returned no row"));
-		yield* query((db) =>
-			db.update(thread).set({ chatId: created.id }).where(eq(thread.id, main.id)),
-		);
-		yield* query((db) =>
-			db.insert(threadParticipant).values({ threadId: main.id, agentId: hostAgentId }),
-		);
-		return created;
-	});
-}
 
 function triggerMessageContent(instructions: string, trigger: RoutineExecutionTrigger) {
 	return `Routine instructions:\n${instructions}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;

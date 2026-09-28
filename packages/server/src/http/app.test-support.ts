@@ -1,9 +1,11 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import type { ChatStore } from "@sugabots/core/conversations/chats/store";
+import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
+import { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
-import type { ThreadStore } from "@sugabots/core/conversations/threads/store";
-import { noToolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
+import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
 import { ModelRequestFailed, type TurnModel } from "@sugabots/core/conversations/turns/model";
 import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
 import { memoryEventStore } from "@sugabots/core/database/events/store";
@@ -109,21 +111,6 @@ function notStubbed(method: string): Effect.Effect<never> {
 	return Effect.die(new Error(`${method} has no test double. Pass one to createTestApp.`));
 }
 
-const emptyThreadStore: ThreadStore = {
-	listVisible: () => Effect.succeed([]),
-	visibleThreadId: () => Effect.undefined,
-	getVisible: () => Effect.undefined,
-	activity: () => Effect.undefined,
-};
-
-const emptyChatStore: ChatStore = {
-	list: () => Effect.succeed({ items: [] }),
-	getOrCreate: () => notStubbed("chats.getOrCreate"),
-	messages: () => Effect.undefined,
-	history: () => Effect.undefined,
-	sendMain: () => Effect.undefined,
-};
-
 const emptyRoutineStore: RoutineStore = {
 	listInWorkspace: () => Effect.succeed([]),
 	list: () => Effect.succeed([]),
@@ -140,11 +127,7 @@ const emptyRoutineStore: RoutineStore = {
 };
 
 const emptyStores: Stores = {
-	threads: emptyThreadStore,
-	chats: emptyChatStore,
 	routines: emptyRoutineStore,
-	turns: { requestCancel: () => Effect.succeed(false) },
-	approvals: noToolApprovalStore,
 };
 
 /**
@@ -159,6 +142,11 @@ const emptyServices = Layer.mergeAll(
 	unimplemented(ModelProviderSetup.Service),
 	unimplemented(SearchProviderSetup.Service),
 	unimplemented(ConnectionSetup.Service),
+	unimplemented(Chats.Service),
+	unimplemented(ChatView.Service),
+	unimplemented(ThreadView.Service),
+	unimplemented(TurnExecution.Service),
+	unimplemented(ToolApprovals.Service),
 );
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */

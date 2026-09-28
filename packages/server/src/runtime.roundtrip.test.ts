@@ -1,4 +1,5 @@
-import { composeConversations } from "@sugabots/core/conversations/composition";
+import { Chats } from "@sugabots/core/conversations/chats/chats";
+import { Conversations } from "@sugabots/core/conversations/composition";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
@@ -54,7 +55,10 @@ const workflows = ManagedRuntime.make(
 	),
 );
 const services = await workflows.context();
-const { emit, repositories, stores } = await workflows.runPromise(composeConversations);
+const conversations = await workflows.runPromise(
+	Layer.build(Conversations.layer).pipe(Effect.scoped, Effect.provide(database)),
+);
+const chats = Context.get(conversations, Chats.Service);
 
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
 	// The Scribe is left out: nothing here runs its workflow.
@@ -86,23 +90,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 
 	const background = backgroundLayer({ eventStore });
 	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
-		Layer.provideMerge(facilitateSteps({ model, emit })),
+		Layer.provideMerge(facilitateSteps({ model })),
 		Layer.provideMerge(
 			stepsLayer({
-				execution: stores.turns,
-				turns: repositories.turns,
-				toolCalls: repositories.toolCalls,
 				model,
 				events: bus,
-				collaborations: stores.collaborations,
-				approvals: stores.approvals,
 				builtInTools: noBuiltInTools,
 				connectionTools: noConnectionTools,
-				emit,
 			}),
 		),
 		Layer.provide(withoutSummaries),
-		Layer.provide(Layer.succeedContext(services)),
+		Layer.provide(Layer.succeedContext(Context.merge(services, conversations))),
 	);
 	const runtime = ManagedRuntime.make(
 		Layer.merge(background, workflowLayers).pipe(
@@ -202,9 +200,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		userId: string;
 		content: string;
 	}) {
-		const opened = await runtime.runPromise(stores.chats.getOrCreate(input));
+		const opened = await runtime.runPromise(chats.open(input));
 		await runtime.runPromise(
-			stores.chats.sendMain({
+			chats.post({
 				chatId: opened.id,
 				author: { id: input.userId, name: "Sam", image: null },
 				messageId: crypto.randomUUID(),

@@ -1,51 +1,60 @@
-import { Effect } from "effect";
+export * as Conversations from "./composition.ts";
+
+import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
-import { chatStore } from "./chats/store.ts";
+import { ChatView } from "./chats/chat-view.ts";
+import { Chats } from "./chats/chats.ts";
+import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
-import { routineStore } from "./routines/store.ts";
-import { summaryStore } from "./summaries/store.ts";
 import { ThreadFeed } from "./thread-feed.ts";
-import { threadStore } from "./threads/store.ts";
-import { toolApprovalStore } from "./tools/approvals/store.ts";
-import { toolCallRepository } from "./tools/calls/repository.ts";
-import { collaborationStore } from "./tools/collaborate/store.ts";
-import { turnExecution } from "./turns/execution.ts";
-import { turnRepository } from "./turns/repository.ts";
+import { ThreadRepository } from "./threads/repository.ts";
+import { ThreadView } from "./threads/thread-view.ts";
+import { ToolApprovals } from "./tools/approvals/tool-approvals.ts";
+import { ToolCallRepository } from "./tools/calls/repository.ts";
+import { Collaborations } from "./tools/collaborate/collaborations.ts";
+import { CollaborationRepository } from "./tools/collaborate/repository.ts";
+import { TurnExecution } from "./turns/execution.ts";
+import { TurnRepository } from "./turns/repository.ts";
+
+const services = Layer.mergeAll(
+	Chats.layer,
+	Collaborations.layer,
+	ToolApprovals.layer,
+	TurnExecution.layer,
+	RoutineSettlement.layer,
+	ChatView.layer,
+	ThreadView.layer,
+	// For the workflows' steps, which record a turn's progress directly.
+	TurnRepository.layer,
+	ToolCallRepository.layer,
+	ThreadRepository.layer,
+	CollaborationRepository.layer,
+);
+
+/** Everything `layer` provides. */
+export type Services = Layer.Success<typeof services> | ConversationEvents.Service;
 
 /**
- * The conversation repositories and stores, and the handlers of the domain
- * events they emit, in order: the thread feed tells watching clients what
+ * The conversation services, with `ConversationEvents` handing what they
+ * emit to its handlers, in order: the thread feed tells watching clients what
  * happened, then routine settlement ends the runs that work finished.
  */
-export const composeConversations = Effect.gen(function* () {
-	const outbox = yield* EventOutbox.Service;
-	// Settlement acts through the repositories and stores, which emit, so
-	// `emit` hands their events to handlers built after them.
-	const emit: DomainEvents.Emit<ConversationEvent> = (events) => dispatch(events);
-	const toolCalls = toolCallRepository(emit);
-	const turns = turnRepository(emit, toolCalls);
-	const collaborations = yield* collaborationStore(emit);
-	const settlement = yield* RoutineSettlement.make(emit, turns, collaborations);
-	const dispatch = DomainEvents.emitTo<ConversationEvent>([
-		ThreadFeed.handler(outbox),
-		settlement.handler,
-	]);
-	return {
-		/** For recording conversation facts outside the stores, as the facilitator does. */
-		emit,
-		repositories: { turns, toolCalls },
-		/** For the routine workflow's steps. */
-		settlement,
-		stores: {
-			chats: yield* chatStore(emit),
-			routines: yield* routineStore(emit),
-			threads: threadStore(),
-			turns: yield* turnExecution(turns, emit),
-			summaries: summaryStore(emit, turns),
-			collaborations,
-			approvals: yield* toolApprovalStore(toolCalls, turns),
-		},
-	};
-});
+export const layer = Layer.effectContext(
+	Effect.gen(function* () {
+		const outbox = yield* EventOutbox.Service;
+		// Settlement is built from the services that emit, so `emit` reaches the
+		// handlers through `dispatch`, which exists once they are built. Nothing
+		// emits while they are being built.
+		const events = ConversationEvents.Service.of({ emit: (batch) => dispatch(batch) });
+		const built = yield* Layer.build(
+			services.pipe(Layer.provide(Layer.succeed(ConversationEvents.Service, events))),
+		);
+		const dispatch = DomainEvents.emitTo<ConversationEvent>([
+			ThreadFeed.handler(outbox),
+			Context.get(built, RoutineSettlement.Service).handler,
+		]);
+		return Context.add(built, ConversationEvents.Service, events);
+	}),
+);

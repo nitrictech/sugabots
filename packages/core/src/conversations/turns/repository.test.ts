@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -7,14 +7,18 @@ import { memoryEventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { Chats } from "../chats/chats.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { conversationsForTests } from "../testing.ts";
-import { noToolApprovalStore } from "../tools/approvals/store.ts";
+import { ToolApprovals } from "../tools/approvals/tool-approvals.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
+import { ToolCallRepository } from "../tools/calls/repository.ts";
+import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { noConnectionTools } from "../tools/connections.ts";
-import { type PreparedTurn, replyTurnOf } from "./execution.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { ModelRequestFailed, type TurnModel } from "./model.ts";
-import type { TurnCheckpoint } from "./repository.ts";
+import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { runSegment } from "./turn.steps.ts";
 
@@ -25,15 +29,15 @@ import { runSegment } from "./turn.steps.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
-	const { emit, repositories, stores } = await conversationsForTests({
+	const conversations = await conversationsForTests({
 		publishCommitted: async (events) => {
 			delivered.push(...events);
 		},
 	});
-	const turns = onPostgres(repositories.turns);
-	const calls = onPostgres(repositories.toolCalls);
-	const chats = onPostgres(stores.chats);
-	const execution = onPostgres(stores.turns);
+	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
+	const calls = onPostgres(Context.get(conversations, ToolCallRepository.Service));
+	const chats = onPostgres(Context.get(conversations, Chats.Service));
+	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
 	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
 	const providerDown = UserMessage.of`The model provider could not answer.`;
 	let threadId: string;
@@ -201,16 +205,17 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		const segmentWith = (model: TurnModel) =>
 			runOnPostgres(
 				runSegment(prepared.run, {
-					execution: stores.turns,
-					turns: repositories.turns,
-					toolCalls: repositories.toolCalls,
+					execution: Context.get(conversations, TurnExecution.Service),
+					turns: Context.get(conversations, TurnRepository.Service),
+					toolCalls: Context.get(conversations, ToolCallRepository.Service),
 					model,
-					collaborations: stores.collaborations,
-					approvals: noToolApprovalStore,
+					collaborations: Context.get(conversations, Collaborations.Service),
+					approvals: Context.get(conversations, ToolApprovals.Service),
+					chats: Context.get(conversations, Chats.Service),
 					builtInTools: noBuiltInTools,
 					connectionTools: noConnectionTools,
 					events,
-					emit,
+					emit: Context.get(conversations, ConversationEvents.Service).emit,
 					requests: { queueSummary: vi.fn(() => Effect.void) },
 				}),
 			);

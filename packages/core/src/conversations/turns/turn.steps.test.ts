@@ -7,12 +7,10 @@ import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import {
-	noToolApprovalStore,
 	ToolApprovalsIncomplete,
 	ToolExecutionRefused,
-} from "../tools/approvals/store.ts";
+} from "../tools/approvals/tool-approvals.ts";
 import { noBuiltInTools } from "../tools/built-in.ts";
-import type { CollaborationStore } from "../tools/collaborate/store.ts";
 import { noConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, type TurnRun } from "./execution.ts";
 import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
@@ -280,7 +278,6 @@ describe("runSegment", () => {
 								atOffset,
 								mutating: true,
 							}),
-						decide: () => Effect.die(new Error("unused")),
 					},
 				}),
 			),
@@ -362,7 +359,6 @@ describe("runSegment", () => {
 						responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
 						beginExecution: () =>
 							Effect.fail(new ToolExecutionRefused({ message: "must not execute" })),
-						decide: () => Effect.die(new Error("unused")),
 					},
 				}),
 			),
@@ -427,7 +423,6 @@ describe("runSegment", () => {
 					approvals: {
 						responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
 						beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
-						decide: () => Effect.die(new Error("unused")),
 					},
 				}),
 			),
@@ -818,9 +813,6 @@ describe("runSegment", () => {
 function fakes() {
 	const execution: TurnStepsDependencies["execution"] = {
 		prepare: vi.fn(() => Effect.succeed<PreparedTurn | NotRunnable>(prepared)),
-		giveFloor: vi.fn(() =>
-			Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
-		),
 	};
 	const turns: TurnStepsDependencies["turns"] = {
 		saveReply: vi.fn(() => Effect.void),
@@ -835,13 +827,27 @@ function fakes() {
 	return { execution, turns };
 }
 
-/** What a segment runs on, with no approvals, built-in tools or connection tools unless given. */
+type Defaulted = "approvals" | "chats" | "builtInTools" | "connectionTools" | "emit";
+
+/**
+ * What a segment runs on, with no approvals, built-in tools or connection
+ * tools unless given, and nobody given the floor after a reply.
+ */
 function dependencies(
-	given: Omit<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools" | "emit"> &
-		Partial<Pick<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools" | "emit">>,
+	given: Omit<TurnStepsDependencies, Defaulted> & Partial<Pick<TurnStepsDependencies, Defaulted>>,
 ): TurnStepsDependencies {
 	return {
-		approvals: noToolApprovalStore,
+		approvals: {
+			responsesForTurn: () =>
+				Effect.fail(new ToolApprovalsIncomplete({ message: "These cases ask for no approvals" })),
+			beginExecution: () =>
+				Effect.fail(new ToolExecutionRefused({ message: "These cases ask for no approvals" })),
+		},
+		chats: {
+			giveFloor: vi.fn(() =>
+				Effect.succeed({ kind: "nobody" as const, why: "exchange-over" as const }),
+			),
+		},
 		builtInTools: noBuiltInTools,
 		connectionTools: noConnectionTools,
 		emit: () => Effect.void,
@@ -874,15 +880,9 @@ function toolCalls(): TurnStepsDependencies["toolCalls"] {
 }
 
 /** No case here collaborates, so every method dies if reached. */
-function collaborations(): CollaborationStore {
+function collaborations(): TurnStepsDependencies["collaborations"] {
 	const unused = () => Effect.die(new Error("These cases do not collaborate"));
-	return {
-		open: unused,
-		stopWaiting: unused,
-		readAnswer: unused,
-		deliverAnswer: unused,
-		failUnder: unused,
-	};
+	return { open: unused, stopWaiting: unused, answer: unused };
 }
 
 function eventBus(): EventBus {

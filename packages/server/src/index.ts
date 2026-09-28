@@ -1,12 +1,15 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { composeConversations } from "@sugabots/core/conversations/composition";
+import { Conversations } from "@sugabots/core/conversations/composition";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
+import { routineStore } from "@sugabots/core/conversations/routines/store";
+import { summaryStore } from "@sugabots/core/conversations/summaries/store";
 import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
 import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
+import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
@@ -44,7 +47,7 @@ import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-admi
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { Config, Duration, Effect, Layer } from "effect";
+import { Config, Context, Duration, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { apiLayer } from "./http/app.ts";
@@ -90,8 +93,11 @@ const main = Effect.gen(function* () {
 			Layer.merge(EventOutbox.layer(bus)),
 		),
 	);
-	const conversations = yield* composeConversations.pipe(Effect.provide(conversationServices));
-	const stores = conversations.stores;
+	const conversations = yield* Layer.build(
+		Conversations.layer.pipe(Layer.provide(Layer.succeedContext(conversationServices))),
+	);
+	const composed = Context.merge(conversationServices, conversations);
+	const routines = yield* routineStore.pipe(Effect.provide(composed));
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -117,39 +123,29 @@ const main = Effect.gen(function* () {
 			routineWorkflow.layer,
 			Lanes.reconcileLayer,
 		).pipe(
-			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
 			Layer.provideMerge(
-				routineSteps({ routines: stores.routines, settlement: conversations.settlement }),
+				summarySteps({ store: yield* summaryStore.pipe(Effect.provide(composed)), model }),
 			),
-			Layer.provideMerge(facilitateSteps({ model, emit: conversations.emit })),
-			Layer.provideMerge(
-				turnSteps({
-					execution: stores.turns,
-					turns: conversations.repositories.turns,
-					toolCalls: conversations.repositories.toolCalls,
-					model,
-					events: bus,
-					collaborations: stores.collaborations,
-					approvals: stores.approvals,
-					builtInTools,
-					connectionTools,
-					emit: conversations.emit,
-				}),
-			),
-			Layer.provide(Layer.succeedContext(conversationServices)),
+			Layer.provideMerge(routineSteps({ routines })),
+			Layer.provideMerge(facilitateSteps({ model })),
+			Layer.provideMerge(turnSteps({ model, events: bus, builtInTools, connectionTools })),
+			Layer.provide(Layer.succeedContext(composed)),
 		),
 	);
 
 	yield* Layer.build(seedEveryWorkspaceLayer);
-	yield* Layer.build(backgroundLayer({ eventStore, routines: stores.routines }));
+	yield* Layer.build(backgroundLayer({ eventStore, routines }));
 	const api = apiLayer({
 		authentication,
 		installation,
 		authorization,
-		stores,
-		events: { bus, access: channelAccess(authorization, stores.threads) },
+		stores: { routines },
+		events: {
+			bus,
+			access: channelAccess(authorization, Context.get(conversations, ThreadView.Service)),
+		},
 		model,
-	});
+	}).pipe(Layer.provide(Layer.succeedContext(conversations)));
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
 			Layer.provide(requestSpanNames),

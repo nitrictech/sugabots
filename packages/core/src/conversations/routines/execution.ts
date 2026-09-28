@@ -3,7 +3,8 @@ import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { routineExecution, thread } from "../../database/schema.ts";
+import { routineExecution } from "../../database/schema.ts";
+import { lineageOf } from "../threads/tree.ts";
 
 export function toRoutineExecution(row: schema.RoutineExecutionRow): RoutineExecution {
 	return {
@@ -28,16 +29,9 @@ export function toRoutineExecution(row: schema.RoutineExecutionRow): RoutineExec
  * scalar subquery: a collaboration a routine's agent starts is part of the run.
  */
 export const routineExecutionIdOf = (threadId: SQLWrapper) => sql<string | null>`(
-	with recursive ancestors as (
-		select id, parent_thread_id from ${thread} where id = ${threadId}
-		union all
-		select parent.id, parent.parent_thread_id
-		from ${thread} parent
-		join ancestors child on child.parent_thread_id = parent.id
-	)
 	select execution.id
 	from ${routineExecution} execution
-	join ancestors on ancestors.id = execution.thread_id
+	join ${lineageOf(threadId)} as lineage on lineage.id = execution.thread_id
 	limit 1
 )`;
 

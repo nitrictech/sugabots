@@ -56,7 +56,7 @@ const unavailable: FacilitatorExecution["model"] = {
 
 const execution = (model: FacilitatorExecution["model"]): FacilitatorExecution => ({
 	model,
-	emit: () => Effect.void,
+	threads: { addAgents: () => Effect.void },
 	requests: { queueTurn: mocks.queueTurn },
 });
 

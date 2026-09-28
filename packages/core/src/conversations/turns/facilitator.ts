@@ -1,5 +1,5 @@
 import type { ThreadType } from "@sugabots/contracts";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Duration, Effect, Layer, Ref } from "effect";
 import {
 	Database,
@@ -8,13 +8,15 @@ import {
 	query,
 	transaction,
 } from "../../database/database.ts";
-import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
 import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
 } from "../../workspaces/agents/system-agents.ts";
+import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { crewOf } from "../threads/participants.ts";
+import { ThreadRepository } from "../threads/repository.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import {
 	type AttemptOutcome,
@@ -47,20 +49,26 @@ const MAX_ANSWER_CHARACTERS = 200;
 
 export interface FacilitatorExecution {
 	model: TurnModel;
-	emit: DomainEvents.Emit<ConversationEvent>;
+	/** Where the chosen agent is brought into the thread. */
+	threads: Pick<ThreadRepository.Interface, "addAgents">;
 	/** How the chosen agent's turn is asked for. */
 	requests: Pick<TurnRequests.Interface, "queueTurn">;
 }
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = (options: Omit<FacilitatorExecution, "requests">) =>
+export const stepsLayer = (options: Pick<FacilitatorExecution, "model">) =>
 	Layer.effect(
 		FacilitateSteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
-			const execution = { ...options, requests: yield* TurnRequests.Service };
+			const { emit } = yield* ConversationEvents.Service;
+			const execution: FacilitatorExecution = {
+				...options,
+				threads: yield* ThreadRepository.Service,
+				requests: yield* TurnRequests.Service,
+			};
 			const announce = (event: ConversationEvent) =>
-				transaction(execution.emit([event])).pipe(Effect.provideService(Database, database));
+				transaction(emit([event])).pipe(Effect.provideService(Database, database));
 			return FacilitateSteps.of({
 				attempt: (request, attempt) =>
 					attemptFacilitation(request, attempt, execution).pipe(
@@ -155,18 +163,7 @@ const applyDecision = (
 	if (decision.kind === "nobody") return Effect.void;
 	return transaction(
 		Effect.gen(function* () {
-			const chosen = scope.crew.find((member) => member.id === decision.agentId);
-			if (chosen && !chosen.inThread) {
-				yield* query((db) =>
-					db
-						.insert(threadParticipant)
-						.values({ threadId: scope.threadId, agentId: chosen.id })
-						.onConflictDoNothing(),
-				);
-				yield* execution.emit([
-					ConversationEvent.AgentsJoined({ threadId: scope.threadId, agentIds: [chosen.id] }),
-				]);
-			}
+			yield* execution.threads.addAgents(scope.threadId, [decision.agentId]);
 			yield* execution.requests.queueTurn({
 				threadId: scope.threadId,
 				agentId: decision.agentId,
@@ -366,7 +363,7 @@ export const loadFacilitatorScope = Effect.fn("Facilitator.loadFacilitatorScope"
 			description: agent.description,
 		})
 		.from(agent)
-		.where(and(eq(agent.podId, scope.podId), isNull(agent.systemAgentKey)))
+		.where(crewOf(scope.podId))
 		.orderBy(agent.name);
 	const participantRows = yield* db
 		.select({ agentId: threadParticipant.agentId, personName: user.name })

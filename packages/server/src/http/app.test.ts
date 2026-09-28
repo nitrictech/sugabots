@@ -1,4 +1,6 @@
 import { healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
+import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
+import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UserResolver } from "./app.test-support.ts";
@@ -177,7 +179,7 @@ describe("cookie request origins", () => {
 			headers.get("authorization") === "Bearer good-token"
 				? user
 				: null,
-		stores: { turns: { requestCancel: () => Effect.succeed(true) } },
+		services: unimplemented(TurnExecution.Service, { requestCancel: () => Effect.succeed(true) }),
 	});
 
 	it("accepts an unsafe cookie request from a trusted origin", async () => {

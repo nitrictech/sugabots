@@ -3,7 +3,7 @@ import { Effect, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
-import { noToolApprovalStore, ToolExecutionRefused } from "../approvals/store.ts";
+import { ToolExecutionRefused } from "../approvals/tool-approvals.ts";
 import { recorded } from "./recorded.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
@@ -21,7 +21,7 @@ const from = {
 };
 const callOptions = { toolCallId: "sdk-1", messages: [] } as never;
 
-function store(): Pick<ToolCallRepository, "open" | "close"> {
+function fakeCalls(): Pick<ToolCallRepository.Interface, "open" | "close"> {
 	return {
 		open: vi.fn(({ atOffset, tool, input, mutating }) =>
 			Effect.succeed({
@@ -44,7 +44,7 @@ function store(): Pick<ToolCallRepository, "open" | "close"> {
 
 describe("a recorded tool", () => {
 	it("opens the call with its input where the reply stands, then closes it with the output", async () => {
-		const calls = store();
+		const calls = fakeCalls();
 		const noted: Array<{ id: string; atOffset: number; mutating: boolean }> = [];
 		const probe = recorded(
 			"probe",
@@ -79,7 +79,7 @@ describe("a recorded tool", () => {
 	});
 
 	it("marks a call as acting when the tool changes things, in the row and in the reply", async () => {
-		const calls = store();
+		const calls = fakeCalls();
 		const noted: Array<{ mutating: boolean }> = [];
 		const probe = recorded(
 			"wiki__wipe",
@@ -107,7 +107,7 @@ describe("a recorded tool", () => {
 	});
 
 	it("records that a tool threw, but not what it threw", async () => {
-		const calls = store();
+		const calls = fakeCalls();
 		const probe = recorded(
 			"probe",
 			tool({
@@ -132,7 +132,7 @@ describe("a recorded tool", () => {
 	});
 
 	it("does not run an approved call its approval no longer covers, nor tell the model why", async () => {
-		const calls = store();
+		const calls = fakeCalls();
 		const execute = vi.fn(async () => ({ ok: true }));
 		const probe = recorded(
 			"probe",
@@ -150,8 +150,7 @@ describe("a recorded tool", () => {
 				replyLength: () => 0,
 				noteToolCall: () => Effect.void,
 				approval: {
-					store: {
-						...noToolApprovalStore,
+					approvals: {
 						beginExecution: () =>
 							Effect.fail(
 								new ToolExecutionRefused({

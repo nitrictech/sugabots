@@ -7,7 +7,7 @@ import type { ModelAccounting } from "./turns/model.ts";
 /**
  * What happened in a conversation, as the facts that changed.
  *
- * The stores emit these through `DomainEvents` in the transaction that wrote
+ * The repositories emit these through `DomainEvents` in the transaction that wrote
  * them; `ThreadFeed` decides what a watching client is told. An event carries
  * the ids involved and what changed, plus what the feed would otherwise have
  * to query back, such as a finished reply's content. A tool call or

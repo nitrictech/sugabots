@@ -1,6 +1,7 @@
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
@@ -15,17 +16,21 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { conversationsForTests } from "../testing.ts";
+import { RoutineSettlement } from "./settlement.ts";
 import {
 	InvalidRoutineExecutionCursor,
 	RoutineRequiresCrewAgent,
 	RoutineTriggerConflict,
+	routineStore,
 } from "./store.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
 	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
-	const store = onPostgres(conversations.stores.routines);
-	const settlement = onPostgres({ settleRun: conversations.settlement.settleRun });
+	const store = onPostgres(await runOnPostgres(Effect.provide(routineStore, conversations)));
+	const settlement = onPostgres({
+		settleRun: Context.get(conversations, RoutineSettlement.Service).settleRun,
+	});
 	let workspaceId: string;
 	let agentId: string;
 	let userId: string;

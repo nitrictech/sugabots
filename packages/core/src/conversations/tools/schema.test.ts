@@ -16,13 +16,7 @@ function unexpectedExecution(): never {
 const fetchTool = webFetchTool({ fetchPage: unexpectedExecution });
 const collaborate = collaborateTool({
 	from: { threadId: "thread", agentId: "agent", turnId: "turn", messageId: "message" },
-	collaborations: {
-		open: unexpectedExecution,
-		readAnswer: unexpectedExecution,
-		stopWaiting: unexpectedExecution,
-		deliverAnswer: unexpectedExecution,
-		failUnder: unexpectedExecution,
-	},
+	collaborations: { open: unexpectedExecution, stopWaiting: unexpectedExecution },
 	bus: { subscribe: unexpectedExecution },
 	run: unexpectedExecution,
 	replyLength: unexpectedExecution,

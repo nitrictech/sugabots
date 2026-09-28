@@ -1,7 +1,5 @@
-import {
-	noToolApprovalStore,
-	type ToolApprovalStore,
-} from "@sugabots/core/conversations/tools/approvals/store";
+import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { unimplemented } from "@sugabots/core/testing";
 import { testAuthorization } from "@sugabots/core/workspaces/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -32,13 +30,13 @@ const authorization = testAuthorization({
 });
 
 function app() {
-	const decide = vi.fn<ToolApprovalStore["decide"]>(() => Effect.void);
+	const decide = vi.fn<ToolApprovals.Interface["decide"]>(() => Effect.void);
 	return {
 		decide,
 		app: createTestApp({
 			resolveUser,
 			authorization,
-			stores: { approvals: { ...noToolApprovalStore, decide } },
+			services: unimplemented(ToolApprovals.Service, { decide }),
 		}),
 	};
 }

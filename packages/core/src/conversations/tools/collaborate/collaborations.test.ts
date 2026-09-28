@@ -1,5 +1,6 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../../database/events/bus.ts";
 import { memoryEventStore } from "../../../database/events/store.ts";
@@ -23,25 +24,32 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
+import { ChatView } from "../../chats/chat-view.ts";
+import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
+import { ThreadView } from "../../threads/thread-view.ts";
 import { modelPrompt } from "../../turns/context.ts";
-import { replyTurnOf } from "../../turns/execution.ts";
+import { replyTurnOf, TurnExecution } from "../../turns/execution.ts";
+import { TurnRepository } from "../../turns/repository.ts";
 import { prepareRunnable, releaseTurn, runningTurns, waitingTurns } from "../../turns/testing.ts";
-import { CollaborationRefused, type CollaborationStore } from "./store.ts";
+import { CollaborationRefused, Collaborations } from "./collaborations.ts";
+import { CollaborationRepository } from "./repository.ts";
 
 /**
  * Collaboration against Postgres: what `open` writes, what policy refuses, and
  * how a collaboration moves between the asking agent and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", async () => {
-	const { repositories, stores } = await conversationsForTests(
-		createEventBus({ store: memoryEventStore() }),
+	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const collaborations: Promised<Collaborations.Interface> = onPostgres(
+		Context.get(conversations, Collaborations.Service),
 	);
-	const collaborations: Promised<CollaborationStore> = onPostgres(stores.collaborations);
-	const threads = onPostgres(stores.threads);
-	const chats = onPostgres(stores.chats);
-	const turns = onPostgres(stores.turns);
-	const turnRecords = onPostgres(repositories.turns);
+	const records = onPostgres(Context.get(conversations, CollaborationRepository.Service));
+	const threads = onPostgres(Context.get(conversations, ThreadView.Service));
+	const chats = onPostgres(Context.get(conversations, Chats.Service));
+	const chatView = onPostgres(Context.get(conversations, ChatView.Service));
+	const turns = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -124,21 +132,21 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		if (!hostRow || !helperRow) throw new Error("fixture");
 		host = hostRow;
 		helper = helperRow;
-		const opened = await chats.getOrCreate({
+		const opened = await chats.open({
 			workspaceId,
 			podId,
 			hostAgentId: host.id,
 			userId: memberId,
 		});
 		hostChatId = opened.id;
-		await chats.sendMain({
+		await chats.post({
 			chatId: opened.id,
 			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
 		rootThreadId = opened.mainThreadId;
-		const helperChat = await chats.getOrCreate({
+		const helperChat = await chats.open({
 			workspaceId,
 			podId,
 			hostAgentId: helper.id,
@@ -209,14 +217,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
 			{ request: { agentId: helper.id } },
 		]);
-		expect((await chats.messages(helperChatId, memberId))?.items).toEqual([
+		expect((await chatView.messages(helperChatId, memberId))?.items).toEqual([
 			expect.objectContaining({
 				kind: "collaboration",
 				threadId: opened.collaboration.threadId,
 				initiator: expect.objectContaining({ id: host.id }),
 			}),
 		]);
-		expect((await chats.history(helperChatId, memberId))?.items).toEqual([
+		expect((await chatView.history(helperChatId, memberId))?.items).toEqual([
 			expect.objectContaining({ threadId: opened.collaboration.threadId }),
 		]);
 		const recipientEvents = await onDatabase((db) =>
@@ -294,15 +302,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 	it("records the answer without a resume turn while the asker is still waiting", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
-		expect(await collaborations.readAnswer(opened.collaboration.id)).toBeUndefined();
+		expect(await records.answerOf(opened.collaboration.id)).toBeUndefined();
 
-		await collaborations.deliverAnswer({
+		await collaborations.answer({
 			threadId: opened.collaboration.threadId,
 			answer: "Nothing alarming.",
 		});
 
-		expect(await collaborations.readAnswer(opened.collaboration.id)).toBe("Nothing alarming.");
-		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe(false);
+		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe("Nothing alarming.");
 		expect(
 			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
 		).toHaveLength(0);
@@ -310,7 +317,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 	it("keeps a collaboration in model history when the thread has a summary", async () => {
 		const opened = await collaborations.open({ from: from(6), to: helper.name, brief: "Look" });
-		await collaborations.deliverAnswer({
+		await collaborations.answer({
 			threadId: opened.collaboration.threadId,
 			answer: "Nothing alarming.",
 		});
@@ -342,7 +349,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				content: "The release was checked.",
 			}),
 		);
-		await chats.sendMain({
+		await chats.post({
 			chatId: hostChatId,
 			author: { id: memberId, name: "Sam", image: null },
 			messageId: crypto.randomUUID(),
@@ -386,9 +393,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 	it("queues a turn for the asker when the answer arrives after it stopped waiting", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
-		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBe(true);
+		expect(await collaborations.stopWaiting(opened.collaboration.id)).toBeUndefined();
 
-		await collaborations.deliverAnswer({
+		await collaborations.answer({
 			threadId: opened.collaboration.threadId,
 			answer: "Late, but fine.",
 		});
