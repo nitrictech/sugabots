@@ -85,7 +85,7 @@ const generateSummary = (
 			yield* failure instanceof SummaryStoppedUnexpectedly
 				? Effect.logError("A summary died", cause)
 				: Effect.logWarning(`A summary failed: ${failure.message}`);
-			yield* turns.failScribeTurn(prepared.turnId, failure.userMessage);
+			yield* turns.failSystemAgentTurn(prepared.turnId, failure.userMessage);
 		}),
 	);
 

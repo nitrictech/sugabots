@@ -86,7 +86,7 @@ export function handleFromName(name: string): string {
  * name the same system agent, and adding one is a compile error everywhere it has
  * to be handled rather than a string to remember.
  */
-export const systemAgentKeySchema = Schema.Literals(["summarise", "facilitate"]);
+export const systemAgentKeySchema = Schema.Literals(["summarise", "facilitate", "compact"]);
 export type SystemAgentKey = typeof systemAgentKeySchema.Type;
 
 export const agentSchema = Schema.Struct({

@@ -7,6 +7,7 @@ import { createEventBus, type EventBus } from "../../database/events/bus.ts";
 import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { unimplemented } from "../../testing.ts";
+import { compactionLineTokens } from "../compaction/window.ts";
 import {
 	ApprovedToolCalls,
 	ToolApprovalsIncomplete,
@@ -79,6 +80,8 @@ const prepared: PreparedTurn = {
 		},
 		reason: "default",
 		routing: { facilitator: false },
+		windowTokens: 128_000,
+		compaction: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
 		crew: [],
@@ -124,6 +127,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
 			usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
 			reportedCost: 0.001,
+			contextCapacity: 128_000,
 		});
 		expect(turns.fail).not.toHaveBeenCalled();
 		expect(queueSummary).toHaveBeenCalledWith({
@@ -133,6 +137,46 @@ describe("runSegment", () => {
 		});
 		expect(eventTypes(events)).toEqual(["message.delta", "message.delta"]);
 	});
+
+	it.each([
+		// A 128K model compacts at 70% of its own window, not of the 256K ceiling.
+		{ contextTokens: compactionLineTokens(128_000) - 1, queued: false },
+		{ contextTokens: compactionLineTokens(128_000), queued: true },
+	])(
+		"queues a compaction only once the prompt reaches the compaction line ($contextTokens tokens)",
+		async ({ contextTokens, queued }) => {
+			const { execution, turns } = fakes();
+			const queueCompaction = vi.fn(noCompaction);
+			await runWithServices(
+				segmentWith({
+					execution,
+					turns,
+					model: {
+						stream: () =>
+							Effect.sync(() => ({
+								text: chunks("Done"),
+								accounting: Effect.succeed({ usage: {}, contextTokens }),
+							})),
+					},
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					requests: { queueSummary: noSummary, queueCompaction },
+				}),
+			);
+
+			if (queued) {
+				expect(queueCompaction).toHaveBeenCalledWith({
+					threadId: prepared.context.thread.id,
+					agentId: prepared.context.agent.id,
+					sourceMessageId: prepared.responseMessage.id,
+					readKeptFrom: null,
+				});
+			} else {
+				expect(queueCompaction).not.toHaveBeenCalled();
+			}
+		},
+	);
 
 	it("records a built-in tool's call where the reply made it", async () => {
 		const { execution, turns } = fakes();
@@ -209,7 +253,7 @@ describe("runSegment", () => {
 				collaborations: [],
 				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
 			},
-			{ usage: {} },
+			{ usage: {}, contextCapacity: 128_000 },
 		);
 	});
 
@@ -286,7 +330,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ usage: {} },
+			{ usage: {}, contextCapacity: 128_000 },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});
@@ -793,7 +837,9 @@ interface Given {
 	>;
 	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	collaborations: Partial<Collaborations.Interface>;
-	requests: Pick<TurnRequests.Interface, "queueSummary">;
+	/** A compaction is only asked for past the compaction line, so a case below it need not give one. */
+	requests: Pick<TurnRequests.Interface, "queueSummary"> &
+		Partial<Pick<TurnRequests.Interface, "queueCompaction">>;
 	approvals?: ApprovedToolCalls.Interface;
 	model: TurnModel;
 	events: EventBus;
@@ -896,6 +942,7 @@ function eventTypes(events: EventBus): string[] {
 }
 
 const noSummary = () => Effect.void;
+const noCompaction = () => Effect.void;
 
 async function* chunks(...values: string[]): AsyncIterable<string> {
 	for (const value of values) {

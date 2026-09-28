@@ -9,8 +9,10 @@ import {
 	agent,
 	event,
 	message,
+	modelProvider,
 	pod,
 	podMember,
+	providerModel,
 	thread,
 	turn,
 	user,
@@ -30,9 +32,12 @@ import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
+import { Compactions } from "../compaction/compactions.ts";
 import { Summaries } from "../summaries/summaries.ts";
 import { conversationsForTests } from "../testing.ts";
+import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { TurnCancellation } from "../turns/cancellation.ts";
+import { modelPrompt } from "../turns/context.ts";
 import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { TurnRepository } from "../turns/repository.ts";
@@ -56,6 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	const summaries = onPostgres(Context.get(conversations, Summaries.Service));
+	const compactions = onPostgres(Context.get(conversations, Compactions.Service));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -97,6 +103,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		const preparation = await summaries.prepare(request);
 		if (preparation._tag !== "Prepared") {
 			throw new Error(`Thread test could not prepare its summary: ${preparation.reason}`);
+		}
+		return preparation;
+	}
+
+	/** Prepares the compaction `request` asks for, for a case that needs it to run. */
+	async function preparedCompaction(request: Parameters<typeof compactions.prepare>[0]) {
+		const preparation = await compactions.prepare(request);
+		if (preparation._tag !== "Prepared") {
+			throw new Error(`Thread test could not prepare its compaction: ${preparation.reason}`);
 		}
 		return preparation;
 	}
@@ -756,6 +771,16 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
+		// The Scribe's own turn, measured at 1,000 tokens, is in its child thread, so
+		// the context is the crew reply's.
+		expect((await viewAs(memberId).activity(details.thread.id))?.context).toEqual({
+			usedTokens: 30,
+			measuredAt: expect.any(String),
+			// The window the reply was read with, as its turn recorded it.
+			windowTokens: 200_000,
+			compactionLineTokens: 140_000,
+			compactedAt: null,
+		});
 
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
 		await chatsAs(memberId).post({
@@ -831,6 +856,338 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		await expect(viewAs(outsiderId).get(details.thread.id)).rejects.toThrow(ResourceHidden);
 		expect(await viewAs(outsiderId).list(workspaceId)).toEqual([]);
+	});
+
+	it("compacts a long thread into a summary and the newest messages, and searches what came before", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Plan the trip",
+		});
+		// Twenty messages of about 10,000 tokens each, written before the one
+		// that opened the thread: far past the compaction line between them.
+		const long = (index: number) =>
+			`${index === 2 ? "The hotel budget is 150 euros a night. " : ""}Message ${index}. ${"word ".repeat(8_000)}`;
+		const earlier = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(
+					Array.from({ length: 20 }, (_, index) => ({
+						threadId: details.thread.id,
+						authorUserId: memberId,
+						kind: "text" as const,
+						status: "complete" as const,
+						parts: [{ type: "text" as const, text: long(index + 1) }],
+						content: long(index + 1),
+						createdAt: new Date(Date.now() - (20 - index) * 60_000),
+					})),
+				)
+				.returning({ createdAt: message.createdAt }),
+		);
+		const sourceMessageId = details.messages[0]?.id ?? "";
+
+		const prepared = await preparedCompaction({
+			threadId: details.thread.id,
+			agentId,
+			sourceMessageId,
+			readKeptFrom: null,
+		});
+
+		// Kept word for word: the newest six long messages and the short one,
+		// about a quarter of the window. Summarised: the eleven before them.
+		expect(prepared.model).toBe("claude-opus-4-1-20250805");
+		expect(prepared.keptFrom).toEqual(earlier[14]?.createdAt);
+		expect(prepared.historyStartsAt).toEqual(earlier[3]?.createdAt);
+		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
+			Array.from({ length: 11 }, (_, index) => `Message ${index + 4}`),
+		);
+		await compactions.complete(prepared, "The family is planning a trip.", { usage: {} });
+
+		const turn = await prepareRunnable(turns, await runningTurn(details.thread.id));
+		expect(turn.context.compaction).toEqual({
+			summary: "The family is planning a trip.",
+			historyStartsAt: earlier[3]?.createdAt,
+			keptFrom: earlier[14]?.createdAt,
+		});
+		expect(turn.context.messages.map(({ content }) => content.split(".")[0])).toEqual([
+			...Array.from({ length: 6 }, (_, index) => `Message ${index + 15}`),
+			"Plan the trip",
+		]);
+		const prompt = modelPrompt(turn.context, {
+			now: new Date(),
+			builtInTools: [],
+			connectionTools: [],
+		});
+		expect(prompt.messages[0]?.content).toContain("The family is planning a trip.");
+		await turnRecords.complete(
+			replyTurnOf(turn),
+			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+			{ usage: {}, contextTokens: 70_000 },
+		);
+		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
+			usedTokens: 70_000,
+			compactedAt: expect.any(String),
+		});
+
+		const search = searchHistoryTool({
+			threadId: details.thread.id,
+			before: prepared.keptFrom,
+			run: runOnPostgres,
+		});
+		const searchFor = (input: { query?: string; after?: string; before?: string }) =>
+			search.execute?.(input, { toolCallId: "search", messages: [] } as never);
+		expect(await searchFor({ query: "hotel budget" })).toEqual({
+			messages: [
+				expect.objectContaining({
+					author: "Sam",
+					text: expect.stringContaining("The hotel budget is 150 euros a night."),
+				}),
+			],
+			more: false,
+		});
+		// A time range alone lists what was said then, oldest first.
+		const listed = await searchFor({
+			after: earlier[0]?.createdAt.toISOString(),
+			before: earlier[2]?.createdAt.toISOString(),
+		});
+		expect(listed).toMatchObject({ more: false });
+		expect(
+			listed && "messages" in listed ? listed.messages.map(({ text }) => text.split(".")[0]) : [],
+		).toEqual(["Message 1", "The hotel budget is 150 euros a night"]);
+		// Nothing the bot already reads word for word, however late the range runs.
+		const late = await searchFor({ after: earlier[13]?.createdAt.toISOString() });
+		expect(
+			late && "messages" in late ? late.messages.map(({ text }) => text.split(".")[0]) : [],
+		).toEqual(["Message 14"]);
+		expect(await searchFor({})).toEqual({
+			refused: "Give words to look for, a time range, or both.",
+		});
+
+		const readKeptFrom = prepared.keptFrom.toISOString();
+		// Nothing new past what the compaction kept: nothing to summarise.
+		expect(
+			await compactions.prepare({
+				threadId: details.thread.id,
+				agentId,
+				sourceMessageId,
+				readKeptFrom,
+			}),
+		).toMatchObject({ _tag: "Skipped" });
+
+		// Three more long messages push the kept part on. A turn measured before the
+		// compaction says nothing about the thread now, so only one that read it counts.
+		const later = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(
+					Array.from({ length: 3 }, (_, index) => ({
+						threadId: details.thread.id,
+						authorUserId: memberId,
+						kind: "text" as const,
+						status: "complete" as const,
+						parts: [{ type: "text" as const, text: long(21 + index) }],
+						content: long(21 + index),
+						createdAt: new Date(Date.now() + (index + 1) * 60_000),
+					})),
+				)
+				.returning({ id: message.id }),
+		);
+		const newest = { threadId: details.thread.id, agentId, sourceMessageId: later[2]?.id ?? "" };
+		expect(await compactions.prepare({ ...newest, readKeptFrom: null })).toMatchObject({
+			_tag: "Skipped",
+		});
+
+		// The next compaction carries the first summary forward rather than dropping it.
+		const next = await preparedCompaction({ ...newest, readKeptFrom });
+		expect(next.previousSummary).toBe("The family is planning a trip.");
+		expect(next.historyStartsAt).toEqual(earlier[3]?.createdAt);
+		expect(next.keptFrom).toEqual(earlier[17]?.createdAt);
+		expect(next.transcript.map(({ content }) => content.split(".")[0])).toEqual([
+			"Message 15",
+			"Message 16",
+			"Message 17",
+		]);
+	});
+
+	it("searches history in any language: stemmed, as written, and as substrings", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Plan the trip",
+		});
+		const said = [
+			"The hotels near the river are all booked.",
+			// "was" is an English stop word, so stemmed English search drops it.
+			"Was kostet das Hotel pro Nacht?",
+			// No spaces between words: full-text search reads this as one token.
+			"我们的酒店预算是每晚150欧元。",
+			"Discount code: 50%_OFF",
+			// "river" only as part of a longer word: a substring match, not a full-text one.
+			"Riverside parking is free.",
+		];
+		await onDatabase((db) =>
+			db.insert(message).values(
+				said.map((content, index) => ({
+					threadId: details.thread.id,
+					authorUserId: memberId,
+					kind: "text" as const,
+					status: "complete" as const,
+					parts: [{ type: "text" as const, text: content }],
+					content,
+					createdAt: new Date(Date.now() - (said.length - index) * 60_000),
+				})),
+			),
+		);
+		const search = searchHistoryTool({
+			threadId: details.thread.id,
+			before: new Date(Date.now() + 60_000),
+			run: runOnPostgres,
+		});
+		const found = async (query: string) => {
+			const result = await search.execute?.({ query }, {
+				toolCallId: "search",
+				messages: [],
+			} as never);
+			return result && "messages" in result ? result.messages.map(({ text }) => text) : [];
+		};
+
+		expect(await found("hotel booking")).toEqual([said[0]]);
+		expect(await found("was kostet")).toEqual([said[1]]);
+		expect(await found("酒店预算")).toEqual([said[2]]);
+		// Wildcards the bot types are taken literally.
+		expect(await found("50%_OFF")).toEqual([said[3]]);
+		expect(await found("5%OFF")).toEqual([]);
+		// A full-text match ranks above one found only as a substring, even a newer one.
+		expect(await found("river")).toEqual([said[0], said[4]]);
+	});
+
+	/**
+	 * A thread of twenty long messages, about 10K tokens each, before its
+	 * first, with the bot's model given a 128K window and the system agents'
+	 * a 64K one.
+	 */
+	async function threadWithLongHistory() {
+		const [provider] = await onDatabase((db) =>
+			db
+				.insert(modelProvider)
+				.values({
+					workspaceId,
+					name: "Windows",
+					baseUrl: "https://models.example/v1",
+					apiFormat: "openai",
+					active: true,
+				})
+				.returning({ id: modelProvider.id }),
+		);
+		if (!provider) throw new Error("Could not create the model provider");
+		await onDatabase((db) =>
+			db.insert(providerModel).values([
+				// Both smaller than the 256K ceiling.
+				{
+					workspaceId,
+					providerId: provider.id,
+					modelId: "claude-opus-4-1-20250805",
+					contextLength: 128_000,
+					enabled: true,
+					source: "manual" as const,
+				},
+				{
+					workspaceId,
+					providerId: provider.id,
+					modelId: SYSTEM_AGENT_MODEL,
+					contextLength: 64_000,
+					enabled: true,
+					source: "manual" as const,
+				},
+			]),
+		);
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Plan the trip",
+		});
+		const long = (index: number) => `Message ${index}. ${"word ".repeat(8_000)}`;
+		const earlier = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(
+					Array.from({ length: 20 }, (_, index) => ({
+						threadId: details.thread.id,
+						authorUserId: memberId,
+						kind: "text" as const,
+						status: "complete" as const,
+						parts: [{ type: "text" as const, text: long(index + 1) }],
+						content: long(index + 1),
+						createdAt: new Date(Date.now() - (20 - index) * 60_000),
+					})),
+				)
+				.returning({ createdAt: message.createdAt }),
+		);
+		return { details, earlier };
+	}
+
+	it("compacts on the bot's model, sized to its window", async () => {
+		const { details, earlier } = await threadWithLongHistory();
+
+		const prepared = await preparedCompaction({
+			threadId: details.thread.id,
+			agentId,
+			sourceMessageId: details.messages[0]?.id ?? "",
+			readKeptFrom: null,
+		});
+
+		expect(prepared.model).toBe("claude-opus-4-1-20250805");
+		// A quarter of the bot's 128K is kept: the three newest long messages.
+		expect(prepared.keptFrom).toEqual(earlier[17]?.createdAt);
+		// Up to the 89.6K compaction line less what is kept is summarised.
+		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual([
+			"Message 13",
+			"Message 14",
+			"Message 15",
+			"Message 16",
+			"Message 17",
+		]);
+
+		const turn = await prepareRunnable(turns, await runningTurn(details.thread.id));
+		expect(turn.context.windowTokens).toBe(128_000);
+		await turnRecords.complete(
+			replyTurnOf(turn),
+			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+			{ usage: {}, contextTokens: 50_000, contextCapacity: turn.context.windowTokens },
+		);
+		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
+			windowTokens: 128_000,
+			compactionLineTokens: 89_600,
+		});
+	});
+
+	it("compacts for a bot without a model on the system agents' model, capped to its window", async () => {
+		const { details, earlier } = await threadWithLongHistory();
+		await onDatabase((db) => db.update(agent).set({ model: null }).where(eq(agent.id, agentId)));
+
+		const prepared = await preparedCompaction({
+			threadId: details.thread.id,
+			agentId,
+			sourceMessageId: details.messages[0]?.id ?? "",
+			readKeptFrom: null,
+		});
+
+		expect(prepared.model).toBe(SYSTEM_AGENT_MODEL);
+		// A quarter of the 256K ceiling is kept: the six newest long messages.
+		expect(prepared.keptFrom).toEqual(earlier[14]?.createdAt);
+		// The 64K model is given at most 60% of its window, three messages,
+		// rather than the 115.2K the reader's window alone would allow.
+		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual([
+			"Message 12",
+			"Message 13",
+			"Message 14",
+		]);
 	});
 
 	it("treats a malformed thread id as absent", async () => {

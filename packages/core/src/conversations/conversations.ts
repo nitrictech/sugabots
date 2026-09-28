@@ -5,6 +5,7 @@ import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
+import { Compactions } from "./compaction/compactions.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
@@ -36,6 +37,7 @@ const services = Layer.mergeAll(
 	RoutineWebhooks.layer,
 	RoutineRunner.layer,
 	Summaries.layer,
+	Compactions.layer,
 	RoutineSettlement.layer,
 	ChatView.layer,
 	ThreadView.layer,
@@ -43,7 +45,8 @@ const services = Layer.mergeAll(
 	FloorControl.layer,
 	// The repositories workflow steps write through: a turn's steps record its
 	// reply and tool calls, a summary's failure is recorded on the Scribe's
-	// turn, and the Facilitator brings the agent it picks into the thread.
+	// turn, as is a compaction's, and the Facilitator brings the agent it picks
+	// into the thread.
 	TurnRepository.layer,
 	ToolCallRepository.layer,
 	ThreadRepository.layer,

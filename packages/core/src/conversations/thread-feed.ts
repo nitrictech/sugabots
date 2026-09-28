@@ -99,6 +99,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
 		CollaborationFailed: (change) => [collaborationUpdated(change)],
 		ThreadSummarised: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
+		ThreadCompacted: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
 		RoutineExecutionAccepted: ({ workspaceId, chatId, threadId }) => [
 			routineThreadChanged(workspaceId, chatId, threadId),
 		],

@@ -215,6 +215,7 @@ const chatActivity: ThreadActivity = {
 		sourceMessageId: "0199a3a0-0000-7000-8000-0000000000a2",
 		updatedAt: "2026-09-18T09:22:00.000Z",
 	},
+	context: null,
 	recentParticipants: [host, person],
 };
 

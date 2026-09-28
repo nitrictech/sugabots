@@ -53,7 +53,7 @@ describe("summarise", () => {
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(turns.failScribeTurn).toHaveBeenCalledWith(
+			expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
 				prepared.turnId,
 				"The model did not answer in time.",
 			);
@@ -88,7 +88,7 @@ describe("summarise", () => {
 				reportedCost: 0.002,
 			},
 		);
-		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 	});
 
 	it("asks again when the first summary is not the shape it asked for", async () => {
@@ -108,7 +108,7 @@ describe("summarise", () => {
 		// job being burned on one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(turns.failScribeTurn).toHaveBeenCalledWith(
+		expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
 			prepared.turnId,
 			"The model's answer could not be used.",
 		);
@@ -135,7 +135,7 @@ describe("summarise", () => {
 		);
 
 		expect(stream).toHaveBeenCalledTimes(2);
-		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
@@ -159,7 +159,7 @@ describe("summarise", () => {
 			}).pipe(Effect.provide(services(summaries, turns))),
 		);
 
-		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
@@ -182,7 +182,7 @@ describe("summarise", () => {
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(turns.failScribeTurn).toHaveBeenCalledWith(
+		expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
 			prepared.turnId,
 			"The model provider could not answer.",
 		);
@@ -203,7 +203,7 @@ describe("summarise", () => {
 		);
 
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(turns.failScribeTurn).not.toHaveBeenCalled();
+		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 	});
 
 	it("leaves a transient failure to the engine, which retries the activity", async () => {
@@ -225,7 +225,11 @@ function fakes() {
 			prepare: vi.fn<Summaries.Interface["prepare"]>(() => Effect.succeed(prepared)),
 			complete: vi.fn<Summaries.Interface["complete"]>(() => Effect.void),
 		},
-		turns: { failScribeTurn: vi.fn<TurnRepository.Interface["failScribeTurn"]>(() => Effect.void) },
+		turns: {
+			failSystemAgentTurn: vi.fn<TurnRepository.Interface["failSystemAgentTurn"]>(
+				() => Effect.void,
+			),
+		},
 	};
 }
 

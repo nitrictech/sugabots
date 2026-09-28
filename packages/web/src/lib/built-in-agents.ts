@@ -6,13 +6,17 @@ import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The Scribe and the Facilitator: the two agents the product ships, which the
+ * The Scribe, the Facilitator and Compaction: the agents the product ships, which the
  * workspace owns and every pod is served by. People read them as the system
  * agents, which share one model chosen on the Models page.
  */
 
-/** The order they are shown in, and the only two there are. */
-export const BUILT_IN_AGENT_KEYS: readonly SystemAgentKey[] = ["summarise", "facilitate"];
+/** The order they are shown in, and the only ones there are. */
+export const BUILT_IN_AGENT_KEYS: readonly SystemAgentKey[] = [
+	"summarise",
+	"facilitate",
+	"compact",
+];
 
 /**
  * The workspace's built-in agents. Read by everyone: a chat's summary has to

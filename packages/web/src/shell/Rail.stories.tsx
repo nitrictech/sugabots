@@ -1,4 +1,4 @@
-import { expect, fn, screen } from "storybook/test";
+import { expect, fn, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { RailView } from "./Rail.tsx";
 import { podsWithBots } from "./story-fixtures.ts";
@@ -61,7 +61,8 @@ export const PodMenu = meta.story({
 		await expect(screen.getByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();
 		await userEvent.click(screen.getByRole("menuitem", { name: "New bot" }));
 		await expect(args.onNewBot).toHaveBeenCalledWith(expect.objectContaining({ slug: "revenue" }));
-		await expect(menu).not.toBeInTheDocument();
+		// The menu stays mounted while its closing animation plays.
+		await waitFor(() => expect(menu).not.toBeInTheDocument());
 	},
 });
 

@@ -12,6 +12,8 @@ import { agent } from "../../database/schema.ts";
  * One is born without a model and does not run until an administrator chooses
  * one. There is no default and no fallback: an unattended agent quietly running
  * on a model nobody picked is what this arrangement exists to prevent.
+ * Compaction is the exception: it runs on the model of the bot it compacts
+ * for, which somebody did pick, and on its own only for a bot with none.
  */
 
 export type { SystemAgentKey };
@@ -21,6 +23,9 @@ export const SUMMARISE_SYSTEM_AGENT: SystemAgentKey = "summarise";
 
 /** The system agent that decides who speaks next when nobody was addressed. */
 export const FACILITATE_SYSTEM_AGENT: SystemAgentKey = "facilitate";
+
+/** The system agent that compacts what a bot reads when its conversation gets long. */
+export const COMPACT_SYSTEM_AGENT: SystemAgentKey = "compact";
 
 export interface SystemAgentDefinition {
 	/** What the system looks the agent up by. */
@@ -50,7 +55,29 @@ export const SYSTEM_AGENTS: readonly SystemAgentDefinition[] = [
 		prompt:
 			"Keep the conversation on track: bring in the agent who can answer, and let it rest when the question has been answered.",
 	},
+	{
+		key: COMPACT_SYSTEM_AGENT,
+		name: "Compaction",
+		description: "Compacts long conversations so bots can keep reading them.",
+		color: "purple",
+		face: "square",
+		prompt: "Summarize what a bot needs to carry on the conversation. Do not invent details.",
+	},
 ];
+
+/** The workspace's system agent and the model chosen for it, if any. */
+export const findSystemAgent = Effect.fn("SystemAgents.findSystemAgent")(function* (
+	db: Executor,
+	workspaceId: string,
+	key: SystemAgentKey,
+) {
+	const [row] = yield* db
+		.select({ id: agent.id, model: agent.model })
+		.from(agent)
+		.where(and(eq(agent.workspaceId, workspaceId), eq(agent.systemAgentKey, key)))
+		.limit(1);
+	return row;
+});
 
 /**
  * The system agent and the model it runs on, or nothing when no model has been

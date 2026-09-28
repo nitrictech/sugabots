@@ -1,6 +1,11 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { stepsLayer as compactionSteps } from "@sugabots/core/conversations/compaction/compaction.steps";
+import {
+	Compaction,
+	compactionWorkflow,
+} from "@sugabots/core/conversations/compaction/compaction.workflow";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
@@ -80,7 +85,7 @@ const main = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	const httpClients = egress.providers;
 
-	// One model client for turns, summaries, facilitation, trials and settings.
+	// One model client for turns, summaries, compactions, facilitation, trials and settings.
 	const model = yield* Models;
 	// The conversations, over what they are composed from: how they start and
 	// signal durable workflows, on the engine WORKFLOW_ENGINE names, and where
@@ -88,7 +93,7 @@ const main = Effect.gen(function* () {
 	const conversations = yield* Layer.build(
 		Conversations.layer.pipe(
 			Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
-			Layer.provideMerge(Lanes.layer([Summary, Turn, Facilitate, Routine])),
+			Layer.provideMerge(Lanes.layer([Summary, Compaction, Turn, Facilitate, Routine])),
 			Layer.provideMerge(Workflows.engine),
 			Layer.provideMerge(EventOutbox.layer(bus)),
 		),
@@ -113,12 +118,14 @@ const main = Effect.gen(function* () {
 	yield* Layer.build(
 		Layer.mergeAll(
 			summaryWorkflow.layer,
+			compactionWorkflow.layer,
 			turnWorkflow.layer,
 			facilitateWorkflow.layer,
 			routineWorkflow.layer,
 			Lanes.reconcileLayer,
 		).pipe(
 			Layer.provideMerge(summarySteps({ model })),
+			Layer.provideMerge(compactionSteps({ model })),
 			Layer.provideMerge(routineSteps),
 			Layer.provideMerge(facilitateSteps({ model })),
 			Layer.provideMerge(turnSteps({ model, events: bus, builtInTools, connectionTools })),

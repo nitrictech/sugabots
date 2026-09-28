@@ -48,12 +48,14 @@ export const ACCURACY_NEEDED = 0.9;
 export const BUDGET_MS: Record<TrialSystemAgent, number> = {
 	facilitate: 2_000,
 	summarise: 20_000,
+	compact: 60_000,
 };
 
 const WHY_IT_MATTERS: Record<TrialSystemAgent, string> = {
 	facilitate: "it runs before anyone can reply, so the wait is added to every message",
 	summarise:
 		"it runs in the background, but a summary nobody waits for is still a summary nobody reads",
+	compact: "it runs in the background, but a long chat keeps growing until it finishes",
 };
 
 export interface TrialCaseResult {

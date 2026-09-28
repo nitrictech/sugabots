@@ -151,7 +151,7 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 
 /**
  * One model for everything Sugabots does behind the scenes: thread summaries,
- * chat titles and handing a pod's floor to the right bot. Choosing it sets it
+ * chat titles, handing a pod's floor to the right bot and compacting long chats. Choosing it sets it
  * for every system bot at once.
  */
 export function SystemModelSettings() {
@@ -159,10 +159,11 @@ export function SystemModelSettings() {
 	const systemAgents = useBuiltInAgents();
 	const summarise = useChooseBuiltInAgentModel("summarise");
 	const facilitate = useChooseBuiltInAgentModel("facilitate");
-	const choosers = { summarise, facilitate };
+	const compact = useChooseBuiltInAgentModel("compact");
+	const choosers = { summarise, facilitate, compact };
 	const [error, setError] = useState<unknown>();
 	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
-	const pending = summarise.isPending || facilitate.isPending;
+	const pending = summarise.isPending || facilitate.isPending || compact.isPending;
 	const groups = (providers.data ?? [])
 		.filter((provider) => isConnected(provider))
 		.map((provider) => ({
@@ -184,7 +185,7 @@ export function SystemModelSettings() {
 		<SettingsPage
 			back={<BackToModels />}
 			title="System agents"
-			description="The model Sugabots uses behind the scenes: summaries, chat titles and routing collaborations. A fast, cheap model works best."
+			description="The model Sugabots uses behind the scenes: summaries, chat titles, routing collaborations and compacting long chats. A fast, cheap model works best."
 		>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			{groups.length === 0 && !providers.isPending && (
