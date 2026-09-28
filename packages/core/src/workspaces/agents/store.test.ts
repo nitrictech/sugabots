@@ -53,7 +53,12 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		);
 		if (!room) throw new Error("pod setup failed");
 		podId = room.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
+		await onDatabase((db) =>
+			db.insert(podMember).values([
+				{ workspaceId, podId, userId: adminId },
+				{ workspaceId, podId, userId: memberId },
+			]),
+		);
 	});
 
 	it("creates an agent in exactly one pod and scopes member visibility to that pod", async () => {
@@ -64,16 +69,6 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		});
 		expect(made.podId).toBe(podId);
 		expect(await store.listVisible(workspaceId, memberId)).toEqual([made]);
-	});
-
-	it("shows an admin an agent in a shared pod they are not a member of", async () => {
-		const made = await store.create(workspaceId, adminId, {
-			podId,
-			name: "Triage",
-			model: "gpt-4o-mini",
-		});
-
-		expect((await store.listVisible(workspaceId, adminId)).map(({ id }) => id)).toContain(made.id);
 	});
 
 	it("rejects a pod from another workspace", async () => {

@@ -146,6 +146,8 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
 				queries.invalidateQueries({ queryKey: ["pods"] }),
+				// Making somebody an administrator puts them in every shared pod.
+				queries.invalidateQueries({ queryKey: ["pod-members"] }),
 				queries.invalidateQueries({ queryKey: ["agents"] }),
 			]),
 	});

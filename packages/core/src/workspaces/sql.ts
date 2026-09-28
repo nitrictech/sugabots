@@ -246,9 +246,10 @@ export const pod = pgTable(
 /**
  * Who has been added to a pod.
  *
- * These rows are explicit membership, and only that: a workspace admin reaches
- * every shared pod without one, and adding no row is what makes demoting them
- * take that reach away again. `docs/permissions.md` is the specification.
+ * These rows are the whole answer to who is in a shared pod. Nobody reaches one
+ * without a row: every workspace admin has one in every shared pod, kept there
+ * by `keepAdministratorsInSharedPods`, and demoting them leaves their rows as
+ * they are. `docs/permissions.md` is the specification.
  *
  * There is no role here. What somebody may configure is their workspace role,
  * which lives on `workspace_member`. Adding a column here later is cheaper

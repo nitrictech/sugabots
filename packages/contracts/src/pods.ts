@@ -6,9 +6,9 @@ import { uuidSchema } from "./uuid.ts";
 /**
  * Pods: a folder of agents plus the people who can reach into it.
  *
- * A shared pod is reached by the members added to it and by every workspace
- * admin, who needs no membership row. A Personal pod is reached by its owner
- * and by nobody else, admins included. `docs/permissions.md` is the
+ * A shared pod is reached by its members, and every workspace admin is one of
+ * them. A Personal pod is reached by its owner and by nobody else, admins
+ * included. `docs/permissions.md` is the
  * specification.
  */
 
@@ -103,6 +103,8 @@ export const podPermissionsSchema = Schema.Struct({
 	changeRouting: Schema.Boolean,
 	/** Add and remove members. Never on a Personal pod, which is one person's. */
 	manageMembers: Schema.Boolean,
+	/** Take yourself out of the pod. Never for an administrator, who is in every shared pod. */
+	leave: Schema.Boolean,
 	createAgents: Schema.Boolean,
 	updateAgents: Schema.Boolean,
 	deleteAgents: Schema.Boolean,
@@ -147,7 +149,7 @@ export const podUpdateSchema = newPodSchema
 
 export type PodUpdate = typeof podUpdateSchema.Type;
 
-/** Somebody who can see into a pod. */
+/** Somebody in a pod. Every administrator is in every shared pod. */
 export const podMemberSchema = Schema.Struct({
 	userId: uuidSchema,
 	name: Schema.String,

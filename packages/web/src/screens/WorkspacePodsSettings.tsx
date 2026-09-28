@@ -1,10 +1,4 @@
-import {
-	type Agent,
-	type Pod,
-	type PodMember,
-	type WorkspaceRole,
-	workspaceRoleLabel,
-} from "@sugabots/contracts";
+import { type Agent, type Pod, type PodMember, workspaceRoleLabel } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
 import { type ReactNode, useDeferredValue, useId, useState } from "react";
@@ -13,6 +7,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
 	useDeletePod,
+	useLeavePod,
 	usePlacePodMember,
 	usePodMembers,
 	usePods,
@@ -331,40 +326,52 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 	);
 }
 
-/**
- * What coming off the roster costs, which is the role's answer rather than the
- * pod's: an administrator reaches every shared pod without a membership row,
- * so the roster is all they lose. Administering is also what lets somebody
- * manage members at all, which is why leaving never costs the person leaving.
- * The grants are in `packages/core/src/workspaces/permissions.ts`.
- */
-function removalCost(role: WorkspaceRole | undefined, isYou: boolean): string {
-	if (role !== "admin") {
-		return "They lose this pod, its bots, and their chats. You can add them back at any time.";
-	}
-	return isYou
-		? "You come off this pod's member list. As an administrator you still reach the pod and everything in it."
-		: "They come off this pod's member list. As an administrator they still reach the pod and everything in it.";
-}
-
 /*
  * The people who can see into the pod. Anyone in the workspace can be added;
  * the label after a name is their standing in the workspace, since a pod has
- * no roles of its own.
+ * no roles of its own. Administrators are in every shared pod, so they have
+ * no remove button, and you can leave only a pod the API says you may.
  */
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
 	const workspaceMembers = useWorkspaceMembers(pod.workspaceId);
 	const invite = usePlacePodMember(pod.id);
 	const remove = usePlacePodMember(pod.id);
+	const leave = useLeavePod(pod.id);
+	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<PodMember>();
 	const { session } = useRouteContext({ from: "__root__" });
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
+	const mayTakeOut = (userId: string) =>
+		isYou(userId)
+			? pod.permissions.leave
+			: canManageMembers && workspaceMembers.data !== undefined && roleOf(userId) !== "admin";
 	const leaving = removing !== undefined && isYou(removing.userId);
+	const pending = leaving ? leave : remove;
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
+
+	async function takeOut(member: PodMember) {
+		try {
+			if (leaving) {
+				await leave.mutateAsync();
+			} else {
+				await remove.mutateAsync({ userId: member.userId, member: false });
+			}
+		} catch {
+			return;
+		}
+		setRemoving(undefined);
+		if (leaving) {
+			await navigate({
+				from: "/$workspace",
+				to: "./settings/$section",
+				params: { section: "pods" },
+			});
+		}
+	}
 
 	let rows: ReactNode;
 	if (members.isError) {
@@ -389,12 +396,12 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								: // Said once the workspace roster has answered, not guessed before it.
 									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
 						</SettingsValue>
-						{canManageMembers && (
+						{mayTakeOut(member.userId) && (
 							<Tooltip label={isYou(member.userId) ? "Leave pod" : "Remove from pod"}>
 								<button
 									type="button"
 									aria-label={isYou(member.userId) ? `Leave ${pod.name}` : `Remove ${member.name}`}
-									disabled={remove.isPending}
+									disabled={remove.isPending || leave.isPending}
 									onClick={() => setRemoving(member)}
 									className="focus-ring grid size-7 shrink-0 place-items-center rounded-full text-destructive-text transition-colors hover:bg-destructive-hover"
 								>
@@ -457,18 +464,16 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 						? `Leave ${pod.name}?`
 						: `Remove ${removing?.name ?? "this person"} from ${pod.name}?`
 				}
-				description={removalCost(removing && roleOf(removing.userId), leaving)}
+				description={
+					leaving
+						? "You lose this pod, its bots, and your chats. An administrator can add you back."
+						: "They lose this pod, its bots, and their chats. You can add them back at any time."
+				}
 				confirmLabel={leaving ? "Leave" : "Remove"}
-				pending={remove.isPending}
-				error={remove.error ? failureMessage(remove.error) : undefined}
+				pending={pending.isPending}
+				error={pending.error ? failureMessage(pending.error) : undefined}
 				onDelete={async () => {
-					if (!removing) return;
-					try {
-						await remove.mutateAsync({ userId: removing.userId, member: false });
-					} catch {
-						return;
-					}
-					setRemoving(undefined);
+					if (removing) await takeOut(removing);
 				}}
 			/>
 		</SettingsGroup>

@@ -188,7 +188,7 @@ type Conversation = NonNullable<Effect.Success<ReturnType<typeof loadConversatio
 
 function toThreadDetails(row: Conversation, userId: string, limit: number): ThreadDetails {
 	const actor = { userId, workspaceRole: row.workspaceRole ?? undefined };
-	const pod = { kind: row.pod.kind, ownerId: row.pod.ownerId, isExplicitMember: row.isPodMember };
+	const pod = { kind: row.pod.kind, ownerId: row.pod.ownerId, isMember: row.isPodMember };
 	const page = row.messages.slice(0, limit).reverse();
 	const oldest = page[0];
 	return {

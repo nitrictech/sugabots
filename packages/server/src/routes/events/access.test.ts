@@ -11,7 +11,6 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, noDatabase, onDatabase, onPostgres } from "@sugabots/core/database/testing";
 import { authorization } from "@sugabots/core/workspaces/access";
-import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access.ts";
@@ -45,8 +44,9 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	afterAll(closeDatabase);
 
 	/**
-	 * A workspace with a member in a shared pod, an administrator who is not in
-	 * it, and one person left outside the workspace.
+	 * A workspace with a member in a shared pod, an administrator without a row
+	 * in it (which the pod store never leaves one without), and one person left
+	 * outside the workspace.
 	 */
 	async function fixture() {
 		const suffix = crypto.randomUUID();
@@ -198,27 +198,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access.thread(member.id, crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("gives an administrator the channel of a shared pod's thread without membership", async () => {
+	it("gives an administrator without a row in the pod nothing, since reach is the row", async () => {
 		const { access, administrator, conversation } = await fixture();
-
-		expect(await access.thread(administrator.id, conversation.id)).toBe(
-			`thread:${conversation.id}`,
-		);
-	});
-
-	it("takes the channel away once the administrator is demoted", async () => {
-		const { access, administrator, space, conversation } = await fixture();
-		await onDatabase((db) =>
-			db
-				.update(workspaceMember)
-				.set({ role: "member" })
-				.where(
-					and(
-						eq(workspaceMember.workspaceId, space.id),
-						eq(workspaceMember.userId, administrator.id),
-					),
-				),
-		);
 
 		expect(await access.thread(administrator.id, conversation.id)).toBeUndefined();
 	});

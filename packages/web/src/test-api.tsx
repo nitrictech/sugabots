@@ -64,6 +64,7 @@ const ADMIN_IN_POD: PodPermissions = {
 	rename: true,
 	changeRouting: true,
 	manageMembers: true,
+	leave: false,
 	createAgents: true,
 	updateAgents: true,
 	deleteAgents: true,
@@ -78,6 +79,7 @@ const MEMBER_IN_POD: PodPermissions = {
 	rename: false,
 	changeRouting: false,
 	manageMembers: false,
+	leave: true,
 	deleteAgents: false,
 	manageConnections: false,
 	manageRoutines: false,
@@ -100,6 +102,7 @@ export const OWN_PERSONAL_POD: PodPermissions = {
 	...ADMIN_IN_POD,
 	rename: false,
 	manageMembers: false,
+	leave: false,
 };
 
 /** The two the dev seed makes. */

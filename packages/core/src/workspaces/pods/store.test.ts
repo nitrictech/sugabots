@@ -271,7 +271,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			if (!assistant) throw new Error("Personal Assistant was not provisioned");
 
 			expect(await authorization.pod(memberId, personal.id, "pod.delete")).toMatchObject({
-				facts: { isExplicitMember: true },
+				facts: { isMember: true },
 			});
 			await expect(authorization.pod(adminId, personal.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
@@ -346,14 +346,35 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).rejects.toThrow(ResourceHidden);
 		});
 
-		it("gives an admin every shared pod without a membership row", async () => {
+		it("puts every administrator in a new shared pod, and keeps them there", async () => {
+			await onDatabase((db) =>
+				db
+					.update(workspaceMember)
+					.set({ role: "admin" })
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, viewerId)),
+					),
+			);
+
 			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await store.removeMember(workspaceId, made.id, adminId);
 
-			const standing = await authorization.pod(adminId, made.id, "pod.delete");
+			expect((await store.listMembers(made.id)).map(({ userId }) => userId).toSorted()).toEqual(
+				[adminId, viewerId].toSorted(),
+			);
+			expect(await store.removeMember(workspaceId, made.id, viewerId)).toBe("administrator");
+			expect(await authorization.pod(viewerId, made.id, "pod.delete")).toMatchObject({
+				facts: { isMember: true },
+			});
+		});
 
-			expect(standing).toMatchObject({ facts: { isExplicitMember: false } });
-			expect(standing.may("agent.delete")).toBe(true);
+		it("refuses an administrator leaving a shared pod", async () => {
+			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
+			await store.addMember(workspaceId, made.id, memberId);
+
+			await expect(authorization.pod(adminId, made.id, "pod.leave")).rejects.toThrow(
+				ActionForbidden,
+			);
+			expect(await authorization.pod(memberId, made.id, "pod.leave")).toBeDefined();
 		});
 
 		it("gives a member the pods they have joined, and nothing else", async () => {
@@ -362,7 +383,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await store.addMember(workspaceId, joined.id, memberId);
 
 			expect(await authorization.pod(memberId, joined.id, "agent.create")).toMatchObject({
-				facts: { isExplicitMember: true },
+				facts: { isMember: true },
 			});
 			await expect(authorization.pod(memberId, joined.id, "agent.delete")).rejects.toThrow(
 				ActionForbidden,
@@ -422,13 +443,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).toEqual([joined.id]);
 		});
 
-		it("carries a viewer's permissions on the pods it lists, all of them closed", async () => {
+		it("carries a viewer's permissions on the pods it lists, all closed but leaving", async () => {
 			const joined = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
 			await store.addMember(workspaceId, joined.id, viewerId);
 
 			const [seen] = await store.listVisible(workspaceId, actor(viewerId, "viewer"));
+			const { leave, ...others } = seen?.permissions ?? { leave: false };
 
-			expect(Object.values(seen?.permissions ?? {})).not.toContain(true);
+			expect(leave).toBe(true);
+			expect(Object.values(others)).not.toContain(true);
 		});
 
 		it("leaves a viewer in charge of their own Personal pod", async () => {
@@ -445,10 +468,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			});
 		});
 
-		it("stops reaching a shared pod once somebody is demoted", async () => {
+		it("keeps a demoted administrator in their pods, with a member's permissions there", async () => {
 			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await store.removeMember(workspaceId, made.id, adminId);
-			expect(await authorization.pod(adminId, made.id, "pod.read")).toBeDefined();
 
 			await onDatabase((db) =>
 				db
@@ -459,8 +480,10 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 					),
 			);
 
+			const standing = await authorization.pod(adminId, made.id, "pod.read");
+			expect(standing.may("pod.delete")).toBe(false);
+			expect(await store.removeMember(workspaceId, made.id, adminId)).toBe("removed");
 			await expect(authorization.pod(adminId, made.id, "pod.read")).rejects.toThrow(ResourceHidden);
-			expect(await store.listVisible(workspaceId, actor(adminId, "member"))).toEqual([]);
 		});
 
 		it("does not carry an administrator's reach into another workspace", async () => {

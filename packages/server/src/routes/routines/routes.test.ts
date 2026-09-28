@@ -180,7 +180,7 @@ const executionsFor = (userId: string, listExecutions: RoutineStore["listExecuti
 	);
 
 describe("Routine execution history", () => {
-	it("shows an administrator the history of a pod they are not in", async () => {
+	it("shows an administrator the history of a pod nobody added them to", async () => {
 		const listExecutions = vi.fn<RoutineStore["listExecutions"]>(() =>
 			Effect.succeed({ items: [], nextCursor: null }),
 		);

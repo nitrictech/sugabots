@@ -329,7 +329,7 @@ function MemberPage({
 					label="Pods"
 					note={
 						role === "admin"
-							? "As an administrator they reach every pod, whichever they are in."
+							? "Administrators are in every shared pod."
 							: "They can talk to every bot in the pods they are in."
 					}
 				>
@@ -339,7 +339,7 @@ function MemberPage({
 							pod={pod}
 							userId={member.user.id}
 							name={member.user.name}
-							canManage={canManage}
+							canManage={canManage && role !== "admin"}
 						/>
 					))}
 				</SettingsGroup>

@@ -1,4 +1,4 @@
-import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
+import type { WorkspaceRole } from "@sugabots/contracts";
 import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Database, Executor } from "../database/database.ts";
@@ -12,7 +12,7 @@ import {
 	mayInWorkspace,
 	type PodFacts,
 	type PodPermission,
-	sharedPodReach,
+	rolesWithInPod,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -26,15 +26,13 @@ import {
  * `podStanding` is the only way to build one, so a caller cannot pair a pod
  * with somebody else's membership.
  *
- * Two distinctions the rest of the codebase depends on:
+ * **Reach** is a stored `pod_member` row in a shared pod, or ownership of a
+ * Personal pod. No role reaches a shared pod without a row: administrators are
+ * kept in every one instead, by `keepAdministratorsInSharedPods`.
  *
- * - **Explicit membership** is a stored `pod_member` row. **Reach** is
- *   membership *or* a role that grants the pod without one. They are kept
- *   apart because editing a pod's member list, and demoting somebody, both
- *   mean the stored rows and not the effective answer.
- * - **Hidden** and **forbidden** are different refusals. A resource the caller
- *   cannot reach is hidden, so an id cannot be probed for; a resource they can
- *   reach but may not change is forbidden.
+ * **Hidden** and **forbidden** are different refusals. A resource the caller
+ * cannot reach is hidden, so an id cannot be probed for; a resource they can
+ * reach but may not change is forbidden.
  *
  * An interface, so routes can be tested without a database: the HTTP tests
  * hand `createTestApp` their own.
@@ -202,12 +200,8 @@ export function closedAuthorization(): Authorization {
  * The only constructor there is, so the pod, the role and the membership in a
  * standing always describe the same person and the same pod.
  */
-export function podStanding(
-	row: schema.PodRow,
-	actor: Actor,
-	isExplicitMember: boolean,
-): PodStanding {
-	const facts: PodFacts = { kind: row.kind, ownerId: row.ownerId, isExplicitMember };
+export function podStanding(row: schema.PodRow, actor: Actor, isMember: boolean): PodStanding {
+	const facts: PodFacts = { kind: row.kind, ownerId: row.ownerId, isMember };
 	return { pod: row, actor, facts, may: (permission) => mayInPod(actor, permission, facts) };
 }
 
@@ -283,15 +277,8 @@ export function decideInPod(
 	return Effect.succeed(standing);
 }
 
-/** Roles that reach every shared pod in their workspace without a membership row. */
-const ROLES_REACHING_EVERY_SHARED_POD = WORKSPACE_ROLES.filter(
-	(role) => sharedPodReach(role) === "all",
-);
-
 /** Roles that reach a shared pod once they have been added to it. */
-const ROLES_REACHING_JOINED_PODS = WORKSPACE_ROLES.filter(
-	(role) => sharedPodReach(role) !== "none",
-);
+const ROLES_REACHING_JOINED_PODS = rolesWithInPod("pod.read");
 
 /**
  * SQL for "this person reaches that pod", for the queries that scope a list
@@ -300,8 +287,8 @@ const ROLES_REACHING_JOINED_PODS = WORKSPACE_ROLES.filter(
  * The same rule `mayInPod(actor, "pod.read", …)` applies to a single pod, in
  * the one form a `where` clause can use, so a list and a direct read cannot
  * disagree: a Personal pod is reached by its owner and by nobody else, and a
- * shared pod by a role that reaches every one of them or by a membership row
- * held by a role that reaches the pods it has joined. `podId` is the column
+ * shared pod by a membership row held by a role that reaches the pods it has
+ * joined. `podId` is the column
  * naming the pod: `thread.podId`, `agent.podId`, `pod.id`.
  *
  * Aliased throughout, so it composes with a query that already joins any of
@@ -322,13 +309,8 @@ export function reachesPod(podId: SQLWrapper, userId: string): SQL<boolean> {
 				(reach_pod.kind = 'personal' and reach_pod.owner_id = ${userId})
 				or (
 					reach_pod.kind = 'shared'
-					and (
-						${roleIsOneOf(ROLES_REACHING_EVERY_SHARED_POD)}
-						or (
-							reach_pod_member.id is not null
-							and ${roleIsOneOf(ROLES_REACHING_JOINED_PODS)}
-						)
-					)
+					and reach_pod_member.id is not null
+					and ${roleIsOneOf(ROLES_REACHING_JOINED_PODS)}
 				)
 			)
 	)`;

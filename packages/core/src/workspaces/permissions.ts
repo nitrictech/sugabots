@@ -62,6 +62,8 @@ export type PodPermission =
 	| "pod.update"
 	| "pod.delete"
 	| "pod.members.manage"
+	/** Take yourself out of a shared pod. Administrators stay in every one. */
+	| "pod.leave"
 	| "agent.read"
 	| "agent.create"
 	| "agent.update"
@@ -95,18 +97,8 @@ export interface PodFacts {
 	/** Whose Personal pod this is. `null` for a shared pod. */
 	ownerId: string | null;
 	/** Whether a `pod_member` row puts the caller in this pod. */
-	isExplicitMember: boolean;
+	isMember: boolean;
 }
-
-/**
- * Where a role holds a pod permission.
- *
- * `shared-pods` reaches every shared pod in the workspace without a membership
- * row; `joined-pods` reaches only the shared pods the caller has actually been
- * added to. Personal pods are not reached by either — they are governed by
- * ownership alone, below.
- */
-type PodGrantScope = "shared-pods" | "joined-pods";
 
 const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
 	admin: new Set<WorkspacePermission>([
@@ -121,44 +113,53 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 	viewer: new Set<WorkspacePermission>(["workspace.read"]),
 };
 
-const POD_GRANTS: Record<WorkspaceRole, Readonly<Partial<Record<PodPermission, PodGrantScope>>>> = {
-	admin: {
-		"pod.read": "shared-pods",
-		"pod.update": "shared-pods",
-		"pod.delete": "shared-pods",
-		"pod.members.manage": "shared-pods",
-		"agent.read": "shared-pods",
-		"agent.create": "shared-pods",
-		"agent.update": "shared-pods",
-		"agent.delete": "shared-pods",
-		"connection.read": "shared-pods",
-		"connection.manage": "shared-pods",
-		"routine.read": "shared-pods",
-		"routine.manage": "shared-pods",
-		"routine.run": "shared-pods",
-		"routine.history.read": "shared-pods",
-		"approval.decide": "shared-pods",
-		"approval.routine.decide": "shared-pods",
-	},
-	member: {
-		"pod.read": "joined-pods",
-		"agent.read": "joined-pods",
-		"agent.create": "joined-pods",
-		"agent.update": "joined-pods",
-		"connection.read": "joined-pods",
-		"routine.read": "joined-pods",
-		"routine.history.read": "joined-pods",
-		"approval.decide": "joined-pods",
-	},
+/**
+ * The pod permissions each role holds in the shared pods it is a member of.
+ *
+ * Nobody reaches a shared pod without a `pod_member` row. Administrators are
+ * no exception: they are made members of every shared pod, and kept there, by
+ * `keepAdministratorsInSharedPods` in `packages/core/src/workspaces/pods/store.ts`.
+ */
+const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
+	admin: new Set<PodPermission>([
+		"pod.read",
+		"pod.update",
+		"pod.delete",
+		"pod.members.manage",
+		"agent.read",
+		"agent.create",
+		"agent.update",
+		"agent.delete",
+		"connection.read",
+		"connection.manage",
+		"routine.read",
+		"routine.manage",
+		"routine.run",
+		"routine.history.read",
+		"approval.decide",
+		"approval.routine.decide",
+	]),
+	member: new Set<PodPermission>([
+		"pod.read",
+		"pod.leave",
+		"agent.read",
+		"agent.create",
+		"agent.update",
+		"connection.read",
+		"routine.read",
+		"routine.history.read",
+		"approval.decide",
+	]),
 	// A viewer reads and takes part — which `pod.read` grants — and configures
 	// nothing beyond that.
-	viewer: {
-		"pod.read": "joined-pods",
-		"agent.read": "joined-pods",
-		"connection.read": "joined-pods",
-		"routine.read": "joined-pods",
-		"routine.history.read": "joined-pods",
-	},
+	viewer: new Set<PodPermission>([
+		"pod.read",
+		"pod.leave",
+		"agent.read",
+		"connection.read",
+		"routine.read",
+		"routine.history.read",
+	]),
 };
 
 /**
@@ -193,9 +194,7 @@ export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts)
 	if (!grants) return false;
 	if (pod.kind === "personal") return isPersonalPodOwner(actor, pod);
 
-	const scope = grants.pod[permission];
-	if (!scope) return false;
-	return scope === "shared-pods" || pod.isExplicitMember;
+	return pod.isMember && grants.pod.has(permission);
 }
 
 /**
@@ -210,22 +209,14 @@ export function rolesWith(permission: WorkspacePermission): WorkspaceRole[] {
 }
 
 /**
- * Which shared pods a role reaches, for the queries that list rather than
- * address one resource.
+ * The roles holding a pod permission in the shared pods they are members of,
+ * for the queries that filter by the stored role rather than asking about one
+ * caller.
  *
- * `all` means every shared pod in the workspace; `joined` means only those with
- * a membership row; `none` means the role reaches no shared pod at all. Either
- * way a Personal pod is reached by its owner alone, which is why this answers
- * about shared pods only.
- *
- * The equivalent single-resource answer is `mayInPod(actor, "pod.read", pod)`.
- * `packages/core/src/workspaces/access.ts` expresses the same rule as one SQL
- * predicate so a list and a direct read cannot disagree.
+ * The equivalent single-resource answer is `mayInPod`.
  */
-export function sharedPodReach(role: WorkspaceRole | undefined): "all" | "joined" | "none" {
-	const scope = grantsFor(role)?.pod["pod.read"];
-	if (!scope) return "none";
-	return scope === "shared-pods" ? "all" : "joined";
+export function rolesWithInPod(permission: PodPermission): WorkspaceRole[] {
+	return WORKSPACE_ROLES.filter((role) => POD_GRANTS[role].has(permission));
 }
 
 /**
@@ -244,6 +235,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		rename: shared && may("pod.update"),
 		changeRouting: may("pod.update"),
 		manageMembers: shared && may("pod.members.manage"),
+		leave: shared && may("pod.leave"),
 		createAgents: may("agent.create"),
 		updateAgents: may("agent.update"),
 		deleteAgents: may("agent.delete"),

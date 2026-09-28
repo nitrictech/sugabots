@@ -28,7 +28,7 @@ import { Installation } from "../../installation/installation.ts";
 import { provisionDefaultSearchProvider } from "../../providers/search-providers/store.ts";
 import { type AuthorizationDenied, authorization, ResourceHidden } from "../access.ts";
 import { ensureSystemAgents } from "../agents/system-agents.ts";
-import { provisionPersonalPod } from "../pods/store.ts";
+import { keepAdministratorsInSharedPods, provisionPersonalPod } from "../pods/store.ts";
 
 /**
  * Every operation takes the id of the person asking and checks what they may do
@@ -247,10 +247,14 @@ export const make = Effect.gen(function* () {
 							yield* requireAnotherAdministrator(standing.workspaceId, target.id);
 						}
 						yield* query((db) =>
-							db
-								.update(workspaceMember)
-								.set({ role: input.role })
-								.where(eq(workspaceMember.id, target.id)),
+							Effect.gen(function* () {
+								yield* db
+									.update(workspaceMember)
+									.set({ role: input.role })
+									.where(eq(workspaceMember.id, target.id));
+								// Demoting keeps the pods they are in; they leave them one at a time.
+								yield* keepAdministratorsInSharedPods(db, standing.workspaceId);
+							}),
 						);
 					}),
 				),
@@ -473,6 +477,7 @@ export const make = Effect.gen(function* () {
 									.set({ status: "accepted" })
 									.where(eq(workspaceInvite.id, input.invitationId));
 								yield* provisionPersonalPod(db, invitation.workspaceId, input.userId);
+								yield* keepAdministratorsInSharedPods(db, invitation.workspaceId);
 							}),
 						);
 						return { workspaceId: invitation.workspaceId };

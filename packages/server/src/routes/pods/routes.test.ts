@@ -51,8 +51,8 @@ const resolveUser: UserResolver = async (headers) => {
 };
 
 /**
- * Ada administers the workspace and is *not* in the pod; Sam is in it as an
- * ordinary member; Lee is nowhere.
+ * Ada administers the workspace, so is in the shared pod without being listed;
+ * Sam is in it as an ordinary member; Lee is nowhere.
  */
 const world = (kind: Pod["kind"] = "shared") =>
 	testAuthorization({
@@ -82,7 +82,7 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 		{
 			kind,
 			ownerId: kind === "personal" ? member.id : null,
-			isExplicitMember: userId === member.id,
+			isMember: true,
 		},
 	),
 	createdAt: "2026-09-09T00:00:00.000Z",
@@ -106,6 +106,7 @@ let store: PodStore;
 let created: { name: string; slug: string; color?: PodColor } | undefined;
 let updated: { name?: string; slug?: string } | undefined;
 let added: string[];
+let removed: string[];
 let slugTaken: boolean;
 let podKind: Pod["kind"];
 
@@ -113,6 +114,7 @@ beforeEach(() => {
 	created = undefined;
 	updated = undefined;
 	added = [];
+	removed = [];
 	slugTaken = false;
 	podKind = "shared";
 
@@ -158,7 +160,10 @@ beforeEach(() => {
 		removeMember: (_workspaceId, _podId, userId) =>
 			Effect.sync(() => {
 				if (podKind === "personal") return "personal_pod";
-				return userId === member.id ? "removed" : "not_a_member";
+				if (userId === admin.id) return "administrator";
+				if (userId !== member.id) return "not_a_member";
+				removed.push(userId);
+				return "removed";
 			}),
 	};
 });
@@ -291,7 +296,7 @@ describe("POST /workspaces/:workspace/pods", () => {
 });
 
 describe("changing a pod", () => {
-	it("lets an admin rename a pod they are not in", async () => {
+	it("lets an admin rename a pod nobody added them to", async () => {
 		const response = await app().request(
 			`/pods/${POD}`,
 			as("admin-token", { method: "PATCH", body: JSON.stringify({ name: "Platform" }) }),
@@ -371,6 +376,48 @@ describe("pod membership", () => {
 		);
 
 		expect(response.status).toBe(404);
+	});
+
+	it("refuses taking an administrator out of a shared pod", async () => {
+		const response = await app().request(
+			`/pods/${POD}/members/${admin.id}`,
+			as("admin-token", { method: "DELETE" }),
+		);
+
+		expect(response.status).toBe(400);
+		expect(removed).toEqual([]);
+	});
+
+	it("lets a member leave", async () => {
+		const response = await app().request(
+			`/pods/${POD}/membership`,
+			as("member-token", { method: "DELETE" }),
+		);
+
+		expect(response.status).toBe(204);
+		expect(removed).toEqual([member.id]);
+	});
+
+	it("refuses an administrator leaving, since they are in every shared pod", async () => {
+		const response = await app().request(
+			`/pods/${POD}/membership`,
+			as("admin-token", { method: "DELETE" }),
+		);
+
+		expect(response.status).toBe(403);
+		expect(removed).toEqual([]);
+	});
+
+	it("refuses leaving a Personal pod", async () => {
+		podKind = "personal";
+
+		const response = await app().request(
+			`/pods/${POD}/membership`,
+			as("member-token", { method: "DELETE" }),
+		);
+
+		expect(response.status).toBe(400);
+		expect(removed).toEqual([]);
 	});
 
 	it("reports the store's refusal to staff a Personal pod as a bad request", async () => {

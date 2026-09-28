@@ -406,6 +406,55 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
+	it("puts an administrator in every shared pod, and leaves a demoted one where they were", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const kim = await person("Kim");
+		const [shared] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: workspace.id,
+					kind: "shared",
+					name: "Launch",
+					slug: `launch-${unique()}`,
+				})
+				.returning(),
+		);
+		if (!shared) throw new Error("The pod was not created");
+		const inShared = () =>
+			onDatabase((db) =>
+				db
+					.select({ userId: podMember.userId })
+					.from(podMember)
+					.where(eq(podMember.podId, shared.id)),
+			).then((rows) => rows.map((row) => row.userId).toSorted());
+
+		const bobMember = await join(workspace.id, ada.id, bob);
+		await join(workspace.id, ada.id, kim, "admin");
+		expect(await inShared()).toEqual([ada.id, kim.id].toSorted());
+
+		await run((m) =>
+			m.changeRole({
+				userId: ada.id,
+				workspace: workspace.id,
+				memberId: bobMember.id,
+				role: "admin",
+			}),
+		);
+		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());
+
+		await run((m) =>
+			m.changeRole({
+				userId: ada.id,
+				workspace: workspace.id,
+				memberId: bobMember.id,
+				role: "member",
+			}),
+		);
+		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());
+	});
+
 	it("keeps the last administrator", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");

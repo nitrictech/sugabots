@@ -31,7 +31,11 @@ export interface TestPod {
 	kind?: "personal" | "shared";
 	/** Whose Personal pod it is. Shared pods have no owner. */
 	ownerId?: string | null;
-	/** The people with a `pod_member` row in it. */
+	/**
+	 * The people with a `pod_member` row in it. A shared pod's administrators
+	 * need not be listed: `keepAdministratorsInSharedPods` gives every one of
+	 * them a row, so this does too.
+	 */
 	members?: string[];
 	name?: string;
 	slug?: string;
@@ -64,6 +68,10 @@ export function testAuthorization(world: TestWorkspace): Authorization {
 		workspaceRole: world.roles[userId],
 	});
 
+	const isMember = (pod: TestPod, userId: string) =>
+		(pod.members ?? []).includes(userId) ||
+		((pod.kind ?? "shared") === "shared" && world.roles[userId] === "admin");
+
 	const standing = (
 		pod: TestPod,
 		userId: string,
@@ -71,7 +79,7 @@ export function testAuthorization(world: TestWorkspace): Authorization {
 		resource: "pod" | "agent",
 	): Effect.Effect<PodStanding, AuthorizationDenied> =>
 		decideInPod(
-			podStanding(podRow(world.id, pod), actorIn(userId), (pod.members ?? []).includes(userId)),
+			podStanding(podRow(world.id, pod), actorIn(userId), isMember(pod, userId)),
 			permission,
 			resource,
 		);

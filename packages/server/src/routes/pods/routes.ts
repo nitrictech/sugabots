@@ -123,6 +123,20 @@ export function podRoutes({ pods, modelProviders }: PodRoutesOptions) {
 					if (outcome === "not_a_member") {
 						return yield* new NotFound({ message: "That person is not in this pod" });
 					}
+					if (outcome === "administrator") {
+						return yield* new BadRequest({ message: "Administrators are in every shared pod" });
+					}
+				}),
+			)
+			// Administrators do not hold `pod.leave`, so only a Personal pod, which
+			// its owner holds every permission in, can refuse this.
+			.handle("leave", () =>
+				Effect.gen(function* () {
+					const { pod, actor } = yield* grantedPod;
+					const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, actor.userId);
+					if (outcome === "personal_pod") {
+						return yield* new BadRequest({ message: "You cannot leave your Personal pod" });
+					}
 				}),
 			),
 	);

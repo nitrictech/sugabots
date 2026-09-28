@@ -90,11 +90,12 @@ export interface PodStore {
 		never,
 		Database
 	>;
+	/** Refuses an administrator, who belongs to every shared pod. */
 	removeMember(
 		workspaceId: string,
 		podId: string,
 		userId: string,
-	): Effect.Effect<"removed" | "not_a_member" | "personal_pod", never, Database>;
+	): Effect.Effect<"removed" | "not_a_member" | "personal_pod" | "administrator", never, Database>;
 }
 
 /** The slug is taken in this workspace. The route makes it a `conflict`. */
@@ -143,10 +144,8 @@ export class FacilitatorNotSetUp extends Data.TaggedError("FacilitatorNotSetUp")
 }
 
 const create: PodStore["create"] = (workspaceId, creator, { name, slug, color }) =>
-	// The insert and the creator's membership are one unit, so a pod is never
-	// briefly one without the other and whoever made it is in it. It is no
-	// longer a safety net: an admin reaches a shared pod with no members at all
-	// and can add people to it, so an empty pod is recoverable.
+	// The insert and its members are one unit, so a pod is never briefly one
+	// without the other: whoever made it, and every administrator, is in it.
 	transaction(
 		Effect.gen(function* () {
 			const taken = yield* query((db) =>
@@ -178,7 +177,12 @@ const create: PodStore["create"] = (workspaceId, creator, { name, slug, color })
 			}
 
 			yield* query((db) =>
-				db.insert(podMember).values({ workspaceId, podId: row.id, userId: creator.userId }),
+				Effect.gen(function* () {
+					yield* db
+						.insert(podMember)
+						.values({ workspaceId, podId: row.id, userId: creator.userId });
+					yield* keepAdministratorsInSharedPods(db, workspaceId);
+				}),
 			);
 			return podSeenBy(podStanding(row, creator, true));
 		}),
@@ -192,6 +196,31 @@ const ensurePersonal: PodStore["ensurePersonal"] = (workspaceId, owner, model) =
 			),
 		),
 	);
+
+/**
+ * Puts every administrator in every shared pod of the workspace they are not
+ * already in.
+ *
+ * Administrators belong to every shared pod, so that `pod_member` is the whole
+ * answer to who is in a pod. Called in the same transaction as anything that
+ * makes a shared pod or an administrator; idempotent, so a caller never needs
+ * to know which rows are missing.
+ */
+export const keepAdministratorsInSharedPods = Effect.fn("PodStore.keepAdministratorsInSharedPods")(
+	function* (db: Executor, workspaceId: string) {
+		yield* db.execute(sql`
+		insert into ${podMember} ("workspace_id", "pod_id", "user_id")
+		select ${pod.workspaceId}, ${pod.id}, ${workspaceMember.userId}
+		from ${pod}
+		inner join ${workspaceMember}
+			on ${workspaceMember.workspaceId} = ${pod.workspaceId}
+			and ${workspaceMember.role} = 'admin'
+		where ${pod.workspaceId} = ${workspaceId}
+			and ${pod.kind} = 'shared'
+		on conflict ("pod_id", "user_id") do nothing
+	`);
+	},
+);
 
 export const provisionPersonalPod = Effect.fn("PodStore.provisionPersonalPod")(function* (
 	db: Executor,
@@ -328,16 +357,14 @@ export const podStore: PodStore = {
 			db
 				.select({
 					pod,
-					isExplicitMember: sql<boolean>`${podMember.id} is not null`,
+					isMember: sql<boolean>`${podMember.id} is not null`,
 				})
 				.from(pod)
 				.leftJoin(podMember, and(eq(podMember.podId, pod.id), eq(podMember.userId, actor.userId)))
 				.where(and(eq(pod.workspaceId, workspaceId), reachesPod(pod.id, actor.userId)))
 				.orderBy(asc(pod.name)),
 		).pipe(
-			Effect.map((rows) =>
-				rows.map((row) => podSeenBy(podStanding(row.pod, actor, row.isExplicitMember))),
-			),
+			Effect.map((rows) => rows.map((row) => podSeenBy(podStanding(row.pod, actor, row.isMember)))),
 		),
 
 	create,
@@ -427,6 +454,16 @@ export const podStore: PodStore = {
 					.limit(1);
 				if (target?.kind === "personal") {
 					return "personal_pod";
+				}
+				const [membership] = yield* db
+					.select({ role: workspaceMember.role })
+					.from(workspaceMember)
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)),
+					)
+					.limit(1);
+				if (membership?.role === "admin") {
+					return "administrator";
 				}
 				const removed = yield* db
 					.delete(podMember)

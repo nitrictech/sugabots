@@ -153,7 +153,7 @@ describe("agent routes", () => {
 		expect(response.status).toBe(403);
 	});
 
-	it("lets an admin delete a shared-pod agent they are not a member of", async () => {
+	it("lets an admin delete a shared-pod agent nobody added them to", async () => {
 		const response = await app().request(`/agents/${AGENT}`, {
 			...auth("admin"),
 			method: "DELETE",

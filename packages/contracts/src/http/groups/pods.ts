@@ -50,14 +50,16 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			params: { podId: uuidSchema },
 			success: Schema.Array(podMemberSchema),
 		}),
-		// Reached without pod membership: this is how the first person is added
-		// to a pod the admin is not in themselves.
 		HttpApiEndpoint.post("addMember", "/pods/:podId/members", {
 			params: { podId: uuidSchema },
 			payload: newPodMemberSchema,
 		}),
 		HttpApiEndpoint.delete("removeMember", "/pods/:podId/members/:userId", {
 			params: { podId: uuidSchema, userId: Schema.String },
+		}),
+		/** Takes the caller out of the pod. */
+		HttpApiEndpoint.delete("leave", "/pods/:podId/membership", {
+			params: { podId: uuidSchema },
 		}),
 	)
 	.middleware(Authorise)

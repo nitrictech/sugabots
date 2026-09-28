@@ -12,9 +12,9 @@ import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The pods this person reaches: the shared pods they have joined, every shared
- * pod if they administer the workspace, and their own Personal pod. Each one
- * carries what they may do in it. See `docs/permissions.md`.
+ * The pods this person reaches: the shared pods they are in, which for an
+ * administrator is every one, and their own Personal pod. Each one carries
+ * what they may do in it. See `docs/permissions.md`.
  *
  * The sidebar and the routes share this one query rather than fetching twice:
  * the sidebar lists them and a route resolves its `:pod` slug out of the
@@ -134,5 +134,20 @@ export function usePlacePodMember(podId: string) {
 					: client.api.pods.removeMember({ params: { podId, userId } }),
 			),
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
+	});
+}
+
+/** Takes you out of a pod, and so off the rail. */
+export function useLeavePod(podId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+
+	return useMutation({
+		mutationFn: () => Effect.runPromise(client.api.pods.leave({ params: { podId } })),
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
+			]),
 	});
 }

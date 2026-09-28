@@ -106,7 +106,11 @@ export const List = meta.story({
 	},
 });
 
-/** A shared pod: its bots, its people, the apps they share, and deleting it. */
+/**
+ * A shared pod: its bots, its people, the apps they share, and deleting it.
+ * Administrators are in every shared pod, so only Mara, a member, can be taken
+ * out, and you cannot leave.
+ */
 export const SharedPod = meta.story({
 	render: () => <StoryApp path={`${pods}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
@@ -115,6 +119,11 @@ export const SharedPod = meta.story({
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Jay Young")).toBeInTheDocument();
 		await expect(await canvas.findByText("Admin")).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("button", { name: "Remove Mara Kent" }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Remove Jay Young" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Leave Revenue" })).toBeNull();
 		await expect(await canvas.findByText("HubSpot")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Delete pod" })).toBeInTheDocument();
 	},
@@ -131,7 +140,7 @@ export const PersonalPod = meta.story({
 	},
 });
 
-/** A member reads the same pod, without the controls only an administrator has. */
+/** A member reads the same pod, without the controls only an administrator has, and can leave it. */
 export const AsAMember = meta.story({
 	beforeEach({ msw }) {
 		// A pod carries what its viewer may do there; a member may not rename, delete or manage it.
@@ -144,6 +153,7 @@ export const AsAMember = meta.story({
 				manageConnections: false,
 				deleteAgents: false,
 				changeRouting: false,
+				leave: pod.kind === "shared",
 			},
 		}));
 		msw.use(...revenueHandlers, ...appHandlers({ role: "member", pods: asMember }));
@@ -155,6 +165,8 @@ export const AsAMember = meta.story({
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete pod" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Add people" })).toBeNull();
+		await expect(await canvas.findByRole("button", { name: "Leave Revenue" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Remove Mara Kent" })).toBeNull();
 	},
 });
 

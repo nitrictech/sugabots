@@ -58,7 +58,7 @@ describe("tool approval routes", () => {
 		);
 	});
 
-	it("lets an admin who is not in the pod decide", async () => {
+	it("lets an admin decide, as a member of every shared pod", async () => {
 		const built = app();
 		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
 			method: "POST",

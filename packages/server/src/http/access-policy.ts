@@ -65,6 +65,7 @@ export const accessPolicy: AccessPolicy = {
 		listMembers: { pod: "pod.read" },
 		addMember: { pod: "pod.members.manage" },
 		removeMember: { pod: "pod.members.manage" },
+		leave: { pod: "pod.leave" },
 	},
 	onboarding: {
 		status: { reach: "the signed-in person's own progress" },
