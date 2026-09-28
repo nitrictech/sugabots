@@ -132,7 +132,7 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
-			expect.anything(),
+			undefined,
 		);
 	});
 
@@ -150,7 +150,7 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Release", content: "Notes are ready." },
-			expect.anything(),
+			undefined,
 		);
 	});
 
