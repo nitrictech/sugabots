@@ -8,7 +8,6 @@ import { docsComponents } from "@/docs/components/mdx-components";
 import { OnThisPage } from "@/docs/components/on-this-page";
 import { PageLinks } from "@/docs/components/page-links";
 import { findDocPage, neighbours } from "@/docs/pages";
-import { siteMeta } from "@/site-meta";
 
 export const Route = createFileRoute("/docs/$slug")({
 	loader: ({ params }) => {
@@ -22,7 +21,6 @@ export const Route = createFileRoute("/docs/$slug")({
 			{ name: "description", content: loaderData.description },
 			{ property: "og:title", content: `${loaderData.title} | Sugabots docs` },
 			{ property: "og:description", content: loaderData.description },
-			{ property: "og:url", content: `${siteMeta.url}/docs` },
 		],
 	}),
 	component: DocsPage,

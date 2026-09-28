@@ -10,3 +10,11 @@ export const siteMeta = {
 	/** Written by scripts/generate-og-image.tsx. */
 	ogImagePath: "/og.png",
 } as const;
+
+/**
+ * A page's address on the live site. Pages are prerendered to `<path>.html`,
+ * which Cloudflare serves without a trailing slash, so the address has none.
+ */
+export function pageUrl(pathname: string) {
+	return `${siteMeta.url}${pathname.replace(/\/+$/, "") || "/"}`;
+}
