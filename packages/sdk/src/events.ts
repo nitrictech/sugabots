@@ -40,7 +40,7 @@ export interface EventStream extends AsyncIterable<StreamEvent> {
 export interface EventsApi {
 	/** Threads, unread counts, agents and pods across one workspace. */
 	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
-	/** One root thread and every thread under it. */
+	/** One thread's messages, turns, tool calls and collaborations. */
 	thread(threadId: string, options?: EventStreamOptions): EventStream;
 }
 

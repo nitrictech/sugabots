@@ -75,8 +75,12 @@ export const eventPayloadSchemas = {
 		reportedCost: Schema.optional(Schema.Finite),
 	}),
 	"thread.created": Schema.Struct({ threadId }),
-	/** On a workspace channel the thread is unnamed; on a thread channel it is named. */
-	"thread.changed": Schema.Struct({ threadId: Schema.optional(threadId) }),
+	/**
+	 * Something about the thread no more specific event describes. On the
+	 * thread's channel it means refetch the thread; on its workspace's channel,
+	 * that what lists show of the thread may be out of date.
+	 */
+	"thread.changed": Schema.Struct({ threadId }),
 	"chat.thread_changed": Schema.Struct({
 		chatId: uuidSchema,
 		threadId,

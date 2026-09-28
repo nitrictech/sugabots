@@ -55,9 +55,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 	const lanes = Context.get(engine, Lanes.Service);
 	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
-	const publishEvents = eventPublisher(bus);
-	const { stores } = composeConversations({
-		publishEvents,
+	const { emit, stores } = composeConversations({
+		publishEvents: eventPublisher(bus),
 		queueTurn,
 		queueFacilitation: queueFacilitationInLane(lanes),
 		signals: turnSignals(workflowEngine),
@@ -87,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 
 	const background = backgroundLayer({ eventStore });
 	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
-		Layer.provideMerge(facilitateSteps({ model, publishEvents, queueTurn })),
+		Layer.provideMerge(facilitateSteps({ model, emit, queueTurn })),
 		Layer.provideMerge(
 			stepsLayer({
 				store: stores.turns,

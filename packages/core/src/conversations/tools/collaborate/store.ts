@@ -1,14 +1,9 @@
 import type { CollaborationPart } from "@sugabots/contracts";
-import {
-	MAX_THREAD_TITLE_CHARACTERS,
-	streamEvent,
-	threadChannel,
-	workspaceChannel,
-} from "@sugabots/contracts";
+import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../../database/database.ts";
-import type { PublishEvents } from "../../../database/events/publish.ts";
+import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import type * as schema from "../../../database/schema.ts";
 import {
 	agent,
@@ -18,7 +13,8 @@ import {
 	thread,
 	threadParticipant,
 } from "../../../database/schema.ts";
-import { toCollaborationPart } from "../../threads/collaborations.ts";
+import { ConversationEvent } from "../../events.ts";
+import { collaborationChange } from "../../threads/collaborations.ts";
 import type { QueueTurn } from "../../turns/queue.ts";
 
 /**
@@ -72,12 +68,8 @@ export interface CollaborationStore {
 	/** The collaborator's reply, once its turn in the child thread has completed. */
 	readAnswer(collaborationId: string): Effect.Effect<string | undefined, never, Database>;
 	/**
-	 * Called when a turn completes in a thread that was opened by collaboration.
-	 * Records the reply as the answer and, if the asking agent had stopped
-	 * waiting, queues a turn for it in the parent thread so it continues.
-	 */
-	/**
-	 * Hands the collaborator's reply back to the agent that asked.
+	 * Hands the collaborator's reply back to the agent that asked. An agent that
+	 * stopped waiting gets a turn in the parent thread to pick the answer up.
 	 *
 	 * `true` when this reply answered an outstanding brief, which concludes that
 	 * exchange: the answer has gone to the parent and the asking agent carries on
@@ -100,22 +92,9 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 }
 
 export function collaborationStore(
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	queueTurn: QueueTurn,
 ): CollaborationStore {
-	/** Tells the parent thread's listeners how a collaboration now stands. */
-	const announce = (row: schema.CollaborationRow, collaboratorName: string) =>
-		publishEvents([
-			{
-				channel: threadChannel(row.parentThreadId),
-				event: streamEvent("collaboration.updated", {
-					threadId: row.parentThreadId,
-					messageId: row.parentMessageId,
-					collaboration: toCollaborationPart(row, collaboratorName),
-				}),
-			},
-		]);
-
 	return {
 		open: ({ from, to, brief }) =>
 			transaction(
@@ -219,26 +198,15 @@ export function collaborationStore(
 					const recipientChat = yield* query((db) =>
 						findAgentChat(db, parent.podId, collaborator.id),
 					);
-					yield* announce(opened, collaborator.name);
-					yield* publishEvents([
-						{ channel: workspaceChannel(parent.workspaceId), event: streamEvent("thread.changed") },
-						...(recipientChat
-							? [
-									{
-										channel: workspaceChannel(parent.workspaceId),
-										event: streamEvent("chat.thread_changed", {
-											chatId: recipientChat.id,
-											threadId: child.id,
-											threadType: "collaboration",
-										}),
-									},
-								]
-							: []),
+					const change = collaborationChange(opened, collaborator.name);
+					yield* emit([
+						ConversationEvent.CollaborationOpened({
+							...change,
+							workspaceId: parent.workspaceId,
+							recipientChatId: recipientChat?.id ?? null,
+						}),
 					]);
-					return {
-						collaboration: toCollaborationPart(opened, collaborator.name),
-						collaborator,
-					};
+					return { collaboration: change.collaboration, collaborator };
 				}),
 			),
 
@@ -254,7 +222,11 @@ export function collaborationStore(
 					const updated = yield* query((db) =>
 						writeStatus(db, current.row.id, { status: "pending" }),
 					);
-					yield* announce(updated, current.collaboratorName);
+					yield* emit([
+						ConversationEvent.CollaborationStoppedWaiting(
+							collaborationChange(updated, current.collaboratorName),
+						),
+					]);
 					return true;
 				}),
 			),
@@ -283,7 +255,11 @@ export function collaborationStore(
 					const updated = yield* query((db) =>
 						writeStatus(db, current.row.id, { status: "answered", answer }),
 					);
-					yield* announce(updated, current.collaboratorName);
+					yield* emit([
+						ConversationEvent.CollaborationAnswered(
+							collaborationChange(updated, current.collaboratorName),
+						),
+					]);
 					// The asking agent moved on; give it a turn to pick the answer up.
 					// While it was still waiting, the tool reads the answer itself.
 					if (current.row.status === "pending") {

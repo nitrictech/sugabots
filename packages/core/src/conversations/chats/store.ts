@@ -10,7 +10,7 @@ import type {
 	ChatPageQuery,
 	Message,
 } from "@sugabots/contracts";
-import { DEFAULT_CHAT_PAGE_LIMIT, streamEvent, threadChannel } from "@sugabots/contracts";
+import { DEFAULT_CHAT_PAGE_LIMIT } from "@sugabots/contracts";
 import {
 	and,
 	asc,
@@ -25,7 +25,7 @@ import {
 } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
-import type { PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { isUuid } from "../../database/ids.ts";
 import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
@@ -41,6 +41,7 @@ import {
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { ConversationEvent } from "../events.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -132,7 +133,7 @@ export interface ChatStore {
 }
 
 export function chatStore(
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	queueTurn: QueueTurn,
 	queueFacilitation: QueueFacilitation,
 ): ChatStore {
@@ -274,7 +275,7 @@ export function chatStore(
 							.onConflictDoNothing(),
 					);
 					yield* giveFloor(
-						{ publishEvents, queueTurn, queueFacilitation },
+						{ emit, queueTurn, queueFacilitation },
 						{
 							id: created.id,
 							threadId: visible.mainThreadId,
@@ -283,14 +284,8 @@ export function chatStore(
 						},
 					);
 					const result = toMessage(created, messageAuthor(input.author));
-					yield* publishEvents([
-						{
-							channel: threadChannel(visible.mainThreadId),
-							event: streamEvent("message.created", {
-								threadId: visible.mainThreadId,
-								message: result,
-							}),
-						},
+					yield* emit([
+						ConversationEvent.MessagePosted({ threadId: visible.mainThreadId, message: result }),
 					]);
 					return result;
 				}),

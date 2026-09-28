@@ -1,10 +1,4 @@
-import {
-	mentionedHandles,
-	type PodRouting,
-	streamEvent,
-	type ThreadType,
-	threadChannel,
-} from "@sugabots/contracts";
+import { mentionedHandles, type PodRouting, type ThreadType } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
@@ -14,7 +8,7 @@ import {
 	query,
 	transaction,
 } from "../../database/database.ts";
-import type { PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	agent,
 	message,
@@ -23,6 +17,7 @@ import {
 	thread,
 	threadParticipant,
 } from "../../database/schema.ts";
+import { ConversationEvent } from "../events.ts";
 import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 
 /**
@@ -137,7 +132,7 @@ export interface FloorMessage {
  */
 export const giveFloor = (
 	effects: {
-		readonly publishEvents: PublishEvents;
+		readonly emit: DomainEvents.Emit<ConversationEvent>;
 		readonly queueTurn: QueueTurn;
 		readonly queueFacilitation: QueueFacilitation;
 	},
@@ -173,11 +168,11 @@ export const giveFloor = (
 						.values(joining.map(({ agentId }) => ({ threadId: committed.threadId, agentId })))
 						.onConflictDoNothing(),
 				);
-				yield* effects.publishEvents([
-					{
-						channel: threadChannel(committed.threadId),
-						event: streamEvent("thread.changed", { threadId: committed.threadId }),
-					},
+				yield* effects.emit([
+					ConversationEvent.AgentsJoined({
+						threadId: committed.threadId,
+						agentIds: joining.map(({ agentId }) => agentId),
+					}),
 				]);
 			}
 			for (const { agentId, reason } of decision.agents) {

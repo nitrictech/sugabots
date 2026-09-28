@@ -164,8 +164,11 @@ describe("envelope", () => {
 	it("keeps open empty payloads and workspace envelopes", () => {
 		const extras = { future: { value: 1 } };
 		expect(Schema.decodeSync(eventPayloadSchemas["agent.updated"])(extras)).toEqual(extras);
-		for (const type of ["reset", "thread.changed"]) {
-			const event = { v: 1, type, ...extras };
+		for (const payload of [
+			{ type: "reset" },
+			{ type: "thread.changed", threadId: "00000000-0000-4000-8000-000000000001" },
+		]) {
+			const event = { v: 1, ...payload, ...extras };
 			expect(Schema.decodeUnknownSync(workspaceUpdateEventSchema)(event)).toEqual(event);
 			expect(Schema.decodeUnknownSync(threadUpdateEventSchema)(event)).toEqual(event);
 		}
