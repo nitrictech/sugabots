@@ -22,6 +22,8 @@ COPY packages/provider-logos/package.json packages/provider-logos/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
+COPY packages/website/package.json packages/website/
+COPY packages/workflow/package.json packages/workflow/
 
 # --ignore-scripts: the root `prepare` script is editor tooling.
 FROM base AS web
@@ -46,6 +48,7 @@ COPY --from=server /app ./
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
 COPY packages/server packages/server
+COPY packages/workflow packages/workflow
 COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh
 COPY --from=web /app/packages/web/dist packages/web/dist
 
