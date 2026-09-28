@@ -13,7 +13,7 @@ import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { TurnReason } from "../sql.ts";
-import { ApprovalDecision, DecidedApproval } from "../tools/calls/lifecycle.ts";
+import { ApprovalDecision, DecidedApproval } from "./tool-calls/lifecycle.ts";
 
 export const TurnRequest = Schema.Struct({
 	threadId: Schema.String,
@@ -39,6 +39,21 @@ export const Turn = Workflow.make("turn", {
 /** One turn per agent per thread at a time; the turn reads everything posted while it waited. */
 export const turnLane = (request: Pick<TurnRequest, "threadId" | "agentId">) =>
 	`turn:${request.threadId}:${request.agentId}`;
+
+/**
+ * Asks for the turn in its lane, joining the caller's transaction. A turn
+ * already asked for is kept: it will read every message posted since.
+ */
+export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
+	lanes
+		.admit({
+			key: turnLane(request),
+			subject: request.threadId,
+			workflow: Turn,
+			payload: request,
+			whenBusy: "coalesce",
+		})
+		.pipe(Effect.asVoid);
 
 /**
  * How a segment ended: the turn is over, it waits for approvals, or it failed

@@ -6,8 +6,7 @@ import type { RoutineView } from "@sugabots/core/conversations/routines/routine-
 import type { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import type { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
-import type { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
+import type { Turns } from "@sugabots/core/conversations/turns/turns";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import type { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
@@ -41,8 +40,7 @@ export type HttpServices =
 	| Chats.Service
 	| ChatView.Service
 	| ThreadView.Service
-	| TurnCancellation.Service
-	| ToolApprovals.Service
+	| Turns.Controls
 	| Routines.Service
 	| RoutineView.Service
 	| RoutineWebhooks.Service

@@ -26,6 +26,22 @@ export const Facilitate = Workflow.make("facilitate", {
 export const facilitateLane = (request: Pick<FacilitateRequest, "threadId">) =>
 	`facilitate:${request.threadId}`;
 
+/**
+ * Asks the Facilitator who speaks after a message, joining the caller's
+ * transaction. A request for a newer message replaces one still waiting,
+ * since only the latest message needs a speaker.
+ */
+export const admitFacilitation = (lanes: Lanes.Interface, request: FacilitateRequest) =>
+	lanes
+		.admit({
+			key: facilitateLane(request),
+			subject: request.threadId,
+			workflow: Facilitate,
+			payload: request,
+			whenBusy: "replace",
+		})
+		.pipe(Effect.asVoid);
+
 /** How an attempt ended: the floor is decided and given, or the attempt failed and changed nothing. */
 export const AttemptOutcome = Schema.Literals(["decided", "failed"]);
 export type AttemptOutcome = typeof AttemptOutcome.Type;

@@ -15,7 +15,7 @@ import { routine, routineExecution, thread } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import type { Ended } from "../turns/lifecycle.ts";
+import type { Turns } from "../turns/turns.ts";
 import { inScope, type Scope } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
 
@@ -74,7 +74,7 @@ export interface Interface {
 	 */
 	readonly start: (executionId: string) => Effect.Effect<schema.RoutineExecutionRow | undefined>;
 	/** Records how a running run is ending. */
-	readonly recordEnding: (executionId: string, ending: Ended) => Effect.Effect<void>;
+	readonly recordEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<void>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
 	 * was not running.
@@ -364,7 +364,7 @@ export type Definition = Pick<
 >;
 
 /** How a run's work ended. */
-export type Settled = Ended | { readonly state: "completed" };
+export type Settled = Turns.Ended | { readonly state: "completed" };
 
 export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") implements UserFacing {
 	get userMessage() {

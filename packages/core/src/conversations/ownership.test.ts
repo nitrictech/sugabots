@@ -23,7 +23,7 @@ const OWNERS: Record<string, readonly string[]> = {
 	threadSummary: ["core/src/conversations/summaries/repository.ts"],
 	threadCompaction: ["core/src/conversations/compaction/repository.ts"],
 	turn: ["core/src/conversations/turns/repository.ts"],
-	toolCall: ["core/src/conversations/tools/calls/repository.ts"],
+	toolCall: ["core/src/conversations/turns/tool-calls/repository.ts"],
 };
 
 const write = new RegExp(`\\.(insert|update|delete)\\((${Object.keys(OWNERS).join("|")})\\)`, "g");

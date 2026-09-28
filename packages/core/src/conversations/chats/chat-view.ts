@@ -25,6 +25,7 @@ import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
+import { respondingIn } from "../floor/floor.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -34,7 +35,6 @@ import {
 	personColumns,
 	toParticipant,
 } from "../threads/participants.ts";
-import { respondingIn } from "../turns/requests.ts";
 
 /**
  * What the chat screens show, of the chats the current actor can see: the

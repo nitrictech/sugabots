@@ -25,10 +25,16 @@ import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../threads/thread-view.ts";
-import { modelPrompt } from "../../turns/context.ts";
-import { replyTurnOf, TurnExecution } from "../../turns/execution.ts";
-import { TurnRepository } from "../../turns/repository.ts";
-import { prepareRunnable, releaseTurn, runningTurns, waitingTurns } from "../../turns/testing.ts";
+import {
+	modelPrompt,
+	prepareRunnable,
+	releaseTurn,
+	replyTurnOf,
+	runningTurns,
+	TurnExecution,
+	TurnRepository,
+	waitingTurns,
+} from "../../turns/testing.ts";
 import { CollaborationRefused, Collaborations } from "./collaborations.ts";
 import { CollaborationRepository } from "./repository.ts";
 import { collaborateTool } from "./tool.ts";

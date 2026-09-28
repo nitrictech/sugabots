@@ -1,5 +1,5 @@
 import { healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
-import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -183,7 +183,7 @@ describe("cookie request origins", () => {
 					? user
 					: null,
 			),
-			unimplemented(TurnCancellation.Service, { request: () => Effect.succeed(true) }),
+			unimplemented(Turns.Controls, { cancel: () => Effect.succeed(true) }),
 		),
 	);
 

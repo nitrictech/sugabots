@@ -19,28 +19,20 @@ import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import {
-	ApprovedToolCalls,
-	type ToolApprovalsIncomplete,
-} from "../tools/approvals/approved-calls.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
-import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
-import { toolsForTurn } from "../tools/for-turn.ts";
+import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
 	type PreparedTurn,
-	replyFloorMessage,
 	replyTurnOf,
 	TurnExecution,
 	type TurnRun,
 	turnRunFor,
 } from "./execution.ts";
-import { FloorControl } from "./floor-control.ts";
 import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
 import {
 	type ReplyDraft,
@@ -48,7 +40,8 @@ import {
 	type TurnCheckpoint,
 	TurnRepository,
 } from "./repository.ts";
-import { TurnRequests } from "./requests.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
+import { toolsForTurn } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -80,8 +73,6 @@ type SegmentServices =
 	| ToolCallRepository.Service
 	| Collaborations.Service
 	| ApprovedToolCalls.Service
-	| FloorControl.Service
-	| TurnRequests.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -240,8 +231,6 @@ const generateReply = (
 		Effect.gen(function* () {
 			const turns = yield* TurnRepository.Service;
 			const collaborations = yield* Collaborations.Service;
-			const floor = yield* FloorControl.Service;
-			const requests = yield* TurnRequests.Service;
 			const replyTurn = replyTurnOf(prepared);
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, reply)));
@@ -276,14 +265,7 @@ const generateReply = (
 				const { contextTokens } = streamed.value;
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
-				// and gives up waiting for an answer that lands a moment later. The
-				// summary is asked for in it too, so a completed reply is never left
-				// out of its thread's summary.
-				const followUp = {
-					threadId: prepared.context.thread.id,
-					agentId: prepared.context.agent.id,
-					sourceMessageId: prepared.responseMessage.id,
-				};
+				// and gives up waiting for an answer that lands a moment later.
 				yield* transaction(
 					Effect.gen(function* () {
 						// `answer` runs in a savepoint of this transaction, so a
@@ -303,27 +285,11 @@ const generateReply = (
 						yield* turns.complete(replyTurn, draft, {
 							contextTokens,
 							contextCapacity: prepared.context.windowTokens,
+							readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
+							answeredCollaboration: answered,
 						});
-						// An answer to a brief goes back to the agent that asked, which
-						// carries on in the parent thread, so nobody speaks next here.
-						if (!answered) {
-							yield* floor.giveFloor(replyFloorMessage(prepared, draft));
-						}
-						yield* requests.queueSummary(followUp);
 					}),
 				);
-				if (needsCompaction(contextTokens, prepared.context.windowTokens)) {
-					yield* requests
-						.queueCompaction({
-							...followUp,
-							readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
-						})
-						.pipe(
-							Effect.catchCause((cause) =>
-								Effect.logError("Queueing a thread compaction failed", cause),
-							),
-						);
-				}
 				return finished;
 			}
 

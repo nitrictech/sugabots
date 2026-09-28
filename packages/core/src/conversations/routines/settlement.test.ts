@@ -24,19 +24,22 @@ import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
-import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
-import type { Ended } from "../turns/lifecycle.ts";
-import { type TurnCheckpoint, TurnRepository } from "../turns/repository.ts";
 import {
 	prepareRunnable,
 	queueFacilitationForTests,
 	queueTurnForTests,
 	releaseFacilitation,
 	releaseTurn,
+	replyTurnOf,
 	runningTurns,
+	Turn,
+	type TurnCheckpoint,
+	TurnExecution,
+	TurnRepository,
+	turnLane,
 	waitingFacilitation,
 } from "../turns/testing.ts";
-import { Turn, turnLane } from "../turns/turn.workflow.ts";
+import type { Turns } from "../turns/turns.ts";
 import { RoutineRunner } from "./routine-runner.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
@@ -67,9 +70,9 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	/** Emits `events` in a transaction of their own, as a service would. */
 	const announce = (...events: ConversationEvent[]) => runOnPostgres(transaction(emit(events)));
 	/** An event ending the thread's routine run early, as `outcome`. */
-	const ended = (threadId: string, outcome: Ended) =>
+	const ended = (threadId: string, outcome: Turns.Ended) =>
 		ConversationEvent.TurnAbandoned({ threadId, agentId, outcome });
-	const failed = (error: UserMessage): Ended => ({ state: "failed", error });
+	const failed = (error: UserMessage): Turns.Ended => ({ state: "failed", error });
 	const executionOf = async (executionId: string) => {
 		const [row] = await onDatabase((db) =>
 			db.select().from(routineExecution).where(eq(routineExecution.id, executionId)),
@@ -590,7 +593,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await turns.complete(
 			replyTurnOf(prepared),
 			{ content: "Done.", collaborations: [], toolCalls: [] },
-			{},
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 
 		const types = delivered.map(({ event }) => event.type);

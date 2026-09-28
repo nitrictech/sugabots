@@ -32,10 +32,15 @@ import {
 } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
-import { ToolApprovalForbidden, ToolApprovals } from "../tools/approvals/tool-approvals.ts";
-import { type PreparedTurn, replyTurnOf, TurnExecution } from "../turns/execution.ts";
-import { TurnRepository } from "../turns/repository.ts";
-import { prepareRunnable, runningTurns } from "../turns/testing.ts";
+import {
+	type PreparedTurn,
+	prepareRunnable,
+	replyTurnOf,
+	runningTurns,
+	TurnExecution,
+	TurnRepository,
+} from "../turns/testing.ts";
+import { Turns } from "../turns/turns.ts";
 import { lockTriggers } from "./acceptance.ts";
 import { RoutineTriggerConflict } from "./routine.ts";
 import { RoutineRunner } from "./routine-runner.ts";
@@ -677,11 +682,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			const pending = await parkForApproval(prepared);
 			const decision = { podId, toolCallId: pending.id, decision: "allow_once" as const };
 			const approvalsAs = (personId: string) =>
-				onPostgresAs(personId)(Context.get(conversations, ToolApprovals.Service));
+				onPostgresAs(personId)(Context.get(conversations, Turns.Controls));
 
 			await expect(
 				approvalsAs(await somebody("member", true)).decide(decision),
-			).rejects.toBeInstanceOf(ToolApprovalForbidden);
+			).rejects.toBeInstanceOf(Turns.ToolApprovalForbidden);
 			const [undecided] = await onDatabase((db) =>
 				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
 			);
@@ -724,7 +729,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			await turnLocked;
 
 			const decided = await Promise.race([
-				onPostgresAs(userId)(Context.get(conversations, ToolApprovals.Service))
+				onPostgresAs(userId)(Context.get(conversations, Turns.Controls))
 					.decide({ podId, toolCallId: pending.id, decision: "allow_once" })
 					.then(() => "decided"),
 				new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),

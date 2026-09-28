@@ -1,6 +1,6 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ResourceHidden } from "../../authorization/access.ts";
 import { query } from "../../database/database.ts";
@@ -27,21 +27,32 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { Models } from "../../providers/models/models.ts";
+import { lane } from "../../workflows/sql.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
+import { compactionLane } from "../compaction/compaction.workflow.ts";
 import { Compactions } from "../compaction/compactions.ts";
+import { compactionLineTokens } from "../compaction/window.ts";
+import { loadFacilitatorScope } from "../floor/facilitator.ts";
 import { Summaries } from "../summaries/summaries.ts";
+import { summarise } from "../summaries/summary.steps.ts";
 import { conversationsForTests } from "../testing.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { TurnCancellation } from "../turns/cancellation.ts";
-import { modelPrompt } from "../turns/context.ts";
-import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
-import { loadFacilitatorScope } from "../turns/facilitator.ts";
-import { TurnRepository } from "../turns/repository.ts";
-import { prepareRunnable, queueTurnForTests, releaseTurn, runningTurns } from "../turns/testing.ts";
+import {
+	modelPrompt,
+	prepareRunnable,
+	queueTurnForTests,
+	releaseTurn,
+	replyTurnOf,
+	runningTurns,
+	TurnExecution,
+	TurnRepository,
+} from "../turns/testing.ts";
+import { Turns } from "../turns/turns.ts";
 import { ThreadView } from "./thread-view.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -56,12 +67,18 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
-	const cancellationAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, TurnCancellation.Service));
+	const controlsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const summaries = onPostgres(Context.get(conversations, Summaries.Service));
-	const compactions = onPostgres(Context.get(conversations, Compactions.Service));
+	const summaries = onPostgres({
+		prepare: Context.get(conversations, Summaries.Service).prepare,
+		complete: Context.get(conversations, Summaries.Service).complete,
+	});
+	const compactions = onPostgres({
+		prepare: Context.get(conversations, Compactions.Service).prepare,
+		complete: Context.get(conversations, Compactions.Service).complete,
+	});
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -707,7 +724,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(preparedTurn),
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
-			{ contextTokens: 30, contextCapacity: 200_000 },
+			{
+				contextTokens: 30,
+				contextCapacity: 200_000,
+				readKeptFrom: null,
+				answeredCollaboration: false,
+			},
 		);
 		await runOnPostgres(releaseTurn(firstRun));
 		const firstSummary = await preparedSummary({
@@ -719,15 +741,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		// The summariser works in its own thread hanging off the one it summarises,
 		// so its turns never appear in the conversation people are having.
-		const [summaryTurn] = await onDatabase((db) =>
-			db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, firstSummary.turnId)),
-		);
-		expect(summaryTurn?.threadId).not.toBe(details.thread.id);
+		expect(firstSummary.scribe.threadId).not.toBe(details.thread.id);
 		const [systemAgentThread] = await onDatabase((db) =>
 			db
 				.select({ systemAgentKey: thread.systemAgentKey, parentThreadId: thread.parentThreadId })
 				.from(thread)
-				.where(eq(thread.id, summaryTurn?.threadId as string)),
+				.where(eq(thread.id, firstSummary.scribe.threadId)),
 		);
 		expect(systemAgentThread).toMatchObject({
 			systemAgentKey: "summarise",
@@ -736,12 +755,25 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		// And it stays out of the pod's thread list.
 		const listed = await viewAs(memberId).list(workspaceId);
-		expect(listed.some((row) => row.id === summaryTurn?.threadId)).toBe(false);
+		expect(listed.some((row) => row.id === firstSummary.scribe.threadId)).toBe(false);
 		expect(listed.some((row) => row.id === details.thread.id)).toBe(true);
-		await summaries.complete(
-			firstSummary,
-			{ title: "Verify the release", content: "The release work is complete." },
-			1_000,
+		// Recorded as the Scribe's turn, measured at 1,000 tokens.
+		await runOnPostgres(
+			Context.get(conversations, Turns.Service).recordSystemTurn(
+				{
+					...firstSummary.scribe,
+					triggerMessageId: firstSummary.sourceMessageId,
+					model: firstSummary.model,
+					name: "summary",
+				},
+				() =>
+					Context.get(conversations, Summaries.Service)
+						.complete(firstSummary, {
+							title: "Verify the release",
+							content: "The release work is complete.",
+						})
+						.pipe(Effect.as({ value: undefined, contextTokens: 1_000 })),
+			),
 		);
 
 		const refreshed = await viewAs(memberId).get(details.thread.id);
@@ -789,7 +821,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(nextTurn),
 			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
-			{},
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 		const nextSummary = await preparedSummary({
 			threadId: details.thread.id,
@@ -805,10 +837,53 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				{ content: "Only approval remains." },
 			],
 		});
-		await summaries.complete(nextSummary, { content: "Only approval remains." }, undefined);
+		await summaries.complete(nextSummary, { content: "Only approval remains." });
 		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toBe(
 			"Verify the release",
 		);
+	});
+
+	it("records a summary the model could not write as the Scribe's failed turn", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Summarize this thread",
+		});
+		const preparedTurn = await prepareRunnable(turns, await runningTurn(details.thread.id));
+		await turnRecords.complete(
+			replyTurnOf(preparedTurn),
+			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+		);
+		const providerDown = Models.fromStream(() =>
+			Effect.fail(new Models.RequestFailed({ message: "provider down", reason: "unavailable" })),
+		);
+
+		await runOnPostgres(
+			summarise(
+				{
+					threadId: details.thread.id,
+					agentId,
+					sourceMessageId: preparedTurn.responseMessage.id,
+				},
+				providerDown,
+			).pipe(Effect.provideContext(conversations)),
+		);
+
+		const scribeTurns = await onDatabase((db) =>
+			db
+				.select({ status: turn.status, error: turn.error })
+				.from(turn)
+				.innerJoin(thread, eq(thread.id, turn.threadId))
+				.where(
+					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
+				),
+		);
+		expect(scribeTurns).toEqual([
+			{ status: "failed", error: "The model provider could not answer." },
+		]);
 	});
 
 	it("requests cancellation only once while an authorized turn remains active", async () => {
@@ -821,11 +896,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 		const prepared = await prepareRunnable(turns, await runningTurn(details.thread.id));
 
-		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(true);
-		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(false);
-		await expect(cancellationAs(outsiderId).request(prepared.turnId)).rejects.toThrow(
-			ResourceHidden,
-		);
+		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(true);
+		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(false);
+		await expect(controlsAs(outsiderId).cancel(prepared.turnId)).rejects.toThrow(ResourceHidden);
 		// Announced once, for the workflow running the turn.
 		const announced = await onDatabase((db) =>
 			db
@@ -894,7 +967,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
 			Array.from({ length: 11 }, (_, index) => `Message ${index + 4}`),
 		);
-		await compactions.complete(prepared, "The family is planning a trip.", undefined);
+		await compactions.complete(prepared, "The family is planning a trip.");
 
 		const turn = await prepareRunnable(turns, await runningTurn(details.thread.id));
 		expect(turn.context.compaction).toEqual({
@@ -915,7 +988,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(turn),
 			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
-			{ contextTokens: 70_000 },
+			{
+				contextTokens: 70_000,
+				contextCapacity: turn.context.windowTokens,
+				readKeptFrom: prepared.keptFrom.toISOString(),
+				answeredCollaboration: false,
+			},
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
 			usedTokens: 70_000,
@@ -1001,6 +1079,52 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			"Message 17",
 		]);
 	});
+
+	it.each([
+		// A 128K model compacts at 70% of its own window, not of the 256K ceiling.
+		{ contextTokens: compactionLineTokens(128_000) - 1, asked: false },
+		{ contextTokens: compactionLineTokens(128_000), asked: true },
+	])(
+		"asks for a compaction only once a reply's prompt reaches the compaction line ($contextTokens tokens)",
+		async ({ contextTokens, asked }) => {
+			const details = await createThread({
+				workspaceId,
+				podId,
+				hostAgentId: agentId,
+				initiatorUserId: memberId,
+				message: "Plan the trip",
+			});
+			const prepared = await prepareRunnable(turns, await runningTurn(details.thread.id));
+
+			await turnRecords.complete(
+				replyTurnOf(prepared),
+				{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+				{
+					contextTokens,
+					contextCapacity: 128_000,
+					readKeptFrom: null,
+					answeredCollaboration: false,
+				},
+			);
+
+			const [compaction] = await onDatabase((db) =>
+				db
+					.select({ payload: lane.payload })
+					.from(lane)
+					.where(eq(lane.key, compactionLane({ threadId: details.thread.id }))),
+			);
+			expect(compaction?.payload).toEqual(
+				asked
+					? {
+							threadId: details.thread.id,
+							agentId,
+							sourceMessageId: prepared.responseMessage.id,
+							readKeptFrom: null,
+						}
+					: undefined,
+			);
+		},
+	);
 
 	it("searches history in any language: stemmed, as written, and as substrings", async () => {
 		const details = await createThread({
@@ -1150,7 +1274,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(turn),
 			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
-			{ contextTokens: 50_000, contextCapacity: turn.context.windowTokens },
+			{
+				contextTokens: 50_000,
+				contextCapacity: turn.context.windowTokens,
+				readKeptFrom: null,
+				answeredCollaboration: false,
+			},
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
 			windowTokens: 128_000,

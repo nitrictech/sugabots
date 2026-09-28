@@ -25,7 +25,6 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { lockRoutineSettlementOf, routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
-import { ToolCallRepository } from "../tools/calls/repository.ts";
 import {
 	ACTIVE_STATUSES,
 	type Ended,
@@ -39,6 +38,7 @@ import {
 	type TurnState,
 	transition,
 } from "./lifecycle.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
 
 /**
  * The only writer of `turn`, and of a turn's reply message while the turn
@@ -83,7 +83,7 @@ export interface Interface {
 	readonly complete: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		measured: ContextMeasurement,
+		completion: TurnCompletion,
 	) => Effect.Effect<void>;
 	/**
 	 * Records the run as failed, telling people `userMessage`, and returns
@@ -454,7 +454,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (reply, draft, measured) =>
+		complete: (reply, draft, completion) =>
 			operation(
 				"complete",
 				transaction(
@@ -465,15 +465,21 @@ export const make = Effect.gen(function* () {
 						);
 						if (locked?.decided._tag !== "Next") return;
 						yield* writeReply(reply, draft, "complete");
-						yield* write(locked.id, locked.decided.state, measurementColumns(measured));
+						yield* write(locked.id, locked.decided.state, measurementColumns(completion));
 						yield* emit([
 							ConversationEvent.TurnCompleted({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
 								podId: reply.podId,
 								turnId: locked.id,
+								agentId: reply.agentId,
+								reason: reply.reason,
 								messageId: reply.messageId,
 								content: draft.content,
+								contextTokens: completion.contextTokens,
+								contextCapacity: completion.contextCapacity,
+								readKeptFrom: completion.readKeptFrom,
+								answeredCollaboration: completion.answeredCollaboration,
 							}),
 						]);
 					}),
@@ -699,6 +705,8 @@ export interface ReplyTurn {
 	readonly threadId: string;
 	readonly workspaceId: string;
 	readonly podId: string;
+	readonly agentId: string;
+	readonly reason: TurnReason | undefined;
 	readonly messageId: string;
 }
 
@@ -816,6 +824,14 @@ export interface ContextMeasurement {
 	contextTokens?: number;
 	/** The window the prompt was read with. */
 	contextCapacity?: number;
+}
+
+/** How a reply completed, for what reacts to it (see `TurnCompleted`). */
+export interface TurnCompletion extends ContextMeasurement {
+	/** A reply is always read with a window. */
+	readonly contextCapacity: number;
+	readonly readKeptFrom: string | null;
+	readonly answeredCollaboration: boolean;
 }
 
 function measurementColumns(measured: ContextMeasurement) {

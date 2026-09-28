@@ -8,8 +8,8 @@ import { query, serviceOperations, transaction } from "../../../database/databas
 import { toolCall } from "../../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
-import { TurnRepository } from "../../turns/repository.ts";
-import { ToolCallRepository } from "../calls/repository.ts";
+import { TurnRepository } from "../repository.ts";
+import { ToolCallRepository } from "../tool-calls/repository.ts";
 
 /**
  * A turn reading what people decided on the calls it parked for approval, and

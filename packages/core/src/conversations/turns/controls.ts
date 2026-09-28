@@ -1,51 +1,59 @@
-export * as ToolApprovals from "./tool-approvals.ts";
-
-import type { ToolApprovalDecision } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../../../authorization/access.ts";
-import { Authorization } from "../../../authorization/authorization.ts";
-import type { CurrentActor } from "../../../authorization/current-actor.ts";
-import { query, serviceOperations, transaction } from "../../../database/database.ts";
-import { thread, toolCall, turn } from "../../../database/schema.ts";
-import { isUuid } from "../../../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../../../user-message.ts";
-import { lockRoutineSettlementOf } from "../../routines/execution.ts";
-import { awaitsDecisions } from "../../turns/lifecycle.ts";
-import { TurnSignals } from "../../turns/signals.ts";
-import { awaitsDecision } from "../calls/lifecycle.ts";
-import { ToolCallRepository } from "../calls/repository.ts";
+import { Data, Effect } from "effect";
+import { ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import { Visibility } from "../../authorization/visibility.ts";
+import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
+import { thread, toolCall, turn } from "../../database/schema.ts";
+import { isUuid } from "../../ids/ids.ts";
+import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { lockRoutineSettlementOf } from "../routines/execution.ts";
+import { awaitsDecisions } from "./lifecycle.ts";
+import { TurnRepository } from "./repository.ts";
+import { TurnSignals } from "./signals.ts";
+import { awaitsDecision } from "./tool-calls/lifecycle.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
+import type { Turns } from "./turns.ts";
 
 /**
- * People deciding the tool calls a reply parked for approval. The turn reading
- * their decisions and running what they allowed is `ApprovedToolCalls`.
+ * `Turns.Controls`: people cancelling a turn and deciding the tool calls it
+ * parked for approval. The turn reading their decisions and running what they
+ * allowed is `ApprovedToolCalls`.
  */
-export interface Interface {
-	/**
-	 * Checks the current actor may make the decision, then sends it, as theirs,
-	 * to the turn's workflow, which records it.
-	 */
-	readonly decide: (input: {
-		podId: string;
-		toolCallId: string;
-		decision: ToolApprovalDecision["decision"];
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
-		CurrentActor.Service
-	>;
-}
-
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/ToolApprovals",
-) {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("ToolApprovals");
+export const makeControls = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Turns.ControlsInterface>("Turns.Controls");
 	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
+	const turns = yield* TurnRepository.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
 	const signals = yield* TurnSignals.Service;
-	return Service.of({
+	return {
+		cancel: (turnId) =>
+			operation(
+				"cancel",
+				transaction(
+					Effect.gen(function* () {
+						const hidden = new ResourceHidden({ resource: "turn" });
+						if (!isUuid(turnId)) return yield* hidden;
+						const [candidate] = yield* query((db) =>
+							db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, turnId)).limit(1),
+						);
+						if (!candidate) return yield* hidden;
+						yield* visibility
+							.thread(candidate.threadId)
+							.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
+						const requested = yield* turns.requestCancel(turnId);
+						if (requested._tag === "Refused") return false;
+						// Telling the workflow is the cancellation; it records it. The flag
+						// set with it stops the next segment instead if the workflow has
+						// just stopped waiting, since the signal would then go unheard.
+						if (requested._tag === "SignalOwner") {
+							yield* afterCommit(signals.cancel(requested.owner));
+						}
+						return true;
+					}),
+				),
+			),
 		decide: (input) =>
 			operation(
 				"decide",
@@ -114,14 +122,8 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
-	});
+	} satisfies Turns.ControlsInterface;
 });
-
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ToolCallRepository.layer]),
-);
 
 export class ToolApprovalNotFound
 	extends Data.TaggedError("ToolApprovalNotFound")

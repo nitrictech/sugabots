@@ -8,8 +8,7 @@ import { RoutineView } from "@sugabots/core/conversations/routines/routine-view"
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
-import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
@@ -100,8 +99,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Chats.Service),
 	unimplemented(ChatView.Service),
 	unimplemented(ThreadView.Service),
-	unimplemented(TurnCancellation.Service),
-	unimplemented(ToolApprovals.Service),
+	unimplemented(Turns.Controls),
 	unimplemented(Routines.Service),
 	unimplemented(RoutineView.Service),
 	unimplemented(RoutineWebhooks.Service),

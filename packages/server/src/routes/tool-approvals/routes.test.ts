@@ -1,6 +1,6 @@
 import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -8,8 +8,8 @@ import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
- * The approval route, over a double of `ToolApprovals`, which decides who may
- * make which decision; `tools/calls/repository.test.ts` tests that.
+ * The approval route, over a double of `Turns.Controls`, which decides who may
+ * make which decision; `turns/tool-calls/repository.test.ts` tests that.
  */
 
 const MEMBER_ID = "0199a3a0-0000-7000-8000-000000000003";
@@ -23,9 +23,9 @@ const resolveUser: UserResolver = async () => ({
 	image: null,
 });
 
-function app(decide: ToolApprovals.Interface["decide"]) {
+function app(decide: Turns.ControlsInterface["decide"]) {
 	return createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(ToolApprovals.Service, { decide })),
+		Layer.merge(identifiedBy(resolveUser), unimplemented(Turns.Controls, { decide })),
 	);
 }
 
@@ -39,7 +39,7 @@ const approve = (routes: ReturnType<typeof app>, decision: string) =>
 describe("tool approval routes", () => {
 	it("decides the call in the path as the person asking", async () => {
 		let decidedAs: string | undefined;
-		const decide = vi.fn<ToolApprovals.Interface["decide"]>(() =>
+		const decide = vi.fn<Turns.ControlsInterface["decide"]>(() =>
 			Effect.map(CurrentActor.Service, ({ userId }) => {
 				decidedAs = userId;
 			}),
@@ -66,7 +66,7 @@ describe("tool approval routes", () => {
 	});
 
 	it("has no standing approval to give: every call that changes things is decided on its own", async () => {
-		const decide = vi.fn<ToolApprovals.Interface["decide"]>(() => Effect.void);
+		const decide = vi.fn<Turns.ControlsInterface["decide"]>(() => Effect.void);
 
 		const response = await approve(app(decide), "always_allow");
 

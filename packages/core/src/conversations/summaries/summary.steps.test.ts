@@ -5,7 +5,7 @@ import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { TurnRepository } from "../turns/repository.ts";
+import { Turns } from "../turns/turns.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
@@ -25,7 +25,10 @@ const request: SummaryRequest = {
 const prepared: PreparedSummary = {
 	_tag: "Prepared",
 	request,
-	turnId: "0199a3a0-0000-7000-8000-000000000005",
+	scribe: {
+		threadId: "0199a3a0-0000-7000-8000-000000000005",
+		agentId: "0199a3a0-0000-7000-8000-000000000008",
+	},
 	threadId: request.threadId,
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
 	podId: "0199a3a0-0000-7000-8000-000000000007",
@@ -41,7 +44,7 @@ const prepared: PreparedSummary = {
 describe("summarise", () => {
 	it("records a timeout rather than a shutdown and aborts without retrying", async () => {
 		vi.useFakeTimers();
-		const { summaries, turns } = fakes();
+		const { summaries, turns, ended } = fakes();
 		let signal: AbortSignal | undefined;
 		const stream = vi.fn<Models.Interface["stream"]>(() =>
 			Effect.gen(function* () {
@@ -59,10 +62,7 @@ describe("summarise", () => {
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
-				prepared.turnId,
-				"The model did not answer in time.",
-			);
+			expect(ended).toEqual([{ failed: "The model did not answer in time." }]);
 			expect(summaries.complete).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
@@ -70,7 +70,7 @@ describe("summarise", () => {
 	});
 
 	it("persists the first generated title and summary", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, recorded, ended } = fakes();
 		const model = Models.fromStream(() =>
 			Effect.sync(() =>
 				streamed(chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'), {
@@ -83,16 +83,23 @@ describe("summarise", () => {
 			summarise(request, model).pipe(Effect.provide(services(summaries, turns))),
 		);
 
-		expect(summaries.complete).toHaveBeenCalledWith(
-			prepared,
-			{ title: "Prepare release notes", content: "Notes are ready." },
-			20,
-		);
-		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
+		expect(recorded).toEqual([
+			{
+				...prepared.scribe,
+				triggerMessageId: request.sourceMessageId,
+				model: prepared.model,
+				name: "summary",
+			},
+		]);
+		expect(summaries.complete).toHaveBeenCalledWith(prepared, {
+			title: "Prepare release notes",
+			content: "Notes are ready.",
+		});
+		expect(ended).toEqual([{ completed: 20 }]);
 	});
 
 	it("asks again when the first summary is not the shape it asked for", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, ended } = fakes();
 		const stream = vi.fn(() => Effect.sync(() => streamed(chunks("Notes are ready."))));
 
 		await runWithServices(
@@ -105,14 +112,11 @@ describe("summarise", () => {
 		// whole summary being retried over one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
-			prepared.turnId,
-			"The model's answer could not be used.",
-		);
+		expect(ended).toEqual([{ failed: "The model's answer could not be used." }]);
 	});
 
 	it("takes the answer as soon as one of the asks comes back usable", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, ended } = fakes();
 		const stream = vi
 			.fn(() =>
 				Effect.sync(() => streamed(chunks('{"title":"Release","summary":"Notes are ready."}'))),
@@ -128,16 +132,15 @@ describe("summarise", () => {
 		);
 
 		expect(stream).toHaveBeenCalledTimes(2);
-		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
-		expect(summaries.complete).toHaveBeenCalledWith(
-			prepared,
-			{ title: "Release", content: "Notes are ready." },
-			undefined,
-		);
+		expect(ended).toEqual([{ completed: undefined }]);
+		expect(summaries.complete).toHaveBeenCalledWith(prepared, {
+			title: "Release",
+			content: "Notes are ready.",
+		});
 	});
 
 	it("reads a first summary the model wrapped in a markdown fence", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, ended } = fakes();
 		const fenced = ["```json", '{"title":"Release","summary":"Notes are ready."}', "```"].join(
 			"\n",
 		);
@@ -146,16 +149,15 @@ describe("summarise", () => {
 			summarise(request, scriptedModel(fenced)).pipe(Effect.provide(services(summaries, turns))),
 		);
 
-		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
-		expect(summaries.complete).toHaveBeenCalledWith(
-			prepared,
-			{ title: "Release", content: "Notes are ready." },
-			undefined,
-		);
+		expect(ended).toEqual([{ completed: undefined }]);
+		expect(summaries.complete).toHaveBeenCalledWith(prepared, {
+			title: "Release",
+			content: "Notes are ready.",
+		});
 	});
 
 	it("does not re-ask a provider that is down, and records the failure", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, ended } = fakes();
 		const stream = vi.fn(() =>
 			Effect.fail(
 				new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
@@ -171,15 +173,12 @@ describe("summarise", () => {
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(
-			prepared.turnId,
-			"The model provider could not answer.",
-		);
+		expect(ended).toEqual([{ failed: "The model provider could not answer." }]);
 		expect(summaries.complete).not.toHaveBeenCalled();
 	});
 
 	it("does nothing when the summary is no longer needed", async () => {
-		const { summaries, turns } = fakes();
+		const { summaries, turns, recorded } = fakes();
 		vi.mocked(summaries.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				_tag: "Skipped",
@@ -192,7 +191,7 @@ describe("summarise", () => {
 		);
 
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
+		expect(recorded).toEqual([]);
 	});
 
 	it("leaves a transient failure to the engine, which retries the activity", async () => {
@@ -207,28 +206,45 @@ describe("summarise", () => {
 	});
 });
 
-/** Prepares `prepared` and records nothing; the cases check what was asked to be recorded. */
+/**
+ * Prepares `prepared` and records nothing. The Scribe's turn is recorded as
+ * how its work ended, as `Turns.recordSystemTurn` would write it: completed
+ * with the prompt size measured, or failed with what people are told.
+ */
 function fakes() {
+	const recorded: Turns.SystemTurn[] = [];
+	const ended: Array<{ completed: number | undefined } | { failed: string }> = [];
+	const recordSystemTurn: Turns.Interface["recordSystemTurn"] = (systemTurn, work) =>
+		Effect.suspend(() => {
+			recorded.push(systemTurn);
+			return work("0199a3a0-0000-7000-8000-000000000009").pipe(
+				Effect.map(({ value, contextTokens }) => {
+					ended.push({ completed: contextTokens });
+					return { _tag: "Completed", value } as const;
+				}),
+				Effect.catch((failure) =>
+					Effect.sync(() => {
+						ended.push({ failed: failure.userMessage });
+						return { _tag: "Failed" } as const;
+					}),
+				),
+			);
+		});
 	return {
 		summaries: {
 			prepare: vi.fn<Summaries.Interface["prepare"]>(() => Effect.succeed(prepared)),
 			complete: vi.fn<Summaries.Interface["complete"]>(() => Effect.void),
 		},
-		turns: {
-			failSystemAgentTurn: vi.fn<TurnRepository.Interface["failSystemAgentTurn"]>(
-				() => Effect.void,
-			),
-		},
+		turns: { recordSystemTurn },
+		recorded,
+		ended,
 	};
 }
 
 /** The services a summary runs on, doing only what `summaries` and `turns` do. */
-function services(
-	summaries: Partial<Summaries.Interface>,
-	turns: Partial<TurnRepository.Interface>,
-) {
+function services(summaries: Partial<Summaries.Interface>, turns: Partial<Turns.Interface>) {
 	return Layer.mergeAll(
 		unimplemented(Summaries.Service, summaries),
-		unimplemented(TurnRepository.Service, turns),
+		unimplemented(Turns.Service, turns),
 	);
 }

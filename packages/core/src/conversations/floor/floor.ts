@@ -1,5 +1,5 @@
 import { mentionedHandles, type PodRouting, type ThreadType } from "@sugabots/contracts";
-import { eq, sql } from "drizzle-orm";
+import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor, QueryFailure } from "../../database/database.ts";
 import {
@@ -10,7 +10,10 @@ import {
 	thread,
 	threadParticipant,
 } from "../../database/schema.ts";
+import { laneBusy } from "../../workflows/lanes.ts";
 import { crewOf } from "../threads/participants.ts";
+import { Turns } from "../turns/turns.ts";
+import { Facilitate } from "./facilitate.workflow.ts";
 
 /**
  * Who has the floor: which agent, if any, speaks after a message.
@@ -185,3 +188,11 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		agentRun,
 	};
 });
+
+/**
+ * respondingIn reports, as a condition for a query, whether an agent is
+ * answering in the thread `threadId` or about to: its turn is running or
+ * waiting to start, or the Facilitator is choosing who speaks.
+ */
+export const respondingIn = (threadId: SQLWrapper) =>
+	sql<boolean>`(${Turns.busyIn(threadId)} or ${laneBusy(threadId, [Facilitate._tag])})`;

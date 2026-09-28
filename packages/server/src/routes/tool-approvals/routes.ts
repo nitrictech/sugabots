@@ -1,5 +1,5 @@
 import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -8,9 +8,9 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 
 export const toolApprovalRoutes = HttpApiBuilder.group(ServerApi, "toolApprovals", (handlers) =>
 	Effect.gen(function* () {
-		const approvals = yield* ToolApprovals.Service;
+		const turns = yield* Turns.Controls;
 		return handlers.handle("decide", ({ params, payload }) =>
-			approvals
+			turns
 				.decide({
 					podId: params.podId,
 					toolCallId: params.toolCallId,

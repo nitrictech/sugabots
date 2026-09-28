@@ -2,7 +2,7 @@ export * as RoutineSettlement from "./settlement.ts";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
+import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	collaboration,
@@ -15,13 +15,10 @@ import { UserMessage } from "../../user-message.ts";
 import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import { Facilitate } from "../floor/facilitate.workflow.ts";
 import { workingThreadsOf } from "../threads/tree.ts";
 import { CollaborationRepository } from "../tools/collaborate/repository.ts";
-import { Facilitate } from "../turns/facilitate.workflow.ts";
-import type { Ended } from "../turns/lifecycle.ts";
-import { TurnRepository } from "../turns/repository.ts";
-import { TurnSignals } from "../turns/signals.ts";
-import { Turn } from "../turns/turn.workflow.ts";
+import { Turns } from "../turns/turns.ts";
 import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
 import { RoutineRepository } from "./repository.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
@@ -60,32 +57,24 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineSettlement");
 	const { emit } = yield* ConversationEvents.Service;
-	const turns = yield* TurnRepository.Service;
+	const turns = yield* Turns.Service;
 	const collaborations = yield* CollaborationRepository.Service;
 	const routines = yield* RoutineRepository.Service;
-	const signals = yield* TurnSignals.Service;
 	const runs = yield* RoutineRuns.Service;
 
 	/** Cancels the work still going on in the run's threads `work`. */
 	const cancelWork = (work: readonly string[]) =>
 		Effect.gen(function* () {
 			yield* collaborations.failUnder(work);
-			// A cancelled waiting turn's workflow still waits for its approvals,
-			// holding its lane, until it is told to stop.
-			const stillWaiting = yield* turns.cancelUnder(work);
-			yield* afterCommit(
-				Effect.forEach(stillWaiting, (owner) => signals.cancel(owner), { discard: true }),
-			);
-			yield* query((db) =>
-				db.execute(dropWaiting(threadIdsRelation(work), [Turn._tag, Facilitate._tag])),
-			);
+			yield* turns.stopUnder(work);
+			yield* query((db) => db.execute(dropWaiting(threadIdsRelation(work), [Facilitate._tag])));
 		});
 
 	/**
 	 * Settles the running routine run the thread `threadId` belongs to, if its
 	 * work is done, first adding `outcome` to how it is ending.
 	 */
-	const settle = (threadId: string, outcome?: Ended) =>
+	const settle = (threadId: string, outcome?: Turns.Ended) =>
 		transaction(
 			Effect.gen(function* () {
 				const executionId = yield* query((db) => findRoutineExecutionId(db, threadId));
@@ -162,7 +151,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([TurnRepository.layer, CollaborationRepository.layer, RoutineRepository.layer]),
+	Layer.provide([CollaborationRepository.layer, RoutineRepository.layer]),
 );
 
 /** What people are told about a run whose workflow failed; the cause goes only to the logs. */
@@ -171,7 +160,7 @@ const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpect
 /** The thread an event may let a routine run settle in, and how the run ends if it ends it early. */
 function settlementFor(
 	event: ConversationEvent,
-): Array<{ readonly threadId: string; readonly outcome?: Ended }> {
+): Array<{ readonly threadId: string; readonly outcome?: Turns.Ended }> {
 	switch (event._tag) {
 		case "TurnCompleted":
 		case "LaneReleased":
@@ -199,14 +188,17 @@ function settlementFor(
  * endingAfter returns how a run ends once `outcome` is added to `ending`, how
  * it was already ending. A failure stands over a cancellation.
  */
-function endingAfter(ending: Ended | undefined, outcome: Ended | undefined): Ended | undefined {
+function endingAfter(
+	ending: Turns.Ended | undefined,
+	outcome: Turns.Ended | undefined,
+): Turns.Ended | undefined {
 	if (!outcome || ending?.state === "failed") return ending;
 	return outcome;
 }
 
 /** settledAs returns how a run whose work is over ends: as it was ending, or else as its last turn did. */
 function settledAs(
-	ending: Ended | undefined,
+	ending: Turns.Ended | undefined,
 	lastTurn: { status: string; error: UserMessage | null } | undefined,
 ): RoutineRepository.Settled {
 	if (ending) return ending;
@@ -233,7 +225,7 @@ const runningRun = (executionId: string) =>
 	);
 
 /** How the run is already ending, if something has started ending it. */
-function endingOf(run: RoutineExecutionRow): Ended | undefined {
+function endingOf(run: RoutineExecutionRow): Turns.Ended | undefined {
 	if (run.pendingTerminalState === "cancelled") return { state: "cancelled" };
 	if (run.pendingTerminalState === "failed") {
 		// `pending_terminal_error` is nullable in the schema; a failure recorded
@@ -299,7 +291,11 @@ const stillBusy = (work: readonly string[], ending: boolean) =>
 				sql`select (
 					exists (
 						select 1 from (${threadIdsRelation(work)}) as work(id)
-						where ${laneBusy(sql`work.id`, ending ? [Facilitate._tag] : [Turn._tag, Facilitate._tag])}
+						where ${
+							ending
+								? laneBusy(sql`work.id`, [Facilitate._tag])
+								: sql`(${Turns.busyIn(sql`work.id`)} or ${laneBusy(sql`work.id`, [Facilitate._tag])})`
+						}
 					)
 					or exists (
 						select 1 from ${turn}

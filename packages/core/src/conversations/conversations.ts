@@ -8,6 +8,7 @@ import { Chats } from "./chats/chats.ts";
 import { Compactions } from "./compaction/compactions.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
+import { FloorControl } from "./floor/floor-control.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
 import { RoutineView } from "./routines/routine-view.ts";
 import { RoutineWebhooks } from "./routines/routine-webhooks.ts";
@@ -17,22 +18,17 @@ import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
-import { ApprovedToolCalls } from "./tools/approvals/approved-calls.ts";
-import { ToolApprovals } from "./tools/approvals/tool-approvals.ts";
-import { ToolCallRepository } from "./tools/calls/repository.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
-import { TurnCancellation } from "./turns/cancellation.ts";
-import { TurnExecution } from "./turns/execution.ts";
-import { FloorControl } from "./turns/floor-control.ts";
-import { TurnRepository } from "./turns/repository.ts";
+import { Turns } from "./turns/turns.ts";
 
+/**
+ * `Turns` is provided here, once, to all of these. The turn's own steps call
+ * back into collaborations and floor control, so a service providing it
+ * itself would load it before it exists.
+ */
 const services = Layer.mergeAll(
 	Chats.layer,
 	Collaborations.layer,
-	ToolApprovals.layer,
-	ApprovedToolCalls.layer,
-	TurnExecution.layer,
-	TurnCancellation.layer,
 	Routines.layer,
 	RoutineWebhooks.layer,
 	RoutineRunner.layer,
@@ -43,14 +39,9 @@ const services = Layer.mergeAll(
 	ThreadView.layer,
 	RoutineView.layer,
 	FloorControl.layer,
-	// The repositories workflow steps write through: a turn's steps record its
-	// reply and tool calls, a summary's failure is recorded on the Scribe's
-	// turn, as is a compaction's, and the Facilitator brings the agent it picks
-	// into the thread.
-	TurnRepository.layer,
-	ToolCallRepository.layer,
+	// The Facilitator's workflow step brings the agent it picks into the thread.
 	ThreadRepository.layer,
-);
+).pipe(Layer.provideMerge(Turns.layer));
 
 /** Everything `layer` provides. */
 export type Services = Layer.Success<typeof services> | ConversationEvents.Service;
@@ -58,8 +49,10 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
 /**
  * The conversation services, with `ConversationEvents` handing what they
  * emit to its handlers, in order: the thread feed tells watching clients what
- * happened, routine settlement ends the runs that work finished, and
- * collaborations whose collaborator stopped without answering fail.
+ * happened, routine settlement ends the runs that work finished,
+ * collaborations whose collaborator stopped without answering fail, the floor
+ * passes after each completed reply, and the reply asks for its thread's
+ * summary and, past the compaction line, its compaction once it commits.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
@@ -75,6 +68,9 @@ export const layer = Layer.effectContext(
 			ThreadFeed.handler(outbox),
 			Context.get(built, RoutineSettlement.Service).handler,
 			Context.get(built, Collaborations.Service).handler,
+			Context.get(built, FloorControl.Service).handler,
+			Context.get(built, Summaries.Service).handler,
+			Context.get(built, Compactions.Service).handler,
 		]);
 		return Context.add(built, ConversationEvents.Service, events);
 	}),
