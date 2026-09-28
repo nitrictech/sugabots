@@ -60,3 +60,48 @@ Summaries need a [behind-the-scenes
 model](/docs/models#behind-the-scenes-model).
 
 </Tip>
+
+## Long conversations
+
+A bot reads its chat every time it replies, and a model can only read so much at
+once: its context window. So when a chat gets long, Sugabots **compacts** what
+the bot reads. You don't have to do anything, and nothing is deleted: everyone
+still sees the whole chat.
+
+<CompactionDemo />
+
+How it works:
+
+- **It starts early.** After each reply, Sugabots checks how much of the bot's
+  context window that reply's prompt filled. Past 70%, it compacts the chat.
+  That line sits well below the limit, so there's room to keep chatting while
+  it works.
+- **It happens in the background.** Nobody waits for it, and nothing shows in
+  the chat.
+- **Recent messages stay whole.** The newest messages, about a quarter of the
+  context window, stay word for word. The ones just before them become a summary
+  at the head of what the bot reads. It keeps decisions, requests and promises,
+  open questions, and key facts like dates, prices and links, each with who
+  said it.
+- **The summary carries forward.** When the chat fills up again, the next
+  summary folds in the last one, so what the bot remembers keeps up with the
+  chat.
+- **The oldest messages are searched, not read.** The first compaction only
+  summarises the stretch just before the newest messages, so anything older is
+  left out of what the bot reads. The bot can still search everything before
+  its word-for-word messages, and does when it needs a detail the summary
+  doesn't have.
+
+The details panel shows how much of the bot's **short-term memory** the chat
+fills, where it gets compacted, and when it was last compacted.
+
+Compacting uses the bot's own model, so a chat is summarised as well as it is
+read. Sugabots treats no model as having a context window over 256K tokens, and
+treats a model whose size it doesn't know as having exactly that.
+
+<Tip>
+
+If a compaction fails or hasn't finished, the bot keeps replying from as many of
+the newest messages as fit, and the next reply past the line tries again.
+
+</Tip>
