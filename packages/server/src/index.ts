@@ -1,18 +1,13 @@
 import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { chatStore } from "@sugabots/core/conversations/chats/store";
+import { composeConversations } from "@sugabots/core/conversations/composition";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
-import { routineStore } from "@sugabots/core/conversations/routines/store";
-import { queueSummary, summaryStore } from "@sugabots/core/conversations/summaries/store";
+import { queueSummary } from "@sugabots/core/conversations/summaries/store";
 import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
 import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/worker";
-import { threadStore } from "@sugabots/core/conversations/threads/store";
-import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
 import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
-import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
-import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
 import {
@@ -23,7 +18,6 @@ import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turn
 import { workspaceTurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
-import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
 import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/worker";
 import { Credentials } from "@sugabots/core/credentials/credentials";
@@ -60,11 +54,6 @@ import { VERSION } from "./version.ts";
 import { Workflows } from "./workflows.ts";
 
 /**
- * The process. Builds every part of the API and binds a port. This is the only
- * file that knows how the parts fit.
- */
-
-/**
  * How long a client gets to finish what it was sent before its socket is cut.
  *
  * Past this the process is holding the port and, in development, the watcher
@@ -73,6 +62,7 @@ import { Workflows } from "./workflows.ts";
  */
 const SHUTDOWN_GRACE = Duration.seconds(3);
 
+/** The process: builds every part of the API and binds a port. */
 const main = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
 	const installation = yield* Installation.Service;
@@ -83,7 +73,6 @@ const main = Effect.gen(function* () {
 	const eventStore = yield* postgresEventStore;
 	// Every process runs a worker, so what one writes the others must hear about.
 	const bus = createEventBus({ store: eventStore, relay: yield* postgresEventRelay(eventStore) });
-	const publishEvents = eventPublisher(bus);
 
 	const egress = yield* Egress.Service;
 	const httpClients = egress.providers;
@@ -99,9 +88,15 @@ const main = Effect.gen(function* () {
 	);
 	const lanes = Context.get(engine, Lanes.Service);
 	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
-	const signals = turnSignals(workflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
-	const queueFacilitation = queueFacilitationInLane(lanes);
+	const publishEvents = eventPublisher(bus);
+	const conversations = composeConversations({
+		publishEvents,
+		queueTurn,
+		queueFacilitation: queueFacilitationInLane(lanes),
+		signals: turnSignals(workflowEngine),
+		routineRuns: routineRunsInLanes(lanes, workflowEngine),
+	});
 	const stores = {
 		pods: podStore,
 		agents: agentStore,
@@ -110,19 +105,7 @@ const main = Effect.gen(function* () {
 		modelProviders,
 		searchProviders: searchProviderStore(credentials),
 		connections: connectionStore(credentials),
-		chats: chatStore(publishEvents, queueTurn, queueFacilitation),
-		routines: routineStore(
-			publishEvents,
-			queueTurn,
-			signals,
-			routineRunsInLanes(lanes, workflowEngine),
-		),
-		threads: threadStore(),
-		turns: turnStore(publishEvents, queueTurn, queueFacilitation, signals),
-		summaries: summaryStore(publishEvents),
-		collaborations: collaborationStore(publishEvents, queueTurn),
-		calls: toolCallStore(publishEvents),
-		approvals: toolApprovalStore(publishEvents, signals),
+		...conversations.stores,
 	};
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.

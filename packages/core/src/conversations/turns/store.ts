@@ -1,12 +1,5 @@
 import type { AgentColor, PodRouting, ThreadType } from "@sugabots/contracts";
-import {
-	type Message,
-	messagePartsFor,
-	streamEvent,
-	type ThreadParticipant,
-	threadChannel,
-	workspaceChannel,
-} from "@sugabots/contracts";
+import { type Message, messagePartsFor, type ThreadParticipant } from "@sugabots/contracts";
 import type { ModelMessage } from "ai";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -17,7 +10,7 @@ import {
 	query,
 	transaction,
 } from "../../database/database.ts";
-import type { PendingEvent, PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	type AgentRow,
 	agent,
@@ -34,17 +27,17 @@ import {
 	workspace,
 } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
+import { ConversationEvent } from "../events.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../routines/execution.ts";
 import { loadParticipants, participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
-import { toToolCallPart } from "../threads/tool-calls.ts";
+import { toolCallChange } from "../threads/tool-calls.ts";
 import { visibleThread } from "../threads/visibility.ts";
 import type { PendingToolApproval } from "../tools/approvals/store.ts";
 import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
-import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 import type { TurnSignals } from "./signals.ts";
 import type { TurnRequest } from "./turn.workflow.ts";
 
@@ -54,12 +47,15 @@ import type { TurnRequest } from "./turn.workflow.ts";
  * A turn is asked for when a person posts, run by the turn workflow (see
  * `turn.workflow.ts`), and recorded as a `turn` row plus the agent's reply as a
  * `message` that starts out `streaming`. The worker drives it from there
- * through the methods below, each of which writes the outcome and publishes it
+ * through the methods below, each of which writes the outcome and emits it
  * in one transaction.
  */
 
 /** What people are told of a tool call cut short because its turn was cancelled. */
 const TURN_CANCELLED = UserMessage.of`Turn cancelled`;
+
+/** What people are told of a tool call cut short because its routine run ended. */
+const ROUTINE_EXECUTION_ENDED = UserMessage.of`Routine execution ended`;
 
 /** How much of the conversation the agent is shown. */
 const MAX_HISTORY_MESSAGES = 100;
@@ -238,10 +234,12 @@ export interface TurnStore {
 export const runsAgainAfterFailure = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
 	!prepared.checkpoint && !reply.acted && prepared.runs < MAX_TURN_RUNS;
 
+/** What deciding the floor needs: it queues the turns, and announces agents it brings in itself. */
+export type FloorEffects = Parameters<typeof giveFloor>[0];
+
 export function turnStore(
-	publishEvents: PublishEvents,
-	queueTurn: QueueTurn,
-	queueFacilitation: QueueFacilitation,
+	emit: DomainEvents.Emit<ConversationEvent>,
+	floor: FloorEffects,
 	signals: TurnSignals,
 ): TurnStore {
 	/** Records a waiting turn as cancelled and says so; `false` if it had stopped waiting. */
@@ -270,47 +268,103 @@ export function turnStore(
 					.where(eq(message.id, waitingTurn.messageId)),
 			);
 			const abandoned = yield* query((db) => abandonRunningToolCalls(db, turnId, TURN_CANCELLED));
-			yield* publishEvents([
+			yield* emit([
 				...abandoned,
-				{
-					channel: threadChannel(waitingTurn.threadId),
-					event: streamEvent("message.completed", {
-						threadId: waitingTurn.threadId,
-						messageId: waitingTurn.messageId,
-						content: waitingTurn.content,
-						status: "cancelled",
-					}),
-				},
-				{
-					channel: threadChannel(waitingTurn.threadId),
-					event: streamEvent("turn.completed", {
-						threadId: waitingTurn.threadId,
-						turnId,
-						status: "cancelled",
-					}),
-				},
-				{
-					channel: workspaceChannel(waitingTurn.workspaceId),
-					event: streamEvent("thread.changed"),
-				},
+				ConversationEvent.TurnCancelled({
+					threadId: waitingTurn.threadId,
+					workspaceId: waitingTurn.workspaceId,
+					turnId,
+					messageId: waitingTurn.messageId,
+					content: waitingTurn.content,
+				}),
 			]);
 			return true;
 		});
 
+	/**
+	 * Ends a turn found stopped before it finished, with its reply and its
+	 * running tool calls, and says so.
+	 */
+	const endInterrupted = ({ turnId, state, error }: Interruption) =>
+		Effect.gen(function* () {
+			const [interrupted] = yield* query((db) =>
+				db
+					.select({
+						threadId: turn.threadId,
+						workspaceId: thread.workspaceId,
+						messageId: message.id,
+						content: message.content,
+					})
+					.from(turn)
+					.innerJoin(thread, eq(thread.id, turn.threadId))
+					.innerJoin(message, eq(message.turnId, turn.id))
+					.where(eq(turn.id, turnId))
+					.limit(1),
+			);
+			if (!interrupted) {
+				return yield* Effect.die(new Error("An interrupted turn has no reply message"));
+			}
+			yield* query((db) =>
+				db
+					.update(turn)
+					.set({
+						status: state,
+						error: state === "failed" ? error : null,
+						checkpoint: null,
+						finishedAt: new Date(),
+					})
+					.where(eq(turn.id, turnId)),
+			);
+			yield* query((db) =>
+				db.update(message).set({ status: state }).where(eq(message.id, interrupted.messageId)),
+			);
+			const abandoned = yield* query((db) => abandonRunningToolCalls(db, turnId, error));
+			const { threadId, workspaceId, messageId, content } = interrupted;
+			yield* emit([
+				...abandoned,
+				state === "failed"
+					? ConversationEvent.TurnFailed({
+							threadId,
+							workspaceId,
+							turnId,
+							messageId,
+							userMessage: error,
+							willRetry: false,
+						})
+					: ConversationEvent.TurnCancelled({ threadId, workspaceId, turnId, messageId, content }),
+			]);
+		});
+
+	/** The refusal to run a claim, ending first the turn it found stopped, if any. */
+	const notRunnable = (reason: string, interruption: Interruption | undefined) =>
+		Effect.gen(function* () {
+			if (!interruption) return new TurnNotRunnable({ reason });
+			yield* endInterrupted(interruption);
+			return new TurnNotRunnable({
+				reason,
+				terminalOutcome:
+					interruption.state === "failed"
+						? { state: "failed", error: interruption.error }
+						: { state: "cancelled" },
+			});
+		});
+
+	/** The turn the workflow `owner` is running, if any, to end as cancelled. */
+	const activeTurnCancelled = (owner: string, error: UserMessage) =>
+		Effect.map(
+			query((db) => findActiveTurn(db, owner)),
+			(active): Interruption | undefined =>
+				active && { turnId: active.id, state: "cancelled", error },
+		);
+
 	return {
 		abandon: (claimed, userMessage) =>
-			query((db) =>
-				db
-					.select({ id: turn.id })
-					.from(turn)
-					.where(and(eq(turn.owner, claimed.owner), inArray(turn.status, ["running", "waiting"])))
-					.limit(1),
-			).pipe(
-				Effect.flatMap(([active]) =>
-					active
-						? query((db) => finishInterruptedTurn(db, active.id, "failed", userMessage))
-						: Effect.void,
-				),
+			transaction(
+				Effect.gen(function* () {
+					const active = yield* query((db) => findActiveTurn(db, claimed.owner));
+					if (active)
+						yield* endInterrupted({ turnId: active.id, state: "failed", error: userMessage });
+				}),
 			),
 
 		prepare: (claimed) =>
@@ -327,11 +381,10 @@ export function turnStore(
 						executionId &&
 						(yield* query((db) => routineExecutionRejectsNewTurns(db, executionId)))
 					) {
-						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.owner));
-						return new TurnNotRunnable({
-							reason: "The Routine execution has ended",
-							...(outcome ? { terminalOutcome: outcome } : {}),
-						});
+						return yield* notRunnable(
+							"The Routine execution has ended",
+							yield* activeTurnCancelled(claimed.owner, ROUTINE_EXECUTION_ENDED),
+						);
 					}
 					const scope = yield* query((db) => loadTurnScope(db, claimed));
 					if (!scope) {
@@ -350,18 +403,14 @@ export function turnStore(
 						});
 					}
 					if (scope.threadType === "chat" && claimed.payload.reason === "facilitator") {
-						const outcome = yield* query((db) => terminateClaimedTurn(db, claimed.owner));
-						return new TurnNotRunnable({
-							reason: "The Facilitator does not route Chats",
-							...(outcome ? { terminalOutcome: outcome } : {}),
-						});
+						return yield* notRunnable(
+							"The Facilitator does not route Chats",
+							yield* activeTurnCancelled(claimed.owner, TURN_CANCELLED),
+						);
 					}
 					const opened = yield* query((db) => openTurn(db, claimed, scope, model));
 					if ("notRunnableReason" in opened) {
-						return new TurnNotRunnable({
-							reason: opened.notRunnableReason,
-							...(opened.terminalOutcome ? { terminalOutcome: opened.terminalOutcome } : {}),
-						});
+						return yield* notRunnable(opened.notRunnableReason, opened.interruption);
 					}
 					const { turnId, runs, response, checkpoint, resumed } = opened;
 					// One query at a time: inside a transaction the executor is a single
@@ -414,22 +463,13 @@ export function turnStore(
 						...(checkpoint ? { checkpoint } : {}),
 					};
 					if (!resumed)
-						yield* publishEvents([
-							{
-								channel: threadChannel(scope.threadId),
-								event: streamEvent("turn.started", {
-									threadId: scope.threadId,
-									turnId,
-									agentId: scope.agentId,
-								}),
-							},
-							{
-								channel: threadChannel(scope.threadId),
-								event: streamEvent("message.created", {
-									threadId: scope.threadId,
-									message: prepared.responseMessage,
-								}),
-							},
+						yield* emit([
+							ConversationEvent.TurnStarted({
+								threadId: scope.threadId,
+								turnId,
+								agentId: scope.agentId,
+								reply: prepared.responseMessage,
+							}),
 						]);
 					return prepared;
 				}),
@@ -473,19 +513,16 @@ export function turnStore(
 							})
 							.where(eq(turn.id, prepared.turnId)),
 					);
-					yield* publishEvents([
-						replyFinished(prepared, content, "complete"),
-						{
-							channel: threadChannel(prepared.context.thread.id),
-							event: streamEvent("turn.completed", {
-								threadId: prepared.context.thread.id,
-								turnId: prepared.turnId,
-								status: "done",
-								usage: accounting.usage,
-								reportedCost: accounting.reportedCost,
-							}),
-						},
-						threadChanged(prepared),
+					yield* emit([
+						ConversationEvent.TurnCompleted({
+							threadId: prepared.context.thread.id,
+							workspaceId: prepared.context.thread.workspaceId,
+							turnId: prepared.turnId,
+							messageId: prepared.responseMessage.id,
+							content,
+							usage: accounting.usage,
+							reportedCost: accounting.reportedCost,
+						}),
 					]);
 				}),
 			),
@@ -574,35 +611,29 @@ export function turnStore(
 							.set({ content: checkpoint.reply.content, parts: replyParts(checkpoint.reply) })
 							.where(eq(message.id, prepared.responseMessage.id)),
 					);
-					yield* publishEvents([
-						...parked.map((row) => ({
-							channel: threadChannel(row.threadId),
-							event: streamEvent("tool_call.started" as const, {
-								threadId: row.threadId,
-								messageId: row.messageId,
-								toolCall: toToolCallPart(row),
-							}),
-						})),
-						threadChanged(prepared),
+					yield* emit([
+						...parked.map((row) => ConversationEvent.ToolCallStarted(toolCallChange(row))),
+						ConversationEvent.TurnSuspended({
+							threadId: prepared.context.thread.id,
+							workspaceId: prepared.context.thread.workspaceId,
+							turnId: prepared.turnId,
+						}),
 					]);
 					return true;
 				}),
 			),
 
 		giveFloor: (prepared, reply) =>
-			giveFloor(
-				{ publishEvents, queueTurn, queueFacilitation },
-				{
-					id: prepared.responseMessage.id,
-					threadId: prepared.context.thread.id,
-					content: reply.content,
-					author: {
-						kind: "agent",
-						agentId: prepared.context.agent.id,
-						spokeBecause: prepared.claim.payload.reason,
-					},
+			giveFloor(floor, {
+				id: prepared.responseMessage.id,
+				threadId: prepared.context.thread.id,
+				content: reply.content,
+				author: {
+					kind: "agent",
+					agentId: prepared.context.agent.id,
+					spokeBecause: prepared.claim.payload.reason,
 				},
-			),
+			}),
 
 		fail: (prepared, reply, userMessage, willRetry) =>
 			transaction(
@@ -627,18 +658,16 @@ export function turnStore(
 					const abandoned = yield* query((db) =>
 						abandonRunningToolCalls(db, prepared.turnId, userMessage),
 					);
-					yield* publishEvents([
+					yield* emit([
 						...abandoned,
-						{
-							channel: threadChannel(prepared.context.thread.id),
-							event: streamEvent("message.failed", {
-								threadId: prepared.context.thread.id,
-								messageId: prepared.responseMessage.id,
-								turnId: prepared.turnId,
-								willRetry,
-								error: userMessage,
-							}),
-						},
+						ConversationEvent.TurnFailed({
+							threadId: prepared.context.thread.id,
+							workspaceId: prepared.context.thread.workspaceId,
+							turnId: prepared.turnId,
+							messageId: prepared.responseMessage.id,
+							userMessage,
+							willRetry,
+						}),
 					]);
 				}),
 			),
@@ -662,18 +691,15 @@ export function turnStore(
 					const abandoned = yield* query((db) =>
 						abandonRunningToolCalls(db, prepared.turnId, TURN_CANCELLED),
 					);
-					yield* publishEvents([
+					yield* emit([
 						...abandoned,
-						replyFinished(prepared, content, "cancelled"),
-						{
-							channel: threadChannel(prepared.context.thread.id),
-							event: streamEvent("turn.completed", {
-								threadId: prepared.context.thread.id,
-								turnId: prepared.turnId,
-								status: "cancelled",
-							}),
-						},
-						threadChanged(prepared),
+						ConversationEvent.TurnCancelled({
+							threadId: prepared.context.thread.id,
+							workspaceId: prepared.context.thread.workspaceId,
+							turnId: prepared.turnId,
+							messageId: prepared.responseMessage.id,
+							content,
+						}),
 					]);
 				}),
 			),
@@ -771,12 +797,9 @@ export function turnStore(
 							.returning({ id: turn.id }),
 					);
 					if (updated.length === 0) return false;
-					// The worker running it waits for this rather than polling the flag.
-					yield* publishEvents([
-						{
-							channel: threadChannel(candidate.threadId),
-							event: streamEvent("turn.cancel_requested", { threadId: candidate.threadId, turnId }),
-						},
+					// The worker running it stops on this event; it reads the flag only as a fallback.
+					yield* emit([
+						ConversationEvent.TurnCancelRequested({ threadId: candidate.threadId, turnId }),
 					]);
 					return true;
 				}),
@@ -873,40 +896,27 @@ const routineExecutionRejectsNewTurns = Effect.fn("TurnStore.routineExecutionRej
 	},
 );
 
-const finishInterruptedTurn = Effect.fn("TurnStore.finishInterruptedTurn")(function* (
-	db: Executor,
-	turnId: string,
-	status: "failed" | "cancelled",
-	error: UserMessage,
-) {
-	yield* db
-		.update(turn)
-		.set({
-			status,
-			error: status === "failed" ? error : null,
-			checkpoint: null,
-			finishedAt: new Date(),
-		})
-		.where(eq(turn.id, turnId));
-	yield* db.update(message).set({ status }).where(eq(message.turnId, turnId));
-	yield* abandonRunningToolCalls(db, turnId, error);
-});
+/**
+ * A turn found stopped before it finished, and how it ends. `error` is what
+ * people are told of its running tool calls, and of the turn when it failed.
+ */
+interface Interruption {
+	readonly turnId: string;
+	readonly state: "failed" | "cancelled";
+	readonly error: UserMessage;
+}
 
-const terminateClaimedTurn = Effect.fn("TurnStore.terminateClaimedTurn")(function* (
+/** The turn the workflow `owner` is running or holding for approvals, if any. */
+const findActiveTurn = Effect.fn("TurnStore.findActiveTurn")(function* (
 	db: Executor,
 	owner: string,
-): Effect.fn.Return<
-	{ state: "failed" | "cancelled"; error?: UserMessage } | undefined,
-	QueryFailure
-> {
+) {
 	const [active] = yield* db
-		.select({ id: turn.id, status: turn.status, error: turn.error })
+		.select({ id: turn.id })
 		.from(turn)
 		.where(and(eq(turn.owner, owner), inArray(turn.status, ["running", "waiting"])))
 		.limit(1);
-	if (!active) return undefined;
-	yield* finishInterruptedTurn(db, active.id, "cancelled", UserMessage.of`Routine execution ended`);
-	return { state: "cancelled" };
+	return active;
 });
 
 /** The other crew agents placed in the pod: who this agent may collaborate with. */
@@ -949,7 +959,8 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 	  }
 	| {
 			notRunnableReason: string;
-			terminalOutcome?: { state: "failed" | "cancelled"; error?: UserMessage };
+			/** The turn the claim found stopped, which ends with it. */
+			interruption?: Interruption;
 	  },
 	QueryFailure
 > {
@@ -978,10 +989,9 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			return { notRunnableReason: "The turn has already ended" };
 		}
 		if (existing.cancelRequested) {
-			yield* finishInterruptedTurn(db, existing.id, "cancelled", TURN_CANCELLED);
 			return {
 				notRunnableReason: TURN_CANCELLED,
-				terminalOutcome: { state: "cancelled" },
+				interruption: { turnId: existing.id, state: "cancelled", error: TURN_CANCELLED },
 			};
 		}
 		const [uncertainMutation] = yield* db
@@ -997,18 +1007,16 @@ const openTurn = Effect.fn("TurnStore.openTurn")(function* (
 			.limit(1);
 		if (existing.mutationStarted && (!existing.checkpoint || uncertainMutation)) {
 			const error = UserMessage.of`A mutating tool may have run before the worker stopped`;
-			yield* finishInterruptedTurn(db, existing.id, "failed", error);
 			return {
 				notRunnableReason: error,
-				terminalOutcome: { state: "failed", error },
+				interruption: { turnId: existing.id, state: "failed", error },
 			};
 		}
 		if (existing.runs >= MAX_TURN_RUNS) {
 			const error = UserMessage.of`The turn stopped ${existing.runs} times before it could finish`;
-			yield* finishInterruptedTurn(db, existing.id, "failed", error);
 			return {
 				notRunnableReason: error,
-				terminalOutcome: { state: "failed", error },
+				interruption: { turnId: existing.id, state: "failed", error },
 			};
 		}
 		if (existing.checkpoint) {
@@ -1163,27 +1171,4 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
 		})
 		.filter((part) => part.type !== "text" || part.text !== "");
 	return parts;
-}
-
-function replyFinished(
-	prepared: PreparedTurn,
-	content: string,
-	status: "complete" | "cancelled",
-): PendingEvent {
-	return {
-		channel: threadChannel(prepared.context.thread.id),
-		event: streamEvent("message.completed", {
-			threadId: prepared.context.thread.id,
-			messageId: prepared.responseMessage.id,
-			content,
-			status,
-		}),
-	};
-}
-
-function threadChanged(prepared: PreparedTurn): PendingEvent {
-	return {
-		channel: workspaceChannel(prepared.context.thread.workspaceId),
-		event: streamEvent("thread.changed"),
-	};
 }

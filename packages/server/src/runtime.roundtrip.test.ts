@@ -1,7 +1,5 @@
-import { chatStore } from "@sugabots/core/conversations/chats/store";
-import { toolApprovalStore } from "@sugabots/core/conversations/tools/approvals/store";
-import { toolCallStore } from "@sugabots/core/conversations/tools/calls/store";
-import { collaborationStore } from "@sugabots/core/conversations/tools/collaborate/store";
+import { composeConversations } from "@sugabots/core/conversations/composition";
+import { routineRunsInLanes } from "@sugabots/core/conversations/routines/runs";
 import {
 	Facilitate,
 	facilitateLane,
@@ -11,7 +9,6 @@ import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turn
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import { queueFacilitationInLane, queueTurnInLane } from "@sugabots/core/conversations/turns/queue";
 import { turnSignals } from "@sugabots/core/conversations/turns/signals";
-import { turnStore } from "@sugabots/core/conversations/turns/store";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
 import { stepsLayer } from "@sugabots/core/conversations/turns/worker";
 import { createEventBus } from "@sugabots/core/database/events/bus";
@@ -55,13 +52,17 @@ const engine = await workflows.context();
 
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
 	const bus = createEventBus({ store: eventStore });
+	const lanes = Context.get(engine, Lanes.Service);
+	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
+	const queueTurn = queueTurnInLane(lanes);
 	const publishEvents = eventPublisher(bus);
-	const queueTurn = queueTurnInLane(Context.get(engine, Lanes.Service));
-	const queueFacilitation = queueFacilitationInLane(Context.get(engine, Lanes.Service));
-	const signals = turnSignals(Context.get(engine, WorkflowEngine.WorkflowEngine));
-	const turns = turnStore(publishEvents, queueTurn, queueFacilitation, signals);
-	const chats = chatStore(publishEvents, queueTurn, queueFacilitation);
-	const collaborations = collaborationStore(publishEvents, queueTurn);
+	const { stores } = composeConversations({
+		publishEvents,
+		queueTurn,
+		queueFacilitation: queueFacilitationInLane(lanes),
+		signals: turnSignals(workflowEngine),
+		routineRuns: routineRunsInLanes(lanes, workflowEngine),
+	});
 	/** Host asks the helper through the tool; helper answers straight away. */
 	const model: TurnModel = {
 		stream: (input) =>
@@ -89,12 +90,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		Layer.provideMerge(facilitateSteps({ model, publishEvents, queueTurn })),
 		Layer.provideMerge(
 			stepsLayer({
-				store: turns,
+				store: stores.turns,
 				model,
 				events: bus,
-				collaborations,
-				calls: toolCallStore(publishEvents),
-				approvals: toolApprovalStore(publishEvents, signals),
+				collaborations: stores.collaborations,
+				calls: stores.calls,
+				approvals: stores.approvals,
 				queueSummary: () => Effect.void,
 			}),
 		),
@@ -198,9 +199,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		userId: string;
 		content: string;
 	}) {
-		const opened = await runtime.runPromise(chats.getOrCreate(input));
+		const opened = await runtime.runPromise(stores.chats.getOrCreate(input));
 		await runtime.runPromise(
-			chats.sendMain({
+			stores.chats.sendMain({
 				chatId: opened.id,
 				author: { id: input.userId, name: "Sam", image: null },
 				messageId: crypto.randomUUID(),

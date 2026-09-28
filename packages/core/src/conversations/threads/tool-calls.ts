@@ -3,6 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { type ToolCallRow, toolCall, user } from "../../database/schema.ts";
+import type { ToolCallChange } from "../events.ts";
 
 /**
  * Reading tool calls back into the messages they belong to.
@@ -59,5 +60,17 @@ export function toToolCallPart(
 		atOffset: row.atOffset,
 		startedAt: row.startedAt.toISOString(),
 		finishedAt: row.finishedAt?.toISOString() ?? null,
+	};
+}
+
+/** The call as an event carries it once it has changed. */
+export function toolCallChange(
+	row: ToolCallRow,
+	decidedByName: string | null = null,
+): ToolCallChange {
+	return {
+		threadId: row.threadId,
+		messageId: row.messageId,
+		toolCall: toToolCallPart(row, decidedByName),
 	};
 }

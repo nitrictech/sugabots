@@ -7,6 +7,7 @@ import {
 	type QueryFailure,
 	query,
 	type RunEffect,
+	transactional,
 } from "./database.ts";
 
 /**
@@ -72,5 +73,5 @@ export const onPostgres = promising(runOnPostgres);
  */
 export const noDatabase: Layer.Layer<Database> = Layer.succeed(Database, {
 	execute: () => Effect.die(new Error("This test has no database")),
-	transaction: (use) => use,
+	transaction: transactional((use) => use),
 });

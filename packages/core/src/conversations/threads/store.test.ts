@@ -21,10 +21,9 @@ import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../data
 import { agentStore } from "../../workspaces/agents/store.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { podStore } from "../../workspaces/pods/store.ts";
-import { chatStore } from "../chats/store.ts";
-import { summaryStore } from "../summaries/store.ts";
+import { composeConversations } from "../composition.ts";
+import { routineRunsForTests } from "../routines/testing.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
-import { turnStore } from "../turns/store.ts";
 import {
 	queueFacilitationForTests,
 	queueTurnForTests,
@@ -32,7 +31,6 @@ import {
 	runningTurns,
 	turnSignalsForTests,
 } from "../turns/testing.ts";
-import { threadStore } from "./store.ts";
 
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
@@ -41,13 +39,17 @@ const eventStore = await runOnPostgres(postgresEventStore);
 
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", () => {
 	const eventBus = createEventBus({ store: eventStore });
-	const publishEvents = eventPublisher(eventBus);
-	const store = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
-	const turns = onPostgres(
-		turnStore(publishEvents, queueTurnForTests, queueFacilitationForTests, turnSignalsForTests),
-	);
-	const summaries = onPostgres(summaryStore(publishEvents));
+	const { stores } = composeConversations({
+		publishEvents: eventPublisher(eventBus),
+		queueTurn: queueTurnForTests,
+		queueFacilitation: queueFacilitationForTests,
+		signals: turnSignalsForTests,
+		routineRuns: routineRunsForTests,
+	});
+	const store = onPostgres(stores.threads);
+	const chats = onPostgres(stores.chats);
+	const turns = onPostgres(stores.turns);
+	const summaries = onPostgres(stores.summaries);
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;

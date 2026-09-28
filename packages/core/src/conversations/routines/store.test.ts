@@ -4,6 +4,9 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, query, transaction } from "../../database/database.ts";
+import { createEventBus } from "../../database/events/bus.ts";
+import { eventPublisher } from "../../database/events/publish.ts";
+import { memoryEventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	collaboration,
@@ -21,7 +24,7 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { turnStore as createTurnStore } from "../turns/store.ts";
+import { composeConversations } from "../composition.ts";
 import {
 	queueFacilitationForTests,
 	queueTurnForTests,
@@ -36,17 +39,19 @@ import {
 	InvalidRoutineExecutionCursor,
 	RoutineRequiresCrewAgent,
 	RoutineTriggerConflict,
-	routineStore,
 } from "./store.ts";
 import { releaseRun, routineRunsForTests, runningRun } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
-	const routineEffects = routineStore(
-		() => Effect.void,
-		queueTurnForTests,
-		turnSignalsForTests,
-		routineRunsForTests,
-	);
+	const dependencies = {
+		publishEvents: eventPublisher(createEventBus({ store: memoryEventStore() })),
+		queueTurn: queueTurnForTests,
+		queueFacilitation: queueFacilitationForTests,
+		signals: turnSignalsForTests,
+		routineRuns: routineRunsForTests,
+	};
+	const { stores } = composeConversations(dependencies);
+	const routineEffects = stores.routines;
 	const store = onPostgres(routineEffects);
 	/** Starts the routine's run holding its lane, as its workflow's first step does. */
 	const startRunning = async (routineId: string) => {
@@ -802,12 +807,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 		);
 		const cancel = vi.fn(() => Effect.void);
 		const ending = onPostgres(
-			routineStore(
-				() => Effect.void,
-				queueTurnForTests,
-				{ decide: () => Effect.void, cancel },
-				routineRunsForTests,
-			),
+			composeConversations({ ...dependencies, signals: { decide: () => Effect.void, cancel } })
+				.stores.routines,
 		);
 
 		expect(await ending.settleThread(fixture.childThread.id, { state: "cancelled" })).toBe(true);
@@ -919,14 +920,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", () => {
 				error: UserMessage.of`Child model failed`,
 			}),
 		).toBe(false);
-		const turns = onPostgres(
-			createTurnStore(
-				() => Effect.void,
-				queueTurnForTests,
-				queueFacilitationForTests,
-				turnSignalsForTests,
-			),
-		);
+		const turns = onPostgres(stores.turns);
 		await expect(turns.prepare(claimedChild)).rejects.toThrow("The Routine execution has ended");
 
 		await onDatabase((db) =>

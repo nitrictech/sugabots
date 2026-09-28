@@ -24,10 +24,9 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
-import { chatStore } from "../../chats/store.ts";
-import { threadStore } from "../../threads/store.ts";
+import { composeConversations } from "../../composition.ts";
+import { routineRunsForTests } from "../../routines/testing.ts";
 import { modelPrompt } from "../../turns/context.ts";
-import { turnStore } from "../../turns/store.ts";
 import {
 	queueFacilitationForTests,
 	queueTurnForTests,
@@ -36,22 +35,24 @@ import {
 	turnSignalsForTests,
 	waitingTurns,
 } from "../../turns/testing.ts";
-import { CollaborationRefused, type CollaborationStore, collaborationStore } from "./store.ts";
+import { CollaborationRefused, type CollaborationStore } from "./store.ts";
 
 /**
  * Collaboration against Postgres: what `open` writes, what policy refuses, and
  * how a collaboration moves between the asking agent and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", () => {
-	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
-	const collaborations: Promised<CollaborationStore> = onPostgres(
-		collaborationStore(publishEvents, queueTurnForTests),
-	);
-	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
-	const turns = onPostgres(
-		turnStore(publishEvents, queueTurnForTests, queueFacilitationForTests, turnSignalsForTests),
-	);
+	const { stores } = composeConversations({
+		publishEvents: eventPublisher(createEventBus({ store: memoryEventStore() })),
+		queueTurn: queueTurnForTests,
+		queueFacilitation: queueFacilitationForTests,
+		signals: turnSignalsForTests,
+		routineRuns: routineRunsForTests,
+	});
+	const collaborations: Promised<CollaborationStore> = onPostgres(stores.collaborations);
+	const threads = onPostgres(stores.threads);
+	const chats = onPostgres(stores.chats);
+	const turns = onPostgres(stores.turns);
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
