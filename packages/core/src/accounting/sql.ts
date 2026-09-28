@@ -59,7 +59,7 @@ export const modelRequest = pgTable(
 		index("model_request_thread_idx").on(table.threadId).where(sql`${table.threadId} is not null`),
 		check(
 			"model_request_purpose_valid",
-			sql`${table.purpose} in ('agent-turn', 'facilitation', 'summary', 'compaction', 'trial', 'probe')`,
+			sql`${table.purpose} in ('agent-turn', 'facilitation', 'summary', 'compaction', 'trial', 'provider-check')`,
 		),
 		check(
 			"model_request_outcome_valid",

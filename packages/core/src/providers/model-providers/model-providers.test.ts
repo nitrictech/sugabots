@@ -254,7 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(saved).toMatchObject({ active: false, status: "error" });
 	});
 
-	it("disables a provider whose model rejects a probe after its model listing succeeds", async () => {
+	it("disables a provider whose enabled model refuses to answer after its model listing succeeds", async () => {
 		await repository.addModels(workspaceId, providerId, [
 			{
 				modelId: "test-model",

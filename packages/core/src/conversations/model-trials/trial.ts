@@ -283,7 +283,6 @@ const ask = (
 	models
 		.answer({
 			...trialCase.prompt(model, workspaceId),
-			purpose: trialCase.name,
 			activity: { purpose: "trial" },
 			maxCharacters: MAX_ANSWER_CHARACTERS,
 			timeout: ANSWER_TIMEOUT,

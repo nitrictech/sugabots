@@ -172,7 +172,6 @@ const decide = (
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
 			...facilitatorPrompt(scope),
-			purpose: "Facilitator",
 			activity: { purpose: "facilitation", podId: scope.podId, threadId: scope.threadId },
 			maxCharacters: MAX_ANSWER_CHARACTERS,
 			timeout: FACILITATOR_TIMEOUT,

@@ -98,8 +98,11 @@ export type Activity =
 			/** The system agent's own turn, in its child thread. */
 			readonly turnId: string;
 	  }
-	/** Trying a model out from settings, before giving it to a system agent or a provider. */
-	| { readonly purpose: "trial" | "probe" };
+	/**
+	 * Trying a model out from settings: a trial before giving it to a system
+	 * agent, or checking that a provider's enabled model answers at all.
+	 */
+	| { readonly purpose: "trial" | "provider-check" };
 
 export type Purpose = Activity["purpose"];
 

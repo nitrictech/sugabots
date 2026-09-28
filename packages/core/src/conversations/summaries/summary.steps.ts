@@ -92,7 +92,6 @@ const generate = (
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
 			...threadSummaryPrompt(prepared),
-			purpose: "Thread summary",
 			activity: {
 				purpose: "summary",
 				podId: prepared.podId,

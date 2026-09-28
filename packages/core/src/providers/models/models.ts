@@ -58,9 +58,7 @@ export interface StreamRequest extends Prompt {
 
 /** A whole answer, given up on if it runs past either limit. */
 export interface AnswerRequest extends Prompt {
-	/** What is being asked for, as the logs name it: "Thread summary", "Facilitator". */
-	purpose: string;
-	/** What the request is for, which the ledger records as whose spend it is. */
+	/** What the request is for, which the ledger records as whose spend it is and the logs name it by. */
 	activity: ModelRequests.Activity;
 	maxCharacters: number;
 	timeout: Duration.Input;
@@ -288,7 +286,10 @@ export function fromStream(stream: Interface["stream"]): Interface {
 						Ref.updateAndGet(collected, (soFar) => soFar + delta).pipe(
 							Effect.filterOrFail(
 								(soFar) => soFar.length <= request.maxCharacters,
-								() => new UnusableAnswer({ reason: `${request.purpose} returned too much text` }),
+								() =>
+									new UnusableAnswer({
+										reason: `The ${request.activity.purpose} answer ran past ${request.maxCharacters} characters`,
+									}),
 							),
 							Effect.asVoid,
 						),
@@ -300,7 +301,9 @@ export function fromStream(stream: Interface["stream"]): Interface {
 				Effect.timeoutOrElse({
 					duration: request.timeout,
 					orElse: () =>
-						Effect.fail(new AnswerTimedOut({ message: `${request.purpose} timed out` })),
+						Effect.fail(
+							new AnswerTimedOut({ message: `The ${request.activity.purpose} answer timed out` }),
+						),
 				}),
 			),
 	};
