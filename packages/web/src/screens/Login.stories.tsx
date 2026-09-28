@@ -28,7 +28,7 @@ export const LogIn = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));
 		await expect(await canvas.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
-		await expect(canvas.getByLabelText("Work email")).toBeInTheDocument();
+		await expect(canvas.getByLabelText("Email")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Back" })).toBeInTheDocument();
 	},
 });
@@ -65,7 +65,7 @@ export const CheckYourEmail = meta.story({
 		await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "Create an account" }));
 		await userEvent.type(await canvas.findByLabelText("Name"), "Ryan Eyes");
-		await userEvent.type(canvas.getByLabelText("Work email"), "ryan@nitric.io");
+		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
 		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse");
 		await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
 		await expect(

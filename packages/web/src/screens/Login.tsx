@@ -130,7 +130,7 @@ export function Login({
 							/>
 						</FormRow>
 					)}
-					<FormRow id="email" label="Work email">
+					<FormRow id="email" label="Email">
 						<input
 							id="email"
 							type="email"
