@@ -117,8 +117,8 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
  * The pod permissions each role holds in the shared pods it is a member of.
  *
  * Nobody reaches a shared pod without a `pod_member` row. Administrators are
- * no exception: they are made members of every shared pod, and kept there, by
- * `keepAdministratorsInSharedPods` in `packages/core/src/workspaces/pods/store.ts`.
+ * no exception: database triggers make them members of every shared pod, as
+ * `podMember` in `packages/core/src/workspaces/sql.ts` describes.
  */
 const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
 	admin: new Set<PodPermission>([
@@ -215,7 +215,7 @@ export function rolesWith(permission: WorkspacePermission): WorkspaceRole[] {
  *
  * The equivalent single-resource answer is `mayInPod`.
  */
-export function rolesWithInPod(permission: PodPermission): WorkspaceRole[] {
+export function rolesGrantedInPod(permission: PodPermission): WorkspaceRole[] {
 	return WORKSPACE_ROLES.filter((role) => POD_GRANTS[role].has(permission));
 }
 

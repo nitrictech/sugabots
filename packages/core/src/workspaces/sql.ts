@@ -247,9 +247,9 @@ export const pod = pgTable(
  * Who has been added to a pod.
  *
  * These rows are the whole answer to who is in a shared pod. Nobody reaches one
- * without a row: every workspace admin has one in every shared pod, kept there
- * by `keepAdministratorsInSharedPods`, and demoting them leaves their rows as
- * they are. `docs/permissions.md` is the specification.
+ * without a row: every workspace admin has one in every shared pod, and
+ * demoting them leaves their rows as they are. `docs/permissions.md` is the
+ * specification.
  *
  * There is no role here. What somebody may configure is their workspace role,
  * which lives on `workspace_member`. Adding a column here later is cheaper
@@ -260,6 +260,12 @@ export const pod = pgTable(
  * Drizzle has no way to declare a trigger, so it lives in the migration that
  * added it (`20260922010506_productive_dreadnoughts`) and is named here
  * because this is where somebody checking what constrains these rows looks.
+ *
+ * The admin rows are written by triggers too, in `20260928023650_admins_pod_membership_trigger`:
+ * `shared_pod_administrators` adds every admin to a new shared pod, and
+ * `administrator_shared_pods` adds a new admin to every shared pod. Both take
+ * `lock_pod_membership(workspace_id)`, as must anything that removes a row
+ * on the strength of somebody's role, so a promotion cannot slip between them.
  */
 export const podMember = pgTable(
 	"pod_member",

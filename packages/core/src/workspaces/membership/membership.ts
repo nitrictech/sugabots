@@ -28,7 +28,7 @@ import { Installation } from "../../installation/installation.ts";
 import { provisionDefaultSearchProvider } from "../../providers/search-providers/store.ts";
 import { type AuthorizationDenied, authorization, ResourceHidden } from "../access.ts";
 import { ensureSystemAgents } from "../agents/system-agents.ts";
-import { keepAdministratorsInSharedPods, provisionPersonalPod } from "../pods/store.ts";
+import { provisionPersonalPod } from "../pods/store.ts";
 
 /**
  * Every operation takes the id of the person asking and checks what they may do
@@ -246,15 +246,13 @@ export const make = Effect.gen(function* () {
 						if (target.role === "admin" && input.role !== "admin") {
 							yield* requireAnotherAdministrator(standing.workspaceId, target.id);
 						}
+						// Promoting puts them in every shared pod, by the
+						// `administrator_shared_pods` trigger; demoting leaves their pods as they are.
 						yield* query((db) =>
-							Effect.gen(function* () {
-								yield* db
-									.update(workspaceMember)
-									.set({ role: input.role })
-									.where(eq(workspaceMember.id, target.id));
-								// Demoting keeps the pods they are in; they leave them one at a time.
-								yield* keepAdministratorsInSharedPods(db, standing.workspaceId);
-							}),
+							db
+								.update(workspaceMember)
+								.set({ role: input.role })
+								.where(eq(workspaceMember.id, target.id)),
 						);
 					}),
 				),
@@ -477,7 +475,6 @@ export const make = Effect.gen(function* () {
 									.set({ status: "accepted" })
 									.where(eq(workspaceInvite.id, input.invitationId));
 								yield* provisionPersonalPod(db, invitation.workspaceId, input.userId);
-								yield* keepAdministratorsInSharedPods(db, invitation.workspaceId);
 							}),
 						);
 						return { workspaceId: invitation.workspaceId };

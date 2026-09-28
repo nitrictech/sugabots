@@ -29,7 +29,12 @@ const people = [
 		email: "mara@nitric.io",
 		image: null,
 	},
-].map((person) => ({ ...person, addedAt: "2026-09-02T00:00:00.000Z" }));
+].map((person, index) => ({
+	...person,
+	addedAt: "2026-09-02T00:00:00.000Z",
+	// The first two are administrators, as the workspace roster below says.
+	removable: index > 1,
+}));
 
 function connection(
 	n: number,

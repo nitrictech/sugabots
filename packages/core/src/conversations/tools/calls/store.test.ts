@@ -12,7 +12,6 @@ import {
 	connection,
 	job,
 	pod,
-	podMember,
 	toolCall,
 	turn,
 	user,
@@ -153,7 +152,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		);
 		if (!room) throw new Error("fixture");
 		podId = room.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
+		// No `pod_member` insert: they are an administrator, whom the database puts in every shared pod.
 		const [host] = await onDatabase((db) =>
 			db
 				.insert(agent)

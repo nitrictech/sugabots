@@ -176,13 +176,13 @@ const create: PodStore["create"] = (workspaceId, creator, { name, slug, color })
 				return yield* new SlugTaken({ slug });
 			}
 
+			// The `shared_pod_administrators` trigger has already added every
+			// administrator, the creator too if they are one.
 			yield* query((db) =>
-				Effect.gen(function* () {
-					yield* db
-						.insert(podMember)
-						.values({ workspaceId, podId: row.id, userId: creator.userId });
-					yield* keepAdministratorsInSharedPods(db, workspaceId);
-				}),
+				db
+					.insert(podMember)
+					.values({ workspaceId, podId: row.id, userId: creator.userId })
+					.onConflictDoNothing({ target: [podMember.podId, podMember.userId] }),
 			);
 			return podSeenBy(podStanding(row, creator, true));
 		}),
@@ -196,31 +196,6 @@ const ensurePersonal: PodStore["ensurePersonal"] = (workspaceId, owner, model) =
 			),
 		),
 	);
-
-/**
- * Puts every administrator in every shared pod of the workspace they are not
- * already in.
- *
- * Administrators belong to every shared pod, so that `pod_member` is the whole
- * answer to who is in a pod. Called in the same transaction as anything that
- * makes a shared pod or an administrator; idempotent, so a caller never needs
- * to know which rows are missing.
- */
-export const keepAdministratorsInSharedPods = Effect.fn("PodStore.keepAdministratorsInSharedPods")(
-	function* (db: Executor, workspaceId: string) {
-		yield* db.execute(sql`
-		insert into ${podMember} ("workspace_id", "pod_id", "user_id")
-		select ${pod.workspaceId}, ${pod.id}, ${workspaceMember.userId}
-		from ${pod}
-		inner join ${workspaceMember}
-			on ${workspaceMember.workspaceId} = ${pod.workspaceId}
-			and ${workspaceMember.role} = 'admin'
-		where ${pod.workspaceId} = ${workspaceId}
-			and ${pod.kind} = 'shared'
-		on conflict ("pod_id", "user_id") do nothing
-	`);
-	},
-);
 
 export const provisionPersonalPod = Effect.fn("PodStore.provisionPersonalPod")(function* (
 	db: Executor,
@@ -381,9 +356,18 @@ export const podStore: PodStore = {
 					email: user.email,
 					image: user.image,
 					addedAt: podMember.createdAt,
+					removable: sql<boolean>`${pod.kind} = 'shared' and ${workspaceMember.role} <> 'admin'`,
 				})
 				.from(podMember)
 				.innerJoin(user, eq(user.id, podMember.userId))
+				.innerJoin(pod, eq(pod.id, podMember.podId))
+				.innerJoin(
+					workspaceMember,
+					and(
+						eq(workspaceMember.workspaceId, podMember.workspaceId),
+						eq(workspaceMember.userId, podMember.userId),
+					),
+				)
 				.where(eq(podMember.podId, podId))
 				.orderBy(asc(user.name)),
 		).pipe(
@@ -445,39 +429,44 @@ export const podStore: PodStore = {
 		}),
 
 	removeMember: (workspaceId, podId, userId) =>
-		query((db) =>
-			Effect.gen(function* () {
-				const [target] = yield* db
-					.select({ kind: pod.kind })
-					.from(pod)
-					.where(and(eq(pod.id, podId), eq(pod.workspaceId, workspaceId)))
-					.limit(1);
-				if (target?.kind === "personal") {
-					return "personal_pod";
-				}
-				const [membership] = yield* db
-					.select({ role: workspaceMember.role })
-					.from(workspaceMember)
-					.where(
-						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)),
-					)
-					.limit(1);
-				if (membership?.role === "admin") {
-					return "administrator";
-				}
-				const removed = yield* db
-					.delete(podMember)
-					.where(
-						and(
-							eq(podMember.workspaceId, workspaceId),
-							eq(podMember.podId, podId),
-							eq(podMember.userId, userId),
-						),
-					)
-					.returning({ id: podMember.id });
+		transaction(
+			query((db) =>
+				Effect.gen(function* () {
+					// Held until the transaction ends, so nobody is promoted between the
+					// role check and the delete. The pod and role triggers take it too.
+					yield* db.execute(sql`select lock_pod_membership(${workspaceId})`);
+					const [target] = yield* db
+						.select({ kind: pod.kind })
+						.from(pod)
+						.where(and(eq(pod.id, podId), eq(pod.workspaceId, workspaceId)))
+						.limit(1);
+					if (target?.kind === "personal") {
+						return "personal_pod";
+					}
+					const [membership] = yield* db
+						.select({ role: workspaceMember.role })
+						.from(workspaceMember)
+						.where(
+							and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)),
+						)
+						.limit(1);
+					if (membership?.role === "admin") {
+						return "administrator";
+					}
+					const removed = yield* db
+						.delete(podMember)
+						.where(
+							and(
+								eq(podMember.workspaceId, workspaceId),
+								eq(podMember.podId, podId),
+								eq(podMember.userId, userId),
+							),
+						)
+						.returning({ id: podMember.id });
 
-				return removed.length > 0 ? "removed" : "not_a_member";
-			}),
+					return removed.length > 0 ? "removed" : "not_a_member";
+				}),
+			),
 		),
 };
 

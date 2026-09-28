@@ -53,12 +53,8 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		);
 		if (!room) throw new Error("pod setup failed");
 		podId = room.id;
-		await onDatabase((db) =>
-			db.insert(podMember).values([
-				{ workspaceId, podId, userId: adminId },
-				{ workspaceId, podId, userId: memberId },
-			]),
-		);
+		// The administrator is already in it: the database puts them in every shared pod.
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 	});
 
 	it("creates an agent in exactly one pod and scopes member visibility to that pod", async () => {

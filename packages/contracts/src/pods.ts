@@ -8,8 +8,7 @@ import { uuidSchema } from "./uuid.ts";
  *
  * A shared pod is reached by its members, and every workspace admin is one of
  * them. A Personal pod is reached by its owner and by nobody else, admins
- * included. `docs/permissions.md` is the
- * specification.
+ * included. `docs/permissions.md` is the specification.
  */
 
 /**
@@ -156,6 +155,11 @@ export const podMemberSchema = Schema.Struct({
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
 	addedAt: isoTimestampSchema,
+	/**
+	 * Whether they can be taken out of this pod. Never an administrator, who is
+	 * in every shared pod, nor a Personal pod's owner.
+	 */
+	removable: Schema.Boolean,
 });
 
 export type PodMember = typeof podMemberSchema.Type;

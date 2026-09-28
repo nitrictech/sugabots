@@ -4,7 +4,6 @@ import {
 	agent,
 	modelProvider,
 	pod,
-	podMember,
 	providerModel,
 	user,
 	workspace,
@@ -73,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		);
 		if (!madePod) throw new Error("could not create onboarding pod");
 		podId = madePod.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: adminId }));
+		// No `pod_member` insert: the database puts the administrator in every shared pod.
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)

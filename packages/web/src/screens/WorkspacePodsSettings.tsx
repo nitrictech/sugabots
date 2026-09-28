@@ -329,8 +329,8 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
 /*
  * The people who can see into the pod. Anyone in the workspace can be added;
  * the label after a name is their standing in the workspace, since a pod has
- * no roles of its own. Administrators are in every shared pod, so they have
- * no remove button, and you can leave only a pod the API says you may.
+ * no roles of its own. Who can be taken out, and whether you may leave, is
+ * the API's answer.
  */
 function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolean }) {
 	const members = usePodMembers(pod.id);
@@ -345,17 +345,16 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
-	const mayTakeOut = (userId: string) =>
-		isYou(userId)
-			? pod.permissions.leave
-			: canManageMembers && workspaceMembers.data !== undefined && roleOf(userId) !== "admin";
+	const mayTakeOut = (member: PodMember) =>
+		isYou(member.userId) ? pod.permissions.leave : canManageMembers && member.removable;
 	const leaving = removing !== undefined && isYou(removing.userId);
 	const pending = leaving ? leave : remove;
 	const invitable = workspaceMembers.data?.filter((member) => !inPod.has(member.user.id)) ?? [];
 
 	async function takeOut(member: PodMember) {
+		const isLeaving = isYou(member.userId);
 		try {
-			if (leaving) {
+			if (isLeaving) {
 				await leave.mutateAsync();
 			} else {
 				await remove.mutateAsync({ userId: member.userId, member: false });
@@ -364,7 +363,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 			return;
 		}
 		setRemoving(undefined);
-		if (leaving) {
+		if (isLeaving) {
 			await navigate({
 				from: "/$workspace",
 				to: "./settings/$section",
@@ -396,7 +395,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								: // Said once the workspace roster has answered, not guessed before it.
 									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
 						</SettingsValue>
-						{mayTakeOut(member.userId) && (
+						{mayTakeOut(member) && (
 							<Tooltip label={isYou(member.userId) ? "Leave pod" : "Remove from pod"}>
 								<button
 									type="button"

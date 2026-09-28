@@ -12,7 +12,7 @@ import {
 	mayInWorkspace,
 	type PodFacts,
 	type PodPermission,
-	rolesWithInPod,
+	rolesGrantedInPod,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -28,7 +28,7 @@ import {
  *
  * **Reach** is a stored `pod_member` row in a shared pod, or ownership of a
  * Personal pod. No role reaches a shared pod without a row: administrators are
- * kept in every one instead, by `keepAdministratorsInSharedPods`.
+ * put in every one instead, by the triggers described on `podMember`.
  *
  * **Hidden** and **forbidden** are different refusals. A resource the caller
  * cannot reach is hidden, so an id cannot be probed for; a resource they can
@@ -278,7 +278,7 @@ export function decideInPod(
 }
 
 /** Roles that reach a shared pod once they have been added to it. */
-const ROLES_REACHING_JOINED_PODS = rolesWithInPod("pod.read");
+const ROLES_READING_SHARED_PODS = rolesGrantedInPod("pod.read");
 
 /**
  * SQL for "this person reaches that pod", for the queries that scope a list
@@ -287,9 +287,8 @@ const ROLES_REACHING_JOINED_PODS = rolesWithInPod("pod.read");
  * The same rule `mayInPod(actor, "pod.read", …)` applies to a single pod, in
  * the one form a `where` clause can use, so a list and a direct read cannot
  * disagree: a Personal pod is reached by its owner and by nobody else, and a
- * shared pod by a membership row held by a role that reaches the pods it has
- * joined. `podId` is the column
- * naming the pod: `thread.podId`, `agent.podId`, `pod.id`.
+ * shared pod by a membership row held by a role granted `pod.read`. `podId` is
+ * the column naming the pod: `thread.podId`, `agent.podId`, `pod.id`.
  *
  * Aliased throughout, so it composes with a query that already joins any of
  * these tables.
@@ -310,7 +309,7 @@ export function reachesPod(podId: SQLWrapper, userId: string): SQL<boolean> {
 				or (
 					reach_pod.kind = 'shared'
 					and reach_pod_member.id is not null
-					and ${roleIsOneOf(ROLES_REACHING_JOINED_PODS)}
+					and ${roleIsOneOf(ROLES_READING_SHARED_PODS)}
 				)
 			)
 	)`;

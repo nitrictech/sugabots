@@ -33,8 +33,8 @@ export interface TestPod {
 	ownerId?: string | null;
 	/**
 	 * The people with a `pod_member` row in it. A shared pod's administrators
-	 * need not be listed: `keepAdministratorsInSharedPods` gives every one of
-	 * them a row, so this does too.
+	 * need not be listed: the database gives every one of them a row, so this
+	 * does too.
 	 */
 	members?: string[];
 	name?: string;

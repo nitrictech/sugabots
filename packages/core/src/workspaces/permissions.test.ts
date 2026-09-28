@@ -8,8 +8,8 @@ import {
 	type PodFacts,
 	type PodPermission,
 	podPermissions,
+	rolesGrantedInPod,
 	rolesWith,
-	rolesWithInPod,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -261,7 +261,7 @@ describe("the roles holding a permission", () => {
 describe("the roles holding a pod permission", () => {
 	it.each(POD_PERMISSIONS)("agrees with mayInPod in a joined pod about %s", (permission) => {
 		for (const role of WORKSPACE_ROLES) {
-			expect(rolesWithInPod(permission).includes(role)).toBe(
+			expect(rolesGrantedInPod(permission).includes(role)).toBe(
 				mayInPod(actor(role), permission, sharedPod(true)),
 			);
 		}
