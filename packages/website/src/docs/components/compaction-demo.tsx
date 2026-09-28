@@ -9,14 +9,8 @@ import { Card } from "@/components/ui/card";
 import { type CastName, cast } from "@/docs/cast";
 import { Say } from "@/docs/components/chat-demo";
 
-/** The system agent that compacts a bot's history, as packages/core/src/workspaces/agents/system-agents.ts defines it. */
-const compactor = {
-	name: "Compaction",
-	look: { color: "purple", face: "square" },
-} as const satisfies {
-	name: string;
-	look: BotLook;
-};
+/** How the system agent that compacts a bot's history looks, as packages/core/src/workspaces/agents/system-agents.ts defines it. */
+const compactorLook: BotLook = { color: "purple", face: "square" };
 
 /** Where a message ends up once the chat has been compacted. */
 type Band =
@@ -99,7 +93,7 @@ const lines: readonly Line[] = [
 const summary = [
 	"Decisions: On 15 May, Dad chose the 18:40 flight on Friday 16th, and Trip Planner held it for four.",
 	"Key facts: €220 left in the pot.",
-	`This summarises the chat up to ${KEPT_FROM}. Search the history for anything earlier it leaves out.`,
+	`This covers the chat up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
 ];
 
 interface Step {
@@ -118,29 +112,29 @@ const steps: readonly Step[] = [
 	{
 		title: "The chat grows",
 		caption:
-			"Every turn, Trip Planner reads the whole chat, so each message takes up a little more room.",
+			"Every time it replies, Trip Planner rereads the whole chat, so each message takes up a little more room.",
 		said: 4,
 		contextUsed: 22,
 		compaction: "idle",
 	},
 	{
 		title: "Filling up",
-		caption: "The longer the chat, the more of the model's context window it fills.",
+		caption: "The longer the chat, the more of Trip Planner's short-term memory it fills.",
 		said: 7,
 		contextUsed: 62,
 		compaction: "idle",
 	},
 	{
-		title: "Past the line",
+		title: "Nearly full",
 		caption:
-			"Trip Planner's reply filled more than 70% of its model's context window, so the chat is compacted in the background. Nobody waits for it.",
+			"The chat has filled most of Trip Planner's short-term memory, so Sugabots starts compacting it in the background. Nobody waits for it.",
 		said: 8,
 		contextUsed: 73,
 		compaction: "working",
 	},
 	{
 		title: "Still room to talk",
-		caption: "The line sits well below the limit, so the chat carries on while compaction works.",
+		caption: "There's still room to spare, so the chat carries on in the meantime.",
 		said: 10,
 		contextUsed: 81,
 		compaction: "working",
@@ -148,7 +142,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Compacted",
 		caption:
-			"Trip Planner now reads a summary of the messages just before the newest ones, then the newest word for word. The oldest are left out. Everyone still sees the whole chat.",
+			"Trip Planner now rereads a short summary, then the latest messages word for word. Everyone still sees the whole chat.",
 		said: 10,
 		contextUsed: 26,
 		compaction: "done",
@@ -156,7 +150,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Looking further back",
 		caption:
-			"Mum's budget was left out. The summary says where it stops, so Trip Planner searches the earlier messages and finds it.",
+			"Mum's budget isn't in the summary, so Trip Planner searches the earlier messages and finds it.",
 		said: 12,
 		contextUsed: 33,
 		compaction: "done",
@@ -321,9 +315,9 @@ function SummaryHead() {
 			animate={{ opacity: 1, scale: 1 }}
 			className="flex items-start gap-2.5 rounded-xl border-2 border-dashed border-input px-3 py-2"
 		>
-			<BotAvatar size="sm" {...compactor.look} />
+			<BotAvatar size="sm" {...compactorLook} />
 			<span className="flex flex-col gap-0.5 text-xs">
-				<span className="font-semibold">Compaction summary</span>
+				<span className="font-semibold">Summary</span>
 				{summary.map((paragraph) => (
 					<span key={paragraph} className="text-muted-foreground text-pretty">
 						{paragraph}
@@ -360,11 +354,9 @@ function CompactionStatus({ state }: { state: Step["compaction"] }) {
 				transition={state === "working" ? { repeat: Infinity, duration: 1.2 } : undefined}
 				className={cn(state === "idle" && "opacity-40")}
 			>
-				<BotAvatar size="xs" {...compactor.look} />
+				<BotAvatar size="xs" {...compactorLook} />
 			</motion.span>
-			<span className={cn(state === "idle" && "text-muted-foreground")}>
-				{compactor.name}: {text}
-			</span>
+			<span className={cn(state === "idle" && "text-muted-foreground")}>{text}</span>
 		</div>
 	);
 }
@@ -402,7 +394,7 @@ function ContextMeter({ used }: { used: number }) {
 				<span className="absolute -translate-x-1/2" style={{ left: `${COMPACTION_LINE}%` }}>
 					Compact
 				</span>
-				<span className="absolute right-0">Limit</span>
+				<span className="absolute right-0">Full</span>
 			</div>
 		</div>
 	);

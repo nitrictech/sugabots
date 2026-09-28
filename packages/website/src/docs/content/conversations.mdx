@@ -63,45 +63,28 @@ model](/docs/models#behind-the-scenes-model).
 
 ## Long conversations
 
-A bot reads its chat every time it replies, and a model can only read so much at
-once: its context window. So when a chat gets long, Sugabots **compacts** what
-the bot reads. You don't have to do anything, and nothing is deleted: everyone
-still sees the whole chat.
+A bot rereads its chat every time it replies, and it can only hold so much in
+mind at once. Think of it as the bot's **short-term memory**. When a chat gets
+long, Sugabots makes room by compacting what the bot rereads. You don't have to
+do anything, and nothing is deleted: everyone still sees the whole chat.
 
 <CompactionDemo />
 
 How it works:
 
-- **It starts early.** After each reply, Sugabots checks how much of the bot's
-  context window that reply's prompt filled. Past 70%, it compacts the chat.
-  That line sits well below the limit, so there's room to keep chatting while
-  it works.
+- **It starts early.** Once a chat fills most of the bot's short-term memory,
+  Sugabots starts compacting it, while there's still plenty of room to keep
+  chatting.
 - **It happens in the background.** Nobody waits for it, and nothing shows in
   the chat.
-- **Recent messages stay whole.** The newest messages, about a quarter of the
-  context window, stay word for word. The ones just before them become a summary
-  at the head of what the bot reads. It keeps decisions, requests and promises,
-  open questions, and key facts like dates, prices and links, each with who
-  said it.
-- **The summary carries forward.** When the chat fills up again, the next
-  summary folds in the last one, so what the bot remembers keeps up with the
-  chat.
-- **The oldest messages are searched, not read.** The first compaction only
-  summarises the stretch just before the newest messages, so anything older is
-  left out of what the bot reads. The bot can still search everything before
-  its word-for-word messages, and does when it needs a detail the summary
-  doesn't have.
+- **Recent messages stay whole.** The bot keeps rereading the latest messages
+  word for word. The ones before them become a summary of what was decided,
+  asked for and promised, what's still open, and key details like dates and
+  prices, along with who said each thing.
+- **The summary carries forward.** When the chat fills up again, the new summary
+  builds on the last one.
+- **The bot can look further back.** The summary can't hold everything. When the
+  bot needs a detail it doesn't have, it searches the earlier messages.
 
-The details panel shows how much of the bot's **short-term memory** the chat
-fills, where it gets compacted, and when it was last compacted.
-
-Compacting uses the bot's own model, so a chat is summarised as well as it is
-read. Sugabots treats no model as having a context window over 256K tokens, and
-treats a model whose size it doesn't know as having exactly that.
-
-<Tip>
-
-If a compaction fails or hasn't finished, the bot keeps replying from as many of
-the newest messages as fit, and the next reply past the line tries again.
-
-</Tip>
+To see how full a bot's short-term memory is, and when it was last compacted,
+open the chat's details panel.
