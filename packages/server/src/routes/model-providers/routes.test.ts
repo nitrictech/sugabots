@@ -117,7 +117,9 @@ describe("model provider routes", () => {
 
 	it("passes a change through, and reports activation without a key as a bad request", async () => {
 		const update = vi.fn<ModelProviderSetup.Interface["update"]>(() =>
-			Effect.fail(new ModelProviderSetup.ProviderActivationRequiresApiKey()),
+			Effect.fail(
+				new ModelProviderSetup.ProviderActivationRequiresCredential({ missing: "api-key" }),
+			),
 		);
 
 		const response = await app({ update }).request(`${root}/${PROVIDER_ID}`, {

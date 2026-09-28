@@ -8,6 +8,7 @@ import type {
 	NewModelProvider,
 	ProviderModel,
 	ProviderModelUpdate,
+	ProviderPresetId,
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { presetSignsIn, providerLacksCredential, providerPreset } from "@sugabots/contracts";
@@ -72,7 +73,10 @@ export interface Interface {
 		input: InProvider & { changes: ModelProviderUpdate },
 	) => Effect.Effect<
 		ModelProvider,
-		AuthorizationDenied | ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresApiKey,
+		| AuthorizationDenied
+		| ModelProviderNotFound
+		| UrlNotAllowed
+		| ProviderActivationRequiresCredential,
 		CurrentActor.Service
 	>;
 	readonly remove: (
@@ -137,7 +141,7 @@ export interface Interface {
 		ModelProvider,
 		| AuthorizationDenied
 		| ModelProviderNotFound
-		| ProviderModelsRequireApiKey
+		| ProviderModelsRequireCredential
 		| ProviderModelAlreadyConfigured,
 		CurrentActor.Service
 	>;
@@ -145,7 +149,7 @@ export interface Interface {
 		input: InProvider & { modelIds: string[]; enabled: boolean },
 	) => Effect.Effect<
 		number,
-		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireApiKey,
+		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireCredential,
 		CurrentActor.Service
 	>;
 	readonly updateModel: (
@@ -154,7 +158,7 @@ export interface Interface {
 		number,
 		| AuthorizationDenied
 		| ModelProviderNotFound
-		| ProviderModelsRequireApiKey
+		| ProviderModelsRequireCredential
 		| FetchedModelCapabilitiesImmutable
 		| ProviderModelNotFound,
 		CurrentActor.Service
@@ -210,7 +214,8 @@ export const make = Effect.gen(function* () {
 		requireProvider(workspaceId, providerId).pipe(
 			Effect.filterOrFail(
 				(provider) => !providerLacksCredential(provider),
-				() => new ProviderModelsRequireApiKey(),
+				(provider) =>
+					new ProviderModelsRequireCredential({ missing: missingCredential(provider.preset) }),
 			),
 		);
 
@@ -336,7 +341,9 @@ export const make = Effect.gen(function* () {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
 					if (changes.active === true && providerLacksCredential(current) && !changes.apiKey) {
-						return yield* new ProviderActivationRequiresApiKey();
+						return yield* new ProviderActivationRequiresCredential({
+							missing: missingCredential(current.preset),
+						});
 					}
 					// Switching on is a test's to do, below, so it is not written here.
 					const updated = yield* providers.update(workspaceId, providerId, {
@@ -530,21 +537,36 @@ export class ModelProviderNotFound
 	}
 }
 
-export class ProviderModelsRequireApiKey
-	extends Data.TaggedError("ProviderModelsRequireApiKey")
+/** What a provider lacks before it can be used: a key, or for ChatGPT, a sign-in. */
+type MissingCredential = "api-key" | "chatgpt-sign-in";
+
+function missingCredential(preset: ProviderPresetId | null): MissingCredential {
+	return presetSignsIn(preset) ? "chatgpt-sign-in" : "api-key";
+}
+
+export class ProviderModelsRequireCredential
+	extends Data.TaggedError("ProviderModelsRequireCredential")<{
+		readonly missing: MissingCredential;
+	}>
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Add an API key before managing models`;
+		return this.missing === "chatgpt-sign-in"
+			? UserMessage.of`Sign in with ChatGPT before managing models`
+			: UserMessage.of`Add an API key before managing models`;
 	}
 }
 
-export class ProviderActivationRequiresApiKey
-	extends Data.TaggedError("ProviderActivationRequiresApiKey")
+export class ProviderActivationRequiresCredential
+	extends Data.TaggedError("ProviderActivationRequiresCredential")<{
+		readonly missing: MissingCredential;
+	}>
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Add an API key before activating this provider`;
+		return this.missing === "chatgpt-sign-in"
+			? UserMessage.of`Sign in with ChatGPT before activating this provider`
+			: UserMessage.of`Add an API key before activating this provider`;
 	}
 }
 

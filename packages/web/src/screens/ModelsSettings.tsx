@@ -347,6 +347,12 @@ function PresetStep({
 		if (!ready) return;
 		setError(undefined);
 		try {
+			// A seeded ChatGPT provider already exists; its page is where the person
+			// signs in, which is what switches it on.
+			if (signsIn && existing) {
+				await onAdded(existing);
+				return;
+			}
 			const added = existing
 				? await actions.update.mutateAsync({
 						providerId: existing.id,
@@ -373,9 +379,7 @@ function PresetStep({
 			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup note={preset.hint}>
-					{signsIn && (
-						<SettingsRow label="Once it is added, sign in with the ChatGPT account whose plan it should use." />
-					)}
+					{signsIn && <SettingsRow label="ChatGPT account" sub="Sign in after you continue" />}
 					{local && (
 						<SettingsFieldRow
 							label="Server URL"
@@ -403,7 +407,11 @@ function PresetStep({
 				)}
 				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
-			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
+			<DialogFormFooter
+				action={signsIn ? "Continue" : "Add"}
+				actionDisabled={!ready || pending}
+				cancel={false}
+			/>
 		</DialogFormStep>
 	);
 }

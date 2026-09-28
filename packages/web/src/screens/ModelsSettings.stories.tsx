@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
-import { expect, screen, within } from "storybook/test";
+import { expect, fn, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -117,12 +117,14 @@ const openrouter = provider(
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
+	active: false,
 	status: "signed_out",
 	hasApiKey: false,
 	apiKeyHint: null,
 });
 const chatgptSignedIn: ModelProvider = {
 	...chatgpt,
+	active: true,
 	status: "connected",
 	signedIn: true,
 	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
@@ -304,10 +306,14 @@ export const SystemAgents = meta.story({
 	},
 });
 
-function AddProviderPreview() {
+function AddProviderPreview({
+	onAdded = async () => {},
+}: {
+	onAdded?: (provider: ModelProvider) => Promise<void>;
+}) {
 	return (
 		<Dialog open>
-			<AddProviderDialog providers={providers} done={() => {}} onAdded={async () => {}} />
+			<AddProviderDialog providers={providers} done={() => {}} onAdded={onAdded} />
 		</Dialog>
 	);
 }
@@ -334,6 +340,29 @@ export const AddProviderKey = meta.story({
 		const step = await screen.findByRole("dialog", { name: "Groq" });
 		await expect(within(step).getByRole("button", { name: "Add" })).toBeDisabled();
 		await expect(within(step).getByRole("button", { name: "Back" })).toBeInTheDocument();
+	},
+});
+
+const chatgptAdded = fn(async (_provider: ModelProvider) => {});
+
+/**
+ * ChatGPT is in every workspace from the start, so choosing it goes on to its
+ * page, where the person signs in, rather than switching it on without one.
+ */
+export const AddChatgpt = meta.story({
+	render: () => <AddProviderPreview onAdded={chatgptAdded} />,
+	beforeEach() {
+		chatgptAdded.mockClear();
+	},
+	play: async ({ userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "Add provider" });
+		await userEvent.click(within(dialog).getByRole("button", { name: /^ChatGPT/ }));
+		const step = await screen.findByRole("dialog", { name: "ChatGPT" });
+		await expect(within(step).getByText("Sign in after you continue")).toBeVisible();
+		await expect(within(step).queryByText("API key")).toBeNull();
+		await userEvent.click(within(step).getByRole("button", { name: "Continue" }));
+		await expect(chatgptAdded).toHaveBeenCalledWith(chatgpt);
+		await expect(within(step).queryByRole("alert")).toBeNull();
 	},
 });
 
