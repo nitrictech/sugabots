@@ -20,7 +20,7 @@
       "name": "@sugabots/accounting",
       "version": "0.0.0",
       "dependencies": {
-        "@opencode-ai/models": "^0.0.73",
+        "@opencode-ai/models": "^0.0.85",
         "ai": "^7.0.100",
         "effect": "catalog:",
       },
@@ -63,7 +63,7 @@
         "@effect/sql-pg": "catalog:",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "@mozilla/readability": "^0.6.0",
-        "@opencode-ai/models": "^0.0.73",
+        "@opencode-ai/models": "^0.0.85",
         "@sugabots/accounting": "workspace:*",
         "@sugabots/contracts": "workspace:*",
         "@sugabots/workflow": "workspace:*",
@@ -607,7 +607,7 @@
 
     "@open-draft/until": ["@open-draft/until@2.1.0", "", {}, "sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg=="],
 
-    "@opencode-ai/models": ["@opencode-ai/models@0.0.73", "", { "peerDependencies": { "effect": "4.0.0-beta.83" }, "optionalPeers": ["effect"] }, "sha512-3D4q3xWTwnZI799yx3W7FIpn4nKxWPVW3p8OD/c5VTHsWflibnUFH3fuj6eqjJc0cyNj5yBq3J63C23ojwab2Q=="],
+    "@opencode-ai/models": ["@opencode-ai/models@0.0.85", "", { "peerDependencies": { "effect": "4.0.0-beta.83" }, "optionalPeers": ["effect"] }, "sha512-1U65/zh8DQWly7V3n/V3vfMM+hZieIjLJKUqEwMmpsDJJV4clWmvrVVffGKvgkIP84aPxOPvLYsmUQWDbwK02g=="],
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.43.0", "", {}, "sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg=="],
 

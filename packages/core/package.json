@@ -23,7 +23,7 @@
 		"@sugabots/accounting": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/workflow": "workspace:*",
-		"@opencode-ai/models": "^0.0.73",
+		"@opencode-ai/models": "^0.0.85",
 		"ai": "^7.0.100",
 		"cron-parser": "^5.10.1",
 		"drizzle-orm": "catalog:",
