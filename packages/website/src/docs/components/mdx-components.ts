@@ -1,6 +1,7 @@
 import type { MDXComponents } from "mdx/types";
 import { ApprovalPlayground } from "@/docs/components/approval-playground";
 import { Careful, Tip } from "@/docs/components/bot-aside";
+import { BuiltInTools } from "@/docs/components/built-in-tools";
 import { Activity, Chat, Say } from "@/docs/components/chat-demo";
 import { PodGallery } from "@/docs/components/pod-gallery";
 import { PodMap } from "@/docs/components/pod-map";
@@ -17,6 +18,7 @@ export const docsComponents: MDXComponents = {
 	...proseComponents,
 	Activity,
 	ApprovalPlayground,
+	BuiltInTools,
 	Careful,
 	Chat,
 	PodGallery,
