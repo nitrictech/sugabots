@@ -2,12 +2,12 @@ export * as TurnCancellation from "./cancellation.ts";
 
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import { ResourceHidden } from "../../authorization/access.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import { turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { ResourceHidden } from "../../workspaces/access.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
-import { Visibility } from "../../workspaces/visibility.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
 

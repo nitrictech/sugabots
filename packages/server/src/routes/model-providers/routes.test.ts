@@ -1,4 +1,6 @@
 import type { ModelProvider } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { ModelDiscoveryFailed } from "@sugabots/core/providers/model-providers/remote";
@@ -6,8 +8,6 @@ import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { UserMessage } from "@sugabots/core/user-message";
-import { ResourceHidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

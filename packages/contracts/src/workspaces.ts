@@ -15,7 +15,7 @@ import { Schema } from "effect";
  * These are the whole set: the database refuses any other value.
  *
  * `docs/permissions.md` is the specification; the grants are in
- * `packages/core/src/workspaces/permissions.ts`.
+ * `packages/core/src/authorization/permissions.ts`.
  */
 export const WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;
 
@@ -42,7 +42,7 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
  *
  * These sit beside the role list rather than in a screen, because they are
  * claims about the grants in
- * `packages/core/src/workspaces/permissions.ts` — when those move, these are
+ * `packages/core/src/authorization/permissions.ts` — when those move, these are
  * the sentences that become lies, and they should be one edit away from them.
  *
  * Deliberately say what the role does rather than everything it cannot: a

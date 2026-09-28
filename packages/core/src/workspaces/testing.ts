@@ -1,11 +1,11 @@
 import { type Context, Effect, type Layer } from "effect";
+import { CurrentActor } from "../authorization/current-actor.ts";
 import {
 	type Promised,
 	promising,
 	runOnPostgres,
 	type TestInfrastructure,
 } from "../database/testing.ts";
-import { CurrentActor } from "./current-actor.ts";
 
 /**
  * `service` with its methods returning promises, each run against the test

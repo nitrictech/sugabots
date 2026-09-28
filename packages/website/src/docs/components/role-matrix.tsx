@@ -20,7 +20,7 @@ interface Ability {
 	note?: string;
 }
 
-/** What each role may do, as packages/core/src/workspaces/permissions.ts grants it. */
+/** What each role may do, as packages/core/src/authorization/permissions.ts grants it. */
 const abilities: readonly Ability[] = [
 	{
 		label: "Chat with bots",

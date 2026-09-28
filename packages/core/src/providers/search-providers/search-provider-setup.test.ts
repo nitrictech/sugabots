@@ -1,8 +1,8 @@
 import { Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ActionForbidden } from "../../authorization/access.ts";
 import { user, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
-import { ActionForbidden } from "../../workspaces/access.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { SearchProviderSetup } from "./search-provider-setup.ts";

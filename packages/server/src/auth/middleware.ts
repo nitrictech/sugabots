@@ -5,7 +5,7 @@ import {
 	Session,
 	Unauthorized,
 } from "@sugabots/contracts/http";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";

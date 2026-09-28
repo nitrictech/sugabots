@@ -3,6 +3,7 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -26,7 +27,6 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
-import { ActionForbidden, ResourceHidden } from "../../workspaces/access.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import { ToolApprovalForbidden, ToolApprovals } from "../tools/approvals/tool-approvals.ts";

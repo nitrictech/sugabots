@@ -2,6 +2,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import {
 	agent,
 	pod,
@@ -13,7 +14,6 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
-import { CurrentActor } from "../current-actor.ts";
 import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";

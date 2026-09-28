@@ -1,11 +1,11 @@
 import type { SearchProvider } from "@sugabots/contracts";
+import { ActionForbidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { SearchProviderRepository } from "@sugabots/core/providers/search-providers/search-provider-repository";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

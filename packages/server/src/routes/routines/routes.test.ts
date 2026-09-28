@@ -1,9 +1,9 @@
+import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";

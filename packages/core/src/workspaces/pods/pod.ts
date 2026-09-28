@@ -4,9 +4,9 @@ import {
 	type PodColor,
 	type PodPermissions,
 } from "@sugabots/contracts";
+import type { PodStanding } from "../../authorization/access.ts";
+import { podPermissions } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
-import type { PodStanding } from "../access.ts";
-import { podPermissions } from "../permissions.ts";
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
 export function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {

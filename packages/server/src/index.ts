@@ -1,5 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { Authorization } from "@sugabots/core/authorization/authorization";
+import { Visibility } from "@sugabots/core/authorization/visibility";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
@@ -24,11 +26,9 @@ import { seedEveryWorkspaceLayer } from "@sugabots/core/providers/model-provider
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
-import { Authorization } from "@sugabots/core/workspaces/authorization";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { Visibility } from "@sugabots/core/workspaces/visibility";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";

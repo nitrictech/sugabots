@@ -336,7 +336,7 @@ function PodBots({ pod, bots }: { pod: Pod; bots: readonly Agent[] }) {
  * pod's: an administrator reaches every shared pod without a membership row,
  * so the roster is all they lose. Administering is also what lets somebody
  * manage members at all, which is why leaving never costs the person leaving.
- * The grants are in `packages/core/src/workspaces/permissions.ts`.
+ * The grants are in `packages/core/src/authorization/permissions.ts`.
  */
 function removalCost(role: WorkspaceRole | undefined, isYou: boolean): string {
 	if (role !== "admin") {

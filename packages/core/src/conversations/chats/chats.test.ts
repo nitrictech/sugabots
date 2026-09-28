@@ -2,6 +2,7 @@ import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/c
 import { and, eq, like } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Visibility } from "../../authorization/visibility.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -23,7 +24,6 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Visibility } from "../../workspaces/visibility.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";

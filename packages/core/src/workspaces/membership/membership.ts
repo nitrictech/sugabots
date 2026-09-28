@@ -13,6 +13,10 @@ import type {
 import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
+import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
+import { workspacePermissions } from "../../authorization/permissions.ts";
 import {
 	afterCommit,
 	query,
@@ -28,11 +32,7 @@ import { Installation } from "../../installation/installation.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { type AuthorizationDenied, ResourceHidden } from "../access.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
-import { Authorization } from "../authorization.ts";
-import { CurrentActor } from "../current-actor.ts";
-import { workspacePermissions } from "../permissions.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**

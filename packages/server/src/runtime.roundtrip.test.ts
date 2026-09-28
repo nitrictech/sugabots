@@ -1,3 +1,4 @@
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
@@ -23,7 +24,6 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { lane } from "@sugabots/core/workflows/sql";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";

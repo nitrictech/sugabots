@@ -1,4 +1,7 @@
 import { handleFromName } from "@sugabots/contracts";
+import { Authorization } from "@sugabots/core/authorization/authorization";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { Visibility } from "@sugabots/core/authorization/visibility";
 import {
 	agent,
 	pod,
@@ -9,10 +12,7 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
-import { Authorization } from "@sugabots/core/workspaces/authorization";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { onPostgresAs } from "@sugabots/core/workspaces/testing";
-import { Visibility } from "@sugabots/core/workspaces/visibility";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, describe, expect, it } from "vitest";

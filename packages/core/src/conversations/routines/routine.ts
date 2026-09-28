@@ -1,11 +1,11 @@
 import type { Routine } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import type { Authorization } from "../../authorization/authorization.ts";
+import type { PodPermission } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
 import { routine } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { Authorization } from "../../workspaces/authorization.ts";
-import type { PodPermission } from "../../workspaces/permissions.ts";
 
 /** A routine, by the crew agent it belongs to and its own id. */
 export interface OnAgent {

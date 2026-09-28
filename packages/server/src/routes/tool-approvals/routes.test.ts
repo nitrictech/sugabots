@@ -1,7 +1,7 @@
+import { ActionForbidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

@@ -1,9 +1,9 @@
 export * as ChannelAccess from "./access.ts";
 
 import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contracts";
-import { Authorization } from "@sugabots/core/workspaces/authorization";
-import type { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Visibility } from "@sugabots/core/workspaces/visibility";
+import { Authorization } from "@sugabots/core/authorization/authorization";
+import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { Visibility } from "@sugabots/core/authorization/visibility";
 import { Context, Effect, Layer } from "effect";
 
 /**

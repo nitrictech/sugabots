@@ -1,6 +1,8 @@
 import { PERSONAL_POD_SLUG, type PodColor } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
 import {
 	agent,
 	modelProvider,
@@ -17,10 +19,8 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { ActionForbidden, ResourceHidden } from "../access.ts";
 import { AgentAdministration } from "../agents/agent-administration.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
-import { Authorization } from "../authorization.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { PersonalPods } from "./personal-pods.ts";
 import { PodAdministration } from "./pod-administration.ts";

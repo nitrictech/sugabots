@@ -8,11 +8,11 @@ import type {
 } from "@sugabots/contracts";
 import { searchProviderPreset } from "@sugabots/contracts";
 import { Clock, Context, Data, Effect, Layer } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { AuthorizationDenied } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { searchBackend, searchEndpoint } from "./backends.ts";

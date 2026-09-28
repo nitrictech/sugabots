@@ -1,10 +1,10 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
 import { unimplemented } from "@sugabots/core/testing";
-import { ResourceHidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

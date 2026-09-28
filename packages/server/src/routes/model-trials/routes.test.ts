@@ -1,6 +1,6 @@
+import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden } from "@sugabots/core/workspaces/access";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

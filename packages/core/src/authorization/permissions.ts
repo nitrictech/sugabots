@@ -31,7 +31,7 @@ import type {
  * permission added below reaches a role only when that role's table names it.
  *
  * This module is pure. Loading the facts it takes is
- * `packages/core/src/workspaces/access.ts`, and asking it is `Authorization`
+ * `packages/core/src/authorization/access.ts`, and asking it is `Authorization`
  * and `Visibility`; the specification it implements is `docs/permissions.md`.
  */
 
@@ -185,7 +185,7 @@ export function mayInWorkspace(actor: Actor, permission: WorkspacePermission): b
  *
  * `pod` must be a pod in the workspace `actor.workspaceRole` describes; the
  * caller is responsible for not mixing workspaces, which
- * `packages/core/src/workspaces/access.ts` does by loading both together.
+ * `packages/core/src/authorization/access.ts` does by loading both together.
  */
 export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts): boolean {
 	const grants = grantsFor(actor.workspaceRole);
@@ -207,7 +207,7 @@ export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts)
  * about shared pods only.
  *
  * The equivalent single-resource answer is `mayInPod(actor, "pod.read", pod)`.
- * `packages/core/src/workspaces/visibility.ts` expresses the same rule as one
+ * `packages/core/src/authorization/visibility.ts` expresses the same rule as one
  * SQL predicate so a list and a direct read cannot disagree.
  */
 export function sharedPodReach(role: WorkspaceRole | undefined): "all" | "joined" | "none" {

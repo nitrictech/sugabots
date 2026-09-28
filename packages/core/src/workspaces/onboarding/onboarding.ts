@@ -2,6 +2,9 @@ export * as Onboarding from "./onboarding.ts";
 
 import { and, eq, isNull } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import {
 	agent,
@@ -14,9 +17,6 @@ import {
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { AuthorizationDenied } from "../access.ts";
-import { Authorization } from "../authorization.ts";
-import { CurrentActor } from "../current-actor.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**

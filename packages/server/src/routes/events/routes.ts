@@ -1,7 +1,7 @@
 import type { Channel } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
+import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import type { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Context, Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";

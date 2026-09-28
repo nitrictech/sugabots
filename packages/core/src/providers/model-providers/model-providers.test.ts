@@ -2,6 +2,7 @@ import type { NewModelProvider } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ActionForbidden } from "../../authorization/access.ts";
 import {
 	modelProvider,
 	providerModel,
@@ -17,7 +18,6 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
-import { ActionForbidden } from "../../workspaces/access.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ModelProbe } from "./model-probe.ts";

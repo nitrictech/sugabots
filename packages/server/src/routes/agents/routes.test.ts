@@ -1,10 +1,10 @@
 import type { Agent } from "@sugabots/contracts";
+import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/access";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";

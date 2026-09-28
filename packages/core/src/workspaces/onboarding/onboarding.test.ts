@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden } from "../../authorization/access.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import {
 	agent,
 	modelProvider,
@@ -13,8 +15,6 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
-import { ActionForbidden } from "../access.ts";
-import { CurrentActor } from "../current-actor.ts";
 import { onPostgresAs } from "../testing.ts";
 import { Onboarding } from "./onboarding.ts";
 

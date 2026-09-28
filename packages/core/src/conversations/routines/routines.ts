@@ -7,11 +7,11 @@ import type {
 	RoutineUpdate,
 } from "@sugabots/contracts";
 import { Context, DateTime, Effect, Layer } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { routine } from "../../database/schema.ts";
-import type { AuthorizationDenied } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
