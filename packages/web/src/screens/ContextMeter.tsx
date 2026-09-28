@@ -6,7 +6,7 @@ import { formatListTime } from "@/lib/list-time.ts";
  * How much of the bot's short-term memory (its context window) the chat
  * fills, as a percentage measured on the latest reply, with the line where it
  * is compacted marked on the bar. A compaction since that reply leaves the
- * figure out of date until the next one, so the bar fades and says so.
+ * figure out of date until the next one, so the bar fades.
  */
 export function ContextMeter({
 	context,
@@ -49,18 +49,11 @@ export function ContextMeter({
 					style={{ left: `${linePercent}%` }}
 				/>
 			</div>
-			<p className="m-0 text-muted-foreground text-xs">
-				{compactedSinceMeasured
-					? `Compacted ${lastCompacted(new Date(compactedAt), now)}; this updates after the next reply.`
-					: [
-							pastLine
-								? `Past ${linePercent}%: older messages are being summarised.`
-								: `Compacts at ${linePercent}%.`,
-							compactedAt && `Last compacted ${lastCompacted(new Date(compactedAt), now)}.`,
-						]
-							.filter(Boolean)
-							.join(" ")}
-			</p>
+			{compactedAt && (
+				<p className="m-0 text-muted-foreground text-xs">
+					Last compacted {lastCompacted(new Date(compactedAt), now)}.
+				</p>
+			)}
 		</div>
 	);
 }

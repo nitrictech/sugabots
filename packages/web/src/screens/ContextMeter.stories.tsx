@@ -35,7 +35,7 @@ export const Filling = meta.story({
 			"19",
 		);
 		await expect(canvas.getByText("19% full")).toBeVisible();
-		await expect(canvas.getByText("Compacts at 70%.")).toBeVisible();
+		await expect(canvas.queryByText(/compacted/)).toBeNull();
 		await expect(canvas.queryByText(/tokens/)).toBeNull();
 	},
 });
@@ -44,7 +44,7 @@ export const Filling = meta.story({
 export const PastTheLine = meta.story({
 	args: { context: context(186_400) },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Past 70%/)).toBeVisible();
+		await expect(canvas.getByText("73% full")).toBeVisible();
 	},
 });
 
@@ -60,7 +60,6 @@ export const Compacted = meta.story({
 export const CompactedSinceMeasured = meta.story({
 	args: { context: context(186_400, "2026-09-28T09:06:00.000Z") },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/this updates after the next reply/)).toBeVisible();
-		await expect(canvas.queryByText(/Past 70%/)).toBeNull();
+		await expect(canvas.getByText(/Last compacted at/)).toBeVisible();
 	},
 });
