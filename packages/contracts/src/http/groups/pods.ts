@@ -54,8 +54,6 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			success: Schema.Array(podMemberSchema),
 			error: refused,
 		}),
-		// Reached without pod membership: this is how the first person is added
-		// to a pod the admin is not in themselves.
 		HttpApiEndpoint.post("addMember", "/pods/:podId/members", {
 			params: { podId: uuidSchema },
 			payload: newPodMemberSchema,

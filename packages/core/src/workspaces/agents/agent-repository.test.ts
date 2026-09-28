@@ -87,16 +87,6 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		expect((await visibleTo(memberId)).map(({ id }) => id)).toEqual([made.id]);
 	});
 
-	it("shows an admin an agent in a shared pod they are not a member of", async () => {
-		const made = await create(adminId, {
-			podId,
-			name: "Triage",
-			model: "gpt-4o-mini",
-		});
-
-		expect((await visibleTo(adminId)).map(({ id }) => id)).toContain(made.id);
-	});
-
 	it("rejects a pod from another workspace", async () => {
 		const [other] = await onDatabase((db) =>
 			db

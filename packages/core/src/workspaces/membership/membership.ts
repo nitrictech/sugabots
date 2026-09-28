@@ -275,6 +275,8 @@ export const make = Effect.gen(function* () {
 						if (target.role === "admin" && input.role !== "admin") {
 							yield* requireAnotherAdministrator(standing.workspaceId, target.id);
 						}
+						// Promoting puts them in every shared pod, by the
+						// `administrator_shared_pods` trigger; demoting leaves their pods as they are.
 						yield* query((db) =>
 							db
 								.update(workspaceMember)

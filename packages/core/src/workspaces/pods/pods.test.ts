@@ -347,7 +347,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			if (!assistant) throw new Error("Personal Assistant was not provisioned");
 
 			expect(await authorizationAs(memberId).pod(personal.id, "pod.delete")).toMatchObject({
-				facts: { isExplicitMember: true },
+				facts: { isMember: true },
 			});
 			await expect(authorizationAs(adminId).pod(personal.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
@@ -420,14 +420,22 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).rejects.toThrow(ResourceHidden);
 		});
 
-		it("gives an admin every shared pod without a membership row", async () => {
+		it("puts every administrator in a new shared pod, and keeps them there", async () => {
+			await onDatabase((db) =>
+				db
+					.update(workspaceMember)
+					.set({ role: "admin" })
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, viewerId)),
+					),
+			);
+
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await repository.removeMember(workspaceId, made.id, adminId);
 
-			const standing = await authorizationAs(adminId).pod(made.id, "pod.delete");
-
-			expect(standing).toMatchObject({ facts: { isExplicitMember: false } });
-			expect(standing.may("agent.delete")).toBe(true);
+			expect((await membersOf(made.id)).map(({ userId }) => userId).toSorted()).toEqual(
+				[adminId, viewerId].toSorted(),
+			);
+			expect(await repository.removeMember(workspaceId, made.id, viewerId)).toBe("administrator");
 		});
 
 		it("gives a member the pods they have joined, and nothing else", async () => {
@@ -436,7 +444,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			await repository.addMember(workspaceId, joined.id, memberId);
 
 			expect(await authorizationAs(memberId).pod(joined.id, "agent.create")).toMatchObject({
-				facts: { isExplicitMember: true },
+				facts: { isMember: true },
 			});
 			await expect(authorizationAs(memberId).pod(joined.id, "agent.delete")).rejects.toThrow(
 				ActionForbidden,
@@ -451,12 +459,10 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
 			await repository.addMember(workspaceId, joined.id, memberId);
 			await repository.addMember(workspaceId, joined.id, viewerId);
-			// Reached by the admin's role alone, with no membership row.
-			await repository.removeMember(workspaceId, apart.id, adminId);
 			const people = { admin: adminId, member: memberId, viewer: viewerId };
 			const pods: Record<string, string> = {
 				"shared, with the member and viewer in it": joined.id,
-				"shared, with nobody in it": apart.id,
+				"shared, with only the administrator in it": apart.id,
 			};
 			for (const [role, userId] of Object.entries(people)) {
 				pods[`${role}'s Personal pod`] = (await ensurePersonal(userId, "test-model")).id;
@@ -530,10 +536,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			});
 		});
 
-		it("stops reaching a shared pod once somebody is demoted", async () => {
+		it("keeps a demoted administrator in their pods, with a member's permissions there", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await repository.removeMember(workspaceId, made.id, adminId);
-			expect(await authorizationAs(adminId).pod(made.id, "pod.read")).toBeDefined();
 
 			await onDatabase((db) =>
 				db
@@ -544,10 +548,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 					),
 			);
 
+			const standing = await authorizationAs(adminId).pod(made.id, "pod.read");
+			expect(standing.may("pod.delete")).toBe(false);
+			expect(await repository.removeMember(workspaceId, made.id, adminId)).toBe("removed");
 			await expect(authorizationAs(adminId).pod(made.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect(await visibleTo(adminId)).toEqual([]);
 		});
 
 		it("does not carry an administrator's reach into another workspace", async () => {

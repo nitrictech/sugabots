@@ -57,7 +57,7 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 	routing: DEFAULT_POD_ROUTING,
 	permissions: podPermissions(
 		{ userId, workspaceRole: "admin" },
-		{ kind, ownerId: kind === "personal" ? userId : null, isExplicitMember: true },
+		{ kind, ownerId: kind === "personal" ? userId : null, isMember: true },
 	),
 	createdAt: "2026-09-09T00:00:00.000Z",
 });
@@ -277,6 +277,14 @@ describe("pod membership", () => {
 		}).request(`/pods/${POD}/members/${outsider.id}`, as("admin-token", { method: "DELETE" }));
 
 		expect(response.status).toBe(404);
+	});
+
+	it("refuses taking an administrator out of a shared pod", async () => {
+		const response = await app({
+			removeMember: () => Effect.fail(new PodAdministration.AdministratorInEverySharedPod()),
+		}).request(`/pods/${POD}/members/${admin.id}`, as("admin-token", { method: "DELETE" }));
+
+		expect(response.status).toBe(400);
 	});
 
 	it("reports the refusal to staff a Personal pod as a bad request", async () => {

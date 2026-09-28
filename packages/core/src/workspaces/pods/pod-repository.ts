@@ -49,11 +49,12 @@ export interface Interface {
 		podId: string,
 		userId: string,
 	) => Effect.Effect<"added" | "already_member" | "not_workspace_member" | "personal_pod">;
+	/** Refuses an administrator, who belongs to every shared pod. */
 	readonly removeMember: (
 		workspaceId: string,
 		podId: string,
 		userId: string,
-	) => Effect.Effect<"removed" | "not_a_member" | "personal_pod">;
+	) => Effect.Effect<"removed" | "not_a_member" | "personal_pod" | "administrator">;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -76,7 +77,8 @@ export const make = Effect.gen(function* () {
 		create: (workspaceId, { creatorId, name, slug, color }) =>
 			operation(
 				"create",
-				// One unit, so a pod is never briefly without the member who made it.
+				// One unit, so a pod is never briefly without its members: whoever made
+				// it, and every administrator.
 				transaction(
 					Effect.gen(function* () {
 						const taken = yield* query((db) =>
@@ -105,8 +107,13 @@ export const make = Effect.gen(function* () {
 						if (!row) {
 							return yield* new PodSlugTaken({ slug });
 						}
+						// The `shared_pod_administrators` trigger has already added every
+						// administrator, the creator too if they are one.
 						yield* query((db) =>
-							db.insert(podMember).values({ workspaceId, podId: row.id, userId: creatorId }),
+							db
+								.insert(podMember)
+								.values({ workspaceId, podId: row.id, userId: creatorId })
+								.onConflictDoNothing({ target: [podMember.podId, podMember.userId] }),
 						);
 						return row;
 					}),
@@ -276,24 +283,44 @@ export const make = Effect.gen(function* () {
 		removeMember: (workspaceId, podId, userId) =>
 			operation(
 				"removeMember",
-				Effect.gen(function* () {
-					if ((yield* kindOf(workspaceId, podId)) === "personal") {
-						return "personal_pod";
-					}
-					const removed = yield* query((db) =>
-						db
-							.delete(podMember)
-							.where(
-								and(
-									eq(podMember.workspaceId, workspaceId),
-									eq(podMember.podId, podId),
-									eq(podMember.userId, userId),
-								),
-							)
-							.returning({ id: podMember.id }),
-					);
-					return removed.length > 0 ? "removed" : "not_a_member";
-				}),
+				transaction(
+					Effect.gen(function* () {
+						// Held until the transaction ends, so nobody is promoted between the
+						// role check and the delete. The pod and role triggers take it too.
+						yield* query((db) => db.execute(sql`select lock_pod_membership(${workspaceId})`));
+						if ((yield* kindOf(workspaceId, podId)) === "personal") {
+							return "personal_pod";
+						}
+						const [membership] = yield* query((db) =>
+							db
+								.select({ role: workspaceMember.role })
+								.from(workspaceMember)
+								.where(
+									and(
+										eq(workspaceMember.workspaceId, workspaceId),
+										eq(workspaceMember.userId, userId),
+									),
+								)
+								.limit(1),
+						);
+						if (membership?.role === "admin") {
+							return "administrator";
+						}
+						const removed = yield* query((db) =>
+							db
+								.delete(podMember)
+								.where(
+									and(
+										eq(podMember.workspaceId, workspaceId),
+										eq(podMember.podId, podId),
+										eq(podMember.userId, userId),
+									),
+								)
+								.returning({ id: podMember.id }),
+						);
+						return removed.length > 0 ? "removed" : "not_a_member";
+					}),
+				),
 			),
 	});
 });

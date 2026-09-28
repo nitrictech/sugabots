@@ -42,8 +42,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	afterAll(closeDatabase);
 
 	/**
-	 * A workspace with a member in a shared pod, an administrator who is not in
-	 * it, and one person left outside the workspace.
+	 * A workspace with a member in a shared pod, an administrator the database
+	 * has put in it too, and one person left outside the workspace.
 	 */
 	async function fixture() {
 		const suffix = crypto.randomUUID();
@@ -199,14 +199,6 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).thread(crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("gives an administrator the channel of a shared pod's thread without membership", async () => {
-		const { access, administrator, conversation } = await fixture();
-
-		expect(await access(administrator.id).thread(conversation.id)).toBe(
-			`thread:${conversation.id}`,
-		);
-	});
-
 	it("lets only people who reach a pod hear the workspace's events about it", async () => {
 		const { access, member, administrator, space, conversation } = await fixture();
 		const [elsewhere] = await onDatabase((db) =>
@@ -226,17 +218,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(elsewhere.id).reachesPod(conversation.podId)).toBe(false);
 	});
 
-	it("takes the channel away once the administrator is demoted", async () => {
-		const { access, administrator, space, conversation } = await fixture();
+	it("gives an administrator without a row in the pod nothing, since reach is the row", async () => {
+		const { access, administrator, conversation } = await fixture();
 		await onDatabase((db) =>
 			db
-				.update(workspaceMember)
-				.set({ role: "member" })
+				.delete(podMember)
 				.where(
-					and(
-						eq(workspaceMember.workspaceId, space.id),
-						eq(workspaceMember.userId, administrator.id),
-					),
+					and(eq(podMember.podId, conversation.podId), eq(podMember.userId, administrator.id)),
 				),
 		);
 

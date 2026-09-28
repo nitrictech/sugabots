@@ -82,6 +82,7 @@ const podErrors = {
 	EmptyPodUpdate: BadRequest,
 	PodGone: NotFound,
 	PersonalPodMembershipFixed: BadRequest,
+	AdministratorInEverySharedPod: BadRequest,
 	NotInWorkspace: BadRequest,
 	NotInPod: NotFound,
 };

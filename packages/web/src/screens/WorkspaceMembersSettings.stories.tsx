@@ -45,6 +45,7 @@ const inPod = (member: typeof ryan) => ({
 	email: member.user.email,
 	image: null,
 	addedAt: member.joinedAt,
+	removable: member.role !== "admin",
 });
 
 /** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */

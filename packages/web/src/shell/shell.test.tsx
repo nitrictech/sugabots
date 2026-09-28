@@ -1712,12 +1712,15 @@ describe("pod settings", () => {
 		email: sam.email,
 		image: null,
 		addedAt: "2026-09-09T00:00:00.000Z",
+		// Sam administers the workspace, so is in every shared pod for good.
+		removable: false,
 	};
 	const jyeInPod = {
 		...samInPod,
 		userId: jye.id,
 		name: jye.name,
 		email: jye.email,
+		removable: true,
 	};
 	it("lists only crew in a pod, with nothing to say about built-in agents", async () => {
 		mount(podPage);
@@ -1764,25 +1767,13 @@ describe("pod settings", () => {
 		);
 	});
 
-	// Sam is the signed-in administrator, so Sam's own row is the leaving case.
-	it("offers leaving on your own row, and says an administrator keeps the pod", async () => {
+	// Sam is signed in, and an administrator unless a case says otherwise.
+	it("gives an administrator no way off a shared pod", async () => {
 		client.api.pods.listMembers.mockImplementation(() => Effect.succeed([samInPod, jyeInPod]));
-		client.api.pods.removeMember.mockReturnValue(Effect.void);
 		mount(podPage);
 
+		expect(await screen.findByRole("button", { name: `Remove ${jye.name}` })).toBeDefined();
 		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
-		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
-
-		expect(await screen.findByRole("dialog", { name: `Leave ${suga.name}?` })).toBeDefined();
-		expect(screen.getByText(/As an administrator you still reach the pod/)).toBeDefined();
-
-		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
-
-		await waitFor(() =>
-			expect(client.api.pods.removeMember).toHaveBeenCalledWith({
-				params: { podId: suga.id, userId: sam.id },
-			}),
-		);
 	});
 
 	it("says when everyone in the workspace is already in", async () => {

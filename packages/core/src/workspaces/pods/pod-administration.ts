@@ -73,13 +73,13 @@ export interface Interface {
 		AuthorizationDenied | PersonalPodMembershipFixed | NotInWorkspace,
 		CurrentActor.Service
 	>;
-	/** Takes `userId` out of the pod. */
+	/** Takes `userId` out of the pod. Refuses an administrator, who belongs to every shared pod. */
 	readonly removeMember: (input: {
 		podId: string;
 		userId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | PersonalPodMembershipFixed | NotInPod,
+		AuthorizationDenied | PersonalPodMembershipFixed | AdministratorInEverySharedPod | NotInPod,
 		CurrentActor.Service
 	>;
 }
@@ -194,11 +194,15 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { pod } = yield* authorization.pod(podId, "pod.members.manage");
 					const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, userId);
-					if (outcome === "personal_pod") {
-						return yield* new PersonalPodMembershipFixed({ attempted: "remove" });
-					}
-					if (outcome === "not_a_member") {
-						return yield* new NotInPod();
+					switch (outcome) {
+						case "removed":
+							return;
+						case "personal_pod":
+							return yield* new PersonalPodMembershipFixed({ attempted: "remove" });
+						case "administrator":
+							return yield* new AdministratorInEverySharedPod();
+						case "not_a_member":
+							return yield* new NotInPod();
 					}
 				}),
 			),
@@ -246,6 +250,16 @@ export class PersonalPodMembershipFixed
 		return this.attempted === "add"
 			? UserMessage.of`Personal pods cannot have other members`
 			: UserMessage.of`Personal pod membership cannot be changed`;
+	}
+}
+
+/** Administrators belong to every shared pod, so nobody takes one out of it. */
+export class AdministratorInEverySharedPod
+	extends Data.TaggedError("AdministratorInEverySharedPod")
+	implements UserFacing
+{
+	get userMessage() {
+		return UserMessage.of`Administrators are in every shared pod`;
 	}
 }
 
