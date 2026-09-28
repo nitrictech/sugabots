@@ -46,7 +46,7 @@ line you can open:
 
 - **Collaborations**, when one bot asks another.
 - **Routine runs**, when a bot does a [scheduled job](/docs/routines).
-- **Approvals**, when a bot "is waiting on your approval".
+- **Approvals**, when a bot is waiting for someone to allow a tool call.
 
 ## Summaries
 
@@ -60,3 +60,38 @@ Summaries need the Scribe to have a model. See [the behind-the-scenes
 bots](/docs/bots#the-behind-the-scenes-bots).
 
 </Tip>
+
+## Long conversations
+
+<Tip title="Proposal">
+
+This section describes how Sugabots will handle long conversations. It isn't
+built yet.
+
+</Tip>
+
+A bot reads its conversation every time it replies, and a model can only read so
+much at once: its context window. So when a conversation gets long, a
+behind-the-scenes bot called the **Librarian** compacts what the bot reads. You
+don't have to do anything, and you don't lose anything: everyone still sees the
+whole chat.
+
+<CompactionDemo />
+
+How it works:
+
+- **It starts early.** When a conversation fills a set share of the bot's
+  context window, the Librarian starts compacting. That line sits well below the
+  limit, so there's room to keep chatting while it works.
+- **It happens in the background.** Nobody waits for it, and nothing shows in
+  the chat.
+- **Recent messages stay whole.** The newest messages stay word for word. The
+  ones just before them become a short summary at the head of what the bot
+  reads.
+- **Older history is searched, not summarised.** Only the recent part of a
+  conversation is compacted. The summary gives the exact date and time where the
+  bot's history stops, and the bot can search further back when it needs
+  something from earlier.
+
+Like the Scribe, the Librarian uses the model picked for [the behind-the-scenes
+bots](/docs/bots#the-behind-the-scenes-bots).

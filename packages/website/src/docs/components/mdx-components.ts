@@ -3,6 +3,7 @@ import { ApprovalPlayground } from "@/docs/components/approval-playground";
 import { Careful, Tip } from "@/docs/components/bot-aside";
 import { BuiltInTools } from "@/docs/components/built-in-tools";
 import { Activity, Chat, Say } from "@/docs/components/chat-demo";
+import { CompactionDemo } from "@/docs/components/compaction-demo";
 import { PodGallery } from "@/docs/components/pod-gallery";
 import { PodMap } from "@/docs/components/pod-map";
 import { proseComponents } from "@/docs/components/prose";
@@ -21,6 +22,7 @@ export const docsComponents: MDXComponents = {
 	BuiltInTools,
 	Careful,
 	Chat,
+	CompactionDemo,
 	PodGallery,
 	PodMap,
 	ProviderGrid,
