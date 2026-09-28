@@ -126,6 +126,7 @@ export const make = Effect.gen(function* () {
 							turnId: opened.turnId,
 							threadId: scope.threadId,
 							workspaceId: scope.workspaceId,
+							podId: scope.podId,
 							sourceMessageId: request.sourceMessageId,
 							threadTitle: scope.threadTitle,
 							model: summariser.model,
@@ -158,6 +159,7 @@ export const make = Effect.gen(function* () {
 						}
 						yield* summaries.save({
 							workspaceId: prepared.workspaceId,
+							podId: prepared.podId,
 							threadId: prepared.threadId,
 							content: result.content,
 							sourceMessageId: prepared.sourceMessageId,
@@ -193,6 +195,7 @@ export interface PreparedSummary {
 	turnId: string;
 	threadId: string;
 	workspaceId: string;
+	podId: string;
 	/** The last message this summary will cover. */
 	sourceMessageId: string;
 	threadTitle: string;

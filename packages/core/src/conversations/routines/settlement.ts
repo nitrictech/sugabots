@@ -8,6 +8,7 @@ import {
 	collaboration,
 	type RoutineExecutionRow,
 	routineExecution,
+	thread,
 	turn,
 } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
@@ -101,6 +102,7 @@ export const make = Effect.gen(function* () {
 					yield* emit([
 						ConversationEvent.RoutineWorkCancelled({
 							workspaceId: run.workspaceId,
+							podId: yield* podOf(run.threadId),
 							threadIds: work,
 						}),
 					]);
@@ -240,6 +242,16 @@ function endingOf(run: RoutineExecutionRow): Ended | undefined {
 	}
 	return undefined;
 }
+
+/** The pod the thread `threadId` is in. */
+const podOf = (threadId: string) =>
+	Effect.flatMap(
+		query((db) =>
+			db.select({ podId: thread.podId }).from(thread).where(eq(thread.id, threadId)).limit(1),
+		),
+		([row]) =>
+			row ? Effect.succeed(row.podId) : Effect.die(new Error("A routine run's thread is gone")),
+	);
 
 const executionThread = (executionId: string) =>
 	Effect.map(

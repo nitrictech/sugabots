@@ -27,6 +27,7 @@ const prepared: PreparedSummary = {
 	turnId: "0199a3a0-0000-7000-8000-000000000005",
 	threadId: request.threadId,
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
+	podId: "0199a3a0-0000-7000-8000-000000000007",
 	sourceMessageId: request.sourceMessageId,
 	threadTitle: "Prepare release notes",
 	model: "claude-sonnet-4-20250514",

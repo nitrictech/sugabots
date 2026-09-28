@@ -186,6 +186,7 @@ export const make = Effect.gen(function* () {
 						threadId: turn.threadId,
 						agentId: turn.agentId,
 						workspaceId: thread.workspaceId,
+						podId: thread.podId,
 					})
 					.from(message)
 					.innerJoin(turn, eq(turn.id, message.turnId))
@@ -445,6 +446,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnSuspended({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 							}),
 						]);
@@ -469,6 +471,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnCompleted({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 								messageId: reply.messageId,
 								content: draft.content,
@@ -498,6 +501,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnFailed({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 								agentId: locked.agentId,
 								messageId: reply.messageId,
@@ -524,6 +528,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.TurnCancelled({
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
+								podId: reply.podId,
 								turnId: locked.id,
 								agentId: locked.agentId,
 								messageId: reply.messageId,
@@ -696,6 +701,7 @@ export interface ReplyTurn {
 	readonly turnId: string;
 	readonly threadId: string;
 	readonly workspaceId: string;
+	readonly podId: string;
 	readonly messageId: string;
 }
 
@@ -896,6 +902,7 @@ function endAnnouncement(
 		turnId: string;
 		threadId: string;
 		workspaceId: string;
+		podId: string;
 		agentId: string;
 		messageId: string;
 		content: string;
@@ -906,6 +913,7 @@ function endAnnouncement(
 		? ConversationEvent.TurnFailed({
 				threadId: reply.threadId,
 				workspaceId: reply.workspaceId,
+				podId: reply.podId,
 				turnId: reply.turnId,
 				agentId: reply.agentId,
 				messageId: reply.messageId,

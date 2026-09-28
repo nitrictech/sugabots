@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
 import type { PendingEvent } from "../database/events/outbox.ts";
+import { PodAudience } from "../database/events/pod-audience.ts";
 import { noDatabase } from "../database/testing.ts";
 import { UserMessage } from "../user-message.ts";
 import { ConversationEvent } from "./events.ts";
@@ -30,6 +31,7 @@ describe("the thread feed", () => {
 	const threadId = crypto.randomUUID();
 	const turnId = crypto.randomUUID();
 	const agentId = crypto.randomUUID();
+	const podId = crypto.randomUUID();
 
 	beforeEach(() => {
 		published = [];
@@ -46,6 +48,7 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCompleted({
 					threadId,
 					workspaceId,
+					podId,
 					turnId,
 					messageId: "m1",
 					content: "Done.",
@@ -88,6 +91,7 @@ describe("the thread feed", () => {
 					ConversationEvent.TurnFailed({
 						threadId,
 						workspaceId,
+						podId,
 						turnId,
 						agentId,
 						messageId: "m1",
@@ -125,6 +129,7 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCancelled({
 					threadId,
 					workspaceId,
+					podId,
 					turnId,
 					agentId,
 					messageId: "m1",
@@ -149,6 +154,28 @@ describe("the thread feed", () => {
 				channel: workspaceChannel(workspaceId),
 				event: expect.objectContaining({ type: "thread.changed", threadId }),
 			},
+		]);
+	});
+
+	it("names the thread's pod on everything it tells the workspace, and on nothing else", () => {
+		const told = sent(
+			ConversationEvent.TurnCancelled({
+				threadId,
+				workspaceId,
+				podId,
+				turnId,
+				agentId,
+				messageId: "m1",
+				content: "",
+			}),
+		);
+
+		expect(
+			told.map(({ channel, event }) => [channel, PodAudience.audienceOf(event).podId]),
+		).toEqual([
+			[threadChannel(threadId), undefined],
+			[threadChannel(threadId), undefined],
+			[workspaceChannel(workspaceId), podId],
 		]);
 	});
 
@@ -214,6 +241,7 @@ describe("the thread feed", () => {
 					parentMessageId: "m1",
 					collaboration,
 					workspaceId,
+					podId,
 					recipientChatId,
 				}),
 			),
@@ -254,7 +282,13 @@ describe("the thread feed", () => {
 		const childId = crypto.randomUUID();
 
 		expect(
-			sent(ConversationEvent.RoutineWorkCancelled({ workspaceId, threadIds: [threadId, childId] })),
+			sent(
+				ConversationEvent.RoutineWorkCancelled({
+					workspaceId,
+					podId,
+					threadIds: [threadId, childId],
+				}),
+			),
 		).toEqual(
 			[threadId, childId].flatMap((id) => [
 				{

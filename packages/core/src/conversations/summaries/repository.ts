@@ -14,6 +14,7 @@ export interface Interface {
 	 */
 	readonly save: (summary: {
 		workspaceId: string;
+		podId: string;
 		threadId: string;
 		content: string;
 		sourceMessageId: string;
@@ -50,6 +51,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ThreadSummarised({
 								workspaceId: summary.workspaceId,
+								podId: summary.podId,
 								threadId: summary.threadId,
 							}),
 						]);

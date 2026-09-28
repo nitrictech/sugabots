@@ -1,5 +1,6 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -135,6 +136,7 @@ describe("authorisation", () => {
 		const { app } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.undefined,
+			reachesPod: () => Effect.succeed(false),
 		});
 
 		const response = await app.request(`/threads/${THREAD}/events`, {
@@ -150,6 +152,7 @@ describe("authorisation", () => {
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),
+			reachesPod: () => Effect.succeed(true),
 		});
 
 		const stream = await open(app, `/threads/${THREAD}/events`);
@@ -263,6 +266,7 @@ describe("the stream", () => {
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed(channel),
+			reachesPod: () => Effect.succeed(true),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);
 		await bus.publish("thread:root", rawEvent("message.created"));
@@ -347,6 +351,47 @@ describe("the stream", () => {
 		const stream = await open(app, `/threads/${THREAD}/events`);
 		await bus.close();
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
+	});
+});
+
+describe("events meant for one pod's people", () => {
+	const REACHED = "0199a3a0-0000-7000-8000-0000000000c1";
+	const UNREACHED = "0199a3a0-0000-7000-8000-0000000000c2";
+	const reachingOne: ChannelAccess.Interface = {
+		...openChannelAccess,
+		reachesPod: (podId) => Effect.succeed(podId === REACHED),
+	};
+	const channel = `workspace:${WORKSPACE}` as const;
+	const about = (podId: string, threadId: string) =>
+		PodAudience.forPod(podId, streamEvent("thread.changed", { threadId }));
+
+	it("skips what a listener outside the pod may not hear, and sends the rest without the pod", async () => {
+		const { app, bus } = server(reachingOne);
+		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
+
+		await bus.publish(channel, about(UNREACHED, "hidden"));
+		await bus.publish(channel, about(REACHED, "shown"));
+
+		expect(await stream.take(1)).toEqual([
+			{
+				event: "thread.changed",
+				id: "2",
+				data: { v: 1, type: "thread.changed", threadId: "shown" },
+			},
+		]);
+		stream.close();
+	});
+
+	it("skips them on a replay too", async () => {
+		const { app, bus } = server(reachingOne);
+		await bus.publish(channel, rawEvent("thread.created", { threadId: "first" }));
+		await bus.publish(channel, about(UNREACHED, "hidden"));
+		await bus.publish(channel, about(REACHED, "shown"));
+
+		const resumed = await open(app, `/workspaces/${WORKSPACE}/events`, { lastEventId: "1" });
+
+		expect((await resumed.take(1))[0]).toMatchObject({ id: "3", data: { threadId: "shown" } });
+		resumed.close();
 	});
 });
 

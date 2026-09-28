@@ -143,6 +143,7 @@ export const make = Effect.gen(function* () {
 							turnId: opened.turnId,
 							threadId: scope.threadId,
 							workspaceId: scope.workspaceId,
+							podId: scope.podId,
 							threadTitle: scope.threadTitle,
 							model,
 							transcript: plan.summarised.map(({ author, kind, content, createdAt }) => ({
@@ -168,6 +169,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						yield* compactions.save({
 							workspaceId: prepared.workspaceId,
+							podId: prepared.podId,
 							threadId: prepared.threadId,
 							summary,
 							historyStartsAt: prepared.historyStartsAt,
@@ -203,6 +205,7 @@ export interface PreparedCompaction {
 	turnId: string;
 	threadId: string;
 	workspaceId: string;
+	podId: string;
 	threadTitle: string;
 	model: string;
 	/** The summary the thread's bots read until now, which this one replaces and carries forward. */

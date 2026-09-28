@@ -99,7 +99,11 @@ export const make = Effect.gen(function* () {
 						// thread in its history, so it is told too.
 						const [address] = yield* query((db) =>
 							db
-								.select({ workspaceId: thread.workspaceId, recipientChatId: chat.id })
+								.select({
+									workspaceId: thread.workspaceId,
+									podId: thread.podId,
+									recipientChatId: chat.id,
+								})
 								.from(thread)
 								.leftJoin(
 									chat,
@@ -115,6 +119,7 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.CollaborationOpened({
 								...collaborationChange(opened, input.collaborator.name),
 								workspaceId: address.workspaceId,
+								podId: address.podId,
 								recipientChatId: address.recipientChatId,
 							}),
 						]);

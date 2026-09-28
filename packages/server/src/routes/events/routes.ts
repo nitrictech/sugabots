@@ -1,7 +1,8 @@
-import type { Channel } from "@sugabots/contracts";
+import type { Channel, StreamEvent } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import { Context, Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -77,6 +78,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					since: resumeFrom(request.headers["last-event-id"]),
 					timing,
 					stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
+					mayHear: (podId) => access.reachesPod(podId),
 				});
 			}).pipe(asSessionUser);
 
@@ -90,8 +92,8 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 	}),
 );
 
-/** One event, as the wire format. */
-function frame({ seq, event }: EventBus.Delivery): string {
+/** One event, as the wire format, without the audience it was routed by. */
+function frame(seq: number | undefined, event: StreamEvent): string {
 	// An ephemeral event carries no id, so it does not move the client's resume
 	// point past a state change it never saw.
 	const id = seq === undefined ? "" : `id: ${seq}\n`;
@@ -111,6 +113,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 	since,
 	timing: { ping, maxAge },
 	stillAuthorized,
+	mayHear,
 }: {
 	bus: EventBus.Interface;
 	channel: Channel;
@@ -122,6 +125,12 @@ const streamChannel = Effect.fnUntraced(function* ({
 	 * why it is required.
 	 */
 	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
+	/**
+	 * Whether the actor may hear an event meant only for the people who reach
+	 * the pod `podId` (see `PodAudience`). One they may not is skipped, not
+	 * the end of the stream.
+	 */
+	mayHear: (podId: string) => Effect.Effect<boolean, never, CurrentActor.Service>;
 }) {
 	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
 	const ready = yield* Deferred.make<void>();
@@ -167,8 +176,12 @@ const streamChannel = Effect.fnUntraced(function* ({
 							if (!(await stillAuthorizedFor(delivery)) || leaving.signal.aborted) {
 								break;
 							}
+							const audience = PodAudience.audienceOf(delivery.event);
+							if (audience.podId !== undefined && !(await runPromise(mayHear(audience.podId)))) {
+								continue;
+							}
 							if (
-								!(await runPromise(Queue.offer(queue, frame(delivery)), {
+								!(await runPromise(Queue.offer(queue, frame(delivery.seq, audience.event)), {
 									signal: leaving.signal,
 								}))
 							) {

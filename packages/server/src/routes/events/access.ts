@@ -4,6 +4,9 @@ import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contrac
 import { Authorization } from "@sugabots/core/authorization/authorization";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
+import { query, serviceOperations } from "@sugabots/core/database/database";
+import { pod } from "@sugabots/core/database/schema";
+import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 
 /**
@@ -22,6 +25,11 @@ export interface Interface {
 	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
 	workspace(workspaceRef: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	thread(threadId: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
+	/**
+	 * Whether the current actor reaches the pod `podId`, by `Visibility`'s
+	 * rule, and so may hear what a workspace channel says of its threads.
+	 */
+	reachesPod(podId: string): Effect.Effect<boolean, never, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -29,6 +37,7 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("ChannelAccess");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	return Service.of({
@@ -45,6 +54,22 @@ export const make = Effect.gen(function* () {
 				Effect.match({
 					onSuccess: ({ thread }) => threadChannel(thread.id),
 					onFailure: () => undefined,
+				}),
+			),
+
+		reachesPod: (podId) =>
+			operation(
+				"reachesPod",
+				Effect.gen(function* () {
+					const reaches = yield* visibility.reachesPod;
+					const [reached] = yield* query((db) =>
+						db
+							.select({ id: pod.id })
+							.from(pod)
+							.where(and(eq(pod.id, podId), reaches(pod.id)))
+							.limit(1),
+					);
+					return reached !== undefined;
 				}),
 			),
 	});

@@ -248,6 +248,7 @@ export function replyTurnOf(prepared: PreparedTurn): ReplyTurn {
 		turnId: prepared.turnId,
 		threadId: prepared.context.thread.id,
 		workspaceId: prepared.context.thread.workspaceId,
+		podId: prepared.context.agent.podId,
 		messageId: prepared.responseMessage.id,
 	};
 }

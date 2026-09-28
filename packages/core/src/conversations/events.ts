@@ -12,7 +12,8 @@ import type { ModelAccounting } from "./turns/model.ts";
  * the ids involved and what changed, plus what the feed would otherwise have
  * to query back, such as a finished reply's content. A tool call or
  * collaboration is carried whole, as the thread shows it, because clients
- * replace the part rather than patch it.
+ * replace the part rather than patch it. An event the workspace's lists hear
+ * of carries its thread's pod, so only people who reach the pod are told.
  */
 export type ConversationEvent = Data.TaggedEnum<{
 	/** A person posted a message. */
@@ -30,6 +31,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnCompleted: {
 		readonly threadId: string;
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly turnId: string;
 		readonly messageId: string;
 		readonly content: string;
@@ -40,6 +42,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnSuspended: {
 		readonly threadId: string;
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly turnId: string;
 	};
 	/**
@@ -49,6 +52,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnFailed: {
 		readonly threadId: string;
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
 		readonly messageId: string;
@@ -60,6 +64,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnCancelled: {
 		readonly threadId: string;
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
 		readonly messageId: string;
@@ -100,6 +105,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 */
 	CollaborationOpened: CollaborationChange & {
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly recipientChatId: string | null;
 	};
 	/** The asking turn stopped waiting; the answer will resume it instead. */
@@ -112,12 +118,21 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 */
 	CollaborationFailed: CollaborationChange;
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
-	ThreadSummarised: { readonly workspaceId: string; readonly threadId: string };
+	ThreadSummarised: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadId: string;
+	};
 	/** The compaction agent replaced the thread's older history with a summary for its bots. */
-	ThreadCompacted: { readonly workspaceId: string; readonly threadId: string };
+	ThreadCompacted: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadId: string;
+	};
 	/** A routine run began in its own thread, listed in the agent's chat. */
 	RoutineExecutionAccepted: {
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly chatId: string;
 		readonly threadId: string;
 	};
@@ -125,10 +140,15 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * A routine run was told to end, and the work still going on in its
 	 * threads was cancelled: waiting turns, pending approvals, collaborations.
 	 */
-	RoutineWorkCancelled: { readonly workspaceId: string; readonly threadIds: readonly string[] };
+	RoutineWorkCancelled: {
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly threadIds: readonly string[];
+	};
 	/** A routine run finished, failed, or was cancelled. */
 	RoutineExecutionSettled: {
 		readonly workspaceId: string;
+		readonly podId: string;
 		readonly chatId: string;
 		readonly threadId: string;
 	};
