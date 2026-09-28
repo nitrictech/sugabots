@@ -1,0 +1,56 @@
+---
+title: Models
+description: Connect the AI providers your bots think with, hosted or on your own machine.
+---
+
+Bots think with models, and models come from providers. Connect as many as you
+like, and give each bot the one that suits its job: a clever model for research,
+a quick cheap one for sorting the inbox, a local one for private notes.
+
+Admins manage providers in **Settings → Models**.
+
+## Providers Sugabots knows
+
+Sugabots has presets for these. Pick one and it fills in the address for you.
+
+<ProviderGrid />
+
+Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed, plus
+any provider you picked during onboarding. Paste a key to use a hosted provider. Local servers need an address, not a key.
+
+<Tip title="Anything else">
+
+**Custom provider** connects any service that speaks the OpenAI or Anthropic
+format. Give it a name, an address, the format and an API key, plus custom
+headers if it needs them.
+
+</Tip>
+
+## Choose which models bots can use
+
+Each provider lists its models. Switch on the ones you want, and only those show up when someone picks a bot's model. Use **Refresh
+list** to fetch new ones, or **Add model** to type in a model ID.
+
+Each model also says what it can do, like tools, vision or reasoning. Bots use
+tools, so pick models that support them.
+
+## Behind-the-scenes model
+
+Sugabots also uses a model for its own work: summarising and titling
+conversations, and deciding which bot replies when nobody was addressed. It
+starts with none. An admin picks one under **Default → System agents use**. A
+fast, cheap model is best. Until then, chats have no summaries or titles.
+
+## Models on your own machine
+
+Ollama, LM Studio, llama.cpp and vLLM run on your own hardware, so your messages
+never leave it.
+
+<Careful title="Local addresses in production">
+
+When `NODE_ENV=production`, Sugabots won't reach providers at private or
+plain-HTTP addresses unless you set
+[`ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK=true`](/docs/configuration#network).
+
+</Careful>
+

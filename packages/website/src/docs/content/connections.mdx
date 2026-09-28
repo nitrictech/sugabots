@@ -1,0 +1,56 @@
+---
+title: Connections
+description: Plug apps like Linear and Notion into a pod, so its bots can work with them.
+---
+
+A connection links a pod to an app through the
+[Model Context Protocol](https://modelcontextprotocol.io) (MCP). Once it's
+connected, every bot in the pod can use the app's tools, with the
+[approval](/docs/tools-and-approvals#tools-from-connections) you choose.
+
+Admins add and manage connections. Members and viewers can see which ones a pod
+has.
+
+## Add one
+
+Open the pod's settings, find **Connections**, and choose **Add connection**.
+
+### Apps that sign in with one click
+
+Pick one, choose its approval, then **Connect** and sign in to the app.
+
+| App | What bots can reach |
+| --- | --- |
+| Linear | Issues, projects and cycles |
+| Stripe | Customers, payments and invoices |
+| Notion | Pages and databases |
+| Sentry | Errors and performance issues |
+| Jira | Issues and boards |
+
+### Any other MCP server
+
+Choose **Something else**, then **Connect by URL**, and fill in:
+
+- **Name**: what it's called in Sugabots.
+- **Address**: the server's URL. Sugabots connects to remote servers over
+  Streamable HTTP. It doesn't run servers itself.
+- **Header** and **Secret**: an optional key sent with each request, in the
+  `Authorization` header unless you name another.
+- **Approval**: **Ask** or **Allow**. New connections start on Ask. Once it's
+  added, you can also set it to **Off**.
+
+## Look after it
+
+A connection's page shows whether it's signed in, and **Check connection** asks
+the server which tools it offers right now. Tools are named after the
+connection, like `linear__list_issues`, so bots can tell apps apart.
+
+If a server can't be reached, its tools are left out of that turn and the bot
+carries on without them.
+
+<Careful title="Removing a connection">
+
+Bots in the pod lose its tools straight away. Adding it again means signing in
+or entering its details again.
+
+</Careful>

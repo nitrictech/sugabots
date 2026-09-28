@@ -1,0 +1,63 @@
+---
+title: Routines
+description: Jobs a bot does on a schedule, or whenever something calls it.
+---
+
+A routine is a job for one bot: "every weekday at 8, sort the inbox" or "when the
+shop gets an order, draft a thank-you". The bot does it without being asked, and
+posts what it did into its chat.
+
+Admins create and manage routines in **Settings → Routines**, and switch them on
+or off from that list. Members and viewers can see them.
+
+## Make a routine
+
+Choose **New routine**, then pick:
+
+- **Bot**: who does the job.
+- **Instructions**: what to do each time, written like you'd ask in the chat.
+- **When**: a **Schedule** or a **Webhook**.
+
+## On a schedule
+
+Repeat **Every day**, on **Weekdays**, or **Weekly** on the days you pick, at a
+time of your choosing. Have a go:
+
+<RoutineBuilder />
+
+A schedule uses the timezone of whoever created the routine. If Sugabots was down when a run was due, it does one
+catch-up run rather than all the missed ones, and a routine never runs twice at
+the same time.
+
+## When something calls it
+
+A **Webhook** routine runs whenever its address is called, so other apps can set
+a bot to work. When you save it, Sugabots shows the address and a secret.
+
+<Careful title="Copy the secret now">
+
+It isn't shown again. **Reset** makes a new one, and the old one stops working
+straight away.
+
+</Careful>
+
+Call the address with a JSON body and the secret as a bearer token. The bot gets the
+body along with its instructions, marked as data from outside so it isn't taken
+as orders.
+
+```sh
+curl -X POST "https://sugabots.example.com/api/hooks/routines/<routine id>" \
+  -H "Authorization: Bearer <secret>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-1042" \
+  -d '{"order": 1042, "customer": "Sam"}'
+```
+
+`Idempotency-Key` is optional. Send the same key twice and the second call is
+recognised as a repeat.
+
+## Runs
+
+Each run shows in the bot's chat as a line like "Morning inbox sweep ran", and
+opens into a thread with everything the bot did. If a run needs an
+[approval](/docs/tools-and-approvals), only an admin can answer it.

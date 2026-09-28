@@ -28,6 +28,22 @@ export const docGroups: readonly DocGroup[] = [
 		],
 	},
 	{
+		title: "How it works",
+		tone: "sky",
+		summary: "The pieces of a workspace, and how people and bots use them together.",
+		pages: [
+			{ slug: "pods", bot: { color: "teal", face: "square" } },
+			{ slug: "bots", bot: { color: "orange", face: "dot" } },
+			{ slug: "conversations", bot: { color: "sky", face: "pill" } },
+			{ slug: "tools-and-approvals", bot: { color: "yellow", face: "square" } },
+			{ slug: "connections", bot: { color: "ice", face: "arc" } },
+			{ slug: "models", bot: { color: "rose", face: "wink" } },
+			{ slug: "web-search", bot: { color: "teal", face: "wink" } },
+			{ slug: "routines", bot: { color: "yellow", face: "pill" } },
+			{ slug: "people-and-roles", bot: { color: "green", face: "arc" } },
+		],
+	},
+	{
 		title: "Reference",
 		tone: "purple",
 		summary: "Every setting, in one place.",

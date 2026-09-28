@@ -1,0 +1,31 @@
+---
+title: Web search
+description: Let bots search the web and read pages, and choose who answers their searches.
+---
+
+Bots can [search the web and read web pages](/docs/tools-and-approvals#built-in-tools).
+One switch per workspace turns both on or off, and one search provider answers
+every bot's searches.
+
+Admins manage it in **Settings → Web search**.
+
+## Turn it on or off
+
+**Bots can use the web** is the switch. New workspaces start with it on, using
+Exa's free tier, so search works before anyone opens settings. Turn it off and
+no bot in the workspace can search or read web pages.
+
+## Choose a provider
+
+Open **Show advanced** to pick who answers searches.
+
+| Provider | Notes |
+| --- | --- |
+| Exa | The default. A key is optional. Without one it uses the free tier, which is rate limited |
+| Brave Search | Independent index. Needs a key |
+| Tavily | Made for AI agents. Needs a key |
+| SearXNG | Runs on your own server. Give it the server's address |
+
+A provider that needs a key keeps the switch off until you add one.
+
+**Test search** runs one search with your settings, so you can check it works.

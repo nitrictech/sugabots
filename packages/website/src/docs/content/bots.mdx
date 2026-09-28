@@ -1,0 +1,56 @@
+---
+title: Bots
+description: Agents with a job, a model to think with, and a face.
+---
+
+A bot is an AI agent that lives in a pod. Each one has its own instructions, its
+own model, and its own chat that everyone in the pod shares.
+
+## Make a bot
+
+Use **New bot** from a pod's settings or **Settings → Bots**. You choose:
+
+- **Colour** and **Eyes**: how it looks. There are eight colours and five pairs
+  of eyes.
+- **Name**: what people call it. Its handle comes from the name, so
+  "Trip Planner" is `@trip-planner`.
+- **Pod**: where it lives. It uses that pod's connections.
+
+A new bot starts on the first model your workspace has switched on. If there
+are none, connect one in **Settings → Models** first. Bots can't think without
+one.
+
+## Tell it what to do
+
+Open the bot's settings to fill in the rest:
+
+| Setting | What it's for |
+| --- | --- |
+| Description | One line on what the bot is for |
+| Model | What it thinks with. Each bot can use a different one |
+| Instructions | How it should work. It follows these in every chat |
+| Tools | Which built-in tools it may use |
+
+<Tip title="Writing instructions">
+
+Write them like a note to a new teammate: what it's for, how to sound, and what
+to never do. You have up to 20,000 characters.
+
+</Tip>
+
+For example:
+
+```md title="Instructions"
+You plan family trips. Find options that suit everyone, and always check the
+price with @budget-keeper before suggesting anything.
+
+Keep replies short. Nobody wants to read an essay on a phone.
+
+Never book anything without asking first.
+```
+
+## Remove a bot
+
+**Delete bot** is at the bottom of its settings. Its chat, routines and settings
+go with it, and that can't be undone. Members can make and edit bots, but only
+admins can delete them.
