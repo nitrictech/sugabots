@@ -7,8 +7,8 @@ import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
 import { Conversations } from "./conversations.ts";
 import { RoutineRuns } from "./routines/runs.ts";
-import { TurnRequests } from "./turns/requests.ts";
-import { TurnSignals } from "./turns/signals.ts";
+import { TurnRequests, TurnSignals, turnInternalsForTests } from "./turns/testing.ts";
+import { Turns } from "./turns/turns.ts";
 import { ConversationWorkflows } from "./workflows.ts";
 
 /**
@@ -39,7 +39,8 @@ export const workflowsForTests = Layer.merge(
 /**
  * The conversation services as the server composes them, on the test
  * database and engine (see `workflowsForTests`), with stream events delivered
- * to `bus`: a context holding them and what they are composed from.
+ * to `bus`: a context holding them, what they are composed from, and the
+ * turn internals a case drives directly (see `turnInternalsForTests`).
  * `signals`, when given, replaces how turns' workflows are signalled.
  */
 export const conversationsForTests = (
@@ -48,15 +49,25 @@ export const conversationsForTests = (
 ) => {
 	const composedFrom = Layer.mergeAll(
 		TurnRequests.layer,
-		signals ? Layer.succeed(TurnSignals.Service, signals) : TurnSignals.layer,
+		signals ? Layer.succeed(TurnSignals.Service, signals) : Turns.signalsLayer,
 		RoutineRuns.layer,
 	).pipe(
 		Layer.provide(workflowsForTests),
 		Layer.merge(EventOutbox.layer.pipe(Layer.provide(unimplemented(EventBus.Service, bus)))),
 	);
 	return runOnPostgres(
-		Effect.context<Conversations.Services | Layer.Success<typeof composedFrom>>().pipe(
-			Effect.provide(Conversations.layer.pipe(Layer.provideMerge(composedFrom))),
+		Effect.context<
+			| Conversations.Services
+			| Layer.Success<typeof composedFrom>
+			| Layer.Success<typeof turnInternalsForTests>
+		>().pipe(
+			Effect.provide(
+				turnInternalsForTests.pipe(
+					Layer.provideMerge(Conversations.layer),
+					Layer.provideMerge(composedFrom),
+					Layer.provide(workflowsForTests),
+				),
+			),
 		),
 	);
 };

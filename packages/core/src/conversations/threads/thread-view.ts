@@ -27,8 +27,8 @@ import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { compactionLineTokens, contextWindowTokens } from "../compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
+import { respondingIn } from "../floor/floor.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
-import { respondingIn } from "../turns/requests.ts";
 import {
 	agentColumns,
 	authorRow,

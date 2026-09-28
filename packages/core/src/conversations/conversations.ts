@@ -19,20 +19,17 @@ import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
-import { ApprovedToolCalls } from "./turns/approvals/approved-calls.ts";
-import { ToolApprovals } from "./turns/approvals/tool-approvals.ts";
-import { TurnCancellation } from "./turns/cancellation.ts";
-import { TurnExecution } from "./turns/execution.ts";
 import { TurnRepository } from "./turns/repository.ts";
-import { ToolCallRepository } from "./turns/tool-calls/repository.ts";
+import { Turns } from "./turns/turns.ts";
 
+/**
+ * `Turns` is provided here, once, to all of these. The turn's own steps call
+ * back into collaborations and floor control, so a service providing it
+ * itself would load it before it exists.
+ */
 const services = Layer.mergeAll(
 	Chats.layer,
 	Collaborations.layer,
-	ToolApprovals.layer,
-	ApprovedToolCalls.layer,
-	TurnExecution.layer,
-	TurnCancellation.layer,
 	Routines.layer,
 	RoutineWebhooks.layer,
 	RoutineRunner.layer,
@@ -43,14 +40,12 @@ const services = Layer.mergeAll(
 	ThreadView.layer,
 	RoutineView.layer,
 	FloorControl.layer,
-	// The repositories workflow steps write through: a turn's steps record its
-	// reply and tool calls, a summary's failure is recorded on the Scribe's
-	// turn, as is a compaction's, and the Facilitator brings the agent it picks
-	// into the thread.
+	// The repositories workflow steps write through: a summary's failure is
+	// recorded on the Scribe's turn, as is a compaction's, and the Facilitator
+	// brings the agent it picks into the thread.
 	TurnRepository.layer,
-	ToolCallRepository.layer,
 	ThreadRepository.layer,
-);
+).pipe(Layer.provideMerge(Turns.layer));
 
 /** Everything `layer` provides. */
 export type Services = Layer.Success<typeof services> | ConversationEvents.Service;

@@ -13,7 +13,7 @@ import { toCollaborationPart } from "../../threads/collaborations.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
 import { lineageOf } from "../../threads/tree.ts";
-import { TurnRequests } from "../../turns/requests.ts";
+import { Turns } from "../../turns/turns.ts";
 import { CollaborationRepository } from "./repository.ts";
 
 /**
@@ -81,7 +81,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Collaborations");
 	const threads = yield* ThreadRepository.Service;
 	const repository = yield* CollaborationRepository.Service;
-	const requests = yield* TurnRequests.Service;
+	const turns = yield* Turns.Service;
 
 	return Service.of({
 		open: ({ from, to, brief }) =>
@@ -130,7 +130,7 @@ export const make = Effect.gen(function* () {
 							title: firstLine(brief),
 							brief,
 						});
-						yield* requests.queueTurn({
+						yield* turns.ask({
 							threadId: child.threadId,
 							agentId: collaborator.id,
 							triggerMessageId: child.briefMessageId,
@@ -162,7 +162,7 @@ export const make = Effect.gen(function* () {
 						if (!answered) return false;
 						// While it was still waiting, the asking tool reads the answer itself.
 						if (answered.askerMovedOn) {
-							yield* requests.queueTurn({
+							yield* turns.ask({
 								threadId: answered.collaboration.parentThreadId,
 								agentId: answered.askingAgentId,
 								triggerMessageId: answered.collaboration.parentMessageId,

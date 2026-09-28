@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Database, transactional } from "../../database/database.ts";
 import { unimplemented } from "../../testing.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { TurnRequests } from "../turns/requests.ts";
+import { Turns } from "../turns/turns.ts";
 
 const mocks = vi.hoisted(() => ({
-	queueTurn: vi.fn(),
+	ask: vi.fn(),
 	scope: undefined as unknown,
 }));
 
@@ -54,7 +54,7 @@ describe("an attempt at facilitation", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.scope = scope;
-		mocks.queueTurn.mockReturnValue(Effect.void);
+		mocks.ask.mockReturnValue(Effect.void);
 	});
 
 	it("queues the chosen agent's turn", async () => {
@@ -63,7 +63,7 @@ describe("an attempt at facilitation", () => {
 		);
 
 		expect(outcome).toBe("decided");
-		expect(mocks.queueTurn).toHaveBeenCalledWith({
+		expect(mocks.ask).toHaveBeenCalledWith({
 			threadId: request.threadId,
 			agentId: hostAgentId,
 			triggerMessageId: request.triggerMessageId,
@@ -77,7 +77,7 @@ describe("an attempt at facilitation", () => {
 		);
 
 		expect(outcome).toBe("decided");
-		expect(mocks.queueTurn).not.toHaveBeenCalled();
+		expect(mocks.ask).not.toHaveBeenCalled();
 	});
 
 	it("does not ask the model for a Chat", async () => {
@@ -90,11 +90,11 @@ describe("an attempt at facilitation", () => {
 
 		expect(outcome).toBe("decided");
 		expect(stream).not.toHaveBeenCalled();
-		expect(mocks.queueTurn).not.toHaveBeenCalled();
+		expect(mocks.ask).not.toHaveBeenCalled();
 	});
 
 	it("leaves a defect to the workflow rather than reporting it as a failed attempt", async () => {
-		mocks.queueTurn.mockReturnValue(Effect.die(new Error("database unavailable")));
+		mocks.ask.mockReturnValue(Effect.die(new Error("database unavailable")));
 
 		await expect(
 			runWithoutDatabase(attemptFacilitation(request, 1, scriptedModel("@host-agent"))),
@@ -105,20 +105,20 @@ describe("an attempt at facilitation", () => {
 		const outcome = await runWithoutDatabase(attemptFacilitation(request, 3, unavailable));
 
 		expect(outcome).toBe("failed");
-		expect(mocks.queueTurn).not.toHaveBeenCalled();
+		expect(mocks.ask).not.toHaveBeenCalled();
 	});
 });
 
 /** Runs `effect` on services that bring agents in and queue turns without a database. */
 const runWithoutDatabase = <A, E>(
-	effect: Effect.Effect<A, E, Database | ThreadRepository.Service | TurnRequests.Service>,
+	effect: Effect.Effect<A, E, Database | ThreadRepository.Service | Turns.Service>,
 ) =>
 	Effect.runPromise(
 		effect.pipe(
 			Effect.provide(
 				Layer.mergeAll(
 					unimplemented(ThreadRepository.Service, { addAgents: () => Effect.void }),
-					unimplemented(TurnRequests.Service, { queueTurn: mocks.queueTurn }),
+					unimplemented(Turns.Service, { ask: mocks.ask }),
 				),
 			),
 			Effect.provideService(Database, {

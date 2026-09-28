@@ -10,14 +10,13 @@ import { routineWorkflow } from "./routines/routine.workflow.ts";
 import { routineStepsLayer } from "./routines/steps.ts";
 import { summaryStepsLayer } from "./summaries/summary.steps.ts";
 import { summaryWorkflow } from "./summaries/summary.workflow.ts";
-import { turnStepsLayer } from "./turns/turn.steps.ts";
-import { turnWorkflow } from "./turns/turn.workflow.ts";
+import { Turns } from "./turns/turns.ts";
 
 /** Every durable workflow: summaries, compactions, turns, facilitation and routine runs. */
 export const all = [
 	summaryWorkflow,
 	compactionWorkflow,
-	turnWorkflow,
+	Turns.workflow,
 	facilitateWorkflow,
 	routineWorkflow,
 ] as const;
@@ -40,7 +39,7 @@ export const layer = Layer.mergeAll(
 		Layer.mergeAll(
 			summaryStepsLayer,
 			compactionStepsLayer,
-			turnStepsLayer,
+			Turns.stepsLayer,
 			facilitateStepsLayer,
 			routineStepsLayer,
 		),

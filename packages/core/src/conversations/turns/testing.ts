@@ -1,32 +1,55 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { query } from "../../database/database.ts";
 import { agent, connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import type { Chats } from "../chats/chats.ts";
-import { Facilitate, FacilitateRequest, facilitateLane } from "../floor/facilitate.workflow.ts";
-import { lanesForTests, workflowsForTests } from "../testing.ts";
-import { type PreparedTurn, type TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
-import { TurnRequests } from "./requests.ts";
-import { Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
+import {
+	admitFacilitation,
+	Facilitate,
+	FacilitateRequest,
+	facilitateLane,
+} from "../floor/facilitate.workflow.ts";
+import { lanesForTests } from "../testing.ts";
+import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
+import { type PreparedTurn, TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
+import { admitTurn, Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
+
+// Turn internals the cases outside `turns/` drive or inspect directly.
+export { modelPrompt } from "./context.ts";
+export { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
+export { type TurnCheckpoint, TurnRepository } from "./repository.ts";
+export { TurnRequests } from "./requests.ts";
+export { TurnSignals } from "./signals.ts";
+export { ToolCallRepository } from "./tool-calls/repository.ts";
+export { Turn, turnLane } from "./turn.workflow.ts";
 
 /**
+ * The services a case drives a turn's steps through, which `Turns.layer`
+ * hides; built over the conversation services.
+ */
+export const turnInternalsForTests = Layer.mergeAll(
+	TurnExecution.layer,
+	ToolCallRepository.layer,
+	ApprovedToolCalls.layer,
+);
+
+/*
  * Turns and facilitations for the Postgres cases. They are asked for through
  * real lanes, but their workflows here only hold their lanes: a case runs a
  * turn's steps itself, with `runningTurns`, and frees the lane with
- * `releaseTurn` or `releaseFacilitation`.
+ * `releaseTurn` or `releaseFacilitation`. `lanesForTests` is read only when
+ * a helper runs, as `../testing.ts` imports this file.
  */
-const lanes = lanesForTests;
-
-const requests = TurnRequests.make.pipe(Effect.provide(workflowsForTests));
 
 export const queueTurnForTests = (request: TurnRequest) =>
-	Effect.flatMap(requests, (service) => service.queueTurn(request));
+	Effect.flatMap(lanesForTests, (service) => admitTurn(service, request));
 
 export const queueFacilitationForTests = (request: FacilitateRequest) =>
-	Effect.flatMap(requests, (service) => service.queueFacilitation(request));
+	Effect.flatMap(lanesForTests, (service) => admitFacilitation(service, request));
 
 /** The turns running in the thread, each as its workflow runs it. */
 export const runningTurns = (threadId: string) =>
@@ -56,7 +79,7 @@ export const waitingTurns = (lane: Pick<TurnRequest, "threadId" | "agentId">) =>
 
 /** Frees the turn's lane, as its workflow's last step does, starting the turn waiting in it. */
 export const releaseTurn = (run: TurnRun) =>
-	Effect.flatMap(lanes, (service) =>
+	Effect.flatMap(lanesForTests, (service) =>
 		service.release({ key: turnLane(run.request), executionId: run.executionId }),
 	);
 
@@ -75,7 +98,7 @@ export const waitingFacilitation = (threadId: string) =>
 /** Frees the thread's facilitation lane, as its workflow's last step does. */
 export const releaseFacilitation = (request: FacilitateRequest) =>
 	Effect.flatMap(Facilitate.executionId(request), (executionId) =>
-		Effect.flatMap(lanes, (service) =>
+		Effect.flatMap(lanesForTests, (service) =>
 			service.release({ key: facilitateLane(request), executionId }),
 		),
 	);

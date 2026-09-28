@@ -8,7 +8,7 @@ import { RoutineScheduler } from "@sugabots/core/conversations/routines/schedule
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
-import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer } from "@sugabots/core/database/database";
@@ -84,7 +84,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
  * events go through the outbox.
  */
 const ConversationServices = Conversations.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
+	Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, Turns.signalsLayer, RoutineRuns.layer)),
 );
 
 /**

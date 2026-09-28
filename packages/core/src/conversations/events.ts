@@ -1,7 +1,7 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
-import type { Ended } from "./turns/lifecycle.ts";
+import type { Turns } from "./turns/turns.ts";
 
 /**
  * What happened in a conversation, as the facts that changed.
@@ -77,7 +77,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * turn left to end: it could not open, or its workflow failed while none
 	 * was running. `outcome` is how it ended.
 	 */
-	TurnAbandoned: { readonly threadId: string; readonly agentId: string; readonly outcome: Ended };
+	TurnAbandoned: {
+		readonly threadId: string;
+		readonly agentId: string;
+		readonly outcome: Turns.Ended;
+	};
 	/**
 	 * A turn's or facilitation's workflow in the thread finished and freed its
 	 * lane, so it no longer keeps the thread busy.

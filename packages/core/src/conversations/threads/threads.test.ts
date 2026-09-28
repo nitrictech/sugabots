@@ -37,11 +37,17 @@ import { loadFacilitatorScope } from "../floor/facilitator.ts";
 import { Summaries } from "../summaries/summaries.ts";
 import { conversationsForTests } from "../testing.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { TurnCancellation } from "../turns/cancellation.ts";
-import { modelPrompt } from "../turns/context.ts";
-import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
-import { TurnRepository } from "../turns/repository.ts";
-import { prepareRunnable, queueTurnForTests, releaseTurn, runningTurns } from "../turns/testing.ts";
+import {
+	modelPrompt,
+	prepareRunnable,
+	queueTurnForTests,
+	releaseTurn,
+	replyTurnOf,
+	runningTurns,
+	TurnExecution,
+	TurnRepository,
+} from "../turns/testing.ts";
+import { Turns } from "../turns/turns.ts";
 import { ThreadView } from "./thread-view.ts";
 
 /** What these tests set the workspace's system agents up with. */
@@ -56,8 +62,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
-	const cancellationAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, TurnCancellation.Service));
+	const controlsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	const summaries = onPostgres(Context.get(conversations, Summaries.Service));
@@ -821,11 +827,9 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 		const prepared = await prepareRunnable(turns, await runningTurn(details.thread.id));
 
-		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(true);
-		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(false);
-		await expect(cancellationAs(outsiderId).request(prepared.turnId)).rejects.toThrow(
-			ResourceHidden,
-		);
+		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(true);
+		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(false);
+		await expect(controlsAs(outsiderId).cancel(prepared.turnId)).rejects.toThrow(ResourceHidden);
 		// Announced once, for the workflow running the turn.
 		const announced = await onDatabase((db) =>
 			db

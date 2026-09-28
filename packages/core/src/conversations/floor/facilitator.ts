@@ -18,7 +18,7 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { crewOf } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { TurnRequests } from "../turns/requests.ts";
+import { Turns } from "../turns/turns.ts";
 import {
 	type AttemptOutcome,
 	type FacilitateRequest,
@@ -46,9 +46,7 @@ export const facilitateStepsLayer = Layer.effect(
 	FacilitateSteps,
 	Effect.gen(function* () {
 		const model = yield* Models.Service;
-		const services = yield* Effect.context<
-			ThreadRepository.Service | TurnRequests.Service | Database
-		>();
+		const services = yield* Effect.context<ThreadRepository.Service | Turns.Service | Database>();
 		const { emit } = yield* ConversationEvents.Service;
 		const announce = (event: ConversationEvent) =>
 			transaction(emit([event])).pipe(Effect.provideContext(services));
@@ -104,11 +102,7 @@ export const attemptFacilitation = (
 	request: FacilitateRequest,
 	attempt: number,
 	model: Models.Interface,
-): Effect.Effect<
-	AttemptOutcome,
-	never,
-	ThreadRepository.Service | TurnRequests.Service | Database
-> =>
+): Effect.Effect<AttemptOutcome, never, ThreadRepository.Service | Turns.Service | Database> =>
 	Effect.gen(function* () {
 		const scope = yield* query((db) =>
 			loadFacilitatorScope(db, request.threadId, request.triggerMessageId),
@@ -148,9 +142,9 @@ const applyDecision = (
 	return transaction(
 		Effect.gen(function* () {
 			const threads = yield* ThreadRepository.Service;
-			const requests = yield* TurnRequests.Service;
+			const turns = yield* Turns.Service;
 			yield* threads.addAgents(scope.threadId, [decision.agentId]);
-			yield* requests.queueTurn({
+			yield* turns.ask({
 				threadId: scope.threadId,
 				agentId: decision.agentId,
 				triggerMessageId: request.triggerMessageId,

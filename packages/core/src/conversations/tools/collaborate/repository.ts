@@ -15,7 +15,7 @@ import { agent, chat, collaboration, message, thread, turn } from "../../../data
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
-import { ACTIVE_STATUSES } from "../../turns/lifecycle.ts";
+import { Turns } from "../../turns/turns.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -228,7 +228,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(turn.threadId, childThreadId),
 										eq(turn.agentId, collaboratorAgentId),
-										inArray(turn.status, [...ACTIVE_STATUSES]),
+										Turns.isActive,
 									),
 								)
 								.limit(1),

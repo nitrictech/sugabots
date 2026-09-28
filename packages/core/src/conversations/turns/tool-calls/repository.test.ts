@@ -26,8 +26,7 @@ import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../threads/thread-view.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { ToolApprovalConflict, ToolApprovals } from "../approvals/tool-approvals.ts";
-import { TurnCancellation } from "../cancellation.ts";
+import { ToolApprovalConflict } from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
 import { type TurnCheckpoint, TurnRepository } from "../repository.ts";
 import { TurnSignals } from "../signals.ts";
@@ -39,6 +38,7 @@ import {
 	TurnSteps,
 	turnWorkflow,
 } from "../turn.workflow.ts";
+import { Turns } from "../turns.ts";
 import {
 	boundedJson,
 	MAX_STORED_JSON_CHARACTERS,
@@ -63,8 +63,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		Context.get(conversations, ToolCallRepository.Service),
 	);
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const approvalsAs = (userId: string): Promised<ToolApprovals.Interface> =>
-		onPostgresAs(userId)(Context.get(conversations, ToolApprovals.Service));
+	const approvalsAs = (userId: string): Promised<Turns.ControlsInterface> =>
+		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
 	const approvals = onPostgres({
 		beginExecution: Context.get(conversations, ApprovedToolCalls.Service).beginExecution,
 	});
@@ -447,7 +447,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const signals = await parkInWorkflow(pending);
 
 			await onPostgresAs(memberId)(
-				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
 			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
@@ -472,7 +472,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			);
 
 			await onPostgresAs(administrator.id)(
-				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
 			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
@@ -486,7 +486,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 			const deciding = onPostgresAs(memberId)(
-				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
 			);
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ podId, toolCallId: pending.id, decision });
@@ -501,8 +501,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 			expect(
 				await onPostgresAs(memberId)(
-					Context.get(await conversationsForTests(bus, signals), TurnCancellation.Service),
-				).request(prepared.turnId),
+					Context.get(await conversationsForTests(bus, signals), Turns.Controls),
+				).cancel(prepared.turnId),
 			).toBe(true);
 
 			// Marked at once, so a segment starting as the signal lands stops too.

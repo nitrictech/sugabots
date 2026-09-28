@@ -3,7 +3,7 @@ import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabo
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -112,8 +112,8 @@ const app = () =>
 		Layer.mergeAll(
 			identifiedBy(resolveUser),
 			Layer.succeed(ThreadView.Service, view),
-			unimplemented(TurnCancellation.Service, {
-				request: (turnId) =>
+			unimplemented(Turns.Controls, {
+				cancel: (turnId) =>
 					Effect.flatMap(CurrentActor.Service, ({ userId }) => {
 						cancellation = { turnId, userId };
 						return userId === USER

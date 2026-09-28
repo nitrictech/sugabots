@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent, message, thread, user } from "../../database/schema.ts";
-import { messageTextWithPlacedParts } from "../turns/context.ts";
+import { messageTextWithPlacedParts } from "./message-text.ts";
 import { participantColumns, toMessage } from "./participants.ts";
 import { loadPlacedParts } from "./placed-parts.ts";
 

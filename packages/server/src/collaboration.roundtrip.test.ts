@@ -5,8 +5,8 @@ import { facilitateLane } from "@sugabots/core/conversations/floor/facilitate.wo
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
-import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
+import { TurnRequests } from "@sugabots/core/conversations/turns/testing";
+import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
@@ -70,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				Layer.provideMerge(
 					Conversations.layer.pipe(
 						Layer.provideMerge(
-							Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer),
+							Layer.mergeAll(TurnRequests.layer, Turns.signalsLayer, RoutineRuns.layer),
 						),
 					),
 				),

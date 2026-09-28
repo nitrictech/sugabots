@@ -12,10 +12,8 @@ import { RoutineView } from "./conversations/routines/routine-view.ts";
 import { Routines } from "./conversations/routines/routines.ts";
 import { conversationsForTests } from "./conversations/testing.ts";
 import { ThreadView } from "./conversations/threads/thread-view.ts";
-import { ToolApprovals } from "./conversations/turns/approvals/tool-approvals.ts";
-import { TurnCancellation } from "./conversations/turns/cancellation.ts";
-import { TurnExecution } from "./conversations/turns/execution.ts";
-import { prepareRunnable, runningTurns } from "./conversations/turns/testing.ts";
+import { prepareRunnable, runningTurns, TurnExecution } from "./conversations/turns/testing.ts";
+import { Turns } from "./conversations/turns/turns.ts";
 import { query } from "./database/database.ts";
 import { EventBus } from "./database/events/bus.ts";
 import { EventStore } from "./database/events/store.ts";
@@ -352,10 +350,8 @@ const table: ReadonlyArray<ServiceRefusals> = [
 		get: { call: (v, f) => v.get(f.threadId) },
 		activity: { call: (v, f) => v.activity(f.threadId) },
 	}),
-	refusing(TurnCancellation.Service, {
-		request: { call: (c, f) => c.request(f.turnId) },
-	}),
-	refusing(ToolApprovals.Service, {
+	refusing(Turns.Controls, {
+		cancel: { call: (c, f) => c.cancel(f.turnId) },
 		decide: {
 			call: (a, f) =>
 				a.decide({ podId: f.podId, toolCallId: crypto.randomUUID(), decision: "allow_once" }),
@@ -517,7 +513,9 @@ describe.skipIf(!process.env.DATABASE_URL)("refusing whoever may not", async () 
  * and a model provider, and an invitation out; and a stranger, signed in,
  * who belongs to none of it.
  */
-async function aWorkspace(conversations: Context.Context<Conversations.Services>) {
+async function aWorkspace(
+	conversations: Context.Context<Conversations.Services | TurnExecution.Service>,
+) {
 	const suffix = crypto.randomUUID();
 	const [admin, member, viewer, stranger] = await onDatabase((db) =>
 		db

@@ -5,7 +5,7 @@ import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { TurnRepository } from "../turns/repository.ts";
+import { TurnRepository } from "../turns/testing.ts";
 import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";

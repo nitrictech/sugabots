@@ -2,8 +2,10 @@ export * as FloorControl from "./floor-control.ts";
 
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { TurnRequests } from "../turns/requests.ts";
+import { Turns } from "../turns/turns.ts";
+import { admitFacilitation } from "./facilitate.workflow.ts";
 import { decideFloor, type FloorDecision, type FloorMessage, loadFloorScope } from "./floor.ts";
 
 /** Who speaks after a message, in a thread of any type. */
@@ -11,7 +13,7 @@ export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see
 	 * `decideFloor`) and asks for them: brings each addressed agent into the
-	 * thread and queues its turn, or queues the Facilitator. Runs in the
+	 * thread and asks for its turn, or asks the Facilitator. Runs in the
 	 * caller's transaction, so it commits with the message.
 	 */
 	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<FloorDecision>;
@@ -22,7 +24,8 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("FloorControl");
 	const threads = yield* ThreadRepository.Service;
-	const requests = yield* TurnRequests.Service;
+	const lanes = yield* Lanes.Service;
+	const turns = yield* Turns.Service;
 
 	return Service.of({
 		giveFloor: (committed) =>
@@ -37,7 +40,7 @@ export const make = Effect.gen(function* () {
 							author: committed.author,
 						});
 						if (decision.kind === "facilitate") {
-							yield* requests.queueFacilitation({
+							yield* admitFacilitation(lanes, {
 								threadId: committed.threadId,
 								triggerMessageId: committed.id,
 							});
@@ -48,7 +51,7 @@ export const make = Effect.gen(function* () {
 							decision.agents.map(({ agentId }) => agentId),
 						);
 						for (const { agentId, reason } of decision.agents) {
-							yield* requests.queueTurn({
+							yield* turns.ask({
 								threadId: committed.threadId,
 								agentId,
 								triggerMessageId: committed.id,

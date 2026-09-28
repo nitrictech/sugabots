@@ -31,6 +31,9 @@ export const ROUTINE_EXECUTION_ENDED = UserMessage.of`Routine execution ended`;
 /** What people are told of a turn a defect ended, rather than a failure it expects. */
 export const TURN_STOPPED_UNEXPECTEDLY = UserMessage.of`The reply stopped unexpectedly.`;
 
+/** What people are told of a system agent's turn cut short by its process stopping. */
+export const SYSTEM_TURN_INTERRUPTED = UserMessage.of`It was interrupted before it finished.`;
+
 /** What the lifecycle knows of a turn besides its status. */
 interface TurnFacts {
 	/** The workflow execution running the turn. A suspended turn resumes only for its owner. */

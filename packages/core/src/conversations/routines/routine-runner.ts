@@ -6,7 +6,7 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { message } from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { TurnRequests } from "../turns/requests.ts";
+import { Turns } from "../turns/turns.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
 import type { RoutineNotFound, RoutineTriggerConflict, RoutineTriggerRejected } from "./routine.ts";
@@ -35,7 +35,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineRunner");
 	const repository = yield* RoutineRepository.Service;
-	const requests = yield* TurnRequests.Service;
+	const turns = yield* Turns.Service;
 	const acceptTrigger = yield* makeAcceptTrigger;
 
 	return Service.of({
@@ -93,7 +93,7 @@ export const make = Effect.gen(function* () {
 						}
 						// Asking again for a turn already asked for joins it, so a start
 						// repeated after a crash does not run the turn twice.
-						yield* requests.queueTurn({
+						yield* turns.ask({
 							threadId: execution.threadId,
 							agentId: execution.agentId,
 							triggerMessageId: triggerMessage.id,
