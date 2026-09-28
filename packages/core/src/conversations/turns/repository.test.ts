@@ -72,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		approvals: [],
 		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
 		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
-		accounting: { modelCalls: 1 },
+		modelCalls: 1,
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
@@ -264,10 +264,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			const outcome = await segmentWith(
 				Models.fromStream(() =>
 					Effect.sync(() =>
-						streamed(chunks("Example Domain", " says hello."), {
-							modelCalls: 1,
-							contextTokens: 12,
-						}),
+						streamed(chunks("Example Domain", " says hello."), { contextTokens: 12 }),
 					),
 				),
 			);

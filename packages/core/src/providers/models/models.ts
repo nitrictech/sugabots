@@ -70,38 +70,35 @@ export interface Streamed {
 	/** The response's text, one delta at a time. Read it with {@link forEachDelta}. */
 	text: AsyncIterable<string>;
 	/**
-	 * What the finished response cost. Meaningful only once `text` has been
-	 * read to its end; asked for after an abort, it fails. An Effect rather than
-	 * a promise so nothing exists until the caller asks, which is what keeps an
-	 * aborted response from leaving a rejection nobody handles.
+	 * How the response ended. Meaningful only once `text` has been read to its
+	 * end; asked for after an abort, it fails. An Effect rather than a promise
+	 * so nothing exists until the caller asks, which is what keeps an aborted
+	 * response from leaving a rejection nobody handles.
 	 */
-	accounting: Effect.Effect<Accounting, RequestFailed>;
-	/** The tool calls waiting on someone's approval, and the messages that carry the response on. */
-	continuation: Effect.Effect<
-		{
-			approvalRequests: ToolApprovalRequestOutput<ToolSet>[];
-			responseMessages: Array<AssistantModelMessage | ToolModelMessage>;
-		},
-		RequestFailed
-	>;
-}
-
-export interface Answer {
-	text: string;
-	accounting: Accounting;
+	finished: Effect.Effect<Finished, RequestFailed>;
 }
 
 /**
- * What a response's caller keeps of the model's work. What each request used
- * and cost is in the `model_request` ledger, not here.
+ * What a finished response leaves for whoever carries it on. What each
+ * request used and cost is in the `model_request` ledger, not here.
  */
-export interface Accounting {
-	/** How many requests the model made, which caps the steps a resumed turn has left. */
+export interface Finished {
+	/** How many model calls the response took, one per round of tool calls. */
 	modelCalls: number;
 	/**
 	 * The prompt's size at the response's first model call: its history, system
 	 * text and tools. What its tool calls return is left out.
 	 */
+	contextTokens?: number;
+	/** The tool calls waiting on someone's approval. */
+	approvalRequests: ToolApprovalRequestOutput<ToolSet>[];
+	/** The messages that carry the response on once those calls are decided. */
+	responseMessages: Array<AssistantModelMessage | ToolModelMessage>;
+}
+
+export interface Answer {
+	text: string;
+	/** The prompt's size, as in {@link Finished}. */
 	contextTokens?: number;
 }
 
@@ -254,23 +251,21 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			});
 			return {
 				text: result.textStream,
-				accounting: Effect.tryPromise({
+				finished: Effect.tryPromise({
 					try: async () => {
-						const steps = await result.steps;
+						const [steps, responseMessages] = await Promise.all([
+							result.steps,
+							result.responseMessages,
+						]);
 						if (providerFailure !== undefined) throw providerFailure;
 						return {
 							modelCalls: steps.length,
 							contextTokens: steps[0]?.usage.inputTokens,
+							approvalRequests: [...approvalRequests],
+							responseMessages,
 						};
 					},
 					catch: (cause) => RequestFailed.fromCause(providerFailure ?? cause),
-				}),
-				continuation: Effect.tryPromise({
-					try: async () => ({
-						approvalRequests: [...approvalRequests],
-						responseMessages: await result.responseMessages,
-					}),
-					catch: (cause) => RequestFailed.fromCause(cause),
 				}),
 			};
 		}),
@@ -298,7 +293,8 @@ export function fromStream(stream: Interface["stream"]): Interface {
 							Effect.asVoid,
 						),
 					);
-					return { text: yield* Ref.get(collected), accounting: yield* streamed.accounting };
+					const { contextTokens } = yield* streamed.finished;
+					return { text: yield* Ref.get(collected), contextTokens };
 				}),
 			).pipe(
 				Effect.timeoutOrElse({

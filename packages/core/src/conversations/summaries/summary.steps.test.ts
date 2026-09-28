@@ -74,7 +74,6 @@ describe("summarise", () => {
 		const model = Models.fromStream(() =>
 			Effect.sync(() =>
 				streamed(chunks('{"title":"Prepare release notes",', '"summary":"Notes are ready."}'), {
-					modelCalls: 1,
 					contextTokens: 20,
 				}),
 			),
@@ -87,7 +86,7 @@ describe("summarise", () => {
 		expect(summaries.complete).toHaveBeenCalledWith(
 			prepared,
 			{ title: "Prepare release notes", content: "Notes are ready." },
-			{ modelCalls: 1, contextTokens: 20 },
+			20,
 		);
 		expect(turns.failSystemAgentTurn).not.toHaveBeenCalled();
 	});

@@ -11,14 +11,18 @@ export const unusedModel = (): Models.Interface =>
 		Effect.fail(new Models.RequestFailed({ message: "unused model", reason: "unavailable" })),
 	);
 
-/** A finished response with this text, costing `accounting`, and no tool calls waiting. */
+/** A response with this text that ended as `finished` says: by default after one model call, with no tool calls waiting. */
 export const streamed = (
 	text: AsyncIterable<string>,
-	accounting: Models.Accounting = { modelCalls: 1 },
+	finished: Partial<Models.Finished> = {},
 ): Models.Streamed => ({
 	text,
-	accounting: Effect.succeed(accounting),
-	continuation: Effect.succeed({ approvalRequests: [], responseMessages: [] }),
+	finished: Effect.succeed({
+		modelCalls: 1,
+		approvalRequests: [],
+		responseMessages: [],
+		...finished,
+	}),
 });
 
 export async function* chunks(...text: string[]): AsyncGenerator<string> {

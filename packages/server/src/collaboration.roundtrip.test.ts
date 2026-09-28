@@ -58,7 +58,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							yield "A dog named Krypto.";
 						}
 					})(),
-					{ modelCalls: 1 },
 				),
 			),
 		);

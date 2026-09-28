@@ -10,7 +10,6 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { threadSummary } from "../../database/schema.ts";
-import type { Models } from "../../providers/models/models.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
@@ -48,7 +47,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedSummary,
 		result: { content: string; title?: string },
-		accounting: Models.Accounting,
+		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 }
 
@@ -142,7 +141,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, result, accounting) =>
+		complete: (prepared, result, contextTokens) =>
 			operation(
 				"complete",
 				transaction(
@@ -164,7 +163,7 @@ export const make = Effect.gen(function* () {
 							content: result.content,
 							sourceMessageId: prepared.sourceMessageId,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, accounting);
+						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
 			),

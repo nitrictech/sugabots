@@ -149,7 +149,7 @@ const retry: SegmentOutcome = { _tag: "Retry" };
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
 type StreamOutcome =
-	| { kind: "completed"; accounting: Models.Accounting }
+	| { kind: "completed"; contextTokens: number | undefined }
 	| {
 			kind: "suspended";
 			checkpoint: TurnCheckpoint;
@@ -273,10 +273,7 @@ const generateReply = (
 						}),
 					);
 				}
-				const accounting = {
-					...streamed.value.accounting,
-					contextCapacity: prepared.context.windowTokens,
-				};
+				const { contextTokens } = streamed.value;
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
 				// and gives up waiting for an answer that lands a moment later. The
@@ -303,7 +300,10 @@ const generateReply = (
 										),
 									)
 							: false;
-						yield* turns.complete(replyTurn, draft, accounting);
+						yield* turns.complete(replyTurn, draft, {
+							contextTokens,
+							contextCapacity: prepared.context.windowTokens,
+						});
 						// An answer to a brief goes back to the agent that asked, which
 						// carries on in the parent thread, so nobody speaks next here.
 						if (!answered) {
@@ -312,7 +312,7 @@ const generateReply = (
 						yield* requests.queueSummary(followUp);
 					}),
 				);
-				if (needsCompaction(accounting.contextTokens, prepared.context.windowTokens)) {
+				if (needsCompaction(contextTokens, prepared.context.windowTokens)) {
 					yield* requests
 						.queueCompaction({
 							...followUp,
@@ -487,23 +487,22 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
-				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.accounting.modelCalls ?? 0)),
+				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
 			const consume = Effect.gen(function* () {
 				yield* consumeDeltas(prepared, generated.text, events, reply, saveReply);
 				yield* saveReply;
-				const accounting = yield* generated.accounting;
-				const terminal = yield* generated.continuation;
-				if (terminal.approvalRequests.length === 0) {
-					return {
-						kind: "completed" as const,
-						accounting: addAccounting(prepared.checkpoint, accounting),
-					};
+				const finished = yield* generated.finished;
+				// A resumed segment starts with the earlier segment's tool results,
+				// so the first segment's prompt is the one measured.
+				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
+				if (finished.approvalRequests.length === 0) {
+					return { kind: "completed" as const, contextTokens };
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
-				const pending = yield* Effect.forEach(terminal.approvalRequests, (request) => {
+				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.requiresApproval) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
@@ -537,7 +536,7 @@ const streamReply = (
 					kind: "suspended" as const,
 					approvals: pending,
 					checkpoint: {
-						messages: [...segmentMessages, ...terminal.responseMessages],
+						messages: [...segmentMessages, ...finished.responseMessages],
 						approvals: pending.map((request) => ({
 							approvalId: request.approvalId,
 							tool: request.tool,
@@ -547,7 +546,8 @@ const streamReply = (
 						})),
 						modelInput,
 						reply: suspendedReply,
-						accounting: addAccounting(prepared.checkpoint, accounting),
+						modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
+						contextTokens,
 					},
 				};
 			});
@@ -681,16 +681,3 @@ const publishDelta = (
 			}),
 		),
 	).pipe(Effect.catchCause((cause) => Effect.logError("Publishing a message delta failed", cause)));
-
-function addAccounting(
-	checkpoint: TurnCheckpoint | undefined,
-	segment: Models.Accounting,
-): Models.Accounting {
-	if (!checkpoint) return segment;
-	const prior = checkpoint.accounting;
-	return {
-		modelCalls: (prior.modelCalls ?? 0) + segment.modelCalls,
-		// A resumed segment starts with the earlier segment's tool results.
-		contextTokens: prior.contextTokens ?? segment.contextTokens,
-	};
-}

@@ -53,8 +53,8 @@ const generateCompaction = (
 			const turns = yield* TurnRepository.Service;
 			const generated = yield* Effect.exit(restore(generate(prepared, model)));
 			if (Exit.isSuccess(generated)) {
-				const [summary, accounting] = generated.value;
-				return yield* compactions.complete(prepared, summary, accounting);
+				const [summary, contextTokens] = generated.value;
+				return yield* compactions.complete(prepared, summary, contextTokens);
 			}
 			const cause = generated.cause;
 			const expected = Cause.findErrorOption(cause);
@@ -74,7 +74,11 @@ const generateCompaction = (
 const generate = (
 	prepared: PreparedCompaction,
 	model: Models.Interface,
-): Effect.Effect<readonly [string, Models.Accounting], CompactionFailure, Database> =>
+): Effect.Effect<
+	readonly [string, contextTokens: number | undefined],
+	CompactionFailure,
+	Database
+> =>
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
 			...compactionPrompt(prepared),
@@ -92,7 +96,7 @@ const generate = (
 		if (!summary) {
 			return yield* new Models.UnusableAnswer({ reason: "Compaction returned no text" });
 		}
-		return [summary, answer.accounting] as const;
+		return [summary, answer.contextTokens] as const;
 	}).pipe(
 		// Each attempt gets its own time limit.
 		Models.retryUnusable,

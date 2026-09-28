@@ -707,11 +707,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(preparedTurn),
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
-			{
-				modelCalls: 1,
-				contextTokens: 30,
-				contextCapacity: 200_000,
-			},
+			{ contextTokens: 30, contextCapacity: 200_000 },
 		);
 		await runOnPostgres(releaseTurn(firstRun));
 		const firstSummary = await preparedSummary({
@@ -745,10 +741,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await summaries.complete(
 			firstSummary,
 			{ title: "Verify the release", content: "The release work is complete." },
-			{
-				modelCalls: 1,
-				contextTokens: 1_000,
-			},
+			1_000,
 		);
 
 		const refreshed = await viewAs(memberId).get(details.thread.id);
@@ -796,7 +789,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(nextTurn),
 			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
-			{ modelCalls: 1 },
+			{},
 		);
 		const nextSummary = await preparedSummary({
 			threadId: details.thread.id,
@@ -812,7 +805,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				{ content: "Only approval remains." },
 			],
 		});
-		await summaries.complete(nextSummary, { content: "Only approval remains." }, { modelCalls: 1 });
+		await summaries.complete(nextSummary, { content: "Only approval remains." }, undefined);
 		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toBe(
 			"Verify the release",
 		);
@@ -901,7 +894,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
 			Array.from({ length: 11 }, (_, index) => `Message ${index + 4}`),
 		);
-		await compactions.complete(prepared, "The family is planning a trip.", { modelCalls: 1 });
+		await compactions.complete(prepared, "The family is planning a trip.", undefined);
 
 		const turn = await prepareRunnable(turns, await runningTurn(details.thread.id));
 		expect(turn.context.compaction).toEqual({
@@ -922,7 +915,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(turn),
 			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
-			{ modelCalls: 1, contextTokens: 70_000 },
+			{ contextTokens: 70_000 },
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
 			usedTokens: 70_000,
@@ -1157,7 +1150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await turnRecords.complete(
 			replyTurnOf(turn),
 			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
-			{ modelCalls: 1, contextTokens: 50_000, contextCapacity: turn.context.windowTokens },
+			{ contextTokens: 50_000, contextCapacity: turn.context.windowTokens },
 		);
 		expect((await viewAs(memberId).activity(details.thread.id))?.context).toMatchObject({
 			windowTokens: 128_000,

@@ -63,8 +63,8 @@ const generateSummary = (
 			const turns = yield* TurnRepository.Service;
 			const generated = yield* Effect.exit(restore(generate(prepared, model)));
 			if (Exit.isSuccess(generated)) {
-				const [result, accounting] = generated.value;
-				return yield* summaries.complete(prepared, result, accounting);
+				const [result, contextTokens] = generated.value;
+				return yield* summaries.complete(prepared, result, contextTokens);
 			}
 			const cause = generated.cause;
 			const expected = Cause.findErrorOption(cause);
@@ -85,7 +85,7 @@ const generate = (
 	prepared: PreparedSummary,
 	model: Models.Interface,
 ): Effect.Effect<
-	readonly [{ content: string; title?: string }, Models.Accounting],
+	readonly [{ content: string; title?: string }, contextTokens: number | undefined],
 	SummaryFailure,
 	Database
 > =>
@@ -103,7 +103,7 @@ const generate = (
 			timeout: SUMMARY_TIMEOUT,
 		});
 		const result = yield* parseGenerated(answer.text, prepared.previousContent === undefined);
-		return [result, answer.accounting] as const;
+		return [result, answer.contextTokens] as const;
 	}).pipe(
 		// Each attempt gets its own time limit rather than the three sharing one.
 		Models.retryUnusable,

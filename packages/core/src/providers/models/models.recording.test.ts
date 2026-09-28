@@ -114,7 +114,7 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"]) =>
 			Effect.gen(function* () {
 				const generated = yield* model.stream(input);
 				yield* Models.forEachDelta(generated.text, () => Effect.void);
-				return yield* Effect.exit(generated.accounting);
+				return yield* Effect.exit(generated.finished);
 			}),
 		),
 	);

@@ -104,12 +104,7 @@ describe("runSegment", () => {
 		const queueSummary = vi.fn(noSummary);
 		const events = eventBus();
 		const model = Models.fromStream(() =>
-			Effect.sync(() =>
-				streamed(chunks("Release", " checked"), {
-					modelCalls: 1,
-					contextTokens: 10,
-				}),
-			),
+			Effect.sync(() => streamed(chunks("Release", " checked"), { contextTokens: 10 })),
 		);
 
 		await runWithServices(
@@ -125,7 +120,6 @@ describe("runSegment", () => {
 		);
 
 		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
-			modelCalls: 1,
 			contextTokens: 10,
 			contextCapacity: 128_000,
 		});
@@ -152,7 +146,7 @@ describe("runSegment", () => {
 					execution,
 					turns,
 					model: Models.fromStream(() =>
-						Effect.sync(() => streamed(chunks("Done"), { modelCalls: 1, contextTokens })),
+						Effect.sync(() => streamed(chunks("Done"), { contextTokens })),
 					),
 					events: eventBus(),
 					collaborations: collaborations(),
@@ -186,7 +180,7 @@ describe("runSegment", () => {
 				execution,
 				turns,
 				model: Models.fromStream(() =>
-					Effect.succeed(streamed(chunks("Done"), { modelCalls: 1, contextTokens: 0 })),
+					Effect.succeed(streamed(chunks("Done"), { contextTokens: 0 })),
 				),
 				events: eventBus(),
 				collaborations: collaborations(),
@@ -276,7 +270,7 @@ describe("runSegment", () => {
 				collaborations: [],
 				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
 			},
-			{ modelCalls: 1, contextCapacity: 128_000 },
+			{ contextCapacity: 128_000 },
 		);
 	});
 
@@ -353,7 +347,7 @@ describe("runSegment", () => {
 		expect(turns.complete).toHaveBeenCalledWith(
 			replyTurn,
 			expect.objectContaining({ content: "Clearing. Done.", acted: true }),
-			{ modelCalls: 1, contextCapacity: 128_000 },
+			{ contextCapacity: 128_000 },
 		);
 		expect(close).toHaveBeenCalledOnce();
 	});
@@ -409,7 +403,7 @@ describe("runSegment", () => {
 					messages: [{ role: "user", content: "reviewed history" }],
 				},
 				reply: reply(""),
-				accounting: { modelCalls: 1 },
+				modelCalls: 1,
 			},
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
@@ -839,10 +833,8 @@ function segmentAskingApproval(
 		execution,
 		turns,
 		model: Models.fromStream(() =>
-			Effect.succeed({
-				text: chunks("I need approval."),
-				accounting: Effect.succeed({ modelCalls: 1 }),
-				continuation: Effect.succeed({
+			Effect.succeed(
+				streamed(chunks("I need approval."), {
 					approvalRequests: [
 						{
 							type: "tool-approval-request",
@@ -857,7 +849,7 @@ function segmentAskingApproval(
 					] as never,
 					responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
 				}),
-			}),
+			),
 		),
 		events: eventBus(),
 		collaborations: collaborations(),

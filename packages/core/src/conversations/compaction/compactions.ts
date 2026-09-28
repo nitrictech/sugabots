@@ -10,7 +10,6 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { threadCompaction } from "../../database/schema.ts";
-import type { Models } from "../../providers/models/models.ts";
 import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
@@ -54,7 +53,7 @@ export interface Interface {
 	readonly complete: (
 		prepared: PreparedCompaction,
 		summary: string,
-		accounting: Models.Accounting,
+		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 }
 
@@ -162,7 +161,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, summary, accounting) =>
+		complete: (prepared, summary, contextTokens) =>
 			operation(
 				"complete",
 				transaction(
@@ -175,7 +174,7 @@ export const make = Effect.gen(function* () {
 							historyStartsAt: prepared.historyStartsAt,
 							keptFrom: prepared.keptFrom,
 						});
-						yield* turns.completeSystemAgentTurn(prepared.turnId, accounting);
+						yield* turns.completeSystemAgentTurn(prepared.turnId, contextTokens);
 					}),
 				),
 			),
