@@ -1,8 +1,7 @@
-import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
 import { and, asc, eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../database/database.ts";
-import type { PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, thread, threadSummary, turn, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import type { Lanes } from "../../workflows/lanes.ts";
@@ -10,6 +9,7 @@ import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
 } from "../../workspaces/agents/system-agents.ts";
+import { ConversationEvent } from "../events.ts";
 import { participantColumns, toMessage } from "../threads/participants.ts";
 import { loadPlacedParts } from "../threads/placed-parts.ts";
 import { messageTextWithPlacedParts } from "../turns/context.ts";
@@ -83,7 +83,7 @@ export const queueSummary = (lanes: Lanes.Interface, request: SummaryRequest) =>
 		})
 		.pipe(Effect.asVoid);
 
-export function summaryStore(publishEvents: PublishEvents): SummaryStore {
+export function summaryStore(emit: DomainEvents.Emit<ConversationEvent>): SummaryStore {
 	return {
 		prepare: (request) =>
 			// One transaction, so the system-agent thread and its turn are created
@@ -219,15 +219,11 @@ export function summaryStore(publishEvents: PublishEvents): SummaryStore {
 							})
 							.where(eq(turn.id, prepared.turnId)),
 					);
-					yield* publishEvents([
-						{
-							channel: workspaceChannel(prepared.workspaceId),
-							event: streamEvent("thread.changed"),
-						},
-						{
-							channel: threadChannel(prepared.threadId),
-							event: streamEvent("thread.changed", { threadId: prepared.threadId }),
-						},
+					yield* emit([
+						ConversationEvent.ThreadSummarised({
+							workspaceId: prepared.workspaceId,
+							threadId: prepared.threadId,
+						}),
 					]);
 				}),
 			),
@@ -267,8 +263,7 @@ const loadSummarisedThread = Effect.fn("SummaryStore.loadSummarisedThread")(func
 		.from(thread)
 		// The agent in the payload is whoever's reply triggered this, not whoever
 		// writes the summary: that is the pod's summarise system agent, found below.
-		// Requiring it to be the thread's host meant a shared thread stopped being
-		// summarised the moment anyone but the host replied.
+		// It need not be the thread's host, since anyone may reply in a shared thread.
 		.innerJoin(agent, eq(agent.id, request.agentId))
 		.innerJoin(
 			message,
@@ -330,15 +325,15 @@ const loadTranscript = Effect.fn("SummaryStore.loadTranscript")(function* (
 	});
 });
 
-/**
- * The system agent's own thread under the one being summarised: one per system agent per
- * thread, created on first use.
- */
 /** What the thread holding a thread's summaries is called. */
 function summariesTitle(threadTitle: string): string {
 	return `Summaries of ${threadTitle}`;
 }
 
+/**
+ * The system agent's own thread under the one being summarised: one per system agent per
+ * thread, created on first use.
+ */
 const systemAgentThreadFor = Effect.fn("SummaryStore.systemAgentThreadFor")(function* (
 	db: Executor,
 	scope: SummarisedThread,

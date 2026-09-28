@@ -1,4 +1,9 @@
-import { type ToolCallPart, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import {
+	type CollaborationPart,
+	type ToolCallPart,
+	threadChannel,
+	workspaceChannel,
+} from "@sugabots/contracts";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
@@ -162,6 +167,72 @@ describe("the thread feed", () => {
 			),
 		);
 	});
+
+	it.each([
+		{ recipientChatId: crypto.randomUUID(), listed: "in the collaborator's chat" },
+		{ recipientChatId: null, listed: "nowhere else" },
+	])("shows an opened collaboration in the asking reply, listed $listed", ({ recipientChatId }) => {
+		expect(
+			sent(
+				ConversationEvent.CollaborationOpened({
+					parentThreadId: threadId,
+					parentMessageId: "m1",
+					collaboration,
+					workspaceId,
+					recipientChatId,
+				}),
+			),
+		).toEqual([
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({
+					type: "collaboration.updated",
+					threadId,
+					messageId: "m1",
+					collaboration,
+				}),
+			},
+			{
+				channel: workspaceChannel(workspaceId),
+				event: expect.objectContaining({
+					type: "thread.changed",
+					threadId: collaboration.threadId,
+				}),
+			},
+			...(recipientChatId
+				? [
+						{
+							channel: workspaceChannel(workspaceId),
+							event: expect.objectContaining({
+								type: "chat.thread_changed",
+								chatId: recipientChatId,
+								threadId: collaboration.threadId,
+								threadType: "collaboration",
+							}),
+						},
+					]
+				: []),
+		]);
+	});
+
+	it("tells each thread a cancelled routine run touched, and the workspace, which thread changed", () => {
+		const childId = crypto.randomUUID();
+
+		expect(
+			sent(ConversationEvent.RoutineWorkCancelled({ workspaceId, threadIds: [threadId, childId] })),
+		).toEqual(
+			[threadId, childId].flatMap((id) => [
+				{
+					channel: threadChannel(id),
+					event: expect.objectContaining({ type: "thread.changed", threadId: id }),
+				},
+				{
+					channel: workspaceChannel(workspaceId),
+					event: expect.objectContaining({ type: "thread.changed", threadId: id }),
+				},
+			]),
+		);
+	});
 });
 
 const toolCall: ToolCallPart = {
@@ -177,4 +248,16 @@ const toolCall: ToolCallPart = {
 	atOffset: 4,
 	startedAt: new Date().toISOString(),
 	finishedAt: null,
+};
+
+const collaboration: CollaborationPart = {
+	type: "collaboration",
+	id: crypto.randomUUID(),
+	agentId: crypto.randomUUID(),
+	agentName: "Helper",
+	threadId: crypto.randomUUID(),
+	brief: "Look",
+	status: "waiting",
+	answer: null,
+	atOffset: 4,
 };

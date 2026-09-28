@@ -11,11 +11,10 @@ import { Effect } from "effect";
  * resource — the same `Authorization` and the same thread visibility, so a
  * demotion that closes a REST route closes the stream with it.
  *
- * Each function answers with the channel to subscribe to, or
- * `undefined` when the caller may not have it — returning the channel rather
- * than a yes or no because for a thread the two are different questions: the
- * events of a thread publish on its **root** thread's channel, so resolving the
- * root is part of the same lookup.
+ * Each function answers with the channel to subscribe to, or `undefined` when
+ * the caller may not have it. A thread's events go on that thread's own
+ * channel, and a workspace channel carries what its lists need
+ * (`ThreadFeed` in core decides both).
  *
  * It is an interface so stream routes can be tested without a database.
  */

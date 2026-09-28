@@ -125,8 +125,8 @@ describe("authorisation", () => {
 	});
 
 	it("subscribes to the channel authorisation resolved, not the one in the path", async () => {
-		// A thread's events publish on its root thread's channel, so the id in the
-		// path and the channel listened to are routinely different.
+		// Access answers with the channel to listen to, and the route must use that
+		// answer rather than build a channel from the path itself.
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),

@@ -13,15 +13,12 @@ import type {
 import {
 	DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT,
 	MAX_THREAD_TITLE_CHARACTERS,
-	streamEvent,
-	threadChannel,
-	workspaceChannel,
 } from "@sugabots/contracts";
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import type { PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { isUuid } from "../../database/ids.ts";
 import type * as schema from "../../database/schema.ts";
 import {
@@ -41,6 +38,7 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
+import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../turns/facilitate.workflow.ts";
 import type { QueueTurn } from "../turns/queue.ts";
 import type { TurnSignals } from "../turns/signals.ts";
@@ -208,7 +206,7 @@ export interface RoutineStore {
 }
 
 export function routineStore(
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	queueTurn: QueueTurn,
 	signals: TurnSignals,
 	runs: RoutineRuns,
@@ -510,15 +508,12 @@ export function routineStore(
 					if (!triggerMessage)
 						return yield* Effect.die(new Error("Routine message insert returned no row"));
 					yield* runs.queue({ routineId: input.routineId, executionId: execution.id });
-					yield* publishEvents([
-						{
-							channel: workspaceChannel(input.workspaceId),
-							event: streamEvent("chat.thread_changed", {
-								chatId: currentChat.id,
-								threadId: executionThread.id,
-								threadType: "routine",
-							}),
-						},
+					yield* emit([
+						ConversationEvent.RoutineExecutionAccepted({
+							workspaceId: input.workspaceId,
+							chatId: currentChat.id,
+							threadId: executionThread.id,
+						}),
 					]);
 					return { executionId: execution.id, threadId: executionThread.id, duplicate: false };
 				}),
@@ -621,7 +616,7 @@ export function routineStore(
 			),
 
 		settleThread: (threadId, outcome) =>
-			settleRoutineThread(threadId, outcome, publishEvents, signals, runs),
+			settleRoutineThread(threadId, outcome, emit, signals, runs),
 
 		failRun: (run) =>
 			transaction(
@@ -643,7 +638,7 @@ export function routineStore(
 						yield* settleRoutineThread(
 							execution.threadId,
 							{ state: "failed", error: RUN_STOPPED_UNEXPECTEDLY },
-							publishEvents,
+							emit,
 							signals,
 							runs,
 						);
@@ -668,7 +663,7 @@ export function routineStore(
 							)
 							.returning(),
 					);
-					if (failed) yield* announceRunEnded(publishEvents, failed);
+					if (failed) yield* announceRunEnded(emit, failed);
 				}),
 			),
 
@@ -682,7 +677,7 @@ export function routineStore(
 						.limit(1),
 				);
 				if (!execution) return true;
-				yield* settleRoutineThread(execution.threadId, undefined, publishEvents, signals, runs);
+				yield* settleRoutineThread(execution.threadId, undefined, emit, signals, runs);
 				const [settled] = yield* query((db) =>
 					db
 						.select({ state: routineExecution.state })
@@ -897,7 +892,7 @@ const workingChildThreads = sql`select child.id from ${thread} child join tree p
 function settleRoutineThread(
 	threadId: string,
 	outcome: { state: "failed" | "cancelled"; error?: UserMessage } | undefined,
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	signals: TurnSignals,
 	runs: RoutineRuns,
 ) {
@@ -1151,12 +1146,12 @@ function settleRoutineThread(
 						return rows[0]?.active ?? false;
 					}),
 				);
-				yield* publishEvents(
-					affectedThreadIds.map((affectedThreadId) => ({
-						channel: threadChannel(affectedThreadId),
-						event: streamEvent("thread.changed"),
-					})),
-				);
+				yield* emit([
+					ConversationEvent.RoutineWorkCancelled({
+						workspaceId: status.workspace_id,
+						threadIds: affectedThreadIds,
+					}),
+				]);
 			}
 			if (active) return false;
 
@@ -1183,7 +1178,7 @@ function settleRoutineThread(
 			);
 			if (!settled) return false;
 			yield* runs.settled({ routineId: status.routine_id, executionId: status.id });
-			yield* announceRunEnded(publishEvents, {
+			yield* announceRunEnded(emit, {
 				workspaceId: status.workspace_id,
 				threadId: status.thread_id,
 			});
@@ -1194,7 +1189,7 @@ function settleRoutineThread(
 
 /** Tells the workspace that a routine run's thread changed because the run ended. */
 const announceRunEnded = (
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	run: { readonly workspaceId: string; readonly threadId: string },
 ) =>
 	Effect.gen(function* () {
@@ -1209,15 +1204,12 @@ const announceRunEnded = (
 				return root.chatId;
 			}),
 		);
-		yield* publishEvents([
-			{
-				channel: workspaceChannel(run.workspaceId),
-				event: streamEvent("chat.thread_changed", {
-					chatId,
-					threadId: run.threadId,
-					threadType: "routine",
-				}),
-			},
+		yield* emit([
+			ConversationEvent.RoutineExecutionSettled({
+				workspaceId: run.workspaceId,
+				chatId,
+				threadId: run.threadId,
+			}),
 		]);
 	});
 

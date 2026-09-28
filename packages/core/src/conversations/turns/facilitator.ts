@@ -1,4 +1,4 @@
-import { streamEvent, type ThreadType, threadChannel } from "@sugabots/contracts";
+import type { ThreadType } from "@sugabots/contracts";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Duration, Effect, Layer, Ref } from "effect";
 import {
@@ -8,13 +8,14 @@ import {
 	query,
 	transaction,
 } from "../../database/database.ts";
-import type { PublishEvents } from "../../database/events/publish.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { agent, message, pod, thread, threadParticipant, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import {
 	FACILITATE_SYSTEM_AGENT,
 	findRunnableSystemAgent,
 } from "../../workspaces/agents/system-agents.ts";
+import { ConversationEvent } from "../events.ts";
 import type { RoutineStore } from "../routines/store.ts";
 import { AnswerTimedOut, retryUnusable, UnusableAnswer } from "./answer.ts";
 import {
@@ -48,7 +49,7 @@ const MAX_ANSWER_CHARACTERS = 200;
 
 export interface FacilitatorExecution {
 	model: TurnModel;
-	publishEvents: PublishEvents;
+	emit: DomainEvents.Emit<ConversationEvent>;
 	/** How the chosen agent's turn is asked for. */
 	queueTurn: QueueTurn;
 	routines?: Pick<RoutineStore, "settleThread">;
@@ -167,11 +168,8 @@ const applyDecision = (
 							.values({ threadId: scope.threadId, agentId: chosen.id })
 							.onConflictDoNothing(),
 					);
-					yield* execution.publishEvents([
-						{
-							channel: threadChannel(scope.threadId),
-							event: streamEvent("thread.changed", { threadId: scope.threadId }),
-						},
+					yield* execution.emit([
+						ConversationEvent.AgentsJoined({ threadId: scope.threadId, agentIds: [chosen.id] }),
 					]);
 				}
 				yield* execution.queueTurn({

@@ -31,12 +31,12 @@ export function composeConversations(dependencies: ConversationDependencies) {
 		/** For recording conversation facts outside the stores, as the facilitator does. */
 		emit,
 		stores: {
-			chats: chatStore(publishEvents, queueTurn, queueFacilitation),
-			routines: routineStore(publishEvents, queueTurn, signals, routineRuns),
+			chats: chatStore(emit, queueTurn, queueFacilitation),
+			routines: routineStore(emit, queueTurn, signals, routineRuns),
 			threads: threadStore(),
-			turns: turnStore(emit, { publishEvents, queueTurn, queueFacilitation }, signals),
-			summaries: summaryStore(publishEvents),
-			collaborations: collaborationStore(publishEvents, queueTurn),
+			turns: turnStore(emit, queueTurn, queueFacilitation, signals),
+			summaries: summaryStore(emit),
+			collaborations: collaborationStore(emit, queueTurn),
 			calls: toolCallStore(emit),
 			approvals: toolApprovalStore(emit, signals),
 		},

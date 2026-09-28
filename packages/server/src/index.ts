@@ -89,9 +89,8 @@ const main = Effect.gen(function* () {
 	const lanes = Context.get(engine, Lanes.Service);
 	const workflowEngine = Context.get(engine, WorkflowEngine.WorkflowEngine);
 	const queueTurn = queueTurnInLane(lanes);
-	const publishEvents = eventPublisher(bus);
 	const conversations = composeConversations({
-		publishEvents,
+		publishEvents: eventPublisher(bus),
 		queueTurn,
 		queueFacilitation: queueFacilitationInLane(lanes),
 		signals: turnSignals(workflowEngine),
@@ -142,7 +141,12 @@ const main = Effect.gen(function* () {
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
 			Layer.provideMerge(routineSteps(stores.routines)),
 			Layer.provideMerge(
-				facilitateSteps({ model, publishEvents, queueTurn, routines: stores.routines }),
+				facilitateSteps({
+					model,
+					emit: conversations.emit,
+					queueTurn,
+					routines: stores.routines,
+				}),
 			),
 			Layer.provideMerge(
 				turnSteps({

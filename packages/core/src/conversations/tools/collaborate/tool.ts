@@ -1,6 +1,10 @@
-import type { CollaborationPart } from "@sugabots/contracts";
+import {
+	type CollaborationPart,
+	threadChannel,
+	threadUpdateEventSchema,
+} from "@sugabots/contracts";
 import { tool } from "ai";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Option, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { EventBus } from "../../../database/events/bus.ts";
 import type { CollaborationStore } from "./store.ts";
@@ -8,11 +12,13 @@ import type { CollaborationStore } from "./store.ts";
 /** How long the asking agent's turn waits for the collaborator before moving on. */
 const DEFAULT_WAIT = Duration.seconds(120);
 
+const readThreadUpdate = Schema.decodeUnknownOption(threadUpdateEventSchema);
+
 export interface CollaborateToolOptions {
 	/** The turn the tool runs in: its thread, its agent, its turn and its reply. */
 	from: { threadId: string; agentId: string; turnId: string; messageId: string };
 	collaborations: CollaborationStore;
-	/** For noticing the collaborator's turn completing. */
+	/** For noticing the collaboration being answered. */
 	bus: Pick<EventBus, "subscribe">;
 	/** Runs a store Effect from the tool's promise. */
 	run: RunEffect;
@@ -36,9 +42,9 @@ export type CollaborateResult =
  * The `collaborate` tool, bound to one turn.
  *
  * Opening the collaboration is one transaction in the store. Waiting for the
- * answer is not: it watches the child thread's channel for the collaborator's
- * turn to complete, up to `wait`, then either reads the answer or records
- * that the asking agent moved on so the answer resumes it later.
+ * answer is not: it watches the asking thread's channel for the collaboration
+ * to be answered, up to `wait`, then either reads the answer or records that
+ * the asking agent moved on so the answer resumes it later.
  */
 export function collaborateTool({
 	from,
@@ -74,8 +80,8 @@ export function collaborateTool({
 			}
 			const { collaboration, collaborator } = opened.opened;
 
-			const completed = await turnCompletedIn(bus, collaboration.threadId, wait, signal);
-			if (completed) {
+			const settled = await settledIn(bus, from.threadId, collaboration.id, wait, signal);
+			if (settled) {
 				const answer = await run(collaborations.readAnswer(collaboration.id));
 				if (answer !== undefined) {
 					return { status: "answered", answer };
@@ -98,10 +104,14 @@ export function collaborateTool({
 	});
 }
 
-/** Whether a turn completed on the thread within `wait`, or before `signal` aborted. */
-async function turnCompletedIn(
+/**
+ * Whether the collaboration, made in `threadId`, was answered or failed within
+ * `wait`, or before `signal` aborted.
+ */
+async function settledIn(
 	bus: Pick<EventBus, "subscribe">,
 	threadId: string,
+	collaborationId: string,
 	wait: Duration.Input,
 	signal: AbortSignal,
 ): Promise<boolean> {
@@ -113,8 +123,15 @@ async function turnCompletedIn(
 	const onAbort = () => giveUp.abort();
 	signal.addEventListener("abort", onAbort, { once: true });
 	try {
-		for await (const { event } of bus.subscribe(`thread:${threadId}`, { signal: giveUp.signal })) {
-			if (event.type === "turn.completed") {
+		for await (const { event } of bus.subscribe(threadChannel(threadId), {
+			signal: giveUp.signal,
+		})) {
+			const update = Option.getOrUndefined(readThreadUpdate(event));
+			if (
+				update?.type === "collaboration.updated" &&
+				update.collaboration.id === collaborationId &&
+				(update.collaboration.status === "answered" || update.collaboration.status === "failed")
+			) {
 				return true;
 			}
 		}

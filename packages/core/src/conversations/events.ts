@@ -1,4 +1,4 @@
-import type { Message, ToolCallPart } from "@sugabots/contracts";
+import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
 import type { ModelAccounting } from "./turns/model.ts";
@@ -9,11 +9,15 @@ import type { ModelAccounting } from "./turns/model.ts";
  * The stores emit these through `DomainEvents` in the transaction that wrote
  * them; `ThreadFeed` decides what a watching client is told. An event carries
  * the ids involved and what changed, plus what the feed would otherwise have
- * to query back, such as a finished reply's content. A tool call is carried
- * whole, as the thread shows it, because clients replace the part rather
- * than patch it.
+ * to query back, such as a finished reply's content. A tool call or
+ * collaboration is carried whole, as the thread shows it, because clients
+ * replace the part rather than patch it.
  */
 export type ConversationEvent = Data.TaggedEnum<{
+	/** A person posted a message. */
+	MessagePosted: { readonly threadId: string; readonly message: Message };
+	/** Agents were brought into the thread to answer in it. */
+	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };
 	/** An agent's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
 	TurnStarted: {
 		readonly threadId: string;
@@ -71,6 +75,37 @@ export type ConversationEvent = Data.TaggedEnum<{
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */
 	ToolCallFinished: ToolCallChange;
+	/**
+	 * An agent opened a child thread to brief a collaborator. `recipientChatId`
+	 * is the collaborator's chat in the pod, whose history now lists the thread.
+	 */
+	CollaborationOpened: CollaborationChange & {
+		readonly workspaceId: string;
+		readonly recipientChatId: string | null;
+	};
+	/** The asking turn stopped waiting; the answer will resume it instead. */
+	CollaborationStoppedWaiting: CollaborationChange;
+	/** The collaborator's reply was recorded as the answer. */
+	CollaborationAnswered: CollaborationChange;
+	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
+	ThreadSummarised: { readonly workspaceId: string; readonly threadId: string };
+	/** A routine run began in its own thread, listed in the agent's chat. */
+	RoutineExecutionAccepted: {
+		readonly workspaceId: string;
+		readonly chatId: string;
+		readonly threadId: string;
+	};
+	/**
+	 * A routine run was told to end, and the work still going on in its
+	 * threads was cancelled: waiting turns, pending approvals, collaborations.
+	 */
+	RoutineWorkCancelled: { readonly workspaceId: string; readonly threadIds: readonly string[] };
+	/** A routine run finished, failed, or was cancelled. */
+	RoutineExecutionSettled: {
+		readonly workspaceId: string;
+		readonly chatId: string;
+		readonly threadId: string;
+	};
 }>;
 
 export const ConversationEvent = Data.taggedEnum<ConversationEvent>();
@@ -80,4 +115,14 @@ export interface ToolCallChange {
 	readonly threadId: string;
 	readonly messageId: string;
 	readonly toolCall: ToolCallPart;
+}
+
+/**
+ * A collaboration made in the reply `parentMessageId`, as it stands after the
+ * change. Its own thread is `collaboration.threadId`.
+ */
+export interface CollaborationChange {
+	readonly parentThreadId: string;
+	readonly parentMessageId: string;
+	readonly collaboration: CollaborationPart;
 }

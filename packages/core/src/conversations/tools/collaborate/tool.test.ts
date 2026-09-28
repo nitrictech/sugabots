@@ -1,4 +1,4 @@
-import { type CollaborationPart, streamEvent } from "@sugabots/contracts";
+import { type CollaborationPart, streamEvent, threadChannel } from "@sugabots/contracts";
 import { type Duration, Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
@@ -27,6 +27,11 @@ const collaboration: CollaborationPart = {
 	atOffset: 12,
 };
 const opened = { collaboration, collaborator: { id: "a-helper", name: "Helper" } };
+const answered = streamEvent("collaboration.updated", {
+	threadId: "t-root",
+	messageId: "m-reply",
+	collaboration: { ...collaboration, status: "answered", answer: "All good." },
+});
 
 function fakeStore(answer: () => string | undefined): CollaborationStore {
 	return {
@@ -70,7 +75,7 @@ async function call(
 }
 
 describe("collaborate tool", () => {
-	it("returns the answer when the collaborator's turn completes in time, and marks the reply", async () => {
+	it("returns the answer when the collaboration is answered in time, and marks the reply", async () => {
 		const bus = createEventBus({ store: memoryEventStore() });
 		let answer: string | undefined;
 		const store = fakeStore(() => answer);
@@ -79,10 +84,7 @@ describe("collaborate tool", () => {
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		answer = "All good.";
-		await bus.publish(
-			"thread:t-child",
-			streamEvent("turn.completed", { threadId: "t-child", turnId: "turn-2", status: "done" }),
-		);
+		await bus.publish(threadChannel("t-root"), answered);
 
 		expect(await pending).toEqual({ status: "answered", answer: "All good." });
 		expect(store.open).toHaveBeenCalledWith({
@@ -91,6 +93,26 @@ describe("collaborate tool", () => {
 			brief: "Look",
 		});
 		expect(noted).toEqual([collaboration]);
+	});
+
+	it("keeps waiting through updates that do not answer the collaboration", async () => {
+		const bus = createEventBus({ store: memoryEventStore() });
+		const store = fakeStore(() => undefined);
+		const { tool } = toolWith(store, { bus, wait: "200 millis" });
+
+		const pending = call(tool, { to: "Helper", brief: "Look" });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		await bus.publish(
+			threadChannel("t-child"),
+			streamEvent("turn.completed", { threadId: "t-child", turnId: "turn-2", status: "cancelled" }),
+		);
+		await bus.publish(threadChannel("t-root"), {
+			...answered,
+			collaboration: { ...answered.collaboration, id: "d-2" },
+		});
+
+		expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
+		expect(store.readAnswer).not.toHaveBeenCalled();
 	});
 
 	it("gives up after the wait and says the answer is still coming", async () => {

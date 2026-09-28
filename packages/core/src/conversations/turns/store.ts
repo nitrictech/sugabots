@@ -38,6 +38,7 @@ import { executionJson } from "../tools/approvals/store.ts";
 import { abandonRunningToolCalls, boundedJson, deleteToolCallsOf } from "../tools/calls/store.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
 import type { ModelAccounting } from "./model.ts";
+import type { QueueFacilitation, QueueTurn } from "./queue.ts";
 import type { TurnSignals } from "./signals.ts";
 import type { TurnRequest } from "./turn.workflow.ts";
 
@@ -234,12 +235,10 @@ export interface TurnStore {
 export const runsAgainAfterFailure = (prepared: PreparedTurn, reply: ReplyDraft): boolean =>
 	!prepared.checkpoint && !reply.acted && prepared.runs < MAX_TURN_RUNS;
 
-/** What deciding the floor needs: it queues the turns, and announces agents it brings in itself. */
-export type FloorEffects = Parameters<typeof giveFloor>[0];
-
 export function turnStore(
 	emit: DomainEvents.Emit<ConversationEvent>,
-	floor: FloorEffects,
+	queueTurn: QueueTurn,
+	queueFacilitation: QueueFacilitation,
 	signals: TurnSignals,
 ): TurnStore {
 	/** Records a waiting turn as cancelled and says so; `false` if it had stopped waiting. */
@@ -624,16 +623,19 @@ export function turnStore(
 			),
 
 		giveFloor: (prepared, reply) =>
-			giveFloor(floor, {
-				id: prepared.responseMessage.id,
-				threadId: prepared.context.thread.id,
-				content: reply.content,
-				author: {
-					kind: "agent",
-					agentId: prepared.context.agent.id,
-					spokeBecause: prepared.claim.payload.reason,
+			giveFloor(
+				{ emit, queueTurn, queueFacilitation },
+				{
+					id: prepared.responseMessage.id,
+					threadId: prepared.context.thread.id,
+					content: reply.content,
+					author: {
+						kind: "agent",
+						agentId: prepared.context.agent.id,
+						spokeBecause: prepared.claim.payload.reason,
+					},
 				},
-			}),
+			),
 
 		fail: (prepared, reply, userMessage, willRetry) =>
 			transaction(
