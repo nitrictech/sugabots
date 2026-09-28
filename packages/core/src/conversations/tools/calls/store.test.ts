@@ -3,9 +3,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEventBus } from "../../../database/events/bus.ts";
-import { eventPublisher } from "../../../database/events/publish.ts";
-import { memoryEventStore } from "../../../database/events/store.ts";
+import { type CommittedEvent, eventPublisher } from "../../../database/events/publish.ts";
 import {
 	agent,
 	connection,
@@ -26,15 +24,14 @@ import {
 } from "../../../database/testing.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
-import { chatStore } from "../../chats/store.ts";
-import { threadStore } from "../../threads/store.ts";
+import { composeConversations } from "../../composition.ts";
+import { routineRunsForTests } from "../../routines/testing.ts";
 import { turnSignals } from "../../turns/signals.ts";
 import {
 	MAX_TURN_RUNS,
 	type PreparedTurn,
 	runsAgainAfterFailure,
 	type TurnCheckpoint,
-	turnStore,
 } from "../../turns/store.ts";
 import {
 	queueFacilitationForTests,
@@ -54,14 +51,8 @@ import {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 	type ToolApprovalStore,
-	toolApprovalStore,
 } from "../approvals/store.ts";
-import {
-	boundedJson,
-	MAX_STORED_JSON_CHARACTERS,
-	type ToolCallStore,
-	toolCallStore,
-} from "./store.ts";
+import { boundedJson, MAX_STORED_JSON_CHARACTERS, type ToolCallStore } from "./store.ts";
 
 /**
  * Tool calls against Postgres: what `open` and `close` write, how the reply
@@ -69,19 +60,24 @@ import {
  * calls still running.
  */
 describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () => {
-	const publishEvents = eventPublisher(createEventBus({ store: memoryEventStore() }));
-	const calls: Promised<ToolCallStore> = onPostgres(toolCallStore(publishEvents));
-	const approvals: Promised<ToolApprovalStore> = onPostgres(
-		toolApprovalStore(publishEvents, turnSignalsForTests),
-	);
-	const threads = onPostgres(threadStore());
-	const chats = onPostgres(chatStore(publishEvents, queueTurnForTests, queueFacilitationForTests));
-	const store = turnStore(
-		publishEvents,
-		queueTurnForTests,
-		queueFacilitationForTests,
-		turnSignalsForTests,
-	);
+	let delivered: CommittedEvent[] = [];
+	const dependencies = {
+		publishEvents: eventPublisher({
+			publishCommitted: async (events) => {
+				delivered.push(...events);
+			},
+		}),
+		queueTurn: queueTurnForTests,
+		queueFacilitation: queueFacilitationForTests,
+		signals: turnSignalsForTests,
+		routineRuns: routineRunsForTests,
+	};
+	const { stores } = composeConversations(dependencies);
+	const calls: Promised<ToolCallStore> = onPostgres(stores.calls);
+	const approvals: Promised<ToolApprovalStore> = onPostgres(stores.approvals);
+	const threads = onPostgres(stores.threads);
+	const chats = onPostgres(stores.chats);
+	const store = stores.turns;
 	const turns = onPostgres(store);
 	let workspaceId: string;
 	let podId: string;
@@ -188,6 +184,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		});
 		threadId = opened.mainThreadId;
 		prepared = await openReply();
+		delivered = [];
 	});
 
 	/** Prepares the turn running for the thread's host, so a reply message exists. */
@@ -358,7 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 		);
 		// Recording decisions and cancellations is real; the segments are not.
-		const recorder = onPostgres(toolApprovalStore(publishEvents, turnSignalsForTests));
+		const recorder = onPostgres(stores.approvals);
 		const steps = TurnSteps.of({
 			segment,
 			decide: (request, decided) =>
@@ -442,7 +439,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			const pending = pendingCall();
 			const signals = await parkInWorkflow(pending);
 
-			await onPostgres(toolApprovalStore(publishEvents, signals)).decide({
+			await onPostgres(composeConversations({ ...dependencies, signals }).stores.approvals).decide({
 				workspaceId,
 				podId,
 				toolCallId: pending.id,
@@ -460,7 +457,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 		it("tells a second person the approval is already decided", async () => {
 			const pending = pendingCall();
 			const signals = await parkInWorkflow(pending);
-			const deciding = onPostgres(toolApprovalStore(publishEvents, signals));
+			const deciding = onPostgres(
+				composeConversations({ ...dependencies, signals }).stores.approvals,
+			);
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ workspaceId, podId, toolCallId: pending.id, userId: memberId, decision });
 
@@ -474,7 +473,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 
 			expect(
 				await onPostgres(
-					turnStore(publishEvents, queueTurnForTests, queueFacilitationForTests, signals),
+					composeConversations({ ...dependencies, signals }).stores.turns,
 				).requestCancel(prepared.turnId, memberId),
 			).toBe(true);
 
@@ -606,6 +605,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
 		);
 		expect(stopped?.status).toBe("failed");
+		expect(delivered.map(({ event }) => event)).toContainEqual(
+			expect.objectContaining({ type: "message.failed", messageId: prepared.responseMessage.id }),
+		);
 	});
 
 	it("counts a turn's runs again from its last stop for approvals", async () => {
@@ -648,6 +650,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
 		);
 		expect(stopped).toMatchObject({ status: "cancelled", checkpoint: null });
+		expect(delivered.map(({ event }) => event)).toContainEqual(
+			expect.objectContaining({
+				type: "message.completed",
+				messageId: prepared.responseMessage.id,
+				status: "cancelled",
+			}),
+		);
 	});
 
 	it("rejects an approved call after the reviewed connection configuration changes", async () => {
@@ -732,6 +741,27 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", () =>
 			{ type: "text", text: "Looking" },
 			expect.objectContaining({ type: "tool_call", id: opened.id, status: "completed" }),
 			{ type: "text", text: " now. Found it." },
+		]);
+	});
+
+	it("tells the thread that a turn its workflow gave up on failed, calls and all", async () => {
+		const opened = await calls.open(from(0));
+		delivered = [];
+
+		await turns.abandon(prepared.claim, UserMessage.of`The turn stopped unexpectedly`);
+
+		expect(delivered.map(({ event }) => event)).toEqual([
+			expect.objectContaining({
+				type: "tool_call.completed",
+				toolCall: expect.objectContaining({ id: opened.id, status: "failed" }),
+			}),
+			expect.objectContaining({
+				type: "message.failed",
+				messageId: prepared.responseMessage.id,
+				willRetry: false,
+				error: "The turn stopped unexpectedly",
+			}),
+			expect.objectContaining({ type: "thread.changed", threadId }),
 		]);
 	});
 

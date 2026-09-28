@@ -1,12 +1,12 @@
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
-import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../../database/database.ts";
-import type { PendingEvent, PublishEvents } from "../../../database/events/publish.ts";
+import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import { type ToolCallRow, toolCall } from "../../../database/schema.ts";
 import type { UserMessage } from "../../../user-message.ts";
-import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { ConversationEvent } from "../../events.ts";
+import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
 
 /**
  * Tool calls: what an agent's reply asked a built-in tool, and what it got.
@@ -44,7 +44,7 @@ export interface ToolCallStore {
 	): Effect.Effect<ToolCallPart | undefined, never, Database>;
 }
 
-export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
+export function toolCallStore(emit: DomainEvents.Emit<ConversationEvent>): ToolCallStore {
 	return {
 		open: (input) =>
 			transaction(
@@ -67,7 +67,7 @@ export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
 					if (!row) {
 						return yield* Effect.die(new Error("Tool call insert returned no row"));
 					}
-					yield* publishEvents([toolCallEvent("tool_call.started", row)]);
+					yield* emit([ConversationEvent.ToolCallStarted(toolCallChange(row))]);
 					return toToolCallPart(row);
 				}),
 			),
@@ -85,7 +85,7 @@ export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
 					if (!row) {
 						return undefined;
 					}
-					yield* publishEvents([toolCallEvent("tool_call.completed", row)]);
+					yield* emit([ConversationEvent.ToolCallFinished(toolCallChange(row))]);
 					return toToolCallPart(row);
 				}),
 			),
@@ -95,7 +95,7 @@ export function toolCallStore(publishEvents: PublishEvents): ToolCallStore {
 /**
  * Marks the turn's still-running calls failed with `error`, for a turn that
  * ended before its tools returned. Returns the events that announce it, for
- * the caller's own transaction to publish.
+ * the caller's own transaction to emit.
  */
 export const abandonRunningToolCalls = Effect.fn("ToolCallStore.abandonRunningToolCalls")(
 	function* (db: Executor, turnId: string, error: UserMessage) {
@@ -114,7 +114,7 @@ export const abandonRunningToolCalls = Effect.fn("ToolCallStore.abandonRunningTo
 				),
 			)
 			.returning();
-		return rows.map((row): PendingEvent => toolCallEvent("tool_call.completed", row));
+		return rows.map((row) => ConversationEvent.ToolCallFinished(toolCallChange(row)));
 	},
 );
 
@@ -130,20 +130,6 @@ function finished(outcome: ToolCallOutcome): Pick<ToolCallRow, "status" | "outpu
 	return "error" in outcome
 		? { status: "failed", output: null, error: outcome.error }
 		: { status: "completed", output: boundedJson(outcome.output), error: null };
-}
-
-function toolCallEvent(
-	type: "tool_call.started" | "tool_call.completed",
-	row: ToolCallRow,
-): PendingEvent {
-	return {
-		channel: threadChannel(row.threadId),
-		event: streamEvent(type, {
-			threadId: row.threadId,
-			messageId: row.messageId,
-			toolCall: toToolCallPart(row),
-		}),
-	};
 }
 
 /**

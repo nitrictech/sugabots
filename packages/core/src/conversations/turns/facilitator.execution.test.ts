@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Database } from "../../database/database.ts";
+import { Database, transactional } from "../../database/database.ts";
 import { ModelRequestFailed } from "./model.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -124,7 +124,7 @@ const runWithoutDatabase = <A, E>(effect: Effect.Effect<A, E, Database>) =>
 		effect.pipe(
 			Effect.provideService(Database, {
 				execute: () => Effect.die(new Error("This test has no database")),
-				transaction: (work) => work,
+				transaction: transactional((work) => work),
 			}),
 		),
 	);

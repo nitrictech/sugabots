@@ -5,15 +5,6 @@ import { afterCommit, type Database, type Executor, query, transaction } from ".
 import { event } from "../schema.ts";
 import type { EventBus } from "./bus.ts";
 
-/**
- * How a store announces what it wrote.
- *
- * A durable event is a row in the `event` table plus a delivery to whoever is
- * listening. The row goes in on the caller's transaction, so it commits or
- * rolls back with the change it describes; the delivery waits for the commit,
- * so a subscriber is never told about a change that then rolled back.
- */
-
 export interface PendingEvent {
 	channel: Channel;
 	event: StreamEvent & { type: DurableEventType };
@@ -24,7 +15,13 @@ export interface CommittedEvent extends PendingEvent {
 	seq: number;
 }
 
-/** Records events on the current transaction and delivers them once it commits. */
+/**
+ * Records events on the current transaction and delivers them once it
+ * commits. A durable event is a row in the `event` table plus a delivery to
+ * whoever is listening: the row commits or rolls back with the change it
+ * describes, and the delivery waits for the commit, so a subscriber is never
+ * told about a change that then rolled back.
+ */
 export type PublishEvents = (pending: PendingEvent[]) => Effect.Effect<void, never, Database>;
 
 export function eventPublisher(bus: Pick<EventBus, "publishCommitted">): PublishEvents {

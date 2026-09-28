@@ -1,10 +1,9 @@
 import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
-import { streamEvent, threadChannel } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../../database/database.ts";
-import type { PublishEvents } from "../../../database/events/publish.ts";
+import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import {
 	connection,
 	pod,
@@ -16,8 +15,9 @@ import {
 } from "../../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { podStandingFor } from "../../../workspaces/access.ts";
+import { ConversationEvent } from "../../events.ts";
 import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
-import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
 import type { TurnSignals } from "../../turns/signals.ts";
 import type { ApprovalDecision } from "../../turns/turn.workflow.ts";
 import { boundedJson } from "../calls/store.ts";
@@ -116,7 +116,7 @@ export class ToolExecutionRefused extends Data.TaggedError("ToolExecutionRefused
 }> {}
 
 export function toolApprovalStore(
-	publishEvents: PublishEvents,
+	emit: DomainEvents.Emit<ConversationEvent>,
 	signals: TurnSignals,
 ): ToolApprovalStore {
 	return {
@@ -269,11 +269,8 @@ export function toolApprovalStore(
 							message: "Tool call was already claimed, or no longer matches what was approved",
 						});
 					if (running.mutating) yield* markMutationStarted(running.turnId);
-					const part = toToolCallPart(running);
-					yield* publishEvents([
-						callEvent("tool_call.updated", part, running.threadId, running.messageId),
-					]);
-					return part;
+					yield* emit([ConversationEvent.ToolCallExecuting(toolCallChange(running))]);
+					return toToolCallPart(running);
 				}),
 			),
 
@@ -402,13 +399,8 @@ export function toolApprovalStore(
 							.where(eq(user.id, input.decision.userId))
 							.limit(1),
 					);
-					yield* publishEvents([
-						callEvent(
-							"tool_call.updated",
-							toToolCallPart(updated, deciderName?.name ?? null),
-							updated.threadId,
-							updated.messageId,
-						),
+					yield* emit([
+						ConversationEvent.ToolCallDecided(toolCallChange(updated, deciderName?.name ?? null)),
 					]);
 				}),
 			),
@@ -439,15 +431,3 @@ const markMutationStarted = (turnId: string) =>
 			})
 			.where(eq(turn.id, turnId)),
 	).pipe(Effect.asVoid);
-
-function callEvent(
-	type: "tool_call.started" | "tool_call.updated",
-	toolCallPart: ToolCallPart,
-	threadId: string,
-	messageId: string,
-) {
-	return {
-		channel: threadChannel(threadId),
-		event: streamEvent(type, { threadId, messageId, toolCall: toolCallPart }),
-	};
-}

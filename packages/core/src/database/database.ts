@@ -1,7 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
 import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
-import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime } from "effect";
+import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime, Option } from "effect";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import { relations } from "./relations.ts";
 
@@ -27,12 +27,36 @@ export type Executor = EffectPgDatabase<typeof relations>;
 export type QueryFailure = EffectDrizzleQueryError | SqlError;
 
 /**
- * Work waiting for the outermost transaction to commit. `undefined` outside
- * any transaction, where there is nothing to wait for.
+ * The open transaction: work waiting for the outermost one to commit, and
+ * work to run just before it does.
+ *
+ * Code that only makes sense inside a transaction requires this service, and
+ * only `transaction` provides it, so calling that code outside one does not
+ * type-check.
  */
-const AfterCommit = Context.Reference("Database/AfterCommit", {
-	defaultValue: (): Array<Effect.Effect<void>> | undefined => undefined,
-});
+export class Transaction extends Context.Service<
+	Transaction,
+	{
+		readonly beforeCommit: Array<Effect.Effect<void, never, Transaction>>;
+		readonly afterCommit: Array<Effect.Effect<void>>;
+	}
+>()("Database/Transaction") {}
+
+/**
+ * Runs `work` inside the outermost transaction, after everything else in it,
+ * just before the commit: for keeping something written in step with what
+ * the transaction wrote. Work added while this runs, including by `work`
+ * itself, runs next, in the order it was added, until none is left. A failure
+ * rolls the whole transaction back.
+ */
+export const beforeCommit = (
+	work: Effect.Effect<void, never, Database | Transaction>,
+): Effect.Effect<void, never, Database | Transaction> =>
+	Effect.gen(function* () {
+		const open = yield* Transaction;
+		const database = yield* Database;
+		open.beforeCommit.push(Effect.provideService(work, Database, database));
+	});
 
 /**
  * Runs `work` once the enclosing transaction has committed, or straight away
@@ -42,10 +66,10 @@ const AfterCommit = Context.Reference("Database/AfterCommit", {
  * announces has already happened.
  */
 export const afterCommit = (work: Effect.Effect<void>): Effect.Effect<void> =>
-	Effect.flatMap(AfterCommit, (waiting) =>
-		waiting
+	Effect.flatMap(Effect.serviceOption(Transaction), (open) =>
+		Option.isSome(open)
 			? Effect.sync(() => {
-					waiting.push(work);
+					open.value.afterCommit.push(work);
 				})
 			: loggingFailure(work),
 	);
@@ -63,42 +87,57 @@ export class Database extends Context.Service<
 			run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
 		) => Effect.Effect<A, QueryFailure>;
 		/** Runs `use` in one transaction, rolling back if it fails or is interrupted. */
-		readonly transaction: <A, E, R>(use: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+		readonly transaction: <A, E, R>(
+			use: Effect.Effect<A, E, R>,
+		) => Effect.Effect<A, E, Exclude<R, Transaction>>;
 	}
 >()("Database") {}
 
 /**
- * The outermost transaction is a real `begin`/`commit`; work deferred with
- * `afterCommit` anywhere inside runs once the commit has happened, in the
- * order it was deferred.
+ * The outermost transaction is a real `begin`/`commit`. Work deferred with
+ * `beforeCommit` anywhere inside runs once its body has succeeded, still
+ * inside it; work deferred with `afterCommit` runs once the commit has
+ * happened. Both run in the order they were deferred.
  *
  * A nested one is a savepoint, so an inner failure rolls back only the inner
  * work. Joining the outer transaction instead would mean an inner failure the
  * caller recovers from stays committed, which is not what anybody writing
  * `transaction(...)` expects. Work deferred inside the savepoint joins the
  * outer transaction's only if the savepoint succeeds; a rolled-back savepoint
- * takes its announcements with it.
+ * takes its deferred work with it.
  *
- * A failure to begin or commit is a defect: no store can do anything about it.
+ * `begin` runs its argument in a real transaction. A fake database passes
+ * its argument through, keeping the rest without a connection.
  */
-function transactional(client: PgClient.PgClient) {
-	return <A, E, R>(use: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+export function transactional(
+	begin: <A, E, R>(use: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+) {
+	return <A, E, R>(use: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Transaction>> =>
 		Effect.gen(function* () {
-			const outer = yield* AfterCommit;
-			const inner: Array<Effect.Effect<void>> = [];
-			const value = yield* client
-				.withTransaction(Effect.provideService(use, AfterCommit, inner))
-				.pipe(Effect.catchIf(isSqlError, Effect.die)) as Effect.Effect<A, E, R>;
-			if (outer) {
-				outer.push(...inner);
+			const outer = yield* Effect.serviceOption(Transaction);
+			const open = Transaction.of({ beforeCommit: [], afterCommit: [] });
+			const body = Option.isSome(outer) ? use : Effect.tap(use, () => runBeforeCommit(open));
+			const value = yield* begin(Effect.provideService(body, Transaction, open));
+			if (Option.isSome(outer)) {
+				outer.value.beforeCommit.push(...open.beforeCommit);
+				outer.value.afterCommit.push(...open.afterCommit);
 				return value;
 			}
 			// The commit has happened, so the announcements must too, even if the
 			// fibre is being interrupted.
-			yield* Effect.uninterruptible(Effect.forEach(inner, loggingFailure, { discard: true }));
+			yield* Effect.uninterruptible(
+				Effect.forEach(open.afterCommit, loggingFailure, { discard: true }),
+			);
 			return value;
 		});
 }
+
+const runBeforeCommit = (open: Transaction["Service"]) =>
+	Effect.gen(function* () {
+		for (let work = open.beforeCommit.shift(); work; work = open.beforeCommit.shift()) {
+			yield* work;
+		}
+	});
 
 /** The connection pool at `DATABASE_URL`, closed when the layer's scope is. */
 export const clientLayer = PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }).pipe(
@@ -111,7 +150,15 @@ export const make = Effect.gen(function* () {
 	const root = yield* makeWithDefaults({ relations });
 	return Database.of({
 		execute: (run) => run(root),
-		transaction: transactional(client),
+		// A failure to begin or commit is a defect: no store can do anything about it.
+		transaction: transactional(
+			<A, E, R>(use: Effect.Effect<A, E, R>) =>
+				client.withTransaction(use).pipe(Effect.catchIf(isSqlError, Effect.die)) as Effect.Effect<
+					A,
+					E,
+					R
+				>,
+		),
 	});
 });
 
@@ -129,7 +176,7 @@ export const query = <A>(
 /** Runs `use` in one transaction. Rolls back on failure and on interruption. */
 export const transaction = <A, E, R>(
 	use: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R | Database> =>
+): Effect.Effect<A, E, Exclude<R, Transaction> | Database> =>
 	Effect.flatMap(Database, ({ transaction: run }) => run(use));
 
 /**
