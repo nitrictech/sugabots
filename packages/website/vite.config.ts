@@ -63,9 +63,18 @@ export default defineConfig({
 		docsMdx(),
 		// Every page is rendered to static HTML at build time, found by following links from the
 		// pages listed. The docs are listed because the landing page hides its link until launch.
+		// Each page is written as `<path>.html`, not `<path>/index.html`, so Cloudflare serves it
+		// at the address the site links to, without redirecting to add a trailing slash. Route
+		// discovery is off because it lists `/docs/` beside `/docs`, a second copy of the page.
 		tanstackStart({
 			pages: [{ path: "/" }, { path: "/docs" }],
-			prerender: { enabled: true, crawlLinks: true, failOnError: true },
+			prerender: {
+				enabled: true,
+				crawlLinks: true,
+				failOnError: true,
+				autoSubfolderIndex: false,
+				autoStaticPathsDiscovery: false,
+			},
 		}),
 		react(),
 	],
