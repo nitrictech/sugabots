@@ -19,8 +19,11 @@ import type * as schema from "../../database/schema.ts";
 import { agent, chat, message, pod, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { reachesPod } from "../../workspaces/access.ts";
+import { type AuthorizationDenied, ResourceHidden } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import type { CurrentActor } from "../../workspaces/current-actor.ts";
+import { Visibility } from "../../workspaces/visibility.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import {
 	agentColumns,
@@ -33,45 +36,51 @@ import {
 } from "../threads/participants.ts";
 import { respondingIn } from "../turns/requests.ts";
 
-/** What the chat screens show: the pod's bots with their chats, and a chat's two timelines. */
+/**
+ * What the chat screens show, of the chats the current actor can see: the
+ * pod's bots with their chats, and a chat's two timelines.
+ */
 export interface Interface {
-	/** The pod's bots with their chats, or `undefined` when the person cannot reach that pod. */
-	readonly list: (input: ChatListRequest) => Effect.Effect<ChatList | undefined>;
-	/**
-	 * A page of the chat's main conversation, newest last, or `undefined`
-	 * when the person does not reach the chat.
-	 */
+	/** The bots with their chats, in the pods of a workspace, by its id or its slug. */
+	readonly list: (input: {
+		workspace: string;
+		pod: ChatListScope;
+	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
+	/** A page of the chat's main conversation, newest last. */
 	readonly messages: (
 		chatId: string,
-		userId: string,
 		page?: ChatPageQuery,
-	) => Effect.Effect<ChatMessagesPage | undefined, InvalidChatCursor>;
-	/**
-	 * A page of the chat's side threads, newest activity first, or
-	 * `undefined` when the person does not reach the chat.
-	 */
+	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
+	/** A page of the chat's side threads, newest activity first. */
 	readonly history: (
 		chatId: string,
-		userId: string,
 		page?: ChatPageQuery,
-	) => Effect.Effect<ChatHistoryPage | undefined, InvalidChatCursor>;
+	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidChatCursor, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatView") {}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatView");
+	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
 	return Service.of({
 		list: (input) =>
 			operation(
 				"list",
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
+					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
+					const listing = {
+						workspaceId,
+						pod: input.pod,
+						reachesPod: yield* visibility.reachesPod,
+					};
 					if (input.pod !== "all") {
-						const reachable = yield* query((db) => reachablePod(db, input.pod, input));
-						if (!reachable) return undefined;
+						const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
+						if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
 					}
-					const bots = yield* query((db) => listedBots(db, input));
+					const bots = yield* query((db) => listedBots(db, listing));
 					const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
 					const latest = yield* query((db) => latestMessages(db, threadIds));
 					const items = bots.flatMap((row): ChatListItem[] => {
@@ -96,35 +105,43 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		messages: (chatId, userId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
+		messages: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
 			operation(
 				"messages",
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) return undefined;
+					if (!isUuid(chatId)) return yield* new ResourceHidden({ resource: "chat" });
 					// Before the query, and whether or not the chat is there, so a bad cursor
 					// says nothing about the chat.
 					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
-					const row = yield* query((db) => loadMainPage(db, chatId, userId, page.limit, before));
-					return row ? toMainPage(row, page.limit) : undefined;
+					const reachesPod = yield* visibility.reachesPod;
+					const row = yield* query((db) =>
+						loadMainPage(db, chatId, reachesPod, page.limit, before),
+					);
+					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					return toMainPage(row, page.limit);
 				}),
 			),
 
-		history: (chatId, userId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
+		history: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
 			operation(
 				"history",
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) return undefined;
+					if (!isUuid(chatId)) return yield* new ResourceHidden({ resource: "chat" });
 					const before = page.cursor ? yield* chatCursor(page.cursor) : undefined;
-					const row = yield* query((db) => loadHistory(db, chatId, userId, page.limit, before));
-					return row ? toHistoryPage(row, page.limit) : undefined;
+					const reachesPod = yield* visibility.reachesPod;
+					const row = yield* query((db) => loadHistory(db, chatId, reachesPod, page.limit, before));
+					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					return toHistoryPage(row, page.limit);
 				}),
 			),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
 export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") implements UserFacing {
 	get userMessage() {
@@ -132,43 +149,35 @@ export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") imp
 	}
 }
 
-interface ChatListRequest {
+/** Which bots a list covers, and `Visibility`'s rule for who is asking. */
+interface Listing {
 	workspaceId: string;
-	userId: string;
 	pod: ChatListScope;
+	reachesPod: Visibility.ReachesPod;
 }
 
 const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
 	db: Executor,
 	podId: string,
-	input: ChatListRequest,
+	input: Listing,
 ) {
 	const [row] = yield* db
 		.select({ id: pod.id })
 		.from(pod)
-		.where(
-			and(
-				eq(pod.id, podId),
-				eq(pod.workspaceId, input.workspaceId),
-				reachesPod(pod.id, input.userId),
-			),
-		)
+		.where(and(eq(pod.id, podId), eq(pod.workspaceId, input.workspaceId), input.reachesPod(pod.id)))
 		.limit(1);
 	return row !== undefined;
 });
 
 /** Every crew bot the list covers, with its chat in its pod when it has one. */
-const listedBots = Effect.fn("ChatView.listedBots")(function* (
-	db: Executor,
-	input: ChatListRequest,
-) {
+const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
 	const scope = input.pod === "all" ? eq(pod.kind, "shared") : eq(pod.id, input.pod);
 	return yield* db
 		.select({ agent, chatId: chat.id, mainThreadId: chat.mainThreadId })
 		.from(agent)
 		.innerJoin(pod, crewOf(pod.id))
 		.leftJoin(chat, and(eq(chat.podId, agent.podId), eq(chat.hostAgentId, agent.id)))
-		.where(and(eq(agent.workspaceId, input.workspaceId), scope, reachesPod(pod.id, input.userId)))
+		.where(and(eq(agent.workspaceId, input.workspaceId), scope, input.reachesPod(pod.id)))
 		.orderBy(asc(agent.name));
 });
 
@@ -219,18 +228,18 @@ function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
 /**
  * A page of the chat's main conversation, one statement: its messages with their
  * authors and parts, the collaborations its bot was asked into, and its routine
- * runs, each newest first and one more than the page. Nothing when the caller
- * does not reach the chat's pod.
+ * runs, each newest first and one more than the page. Nothing when
+ * `reachesPod` does not reach the chat's pod.
  */
 const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	db: Executor,
 	chatId: string,
-	userId: string,
+	reachesPod: Visibility.ReachesPod,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
 	return yield* db.query.chat.findFirst({
-		where: { id: chatId, RAW: (row) => reachesPod(row.podId, userId) },
+		where: { id: chatId, RAW: (row) => reachesPod(row.podId) },
 		columns: { id: true },
 		with: {
 			mainThread: {
@@ -332,13 +341,13 @@ function toMainPage(row: MainPage, limit: number) {
 /**
  * A page of the chat's side threads, one statement: its routine runs and
  * collaborations, and those its bot was asked into from elsewhere, each newest
- * activity first and one more than the page. Nothing when the caller does not
- * reach the chat's pod.
+ * activity first and one more than the page. Nothing when `reachesPod` does
+ * not reach the chat's pod.
  */
 const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	db: Executor,
 	chatId: string,
-	userId: string,
+	reachesPod: Visibility.ReachesPod,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
@@ -370,7 +379,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 		},
 	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["thread"]>;
 	return yield* db.query.chat.findFirst({
-		where: { id: chatId, RAW: (row) => reachesPod(row.podId, userId) },
+		where: { id: chatId, RAW: (row) => reachesPod(row.podId) },
 		columns: { id: true },
 		with: { threads: sideThreads, hostCollaborationThreads: sideThreads },
 	});

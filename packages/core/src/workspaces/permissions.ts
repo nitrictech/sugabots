@@ -1,8 +1,7 @@
-import {
-	type PodPermissions as PodPermissionsView,
-	WORKSPACE_ROLES,
-	type WorkspacePermissions as WorkspacePermissionsView,
-	type WorkspaceRole,
+import type {
+	PodPermissions as PodPermissionsView,
+	WorkspacePermissions as WorkspacePermissionsView,
+	WorkspaceRole,
 } from "@sugabots/contracts";
 
 /**
@@ -32,8 +31,8 @@ import {
  * permission added below reaches a role only when that role's table names it.
  *
  * This module is pure. Loading the facts it takes is
- * `packages/core/src/workspaces/access.ts`; the specification it implements is
- * `docs/permissions.md`.
+ * `packages/core/src/workspaces/access.ts`, and asking it is `Authorization`
+ * and `Visibility`; the specification it implements is `docs/permissions.md`.
  */
 
 /** An action addressed at a workspace. */
@@ -199,17 +198,6 @@ export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts)
 }
 
 /**
- * The roles holding a workspace permission, for the queries that filter by the
- * stored role rather than asking about one caller.
- *
- * Derived from the grants, so a query scoped with it follows a grant that
- * moves instead of naming a role that used to hold it.
- */
-export function rolesWith(permission: WorkspacePermission): WorkspaceRole[] {
-	return WORKSPACE_ROLES.filter((role) => WORKSPACE_GRANTS[role].has(permission));
-}
-
-/**
  * Which shared pods a role reaches, for the queries that list rather than
  * address one resource.
  *
@@ -219,8 +207,8 @@ export function rolesWith(permission: WorkspacePermission): WorkspaceRole[] {
  * about shared pods only.
  *
  * The equivalent single-resource answer is `mayInPod(actor, "pod.read", pod)`.
- * `packages/core/src/workspaces/access.ts` expresses the same rule as one SQL
- * predicate so a list and a direct read cannot disagree.
+ * `packages/core/src/workspaces/visibility.ts` expresses the same rule as one
+ * SQL predicate so a list and a direct read cannot disagree.
  */
 export function sharedPodReach(role: WorkspaceRole | undefined): "all" | "joined" | "none" {
 	const scope = grantsFor(role)?.pod["pod.read"];

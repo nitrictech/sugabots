@@ -2,7 +2,7 @@ import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { UserMessage } from "../../../user-message.ts";
-import type { ToolApprovals } from "../approvals/tool-approvals.ts";
+import type { ApprovedToolCalls } from "../approvals/approved-calls.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
@@ -26,7 +26,7 @@ export interface RecordingOptions {
 	/** Whether the tool may change something at the other end (ADR 002). Built-in tools do not. */
 	mutating?: boolean;
 	approval?: {
-		approvals: Pick<ToolApprovals.Interface, "beginExecution">;
+		approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 		connectionId: string;
 		connectionRevision: number;
 		remoteToolName: string;

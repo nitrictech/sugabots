@@ -1,28 +1,22 @@
-import { runTrial } from "@sugabots/core/conversations/model-trials/trial";
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedWorkspace } from "../../http/authorisation.ts";
-
-export interface ModelTrialRoutesOptions {
-	model: TurnModel;
-}
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 /**
  * A model that cannot be reached is a failed case in the report, not a failed
  * request — that is the answer somebody asked for. A defect here is ours, and
  * answers 500.
  */
-export function modelTrialRoutes({ model }: ModelTrialRoutesOptions) {
-	return HttpApiBuilder.group(ServerApi, "modelTrials", (handlers) =>
-		handlers.handle("run", ({ payload }) =>
-			Effect.flatMap(grantedWorkspace, ({ workspaceId }) =>
-				runTrial(
-					{ systemAgentKey: payload.systemAgentKey, model: payload.model, workspaceId },
-					model,
-				),
-			),
-		),
-	);
-}
+export const modelTrialRoutes = HttpApiBuilder.group(ServerApi, "modelTrials", (handlers) =>
+	Effect.gen(function* () {
+		const trials = yield* ModelTrials.Service;
+		return handlers.handle("run", ({ params, payload }) =>
+			trials
+				.run({ workspace: params.workspace, ...payload })
+				.pipe(asSessionUser, asHttpError(refusals)),
+		);
+	}),
+);

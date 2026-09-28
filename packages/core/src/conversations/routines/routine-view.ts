@@ -12,43 +12,64 @@ import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../../database/database.ts";
 import { agent, pod, routine, routineExecution } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { reachesPod } from "../../workspaces/access.ts";
+import type { AuthorizationDenied } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import type { CurrentActor } from "../../workspaces/current-actor.ts";
+import { Visibility } from "../../workspaces/visibility.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { crewOf } from "../threads/participants.ts";
 import { toRoutineExecution } from "./execution.ts";
-import { inScope, type Scope, toRoutine } from "./routine.ts";
+import { inScope, type OnAgent, RoutineNotFound, scopeOf, toRoutine } from "./routine.ts";
 
-/** What the routine screens show: the routines, and each one's runs. */
+/**
+ * What the routine screens show, of the routines the current actor may read:
+ * the routines, and each one's runs.
+ */
 export interface Interface {
-	/** Every routine on a crew agent in a pod the person reaches, by name, with its agent and pod. */
-	readonly listInWorkspace: (
-		workspaceId: string,
-		userId: string,
-	) => Effect.Effect<WorkspaceRoutine[]>;
-	/** The agent's routines, by name. */
-	readonly list: (agent: { workspaceId: string; agentId: string }) => Effect.Effect<Routine[]>;
-	readonly get: (scope: Scope) => Effect.Effect<Routine | undefined>;
 	/**
-	 * A page of the routine's runs, newest first. `undefined` when there is no
-	 * such routine, removed ones included, so a removed routine keeps its history.
+	 * Every routine on a crew agent in a pod the actor reaches, in a workspace
+	 * named by its id or its slug, by name, with its agent and pod.
+	 */
+	readonly listInWorkspace: (
+		workspace: string,
+	) => Effect.Effect<WorkspaceRoutine[], AuthorizationDenied, CurrentActor.Service>;
+	/** The agent's routines, by name. */
+	readonly list: (owner: {
+		agentId: string;
+	}) => Effect.Effect<Routine[], AuthorizationDenied, CurrentActor.Service>;
+	readonly get: (
+		routine: OnAgent,
+	) => Effect.Effect<Routine, AuthorizationDenied | RoutineNotFound, CurrentActor.Service>;
+	/**
+	 * A page of the routine's runs, newest first. A removed routine keeps its
+	 * history, so this finds it as long as it was ever defined.
 	 */
 	readonly listExecutions: (
-		scope: Scope,
+		routine: OnAgent,
 		page?: RoutineExecutionPageQuery,
-	) => Effect.Effect<RoutineExecutionPage | undefined, InvalidRoutineExecutionCursor>;
+	) => Effect.Effect<
+		RoutineExecutionPage,
+		AuthorizationDenied | RoutineNotFound | InvalidRoutineExecutionCursor,
+		CurrentActor.Service
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/RoutineView") {}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineView");
+	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
+
 	return Service.of({
-		listInWorkspace: (workspaceId, userId) =>
+		listInWorkspace: (workspace) =>
 			operation(
 				"listInWorkspace",
-				Effect.map(
-					query((db) =>
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+					const reachesPod = yield* visibility.reachesPod;
+					const rows = yield* query((db) =>
 						db
 							.select({ routine, agent, pod: { id: pod.id, slug: pod.slug } })
 							.from(routine)
@@ -58,55 +79,60 @@ export const make = Effect.gen(function* () {
 								and(
 									eq(routine.workspaceId, workspaceId),
 									isNull(routine.deletedAt),
-									reachesPod(pod.id, userId),
+									reachesPod(pod.id),
 								),
 							)
 							.orderBy(asc(routine.name), asc(routine.id)),
-					),
-					(rows) =>
-						rows.flatMap((row): WorkspaceRoutine[] => {
-							const crew = crewAgentRow(row.agent);
-							return crew
-								? [{ routine: toRoutine(row.routine), agent: toAgent(crew), pod: row.pod }]
-								: [];
-						}),
-				),
+					);
+					return rows.flatMap((row): WorkspaceRoutine[] => {
+						const crew = crewAgentRow(row.agent);
+						return crew
+							? [{ routine: toRoutine(row.routine), agent: toAgent(crew), pod: row.pod }]
+							: [];
+					});
+				}),
 			),
 
-		list: (owner) =>
+		list: ({ agentId }) =>
 			operation(
 				"list",
-				Effect.map(
-					query((db) =>
+				Effect.gen(function* () {
+					const { agent: owner } = yield* authorization.agent(agentId, "routine.read");
+					const rows = yield* query((db) =>
 						db
 							.select()
 							.from(routine)
 							.where(
 								and(
 									eq(routine.workspaceId, owner.workspaceId),
-									eq(routine.agentId, owner.agentId),
+									eq(routine.agentId, owner.id),
 									isNull(routine.deletedAt),
 								),
 							)
 							.orderBy(asc(routine.name)),
-					),
-					(rows) => rows.map(toRoutine),
-				),
+					);
+					return rows.map(toRoutine);
+				}),
 			),
 
-		get: (scope) =>
+		get: (addressed) =>
 			operation(
 				"get",
-				Effect.map(
-					query((db) => db.select().from(routine).where(inScope(scope)).limit(1)),
-					([row]) => (row ? toRoutine(row) : undefined),
-				),
+				Effect.gen(function* () {
+					const scope = yield* scopeOf(authorization, addressed, "routine.read");
+					const [row] = yield* query((db) =>
+						db.select().from(routine).where(inScope(scope)).limit(1),
+					);
+					if (!row) return yield* new RoutineNotFound();
+					return toRoutine(row);
+				}),
 			),
 
-		listExecutions: (scope, page = { limit: DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT }) =>
+		listExecutions: (addressed, page = { limit: DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT }) =>
 			operation(
 				"listExecutions",
 				Effect.gen(function* () {
+					const scope = yield* scopeOf(authorization, addressed, "routine.history.read");
 					const before = page.cursor ? yield* executionCursor(page.cursor) : undefined;
 					const [definition] = yield* query((db) =>
 						db
@@ -121,7 +147,7 @@ export const make = Effect.gen(function* () {
 							)
 							.limit(1),
 					);
-					if (!definition) return undefined;
+					if (!definition) return yield* new RoutineNotFound();
 					const rows = yield* query((db) =>
 						db
 							.select()
@@ -151,7 +177,9 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
 export class InvalidRoutineExecutionCursor
 	extends Data.TaggedError("InvalidRoutineExecutionCursor")

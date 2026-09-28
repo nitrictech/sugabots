@@ -2,12 +2,12 @@ import { createServer } from "node:http";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Conversations } from "@sugabots/core/conversations/conversations";
+import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
 import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
 import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
-import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
 import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
 import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
@@ -40,12 +40,13 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderRepository } from "@sugabots/core/providers/search-providers/search-provider-repository";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { Lanes } from "@sugabots/core/workflows/lanes";
-import { authorization } from "@sugabots/core/workspaces/access";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { Authorization } from "@sugabots/core/workspaces/authorization";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { Config, Context, Duration, Effect, Layer } from "effect";
+import { Visibility } from "@sugabots/core/workspaces/visibility";
+import { Config, Duration, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { apiLayer } from "./http/app.ts";
@@ -132,12 +133,10 @@ const main = Effect.gen(function* () {
 	const api = apiLayer({
 		authentication,
 		installation,
-		authorization,
 		events: {
 			bus,
-			access: channelAccess(authorization, Context.get(conversations, ThreadView.Service)),
+			access: channelAccess(yield* Authorization.Service, yield* Visibility.Service),
 		},
-		model,
 	}).pipe(Layer.provide(Layer.succeedContext(conversations)));
 	const server = yield* Layer.build(
 		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
@@ -190,6 +189,10 @@ main.pipe(
 			ModelProviderSetup.layer,
 			SearchProviderSetup.layer,
 			ConnectionSetup.layer,
+			ModelTrials.layer,
+			// For the event streams, which ask them directly.
+			Authorization.layer,
+			Visibility.layer,
 		).pipe(
 			// Settings try a model through the model client turns use.
 			Layer.provideMerge(modelProbeLayer),

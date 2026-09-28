@@ -8,10 +8,10 @@ import { memoryEventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import {
-	ToolApprovals,
+	ApprovedToolCalls,
 	ToolApprovalsIncomplete,
 	ToolExecutionRefused,
-} from "../tools/approvals/tool-approvals.ts";
+} from "../tools/approvals/approved-calls.ts";
 import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -794,7 +794,7 @@ interface Given {
 	toolCalls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	collaborations: Partial<Collaborations.Interface>;
 	requests: Pick<TurnRequests.Interface, "queueSummary">;
-	approvals?: Pick<ToolApprovals.Interface, "responsesForTurn" | "beginExecution">;
+	approvals?: ApprovedToolCalls.Interface;
 	model: TurnModel;
 	events: EventBus;
 	builtInTools?: BuiltInTools;
@@ -819,7 +819,7 @@ function segmentWith(given: Given) {
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(
-					ToolApprovals.Service,
+					ApprovedToolCalls.Service,
 					given.approvals ?? {
 						responsesForTurn: () =>
 							Effect.fail(

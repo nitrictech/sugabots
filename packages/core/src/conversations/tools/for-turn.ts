@@ -4,7 +4,7 @@ import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { PreparedTurn } from "../turns/execution.ts";
-import type { ToolApprovals } from "./approvals/tool-approvals.ts";
+import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { type RecordingOptions, recorded } from "./calls/recorded.ts";
 import type { ToolCallRepository } from "./calls/repository.ts";
 import type { Collaborations } from "./collaborate/collaborations.ts";
@@ -26,7 +26,7 @@ export interface ToolDependencies {
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** Where a built-in tool's calls are written down. */
 	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
-	approvals: Pick<ToolApprovals.Interface, "beginExecution">;
+	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */

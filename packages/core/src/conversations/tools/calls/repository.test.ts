@@ -3,7 +3,14 @@ import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
-import { connection, toolCall, turn, user, workspaceMember } from "../../../database/schema.ts";
+import {
+	connection,
+	podMember,
+	toolCall,
+	turn,
+	user,
+	workspaceMember,
+} from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -13,9 +20,12 @@ import {
 } from "../../../database/testing.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
+import { ActionForbidden, ResourceHidden } from "../../../workspaces/access.ts";
+import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../threads/thread-view.ts";
+import { TurnCancellation } from "../../turns/cancellation.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../../turns/execution.ts";
 import { type TurnCheckpoint, TurnRepository } from "../../turns/repository.ts";
 import { TurnSignals } from "../../turns/signals.ts";
@@ -27,11 +37,8 @@ import {
 	TurnSteps,
 	turnWorkflow,
 } from "../../turns/turn.workflow.ts";
-import {
-	ToolApprovalConflict,
-	ToolApprovalNotFound,
-	ToolApprovals,
-} from "../approvals/tool-approvals.ts";
+import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
+import { ToolApprovalConflict, ToolApprovals } from "../approvals/tool-approvals.ts";
 import {
 	boundedJson,
 	MAX_STORED_JSON_CHARACTERS,
@@ -56,12 +63,18 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		Context.get(conversations, ToolCallRepository.Service),
 	);
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const approvals: Promised<ToolApprovals.Interface> = onPostgres(
-		Context.get(conversations, ToolApprovals.Service),
-	);
-	const threads = onPostgres(Context.get(conversations, ThreadView.Service));
-	const chats = onPostgres(Context.get(conversations, Chats.Service));
-	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const approvalsAs = (userId: string): Promised<ToolApprovals.Interface> =>
+		onPostgresAs(userId)(Context.get(conversations, ToolApprovals.Service));
+	const approvals = onPostgres({
+		beginExecution: Context.get(conversations, ApprovedToolCalls.Service).beginExecution,
+	});
+	const threadsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+	const chatsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const execution = onPostgres({
+		prepare: Context.get(conversations, TurnExecution.Service).prepare,
+	});
 	let workspaceId: string;
 	let podId: string;
 	let memberId: string;
@@ -82,7 +95,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, podId, memberId, threadId, connectionId } = await aChatAwaitingReply(chats));
+		({ workspaceId, podId, memberId, threadId, connectionId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(threadId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -205,7 +218,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			toolCalls: [{ id: opened.id, atOffset: 7 }],
 		});
 
-		const details = await threads.getVisible(threadId, memberId);
+		const details = await threadsAs(memberId).get(threadId);
 		const reply = details?.messages.find((message) => message.id === prepared.responseMessage.id);
 
 		expect(reply?.parts).toEqual([
@@ -309,14 +322,34 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		);
 
 		await expect(
-			approvals.decide({
-				workspaceId,
-				podId,
-				toolCallId: pending.id,
-				userId: stranger.id,
-				decision: "allow_once",
-			}),
-		).rejects.toBeInstanceOf(ToolApprovalNotFound);
+			approvalsAs(stranger.id).decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
+		).rejects.toBeInstanceOf(ResourceHidden);
+	});
+
+	it("refuses a decision to somebody in the pod who may not decide", async () => {
+		const pending = pendingCall({ sdkToolCallId: "sdk-viewer" });
+		await park(pending);
+		const [viewer] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Lee", email: `viewer-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!viewer) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
+		);
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: viewer.id }),
+		);
+
+		await expect(
+			approvalsAs(viewer.id).decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		const [undecided] = await onDatabase((db) =>
+			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+		);
+		expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
 	});
 
 	it("fails calls still running when their turn is cancelled, and keeps them failed", async () => {
@@ -413,15 +446,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 
-			await onPostgres(
+			await onPostgresAs(memberId)(
 				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
-			).decide({
-				workspaceId,
-				podId,
-				toolCallId: pending.id,
-				userId: memberId,
-				decision: "allow_once",
-			});
+			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
 			const [decided] = await onDatabase((db) =>
@@ -430,14 +457,39 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: memberId });
 		});
 
+		it("takes the decision of an administrator who is not in the pod", async () => {
+			const pending = workflowCall();
+			const signals = await parkInWorkflow(pending);
+			const [administrator] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: "Ada", email: `admin-${crypto.randomUUID()}@example.com` })
+					.returning(),
+			);
+			if (!administrator) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: administrator.id, role: "admin" }),
+			);
+
+			await onPostgresAs(administrator.id)(
+				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
+			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
+
+			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
+			const [decided] = await onDatabase((db) =>
+				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
+			);
+			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: administrator.id });
+		});
+
 		it("tells a second person the approval is already decided", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
-			const deciding = onPostgres(
+			const deciding = onPostgresAs(memberId)(
 				Context.get(await conversationsForTests(bus, signals), ToolApprovals.Service),
 			);
 			const decide = (decision: "allow_once" | "deny") =>
-				deciding.decide({ workspaceId, podId, toolCallId: pending.id, userId: memberId, decision });
+				deciding.decide({ podId, toolCallId: pending.id, decision });
 
 			await decide("allow_once");
 
@@ -448,9 +500,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const signals = await parkInWorkflow(workflowCall());
 
 			expect(
-				await onPostgres(
-					Context.get(await conversationsForTests(bus, signals), TurnExecution.Service),
-				).requestCancel(prepared.turnId, memberId),
+				await onPostgresAs(memberId)(
+					Context.get(await conversationsForTests(bus, signals), TurnCancellation.Service),
+				).request(prepared.turnId),
 			).toBe(true);
 
 			// Marked at once, so a segment starting as the signal lands stops too.

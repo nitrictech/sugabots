@@ -7,10 +7,10 @@ import {
 	type AgentStanding,
 	type AuthorizationDenied,
 	agentStandingFor,
-	decideInPod,
 	type PodStanding,
 	podStandingFor,
 	ResourceHidden,
+	requireReach,
 	type WorkspaceStanding,
 	workspaceStandingFor,
 } from "./access.ts";
@@ -76,7 +76,6 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const standing = yield* query((db) => podStandingFor(db, podId, userId));
-					if (!standing) return yield* new ResourceHidden({ resource: "pod" });
 					return yield* decideInPod(standing, permission, "pod");
 				}),
 			),
@@ -87,11 +86,28 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const standing = yield* query((db) => agentStandingFor(db, agentId, userId));
-					if (!standing) return yield* new ResourceHidden({ resource: "agent" });
-					return yield* Effect.as(decideInPod(standing, permission, "agent"), standing);
+					return yield* decideInPod(standing, permission, "agent");
 				}),
 			),
 	});
 });
 
 export const layer = Layer.effect(Service, make);
+
+/**
+ * Hidden whatever the action, for a pod the actor cannot reach (see
+ * `requireReach`). Only once they reach it does being unable to act become
+ * forbidden.
+ */
+function decideInPod<Standing extends PodStanding>(
+	standing: Standing | undefined,
+	permission: PodPermission,
+	resource: "pod" | "agent",
+): Effect.Effect<Standing, AuthorizationDenied> {
+	return requireReach(standing, resource).pipe(
+		Effect.filterOrFail(
+			(reached) => reached.may(permission),
+			() => new ActionForbidden({ permission }),
+		),
+	);
+}

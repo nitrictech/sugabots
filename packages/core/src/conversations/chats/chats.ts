@@ -5,43 +5,44 @@ import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { agent, chat, pod } from "../../database/schema.ts";
-import { isUuid } from "../../ids/ids.ts";
+import { agent, pod, user } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { reachesPod } from "../../workspaces/access.ts";
+import type { AuthorizationDenied, ResourceHidden } from "../../workspaces/access.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import { CurrentActor } from "../../workspaces/current-actor.ts";
+import { Visibility } from "../../workspaces/visibility.ts";
 import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { FloorControl } from "../turns/floor-control.ts";
 
 /**
- * Talking to a crew agent: a person opens a chat with an agent in a pod and
- * posts into it, and whoever has the floor after a message is asked to speak.
+ * Talking to a crew agent: the current actor opens a chat with an agent in a
+ * pod and posts into it, and whoever has the floor after a message is asked to
+ * speak.
  */
 export interface Interface {
 	/**
-	 * The person's chat with the pod's crew agent, opened on first use.
-	 * Refused unless the person reaches the pod and the agent is its crew.
+	 * The chat with the pod's crew agent, opened on first use, in a workspace
+	 * named by its id or its slug. Refused unless the actor reaches the pod and
+	 * the agent is its crew.
 	 */
 	readonly open: (input: {
-		workspaceId: string;
+		workspace: string;
 		podId: string;
 		hostAgentId: string;
-		userId: string;
-	}) => Effect.Effect<Chat, ChatPlacementRejected>;
+	}) => Effect.Effect<Chat, AuthorizationDenied | ChatPlacementRejected, CurrentActor.Service>;
 	/**
-	 * Posts the person's message into the chat's main thread and gives the
-	 * floor. Posting the same message again returns it unchanged. `undefined`
-	 * when the person does not reach the chat.
+	 * Posts the actor's message into the chat's main thread and gives the
+	 * floor. Posting the same message again returns it unchanged.
 	 */
 	readonly post: (input: {
 		chatId: string;
-		/** Who is sending, as the caller already knows them. */
-		author: { id: string; name: string; image: string | null };
 		messageId: string;
 		content: string;
 	}) => Effect.Effect<
-		Message | undefined,
-		ThreadRepository.MessageIdConflict | ChatAgentHasNoModel
+		Message,
+		ResourceHidden | ThreadRepository.MessageIdConflict | ChatAgentHasNoModel,
+		CurrentActor.Service
 	>;
 }
 
@@ -49,6 +50,8 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Chats");
+	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
 	const threads = yield* ThreadRepository.Service;
 	const floor = yield* FloorControl.Service;
 
@@ -58,15 +61,15 @@ export const make = Effect.gen(function* () {
 				"open",
 				transaction(
 					Effect.gen(function* () {
-						if (!(yield* placementAllowed(input))) return yield* new ChatPlacementRejected();
-						return toChat(
-							yield* threads.openChat({
-								workspaceId: input.workspaceId,
-								podId: input.podId,
-								hostAgentId: input.hostAgentId,
-								initiatorUserId: input.userId,
-							}),
+						const { workspaceId, actor } = yield* authorization.workspace(
+							input.workspace,
+							"workspace.read",
 						);
+						const placement = { workspaceId, podId: input.podId, hostAgentId: input.hostAgentId };
+						if (!(yield* placementAllowed(placement, yield* visibility.reachesPod))) {
+							return yield* new ChatPlacementRejected();
+						}
+						return toChat(yield* threads.openChat({ ...placement, initiatorUserId: actor.userId }));
 					}),
 				),
 			),
@@ -76,17 +79,17 @@ export const make = Effect.gen(function* () {
 				"post",
 				transaction(
 					Effect.gen(function* () {
-						const visible = yield* visibleChat(input.chatId, input.author.id);
-						if (!visible) return undefined;
+						const visible = yield* visibility.chat(input.chatId);
+						const sender = yield* senderOf(yield* CurrentActor.Service);
 						const author = personAuthor({
-							userId: input.author.id,
-							userName: input.author.name,
-							userImage: input.author.image,
+							userId: sender.id,
+							userName: sender.name,
+							userImage: sender.image,
 						});
 						const posted = yield* threads.post({
 							id: input.messageId,
 							threadId: visible.mainThreadId,
-							author: input.author,
+							author: sender,
 							content: input.content,
 						});
 						if (posted._tag === "AlreadyPosted") return toMessage(posted.message, author);
@@ -110,7 +113,14 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([ThreadRepository.layer, FloorControl.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([
+		Authorization.layer,
+		Visibility.layer,
+		ThreadRepository.layer,
+		FloorControl.layer,
+	]),
+);
 
 export class ChatPlacementRejected
 	extends Data.TaggedError("ChatPlacementRejected")
@@ -134,13 +144,11 @@ export class ChatAgentHasNoModel
 	}
 }
 
-/** Whether the person reaches the pod and the agent is crew in it. */
-const placementAllowed = (input: {
-	workspaceId: string;
-	podId: string;
-	hostAgentId: string;
-	userId: string;
-}) =>
+/** Whether `reachesPod` reaches the pod and the agent is crew in it. */
+const placementAllowed = (
+	input: { workspaceId: string; podId: string; hostAgentId: string },
+	reachesPod: Visibility.ReachesPod,
+) =>
 	Effect.map(
 		query((db) =>
 			db
@@ -155,31 +163,26 @@ const placementAllowed = (input: {
 					),
 				)
 				.where(
-					and(
-						eq(pod.id, input.podId),
-						eq(pod.workspaceId, input.workspaceId),
-						reachesPod(pod.id, input.userId),
-					),
+					and(eq(pod.id, input.podId), eq(pod.workspaceId, input.workspaceId), reachesPod(pod.id)),
 				)
 				.limit(1),
 		),
 		([allowed]) => allowed !== undefined,
 	);
 
-/** The chat, if the person reaches its pod. */
-const visibleChat = (chatId: string, userId: string) =>
-	isUuid(chatId)
-		? Effect.map(
-				query((db) =>
-					db
-						.select()
-						.from(chat)
-						.where(and(eq(chat.id, chatId), reachesPod(chat.podId, userId)))
-						.limit(1),
-				),
-				([row]) => row,
-			)
-		: Effect.undefined;
+/** The actor as their messages are signed. */
+const senderOf = ({ userId }: CurrentActor.Interface) =>
+	Effect.flatMap(
+		query((db) =>
+			db
+				.select({ id: user.id, name: user.name, image: user.image })
+				.from(user)
+				.where(eq(user.id, userId))
+				.limit(1),
+		),
+		([sender]) =>
+			sender ? Effect.succeed(sender) : Effect.die(new Error("The current actor has no account")),
+	);
 
 const hostModelOf = (agentId: string) =>
 	Effect.map(

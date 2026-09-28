@@ -7,16 +7,20 @@ import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
+import { RoutineRunner } from "./routines/routine-runner.ts";
 import { RoutineView } from "./routines/routine-view.ts";
+import { RoutineWebhooks } from "./routines/routine-webhooks.ts";
 import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
 import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
+import { ApprovedToolCalls } from "./tools/approvals/approved-calls.ts";
 import { ToolApprovals } from "./tools/approvals/tool-approvals.ts";
 import { ToolCallRepository } from "./tools/calls/repository.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
+import { TurnCancellation } from "./turns/cancellation.ts";
 import { TurnExecution } from "./turns/execution.ts";
 import { FloorControl } from "./turns/floor-control.ts";
 import { TurnRepository } from "./turns/repository.ts";
@@ -25,8 +29,12 @@ const services = Layer.mergeAll(
 	Chats.layer,
 	Collaborations.layer,
 	ToolApprovals.layer,
+	ApprovedToolCalls.layer,
 	TurnExecution.layer,
+	TurnCancellation.layer,
 	Routines.layer,
+	RoutineWebhooks.layer,
+	RoutineRunner.layer,
 	Summaries.layer,
 	RoutineSettlement.layer,
 	ChatView.layer,

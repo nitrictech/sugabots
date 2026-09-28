@@ -13,7 +13,7 @@ import type { CurrentActor } from "../current-actor.ts";
 import { Visibility } from "../visibility.ts";
 import { PersonalPods } from "./personal-pods.ts";
 import { podSeenBy } from "./pod.ts";
-import { podMembers, visiblePods } from "./pod-reads.ts";
+import { podMembers } from "./pod-reads.ts";
 import { PodRepository } from "./pod-repository.ts";
 
 /**
@@ -101,11 +101,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* authorization.workspace(
-						input.workspace,
-						"workspace.read",
-					);
-					return yield* visiblePods(workspaceId, actor, yield* visibility.reachesPod);
+					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
+					return (yield* visibility.pods(workspaceId)).map(podSeenBy);
 				}),
 			),
 

@@ -1,14 +1,13 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { Installation } from "@sugabots/core/installation/installation";
-import type { Authorization } from "@sugabots/core/workspaces/access";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
 	HttpMiddleware,
 	HttpRouter,
+	type HttpServer,
 	HttpServerError,
 	HttpServerRequest,
 	HttpServerResponse,
@@ -33,8 +32,8 @@ import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
-import { authoriseLayer } from "./authorisation.ts";
 import { failureResponse } from "./errors.ts";
+import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
 /**
@@ -47,9 +46,11 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The routes take their services from the layer's context, and the events
- * and model trials take theirs here. `createTestApp` in `app.test-support.ts`
- * drives the same routes with fakes.
+ * The routes take their services from the layer's context, which is
+ * `HttpServices` and nothing else of core's, and the events take theirs here.
+ * Each use case authorizes the person the request's session belongs to, so no
+ * middleware decides access. `createTestApp` in `app.test-support.ts` drives
+ * the same routes with fakes.
  */
 
 export interface AppOptions {
@@ -57,21 +58,24 @@ export interface AppOptions {
 	authentication: Authentication.Interface;
 	/** Where the API and web app are reached, and which origins may send a cookie. */
 	installation: Installation.Interface;
-	/** Who may do what in which workspace, pod and agent. */
-	authorization: Authorization;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
-	/** Runs a model, for trying one out on a system agent before choosing it. */
-	model: TurnModel;
 }
+
+/**
+ * What the API is built on besides the core services: the database each
+ * request runs against, and the platform the router serves from.
+ */
+type ApiInfrastructure =
+	| Database
+	| HttpRouter.HttpRouter
+	| Layer.Success<typeof HttpServer.layerServices>;
 
 export function apiLayer({
 	authentication,
 	installation,
-	authorization,
 	events,
-	model,
-}: AppOptions) {
+}: AppOptions): Layer.Layer<never, never, HttpServices | ApiInfrastructure> {
 	const groups = Layer.mergeAll(
 		systemRoutes,
 		workspaceRoutes,
@@ -79,7 +83,7 @@ export function apiLayer({
 		onboardingRoutes,
 		podRoutes,
 		systemAgentRoutes,
-		modelTrialRoutes({ model }),
+		modelTrialRoutes,
 		modelProviderRoutes,
 		searchProviderRoutes,
 		connectionRoutes({ webAppUrl: installation.webAppUrl }),
@@ -89,11 +93,7 @@ export function apiLayer({
 		toolApprovalRoutes,
 		threadRoutes,
 	);
-	const middleware = Layer.mergeAll(
-		sessionLayer(authentication.identify),
-		authoriseLayer(authorization),
-		validateRequestLayer,
-	);
+	const middleware = Layer.merge(sessionLayer(authentication.identify), validateRequestLayer);
 	const api = HttpApiBuilder.layer(ServerApi).pipe(
 		Layer.provide(groups.pipe(Layer.provide(middleware))),
 	);

@@ -1,81 +1,74 @@
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { unimplemented } from "@sugabots/core/testing";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
+import { ActionForbidden } from "@sugabots/core/workspaces/access";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp } from "../../http/app.test-support.ts";
 
-const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
-const ADMIN_ID = "0199a3a0-0000-7000-8000-000000000002";
+/**
+ * The approval route, over a double of `ToolApprovals`, which decides who may
+ * make which decision; `tools/calls/repository.test.ts` tests that.
+ */
+
 const MEMBER_ID = "0199a3a0-0000-7000-8000-000000000003";
 const POD_ID = "0199a3a0-0000-7000-8000-000000000004";
 const CALL_ID = "0199a3a0-0000-7000-8000-000000000005";
 
-const resolveUser: UserResolver = async (headers) => {
-	const admin = headers.get("authorization") === "Bearer admin";
-	return {
-		id: admin ? ADMIN_ID : MEMBER_ID,
-		name: admin ? "Ada" : "Sam",
-		email: admin ? "ada@example.com" : "sam@example.com",
-		image: null,
-	};
-};
-
-/** Ada administers the workspace; Sam is an ordinary member of the pod. */
-const authorization = testAuthorization({
-	id: WORKSPACE_ID,
-	roles: { [ADMIN_ID]: "admin", [MEMBER_ID]: "member" },
-	pods: [{ id: POD_ID, kind: "shared", members: [MEMBER_ID], name: "Support", slug: "support" }],
+const resolveUser: UserResolver = async () => ({
+	id: MEMBER_ID,
+	name: "Sam",
+	email: "sam@example.com",
+	image: null,
 });
 
-function app() {
-	const decide = vi.fn<ToolApprovals.Interface["decide"]>(() => Effect.void);
-	return {
-		decide,
-		app: createTestApp({
-			resolveUser,
-			authorization,
-			services: unimplemented(ToolApprovals.Service, { decide }),
-		}),
-	};
+function app(decide: ToolApprovals.Interface["decide"]) {
+	return createTestApp({ resolveUser, services: unimplemented(ToolApprovals.Service, { decide }) });
 }
 
-describe("tool approval routes", () => {
-	it("lets a pod member allow one exact call", async () => {
-		const built = app();
-		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
-			method: "POST",
-			headers: { authorization: "Bearer member", "content-type": "application/json" },
-			body: JSON.stringify({ decision: "allow_once" }),
-		});
-
-		expect(response.status).toBe(202);
-		expect(built.decide).toHaveBeenCalledWith(
-			expect.objectContaining({ userId: MEMBER_ID, decision: "allow_once" }),
-		);
+const approve = (routes: ReturnType<typeof app>, decision: string) =>
+	routes.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
+		method: "POST",
+		headers: { authorization: "Bearer member", "content-type": "application/json" },
+		body: JSON.stringify({ decision }),
 	});
 
-	it("lets an admin who is not in the pod decide", async () => {
-		const built = app();
-		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
-			method: "POST",
-			headers: { authorization: "Bearer admin", "content-type": "application/json" },
-			body: JSON.stringify({ decision: "deny" }),
-		});
+describe("tool approval routes", () => {
+	it("decides the call in the path as the person asking", async () => {
+		let decidedAs: string | undefined;
+		const decide = vi.fn<ToolApprovals.Interface["decide"]>(() =>
+			Effect.map(CurrentActor.Service, ({ userId }) => {
+				decidedAs = userId;
+			}),
+		);
+
+		const response = await approve(app(decide), "allow_once");
 
 		expect(response.status).toBe(202);
+		expect(decide).toHaveBeenCalledWith({
+			podId: POD_ID,
+			toolCallId: CALL_ID,
+			decision: "allow_once",
+		});
+		expect(decidedAs).toBe(MEMBER_ID);
+	});
+
+	it("answers a decision the caller may not make as forbidden", async () => {
+		const response = await approve(
+			app(() => Effect.fail(new ActionForbidden({ permission: "approval.decide" }))),
+			"deny",
+		);
+
+		expect(response.status).toBe(403);
 	});
 
 	it("has no standing approval to give: every call that changes things is decided on its own", async () => {
-		const built = app();
-		const response = await built.app.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
-			method: "POST",
-			headers: { authorization: "Bearer admin", "content-type": "application/json" },
-			body: JSON.stringify({ decision: "always_allow" }),
-		});
+		const decide = vi.fn<ToolApprovals.Interface["decide"]>(() => Effect.void);
+
+		const response = await approve(app(decide), "always_allow");
 
 		expect(response.status).toBe(400);
-		expect(built.decide).not.toHaveBeenCalled();
+		expect(decide).not.toHaveBeenCalled();
 	});
 });

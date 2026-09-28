@@ -1,8 +1,9 @@
 import type { Agent, SystemAgent } from "@sugabots/contracts";
-import { and, asc, eq, isNotNull, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { agent } from "../../database/schema.ts";
+import type { Visibility } from "../visibility.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { SYSTEM_AGENTS } from "./system-agents.ts";
 
@@ -11,10 +12,7 @@ import { SYSTEM_AGENTS } from "./system-agents.ts";
  * rule for somebody, says they reach, by name. System agents are in no pod
  * and are not here.
  */
-export const visibleCrewAgents = (
-	workspaceId: string,
-	reachesPod: (podId: SQLWrapper) => SQL<boolean>,
-) =>
+export const visibleCrewAgents = (workspaceId: string, reachesPod: Visibility.ReachesPod) =>
 	query((db) =>
 		db
 			.select()

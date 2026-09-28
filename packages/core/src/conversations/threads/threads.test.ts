@@ -24,12 +24,15 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { ResourceHidden } from "../../workspaces/access.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
+import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { Summaries } from "../summaries/summaries.ts";
 import { conversationsForTests } from "../testing.ts";
+import { TurnCancellation } from "../turns/cancellation.ts";
 import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
 import { TurnRepository } from "../turns/repository.ts";
@@ -44,22 +47,19 @@ const eventStore = await runOnPostgres(postgresEventStore);
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async () => {
 	const eventBus = createEventBus({ store: eventStore });
 	const conversations = await conversationsForTests(eventBus);
-	const view = onPostgres(Context.get(conversations, ThreadView.Service));
-	const chats = onPostgres(Context.get(conversations, Chats.Service));
-	const turns = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const viewAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+	const chatsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const cancellationAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, TurnCancellation.Service));
+	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	const summaries = onPostgres(Context.get(conversations, Summaries.Service));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
 	let memberId: string;
-	let authors: Map<string, { id: string; name: string; image: string | null }>;
-	/** A message author, as the route would pass them. */
-	const author = (id: string) => {
-		const person = authors.get(id);
-		if (!person) throw new Error(`No test person ${id}`);
-		return person;
-	};
 	let outsiderId: string;
 
 	async function createThread(input: {
@@ -69,21 +69,18 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		initiatorUserId: string;
 		message: string;
 	}) {
+		const chats = chatsAs(input.initiatorUserId);
 		const opened = await chats.open({
-			workspaceId: input.workspaceId,
+			workspace: input.workspaceId,
 			podId: input.podId,
 			hostAgentId: input.hostAgentId,
-			userId: input.initiatorUserId,
 		});
 		await chats.post({
 			chatId: opened.id,
-			author: author(input.initiatorUserId),
 			messageId: crypto.randomUUID(),
 			content: input.message,
 		});
-		const details = await view.getVisible(opened.mainThreadId, input.initiatorUserId);
-		if (!details) throw new Error("Created Chat thread is not visible");
-		return details;
+		return viewAs(input.initiatorUserId).get(opened.mainThreadId);
 	}
 
 	/** The agent's turn running in the thread, as its workflow runs it. */
@@ -132,7 +129,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		workspaceId = workspaceRow.id;
 		memberId = member.id;
 		outsiderId = outsider.id;
-		authors = new Map(people.map((person) => [person.id, person]));
 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
@@ -390,8 +386,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			initiatorUserId: memberId,
 			message: "Run as a workflow",
 		});
-		const statusNow = async () =>
-			(await view.getVisible(details.thread.id, memberId))?.thread.status;
+		const statusNow = async () => (await viewAs(memberId).get(details.thread.id))?.thread.status;
 		expect(await statusNow()).toBe("running");
 
 		await runOnPostgres(releaseTurn(await runningTurn(details.thread.id)));
@@ -483,7 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		const pages = [];
 		let cursor: string | undefined;
 		do {
-			const page = await view.getVisible(details.thread.id, memberId, { limit: 50, cursor });
+			const page = await viewAs(memberId).get(details.thread.id, { limit: 50, cursor });
 			if (!page) {
 				throw new Error("Thread history disappeared");
 			}
@@ -499,7 +494,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			...historyIds.map((_, index) => `Message ${String(index + 1).padStart(3, "0")}`),
 		]);
 		await expect(
-			view.getVisible(details.thread.id, memberId, { limit: 50, cursor: "not-a-cursor" }),
+			viewAs(memberId).get(details.thread.id, { limit: 50, cursor: "not-a-cursor" }),
 		).rejects.toMatchObject({ _tag: "InvalidThreadHistoryCursor" });
 	});
 
@@ -519,9 +514,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 		const messageId = crypto.randomUUID();
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
-		await chats.post({
+		await chatsAs(memberId).post({
 			chatId: details.thread.chatId,
-			author: author(memberId),
 			messageId,
 			content: "Second",
 		});
@@ -637,14 +631,13 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
-		await chats.post({
+		await chatsAs(outsiderId).post({
 			chatId: details.thread.chatId,
-			author: author(outsiderId),
 			messageId: crypto.randomUUID(),
 			content: "I can help",
 		});
 
-		expect((await view.getVisible(details.thread.id, memberId))?.participants).toEqual(
+		expect((await viewAs(memberId).get(details.thread.id))?.participants).toEqual(
 			expect.arrayContaining([expect.objectContaining({ kind: "person", id: outsiderId })]),
 		);
 	});
@@ -676,7 +669,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				]),
 		);
 		const recentIds = async () =>
-			(await view.activity(details.thread.id, memberId))?.recentParticipants.map(({ id }) => id);
+			(await viewAs(memberId).activity(details.thread.id))?.recentParticipants.map(({ id }) => id);
 
 		expect(await recentIds()).toEqual([memberId, agentId, outsiderId]);
 
@@ -733,7 +726,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 
 		// And it stays out of the pod's thread list.
-		const listed = await view.listVisible(workspaceId, memberId);
+		const listed = await viewAs(memberId).list(workspaceId);
 		expect(listed.some((row) => row.id === summaryTurn?.threadId)).toBe(false);
 		expect(listed.some((row) => row.id === details.thread.id)).toBe(true);
 		await summaries.complete(
@@ -745,7 +738,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			},
 		);
 
-		const refreshed = await view.getVisible(details.thread.id, memberId);
+		const refreshed = await viewAs(memberId).get(details.thread.id);
 		expect(refreshed?.thread.title).toBe("Verify the release");
 		// The thread holding the summaries is named after its parent, and the
 		// first summary is what gives the parent a real title — so without this
@@ -759,15 +752,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				),
 		);
 		expect(summariesThread?.title).toBe("Summaries of Verify the release");
-		expect((await view.activity(details.thread.id, memberId))?.summary).toMatchObject({
+		expect((await viewAs(memberId).activity(details.thread.id))?.summary).toMatchObject({
 			content: "The release work is complete.",
 			sourceMessageId: preparedTurn.responseMessage.id,
 		});
 
 		if (!details.thread.chatId) throw new Error("Chat thread has no Chat");
-		await chats.post({
+		await chatsAs(memberId).post({
 			chatId: details.thread.chatId,
-			author: author(memberId),
 			messageId: crypto.randomUUID(),
 			content: "What remains?",
 		});
@@ -798,7 +790,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			],
 		});
 		await summaries.complete(nextSummary, { content: "Only approval remains." }, { usage: {} });
-		expect((await view.getVisible(details.thread.id, memberId))?.thread.title).toBe(
+		expect((await viewAs(memberId).get(details.thread.id))?.thread.title).toBe(
 			"Verify the release",
 		);
 	});
@@ -813,9 +805,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 		const prepared = await prepareRunnable(turns, await runningTurn(details.thread.id));
 
-		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(true);
-		expect(await turns.requestCancel(prepared.turnId, memberId)).toBe(false);
-		expect(await turns.requestCancel(prepared.turnId, outsiderId)).toBe(false);
+		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(true);
+		expect(await cancellationAs(memberId).request(prepared.turnId)).toBe(false);
+		await expect(cancellationAs(outsiderId).request(prepared.turnId)).rejects.toThrow(
+			ResourceHidden,
+		);
 		// Announced once, for the worker waiting on it.
 		const announced = await onDatabase((db) =>
 			db
@@ -835,11 +829,11 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			message: "Private to the pod",
 		});
 
-		expect(await view.getVisible(details.thread.id, outsiderId)).toBeUndefined();
-		expect(await view.listVisible(workspaceId, outsiderId)).toEqual([]);
+		await expect(viewAs(outsiderId).get(details.thread.id)).rejects.toThrow(ResourceHidden);
+		expect(await viewAs(outsiderId).list(workspaceId)).toEqual([]);
 	});
 
 	it("treats a malformed thread id as absent", async () => {
-		expect(await view.getVisible("not-a-uuid", memberId)).toBeUndefined();
+		await expect(viewAs(memberId).get("not-a-uuid")).rejects.toThrow(ResourceHidden);
 	});
 });

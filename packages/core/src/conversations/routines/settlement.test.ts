@@ -12,8 +12,15 @@ import {
 	thread,
 	turn,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -30,6 +37,7 @@ import {
 	waitingFacilitation,
 } from "../turns/testing.ts";
 import { Turn, turnLane } from "../turns/turn.workflow.ts";
+import { RoutineRunner } from "./routine-runner.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
@@ -47,11 +55,15 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	};
 	const conversations = await conversationsForTests(bus);
 	const { emit } = Context.get(conversations, ConversationEvents.Service);
-	const routines = onPostgres(Context.get(conversations, Routines.Service));
+	/** As the routines' owner, who administers their workspace. */
+	let routines: Promised<Routines.Interface>;
 	const { settleRun, failRun } = Context.get(conversations, RoutineSettlement.Service);
 	const settlement = onPostgres({ settleRun, failRun });
+	const runner = onPostgres(Context.get(conversations, RoutineRunner.Service));
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const execution = onPostgres(Context.get(conversations, TurnExecution.Service));
+	const execution = onPostgres({
+		prepare: Context.get(conversations, TurnExecution.Service).prepare,
+	});
 	/** Emits `events` in a transaction of their own, as a service would. */
 	const announce = (...events: ConversationEvent[]) => runOnPostgres(transaction(emit(events)));
 	/** An event ending the thread's routine run early, as `outcome`. */
@@ -76,12 +88,13 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	beforeEach(async () => {
 		delivered = [];
 		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
+		routines = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	});
 
 	/** A routine with one accepted manual trigger, whose run has started and asked for its turn. */
 	async function aRunningRun() {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
@@ -89,19 +102,8 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: {
-				kind: "manual",
-				requestId,
-				requestedAt: new Date().toISOString(),
-				requestedByUserId: userId,
-			},
-		});
-		const started = await startRunning(routines, created.routine.id);
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
+		const started = await startRunning(runner, created.routine.id);
 		if (started.execution.id !== accepted.executionId) {
 			throw new Error("Could not start settlement test execution");
 		}
@@ -195,7 +197,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 	it("fails a run whose workflow failed at once, while its turn still runs, so the next run can start", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Failing run",
 				instructions: "Do the work.",
@@ -205,22 +207,9 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const accepted = [];
 		for (let run = 0; run < 2; run++) {
 			const requestId = crypto.randomUUID();
-			accepted.push(
-				await routines.acceptTrigger({
-					workspaceId,
-					agentId,
-					routineId: created.routine.id,
-					triggerIdentity: requestId,
-					trigger: {
-						kind: "manual",
-						requestId,
-						requestedAt: new Date().toISOString(),
-						requestedByUserId: userId,
-					},
-				}),
-			);
+			accepted.push(await routines.run({ agentId, routineId: created.routine.id, requestId }));
 		}
-		const first = await startRunning(routines, created.routine.id);
+		const first = await startRunning(runner, created.routine.id);
 
 		await settlement.failRun(first.run);
 		await runOnPostgres(releaseRun(first.run));
@@ -230,13 +219,13 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			error: "The routine run stopped unexpectedly",
 			finishedAt: expect.any(Date),
 		});
-		const next = await startRunning(routines, created.routine.id);
+		const next = await startRunning(runner, created.routine.id);
 		expect(next.execution).toMatchObject({ id: accepted[1]?.executionId, state: "running" });
 	});
 
 	it("fails a run whose workflow failed before starting it", async () => {
 		const created = await routines.create(
-			{ workspaceId, agentId, createdById: userId },
+			{ agentId },
 			{
 				name: "Never started",
 				instructions: "Do the work.",
@@ -244,18 +233,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await routines.acceptTrigger({
-			workspaceId,
-			agentId,
-			routineId: created.routine.id,
-			triggerIdentity: requestId,
-			trigger: {
-				kind: "manual",
-				requestId,
-				requestedAt: new Date().toISOString(),
-				requestedByUserId: userId,
-			},
-		});
+		const accepted = await routines.run({ agentId, routineId: created.routine.id, requestId });
 
 		await settlement.failRun({ routineId: created.routine.id, executionId: accepted.executionId });
 

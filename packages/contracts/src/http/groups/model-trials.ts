@@ -1,7 +1,8 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { modelTrialSchema, newModelTrialSchema } from "../../model-trials.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Authorise, Session } from "../middleware.ts";
+import { refused } from "../errors.ts";
+import { Session } from "../middleware.ts";
 
 /**
  * Trying a model on a system agent before the workspace relies on it.
@@ -15,7 +16,7 @@ export class ModelTrialsApi extends HttpApiGroup.make("modelTrials")
 			params: { workspace: workspaceIdOrSlugSchema },
 			payload: newModelTrialSchema,
 			success: modelTrialSchema,
+			error: refused,
 		}),
 	)
-	.middleware(Authorise)
 	.middleware(Session) {}

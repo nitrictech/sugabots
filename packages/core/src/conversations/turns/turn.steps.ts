@@ -18,7 +18,10 @@ import type { EventBus } from "../../database/events/bus.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { ToolApprovals, type ToolApprovalsIncomplete } from "../tools/approvals/tool-approvals.ts";
+import {
+	ApprovedToolCalls,
+	type ToolApprovalsIncomplete,
+} from "../tools/approvals/approved-calls.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -81,7 +84,7 @@ type SegmentServices =
 	| TurnRepository.Service
 	| ToolCallRepository.Service
 	| Collaborations.Service
-	| ToolApprovals.Service
+	| ApprovedToolCalls.Service
 	| FloorControl.Service
 	| TurnRequests.Service;
 
@@ -367,7 +370,7 @@ const streamReply = (
 			const turns = yield* TurnRepository.Service;
 			const toolCalls = yield* ToolCallRepository.Service;
 			const collaborations = yield* Collaborations.Service;
-			const approvals = yield* ToolApprovals.Service;
+			const approvals = yield* ApprovedToolCalls.Service;
 			const stop = new AbortController();
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
 

@@ -12,12 +12,11 @@ import {
 } from "../../membership.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { BadRequest, Conflict, Forbidden, NotFound } from "../errors.ts";
+import { BadRequest, Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 const workspace = { workspace: workspaceIdOrSlugSchema };
 
-/** Not behind `Authorise`: `Membership` checks each action itself. */
 export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 	.add(
 		HttpApiEndpoint.get("list", "/workspaces", {
@@ -32,50 +31,50 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 			params: workspace,
 			payload: workspaceDetailsSchema,
 			success: workspaceSchema,
-			error: [BadRequest, Conflict, Forbidden, NotFound],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.get("members", "/workspaces/:workspace/members", {
 			params: workspace,
 			success: Schema.Array(workspaceMemberSchema),
-			error: [Forbidden, NotFound],
+			error: refused,
 		}),
 		HttpApiEndpoint.patch("updateMember", "/workspaces/:workspace/members/:memberId", {
 			params: { ...workspace, memberId: uuidSchema },
 			payload: workspaceMemberUpdateSchema,
-			error: [BadRequest, Forbidden, NotFound],
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.delete("removeMember", "/workspaces/:workspace/members/:memberId", {
 			params: { ...workspace, memberId: uuidSchema },
-			error: [BadRequest, Forbidden, NotFound],
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.post("leave", "/workspaces/:workspace/leave", {
 			params: workspace,
-			error: [BadRequest, Forbidden, NotFound],
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.get("invitations", "/workspaces/:workspace/invitations", {
 			params: workspace,
 			success: Schema.Array(workspaceInvitationSchema),
-			error: [Forbidden, NotFound],
+			error: refused,
 		}),
 		HttpApiEndpoint.post("invite", "/workspaces/:workspace/invitations", {
 			params: workspace,
 			payload: newWorkspaceInvitationSchema,
 			success: workspaceInvitationSchema.pipe(HttpApiSchema.status(201)),
-			error: [Conflict, Forbidden, NotFound],
+			error: [Conflict, ...refused],
 		}),
 		HttpApiEndpoint.delete("cancelInvitation", "/invitations/:invitationId", {
 			params: { invitationId: uuidSchema },
-			error: [Forbidden, NotFound],
+			error: refused,
 		}),
 		HttpApiEndpoint.get("invitation", "/invitations/:invitationId", {
 			params: { invitationId: uuidSchema },
 			success: invitationPreviewSchema,
-			error: [Forbidden, NotFound],
+			error: refused,
 		}),
 		HttpApiEndpoint.post("acceptInvitation", "/invitations/:invitationId/accept", {
 			params: { invitationId: uuidSchema },
 			success: acceptedInvitationSchema,
-			error: [Forbidden, NotFound],
+			error: refused,
 		}),
 	)
 	.middleware(Session) {}

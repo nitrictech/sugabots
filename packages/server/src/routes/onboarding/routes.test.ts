@@ -1,4 +1,5 @@
 import { unimplemented } from "@sugabots/core/testing";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -39,7 +40,13 @@ describe("onboarding routes", () => {
 	});
 
 	it("returns the workspace belonging to an accepted invitation", async () => {
-		const completeAcceptedInvite = vi.fn(() => Effect.succeed(WORKSPACE_ID));
+		let askedAs: string | undefined;
+		const completeAcceptedInvite = vi.fn(() =>
+			Effect.map(CurrentActor.Service, ({ userId }) => {
+				askedAs = userId;
+				return WORKSPACE_ID;
+			}),
+		);
 
 		const response = await app({ completeAcceptedInvite }).request("/onboarding/complete-invite", {
 			method: "POST",
@@ -49,9 +56,7 @@ describe("onboarding routes", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ workspaceId: WORKSPACE_ID });
-		expect(completeAcceptedInvite).toHaveBeenCalledWith({
-			userId: USER_ID,
-			invitationId: INVITATION_ID,
-		});
+		expect(completeAcceptedInvite).toHaveBeenCalledWith({ invitationId: INVITATION_ID });
+		expect(askedAs).toBe(USER_ID);
 	});
 });
