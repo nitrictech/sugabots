@@ -1,6 +1,6 @@
-import { Duration, Effect, Ref } from "effect";
+import { Duration, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
-import { Models } from "../../providers/models/models.ts";
+import type { Models } from "../../providers/models/models.ts";
 import { CASES, type TrialCase, type TrialSystemAgent } from "./cases.ts";
 
 /**
@@ -183,12 +183,12 @@ interface TrialOptions {
 /** Runs every case for a system agent and reports how the model did. */
 export const runTrial = (
 	{ systemAgentKey, model, workspaceId, attempts = ATTEMPTS }: TrialOptions,
-	turnModel: Models.Interface,
+	models: Models.Interface,
 ): Effect.Effect<TrialReport, never, Database> =>
 	Effect.gen(function* () {
 		const cases = yield* Effect.forEach(
 			CASES[systemAgentKey],
-			(trialCase) => runCase(trialCase, { model, workspaceId, attempts }, turnModel),
+			(trialCase) => runCase(trialCase, { model, workspaceId, attempts }, models),
 			// One at a time: a local model serving one request at a time would
 			// otherwise queue, and the numbers would say more about the queue.
 			{ concurrency: 1 },
@@ -235,7 +235,7 @@ export const runTrial = (
 const runCase = (
 	trialCase: TrialCase,
 	{ model, workspaceId, attempts }: { model: string; workspaceId: string; attempts: number },
-	turnModel: Models.Interface,
+	models: Models.Interface,
 ): Effect.Effect<{ result: TrialCaseResult; timings: number[] }, never, Database> =>
 	Effect.gen(function* () {
 		let passed = 0;
@@ -244,7 +244,7 @@ const runCase = (
 		for (let attempt = 0; attempt < attempts; attempt += 1) {
 			// Timed around the whole answer, not just opening the stream: what a
 			// person waits for is the last token, not the first.
-			const [took, answer] = yield* Effect.timed(ask(trialCase, model, workspaceId, turnModel));
+			const [took, answer] = yield* Effect.timed(ask(trialCase, model, workspaceId, models));
 			// Only the first attempt at each case is timed, and only when it
 			// answered. Providers cache an identical prompt — Ollama returns the
 			// second ask in tens of milliseconds — so timing the repeats would
@@ -278,35 +278,18 @@ const ask = (
 	trialCase: TrialCase,
 	model: string,
 	workspaceId: string,
-	turnModel: Models.Interface,
+	models: Models.Interface,
 ): Effect.Effect<string | undefined, never, Database> =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* turnModel.stream({
-				...trialCase.prompt(model, workspaceId, stop.signal),
-				activity: { purpose: "trial" },
-			});
-			const collected = yield* Ref.make("");
-			yield* Models.forEachDelta(generated.text, stop, (text) =>
-				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
-					Effect.filterOrFail(
-						(soFar) => soFar.length <= MAX_ANSWER_CHARACTERS,
-						() =>
-							new Models.UnusableAnswer({
-								reason: "The model kept going well past any usable answer",
-							}),
-					),
-				),
-			);
-			return yield* Ref.get(collected);
-		}),
-	).pipe(
-		Effect.timeoutOrElse({
-			duration: ANSWER_TIMEOUT,
-			orElse: () => Effect.undefined,
-		}),
-		Effect.orElseSucceed(() => undefined),
-		Effect.catchDefect(() => Effect.undefined),
-	);
+	models
+		.answer({
+			...trialCase.prompt(model, workspaceId),
+			purpose: trialCase.name,
+			activity: { purpose: "trial" },
+			maxCharacters: MAX_ANSWER_CHARACTERS,
+			timeout: ANSWER_TIMEOUT,
+		})
+		.pipe(
+			Effect.map((answer) => answer.text),
+			Effect.orElseSucceed(() => undefined),
+			Effect.catchDefect(() => Effect.undefined),
+		);

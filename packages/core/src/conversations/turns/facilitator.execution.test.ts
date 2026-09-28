@@ -20,6 +20,7 @@ vi.mock("../../database/database.ts", async (importOriginal) => {
 });
 
 import { Models } from "../../providers/models/models.ts";
+import { scriptedModel } from "../../providers/models/testing.ts";
 import type { FacilitateRequest } from "./facilitate.workflow.ts";
 import { attemptFacilitation, type FacilitatorScope } from "./facilitator.ts";
 
@@ -45,17 +46,9 @@ const scope: FacilitatorScope = {
 	recent: [],
 };
 
-const answering = (answer: string): Models.Interface => ({
-	stream: () =>
-		Effect.succeed({ text: chunks(answer), accounting: Effect.succeed({ modelCalls: 1 }) }),
-});
-
-const unavailable: Models.Interface = {
-	stream: () =>
-		Effect.fail(
-			new Models.ModelRequestFailed({ message: "provider unavailable", reason: "unavailable" }),
-		),
-};
+const unavailable = Models.fromStream(() =>
+	Effect.fail(new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" })),
+);
 
 describe("an attempt at facilitation", () => {
 	beforeEach(() => {
@@ -66,7 +59,7 @@ describe("an attempt at facilitation", () => {
 
 	it("queues the chosen agent's turn", async () => {
 		const outcome = await runWithoutDatabase(
-			attemptFacilitation(request, 1, answering("@host-agent")),
+			attemptFacilitation(request, 1, scriptedModel("@host-agent")),
 		);
 
 		expect(outcome).toBe("decided");
@@ -79,7 +72,9 @@ describe("an attempt at facilitation", () => {
 	});
 
 	it("queues no turn when the facilitator answers nobody", async () => {
-		const outcome = await runWithoutDatabase(attemptFacilitation(request, 1, answering("nobody")));
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 1, scriptedModel("nobody")),
+		);
 
 		expect(outcome).toBe("decided");
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
@@ -87,9 +82,11 @@ describe("an attempt at facilitation", () => {
 
 	it("does not ask the model for a Chat", async () => {
 		mocks.scope = { ...scope, threadType: "chat" };
-		const stream = vi.fn(answering("host-agent").stream);
+		const stream = vi.fn(scriptedModel("host-agent").stream);
 
-		const outcome = await runWithoutDatabase(attemptFacilitation(request, 1, { stream }));
+		const outcome = await runWithoutDatabase(
+			attemptFacilitation(request, 1, Models.fromStream(stream)),
+		);
 
 		expect(outcome).toBe("decided");
 		expect(stream).not.toHaveBeenCalled();
@@ -100,7 +97,7 @@ describe("an attempt at facilitation", () => {
 		mocks.queueTurn.mockReturnValue(Effect.die(new Error("database unavailable")));
 
 		await expect(
-			runWithoutDatabase(attemptFacilitation(request, 1, answering("@host-agent"))),
+			runWithoutDatabase(attemptFacilitation(request, 1, scriptedModel("@host-agent"))),
 		).rejects.toThrow("database unavailable");
 	});
 
@@ -130,7 +127,3 @@ const runWithoutDatabase = <A, E>(
 			}),
 		),
 	);
-
-async function* chunks(...values: string[]): AsyncIterable<string> {
-	for (const value of values) yield value;
-}

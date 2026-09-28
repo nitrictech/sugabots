@@ -7,6 +7,7 @@ import { EventStore } from "../../database/events/store.ts";
 import { agent, message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
+import { chunks, streamed } from "../../providers/models/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -260,16 +261,16 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			);
 
 		it("prepares, streams and completes the reply, and tells the thread", async () => {
-			const outcome = await segmentWith({
-				stream: () =>
-					Effect.sync(() => ({
-						text: (async function* () {
-							yield "Example Domain";
-							yield " says hello.";
-						})(),
-						accounting: Effect.succeed({ modelCalls: 1, contextTokens: 12 }),
-					})),
-			});
+			const outcome = await segmentWith(
+				Models.fromStream(() =>
+					Effect.sync(() =>
+						streamed(chunks("Example Domain", " says hello."), {
+							modelCalls: 1,
+							contextTokens: 12,
+						}),
+					),
+				),
+			);
 
 			expect(outcome).toEqual({ _tag: "Finished" });
 			expect(await storedTurn()).toMatchObject({
@@ -286,12 +287,13 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		});
 
 		it("records a failed run, which the workflow runs again", async () => {
-			const outcome = await segmentWith({
-				stream: () =>
+			const outcome = await segmentWith(
+				Models.fromStream(() =>
 					Effect.fail(
-						new Models.ModelRequestFailed({ message: "provider down", reason: "unavailable" }),
+						new Models.RequestFailed({ message: "provider down", reason: "unavailable" }),
 					),
-			});
+				),
+			);
 
 			expect(outcome).toEqual({ _tag: "Retry" });
 			expect(await storedTurn()).toMatchObject({ status: "failed", error: providerDown });

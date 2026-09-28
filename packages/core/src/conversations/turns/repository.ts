@@ -84,7 +84,7 @@ export interface Interface {
 	readonly complete: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		accounting: Models.Accounting,
+		accounting: TurnAccounting,
 	) => Effect.Effect<void>;
 	/**
 	 * Records the run as failed, telling people `userMessage`, and returns
@@ -808,14 +808,18 @@ export const TurnCheckpoint = Schema.Struct({
 	accounting: Schema.Struct({
 		modelCalls: OptionalCount,
 		contextTokens: OptionalCount,
-		contextCapacity: OptionalCount,
 	}),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
+/** What a turn keeps of its model calls, and how much of the model's context window the prompt took. */
+export interface TurnAccounting extends Models.Accounting {
+	contextCapacity?: number;
+}
+
 type AccountingColumn = "contextTokens" | "contextCapacity";
 
-function accountingColumns(accounting: Models.Accounting) {
+function accountingColumns(accounting: TurnAccounting) {
 	return {
 		contextTokens: accounting.contextTokens ?? null,
 		contextCapacity: accounting.contextCapacity ?? null,

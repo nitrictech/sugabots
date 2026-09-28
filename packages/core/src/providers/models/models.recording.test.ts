@@ -91,7 +91,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 	return { model, recorded };
 }
 
-const input: Omit<Models.Input, "signal"> = {
+const input: Models.StreamRequest = {
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
 	activity,
 	model: "gpt-test",
@@ -104,6 +104,7 @@ const input: Omit<Models.Input, "signal"> = {
 			execute: async () => "It is here.",
 		}),
 	},
+	maxSteps: 8,
 };
 
 /** Reads the whole response, and how it ended. */
@@ -111,9 +112,8 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"]) =>
 	run(
 		Effect.scoped(
 			Effect.gen(function* () {
-				const stop = new AbortController();
-				const generated = yield* model.stream({ ...input, signal: stop.signal });
-				yield* Models.forEachDelta(generated.text, stop, () => Effect.void);
+				const generated = yield* model.stream(input);
+				yield* Models.forEachDelta(generated.text, () => Effect.void);
 				return yield* Effect.exit(generated.accounting);
 			}),
 		),

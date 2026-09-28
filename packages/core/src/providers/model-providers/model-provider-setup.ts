@@ -270,9 +270,21 @@ export const make = Effect.gen(function* () {
 
 			const endpoint = yield* providers.endpoint(workspaceId, providerId);
 			const started = yield* Clock.currentTimeMillis;
-			const answered = yield* Models.probe(models, workspaceId, enabled.modelId).pipe(
-				Effect.result,
-			);
+			// Listing a provider's models cannot tell that a model is gated behind
+			// a setting on the provider's side, that a key has no credit, or that
+			// the model refuses the request shape. Asking it something can.
+			const answered = yield* models
+				.answer({
+					workspaceId,
+					model: enabled.modelId,
+					system: "Answer with the single word OK.",
+					messages: [{ role: "user", content: "OK?" }],
+					purpose: "Trying an enabled model",
+					activity: { purpose: "probe" },
+					maxCharacters: 200,
+					timeout: "30 seconds",
+				})
+				.pipe(Effect.result);
 			const latencyMs = listed.latencyMs + ((yield* Clock.currentTimeMillis) - started);
 			if (answered._tag === "Success") {
 				return { ...listed, latencyMs };

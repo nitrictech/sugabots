@@ -72,14 +72,16 @@ describe("models", () => {
 			});
 
 			await run(
-				model.stream({
-					workspaceId: "workspace-id",
-					activity: { purpose: "probe" },
-					model: "model-id",
-					system: "",
-					messages: [],
-					signal: new AbortController().signal,
-				}),
+				Effect.scoped(
+					model.stream({
+						workspaceId: "workspace-id",
+						activity: { purpose: "probe" },
+						model: "model-id",
+						system: "",
+						messages: [],
+						maxSteps: 1,
+					}),
+				),
 			);
 
 			const createProvider = apiFormat === "anthropic" ? sdk.createAnthropic : sdk.createOpenAI;
@@ -114,14 +116,16 @@ describe("models", () => {
 		});
 
 		await run(
-			model.stream({
-				workspaceId: "workspace-id",
-				activity: { purpose: "probe" },
-				model: "gpt-5.5",
-				system: "You are Suga.",
-				messages: [{ role: "user", content: "Hello" }],
-				signal: new AbortController().signal,
-			}),
+			Effect.scoped(
+				model.stream({
+					workspaceId: "workspace-id",
+					activity: { purpose: "probe" },
+					model: "gpt-5.5",
+					system: "You are Suga.",
+					messages: [{ role: "user", content: "Hello" }],
+					maxSteps: 1,
+				}),
+			),
 		);
 
 		expect(sdk.createOpenAI).toHaveBeenCalledWith(
@@ -154,7 +158,7 @@ describe("a failed model request", () => {
 			}),
 		});
 
-		const failure = Models.ModelRequestFailed.fromCause(refused);
+		const failure = Models.RequestFailed.fromCause(refused);
 
 		expect(failure.message).toBe(
 			"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
@@ -171,11 +175,11 @@ describe("a failed model request", () => {
 			responseBody: "<html>upstream timed out</html>",
 		});
 
-		expect(Models.ModelRequestFailed.fromCause(opaque)).toMatchObject({
+		expect(Models.RequestFailed.fromCause(opaque)).toMatchObject({
 			message: "Provider returned 502: <html>upstream timed out</html>",
 			userMessage: "The model provider could not answer.",
 		});
-		expect(Models.ModelRequestFailed.fromCause(new Error("socket hang up")).message).toBe(
+		expect(Models.RequestFailed.fromCause(new Error("socket hang up")).message).toBe(
 			"socket hang up",
 		);
 	});

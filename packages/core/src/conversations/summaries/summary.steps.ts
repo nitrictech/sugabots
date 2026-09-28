@@ -1,5 +1,5 @@
 import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
+import { Cause, Data, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
@@ -89,43 +89,23 @@ const generate = (
 	SummaryFailure,
 	Database
 > =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-
-			const generated = yield* model.stream({
-				...threadSummaryPrompt(prepared, stop.signal),
-				activity: {
-					purpose: "summary",
-					podId: prepared.podId,
-					threadId: prepared.threadId,
-					turnId: prepared.turnId,
-				},
-			});
-			const collected = yield* Ref.make("");
-			yield* Models.forEachDelta(generated.text, stop, (text) =>
-				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
-					Effect.filterOrFail(
-						(soFar) => soFar.length <= MAX_GENERATED_CHARACTERS,
-						() =>
-							new Models.UnusableAnswer({ reason: "Thread summary model returned too much text" }),
-					),
-					Effect.asVoid,
-				),
-			);
-			const content = yield* Ref.get(collected);
-			const result = yield* parseGenerated(content, prepared.previousContent === undefined);
-			const accounting = yield* generated.accounting;
-			return [result, accounting] as const;
-		}),
-	).pipe(
-		Effect.timeoutOrElse({
-			duration: SUMMARY_TIMEOUT,
-			orElse: () => Effect.fail(new Models.AnswerTimedOut({ message: "Thread summary timed out" })),
-		}),
-		// The timeout is inside, so each attempt gets its own two minutes rather
-		// than the three of them sharing one.
+	Effect.gen(function* () {
+		const answer = yield* model.answer({
+			...threadSummaryPrompt(prepared),
+			purpose: "Thread summary",
+			activity: {
+				purpose: "summary",
+				podId: prepared.podId,
+				threadId: prepared.threadId,
+				turnId: prepared.turnId,
+			},
+			maxCharacters: MAX_GENERATED_CHARACTERS,
+			timeout: SUMMARY_TIMEOUT,
+		});
+		const result = yield* parseGenerated(answer.text, prepared.previousContent === undefined);
+		return [result, answer.accounting] as const;
+	}).pipe(
+		// Each attempt gets its own time limit rather than the three sharing one.
 		Models.retryUnusable,
 	);
 
@@ -179,7 +159,7 @@ function stripFence(text: string): string {
 }
 
 /** Why a summary failed. */
-type SummaryFailure = Models.ModelRequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
+type SummaryFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
 
 /** The process summarising stopped before the summary finished. */
 class SummaryInterrupted extends Data.TaggedError("SummaryInterrupted") implements UserFacing {

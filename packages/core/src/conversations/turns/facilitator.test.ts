@@ -56,7 +56,7 @@ describe("the facilitator", () => {
 	});
 
 	it("asks with the participants, the host, and the recent messages, on the host's model", () => {
-		const prompt = facilitatorPrompt(scope, new AbortController().signal);
+		const prompt = facilitatorPrompt(scope);
 
 		expect(prompt.model).toBe("small-model");
 		expect(prompt.system).toContain("Host: @host-agent");
@@ -83,7 +83,7 @@ describe("the facilitator", () => {
 	});
 
 	it("offers nobody as one of the answers, and says it is the usual one", () => {
-		const prompt = facilitatorPrompt(scope, new AbortController().signal);
+		const prompt = facilitatorPrompt(scope);
 
 		// `nobody` used to be one word inside a paragraph while the handles were a
 		// list. Every one of eleven decisions in a row picked from the list.

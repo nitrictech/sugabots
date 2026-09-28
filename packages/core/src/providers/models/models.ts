@@ -2,7 +2,8 @@
  * The one client every part of the workspace asks a model through: turns,
  * facilitation, summaries, compaction, model trials and provider settings.
  * It resolves the workspace's provider for a model, signs in where the
- * provider needs it, and streams the answer.
+ * provider needs it, and either streams the response or collects a whole
+ * answer.
  */
 export * as Models from "./models.ts";
 
@@ -19,7 +20,7 @@ import {
 	type ToolModelMessage,
 	type ToolSet,
 } from "ai";
-import { Context, Data, Duration, Effect, Layer, Schedule } from "effect";
+import { Context, Data, Duration, Effect, Layer, Ref, Schedule, type Scope } from "effect";
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
@@ -29,76 +30,100 @@ import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
 
-/**
- * What a turn keeps of its model's work. What each request used and cost is
- * in the `model_request` ledger, not here.
- */
-export interface Accounting {
-	/** How many requests the model made, which caps the steps a resumed turn has left. */
-	modelCalls: number;
-	/**
-	 * The prompt's size at the turn's first model call: its history, system
-	 * text and tools. What its tool calls return is left out, since the next
-	 * turn keeps only a short record of it.
-	 */
-	contextTokens?: number;
-	contextCapacity?: number;
-}
-
-export interface Input {
+/** What asking a model once is about: which model, for which workspace, and what it is told. */
+export interface Prompt {
 	workspaceId: string;
-	/** What the request is for, which the ledger records as whose spend it is. */
-	activity: ModelRequests.Activity;
 	model: string;
 	system: string;
 	messages: readonly PromptMessage[];
-	/** Server-owned SDK messages appended when resuming a suspended tool call. */
-	continuationMessages?: readonly ModelMessage[];
-	/** What the model may call during the turn. The SDK executes them as it streams. */
-	tools?: ToolSet;
-	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
-	maxSteps?: number;
-	signal: AbortSignal;
 }
-
-/** A request as its prompt is written; whoever sends it says what it is for. */
-export type Prompt = Omit<Input, "activity">;
 
 export interface PromptMessage {
 	role: "user" | "assistant";
 	content: string;
 }
 
-interface Streamed {
+/** A response streamed as it arrives, with tools the model may call along the way. */
+export interface StreamRequest extends Prompt {
+	/** What the request is for, which the ledger records as whose spend it is. */
+	activity: ModelRequests.Activity;
+	/** Server-owned SDK messages appended when resuming a suspended tool call. */
+	continuationMessages?: readonly ModelMessage[];
+	/** What the model may call. The SDK executes them as it streams. */
+	tools?: ToolSet;
+	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
+	/** How many model calls the response may take, counting one per round of tool calls. */
+	maxSteps: number;
+}
+
+/** A whole answer, given up on if it runs past either limit. */
+export interface AnswerRequest extends Prompt {
+	/** What is being asked for, as the logs name it: "Thread summary", "Facilitator". */
+	purpose: string;
+	/** What the request is for, which the ledger records as whose spend it is. */
+	activity: ModelRequests.Activity;
+	maxCharacters: number;
+	timeout: Duration.Input;
+}
+
+export interface Streamed {
+	/** The response's text, one delta at a time. Read it with {@link forEachDelta}. */
 	text: AsyncIterable<string>;
 	/**
 	 * What the finished response cost. Meaningful only once `text` has been
 	 * read to its end; asked for after an abort, it fails. An Effect rather than
 	 * a promise so nothing exists until the caller asks, which is what keeps an
-	 * aborted turn from leaving a rejection nobody handles.
+	 * aborted response from leaving a rejection nobody handles.
 	 */
-	accounting: Effect.Effect<Accounting, ModelRequestFailed>;
-	continuation?: Effect.Effect<
+	accounting: Effect.Effect<Accounting, RequestFailed>;
+	/** The tool calls waiting on someone's approval, and the messages that carry the response on. */
+	continuation: Effect.Effect<
 		{
 			approvalRequests: ToolApprovalRequestOutput<ToolSet>[];
 			responseMessages: Array<AssistantModelMessage | ToolModelMessage>;
 		},
-		ModelRequestFailed
+		RequestFailed
 	>;
 }
 
-/** Streams one model response for a workspace, through the provider it has configured. */
+export interface Answer {
+	text: string;
+	accounting: Accounting;
+}
+
+/**
+ * What a response's caller keeps of the model's work. What each request used
+ * and cost is in the `model_request` ledger, not here.
+ */
+export interface Accounting {
+	/** How many requests the model made, which caps the steps a resumed turn has left. */
+	modelCalls: number;
+	/**
+	 * The prompt's size at the response's first model call: its history, system
+	 * text and tools. What its tool calls return is left out.
+	 */
+	contextTokens?: number;
+}
+
 export interface Interface {
-	/** The Effect ends once the stream has been opened; `text` is then read as it arrives. */
-	stream(input: Input): Effect.Effect<Streamed, ModelRequestFailed, Database>;
+	/**
+	 * Opens a streamed response. The Effect ends once the stream is open, and
+	 * closing its scope aborts the request, along with any tool call still
+	 * running inside it.
+	 */
+	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailed, Database | Scope.Scope>;
+	/** Asks for one whole answer, in a single model call. */
+	answer(
+		request: AnswerRequest,
+	): Effect.Effect<Answer, RequestFailed | AnswerTimedOut | UnusableAnswer, Database>;
 }
 
 /** The model could not be asked, or its provider failed the request. */
-export class ModelRequestFailed
+export class RequestFailed
 	extends Data.TaggedError("ModelRequestFailed")<{
 		/** Why, for the logs. It may quote the provider's own response. */
 		readonly message: string;
-		readonly reason: ModelRequestFailure;
+		readonly reason: RequestFailure;
 		readonly cause?: unknown;
 	}>
 	implements UserFacing
@@ -108,14 +133,14 @@ export class ModelRequestFailed
 	 * in the response body, usually as `{"error":{"message":...}}`; that
 	 * sentence is the one worth logging, ahead of the SDK's own summary.
 	 */
-	static fromCause(cause: unknown): ModelRequestFailed {
+	static fromCause(cause: unknown): RequestFailed {
 		if (!APICallError.isInstance(cause)) {
 			const message = cause instanceof Error ? cause.message : String(cause);
-			return new ModelRequestFailed({ message, reason: "unavailable", cause });
+			return new RequestFailed({ message, reason: "unavailable", cause });
 		}
 		const status = cause.statusCode;
 		const said = providerSaid(cause.responseBody) ?? cause.message;
-		return new ModelRequestFailed({
+		return new RequestFailed({
 			message: `${status ? `Provider returned ${status}` : "Provider refused"}: ${said}`,
 			reason:
 				status === 401 || status === 403
@@ -128,25 +153,18 @@ export class ModelRequestFailed
 	}
 
 	get userMessage() {
-		return MODEL_REQUEST_USER_MESSAGES[this.reason];
+		return REQUEST_USER_MESSAGES[this.reason];
 	}
 }
 
-type ModelRequestFailure =
-	| "noProvider"
-	| "signInFailed"
-	| "rejected"
-	| "rateLimited"
-	| "unavailable"
-	| "timedOut";
+type RequestFailure = "noProvider" | "signInFailed" | "rejected" | "rateLimited" | "unavailable";
 
-const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
+const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
 	noProvider: UserMessage.of`No active provider offers this model.`,
 	signInFailed: UserMessage.of`The model provider's ChatGPT sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
-	timedOut: UserMessage.of`The model did not answer in time.`,
 };
 
 interface Options {
@@ -159,103 +177,136 @@ interface Options {
 }
 
 export function make({ modelProviders, httpClients, requests, registry }: Options): Interface {
-	return {
-		stream: (input) =>
-			Effect.gen(function* () {
-				const resolved = yield* modelProviders.resolve(input.workspaceId, input.model);
-				if (!resolved) {
-					return yield* new ModelRequestFailed({
-						message: `No active provider offers the model "${input.model}"`,
-						reason: "noProvider",
-					});
-				}
-				const connection = yield* withChatgptAccess(
-					modelProviders,
-					httpClients,
-					input.workspaceId,
-					resolved,
-				).pipe(
-					Effect.mapError(
-						(failure) =>
-							new ModelRequestFailed({
-								message: failure.message,
-								reason: "signInFailed",
-								cause: failure,
-							}),
-					),
-				);
-				const fetch = httpClients.for(connection);
-				const ledger = yield* streamLedger({
-					requests,
-					registry,
-					workspaceId: input.workspaceId,
-					activity: input.activity,
-					model: input.model,
-					connection,
+	return fromStream((input) =>
+		Effect.gen(function* () {
+			const signal = yield* Effect.abortSignal;
+			const resolved = yield* modelProviders.resolve(input.workspaceId, input.model);
+			if (!resolved) {
+				return yield* new RequestFailed({
+					message: `No active provider offers the model "${input.model}"`,
+					reason: "noProvider",
 				});
-				const codex = connection.preset === "chatgpt";
-				// The SDK does not throw a provider's error into the text stream: it
-				// reports it here and ends the stream, and whatever is asked of the
-				// result afterwards fails with "No output generated". Keeping the
-				// first error is what lets the failure say why the provider refused.
-				let providerFailure: unknown;
-				const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
-				const result = streamText({
-					model: languageModel(connection, input.model, fetch),
-					// The Codex backend takes the system prompt only as `instructions`,
-					// and keeps nothing between requests, so reasoning has to travel with them.
-					...(codex
-						? {
-								providerOptions: {
-									openai: {
-										instructions: input.system,
-										store: false,
-										include: ["reasoning.encrypted_content"],
-									},
-								},
-							}
-						: { system: input.system }),
-					messages: [...input.messages, ...(input.continuationMessages ?? [])],
-					tools: input.tools,
-					toolApproval: input.toolApproval,
-					abortSignal: input.signal,
-					onChunk: ({ chunk }) => {
-						if (chunk.type === "tool-approval-request" && !chunk.isAutomatic) {
-							approvalRequests.push(chunk);
-						}
-					},
-					onLanguageModelCallStart: () => ledger.started(),
-					onLanguageModelCallEnd: ({ usage }) => ledger.ended(usage),
-					onError: ({ error }) => {
-						providerFailure ??= error;
-						return ledger.failed();
-					},
-					onAbort: () => ledger.aborted(),
-					stopWhen: stepCountIs(input.maxSteps ?? 8),
-					maxRetries: 0,
-				});
-				return {
-					text: result.textStream,
-					accounting: Effect.tryPromise({
-						try: async () => {
-							const steps = await result.steps;
-							if (providerFailure !== undefined) throw providerFailure;
-							return {
-								modelCalls: steps.length,
-								contextTokens: steps[0]?.usage.inputTokens,
-							};
-						},
-						catch: (cause) => ModelRequestFailed.fromCause(providerFailure ?? cause),
-					}),
-					continuation: Effect.tryPromise({
-						try: async () => ({
-							approvalRequests: [...approvalRequests],
-							responseMessages: await result.responseMessages,
+			}
+			const connection = yield* withChatgptAccess(
+				modelProviders,
+				httpClients,
+				input.workspaceId,
+				resolved,
+			).pipe(
+				Effect.mapError(
+					(failure) =>
+						new RequestFailed({
+							message: failure.message,
+							reason: "signInFailed",
+							cause: failure,
 						}),
-						catch: (cause) => ModelRequestFailed.fromCause(cause),
+				),
+			);
+			const fetch = httpClients.for(connection);
+			const ledger = yield* streamLedger({
+				requests,
+				registry,
+				workspaceId: input.workspaceId,
+				activity: input.activity,
+				model: input.model,
+				connection,
+			});
+			const codex = connection.preset === "chatgpt";
+			// The SDK does not throw a provider's error into the text stream: it
+			// reports it here and ends the stream, and whatever is asked of the
+			// result afterwards fails with "No output generated". Keeping the
+			// first error is what lets the failure say why the provider refused.
+			let providerFailure: unknown;
+			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
+			const result = streamText({
+				model: languageModel(connection, input.model, fetch),
+				// The Codex backend takes the system prompt only as `instructions`,
+				// and keeps nothing between requests, so reasoning has to travel with them.
+				...(codex
+					? {
+							providerOptions: {
+								openai: {
+									instructions: input.system,
+									store: false,
+									include: ["reasoning.encrypted_content"],
+								},
+							},
+						}
+					: { system: input.system }),
+				messages: [...input.messages, ...(input.continuationMessages ?? [])],
+				tools: input.tools,
+				toolApproval: input.toolApproval,
+				abortSignal: signal,
+				onChunk: ({ chunk }) => {
+					if (chunk.type === "tool-approval-request" && !chunk.isAutomatic) {
+						approvalRequests.push(chunk);
+					}
+				},
+				onLanguageModelCallStart: () => ledger.started(),
+				onLanguageModelCallEnd: ({ usage }) => ledger.ended(usage),
+				onError: ({ error }) => {
+					providerFailure ??= error;
+					return ledger.failed();
+				},
+				onAbort: () => ledger.aborted(),
+				stopWhen: stepCountIs(input.maxSteps),
+				maxRetries: 0,
+			});
+			return {
+				text: result.textStream,
+				accounting: Effect.tryPromise({
+					try: async () => {
+						const steps = await result.steps;
+						if (providerFailure !== undefined) throw providerFailure;
+						return {
+							modelCalls: steps.length,
+							contextTokens: steps[0]?.usage.inputTokens,
+						};
+					},
+					catch: (cause) => RequestFailed.fromCause(providerFailure ?? cause),
+				}),
+				continuation: Effect.tryPromise({
+					try: async () => ({
+						approvalRequests: [...approvalRequests],
+						responseMessages: await result.responseMessages,
 					}),
-				};
-			}),
+					catch: (cause) => RequestFailed.fromCause(cause),
+				}),
+			};
+		}),
+	);
+}
+
+/**
+ * A client whose whole answers are collected from `stream`. How the real one
+ * is built, and how a test builds one from a scripted stream.
+ */
+export function fromStream(stream: Interface["stream"]): Interface {
+	return {
+		stream,
+		answer: (request) =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const streamed = yield* stream({ ...request, maxSteps: 1 });
+					const collected = yield* Ref.make("");
+					yield* forEachDelta(streamed.text, (delta) =>
+						Ref.updateAndGet(collected, (soFar) => soFar + delta).pipe(
+							Effect.filterOrFail(
+								(soFar) => soFar.length <= request.maxCharacters,
+								() => new UnusableAnswer({ reason: `${request.purpose} returned too much text` }),
+							),
+							Effect.asVoid,
+						),
+					);
+					return { text: yield* Ref.get(collected), accounting: yield* streamed.accounting };
+				}),
+			).pipe(
+				Effect.timeoutOrElse({
+					duration: request.timeout,
+					orElse: () =>
+						Effect.fail(new AnswerTimedOut({ message: `${request.purpose} timed out` })),
+				}),
+			),
 	};
 }
 
@@ -275,6 +326,7 @@ function languageModel(
 		})(modelId);
 	}
 	const openai = createOpenAI({
+		// A local server such as Ollama takes no key, but the SDK insists on one.
 		apiKey: connection.apiKey ?? "ollama",
 		baseURL: connection.baseUrl,
 		headers: connection.headers,
@@ -296,46 +348,6 @@ export const layer = Layer.effect(
 	}),
 ).pipe(Layer.provide(Layer.mergeAll(ModelProviderRepository.layer, ModelRequests.layer)));
 
-/**
- * Asks a model for one word, to learn whether it will answer at all. What
- * listing a provider's models cannot tell: that a model is gated behind a
- * setting on the provider's side, that a key has no credit, that the model
- * refuses the request shape. Fails with the provider's reason.
- */
-export function probe(
-	model: Interface,
-	workspaceId: string,
-	modelId: string,
-): Effect.Effect<void, ModelRequestFailed, Database> {
-	return Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-			const generated = yield* model.stream({
-				workspaceId,
-				activity: { purpose: "probe" },
-				model: modelId,
-				system: "Answer with the single word OK.",
-				messages: [{ role: "user", content: "OK?" }],
-				signal: stop.signal,
-			});
-			yield* forEachDelta(generated.text, stop, () => Effect.void);
-			yield* generated.accounting;
-		}).pipe(
-			Effect.timeoutOrElse({
-				duration: "30 seconds",
-				orElse: () =>
-					Effect.fail(
-						new ModelRequestFailed({
-							message: "Model did not answer within 30 seconds",
-							reason: "timedOut",
-						}),
-					),
-			}),
-		),
-	);
-}
-
 function providerSaid(body: string | undefined): string | undefined {
 	if (!body) return undefined;
 	try {
@@ -355,43 +367,26 @@ function providerSaid(body: string | undefined): string | undefined {
 /**
  * Reads the model's text one delta at a time and runs `onDelta` for each.
  *
- * Interrupting this aborts the request through `stop`, and does not wait for
- * the iterator to wind down: the SDK's generator may be parked on a network
- * read that only the abort will end, so waiting on it would deadlock.
+ * Interrupting this does not wait for the iterator to wind down: the SDK's
+ * generator may be parked on a network read that only aborting the request
+ * will end, which happens when the stream's scope closes.
  */
 export const forEachDelta = <E, R>(
 	text: AsyncIterable<string>,
-	stop: AbortController,
 	onDelta: (delta: string) => Effect.Effect<void, E, R>,
-): Effect.Effect<void, E | ModelRequestFailed, R> => {
+): Effect.Effect<void, E | RequestFailed, R> => {
 	const iterator = text[Symbol.asyncIterator]();
-	const next = Effect.callback<IteratorResult<string>, ModelRequestFailed>((resume) => {
+	const next = Effect.callback<IteratorResult<string>, RequestFailed>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) => resume(Effect.fail(ModelRequestFailed.fromCause(cause))),
+			(cause) => resume(Effect.fail(RequestFailed.fromCause(cause))),
 		);
-		return Effect.sync(() => stop.abort());
 	});
-	const loop: Effect.Effect<void, E | ModelRequestFailed, R> = Effect.flatMap(next, (result) =>
+	const loop: Effect.Effect<void, E | RequestFailed, R> = Effect.flatMap(next, (result) =>
 		result.done ? Effect.void : Effect.andThen(onDelta(result.value), loop),
 	);
 	return loop;
 };
-
-/**
- * Asking a model for an answer in a particular shape, and dealing with the
- * times it does not give one.
- *
- * A model that returns prose where JSON was asked for, or a word that is not
- * one of the choices, has not failed in the way a timeout or a dead connection
- * has. It is usually a one-off, and asking again usually works. Retrying is far
- * cheaper than giving up, which leaves a thread without its summary or has the
- * facilitator decide that nobody speaks.
- *
- * Only the shape is retried here. A timeout is not — the next attempt would
- * cost the same again — and neither is anything the database or the stream
- * raised, which asking again will not change.
- */
 
 /** The model answered, but not in a shape we can use. */
 export class UnusableAnswer
@@ -440,6 +435,12 @@ const RETRY_UNUSABLE = Schedule.recurs(2).pipe(
  * Asks again when the answer was the wrong shape, and gives up on anything
  * else. What the caller does after the last attempt is its own business:
  * falling back to a safe default, or recording the failure.
+ *
+ * A model that returns prose where JSON was asked for, or a word that is not
+ * one of the choices, has not failed the way a timeout or a dead connection
+ * has: it is usually a one-off, and asking again usually works. A timeout is
+ * not retried, since the next attempt would cost the same again, and neither
+ * is anything the database or the stream raised.
  */
 export const retryUnusable = <A, E, R>(ask: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
 	Effect.retry(ask, {

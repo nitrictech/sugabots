@@ -1,4 +1,4 @@
-import { Cause, Data, Duration, Effect, Exit, Layer, Option, Ref } from "effect";
+import { Cause, Data, Duration, Effect, Exit, Layer, Option } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
@@ -75,50 +75,33 @@ const generate = (
 	prepared: PreparedCompaction,
 	model: Models.Interface,
 ): Effect.Effect<readonly [string, Models.Accounting], CompactionFailure, Database> =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const stop = new AbortController();
-			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
-
-			const generated = yield* model.stream({
-				...compactionPrompt(prepared, stop.signal),
-				activity: {
-					purpose: "compaction",
-					podId: prepared.podId,
-					threadId: prepared.threadId,
-					turnId: prepared.turnId,
-				},
-			});
-			const collected = yield* Ref.make("");
-			yield* Models.forEachDelta(generated.text, stop, (text) =>
-				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
-					Effect.filterOrFail(
-						(soFar) => soFar.length <= MAX_COMPACTION_SUMMARY_CHARACTERS,
-						() => new Models.UnusableAnswer({ reason: "Compaction model returned too much text" }),
-					),
-					Effect.asVoid,
-				),
-			);
-			const summary = (yield* Ref.get(collected)).trim();
-			if (!summary) {
-				return yield* new Models.UnusableAnswer({ reason: "Compaction model returned no text" });
-			}
-			const accounting = yield* generated.accounting;
-			return [summary, accounting] as const;
-		}),
-	).pipe(
-		Effect.timeoutOrElse({
-			duration: COMPACTION_TIMEOUT,
-			orElse: () => Effect.fail(new Models.AnswerTimedOut({ message: "Compaction timed out" })),
-		}),
-		// The timeout is inside, so each attempt gets its own time.
+	Effect.gen(function* () {
+		const answer = yield* model.answer({
+			...compactionPrompt(prepared),
+			purpose: "Compaction",
+			activity: {
+				purpose: "compaction",
+				podId: prepared.podId,
+				threadId: prepared.threadId,
+				turnId: prepared.turnId,
+			},
+			maxCharacters: MAX_COMPACTION_SUMMARY_CHARACTERS,
+			timeout: COMPACTION_TIMEOUT,
+		});
+		const summary = answer.text.trim();
+		if (!summary) {
+			return yield* new Models.UnusableAnswer({ reason: "Compaction returned no text" });
+		}
+		return [summary, answer.accounting] as const;
+	}).pipe(
+		// Each attempt gets its own time limit.
 		Models.retryUnusable,
 	);
 
 /**
  * Why a compaction failed.
  */
-type CompactionFailure = Models.ModelRequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
+type CompactionFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
 
 /** The process compacting stopped before the compaction finished. */
 class CompactionInterrupted
