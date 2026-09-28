@@ -50,8 +50,9 @@ import type { ModelAccounting } from "./model.ts";
  * refuses writes nothing. Commands that end a turn's run also end its
  * unfinished tool calls, through `ToolCallRepository`.
  *
- * An agent's turn writes a reply into its thread; the Scribe's turns write
- * summaries instead, so they have commands of their own and announce nothing.
+ * An agent's turn writes a reply into its thread. A system agent's turn (the
+ * Scribe summarising, the Compaction agent compacting) writes something else
+ * instead, so those have commands of their own and announce nothing.
  */
 export interface Interface {
 	/**
@@ -64,10 +65,10 @@ export interface Interface {
 	readonly openReplyTurn: (
 		request: ReplyTurnRequest,
 	) => Effect.Effect<OpenedReplyTurn | NotRunnable>;
-	/** Opens the Scribe's turn on a message it summarises to, as `openReplyTurn` does. */
-	readonly openScribeTurn: (
-		request: ScribeTurnRequest,
-	) => Effect.Effect<OpenedScribeTurn | NotRunnable>;
+	/** Opens a system agent's turn on the message it works up to, as `openReplyTurn` does. */
+	readonly openSystemAgentTurn: (
+		request: SystemAgentTurnRequest,
+	) => Effect.Effect<OpenedSystemAgentTurn | NotRunnable>;
 	/** Persists the reply so far, so a crash loses at most a second of text. */
 	readonly saveReply: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
 	/**
@@ -96,8 +97,11 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/** Stops the run short, keeping the reply written so far. */
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
-	readonly completeScribeTurn: (turnId: string, accounting: ModelAccounting) => Effect.Effect<void>;
-	readonly failScribeTurn: (turnId: string, userMessage: UserMessage) => Effect.Effect<void>;
+	readonly completeSystemAgentTurn: (
+		turnId: string,
+		accounting: ModelAccounting,
+	) => Effect.Effect<void>;
+	readonly failSystemAgentTurn: (turnId: string, userMessage: UserMessage) => Effect.Effect<void>;
 	/** Asks the turn to stop, and says who has to be told. */
 	readonly requestCancel: (turnId: string) => Effect.Effect<CancelRequest>;
 	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
@@ -168,7 +172,7 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Ends the reply and the unfinished tool calls of a turn the lifecycle
 	 * ended mid-run, telling people `userMessage` of the calls, and announces
-	 * how it ended. A Scribe's turn has no reply, so there is nothing to
+	 * how it ended. A system agent's turn has no reply, so there is nothing to
 	 * announce.
 	 */
 	const endRun = (turnId: string, state: TurnState, userMessage: UserMessage) =>
@@ -258,7 +262,7 @@ export const make = Effect.gen(function* () {
 		});
 
 	const insertTurn = (
-		request: ScribeTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
+		request: SystemAgentTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
 	) =>
 		Effect.gen(function* () {
 			const startedAt = yield* DateTime.nowAsDate;
@@ -397,12 +401,12 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openScribeTurn: (request) =>
+		openSystemAgentTurn: (request) =>
 			operation(
-				"openScribeTurn",
+				"openSystemAgentTurn",
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<
-						OpenedScribeTurn | NotRunnable,
+						OpenedSystemAgentTurn | NotRunnable,
 						never,
 						Database | Transaction
 					> {
@@ -522,9 +526,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		completeScribeTurn: (turnId, accounting) =>
+		completeSystemAgentTurn: (turnId, accounting) =>
 			operation(
-				"completeScribeTurn",
+				"completeSystemAgentTurn",
 				transaction(
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(eq(turn.id, turnId), TurnEvent.Complete());
@@ -534,9 +538,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		failScribeTurn: (turnId, userMessage) =>
+		failSystemAgentTurn: (turnId, userMessage) =>
 			operation(
-				"failScribeTurn",
+				"failSystemAgentTurn",
 				transaction(
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(
@@ -700,7 +704,7 @@ export interface ReplyTurnRequest {
 	readonly author: ParticipantRow;
 }
 
-export interface ScribeTurnRequest {
+export interface SystemAgentTurnRequest {
 	readonly threadId: string;
 	readonly agentId: string;
 	readonly triggerMessageId: string;
@@ -716,7 +720,7 @@ export interface OpenedReplyTurn {
 	readonly checkpoint: TurnCheckpoint | undefined;
 }
 
-export interface OpenedScribeTurn {
+export interface OpenedSystemAgentTurn {
 	readonly _tag: "Opened";
 	readonly turnId: string;
 }

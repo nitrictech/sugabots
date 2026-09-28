@@ -108,6 +108,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 	CollaborationFailed: CollaborationChange;
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: { readonly workspaceId: string; readonly threadId: string };
+	/** The compaction agent replaced the thread's older history with a summary for its bots. */
+	ThreadCompacted: { readonly workspaceId: string; readonly threadId: string };
 	/** A routine run began in its own thread, listed in the agent's chat. */
 	RoutineExecutionAccepted: {
 		readonly workspaceId: string;

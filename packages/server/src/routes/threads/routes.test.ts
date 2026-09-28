@@ -103,7 +103,7 @@ beforeEach(() => {
 			return seenBy(threadId, details);
 		},
 		activity: (threadId) =>
-			seenBy(threadId, { summary: null, recentParticipants: details.participants }),
+			seenBy(threadId, { summary: null, context: null, recentParticipants: details.participants }),
 	};
 });
 
@@ -155,6 +155,7 @@ describe("thread routes", () => {
 		const response = await app().request(`/threads/${THREAD}/activity`, as("member-token"));
 		expect(Schema.decodeUnknownSync(threadActivitySchema)(await response.json())).toEqual({
 			summary: null,
+			context: null,
 			recentParticipants: details.participants,
 		});
 

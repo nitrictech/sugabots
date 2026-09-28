@@ -1,6 +1,7 @@
 export * as TurnExecution from "./execution.ts";
 
 import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -9,8 +10,10 @@ import {
 	serviceOperations,
 	transaction,
 } from "../../database/database.ts";
-import type { TurnReason } from "../../database/schema.ts";
+import { type TurnReason, threadCompaction } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
+import { loadContextWindow } from "../compaction/context-window.ts";
+import { estimatedTokens, historyLimitTokens, newestWithinLimit } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import {
@@ -21,6 +24,7 @@ import {
 	personColumns,
 	toParticipant,
 } from "../threads/participants.ts";
+import { messageTextWithPlacedParts } from "./context.ts";
 import type { FloorMessage } from "./floor.ts";
 import { TURN_CANCELLED } from "./lifecycle.ts";
 import {
@@ -108,6 +112,9 @@ export const make = Effect.gen(function* () {
 							author: authorRow(null, speaker),
 						});
 						if (opened._tag === "NotRunnable") return opened;
+						const windowTokens = yield* query((db) =>
+							loadContextWindow(db, loaded.workspaceId, model),
+						);
 						return {
 							_tag: "Prepared",
 							run,
@@ -140,7 +147,13 @@ export const make = Effect.gen(function* () {
 								participants: loaded.participants.map(({ user, agent }) =>
 									toParticipant(authorRow(user, agent)),
 								),
-								messages: loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
+								windowTokens,
+								compaction: loaded.compaction ?? undefined,
+								messages: newestWithinLimit(
+									loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
+									(message) => estimatedTokens(messageTextWithPlacedParts(message)),
+									historyLimitTokens(windowTokens),
+								),
 							},
 							...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
 						};
@@ -240,12 +253,31 @@ export interface TurnContext {
 	/** The other crew agents in the pod, who this agent may collaborate with. */
 	crew: Array<{ id: string; name: string; handle: string; description: string | null }>;
 	participants: ThreadParticipant[];
-	/** messages contains up to one hundred completed messages, oldest first. */
+	/** The context window the agent's model is treated as having, which every limit is a share of. */
+	windowTokens: number;
+	/** What the Compaction agent left in place of older history, once the thread has been compacted. */
+	compaction: TurnCompaction | undefined;
+	/**
+	 * The newest completed messages, oldest first: those since the compaction
+	 * kept them word for word, as many as fit the agent's history limit.
+	 */
 	messages: Message[];
 }
 
-/** How much of the conversation the agent is shown. */
-const MAX_HISTORY_MESSAGES = 100;
+export interface TurnCompaction {
+	/** The Compaction agent's summary of the messages from `historyStartsAt` to `keptFrom`. */
+	summary: string;
+	/** History before this is neither summarised nor read, only searched. */
+	historyStartsAt: Date;
+	/** Where the messages the agent reads word for word start. */
+	keptFrom: Date;
+}
+
+/**
+ * The most messages loaded for a turn, before they are cut to the agent's
+ * history limit. It bounds the query, not what the agent reads.
+ */
+const MAX_HISTORY_MESSAGES = 1_000;
 
 function notRunnable(reason: string): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended: undefined };
@@ -254,8 +286,8 @@ function notRunnable(reason: string): NotRunnable {
 /**
  * Everything the model is told about the thread, in one statement: the
  * thread with its workspace, its pod and the crew placed there, the people and
- * agents in it, and its last hundred completed messages with the parts placed
- * in them.
+ * agents in it, its compaction, and its newest completed messages since the
+ * compaction kept them, with the parts placed in them.
  */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
@@ -298,9 +330,14 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 				orderBy: { createdAt: "asc", id: "asc" },
 				with: { user: personColumns, agent: agentColumns },
 			},
+			compaction: { columns: { summary: true, historyStartsAt: true, keptFrom: true } },
 			// The reply being written is `streaming`, so this leaves it out.
 			messages: {
-				where: { status: "complete" },
+				where: {
+					status: "complete",
+					RAW: (row) =>
+						sql`${row.createdAt} >= coalesce((select ${threadCompaction.keptFrom} from ${threadCompaction} where ${threadCompaction.threadId} = ${row.threadId}), '-infinity')`,
+				},
 				orderBy: { createdAt: "desc", id: "desc" },
 				limit: MAX_HISTORY_MESSAGES,
 				with: messageRelations,

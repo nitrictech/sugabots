@@ -76,6 +76,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		expect(await placed()).toEqual([
+			{ key: "compact", podId: null, model: null },
 			{ key: "facilitate", podId: null, model: null },
 			{ key: "summarise", podId: null, model: null },
 		]);
@@ -85,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
-		expect(await placed()).toHaveLength(2);
+		expect(await placed()).toHaveLength(3);
 	});
 
 	it("does not put a chosen model back to unset when run again", async () => {
@@ -103,7 +104,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		expect(scribe?.model).toBe("chosen-model");
 	});
 
-	it("gives each workspace its own pair", async () => {
+	it("gives each workspace its own set", async () => {
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 		await agents.ensureSystemAgents({ workspaceId: otherWorkspaceId, createdById: creatorId });
 		await agents.setSystemAgentModel(workspaceId, "facilitate", "one-workspace-only");
@@ -112,6 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
 			{ key: "facilitate", model: null },
+			{ key: "compact", model: null },
 		]);
 	});
 
@@ -121,6 +123,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
 			{ key: "facilitate", model: null },
+			{ key: "compact", model: null },
 		]);
 	});
 

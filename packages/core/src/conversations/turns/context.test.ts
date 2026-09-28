@@ -174,6 +174,43 @@ describe("modelPrompt", () => {
 		);
 	});
 
+	it("keeps what search_history found longer than other tools' output", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const found = `The hotel budget is 150 euros a night. ${"word ".repeat(500)}`;
+		input.messages[1] = {
+			...own,
+			content: "Found it.",
+			parts: [
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-000000000022",
+					tool: "search_history",
+					input: { query: "hotel budget" },
+					output: {
+						messages: [{ author: "Sam", at: "Fri, 15 May 2026, 17:02 UTC", text: found }],
+						more: false,
+					},
+					status: "completed",
+					error: null,
+					mutating: false,
+					atOffset: 0,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+				{ type: "text", text: "Found it." },
+			],
+		};
+
+		const history = modelPrompt(input, environment()).messages[2]?.content ?? "";
+
+		expect(history).toContain(found);
+		expect(history).not.toContain("… (");
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];
@@ -220,6 +257,8 @@ function context(): TurnContext {
 		},
 		reason: "default",
 		routing: { facilitator: false },
+		windowTokens: 256_000,
+		compaction: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
 		crew: [],

@@ -15,6 +15,7 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.thread.id,
 			to: r.routineExecution.threadId,
 		}),
+		compaction: r.one.threadCompaction({ from: r.thread.id, to: r.threadCompaction.threadId }),
 	},
 	chat: {
 		mainThread: r.one.thread({ from: r.chat.mainThreadId, to: r.thread.id, optional: false }),

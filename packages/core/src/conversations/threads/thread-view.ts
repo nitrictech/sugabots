@@ -3,17 +3,18 @@ export * as ThreadView from "./thread-view.ts";
 import type {
 	Thread,
 	ThreadActivity,
+	ThreadContext,
 	ThreadDetails,
 	ThreadHistoryQuery,
 	ThreadParticipant,
 	ThreadSummary,
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { thread, threadSummary } from "../../database/schema.ts";
+import { thread, threadCompaction, threadSummary, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import {
@@ -24,6 +25,7 @@ import {
 import { Authorization } from "../../workspaces/authorization.ts";
 import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Visibility } from "../../workspaces/visibility.ts";
+import { compactionLineTokens, contextWindowTokens } from "../compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
 import { respondingIn } from "../turns/requests.ts";
@@ -121,14 +123,18 @@ export const make = Effect.gen(function* () {
 							.select({
 								summary: threadSummary,
 								recentParticipants: recentParticipantsOf(thread.id),
+								measured: latestMeasurementOf(thread.id),
+								compactedAt: threadCompaction.updatedAt,
 							})
 							.from(thread)
 							.leftJoin(threadSummary, eq(threadSummary.threadId, thread.id))
+							.leftJoin(threadCompaction, eq(threadCompaction.threadId, thread.id))
 							.where(and(eq(thread.id, threadId), reachesPod(thread.podId))),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "thread" });
 					return {
 						summary: row.summary ? toThreadSummary(row.summary) : null,
+						context: row.measured === null ? null : toThreadContext(row.measured, row.compactedAt),
 						recentParticipants: row.recentParticipants.map(toParticipant),
 					};
 				}),
@@ -229,6 +235,38 @@ function toThreadDetails(
 			row.messages.length > limit && oldest
 				? encodeCursor({ at: oldest.createdAt, id: oldest.id })
 				: null,
+	};
+}
+
+/**
+ * How many tokens the prompt of the thread's latest measured turn took, the
+ * window it was read with, and when. Its own turns only: the Scribe's and the
+ * Compaction agent's are in child threads.
+ */
+const latestMeasurementOf = (threadId: SQLWrapper) => sql<Measurement | null>`(
+	select json_build_object('tokens', ${turn.contextTokens}, 'window', ${turn.contextCapacity}, 'at', coalesce(${turn.finishedAt}, ${turn.createdAt}))
+	from ${turn}
+	where ${turn.threadId} = ${threadId} and ${turn.contextTokens} is not null
+	order by ${turn.createdAt} desc
+	limit 1
+)`;
+
+/** A turn's prompt size, the window it was read with (unset on older turns), and when. */
+interface Measurement {
+	tokens: number;
+	window: number | null;
+	at: string;
+}
+
+/** The context the thread's latest measured turn used, against the window that turn read with. */
+function toThreadContext(measured: Measurement, compactedAt: Date | null): ThreadContext {
+	const windowTokens = contextWindowTokens(measured.window);
+	return {
+		usedTokens: measured.tokens,
+		measuredAt: new Date(measured.at).toISOString(),
+		windowTokens,
+		compactionLineTokens: compactionLineTokens(windowTokens),
+		compactedAt: compactedAt?.toISOString() ?? null,
 	};
 }
 

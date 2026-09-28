@@ -1,0 +1,233 @@
+export * as Compactions from "./compactions.ts";
+
+import { eq } from "drizzle-orm";
+import { Context, Effect, Layer } from "effect";
+import {
+	type Database,
+	type Executor,
+	query,
+	serviceOperations,
+	transaction,
+} from "../../database/database.ts";
+import { threadCompaction } from "../../database/schema.ts";
+import {
+	COMPACT_SYSTEM_AGENT,
+	findRunnableSystemAgent,
+} from "../../workspaces/agents/system-agents.ts";
+import { ThreadRepository } from "../threads/repository.ts";
+import {
+	loadSystemAgentScope,
+	loadTranscript,
+	type TranscriptEntry,
+} from "../threads/system-agent-threads.ts";
+import type { ModelAccounting } from "../turns/model.ts";
+import { TurnRepository } from "../turns/repository.ts";
+import type { CompactionRequest } from "./compaction.workflow.ts";
+import { loadContextWindow } from "./context-window.ts";
+import { CompactionRepository } from "./repository.ts";
+import { estimatedTokens, MAX_CONTEXT_WINDOW_TOKENS, planCompaction } from "./window.ts";
+
+/**
+ * Thread compaction, done by the `compact` system agent, Compaction.
+ *
+ * When a turn's prompt passes the compaction line, the thread is queued for
+ * compaction. The Compaction agent summarises the stretch of history just
+ * before the newest messages, and from then on a bot in the thread reads that
+ * summary and the newest messages instead of the whole thread. People still
+ * see every message. Like the Scribe, its turns live in a child thread of the
+ * one it works on.
+ */
+export interface Interface {
+	/**
+	 * Opens the Compaction agent's turn and loads what it summarises, or says
+	 * why there is nothing to do: the thread is gone, the Compaction agent has
+	 * no model, the turn that asked was measured before the latest compaction,
+	 * or there is nothing new to summarise.
+	 */
+	readonly prepare: (
+		request: CompactionRequest,
+	) => Effect.Effect<PreparedCompaction | CompactionSkipped>;
+	/**
+	 * Records the summary as what the thread's bots read from now on,
+	 * completing the Compaction agent's turn. A failed one is recorded on the
+	 * turn (`TurnRepository.failSystemAgentTurn`).
+	 */
+	readonly complete: (
+		prepared: PreparedCompaction,
+		summary: string,
+		accounting: ModelAccounting,
+	) => Effect.Effect<void>;
+}
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Compactions") {}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("Compactions");
+	const turns = yield* TurnRepository.Service;
+	const threads = yield* ThreadRepository.Service;
+	const compactions = yield* CompactionRepository.Service;
+	return Service.of({
+		prepare: (request) =>
+			operation(
+				"prepare",
+				// One transaction, so the Compaction agent's thread and its turn are
+				// created together or not at all.
+				transaction(
+					Effect.gen(function* (): Effect.fn.Return<
+						PreparedCompaction | CompactionSkipped,
+						never,
+						Database
+					> {
+						const scope = yield* query((db) => loadSystemAgentScope(db, request));
+						if (!scope) {
+							return skipped("The thread, the agent that triggered it, or its message is gone");
+						}
+						const compactor = yield* query((db) =>
+							findRunnableSystemAgent(db, scope.workspaceId, COMPACT_SYSTEM_AGENT),
+						);
+						if (!compactor) {
+							return skipped("This workspace has chosen no model for the Compaction agent");
+						}
+
+						const previous = yield* query((db) => loadCompaction(db, scope.threadId));
+						if (previous && previous.keptFrom.toISOString() !== request.readKeptFrom) {
+							return skipped("The turn was measured before the thread's latest compaction");
+						}
+						const transcript = yield* query((db) => loadTranscript(db, scope.threadId));
+						const sourceIndex = transcript.findIndex((row) => row.id === request.sourceMessageId);
+						const history = transcript
+							.slice(0, sourceIndex + 1)
+							.flatMap(({ createdAt, entry }) =>
+								entry ? [{ ...entry, createdAt, tokens: estimatedTokens(entry.content) }] : [],
+							);
+						// Sized to the bot that reads the thread next, and capped to what
+						// the Compaction agent's own model can read.
+						const readerModel = scope.agentModel;
+						const readerTokens =
+							readerModel === null
+								? MAX_CONTEXT_WINDOW_TOKENS
+								: yield* query((db) => loadContextWindow(db, scope.workspaceId, readerModel));
+						const summariserTokens = yield* query((db) =>
+							loadContextWindow(db, scope.workspaceId, compactor.model),
+						);
+						const plan = planCompaction(history, previous?.keptFrom, {
+							readerTokens,
+							summariserTokens,
+						});
+						if (!plan) return skipped("There is nothing new to summarise");
+
+						const systemAgentThreadId = yield* threads.openSystemAgentThread({
+							served: {
+								id: scope.threadId,
+								workspaceId: scope.workspaceId,
+								podId: scope.podId,
+								initiatorUserId: scope.initiatorUserId,
+							},
+							systemAgentId: compactor.id,
+							systemAgentKey: COMPACT_SYSTEM_AGENT,
+							title: `Compactions of ${scope.threadTitle}`,
+						});
+						const opened = yield* turns.openSystemAgentTurn({
+							threadId: systemAgentThreadId,
+							agentId: compactor.id,
+							triggerMessageId: request.sourceMessageId,
+							model: compactor.model,
+						});
+						if (opened._tag === "NotRunnable") return skipped(opened.reason);
+
+						return {
+							_tag: "Prepared",
+							request,
+							turnId: opened.turnId,
+							threadId: scope.threadId,
+							workspaceId: scope.workspaceId,
+							threadTitle: scope.threadTitle,
+							model: compactor.model,
+							transcript: plan.summarised.map(({ author, kind, content, createdAt }) => ({
+								author,
+								kind,
+								content,
+								createdAt,
+							})),
+							previousSummary: previous?.summary,
+							// The previous summary is folded into this one, so what it covers
+							// still starts where the first compaction's history did.
+							historyStartsAt: previous?.historyStartsAt ?? plan.historyStartsAt,
+							keptFrom: plan.keptFrom,
+						};
+					}),
+				),
+			),
+
+		complete: (prepared, summary, accounting) =>
+			operation(
+				"complete",
+				transaction(
+					Effect.gen(function* () {
+						yield* compactions.save({
+							workspaceId: prepared.workspaceId,
+							threadId: prepared.threadId,
+							summary,
+							historyStartsAt: prepared.historyStartsAt,
+							keptFrom: prepared.keptFrom,
+						});
+						yield* turns.completeSystemAgentTurn(prepared.turnId, accounting);
+					}),
+				),
+			),
+	});
+});
+
+export const layerNoDeps = Layer.effect(Service, make);
+
+export const layer = layerNoDeps.pipe(
+	Layer.provide([TurnRepository.layer, ThreadRepository.layer, CompactionRepository.layer]),
+);
+
+/**
+ * A compaction with nothing to do: its thread or source is gone, there is
+ * nothing new to summarise, or the Compaction agent's turn may not run.
+ * `reason` is for the logs.
+ */
+export interface CompactionSkipped {
+	readonly _tag: "Skipped";
+	readonly reason: string;
+}
+
+/** A requested compaction with its turn opened and its input loaded. */
+export interface PreparedCompaction {
+	readonly _tag: "Prepared";
+	request: CompactionRequest;
+	turnId: string;
+	threadId: string;
+	workspaceId: string;
+	threadTitle: string;
+	model: string;
+	/** The summary the thread's bots read until now, which this one replaces and carries forward. */
+	previousSummary: string | undefined;
+	/** The messages to summarise, oldest first: those since the previous summary's. */
+	transcript: Array<TranscriptEntry & { createdAt: Date }>;
+	historyStartsAt: Date;
+	keptFrom: Date;
+}
+
+function skipped(reason: string): CompactionSkipped {
+	return { _tag: "Skipped", reason };
+}
+
+/** A thread's current compaction, if it has one. */
+const loadCompaction = Effect.fn("Compactions.loadCompaction")(function* (
+	db: Executor,
+	threadId: string,
+) {
+	const [row] = yield* db
+		.select({
+			summary: threadCompaction.summary,
+			historyStartsAt: threadCompaction.historyStartsAt,
+			keptFrom: threadCompaction.keptFrom,
+		})
+		.from(threadCompaction)
+		.where(eq(threadCompaction.threadId, threadId))
+		.limit(1);
+	return row;
+});

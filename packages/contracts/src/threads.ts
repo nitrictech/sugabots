@@ -320,9 +320,26 @@ export const threadDetailsSchema = Schema.Struct({
 
 export type ThreadDetails = typeof threadDetailsSchema.Type;
 
+/** How much of a bot's context window the thread fills, and where compaction starts. */
+export const threadContextSchema = Schema.Struct({
+	/** How many tokens the latest reply's prompt took, as its provider counted them. */
+	usedTokens: Schema.Int,
+	/** When that reply was measured. A compaction since then makes the count out of date. */
+	measuredAt: isoTimestampSchema,
+	windowTokens: Schema.Int,
+	/** Past this many tokens, the thread is compacted after the reply. */
+	compactionLineTokens: Schema.Int,
+	/** When the thread was last compacted, or null if it never has been. */
+	compactedAt: Schema.NullOr(isoTimestampSchema),
+});
+
+export type ThreadContext = typeof threadContextSchema.Type;
+
 /** What a thread's sidebar shows about it. */
 export const threadActivitySchema = Schema.Struct({
 	summary: Schema.NullOr(threadSummarySchema),
+	/** Null until a reply in the thread has been measured. */
+	context: Schema.NullOr(threadContextSchema),
 	/**
 	 * Who has written in the thread in the last week, or in its last 100
 	 * messages when that reaches further back, most recently active first.

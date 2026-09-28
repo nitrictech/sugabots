@@ -10,6 +10,7 @@ import type { ToolCallRepository } from "./calls/repository.ts";
 import type { Collaborations } from "./collaborate/collaborations.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import type { OfferedTool } from "./connections.ts";
+import { SEARCH_HISTORY_TOOL, searchHistoryTool } from "./search-history/tool.ts";
 
 /**
  * The tools a turn's model may call. One directory per tool under `tools/`;
@@ -20,6 +21,8 @@ import type { OfferedTool } from "./connections.ts";
  * and leave their own records. The built-in tools do work for the agent, and
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
+ * `search_history` is recorded the same way, and offered only once the
+ * thread has been compacted.
  */
 
 export interface ToolDependencies {
@@ -87,6 +90,17 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 					}
 				: {}),
 		});
+	}
+	if (prepared.context.compaction) {
+		tools[SEARCH_HISTORY_TOOL] = recorded(
+			SEARCH_HISTORY_TOOL,
+			searchHistoryTool({
+				threadId: prepared.context.thread.id,
+				before: prepared.context.compaction.keptFrom,
+				run: deps.run,
+			}),
+			recording,
+		);
 	}
 	if (prepared.context.crew.length > 0) {
 		tools.collaborate = collaborateTool({

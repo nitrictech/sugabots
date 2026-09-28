@@ -3,13 +3,19 @@ export * as TurnRequests from "./requests.ts";
 import type { SQL } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { Lanes, laneBusy } from "../../workflows/lanes.ts";
+import {
+	Compaction,
+	type CompactionRequest,
+	compactionLane,
+} from "../compaction/compaction.workflow.ts";
 import { Summary, type SummaryRequest, summaryLane } from "../summaries/summary.workflow.ts";
 import { Facilitate, type FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
 import { Turn, type TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**
  * Asks for the work that makes agents speak: their turns, the facilitator's
- * choice of who speaks next, and the Scribe's summaries. Each request joins
+ * choice of who speaks next, the Scribe's summaries, and the Compaction
+ * agent's compactions. Each request joins
  * the caller's transaction, and its workflow starts once that commits.
  */
 export interface Interface {
@@ -30,6 +36,11 @@ export interface Interface {
 	 * still waiting for the thread is pointed at this newer message instead.
 	 */
 	readonly queueSummary: (request: SummaryRequest) => Effect.Effect<void>;
+	/**
+	 * Asks for the thread to be compacted up to `sourceMessageId`. A request
+	 * still waiting for the thread is pointed at this newer message instead.
+	 */
+	readonly queueCompaction: (request: CompactionRequest) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/TurnRequests") {}
@@ -63,6 +74,15 @@ export const make = Effect.gen(function* () {
 				.admit({
 					key: summaryLane(request),
 					workflow: Summary,
+					payload: request,
+					whenBusy: "replace",
+				})
+				.pipe(Effect.asVoid),
+		queueCompaction: (request) =>
+			lanes
+				.admit({
+					key: compactionLane(request),
+					workflow: Compaction,
 					payload: request,
 					whenBusy: "replace",
 				})

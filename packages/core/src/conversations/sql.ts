@@ -382,6 +382,8 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorUserId}, ${table.authorAgentId}, ${table.routineTrigger}) = 1`,
 		),
 		index("message_thread_created_at_idx").on(table.threadId, table.createdAt),
+		// What a bot's search_history tool matches against, stemmed so "hotels" finds "hotel".
+		index("message_content_search_idx").using("gin", sql`to_tsvector('english', ${table.content})`),
 	],
 );
 
@@ -511,6 +513,24 @@ export const threadSummary = pgTable("thread_summary", {
 		.references(() => message.id, { onDelete: "cascade" }),
 	updatedAt: updatedStamp("updated_at"),
 });
+
+/**
+ * What a bot reads in place of a long thread's older messages, written by the
+ * Compaction agent. The bot reads `summary`, then every message from `keptFrom` on word
+ * for word. The summary covers the messages from `historyStartsAt` to `keptFrom`;
+ * anything earlier is left out, and the bot searches for it when it needs it.
+ */
+export const threadCompaction = pgTable("thread_compaction", {
+	threadId: uuid("thread_id")
+		.primaryKey()
+		.references(() => thread.id, { onDelete: "cascade" }),
+	summary: text("summary").notNull(),
+	historyStartsAt: timestamp("history_starts_at", { withTimezone: true }).notNull(),
+	keptFrom: timestamp("kept_from", { withTimezone: true }).notNull(),
+	updatedAt: updatedStamp("updated_at"),
+});
+
+export type ThreadCompactionRow = typeof threadCompaction.$inferSelect;
 
 export type ThreadRow = typeof thread.$inferSelect;
 export type ChatRow = typeof chat.$inferSelect;

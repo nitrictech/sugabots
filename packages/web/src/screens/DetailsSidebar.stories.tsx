@@ -45,6 +45,13 @@ const activity: ThreadActivity = {
 		sourceMessageId: "0199a3a0-0000-7000-8000-000000000512",
 		updatedAt: "2026-09-25T06:12:00.000Z",
 	},
+	context: {
+		usedTokens: 48_200,
+		measuredAt: "2026-09-25T06:12:00.000Z",
+		windowTokens: 256_000,
+		compactionLineTokens: 179_200,
+		compactedAt: null,
+	},
 	recentParticipants: people,
 };
 
@@ -146,6 +153,7 @@ export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText("You")).toBeVisible();
+		await expect(canvas.getByRole("meter", { name: "Context window used" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
 	},
 });

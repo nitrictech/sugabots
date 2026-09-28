@@ -23,6 +23,7 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ScribeNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
+import { ContextMeter } from "./ContextMeter.tsx";
 
 /** How many rows a list shows before Show more. */
 const PARTICIPANTS_SHOWN = 3;
@@ -32,8 +33,8 @@ const SUMMARY_FOLDED_OVER = 180;
 
 /**
  * A bot as a contact card, beside its chat: its face, name and pod, the way to
- * its settings, then what the chat is about and who has been in it, the apps it
- * can reach and the routines it runs.
+ * its settings, then what the chat is about, how much of the bot's context it
+ * fills and who has been in it, the apps it can reach and the routines it runs.
  */
 export function DetailsSidebar({
 	agent,
@@ -73,6 +74,11 @@ export function DetailsSidebar({
 					</Link>
 				</div>
 				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
+				{activity?.context && (
+					<SidebarSection title="Context">
+						<ContextMeter context={activity.context} />
+					</SidebarSection>
+				)}
 				{activity && activity.recentParticipants.length > 0 && (
 					<SidebarSection title="Recent participants">
 						<Expandable items={activity.recentParticipants} shown={PARTICIPANTS_SHOWN}>

@@ -143,6 +143,7 @@ export function storyChatActivity(agent: Agent, messages: Message[] = []): Threa
 			sourceMessageId: messages.at(-1)?.id ?? chat.mainThreadId,
 			updatedAt: chat.updatedAt,
 		},
+		context: null,
 		recentParticipants: [...details.participants].reverse(),
 	};
 }

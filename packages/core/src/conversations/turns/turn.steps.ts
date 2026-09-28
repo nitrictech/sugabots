@@ -16,6 +16,7 @@ import {
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import {
@@ -281,7 +282,10 @@ const generateReply = (
 						}),
 					);
 				}
-				const accounting = streamed.value.accounting;
+				const accounting = {
+					...streamed.value.accounting,
+					contextCapacity: prepared.context.windowTokens,
+				};
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking agent wakes to nothing
 				// and gives up waiting for an answer that lands a moment later.
@@ -309,17 +313,30 @@ const generateReply = (
 						}
 					}),
 				);
+				const followUp = {
+					threadId: prepared.context.thread.id,
+					agentId: prepared.context.agent.id,
+					sourceMessageId: prepared.responseMessage.id,
+				};
 				yield* requests
-					.queueSummary({
-						threadId: prepared.context.thread.id,
-						agentId: prepared.context.agent.id,
-						sourceMessageId: prepared.responseMessage.id,
-					})
+					.queueSummary(followUp)
 					.pipe(
 						Effect.catchCause((cause) =>
 							Effect.logError("Queueing a thread summary failed", cause),
 						),
 					);
+				if (needsCompaction(accounting.contextTokens, prepared.context.windowTokens)) {
+					yield* requests
+						.queueCompaction({
+							...followUp,
+							readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
+						})
+						.pipe(
+							Effect.catchCause((cause) =>
+								Effect.logError("Queueing a thread compaction failed", cause),
+							),
+						);
+				}
 				return finished;
 			}
 
