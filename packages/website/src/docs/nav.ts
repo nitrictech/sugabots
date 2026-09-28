@@ -38,6 +38,7 @@ export const docGroups: readonly DocGroup[] = [
 			{ slug: "tools-and-approvals", bot: { color: "yellow", face: "square" } },
 			{ slug: "connections", bot: { color: "ice", face: "arc" } },
 			{ slug: "models", bot: { color: "rose", face: "wink" } },
+			{ slug: "web-search", bot: { color: "teal", face: "wink" } },
 			{ slug: "routines", bot: { color: "yellow", face: "pill" } },
 			{ slug: "people-and-roles", bot: { color: "green", face: "arc" } },
 		],
