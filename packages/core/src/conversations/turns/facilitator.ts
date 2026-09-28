@@ -35,7 +35,7 @@ import { TurnRequests } from "./requests.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
- * message when nothing else did (ADR 004). Runs as a workflow so the request
+ * message when nothing else did. Runs as a workflow so the request
  * that committed the message does not wait on a model.
  *
  * It answers one of the handles in the thread, or `nobody`. A person being
@@ -49,10 +49,10 @@ const CONTEXT_MESSAGES = 8;
 const MAX_ANSWER_CHARACTERS = 200;
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = Layer.effect(
+export const facilitateStepsLayer = Layer.effect(
 	FacilitateSteps,
 	Effect.gen(function* () {
-		const model = yield* Models;
+		const model = yield* Models.Service;
 		const services = yield* Effect.context<
 			ThreadRepository.Service | TurnRequests.Service | Database
 		>();

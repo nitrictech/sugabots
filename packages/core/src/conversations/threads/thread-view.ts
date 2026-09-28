@@ -11,7 +11,7 @@ import type {
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
 import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
 	ResourceHidden,
@@ -263,7 +263,7 @@ function toThreadContext(measured: Measurement, compactedAt: Date | null): Threa
 	const windowTokens = contextWindowTokens(measured.window);
 	return {
 		usedTokens: measured.tokens,
-		measuredAt: new Date(measured.at).toISOString(),
+		measuredAt: DateTime.formatIso(DateTime.makeUnsafe(measured.at)),
 		windowTokens,
 		compactionLineTokens: compactionLineTokens(windowTokens),
 		compactedAt: compactedAt?.toISOString() ?? null,

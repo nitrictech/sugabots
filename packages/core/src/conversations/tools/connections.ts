@@ -16,7 +16,7 @@ import {
 } from "../../providers/network/egress.ts";
 
 /**
- * The tools an agent inherits from its pod for one turn (ADR 006).
+ * The tools an agent inherits from its pod for one turn.
  *
  * Opened per turn: one MCP session per enabled connection the pod has,
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
@@ -33,7 +33,7 @@ import {
 
 export interface OfferedTool {
 	tool: Tool;
-	/** Whether a call may change something at the other end (ADR 002). */
+	/** Whether a call may change something at the other end. */
 	mutating: boolean;
 	/** Whether each call waits for a person to allow it. */
 	requiresApproval: boolean;

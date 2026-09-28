@@ -12,7 +12,7 @@ import {
 } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { lane } from "../../workflows/sql.ts";
-import { lanesForTests } from "../../workflows/testing.ts";
+import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Routine, RoutineRun, routineLane } from "./routine.workflow.ts";
 import type { RoutineRunner } from "./routine-runner.ts";

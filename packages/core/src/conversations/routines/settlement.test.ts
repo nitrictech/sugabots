@@ -189,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		return { accepted, run, askingTurn, childThread, activeCollaboration, runningTurn };
 	}
 
-	/** Marks the fixture's asking turn as running again, as a worker holding it would. */
+	/** Marks the fixture's asking turn as running again, as a workflow holding it would. */
 	const runAgain = (turnId: string) =>
 		onDatabase((db) =>
 			db.update(turn).set({ status: "running", finishedAt: null }).where(eq(turn.id, turnId)),
@@ -459,7 +459,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			finishedAt: null,
 		});
 		expect(stopping?.cancelRequested).toBe(true);
-		// The worker running it hears at once, rather than on its next poll.
+		// The workflow running it hears at once, rather than on its next poll.
 		expect(delivered).toContainEqual(
 			expect.objectContaining({
 				event: expect.objectContaining({
@@ -522,7 +522,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		});
 	});
 
-	it("does not wait for a turn a worker holds, and the worker's next step is refused", async () => {
+	it("does not wait for a turn another transaction holds, and the turn's next step is refused", async () => {
 		const { accepted, run } = await aRunningRun();
 		const [turnRun] = await runOnPostgres(runningTurns(accepted.threadId));
 		if (!turnRun) throw new Error("The run asked for no turn");
@@ -535,7 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const holding = new Promise<void>((resolve) => {
 			held = resolve;
 		});
-		const worker = runOnPostgres(
+		const holder = runOnPostgres(
 			transaction(
 				Effect.gen(function* () {
 					yield* query((db) =>
@@ -548,7 +548,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		);
 		await holding;
 
-		// Settles while the worker still holds the turn: a wait here would never end.
+		// Settles while the holder still has the turn locked: a wait here would never end.
 		await announce(
 			ConversationEvent.FacilitationFailed({
 				threadId: accepted.threadId,
@@ -556,7 +556,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			}),
 		);
 		letGo();
-		await worker;
+		await holder;
 
 		const [skipped] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),

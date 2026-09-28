@@ -1,5 +1,5 @@
-import type { WorkspaceRole } from "@sugabots/contracts";
-import { and, asc, eq, type SQL, type SQLWrapper } from "drizzle-orm";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
+import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
@@ -11,6 +11,7 @@ import {
 	mayInPod,
 	type PodFacts,
 	type PodPermission,
+	sharedPodReach,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -19,8 +20,8 @@ import {
  * workspace role, the pod a resource belongs to, and whether a `pod_member`
  * row exists. `Authorization` and `Visibility` load them here and decide with
  * the pure grants in `permissions.ts`; nothing else loads them or turns them
- * into a decision. `podStanding` is the only way to build a standing, so a
- * caller cannot pair a pod with somebody else's membership.
+ * into a decision. Standings are only built in this module, so a caller cannot
+ * pair a pod with somebody else's membership.
  *
  * Two distinctions the rest of the codebase depends on:
  *
@@ -115,16 +116,16 @@ export function requireReach<Standing extends PodStanding>(
 }
 
 /**
- * One person's standing towards one pod, from facts already in hand.
- *
- * The only constructor there is, so the pod, the role and the membership in a
- * standing always describe the same person and the same pod.
+ * The standing of `actor` towards `row`, a pod they have just created: they
+ * own it if it is a Personal pod, and are its member if it is shared, because
+ * creating a shared pod adds its creator to it.
  */
-export function podStanding(
-	row: schema.PodRow,
-	actor: Actor,
-	isExplicitMember: boolean,
-): PodStanding {
+export function creatorStanding(row: schema.PodRow, actor: Actor): PodStanding {
+	return podStanding(row, actor, true);
+}
+
+/** One person's standing towards one pod, from facts already in hand. */
+function podStanding(row: schema.PodRow, actor: Actor, isExplicitMember: boolean): PodStanding {
 	const facts: PodFacts = { kind: row.kind, ownerId: row.ownerId, isExplicitMember };
 	return { pod: row, actor, facts, may: (permission) => mayInPod(actor, permission, facts) };
 }
@@ -255,15 +256,12 @@ export const threadStandingFor = Effect.fn("Access.threadStandingFor")(function*
 
 /**
  * The pods in a workspace that `userId` reaches, by name, each with their
- * standing in it, in one query. `reachesPodFor` is the SQL form of reach,
- * which `Visibility` owns; it is asked about `userId` here, so the pods listed
- * and the standings in them cannot be two different people's.
+ * standing in it, in one query.
  */
 export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")(function* (
 	db: Executor,
 	workspaceId: string,
 	userId: string,
-	reachesPodFor: (podId: SQLWrapper, userId: string) => SQL<boolean>,
 ) {
 	const rows = yield* db
 		.select(standingColumns)
@@ -274,3 +272,61 @@ export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")
 		.orderBy(asc(pod.name));
 	return rows.map((row) => standingFromRow(row, userId));
 });
+
+/**
+ * SQL for "`userId` reaches the pod `podId` names": what `mayInPod(actor,
+ * "pod.read", …)` decides for one pod, written again as a `where` clause. A
+ * Personal pod is reached by its owner and by nobody else, and a shared pod by
+ * a role that reaches every one of them or by a membership row held by a role
+ * that reaches the pods it has joined. The roles come from `sharedPodReach`,
+ * but the shape of the rule is repeated here, so a change to `mayInPod`'s
+ * shape must be made here too.
+ *
+ * Aliased throughout, so it composes with a query that already joins any of
+ * these tables.
+ */
+export function reachesPodFor(podId: SQLWrapper, userId: string): SQL<boolean> {
+	return sql`exists (
+		select 1
+		from ${pod} as reach_pod
+		inner join ${workspaceMember} as reach_workspace_member
+			on reach_workspace_member.workspace_id = reach_pod.workspace_id
+			and reach_workspace_member.user_id = ${userId}
+		left join ${podMember} as reach_pod_member
+			on reach_pod_member.pod_id = reach_pod.id
+			and reach_pod_member.user_id = ${userId}
+		where reach_pod.id = ${podId}
+			and (
+				(reach_pod.kind = 'personal' and reach_pod.owner_id = ${userId})
+				or (
+					reach_pod.kind = 'shared'
+					and (
+						${roleIsOneOf(ROLES_REACHING_EVERY_SHARED_POD)}
+						or (
+							reach_pod_member.id is not null
+							and ${roleIsOneOf(ROLES_REACHING_JOINED_PODS)}
+						)
+					)
+				)
+			)
+	)`;
+}
+
+/** Roles that reach every shared pod in their workspace without a membership row. */
+const ROLES_REACHING_EVERY_SHARED_POD = WORKSPACE_ROLES.filter(
+	(role) => sharedPodReach(role) === "all",
+);
+
+/** Roles that reach a shared pod once they have been added to it. */
+const ROLES_REACHING_JOINED_PODS = WORKSPACE_ROLES.filter(
+	(role) => sharedPodReach(role) !== "none",
+);
+
+/** `false` rather than an empty `in ()`, which is not valid SQL. */
+function roleIsOneOf(roles: readonly WorkspaceRole[]): SQL {
+	if (roles.length === 0) return sql`false`;
+	return sql`reach_workspace_member.role in (${sql.join(
+		roles.map((role) => sql`${role}`),
+		sql`, `,
+	)})`;
+}

@@ -103,23 +103,26 @@ const logFailure = (failure: ProviderFailure) =>
 	Effect.logWarning("Asking a model provider for its models failed", detail(failure));
 
 export function testProvider(
-	store: Pick<ModelProviderRepository.Interface, "endpoint" | "recordTest" | "renewChatgptTokens">,
+	providers: Pick<
+		ModelProviderRepository.Interface,
+		"endpoint" | "recordTest" | "renewChatgptTokens"
+	>,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
 ): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserMessage }> {
 	const attempt = Effect.gen(function* () {
 		const started = yield* Clock.currentTimeMillis;
-		const connection = yield* requireConnection(store, workspaceId, providerId);
+		const connection = yield* requireConnection(providers, workspaceId, providerId);
 
-		const outcome = yield* requestModels(store, workspaceId, connection, httpClients).pipe(
+		const outcome = yield* requestModels(providers, workspaceId, connection, httpClients).pipe(
 			Effect.tapError(logFailure),
 			Effect.result,
 		);
 		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
 
 		// A test is recorded either way: its result is the point.
-		yield* store.recordTest(
+		yield* providers.recordTest(
 			workspaceId,
 			providerId,
 			connection.configurationUpdatedAt,
@@ -138,7 +141,7 @@ export function testProvider(
 }
 
 export function fetchProviderModels(
-	store: Pick<
+	providers: Pick<
 		ModelProviderRepository.Interface,
 		"endpoint" | "recordTest" | "syncDiscovered" | "renewChatgptTokens"
 	>,
@@ -151,26 +154,26 @@ export function fetchProviderModels(
 	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
 ): Effect.Effect<{ added: number; updated: number; unchanged: number }, ModelDiscoveryFailed> {
 	const discover = Effect.gen(function* () {
-		const connection = yield* requireConnection(store, workspaceId, providerId);
-		const outcome = yield* requestModels(store, workspaceId, connection, httpClients).pipe(
+		const connection = yield* requireConnection(providers, workspaceId, providerId);
+		const outcome = yield* requestModels(providers, workspaceId, connection, httpClients).pipe(
 			Effect.tapError(logFailure),
 			Effect.map((models) => models.map((model) => registry.complete(model, connection))),
 			Effect.result,
 		);
 
 		if (outcome._tag === "Failure") {
-			yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+			yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
 				error: describe(outcome.failure),
 			});
 			return yield* outcome.failure;
 		}
 
-		const { added, updated } = yield* store.syncDiscovered(
+		const { added, updated } = yield* providers.syncDiscovered(
 			workspaceId,
 			providerId,
 			outcome.success,
 		);
-		yield* store.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+		yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
 			activateOnSuccess,
 		});
 		return { added, updated, unchanged: outcome.success.length - added - updated };
@@ -186,19 +189,19 @@ export function fetchProviderModels(
 }
 
 function requireConnection(
-	store: Pick<ModelProviderRepository.Interface, "endpoint">,
+	providers: Pick<ModelProviderRepository.Interface, "endpoint">,
 	workspaceId: string,
 	providerId: string,
 ): Effect.Effect<ModelProviderRepository.ProviderEndpoint, ConnectionMissing> {
 	return Effect.filterOrFail(
-		store.endpoint(workspaceId, providerId),
+		providers.endpoint(workspaceId, providerId),
 		(connection) => connection != null,
 		() => new ConnectionMissing({}),
 	);
 }
 
 function requestModels(
-	store: Pick<ModelProviderRepository.Interface, "renewChatgptTokens">,
+	providers: Pick<ModelProviderRepository.Interface, "renewChatgptTokens">,
 	workspaceId: string,
 	stored: ModelProviderRepository.ProviderEndpoint,
 	httpClients: EgressHttpClients,
@@ -208,7 +211,7 @@ function requestModels(
 	const root = dialect.discoveryRoot?.(baseUrl) ?? baseUrl;
 	const http = httpClients.for({ baseUrl: root });
 	return Effect.gen(function* () {
-		const connection = yield* withChatgptAccess(store, httpClients, workspaceId, stored).pipe(
+		const connection = yield* withChatgptAccess(providers, httpClients, workspaceId, stored).pipe(
 			Effect.mapError((failure) => new SignInLapsed({ failure })),
 		);
 		const response = yield* Effect.tryPromise({

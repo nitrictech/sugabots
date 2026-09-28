@@ -50,8 +50,7 @@ import { Toggle } from "@/ui/toggle.tsx";
  * The people in a workspace and the invitations still out, each person a
  * click into their own page: their role, the pods they are in, and removing
  * them. Whoever may manage members gets the controls; everybody else reads
- * the same pages without them. `docs/permissions.md` says what the roles
- * mean, and the API decides either way.
+ * the same pages without them. The API decides either way.
  */
 export function WorkspaceMembersSettings({
 	workspaceId,

@@ -29,10 +29,10 @@ const firstSummarySchema = Schema.Struct({
 });
 
 /** The summary workflow's step, which its activity reaches through `SummarySteps`. */
-export const stepsLayer = Layer.effect(
+export const summaryStepsLayer = Layer.effect(
 	SummarySteps,
 	Effect.gen(function* () {
-		const model = yield* Models;
+		const model = yield* Models.Service;
 		const services = yield* Effect.context<Summaries.Service | TurnRepository.Service | Database>();
 		return SummarySteps.of({
 			summarise: (request) => summarise(request, model).pipe(Effect.provideContext(services)),

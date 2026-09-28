@@ -40,7 +40,7 @@ interface TurnFacts {
 	readonly runs: number;
 	/** Whether a model transcript is parked to continue from after approvals. */
 	readonly checkpointed: boolean;
-	/** A mutating tool call crossed its dispatch boundary (ADR 002). */
+	/** A mutating tool call crossed its dispatch boundary. */
 	readonly mutationStarted: boolean;
 }
 
@@ -101,7 +101,7 @@ export type FollowUp = Data.TaggedEnum<{
 	End: { readonly userMessage: UserMessage };
 	/** Tell the waiting turn's workflow; recording the cancellation is its job. */
 	SignalOwner: { readonly owner: string };
-	/** Tell the worker running the turn to stop. */
+	/** Tell the workflow running the turn to stop. */
 	AnnounceCancelRequest: Record<never, never>;
 }>;
 
@@ -152,7 +152,7 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 						FollowUp.End({ userMessage: TURN_CANCELLED }),
 					)
 				: refused("The turn is not waiting"),
-		// A running turn is only asked to stop: its worker holds the reply, and
+		// A running turn is only asked to stop: its workflow holds the reply, and
 		// records how it ended. A waiting one has nobody to do that.
 		RoutineEnded: () => {
 			if (state.status === "waiting") {
@@ -175,7 +175,7 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 /**
  * runsAgainAfterFailure reports whether a turn in `state` runs again after
  * its run fails: not once it has a checkpoint or `acted` says a tool that
- * changes things ran, since running again could do it again (ADR 002), and not
+ * changes things ran, since running again could do it again, and not
  * once it has run `MAX_TURN_RUNS` times.
  */
 export const runsAgainAfterFailure = (state: TurnState, acted: boolean): boolean =>
@@ -197,7 +197,7 @@ export function endedAs(state: TurnState): Ended {
 }
 
 /** Told when the lifecycle finds a turn stopped with a mutating call it may have made. */
-const UNCERTAIN_MUTATION = UserMessage.of`A mutating tool may have run before the worker stopped`;
+const UNCERTAIN_MUTATION = UserMessage.of`The reply stopped after a tool that can make changes may have run, so it was not started again. Check what the tool did before asking again.`;
 
 const ended = refused("The turn has already ended");
 

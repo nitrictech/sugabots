@@ -18,7 +18,6 @@ import {
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { agent, pod } from "../../database/schema.ts";
-import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
 import {
@@ -86,7 +85,6 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AgentRepository");
-	const ids = yield* Ids.Service;
 
 	const isSystemAgent = (workspaceId: string, agentId: string) =>
 		query((db) =>
@@ -102,28 +100,24 @@ export const make = Effect.gen(function* () {
 		createdById: string,
 		definition: SystemAgentDefinition,
 	) =>
-		Effect.gen(function* () {
-			const id = yield* ids.next;
-			yield* query((db) =>
-				db
-					.insert(agent)
-					.values({
-						id,
-						workspaceId,
-						podId: null,
-						createdById,
-						name: definition.name,
-						handle: handleFromName(definition.name),
-						systemAgentKey: definition.key,
-						description: definition.description,
-						color: definition.color,
-						face: definition.face,
-						model: null,
-						prompt: definition.prompt,
-					})
-					.onConflictDoNothing({ target: [agent.workspaceId, agent.systemAgentKey] }),
-			);
-		});
+		query((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					podId: null,
+					createdById,
+					name: definition.name,
+					handle: handleFromName(definition.name),
+					systemAgentKey: definition.key,
+					description: definition.description,
+					color: definition.color,
+					face: definition.face,
+					model: null,
+					prompt: definition.prompt,
+				})
+				.onConflictDoNothing({ target: [agent.workspaceId, agent.systemAgentKey] }),
+		).pipe(Effect.asVoid);
 
 	return Service.of({
 		create: (workspaceId, { createdById, agent: input }) =>
@@ -142,14 +136,12 @@ export const make = Effect.gen(function* () {
 							return yield* new PodOutsideWorkspace();
 						}
 
-						const id = yield* ids.next;
 						const handle = input.handle ?? handleFromName(input.name);
 						const [row] = yield* queryCatching(
 							(db) =>
 								db
 									.insert(agent)
 									.values({
-										id,
 										workspaceId,
 										podId: input.podId,
 										createdById,
@@ -217,12 +209,10 @@ export const make = Effect.gen(function* () {
 			operation(
 				"provisionPersonalAssistant",
 				Effect.gen(function* () {
-					const id = yield* ids.next;
 					const [created] = yield* query((db) =>
 						db
 							.insert(agent)
 							.values({
-								id,
 								workspaceId,
 								podId,
 								createdById: userId,

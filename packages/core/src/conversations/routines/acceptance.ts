@@ -16,12 +16,6 @@ import {
 } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
 
-/**
- * Accepting a run of a routine, however it was triggered: opening its thread,
- * posting the trigger, and queueing the run. Whoever triggers it has already
- * decided that it may run; this checks only that the routine takes the trigger.
- */
-
 /** A trigger for the routine `Scope` names, and the identity a retry of it repeats. */
 export interface Trigger extends Scope {
 	trigger: RoutineExecutionTrigger;
@@ -29,8 +23,11 @@ export interface Trigger extends Scope {
 }
 
 /**
- * Accepts a run of the routine. A trigger with an identity already accepted
- * returns that run again, as a duplicate.
+ * Accepts a run of a routine, however it was triggered: opens its thread,
+ * posts the trigger, and queues the run. A trigger with an identity already
+ * accepted returns that run again, as a duplicate. Whoever triggers it has
+ * already decided that it may run; this checks only that the routine takes
+ * the trigger.
  */
 export const makeAcceptTrigger = Effect.gen(function* () {
 	const repository = yield* RoutineRepository.Service;

@@ -1,16 +1,15 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Authorization } from "@sugabots/core/authorization/authorization";
-import { Visibility } from "@sugabots/core/authorization/visibility";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { routineSchedulerLayer } from "@sugabots/core/conversations/routines/scheduler";
+import { RoutineScheduler } from "@sugabots/core/conversations/routines/scheduler";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { modelProbeLayer, modelsLayer } from "@sugabots/core/conversations/turns/model";
+import { Models } from "@sugabots/core/conversations/turns/model";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
 import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
+import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
@@ -22,7 +21,7 @@ import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { seedEveryWorkspaceLayer } from "@sugabots/core/providers/model-providers/preset-seeding";
+import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
@@ -51,7 +50,7 @@ const Infrastructure = Layer.mergeAll(
 	Credentials.layer,
 	Egress.layer,
 	EventOutbox.layer,
-	Workflows.lanes,
+	ConversationWorkflows.lanes,
 ).pipe(
 	Layer.provideMerge(Layer.mergeAll(Installation.layer, EventBus.layer, Workflows.engine)),
 	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
@@ -61,14 +60,11 @@ const Infrastructure = Layer.mergeAll(
 /** The outside systems: email, the workspaces' models, and the tools turns are offered. */
 const Integrations = Layer.mergeAll(
 	Email.layer,
-	modelsLayer,
-	modelProbeLayer,
+	Models.layer,
+	Models.probeLayer,
 	BuiltInTools.layer,
 	ConnectionTools.layer,
 );
-
-/** Who may do what, which the use cases ask and the event streams ask directly. */
-const Authorizing = Layer.mergeAll(Authorization.layer, Visibility.layer);
 
 /** Accounts, members, pods, agents and the providers they use, and trying a model. */
 const WorkspacesAndProviders = Layer.mergeAll(
@@ -95,10 +91,10 @@ const ConversationServices = Conversations.layer.pipe(
  * nightly event prune, and seeding the preset providers into every workspace.
  */
 const Background = Layer.mergeAll(
-	Workflows.layer,
-	routineSchedulerLayer,
+	ConversationWorkflows.layer,
+	RoutineScheduler.layer,
 	EventPruning.layer,
-	seedEveryWorkspaceLayer,
+	PresetSeeding.layer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */
@@ -118,7 +114,6 @@ const Http = listeningLayer.pipe(
 const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(ConversationServices),
 	Layer.provide(WorkspacesAndProviders),
-	Layer.provide(Authorizing),
 	Layer.provide(Integrations),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),

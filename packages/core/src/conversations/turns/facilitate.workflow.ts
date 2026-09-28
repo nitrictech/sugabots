@@ -1,6 +1,6 @@
 /**
  * Facilitating a thread, as a durable workflow: deciding who speaks after a
- * message (ADR 004). It holds the definition and the order of its steps; what
+ * message. It holds the definition and the order of its steps; what
  * each step does lives behind `FacilitateSteps`, implemented in
  * `facilitator.ts`.
  */
@@ -48,7 +48,7 @@ export class FacilitateSteps extends Context.Service<
 	}
 >()("@sugabots/core/FacilitateSteps") {}
 
-export const facilitateActivities = Activities.fromService<FacilitateRequest>()(FacilitateSteps, {
+const facilitateActivities = Activities.fromService<FacilitateRequest>()(FacilitateSteps, {
 	attempt: { input: Schema.Int, success: AttemptOutcome },
 	abandon: {},
 	announceReleased: {},

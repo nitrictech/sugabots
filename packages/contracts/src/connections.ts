@@ -12,11 +12,10 @@ import { uuidSchema } from "./uuid.ts";
 /**
  * Connections: MCP servers a pod owner has configured for every agent in the pod.
  *
- * A connection is the workspace's: a URL, a secret entered once and sealed,
- * and the tools the server was found to offer. There is no catalog yet; the
- * first vendor server worth naming arrives with OAuth (C14c). Every bot in the
- * pod gets those tools, as far as the connection's `access` allows. Remote servers over
- * Streamable HTTP only; nothing here spawns a process.
+ * A connection is the workspace's: a URL, a secret entered once and sealed or
+ * an OAuth sign-in, and the tools the server was found to offer. Every bot in
+ * the pod gets those tools, as far as the connection's `access` allows. Remote
+ * servers over Streamable HTTP only; nothing here spawns a process.
  */
 
 /** A tool as the server described it when last asked. The text is the server's. */
@@ -33,7 +32,7 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
 /**
  * How the server is signed in to. `header`: a secret the admin pasted, sent in
  * a header. `oauth`: the server signed the workspace in itself and issued
- * tokens, which are refreshed as they expire (ADR 006).
+ * tokens, which are refreshed as they expire.
  */
 export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
@@ -100,7 +99,7 @@ export const connectionSchema = Schema.Struct({
 	hasSecret: Schema.Boolean,
 	/**
 	 * What the pod's bots may do with its tools. A tool with no hints is taken
-	 * to change things, as the MCP spec has it (ADR 006).
+	 * to change things, as the MCP spec has it.
 	 */
 	access: connectionAccessSchema,
 	status: providerStatusSchema,
@@ -182,7 +181,7 @@ export type ConnectionTestResult = typeof connectionTestResultSchema.Type;
  * says nothing. `destructiveHint` plays no part. In the spec it only tells an
  * overwriting change from an additive one, and an additive change is still a
  * change: counting it as a read offered Linear's `create_issue_label` on a
- * read-only connection, without asking. This is ADR 002's mutating flag: such a
+ * read-only connection, without asking. This is a tool call's `mutating` flag: such a
  * tool is left out while its connection is read-only, asks for approval
  * otherwise, and a failed turn after it is not retried on its own.
  */

@@ -10,7 +10,7 @@ import { ModelRequestFailed, Models } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { Summaries } from "./summaries.ts";
-import { stepsLayer } from "./summary.steps.ts";
+import { summaryStepsLayer } from "./summary.steps.ts";
 import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
 
 const prepare = vi.fn(() =>
@@ -20,9 +20,9 @@ const prepare = vi.fn(() =>
 const runtime = ManagedRuntime.make(
 	summaryWorkflow.layer.pipe(
 		Layer.provideMerge(
-			stepsLayer.pipe(
+			summaryStepsLayer.pipe(
 				Layer.provide(
-					Layer.succeed(Models, {
+					Layer.succeed(Models.Service, {
 						stream: () =>
 							Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
 					}),
@@ -31,7 +31,7 @@ const runtime = ManagedRuntime.make(
 		),
 		Layer.provide(unimplemented(Summaries.Service, { prepare })),
 		Layer.provide(unimplemented(TurnRepository.Service)),
-		Layer.provideMerge(Lanes.layer([Summary])),
+		Layer.provideMerge(Lanes.layerFor([Summary])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),

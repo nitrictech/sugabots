@@ -3,7 +3,7 @@ import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contract
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { DateTime, Effect, Schema } from "effect";
+import { DateTime, Effect, Redacted, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser, bearerToken } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
@@ -82,11 +82,10 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 						// Deliberately without a session: the routine's secret is what admits the run.
 						const accepted = secret
 							? yield* webhooks
-									.accept(params.routineId, secret, {
-										kind: "webhook",
-										idempotencyKey,
-										payload,
-										receivedAt,
+									.accept({
+										routineId: params.routineId,
+										secret: Redacted.make(secret),
+										trigger: { kind: "webhook", idempotencyKey, payload, receivedAt },
 									})
 									.pipe(asHttpError(routineErrors))
 							: undefined;

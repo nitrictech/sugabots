@@ -18,10 +18,10 @@ import { compactionPrompt, MAX_COMPACTION_SUMMARY_CHARACTERS } from "./prompt.ts
 const COMPACTION_TIMEOUT = Duration.minutes(5);
 
 /** The compaction workflow's step, which its activity reaches through `CompactionSteps`. */
-export const stepsLayer = Layer.effect(
+export const compactionStepsLayer = Layer.effect(
 	CompactionSteps,
 	Effect.gen(function* () {
-		const model = yield* Models;
+		const model = yield* Models.Service;
 		const services = yield* Effect.context<
 			Compactions.Service | TurnRepository.Service | Database
 		>();

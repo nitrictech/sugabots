@@ -17,7 +17,7 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
  * `searchProviders.resolve` finds an enabled search provider with every
  * setting a search needs, and no tools otherwise. The provider's enabled flag
  * is the workspace's one setting for whether bots may use the web, and each
- * search is billed to the workspace (ADR 005). forWorkspace looks the provider
+ * search is billed to the workspace. forWorkspace looks the provider
  * up on every call, so a provider enabled between turns applies from the next
  * turn without a restart.
  */

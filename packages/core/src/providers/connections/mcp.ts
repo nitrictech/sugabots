@@ -12,16 +12,16 @@ import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
  *
  * The AI SDK's client does the bridging from the server's tool list to tools a
  * turn's model can call. It is kept behind this module so a change in it lands
- * in one place (ADR 006). A failure to list is an answer with a reason rather
+ * in one place. A failure to list is an answer with a reason rather
  * than a throw, so the settings page and a recorded test read the same
  * sentence; `cause` is what went wrong, for the logs.
  */
 
-export type ServerTools =
+type ServerTools =
 	| { ok: true; tools: ConnectionTool[] }
 	| { ok: false; reason: UserMessage; cause: unknown };
 
-export interface ServerTarget {
+interface ServerTarget {
 	url: string;
 	headers: Record<string, string>;
 	/** For a server signed in to with OAuth: the SDK adds and refreshes the tokens itself. */
@@ -29,7 +29,7 @@ export interface ServerTarget {
 }
 
 /** One of the server's tools: as the server described it, and as a model can call it. */
-export interface ServerTool {
+interface ServerTool {
 	described: ConnectionTool;
 	tool: Tool;
 }

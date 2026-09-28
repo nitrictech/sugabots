@@ -12,7 +12,6 @@ import { query, queryCatching, serviceOperations, transaction } from "../../data
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { pod, podMember, workspaceMember } from "../../database/schema.ts";
-import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { podColorOf } from "./pod.ts";
 
@@ -63,7 +62,6 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("PodRepository");
-	const ids = yield* Ids.Service;
 
 	const kindOf = (workspaceId: string, podId: string) =>
 		query((db) =>
@@ -87,12 +85,10 @@ export const make = Effect.gen(function* () {
 								.from(pod)
 								.where(and(eq(pod.workspaceId, workspaceId), eq(pod.kind, "shared"))),
 						);
-						const id = yield* ids.next;
 						const [row] = yield* query((db) =>
 							db
 								.insert(pod)
 								.values({
-									id,
 									workspaceId,
 									kind: "shared",
 									name,
@@ -109,11 +105,8 @@ export const make = Effect.gen(function* () {
 						if (!row) {
 							return yield* new PodSlugTaken({ slug });
 						}
-						const memberId = yield* ids.next;
 						yield* query((db) =>
-							db
-								.insert(podMember)
-								.values({ id: memberId, workspaceId, podId: row.id, userId: creatorId }),
+							db.insert(podMember).values({ workspaceId, podId: row.id, userId: creatorId }),
 						);
 						return row;
 					}),
@@ -124,12 +117,10 @@ export const make = Effect.gen(function* () {
 			operation(
 				"provisionPersonal",
 				Effect.gen(function* () {
-					const podId = yield* ids.next;
 					const [created] = yield* query((db) =>
 						db
 							.insert(pod)
 							.values({
-								id: podId,
 								workspaceId,
 								ownerId: userId,
 								kind: "personal",
@@ -158,11 +149,10 @@ export const make = Effect.gen(function* () {
 					if (!personal) {
 						return yield* Effect.die(new Error("Personal pod could not be provisioned"));
 					}
-					const memberId = yield* ids.next;
 					yield* query((db) =>
 						db
 							.insert(podMember)
-							.values({ id: memberId, workspaceId, podId: personal.id, userId })
+							.values({ workspaceId, podId: personal.id, userId })
 							.onConflictDoNothing({ target: [podMember.podId, podMember.userId] }),
 					);
 					return personal;
@@ -241,12 +231,11 @@ export const make = Effect.gen(function* () {
 						return "personal_pod";
 					}
 
-					const memberId = yield* ids.next;
 					const inserted = yield* query((db) =>
 						db.execute<{ id: string }>(
 							sql`
-							insert into ${podMember} ("id", "workspace_id", "pod_id", "user_id")
-							select ${memberId}, ${pod.workspaceId}, ${pod.id}, ${userId}
+							insert into ${podMember} ("workspace_id", "pod_id", "user_id")
+							select ${pod.workspaceId}, ${pod.id}, ${userId}
 							from ${pod}
 							inner join ${workspaceMember}
 								on ${workspaceMember.workspaceId} = ${pod.workspaceId}

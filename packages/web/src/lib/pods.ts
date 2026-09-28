@@ -14,7 +14,7 @@ import { useWorkspace } from "@/lib/workspace.ts";
 /**
  * The pods this person reaches: the shared pods they have joined, every shared
  * pod if they administer the workspace, and their own Personal pod. Each one
- * carries what they may do in it. See `docs/permissions.md`.
+ * carries what they may do in it, as the API resolves it.
  *
  * The sidebar and the routes share this one query rather than fetching twice:
  * the sidebar lists them and a route resolves its `:pod` slug out of the

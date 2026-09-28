@@ -463,9 +463,9 @@ export type CollaborationRow = typeof collaboration.$inferSelect;
  * came back, and where in the reply it happened. See `tools/calls/repository.ts`.
  *
  * `thread_id` is here as well as on the message so the table can be filtered
- * by thread without a join, which `turn` and `message` cannot be by workspace
- * yet (`docs/tenant-isolation.md`). `input` and `output` are truncated by the
- * store before they are written; the model saw the whole result.
+ * by thread without a join. `input` and `output` are truncated to
+ * `MAX_STORED_JSON_CHARACTERS` before they are written; the model saw the
+ * whole result.
  */
 export const toolCall = pgTable(
 	"tool_call",
@@ -498,7 +498,7 @@ export const toolCall = pgTable(
 		output: jsonb("output").$type<JsonValue>(),
 		status: text("status").$type<ToolCallStatus>().notNull().default("running"),
 		error: text("error").$type<UserMessage>(),
-		/** Whether the tool may have changed something at the other end (ADR 002). */
+		/** Whether the tool may have changed something at the other end. */
 		mutating: boolean("mutating").notNull().default(false),
 		/** Where in the reply's text the call was made. */
 		atOffset: integer("at_offset").notNull(),

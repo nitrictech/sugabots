@@ -17,8 +17,8 @@ import { Session } from "../middleware.ts";
  * Pods, and who is in them.
  *
  * Domain law — a Personal pod cannot be renamed, deleted or given other
- * members — is the store's, which is the only thing that can enforce it
- * whatever reaches it. These say what each refusal means over HTTP.
+ * members — is enforced by core, whatever entry point reaches it. These say
+ * what each refusal means over HTTP.
  */
 export class PodsApi extends HttpApiGroup.make("pods")
 	.add(

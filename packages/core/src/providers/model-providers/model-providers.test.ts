@@ -34,9 +34,12 @@ import { seedEveryWorkspace } from "./preset-seeding.ts";
  * once. Needs a migrated database and skips without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", () => {
-	let store: Promised<ModelProviderRepository.Interface>;
+	let repository: Promised<ModelProviderRepository.Interface>;
 	beforeAll(async () => {
-		store = await servedOnPostgres(ModelProviderRepository.Service, ModelProviderRepository.layer);
+		repository = await servedOnPostgres(
+			ModelProviderRepository.Service,
+			ModelProviderRepository.layer,
+		);
 	});
 
 	/**
@@ -69,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	const view = (providerId: string) => runOnPostgres(providerIn(workspaceId, providerId));
 	const list = (inWorkspace: string) => runOnPostgres(providersIn(inWorkspace));
 	const create = (provider: NewModelProvider) =>
-		store.create(workspaceId, { createdById: userId, provider });
+		repository.create(workspaceId, { createdById: userId, provider });
 	/** Switches a provider on as a fixture, the way only a passing test does in the product. */
 	const switchOn = (id: string) =>
 		onDatabase((db) =>
@@ -107,7 +110,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
 		);
-		await store.seedPresets(workspaceId);
+		await repository.seedPresets(workspaceId);
 		const provider = await create({
 			name: `Gateway ${stamp}`,
 			baseUrl: "https://models.example/v1",
@@ -148,7 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			if (!openai) throw new Error("fixture");
 			expect(openai).toMatchObject({ active: false, hasApiKey: false });
 			if (key === "replacement") {
-				await store.update(workspaceId, openai.id, { apiKey: "old-key" });
+				await repository.update(workspaceId, openai.id, { apiKey: "old-key" });
 				await switchOn(openai.id);
 			}
 			let activeDuringCheck: boolean | undefined;
@@ -193,8 +196,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it.each([{ baseUrl: "https://other.example/v1" }, { apiKey: null }])(
 		"does not enable a disabled provider for an unrelated update: %j",
 		async (input) => {
-			await store.update(workspaceId, providerId, { active: false });
-			await store.update(workspaceId, providerId, input);
+			await repository.update(workspaceId, providerId, { active: false });
+			await repository.update(workspaceId, providerId, input);
 
 			expect(await view(providerId)).toMatchObject({ active: false });
 		},
@@ -222,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	);
 
 	it("re-enables a configured provider when testing its connection", async () => {
-		await store.update(workspaceId, providerId, { active: false });
+		await repository.update(workspaceId, providerId, { active: false });
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
@@ -257,7 +260,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("disables a provider whose model rejects a probe after its model listing succeeds", async () => {
-		await store.addModels(workspaceId, providerId, [
+		await repository.addModels(workspaceId, providerId, [
 			{
 				modelId: "test-model",
 				displayName: null,
@@ -268,7 +271,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		]);
 		const [configured] = (await view(providerId))?.models ?? [];
 		if (!configured) throw new Error("fixture");
-		await store.setModelEnabled(workspaceId, providerId, [configured.id], true);
+		await repository.setModelEnabled(workspaceId, providerId, [configured.id], true);
 		// The listing answers; asking the model refuses the key.
 		const setup = await setupWith(
 			() => Response.json({ data: [] }),
@@ -296,7 +299,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await switchOn(providerId);
 			const setup = await setupWith(async () => {
 				vi.setSystemTime(new Date("2030-01-01T00:00:01Z"));
-				await store.update(workspaceId, providerId, { active: false });
+				await repository.update(workspaceId, providerId, { active: false });
 				return Response.json({ data: [] });
 			});
 
@@ -309,7 +312,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("does not reactivate a manually disabled provider when refreshing models", async () => {
-		await store.update(workspaceId, providerId, { active: false });
+		await repository.update(workspaceId, providerId, { active: false });
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		await setup.fetchModels({ workspace: workspaceId, providerId });
@@ -460,9 +463,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!fresh) throw new Error("fixture");
 
 		expect(await list(fresh.id)).toEqual([]);
-		await store.seedPresets(fresh.id);
+		await repository.seedPresets(fresh.id);
 		const seeded = await list(fresh.id);
-		await store.seedPresets(fresh.id);
+		await repository.seedPresets(fresh.id);
 
 		expect(seeded.map(({ preset }) => preset)).toEqual(
 			expect.arrayContaining(["openai", "ollama"]),
@@ -471,13 +474,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("adds what is new, updates what changed, and counts each once", async () => {
-		const first = await store.syncDiscovered(workspaceId, providerId, [
+		const first = await repository.syncDiscovered(workspaceId, providerId, [
 			{ modelId: "alpha", displayName: "Alpha", capabilities: [], contextLength: null },
 			{ modelId: "beta", displayName: null, capabilities: ["tools"], contextLength: 8_000 },
 		]);
 		expect(first).toEqual({ added: 2, updated: 0 });
 
-		const second = await store.syncDiscovered(workspaceId, providerId, [
+		const second = await repository.syncDiscovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -510,7 +513,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("switches a capability off within what the provider reports, and a refresh keeps the choice", async () => {
-		await store.syncDiscovered(workspaceId, providerId, [
+		await repository.syncDiscovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -522,11 +525,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!alpha) throw new Error("fixture");
 
 		expect(
-			await store.updateModel(workspaceId, providerId, alpha.id, {
+			await repository.updateModel(workspaceId, providerId, alpha.id, {
 				disabledCapabilities: ["vision"],
 			}),
 		).toBe(1);
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await repository.syncDiscovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -547,7 +550,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("leaves a model somebody added by hand as they wrote it", async () => {
-		await store.addModels(workspaceId, providerId, [
+		await repository.addModels(workspaceId, providerId, [
 			{
 				modelId: "hand-made",
 				displayName: "Mine",
@@ -557,7 +560,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			},
 		]);
 
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await repository.syncDiscovered(workspaceId, providerId, [
 			{ modelId: "hand-made", displayName: null, capabilities: [], contextLength: null },
 		]);
 		expect(synced).toEqual({ added: 0, updated: 0 });
@@ -582,11 +585,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			apiKey: "secret",
 			customHeaders: [],
 		});
-		await store.syncDiscovered(workspaceId, other.id, [
+		await repository.syncDiscovered(workspaceId, other.id, [
 			{ modelId: "shared-id", displayName: null, capabilities: [], contextLength: null },
 		]);
 
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await repository.syncDiscovered(workspaceId, providerId, [
 			{ modelId: "shared-id", displayName: null, capabilities: [], contextLength: null },
 			{ modelId: "own-id", displayName: null, capabilities: [], contextLength: null },
 		]);

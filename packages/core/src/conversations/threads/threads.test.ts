@@ -835,7 +835,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await expect(cancellationAs(outsiderId).request(prepared.turnId)).rejects.toThrow(
 			ResourceHidden,
 		);
-		// Announced once, for the worker waiting on it.
+		// Announced once, for the workflow running the turn.
 		const announced = await onDatabase((db) =>
 			db
 				.select({ payload: event.payload })

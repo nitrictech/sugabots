@@ -427,7 +427,7 @@ const workspaceServices = Layer.mergeAll(
 			},
 		}),
 		unimplemented(ModelProbe.Service),
-		unimplemented(Models),
+		unimplemented(Models.Service),
 		unimplemented(Email.Service),
 		Layer.succeed(
 			Accounts.Service,

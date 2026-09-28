@@ -19,13 +19,8 @@ import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./sc
  * this asks for no actor and is never handed to a route.
  */
 export interface Interface {
-	/**
-	 * Accepts the run of the cron routine due soonest, if one is due at `now`
-	 * (by default, the current time), and schedules its next.
-	 */
-	readonly processNextDue: (
-		now?: Date,
-	) => Effect.Effect<
+	/** Accepts the run of the cron routine due soonest, if one is due, and schedules its next. */
+	readonly processNextDue: () => Effect.Effect<
 		AcceptedRoutineExecution | undefined,
 		InvalidRoutineSchedule | RoutineNotFound | RoutineTriggerConflict | RoutineTriggerRejected
 	>;
@@ -44,13 +39,13 @@ export const make = Effect.gen(function* () {
 	const acceptTrigger = yield* makeAcceptTrigger;
 
 	return Service.of({
-		processNextDue: (now) =>
+		processNextDue: () =>
 			operation(
 				"processNextDue",
 				transaction(
 					Effect.gen(function* () {
-						const at = now ?? (yield* DateTime.nowAsDate);
-						const due = yield* repository.lockNextDue(at);
+						const now = yield* DateTime.nowAsDate;
+						const due = yield* repository.lockNextDue(now);
 						if (!due) return undefined;
 						if (!due.cronExpression || !due.cronTimezone) {
 							return yield* Effect.die(new Error("Cron Routine has incomplete schedule data"));
@@ -58,7 +53,7 @@ export const make = Effect.gen(function* () {
 						const occurrence = yield* latestMissedAndNextOccurrence(
 							due.cronExpression,
 							due.cronTimezone,
-							at,
+							now,
 						);
 						const scheduledAt = occurrence.latest.toISOString();
 						const accepted = yield* acceptTrigger({
@@ -66,7 +61,7 @@ export const make = Effect.gen(function* () {
 							agentId: due.agentId,
 							routineId: due.id,
 							triggerIdentity: scheduledAt,
-							trigger: { kind: "cron", scheduledAt, acceptedAt: at.toISOString() },
+							trigger: { kind: "cron", scheduledAt, acceptedAt: now.toISOString() },
 						});
 						yield* repository.scheduleNext(due.id, occurrence.next);
 						return accepted;

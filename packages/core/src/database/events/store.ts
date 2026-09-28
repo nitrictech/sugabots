@@ -12,8 +12,7 @@ import { event } from "../schema.ts";
  * An interface rather than a handful of queries because the bus above it has
  * nothing else to say to the database, and because a store that lives in memory
  * lets the bus, the routes and the client be tested end to end without one.
- * `make` is the real thing; `inMemory` is the same contract for tests and for
- * a process that has no need to survive a restart.
+ * `make` is the real thing; `inMemory` is the same contract, for tests.
  */
 export interface Interface {
 	/** Persists an event on a channel and returns its `seq`. */

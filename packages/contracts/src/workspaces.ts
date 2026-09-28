@@ -14,7 +14,7 @@ import { Schema } from "effect";
  *
  * These are the whole set: the database refuses any other value.
  *
- * `docs/permissions.md` is the specification; the grants are in
+ * The grants each role holds are in
  * `packages/core/src/authorization/permissions.ts`.
  */
 export const WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;

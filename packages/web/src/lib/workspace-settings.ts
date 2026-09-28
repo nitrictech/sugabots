@@ -5,7 +5,7 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
  *
  * `needs` names a workspace permission the API resolves, so a section
  * disappears for the same reason its routes refuse: the person does not hold
- * that permission. See `docs/permissions.md`. A group whose sections are all
+ * that permission. A group whose sections are all
  * hidden is hidden with them.
  */
 export const workspaceSettingGroups = [

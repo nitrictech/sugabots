@@ -4,7 +4,7 @@ import { RoutineView } from "@sugabots/core/conversations/routines/routine-view"
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
@@ -18,9 +18,9 @@ const EXECUTION_ID = "0199a3a0-0000-7000-8000-000000000004";
 const THREAD_ID = "0199a3a0-0000-7000-8000-000000000005";
 
 function webhookApp() {
-	const accept = vi.fn<RoutineWebhooks.Interface["accept"]>((routineId, secret) =>
+	const accept = vi.fn<RoutineWebhooks.Interface["accept"]>(({ routineId, secret }) =>
 		Effect.succeed(
-			routineId === ROUTINE_ID && secret === "good-secret"
+			routineId === ROUTINE_ID && Redacted.value(secret) === "good-secret"
 				? { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }
 				: undefined,
 		),
@@ -67,15 +67,14 @@ describe("Routine webhooks", () => {
 			executionId: EXECUTION_ID,
 			duplicate: false,
 		});
-		expect(accept).toHaveBeenCalledWith(
-			ROUTINE_ID,
-			"good-secret",
-			expect.objectContaining({
-				kind: "webhook",
-				idempotencyKey: "delivery-1",
-				payload: { orderId: 42 },
-			}),
-		);
+		const [delivery] = accept.mock.calls[0] ?? [];
+		expect(delivery?.routineId).toBe(ROUTINE_ID);
+		expect(delivery && Redacted.value(delivery.secret)).toBe("good-secret");
+		expect(delivery?.trigger).toMatchObject({
+			kind: "webhook",
+			idempotencyKey: "delivery-1",
+			payload: { orderId: 42 },
+		});
 	});
 
 	it("does not reveal whether a Routine exists when authentication fails", async () => {

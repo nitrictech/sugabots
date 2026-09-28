@@ -2,7 +2,7 @@ export * as PodAdministration from "./pod-administration.ts";
 
 import type { Pod, PodColor, PodMember, PodUpdate } from "@sugabots/contracts";
 import { Context, Data, Effect, Layer } from "effect";
-import { type AuthorizationDenied, podStanding } from "../../authorization/access.ts";
+import { type AuthorizationDenied, creatorStanding } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
@@ -117,7 +117,7 @@ export const make = Effect.gen(function* () {
 						slug,
 						color,
 					});
-					return podSeenBy(podStanding(row, actor, true));
+					return podSeenBy(creatorStanding(row, actor));
 				}),
 			),
 
@@ -134,7 +134,7 @@ export const make = Effect.gen(function* () {
 						userId: actor.userId,
 						model,
 					});
-					return podSeenBy(podStanding(personal, actor, true));
+					return podSeenBy(creatorStanding(personal, actor));
 				}),
 			),
 

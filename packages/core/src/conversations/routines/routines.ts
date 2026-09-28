@@ -119,24 +119,20 @@ export const make = Effect.gen(function* () {
 								)
 							: null;
 					const secret = input.trigger.kind === "webhook" ? generateSecret() : null;
-					return yield* transaction(
-						Effect.gen(function* () {
-							const row = yield* repository.create({
-								workspaceId: owner.workspaceId,
-								agentId: owner.id,
-								createdById: actor.userId,
-								name: input.name,
-								instructions: input.instructions,
-								triggerKind: input.trigger.kind,
-								cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
-								cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
-								nextScheduledAt: schedule,
-								webhookSecretDigest: secret ? hashSecret(secret) : null,
-								state,
-							});
-							return { routine: toRoutine(row), secret };
-						}),
-					);
+					const row = yield* repository.create({
+						workspaceId: owner.workspaceId,
+						agentId: owner.id,
+						createdById: actor.userId,
+						name: input.name,
+						instructions: input.instructions,
+						triggerKind: input.trigger.kind,
+						cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
+						cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
+						nextScheduledAt: schedule,
+						webhookSecretDigest: secret ? hashSecret(secret) : null,
+						state,
+					});
+					return { routine: toRoutine(row), secret };
 				}),
 			),
 

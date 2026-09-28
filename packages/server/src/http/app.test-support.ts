@@ -24,6 +24,7 @@ import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administra
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
+import { closedChannelAccess } from "../routes/events/access.test-support.ts";
 import { ChannelAccess } from "../routes/events/access.ts";
 import { apiLayer } from "./app.ts";
 import type { HttpServices } from "./services.ts";
@@ -31,7 +32,7 @@ import type { HttpServices } from "./services.ts";
 /** The test API's address. */
 export const BASE_URL = "http://localhost:3000";
 /** Where the test app's web app is served, a browser origin it trusts besides its own. */
-export const WEB_ORIGIN = "http://localhost:5173";
+const WEB_ORIGIN = "http://localhost:5173";
 
 export interface TestApp {
 	/** A request to `path` under `API_BASE_PATH`, e.g. `/agents/…`. */
@@ -102,7 +103,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Routines.Service),
 	unimplemented(RoutineView.Service),
 	unimplemented(RoutineWebhooks.Service),
-	Layer.succeed(ChannelAccess.Service, ChannelAccess.closed),
+	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
@@ -112,7 +113,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
 
 /** The `Authentication.identify` a test's resolver stands in for. */
-export function identifyFromResolver(resolveUser: UserResolver) {
+function identifyFromResolver(resolveUser: UserResolver) {
 	return (headers: Headers) =>
 		Effect.map(
 			Effect.promise(() => resolveUser(headers)),

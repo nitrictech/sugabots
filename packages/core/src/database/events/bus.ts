@@ -12,7 +12,7 @@ import { type EventRelay, postgresEventRelay } from "./relay.ts";
 import { EventStore } from "./store.ts";
 
 /**
- * Publish and fan-out for live updates (ADR 001).
+ * Publish and fan-out for live updates, in order within each channel.
  *
  * An in-process registry of subscribers plus a table for the events worth
  * replaying. A process is never alone for long (a second dev server, a rolling
@@ -122,10 +122,9 @@ export function inProcess({
 	/**
 	 * One publish at a time per channel.
 	 *
-	 * ADR 001 promises ordering within a channel, and two overlapping publishes
-	 * could otherwise take their sequence numbers in one order and reach
-	 * subscribers in the other. Callers are expected to be a single writer per
-	 * thread anyway (ADR 002); this makes the guarantee true regardless.
+	 * Subscribers receive a channel's events in sequence order, and two
+	 * overlapping publishes could otherwise take their sequence numbers in one
+	 * order and reach subscribers in the other.
 	 */
 	const publishing = new Map<Channel, Promise<void>>();
 

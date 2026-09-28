@@ -9,7 +9,7 @@ import { podPermissions } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
-export function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
+function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,

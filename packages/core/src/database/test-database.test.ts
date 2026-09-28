@@ -3,8 +3,8 @@ import { DevelopmentDatabaseRefused, testDatabaseUrl } from "./test-database.ts"
 
 /**
  * Which database the tests write to, which is the one thing here that must not
- * be got wrong: the run empties it, and the store tests fill it with rows and
- * queue jobs a running dev server would try to claim.
+ * be got wrong: the run empties it, and the repository tests fill it with rows
+ * and workflow executions a running dev server would resume.
  */
 
 const development = "postgresql://sugabots:secret@localhost:5436/sugabots";
@@ -43,7 +43,7 @@ describe("choosing the tests' database", () => {
 	});
 
 	it("has nothing to offer when no database is configured at all", () => {
-		// The store tests skip themselves rather than failing, as they always have.
+		// The database tests skip themselves rather than failing.
 		expect(testDatabaseUrl({})).toBeUndefined();
 	});
 });

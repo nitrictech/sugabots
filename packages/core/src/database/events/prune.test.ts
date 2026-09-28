@@ -1,5 +1,6 @@
 import { EVENT_VERSION, type EventType, type StreamEvent } from "@sugabots/contracts";
-import { type Duration, Effect, Layer, ManagedRuntime } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it, vi } from "vitest";
 import { EventPruning } from "./prune.ts";
 import { EventStore } from "./store.ts";
@@ -8,11 +9,21 @@ function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEv
 	return { ...data, v: EVENT_VERSION, type };
 }
 
-/** Running the layer starts the sweep; disposing the runtime stops it. */
-function pruning(store: EventStore.Interface, every: Duration.Input = "1 day") {
-	return ManagedRuntime.make(
-		EventPruning.sweepingEvery(every).pipe(Layer.provide(Layer.succeed(EventStore.Service, store))),
+/**
+ * Running the layer starts the sweep on a test clock, which `passes` moves on;
+ * disposing the runtime stops it.
+ */
+function pruning(store: EventStore.Interface) {
+	const runtime = ManagedRuntime.make(
+		EventPruning.layer.pipe(
+			Layer.provide(Layer.succeed(EventStore.Service, store)),
+			Layer.provideMerge(TestClock.layer()),
+		),
 	);
+	return {
+		runtime,
+		passes: (duration: Duration.Input) => runtime.runPromise(TestClock.adjust(duration)),
+	};
 }
 
 describe("pruning", () => {
@@ -24,7 +35,7 @@ describe("pruning", () => {
 			started.resolve();
 			return pending.promise;
 		});
-		const runtime = pruning(store, "1 millis");
+		const { runtime } = pruning(store);
 		try {
 			await runtime.runPromise(Effect.void);
 			await started.promise;
@@ -38,33 +49,39 @@ describe("pruning", () => {
 		}
 	});
 
-	it("sweeps once on start, before waiting a day for the next one", async () => {
+	it("sweeps what is over a week old once on start, and again a day later", async () => {
 		const store = EventStore.inMemory();
 		const prune = vi.spyOn(store, "prune");
 
-		const runtime = pruning(store);
+		const { runtime, passes } = pruning(store);
 		await runtime.runPromise(Effect.void);
 		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
-		await runtime.dispose();
-
 		const [cutoff] = prune.mock.calls[0] ?? [];
-		const days = (Date.now() - (cutoff?.getTime() ?? 0)) / (24 * 60 * 60_000);
-		expect(days).toBeCloseTo(7, 1);
+		expect(cutoff?.getTime()).toBe(-Duration.toMillis(Duration.days(7)));
+
+		await passes(Duration.hours(23));
+		expect(prune).toHaveBeenCalledTimes(1);
+		await passes(Duration.hours(1));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
+		await runtime.dispose();
 	});
 
 	it("keeps sweeping, and stops when the scope closes", async () => {
 		const store = EventStore.inMemory();
 		const prune = vi.spyOn(store, "prune");
 
-		const runtime = pruning(store, "1 millis");
+		const { runtime, passes } = pruning(store);
 		await runtime.runPromise(Effect.void);
-		await vi.waitFor(() => expect(prune.mock.calls.length).toBeGreaterThan(2));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
+		await passes(Duration.days(1));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
+		await passes(Duration.days(1));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(3));
 
 		await runtime.dispose();
-		const settled = prune.mock.calls.length;
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
-		expect(prune).toHaveBeenCalledTimes(settled);
+		expect(prune).toHaveBeenCalledTimes(3);
 	});
 
 	it("survives a store that throws, so a failed sweep cannot take the API down", async () => {
@@ -72,9 +89,11 @@ describe("pruning", () => {
 		await store.append("thread:c1", rawEvent("message.created"));
 		const prune = vi.spyOn(store, "prune").mockRejectedValue(new Error("connection lost"));
 
-		const runtime = pruning(store, "1 millis");
+		const { runtime, passes } = pruning(store);
 		await runtime.runPromise(Effect.void);
-		await vi.waitFor(() => expect(prune.mock.calls.length).toBeGreaterThan(1));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
+		await passes(Duration.days(1));
+		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
 		await runtime.dispose();
 
 		expect(await store.has("thread:c1", 1)).toBe(true);

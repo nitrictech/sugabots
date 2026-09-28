@@ -19,7 +19,6 @@ import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ModelProviderRow, modelProvider, providerModel } from "../../database/schema.ts";
-import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import { ChatgptTokens } from "./chatgpt.ts";
@@ -149,11 +148,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderRepository");
-	const ids = yield* Ids.Service;
 	const cipher = yield* Credentials.Service;
-
-	const withIds = <Row extends object>(rows: readonly Row[]) =>
-		Effect.forEach(rows, (row) => Effect.map(ids.next, (id) => ({ ...row, id })));
 
 	/**
 	 * The catalog's starter models for the given presets, refreshed onto the
@@ -175,16 +170,14 @@ export const make = Effect.gen(function* () {
 						),
 					),
 			);
-			const models = yield* withIds(
-				providers.flatMap((provider) =>
-					(provider.preset ? providerPreset(provider.preset).models : []).map((model) => ({
-						...model,
-						workspaceId,
-						providerId: provider.id,
-						enabled: false,
-						source: "fetched" as const,
-					})),
-				),
+			const models = providers.flatMap((provider) =>
+				(provider.preset ? providerPreset(provider.preset).models : []).map((model) => ({
+					...model,
+					workspaceId,
+					providerId: provider.id,
+					enabled: false,
+					source: "fetched" as const,
+				})),
 			);
 			if (models.length === 0) return;
 			yield* query((db) =>
@@ -244,12 +237,10 @@ export const make = Effect.gen(function* () {
 			operation(
 				"seedPresets",
 				Effect.gen(function* () {
-					const providers = yield* withIds(
-						seededPresets.map((id) => {
-							const { name, baseUrl, apiFormat } = providerPreset(id);
-							return { workspaceId, preset: id, name, baseUrl, apiFormat };
-						}),
-					);
+					const providers = seededPresets.map((id) => {
+						const { name, baseUrl, apiFormat } = providerPreset(id);
+						return { workspaceId, preset: id, name, baseUrl, apiFormat };
+					});
 					yield* query((db) => db.insert(modelProvider).values(providers).onConflictDoNothing());
 					yield* ensureStarterModels(workspaceId, seededPresets);
 				}),
@@ -259,12 +250,11 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const id = yield* ids.next;
 					const [inserted] = yield* queryCatching(
 						(db) =>
 							db
 								.insert(modelProvider)
-								.values({ id, workspaceId, createdById, ...providerValues(provider, cipher) })
+								.values({ workspaceId, createdById, ...providerValues(provider, cipher) })
 								.returning(),
 						(failure) => (isUniqueViolation(failure) ? new ModelProviderNameConflict() : undefined),
 					);
@@ -417,9 +407,12 @@ export const make = Effect.gen(function* () {
 				"addModels",
 				Effect.gen(function* () {
 					if (models.length === 0) return 0;
-					const rows = yield* withIds(
-						models.map((model) => ({ ...model, workspaceId, providerId, enabled: false })),
-					);
+					const rows = models.map((model) => ({
+						...model,
+						workspaceId,
+						providerId,
+						enabled: false,
+					}));
 					const inserted = yield* query((db) =>
 						db
 							.insert(providerModel)
@@ -452,17 +445,15 @@ export const make = Effect.gen(function* () {
 							),
 					);
 					const claimed = new Set(elsewhere.map(({ modelId }) => modelId));
-					const offered = yield* withIds(
-						models
-							.filter(({ modelId }) => !claimed.has(modelId))
-							.map((model) => ({
-								...model,
-								workspaceId,
-								providerId,
-								enabled: false,
-								source: "fetched" as const,
-							})),
-					);
+					const offered = models
+						.filter(({ modelId }) => !claimed.has(modelId))
+						.map((model) => ({
+							...model,
+							workspaceId,
+							providerId,
+							enabled: false,
+							source: "fetched" as const,
+						}));
 					if (offered.length === 0) return { added: 0, updated: 0 };
 					const rows = yield* query((db) =>
 						db

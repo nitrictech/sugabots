@@ -12,7 +12,7 @@ import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
-	let store: Promised<AgentRepository.Interface>;
+	let repository: Promised<AgentRepository.Interface>;
 	let administrationAs: (userId: string) => Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let adminId: string;
@@ -20,7 +20,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	let podId: string;
 
 	beforeAll(async () => {
-		store = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+		repository = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
 		administrationAs = await servedOnPostgresAs(
 			AgentAdministration.Service,
 			AgentAdministration.layer,
@@ -32,7 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	});
 
 	const create = (createdById: string, input: NewAgent) =>
-		store.create(workspaceId, { createdById, agent: input });
+		repository.create(workspaceId, { createdById, agent: input });
 	const visibleTo = (userId: string) => administrationAs(userId).list({ workspace: workspaceId });
 
 	beforeEach(async () => {
@@ -149,7 +149,9 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		await create(adminId, { podId, name: "Triage", model: "model" });
 		const other = await create(adminId, { podId, name: "Sorter", model: "model" });
 
-		await expect(store.update(workspaceId, other.id, { name: "Triage" })).rejects.toMatchObject({
+		await expect(
+			repository.update(workspaceId, other.id, { name: "Triage" }),
+		).rejects.toMatchObject({
 			_tag: "AgentNameTaken",
 			field: "name",
 			value: "Triage",
@@ -163,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 			model: "model",
 		});
 
-		const cleared = await store.update(workspaceId, made.id, { model: null });
+		const cleared = await repository.update(workspaceId, made.id, { model: null });
 
 		expect(cleared.model).toBeNull();
 		// Still a crew agent in its pod, still listed: it simply cannot take a turn.
@@ -173,16 +175,16 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 	it("does not individually delete a system agent", async () => {
 		const system = await placeScribe();
-		await expect(store.remove(workspaceId, system.id)).rejects.toBeInstanceOf(
+		await expect(repository.remove(workspaceId, system.id)).rejects.toBeInstanceOf(
 			AgentRepository.SystemAgentImmutable,
 		);
 	});
 
 	it("does not change a system agent as a crew agent", async () => {
 		const system = await placeScribe();
-		await expect(store.update(workspaceId, system.id, { model: "another" })).rejects.toBeInstanceOf(
-			AgentRepository.SystemAgentImmutable,
-		);
+		await expect(
+			repository.update(workspaceId, system.id, { model: "another" }),
+		).rejects.toBeInstanceOf(AgentRepository.SystemAgentImmutable);
 	});
 
 	it("leaves system agents out of the roster, since they are in no pod", async () => {

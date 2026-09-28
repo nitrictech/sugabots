@@ -36,7 +36,7 @@ import { PodRepository } from "./pod-repository.ts";
  * `db/schema.test.ts` does; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
-	let store: Promised<PodRepository.Interface>;
+	let repository: Promised<PodRepository.Interface>;
 	let personalPods: Promised<PersonalPods.Interface>;
 	let administrationAs: (userId: string) => Promised<PodAdministration.Interface>;
 	let agentsAs: (userId: string) => Promised<AgentAdministration.Interface>;
@@ -50,7 +50,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	let outsiderId: string;
 
 	beforeAll(async () => {
-		store = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
+		repository = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
 		personalPods = await servedOnPostgres(PersonalPods.Service, PersonalPods.layer);
 		administrationAs = await servedOnPostgresAs(PodAdministration.Service, PodAdministration.layer);
 		agentsAs = await servedOnPostgresAs(AgentAdministration.Service, AgentAdministration.layer);
@@ -217,18 +217,18 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("adds, lists and removes people", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			await store.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
 			expect((await membersOf(made.id)).map((row) => row.name)).toEqual(["Ada", "Sam"]);
 
-			expect(await store.removeMember(workspaceId, made.id, memberId)).toBe("removed");
+			expect(await repository.removeMember(workspaceId, made.id, memberId)).toBe("removed");
 			expect((await membersOf(made.id)).map((row) => row.name)).toEqual(["Ada"]);
 		});
 
 		it("is idempotent, so adding twice is not an error", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			await store.addMember(workspaceId, made.id, memberId);
-			await store.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
 
 			expect(await membersOf(made.id)).toHaveLength(2);
 		});
@@ -236,7 +236,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("does not add somebody from another workspace", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			expect(await store.addMember(workspaceId, made.id, outsiderId)).toBe("not_workspace_member");
+			expect(await repository.addMember(workspaceId, made.id, outsiderId)).toBe(
+				"not_workspace_member",
+			);
 		});
 
 		it("rejects a cross-workspace membership at the database boundary", async () => {
@@ -251,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("revokes pod grants when a workspace member leaves and does not restore them", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
-			await store.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
 
 			await onDatabase((db) =>
 				db
@@ -361,7 +363,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("rejects adding another workspace member", async () => {
 			const personal = await ensurePersonal(memberId, "test-model");
 
-			expect(await store.addMember(workspaceId, personal.id, adminId)).toBe("personal_pod");
+			expect(await repository.addMember(workspaceId, personal.id, adminId)).toBe("personal_pod");
 			await expect(
 				onDatabase((db) =>
 					db.insert(podMember).values({ workspaceId, podId: personal.id, userId: adminId }),
@@ -372,13 +374,13 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("does not change its name, address or colour", async () => {
 			const personal = await ensurePersonal(memberId, "test-model");
 
-			await expect(store.update(workspaceId, personal.id, { name: "Mine" })).rejects.toThrow(
+			await expect(repository.update(workspaceId, personal.id, { name: "Mine" })).rejects.toThrow(
 				PodRepository.PersonalPodFixed,
 			);
-			await expect(store.update(workspaceId, personal.id, { slug: "mine" })).rejects.toThrow(
+			await expect(repository.update(workspaceId, personal.id, { slug: "mine" })).rejects.toThrow(
 				PodRepository.PersonalPodFixed,
 			);
-			await expect(store.update(workspaceId, personal.id, { color: "rose" })).rejects.toThrow(
+			await expect(repository.update(workspaceId, personal.id, { color: "rose" })).rejects.toThrow(
 				PodRepository.PersonalPodFixed,
 			);
 		});
@@ -389,7 +391,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 			await create(adminId, { name: "Sales", slug: "sales" });
 
-			await expect(store.update(workspaceId, made.id, { slug: "sales" })).rejects.toThrow(
+			await expect(repository.update(workspaceId, made.id, { slug: "sales" })).rejects.toThrow(
 				PodRepository.PodSlugTaken,
 			);
 		});
@@ -397,9 +399,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("says the pod is gone, not that its slug is taken", async () => {
 			// Renaming a pod somebody else deleted in between.
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
-			await store.remove(workspaceId, made.id);
+			await repository.remove(workspaceId, made.id);
 
-			await expect(store.update(workspaceId, made.id, { name: "Platform" })).rejects.toThrow(
+			await expect(repository.update(workspaceId, made.id, { name: "Platform" })).rejects.toThrow(
 				PodRepository.PodGone,
 			);
 		});
@@ -420,7 +422,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("gives an admin every shared pod without a membership row", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await store.removeMember(workspaceId, made.id, adminId);
+			await repository.removeMember(workspaceId, made.id, adminId);
 
 			const standing = await authorizationAs(adminId).pod(made.id, "pod.delete");
 
@@ -431,7 +433,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("gives a member the pods they have joined, and nothing else", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
-			await store.addMember(workspaceId, joined.id, memberId);
+			await repository.addMember(workspaceId, joined.id, memberId);
 
 			expect(await authorizationAs(memberId).pod(joined.id, "agent.create")).toMatchObject({
 				facts: { isExplicitMember: true },
@@ -444,23 +446,42 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			);
 		});
 
-		it("agrees with what a list shows", async () => {
+		it("lists exactly the pods each role may read one by one", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
-			await store.addMember(workspaceId, joined.id, memberId);
-			const personal = await ensurePersonal(memberId, "test-model");
+			await repository.addMember(workspaceId, joined.id, memberId);
+			await repository.addMember(workspaceId, joined.id, viewerId);
+			// Reached by the admin's role alone, with no membership row.
+			await repository.removeMember(workspaceId, apart.id, adminId);
+			const people = { admin: adminId, member: memberId, viewer: viewerId };
+			const pods: Record<string, string> = {
+				"shared, with the member and viewer in it": joined.id,
+				"shared, with nobody in it": apart.id,
+			};
+			for (const [role, userId] of Object.entries(people)) {
+				pods[`${role}'s Personal pod`] = (await ensurePersonal(userId, "test-model")).id;
+			}
 
-			const forAdmin = (await visibleTo(adminId)).map(({ id }) => id);
-			const forMember = (await visibleTo(memberId)).map(({ id }) => id);
-
-			expect(forAdmin).toEqual(expect.arrayContaining([joined.id, apart.id]));
-			expect(forAdmin).not.toContain(personal.id);
-			expect(forMember.toSorted()).toEqual([joined.id, personal.id].toSorted());
+			for (const [role, userId] of Object.entries(people)) {
+				const listed = new Set((await visibleTo(userId)).map(({ id }) => id));
+				for (const [pod, podId] of Object.entries(pods)) {
+					const readable = await authorizationAs(userId)
+						.pod(podId, "pod.read")
+						.then(() => true)
+						.catch((refusal) =>
+							refusal instanceof ResourceHidden ? false : Promise.reject(refusal),
+						);
+					expect({ role, pod, listed: listed.has(podId) }).toEqual({ role, pod, listed: readable });
+				}
+			}
+			expect((await visibleTo(adminId)).map(({ id }) => id)).toEqual(
+				expect.arrayContaining([joined.id, apart.id]),
+			);
 		});
 
 		it("carries the resolved permissions on each pod it lists", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await store.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
 
 			const [seen] = (await visibleTo(memberId)).filter(({ id }) => id === made.id);
 
@@ -475,7 +496,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		it("gives a viewer the pods they have joined, to read and take part in", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
-			await store.addMember(workspaceId, joined.id, viewerId);
+			await repository.addMember(workspaceId, joined.id, viewerId);
 
 			const standing = await authorizationAs(viewerId).pod(joined.id, "pod.read");
 
@@ -492,7 +513,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("carries a viewer's permissions on the pods it lists, all of them closed", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
-			await store.addMember(workspaceId, joined.id, viewerId);
+			await repository.addMember(workspaceId, joined.id, viewerId);
 
 			const [seen] = await visibleTo(viewerId);
 
@@ -511,7 +532,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("stops reaching a shared pod once somebody is demoted", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await store.removeMember(workspaceId, made.id, adminId);
+			await repository.removeMember(workspaceId, made.id, adminId);
 			expect(await authorizationAs(adminId).pod(made.id, "pod.read")).toBeDefined();
 
 			await onDatabase((db) =>
@@ -569,7 +590,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			// No route and no middleware in front: this is what a new entry point
 			// that forgot to check would reach.
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await store.addMember(workspaceId, made.id, memberId);
+			await repository.addMember(workspaceId, made.id, memberId);
 
 			await expect(administrationAs(memberId).remove({ podId: made.id })).rejects.toThrow(
 				ActionForbidden,

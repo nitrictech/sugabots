@@ -26,7 +26,7 @@ export const Routine = Workflow.make("routine", {
 export const routineLane = (run: Pick<RoutineRun, "routineId">) => `routine:${run.routineId}`;
 
 /** Settlement recorded how the run ended. */
-export const routineSettled = DurableDeferred.make("settled");
+const routineSettled = DurableDeferred.make("settled");
 
 export class RoutineSteps extends Context.Service<
 	RoutineSteps,
@@ -41,7 +41,7 @@ export class RoutineSteps extends Context.Service<
 >()("@sugabots/core/RoutineSteps") {}
 
 /** Each check whether the run has settled is a separate activity, numbered from 0. */
-export const routineActivities = Activities.fromService<RoutineRun>()(RoutineSteps, {
+const routineActivities = Activities.fromService<RoutineRun>()(RoutineSteps, {
 	start: {},
 	settle: { input: Schema.Int, success: Schema.Boolean },
 	fail: {},

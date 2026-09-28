@@ -438,22 +438,12 @@ export const make = Effect.gen(function* () {
 			operation(
 				"cancelInvitation",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
 					const hidden = new ResourceHidden({ resource: "invitation" });
 					if (!isUuid(input.invitationId)) return yield* hidden;
-					// Sought only in the workspaces the actor is in, so an invitation to
-					// any other is answered exactly as one that does not exist.
 					const [invitation] = yield* query((db) =>
 						db
 							.select({ workspaceId: workspaceInvite.workspaceId })
 							.from(workspaceInvite)
-							.innerJoin(
-								workspaceMember,
-								and(
-									eq(workspaceMember.workspaceId, workspaceInvite.workspaceId),
-									eq(workspaceMember.userId, userId),
-								),
-							)
 							.where(
 								and(
 									eq(workspaceInvite.id, input.invitationId),
@@ -462,6 +452,8 @@ export const make = Effect.gen(function* () {
 							),
 					);
 					if (!invitation) return yield* hidden;
+					// A workspace the actor is not in is hidden, so an invitation to it
+					// is answered exactly as one that does not exist.
 					yield* authorization
 						.workspace(invitation.workspaceId, "workspace.members.manage")
 						.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));

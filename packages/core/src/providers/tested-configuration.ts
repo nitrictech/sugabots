@@ -15,8 +15,8 @@ import type { Egress, EgressRefused } from "./network/egress.ts";
 /**
  * SQL that is true while a row still has the configuration `testedAt` was read
  * from, `testedAt` being the row's `updatedAt` as the test loaded it. Postgres
- * stamps microseconds on insert and drizzle milliseconds on update, and a
- * `Date` holds only milliseconds, so the two are compared at that precision.
+ * stamps `updatedAt` to the microsecond and a `Date` holds only milliseconds,
+ * so the two are compared at that precision.
  */
 export function stillConfiguredAs(updatedAt: PgColumn, testedAt: Date): SQL {
 	return sql`date_trunc('milliseconds', ${updatedAt}) = ${testedAt}`;

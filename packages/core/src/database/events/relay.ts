@@ -8,11 +8,11 @@ import type { EventStore } from "./store.ts";
 /**
  * How one process's deliveries reach the subscribers of another.
  *
- * Every API process has its own bus, and any of them may run the worker that
- * makes a change. Without a relay a client streaming from one process, or a
- * tool waiting in it, never hears about a turn another process ran. This is
- * the seam ADR 001 left for that: Postgres `NOTIFY` for the wake-up, the
- * `event` table for a payload too large to carry.
+ * Every API process has its own bus, and any of them may run the workflow
+ * that makes a change. Without a relay a client streaming from one process,
+ * or a tool waiting in it, never hears about a turn another process ran. It
+ * carries deliveries over Postgres: `NOTIFY` for the wake-up, and the `event`
+ * table for a payload too large to carry.
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
@@ -62,7 +62,7 @@ export const postgresEventRelay = (
 		const context = yield* Effect.context<never>();
 		const runPromise = Effect.runPromiseWith(context);
 		/** Identifies this process, so it can ignore its own notices coming back. */
-		const origin = yield* ids.next;
+		const origin = yield* ids.random;
 
 		return {
 			async broadcast(channel, delivery) {

@@ -9,7 +9,7 @@ import { Context, Effect, Layer } from "effect";
 /**
  * Who may listen to what.
  *
- * ADR 001: a stream route authorises exactly like the REST route for the same
+ * A stream route authorises exactly like the REST route for the same
  * resource — the same `Authorization` and the same `Visibility`, so a
  * demotion that closes a REST route closes the stream with it.
  *
@@ -50,10 +50,6 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layerNoDeps = Layer.effect(Service, make);
 
-/** Grants nothing, so a stream route is never open by omission. */
-export const closed: Interface = {
-	workspace: () => Effect.undefined,
-	thread: () => Effect.undefined,
-};
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));

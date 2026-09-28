@@ -202,7 +202,7 @@ export const pod = pgTable(
 		// Null reads as the default colour; a Personal pod is drawn as its lock
 		// rather than a tile, so its colour is never shown.
 		color: text("color").$type<PodColor>(),
-		// Whether non-chat threads use the Facilitator to choose speakers (ADR 004).
+		// Whether non-chat threads use the Facilitator to choose speakers.
 		routing: jsonb("routing").$type<PodRouting>().notNull().default(DEFAULT_POD_ROUTING),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
@@ -248,7 +248,7 @@ export const pod = pgTable(
  *
  * These rows are explicit membership, and only that: a workspace admin reaches
  * every shared pod without one, and adding no row is what makes demoting them
- * take that reach away again. `docs/permissions.md` is the specification.
+ * take that reach away again.
  *
  * There is no role here. What somebody may configure is their workspace role,
  * which lives on `workspace_member`. Adding a column here later is cheaper

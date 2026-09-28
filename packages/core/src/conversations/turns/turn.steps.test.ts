@@ -20,7 +20,7 @@ import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
-import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
+import { ModelRequestFailed, Models, type TurnModel, type TurnModelInput } from "./model.ts";
 import { type NotRunnable, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
 import { runSegment } from "./turn.steps.ts";
@@ -853,14 +853,13 @@ interface Given {
  * connection tools unless given, and nobody given the floor after a reply.
  */
 function segmentWith(given: Given) {
-	return runSegment(run, {
-		model: given.model,
-		events: given.events,
-		builtInTools: given.builtInTools ?? BuiltInTools.none,
-		connectionTools: given.connectionTools ?? ConnectionTools.none,
-	}).pipe(
+	return runSegment(run).pipe(
 		Effect.provide(
 			Layer.mergeAll(
+				Layer.succeed(Models.Service, given.model),
+				Layer.succeed(EventBus.Service, given.events),
+				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
+				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
@@ -925,7 +924,7 @@ function eventBus(): EventBus.Interface {
 	};
 }
 
-/** The real in-process bus, so a cancellation reaches the worker the way it does in production. */
+/** The real in-process bus, so a cancellation reaches the turn the way it does in production. */
 function liveEventBus(): EventBus.Interface {
 	return EventBus.inProcess({ store: EventStore.inMemory() });
 }

@@ -10,7 +10,7 @@ import { uuidSchema } from "./uuid.ts";
 
 /**
  * The live-update wire format, shared by the event bus, the SSE routes and
- * every client. ADR 001 (`docs/adr-001-live-updates.md`) is the full record.
+ * every client.
  *
  * Two things are settled here and nowhere else: what each event carries, and
  * which events are durable. Durability is a decision per type, not a property
@@ -137,7 +137,7 @@ export type DurableEventType = typeof durableEventTypeSchema.Type;
  * Progress within a state change. Sent to live subscribers only and carry no
  * `id`, which per the SSE spec means they do not advance the client's
  * last-event-id: a delta lost to a disconnect is recovered from the message row
- * the worker flushes every second (ADR 002), not from a replay.
+ * a running turn saves every second, not from a replay.
  */
 export const ephemeralEventTypeSchema = Schema.Literals([
 	"message.delta",

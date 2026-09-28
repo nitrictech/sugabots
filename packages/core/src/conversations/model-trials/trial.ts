@@ -18,7 +18,7 @@ import { CASES, type TrialCase, type TrialSystemAgent } from "./cases.ts";
  */
 
 /** How many times each case is asked. */
-export const ATTEMPTS = 3;
+const ATTEMPTS = 3;
 
 const ANSWER_TIMEOUT = Duration.seconds(45);
 /** Long enough for a wordy summary, short enough that a rambling model is a failure. */
@@ -174,7 +174,7 @@ function median(values: readonly number[]): number {
 		: (sorted[middle] ?? 0);
 }
 
-export interface TrialOptions {
+interface TrialOptions {
 	readonly systemAgentKey: TrialSystemAgent;
 	readonly model: string;
 	readonly workspaceId: string;

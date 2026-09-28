@@ -24,7 +24,7 @@ export interface CollaborateToolOptions {
 	run: RunEffect;
 	/** How much of the reply has been written so far, which is where the collaboration sits. */
 	replyLength: () => number;
-	/** Tells the worker a collaboration began, so the reply's parts include it from now on. */
+	/** Tells the running turn a collaboration began, so the reply's parts include it from now on. */
 	noteCollaboration: (
 		collaboration: Pick<CollaborationPart, "id" | "atOffset">,
 	) => Effect.Effect<void>;

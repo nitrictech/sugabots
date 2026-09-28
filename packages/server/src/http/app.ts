@@ -59,10 +59,10 @@ const betterAuthRoutes = Layer.effectDiscard(
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The routes take their services from the layer's context: `HttpServices`,
- * and of what core provides besides only the database, the installation and
- * the event bus (`ApiInfrastructure`). Each use case authorizes the
- * person the request's session belongs to, so no middleware decides access.
+ * The routes take their services from the layer's context: the use cases and
+ * views in `HttpServices`, and the database, installation, sessions and event
+ * bus in `ApiInfrastructure`. Each use case authorizes the person the
+ * request's session belongs to, so no middleware decides access.
  * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
 export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructure> = Layer.mergeAll(

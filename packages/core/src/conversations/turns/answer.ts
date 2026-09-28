@@ -8,9 +8,8 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
  * A model that returns prose where JSON was asked for, or a word that is not
  * one of the choices, has not failed in the way a timeout or a dead connection
  * has. It is usually a one-off, and asking again usually works. Retrying is far
- * cheaper than the alternatives: the summary job gave up after three attempts
- * spread over half a minute, each one re-reading the whole thread first, and
- * the facilitator quietly decided nobody should speak.
+ * cheaper than giving up, which leaves a thread without its summary or has the
+ * facilitator decide that nobody speaks.
  *
  * Only the shape is retried here. A timeout is not — the next attempt would
  * cost the same again — and neither is anything the database or the stream
@@ -55,7 +54,7 @@ export class AnswerTimedOut
  * jittered so a wave of threads hitting the same bad patch does not re-ask in
  * lockstep.
  */
-export const RETRY_UNUSABLE = Schedule.recurs(2).pipe(
+const RETRY_UNUSABLE = Schedule.recurs(2).pipe(
 	Schedule.addDelay(() => Effect.succeed(Duration.millis(250))),
 	Schedule.jittered,
 );

@@ -66,8 +66,8 @@ export const make = Effect.gen(function* () {
 			schema: { user, session, account, verification },
 		}),
 
-		// Postgres column defaults fill every `id` with a UUIDv7, so better-auth
-		// leaves the column alone.
+		// Postgres mints the id of every row better-auth inserts, as it does
+		// every other table's, so better-auth leaves the column alone.
 		advanced: { database: { generateId: false } },
 
 		databaseHooks: {

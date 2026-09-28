@@ -6,7 +6,7 @@ import { ThreadRepository } from "../threads/repository.ts";
 import { decideFloor, type FloorDecision, type FloorMessage, loadFloorScope } from "./floor.ts";
 import { TurnRequests } from "./requests.ts";
 
-/** Who speaks after a message, in a thread of any type (ADR 004). */
+/** Who speaks after a message, in a thread of any type. */
 export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see

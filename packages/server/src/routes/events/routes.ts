@@ -12,7 +12,7 @@ import { ChannelAccess } from "./access.ts";
 /**
  * The HTTP end of a stream: one channel, held open, until the client leaves or
  * the clock turns out. Everything about *what* is on the channel belongs to the
- * bus; this file is the transport and its housekeeping (ADR 001).
+ * bus; this file is the transport and its housekeeping.
  *
  * It is a `Stream` rather than a callback with its own bookkeeping. The client
  * hanging up cancels the web stream, which interrupts the fibre, which runs the

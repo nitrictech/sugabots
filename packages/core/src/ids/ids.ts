@@ -3,17 +3,20 @@ export * as Ids from "./ids.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { Clock, Context, Effect, Layer } from "effect";
 
-/** Identifiers for new rows. */
+/**
+ * Identifiers minted in code. The database mints a row's id when it is
+ * inserted; these are for the ids it cannot.
+ */
 export interface Interface {
 	/**
-	 * A new UUID v7, the same kind the database defaults to: time-ordered, so
-	 * rows written together sit together in an index.
+	 * A new UUID v7, the kind the database mints, for a row whose id has to be
+	 * written elsewhere before the row itself is inserted.
 	 */
 	readonly next: Effect.Effect<string>;
 	/**
-	 * A new UUID v4: all random bits, for an id that is also a link a person
-	 * holds, such as an invitation's, where a time-ordered id would be partly
-	 * guessable.
+	 * A new UUID v4, all random bits: for an id that names no row, such as a
+	 * process's, or one that must not be guessed, such as an invitation's,
+	 * which is also a link a person holds.
 	 */
 	readonly random: Effect.Effect<string>;
 }

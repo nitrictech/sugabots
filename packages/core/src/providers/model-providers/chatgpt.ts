@@ -1,4 +1,4 @@
-import { Data, Effect, Schema } from "effect";
+import { Clock, Data, Effect, Schema } from "effect";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import type { EgressHttpClient, EgressHttpClients } from "../network/egress.ts";
 import type { ModelProviderRepository } from "./model-provider-repository.ts";
@@ -86,7 +86,6 @@ const TokenResponse = Schema.Struct({
 /** Asks OpenAI for a code the person enters to sign in. `http` must reach `CHATGPT_ISSUER`. */
 export function requestDeviceCode(
 	http: EgressHttpClient,
-	now = Date.now(),
 ): Effect.Effect<DeviceCode, ChatgptSignInFailed> {
 	return Effect.gen(function* () {
 		const response = yield* post(http, "/api/accounts/deviceauth/usercode", {
@@ -104,7 +103,7 @@ export function requestDeviceCode(
 			userCode: code.user_code,
 			verificationUrl: DEVICE_VERIFICATION_URL,
 			pollIntervalMs: interval > 0 ? interval * 1000 : DEFAULT_POLL_INTERVAL_MS,
-			expiresAt: now + DEVICE_CODE_LIFETIME_MS,
+			expiresAt: (yield* Clock.currentTimeMillis) + DEVICE_CODE_LIFETIME_MS,
 		};
 	});
 }
@@ -116,7 +115,6 @@ export function requestDeviceCode(
 export function redeemDeviceCode(
 	http: EgressHttpClient,
 	code: Pick<DeviceCode, "deviceAuthId" | "userCode">,
-	now = Date.now(),
 ): Effect.Effect<ChatgptTokens | undefined, ChatgptSignInFailed> {
 	return Effect.gen(function* () {
 		const response = yield* post(http, "/api/accounts/deviceauth/token", {
@@ -130,17 +128,13 @@ export function redeemDeviceCode(
 			});
 		}
 		const authorized = yield* decodeBody(response, DeviceTokenResponse);
-		return yield* requestTokens(
-			http,
-			{
-				grant_type: "authorization_code",
-				code: authorized.authorization_code,
-				redirect_uri: DEVICE_REDIRECT_URI,
-				client_id: CODEX_CLIENT_ID,
-				code_verifier: authorized.code_verifier,
-			},
-			now,
-		);
+		return yield* requestTokens(http, {
+			grant_type: "authorization_code",
+			code: authorized.authorization_code,
+			redirect_uri: DEVICE_REDIRECT_URI,
+			client_id: CODEX_CLIENT_ID,
+			code_verifier: authorized.code_verifier,
+		});
 	});
 }
 
@@ -151,18 +145,16 @@ export function redeemDeviceCode(
 export function refreshChatgptTokens(
 	http: EgressHttpClient,
 	tokens: ChatgptTokens,
-	now = Date.now(),
 ): Effect.Effect<ChatgptTokens, ChatgptSignInFailed> {
-	return requestTokens(
-		http,
-		{ grant_type: "refresh_token", refresh_token: tokens.refresh, client_id: CODEX_CLIENT_ID },
-		now,
-	).pipe(Effect.map((next) => ({ ...next, accountId: next.accountId ?? tokens.accountId })));
+	return requestTokens(http, {
+		grant_type: "refresh_token",
+		refresh_token: tokens.refresh,
+		client_id: CODEX_CLIENT_ID,
+	}).pipe(Effect.map((next) => ({ ...next, accountId: next.accountId ?? tokens.accountId })));
 }
 
-export function needsRefresh(tokens: ChatgptTokens, now = Date.now()): boolean {
-	return tokens.expiresAt - now < REFRESH_MARGIN_MS;
-}
+const needsRefresh = (tokens: ChatgptTokens) =>
+	Clock.currentTimeMillis.pipe(Effect.map((now) => tokens.expiresAt - now < REFRESH_MARGIN_MS));
 
 /**
  * The headers besides the bearer token that the Codex backend wants: the
@@ -195,7 +187,11 @@ export function withChatgptAccess(
 	const http = httpClients.for({ baseUrl: CHATGPT_ISSUER });
 	return Effect.gen(function* () {
 		const tokens = yield* store.renewChatgptTokens(workspaceId, connection.providerId, (current) =>
-			needsRefresh(current) ? refreshChatgptTokens(http, current) : Effect.succeed(current),
+			needsRefresh(current).pipe(
+				Effect.flatMap((stale) =>
+					stale ? refreshChatgptTokens(http, current) : Effect.succeed(current),
+				),
+			),
 		);
 		if (!tokens) {
 			return yield* new ChatgptSignInFailed({
@@ -213,9 +209,10 @@ export function withChatgptAccess(
 function requestTokens(
 	http: EgressHttpClient,
 	form: Record<string, string>,
-	now: number,
 ): Effect.Effect<ChatgptTokens, ChatgptSignInFailed> {
 	return Effect.gen(function* () {
+		// Taken before asking, so the expiry errs early.
+		const now = yield* Clock.currentTimeMillis;
 		const response = yield* post(http, "/oauth/token", { form });
 		if (!response.ok) {
 			return yield* new ChatgptSignInFailed({

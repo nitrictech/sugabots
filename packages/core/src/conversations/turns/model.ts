@@ -1,3 +1,5 @@
+export * as Models from "./model.ts";
+
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
@@ -51,7 +53,7 @@ export interface TurnPromptMessage {
 	content: string;
 }
 
-export interface TurnModelResult {
+interface TurnModelResult {
 	text: AsyncIterable<string>;
 	/**
 	 * What the finished response cost. Meaningful only once `text` has been
@@ -131,7 +133,7 @@ const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
 	timedOut: UserMessage.of`The model did not answer in time.`,
 };
 
-export interface TurnModelOptions {
+interface TurnModelOptions {
 	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewChatgptTokens">;
 	httpClients: EgressHttpClients;
 }
@@ -261,10 +263,10 @@ function languageModel(
  * The workspace model client as a service: the one turns, facilitation,
  * summaries, trials and settings all ask a model through.
  */
-export class Models extends Context.Service<Models, TurnModel>()("@sugabots/core/Models") {}
+export class Service extends Context.Service<Service, TurnModel>()("@sugabots/core/Models") {}
 
-export const modelsLayer = Layer.effect(
-	Models,
+export const layer = Layer.effect(
+	Service,
 	Effect.gen(function* () {
 		const modelProviders = yield* ModelProviderRepository.Service;
 		const egress = yield* Egress.Service;
@@ -272,18 +274,18 @@ export const modelsLayer = Layer.effect(
 	}),
 ).pipe(Layer.provide(ModelProviderRepository.layer));
 
-/** {@link probeModel} through {@link Models}, for settings to try a model the way a turn would. */
-export const modelProbeLayer = Layer.effect(
+/** {@link probeModel} through {@link Service}, for settings to try a model the way a turn would. */
+export const probeLayer = Layer.effect(
 	ModelProbe.Service,
 	Effect.gen(function* () {
-		const model = yield* Models;
+		const model = yield* Service;
 		const database = yield* Database;
 		return ModelProbe.Service.of({
 			probe: (workspaceId, modelId) =>
 				probeModel(model, workspaceId, modelId).pipe(Effect.provideService(Database, database)),
 		});
 	}),
-).pipe(Layer.provide(modelsLayer));
+).pipe(Layer.provide(layer));
 
 /**
  * Asks a model for one word, to learn whether it will answer at all. What
@@ -291,7 +293,7 @@ export const modelProbeLayer = Layer.effect(
  * setting on the provider's side, that a key has no credit, that the model
  * refuses the request shape. Fails with the provider's reason.
  */
-export function probeModel(
+function probeModel(
 	model: TurnModel,
 	workspaceId: string,
 	modelId: string,

@@ -136,7 +136,7 @@ describe("trying a model on the facilitator", () => {
 });
 
 describe("trying a model on the summariser", () => {
-	it("accepts only what the summary worker would accept", async () => {
+	it("accepts only what summarising would accept", async () => {
 		const report = await trial(
 			scripted((input) =>
 				input.system.includes("strict JSON")

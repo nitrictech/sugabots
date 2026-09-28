@@ -9,13 +9,12 @@ import { EventStore } from "./store.ts";
  * a client is told to `reset` and refetch, which costs one query instead of a
  * replay of everything since it left.
  */
-export const RETENTION_DAYS = 7;
+const RETENTION_DAYS = 7;
 
 const NIGHTLY = Duration.days(1);
 
 /**
- * Sweeps the event store every `every` for as long as the layer's scope is
- * open.
+ * Sweeps the event store nightly for as long as the layer's scope is open.
  *
  * A scoped fibre rather than a `setInterval` and a stop function: the sweep
  * ends when the process's scope closes, in order, without anyone remembering to
@@ -25,17 +24,11 @@ const NIGHTLY = Duration.days(1);
  * It runs once immediately, because a process that restarts daily would
  * otherwise never prune.
  */
-export const sweepingEvery = (
-	every: Duration.Input,
-): Layer.Layer<never, never, EventStore.Service> =>
-	Layer.effectDiscard(
-		Effect.flatMap(EventStore.Service, (store) =>
-			Effect.forkScoped(sweep(store).pipe(Effect.repeat(Schedule.spaced(every)), Effect.asVoid)),
-		),
-	);
-
-/** The nightly sweep. */
-export const layer = sweepingEvery(NIGHTLY);
+export const layer = Layer.effectDiscard(
+	Effect.flatMap(EventStore.Service, (store) =>
+		Effect.forkScoped(sweep(store).pipe(Effect.repeat(Schedule.spaced(NIGHTLY)), Effect.asVoid)),
+	),
+);
 
 /**
  * One sweep. A failure is logged and swallowed on purpose: the next sweep

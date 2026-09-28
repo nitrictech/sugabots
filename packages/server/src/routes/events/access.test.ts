@@ -1,7 +1,5 @@
 import { handleFromName } from "@sugabots/contracts";
-import { Authorization } from "@sugabots/core/authorization/authorization";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { Visibility } from "@sugabots/core/authorization/visibility";
 import {
 	agent,
 	pod,
@@ -14,8 +12,9 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { onPostgresAs } from "@sugabots/core/workspaces/testing";
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
+import { closedChannelAccess } from "./access.test-support.ts";
 import { ChannelAccess } from "./access.ts";
 
 /**
@@ -33,7 +32,7 @@ function asSomebody(access: ChannelAccess.Interface, userId: string) {
 }
 
 it("denies event access when no access dependency is configured", async () => {
-	const { workspace, thread } = asSomebody(ChannelAccess.closed, crypto.randomUUID());
+	const { workspace, thread } = asSomebody(closedChannelAccess, crypto.randomUUID());
 
 	expect(await workspace("w1")).toBeUndefined();
 	expect(await thread("c1")).toBeUndefined();
@@ -138,10 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
 		const channels = await runOnPostgres(
-			Effect.provide(
-				ChannelAccess.Service,
-				ChannelAccess.layer.pipe(Layer.provide([Authorization.layer, Visibility.layer])),
-			),
+			Effect.provide(ChannelAccess.Service, ChannelAccess.layer),
 		);
 		return {
 			/** The channels `userId` is given. */
