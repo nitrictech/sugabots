@@ -22,6 +22,7 @@ import {
 import { ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
+import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceAgentsSettings } from "./WorkspaceAgentsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
@@ -101,6 +102,14 @@ export function WorkspaceSettings({
 							)}
 						</SettingsPage>
 					)}
+					{section === "usage" &&
+						(may.manageUsage ? (
+							<UsageSettings />
+						) : (
+							<SettingsPage title="Usage">
+								<Alert>Only workspace administrators can see what the workspace spends.</Alert>
+							</SettingsPage>
+						))}
 					{section === "providers" && (
 						<SettingsPage title="Models">
 							<Alert>Only workspace administrators can manage models.</Alert>

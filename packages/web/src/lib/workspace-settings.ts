@@ -14,6 +14,7 @@ export const workspaceSettingGroups = [
 		sections: [
 			{ id: "general", label: "General", path: "/settings" },
 			{ id: "members", label: "Members", path: "/settings/members" },
+			{ id: "usage", label: "Usage", path: "/settings/usage", needs: "manageUsage" },
 		],
 	},
 	{
