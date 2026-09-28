@@ -23,8 +23,6 @@ export function toRoutineExecution(row: schema.RoutineExecutionRow): RoutineExec
 	};
 }
 
-export const routineSettlementLockKey = (executionId: string) => `routine-settle:${executionId}`;
-
 /**
  * The routine execution a thread belongs to, found through its ancestors, as a
  * scalar subquery: a collaboration a routine's agent starts is part of the run.
@@ -54,43 +52,64 @@ export const findRoutineExecutionId = Effect.fn("RoutineExecution.findRoutineExe
 );
 
 /**
- * routineRejectsTurns reports whether the routine run `executionId` takes no
- * more turns: it is gone, it has ended, or it has been told to end. It holds
- * the run's settlement lock until the transaction ends, so the answer stays
- * true while the caller acts on it.
+ * lockRoutineSettlement holds the settlement lock of the routine run
+ * `executionId` until the transaction ends. Settling the run holds it, so an
+ * answer read under it about whether the run still takes work stands until
+ * the transaction ends.
+ *
+ * Lock order: a transaction that admits work into a run, or ends one of its
+ * waiting turns, takes this lock before it locks the turn or tool call. Other
+ * writers lock their rows first and reach this lock afterwards, when
+ * settlement reacts to their events inside their transaction; so settlement
+ * never waits for their rows, and skips the running turns, collaborations
+ * and waiting lane requests another transaction holds. That transaction's own
+ * events settle the run again.
  */
-export const routineRejectsTurns = (executionId: string) =>
-	Effect.gen(function* () {
-		const lockKey = routineSettlementLockKey(executionId);
-		yield* query((db) =>
-			db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
-		);
-		const [execution] = yield* query((db) =>
-			db
-				.select({
-					state: routineExecution.state,
-					pendingTerminalState: routineExecution.pendingTerminalState,
-				})
-				.from(routineExecution)
-				.where(eq(routineExecution.id, executionId))
-				.limit(1),
-		);
-		if (!execution) return true;
-		return (
-			execution.pendingTerminalState !== null ||
-			execution.state === "completed" ||
-			execution.state === "failed" ||
-			execution.state === "cancelled"
-		);
-	});
+export const lockRoutineSettlement = (executionId: string) =>
+	query((db) =>
+		db.execute(
+			sql`select pg_advisory_xact_lock(hashtextextended(${`routine-settle:${executionId}`}, 0))`,
+		),
+	).pipe(Effect.asVoid);
 
 /**
- * threadRejectsTurns reports whether the routine run the thread belongs to,
- * if any, takes no more turns, holding its settlement lock as
- * `routineRejectsTurns` does.
+ * lockRoutineSettlementOf holds the settlement lock of the routine run the
+ * thread `threadId` belongs to, if any, as `lockRoutineSettlement` does, and
+ * returns the run's id.
  */
-export const threadRejectsTurns = (threadId: string) =>
-	Effect.flatMap(
-		query((db) => findRoutineExecutionId(db, threadId)),
-		(executionId) => (executionId ? routineRejectsTurns(executionId) : Effect.succeed(false)),
+export const lockRoutineSettlementOf = Effect.fn("RoutineExecution.lockRoutineSettlementOf")(
+	function* (threadId: string) {
+		const executionId = yield* query((db) => findRoutineExecutionId(db, threadId));
+		if (executionId) yield* lockRoutineSettlement(executionId);
+		return executionId;
+	},
+);
+
+/**
+ * routineAcceptsWork reports whether the routine run the thread `threadId`
+ * belongs to still takes turns and tool calls: it is queued or running, and
+ * nothing has started ending it. A thread outside any run takes work. The
+ * run's settlement lock is held until the transaction ends, so the answer
+ * stands while the caller admits the work.
+ */
+export const routineAcceptsWork = Effect.fn("RoutineExecution.routineAcceptsWork")(function* (
+	threadId: string,
+) {
+	const executionId = yield* lockRoutineSettlementOf(threadId);
+	if (!executionId) return true;
+	const [execution] = yield* query((db) =>
+		db
+			.select({
+				state: routineExecution.state,
+				pendingTerminalState: routineExecution.pendingTerminalState,
+			})
+			.from(routineExecution)
+			.where(eq(routineExecution.id, executionId))
+			.limit(1),
 	);
+	return (
+		execution !== undefined &&
+		execution.pendingTerminalState === null &&
+		(execution.state === "queued" || execution.state === "running")
+	);
+});

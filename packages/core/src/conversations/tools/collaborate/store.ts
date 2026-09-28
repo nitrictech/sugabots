@@ -1,6 +1,6 @@
 import type { CollaborationPart } from "@sugabots/contracts";
 import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, type Executor, query, transaction } from "../../../database/database.ts";
 import type { DomainEvents } from "../../../database/events/domain-events.ts";
@@ -80,6 +80,12 @@ export interface CollaborationStore {
 		threadId: string;
 		answer: string;
 	}): Effect.Effect<boolean, never, Database>;
+	/**
+	 * Fails the collaborations asked for in these threads that are still
+	 * waiting or pending, because the routine run they work for ended. One
+	 * another transaction holds is skipped: its holder is moving it on.
+	 */
+	failUnder(threadIds: readonly string[]): Effect.Effect<void, never, Database>;
 }
 
 /** Policy said no. The reason goes back to the model as the tool's result. */
@@ -271,6 +277,37 @@ export const collaborationStore = Effect.fnUntraced(function* (
 						});
 					}
 					return true;
+				}),
+			),
+
+		failUnder: (threadIds) =>
+			transaction(
+				Effect.gen(function* () {
+					if (threadIds.length === 0) return;
+					const unanswered = yield* query((db) =>
+						db
+							.select({ collaboration, collaboratorName: agent.name })
+							.from(collaboration)
+							.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
+							.where(
+								and(
+									inArray(collaboration.parentThreadId, [...threadIds]),
+									inArray(collaboration.status, ["waiting", "pending"]),
+								),
+							)
+							.orderBy(collaboration.createdAt, collaboration.id)
+							.for("update", { of: collaboration, skipLocked: true }),
+					);
+					const failed = yield* Effect.forEach(unanswered, (row) =>
+						Effect.map(
+							query((db) => writeStatus(db, row.collaboration.id, { status: "failed" })),
+							(updated) =>
+								ConversationEvent.CollaborationFailed(
+									collaborationChange(updated, row.collaboratorName),
+								),
+						),
+					);
+					yield* emit(failed);
 				}),
 			),
 	};

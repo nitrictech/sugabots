@@ -98,6 +98,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 				approvals: stores.approvals,
 				builtInTools: noBuiltInTools,
 				connectionTools: noConnectionTools,
+				emit,
 			}),
 		),
 		Layer.provide(withoutSummaries),

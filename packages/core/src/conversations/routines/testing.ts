@@ -1,9 +1,21 @@
+import { handleFromName } from "@sugabots/contracts";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
+import {
+	agent,
+	pod,
+	routineExecution,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
+import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { lane } from "../../workflows/sql.ts";
 import { lanesForTests } from "../../workflows/testing.ts";
+import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Routine, RoutineRun, routineLane } from "./routine.workflow.ts";
+import type { RoutineStore } from "./store.ts";
 
 /** The routine's run holding its lane, if any. */
 export const runningRun = (routineId: string) =>
@@ -30,3 +42,88 @@ export const releaseRun = (run: RoutineRun) =>
 			lanes.release({ key: routineLane(run), executionId }),
 		),
 	);
+
+/**
+ * A person in a new workspace with a shared pod whose crew agent owns
+ * routines, and the queued runs other cases left cancelled, so a routine's
+ * next run is the one a case asks for.
+ */
+export async function aRoutineOwner() {
+	await onDatabase((db) =>
+		db
+			.update(routineExecution)
+			.set({ state: "cancelled", finishedAt: new Date() })
+			.where(eq(routineExecution.state, "queued")),
+	);
+	const suffix = crypto.randomUUID();
+	const [person] = await onDatabase((db) =>
+		db
+			.insert(user)
+			.values({ name: "Routine owner", email: `routine-${suffix}@example.com` })
+			.returning(),
+	);
+	const [space] = await onDatabase((db) =>
+		db
+			.insert(workspace)
+			.values({ name: "Routine workspace", slug: `routine-${suffix}` })
+			.returning(),
+	);
+	if (!person || !space) throw new Error("Could not create Routine test identity");
+	const userId = person.id;
+	const workspaceId = space.id;
+	await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId }));
+	const [room] = await onDatabase((db) =>
+		db
+			.insert(pod)
+			.values({
+				workspaceId,
+				ownerId: userId,
+				kind: "shared",
+				name: "Routine pod",
+				slug: `routine-${suffix}`,
+				createdById: userId,
+			})
+			.returning(),
+	);
+	if (!room) throw new Error("Could not create Routine test pod");
+	const podId = room.id;
+	const [owner] = await onDatabase((db) =>
+		db
+			.insert(agent)
+			.values({
+				workspaceId,
+				podId,
+				name: "Routine Agent",
+				handle: handleFromName(`Routine Agent ${suffix}`),
+				color: "green",
+				face: "pill",
+				model: "test/model",
+				createdById: userId,
+			})
+			.returning(),
+	);
+	if (!owner) throw new Error("Could not create Routine test agent");
+	return { userId, workspaceId, podId, agentId: owner.id };
+}
+
+/** Starts the routine's run holding its lane, as its workflow's first step does. */
+export async function startRunning(
+	routines: Pick<Promised<RoutineStore>, "startRun">,
+	routineId: string,
+) {
+	const run = await runOnPostgres(runningRun(routineId));
+	if (!run) throw new Error("No run of the routine is running");
+	await routines.startRun(run);
+	const [execution] = await onDatabase((db) =>
+		db.select().from(routineExecution).where(eq(routineExecution.id, run.executionId)),
+	);
+	if (!execution) throw new Error("The running run has no execution");
+	return { run, execution };
+}
+
+/** Ends the turns running in the thread, as their workflows do once done. */
+export async function finishTurnsIn(threadId: string) {
+	for (const run of await runOnPostgres(runningTurns(threadId))) {
+		await runOnPostgres(releaseTurn(run));
+	}
+}

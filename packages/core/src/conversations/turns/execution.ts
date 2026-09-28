@@ -1,12 +1,17 @@
 import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { type Database, type Executor, query, transaction } from "../../database/database.ts";
+import {
+	afterCommit,
+	type Database,
+	type Executor,
+	query,
+	transaction,
+} from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { type TurnReason, turn } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
-import type { ConversationEvent } from "../events.ts";
-import { routineExecutionIdOf, routineRejectsTurns } from "../routines/execution.ts";
+import { ConversationEvent } from "../events.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -17,7 +22,7 @@ import {
 } from "../threads/participants.ts";
 import { visibleThread } from "../threads/visibility.ts";
 import { type FloorDecision, giveFloor } from "./floor.ts";
-import { ROUTINE_EXECUTION_ENDED, TURN_CANCELLED } from "./lifecycle.ts";
+import { TURN_CANCELLED } from "./lifecycle.ts";
 import type {
 	NotRunnable,
 	ReplyDraft,
@@ -41,9 +46,11 @@ import { Turn, type TurnRequest } from "./turn.workflow.ts";
 export interface TurnExecution {
 	/**
 	 * Opens the turn for this run and loads what the model needs, or says why
-	 * it may not run: its thread or agent is gone, or newer work made it
-	 * pointless. A turn this ends stays ended, so the refusal is a result
-	 * rather than a failure that would roll the ending back.
+	 * it may not run: its thread or agent is gone, its routine run takes no
+	 * more work, or newer work made it pointless. A turn this ends stays ended,
+	 * so the refusal is a result rather than a failure that would roll the
+	 * ending back. A refusal that ends no turn announces `TurnAbandoned`, as
+	 * cancelled.
 	 */
 	prepare(run: TurnRun): Effect.Effect<PreparedTurn | NotRunnable, never, Database>;
 	/** Decides who speaks after this completed reply, and queues them (ADR 004). */
@@ -143,16 +150,6 @@ export const turnExecution = Effect.fnUntraced(function* (
 				Effect.gen(function* (): Effect.fn.Return<PreparedTurn | NotRunnable, never, Database> {
 					const request = run.request;
 					const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
-					if (
-						loaded?.routineExecutionId &&
-						(yield* routineRejectsTurns(loaded.routineExecutionId))
-					) {
-						return yield* refuseRun(
-							run,
-							"The Routine execution has ended",
-							ROUTINE_EXECUTION_ENDED,
-						);
-					}
 					// The agent has to be crew placed in the thread's pod, not the
 					// thread's host. A shared thread gives the floor to whoever the
 					// facilitator or a mention picks, and that is rarely the host.
@@ -217,7 +214,18 @@ export const turnExecution = Effect.fnUntraced(function* (
 						},
 						...(opened.checkpoint ? { checkpoint: opened.checkpoint } : {}),
 					};
-				}),
+				}).pipe(
+					Effect.tap((preparation) =>
+						preparation._tag === "NotRunnable" && !preparation.ended
+							? emit([
+									ConversationEvent.TurnAbandoned({
+										threadId: run.request.threadId,
+										outcome: { state: "cancelled" },
+									}),
+								])
+							: Effect.void,
+					),
+				),
 			),
 
 		giveFloor: (prepared, reply) =>
@@ -248,7 +256,9 @@ export const turnExecution = Effect.fnUntraced(function* (
 					// Telling the workflow is the cancellation; it records it. The flag
 					// set with it stops the next segment instead if the workflow has
 					// just stopped waiting, since the signal would then go unheard.
-					if (requested._tag === "SignalOwner") yield* signals.cancel(requested.owner);
+					if (requested._tag === "SignalOwner") {
+						yield* afterCommit(signals.cancel(requested.owner));
+					}
 					return true;
 				}),
 			),
@@ -264,7 +274,7 @@ function notRunnable(reason: string): NotRunnable {
  * Everything the model is told about the thread, in one statement: the
  * thread with its workspace, its pod and the crew placed there, the people and
  * agents in it, and its last hundred completed messages with the parts placed
- * in them. Also the routine run it belongs to, if any.
+ * in them.
  */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
@@ -280,7 +290,6 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			title: true,
 			type: true,
 		},
-		extras: { routineExecutionId: (row) => routineExecutionIdOf(row.id) },
 		with: {
 			workspace: { columns: { name: true } },
 			pod: {

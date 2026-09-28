@@ -25,7 +25,7 @@ import { runSegment } from "./turn.steps.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
-	const { repositories, stores } = await conversationsForTests({
+	const { emit, repositories, stores } = await conversationsForTests({
 		publishCommitted: async (events) => {
 			delivered.push(...events);
 		},
@@ -210,6 +210,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 					builtInTools: noBuiltInTools,
 					connectionTools: noConnectionTools,
 					events,
+					emit,
 					requests: { queueSummary: vi.fn(() => Effect.void) },
 				}),
 			);

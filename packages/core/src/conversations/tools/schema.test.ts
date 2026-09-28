@@ -18,6 +18,7 @@ const collaborate = collaborateTool({
 		readAnswer: unexpectedExecution,
 		stopWaiting: unexpectedExecution,
 		deliverAnswer: unexpectedExecution,
+		failUnder: unexpectedExecution,
 	},
 	bus: { subscribe: unexpectedExecution },
 	run: unexpectedExecution,

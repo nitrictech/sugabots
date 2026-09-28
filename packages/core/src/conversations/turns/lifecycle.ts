@@ -162,7 +162,10 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 				);
 			}
 			if (state.status === "running") {
-				return next({ ...factsOf(state), status: "running", cancelRequested: true });
+				return next(
+					{ ...factsOf(state), status: "running", cancelRequested: true },
+					FollowUp.AnnounceCancelRequest(),
+				);
 			}
 			return ended;
 		},

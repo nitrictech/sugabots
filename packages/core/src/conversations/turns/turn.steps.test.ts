@@ -556,9 +556,8 @@ describe("runSegment", () => {
 		expect(turns.abandon).not.toHaveBeenCalled();
 	});
 
-	it("settles a Routine as cancelled when its turn is not runnable", async () => {
+	it("finishes a turn that may not run without streaming", async () => {
 		const { execution, turns } = fakes();
-		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(execution.prepare).mockReturnValueOnce(
 			Effect.succeed({ _tag: "NotRunnable", reason: "The agent left its pod", ended: undefined }),
 		);
@@ -574,18 +573,16 @@ describe("runSegment", () => {
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 					requests: { queueSummary: noSummary },
-					routines: { settleThread },
 				}),
 			),
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(settleThread).toHaveBeenCalledWith(run.request.threadId, { state: "cancelled" });
+		expect(turns.complete).not.toHaveBeenCalled();
 	});
 
-	it("fails the turn and its Routine for good when its last run fails", async () => {
+	it("fails the turn for good when its last run fails", async () => {
 		const { execution, turns } = fakes();
-		const settleThread = vi.fn(() => Effect.succeed(true));
 		vi.mocked(turns.fail).mockReturnValueOnce(Effect.succeed(false));
 
 		const outcome = await runWithServices(
@@ -604,7 +601,6 @@ describe("runSegment", () => {
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 					requests: { queueSummary: noSummary },
-					routines: { settleThread },
 				}),
 			),
 		);
@@ -615,10 +611,6 @@ describe("runSegment", () => {
 			reply(""),
 			"The model provider could not answer.",
 		);
-		expect(settleThread).toHaveBeenCalledWith(run.request.threadId, {
-			state: "failed",
-			error: "The model provider could not answer.",
-		});
 	});
 
 	it("keeps a completed turn successful when its summary cannot be queued", async () => {
@@ -845,13 +837,14 @@ function fakes() {
 
 /** What a segment runs on, with no approvals, built-in tools or connection tools unless given. */
 function dependencies(
-	given: Omit<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools"> &
-		Partial<Pick<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools">>,
+	given: Omit<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools" | "emit"> &
+		Partial<Pick<TurnStepsDependencies, "approvals" | "builtInTools" | "connectionTools" | "emit">>,
 ): TurnStepsDependencies {
 	return {
 		approvals: noToolApprovalStore,
 		builtInTools: noBuiltInTools,
 		connectionTools: noConnectionTools,
+		emit: () => Effect.void,
 		...given,
 	};
 }
@@ -883,7 +876,13 @@ function toolCalls(): TurnStepsDependencies["toolCalls"] {
 /** No case here collaborates, so every method dies if reached. */
 function collaborations(): CollaborationStore {
 	const unused = () => Effect.die(new Error("These cases do not collaborate"));
-	return { open: unused, stopWaiting: unused, readAnswer: unused, deliverAnswer: unused };
+	return {
+		open: unused,
+		stopWaiting: unused,
+		readAnswer: unused,
+		deliverAnswer: unused,
+		failUnder: unused,
+	};
 }
 
 function eventBus(): EventBus {

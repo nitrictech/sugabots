@@ -133,10 +133,10 @@ const main = Effect.gen(function* () {
 			Lanes.reconcileLayer,
 		).pipe(
 			Layer.provideMerge(summarySteps({ store: stores.summaries, model })),
-			Layer.provideMerge(routineSteps(stores.routines)),
 			Layer.provideMerge(
-				facilitateSteps({ model, emit: conversations.emit, routines: stores.routines }),
+				routineSteps({ routines: stores.routines, settlement: conversations.settlement }),
 			),
+			Layer.provideMerge(facilitateSteps({ model, emit: conversations.emit })),
 			Layer.provideMerge(
 				turnSteps({
 					execution: stores.turns,
@@ -148,7 +148,7 @@ const main = Effect.gen(function* () {
 					approvals: stores.approvals,
 					builtInTools,
 					connectionTools,
-					routines: stores.routines,
+					emit: conversations.emit,
 				}),
 			),
 			Layer.provide(Layer.succeedContext(conversationServices)),

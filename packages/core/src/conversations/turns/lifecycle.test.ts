@@ -205,6 +205,7 @@ describe("cancelling", () => {
 		expect(transition(turn(), TurnEvent.RoutineEnded())).toEqual({
 			_tag: "Next",
 			state: turn({ cancelRequested: true }),
+			followUp: FollowUp.AnnounceCancelRequest(),
 		});
 	});
 });

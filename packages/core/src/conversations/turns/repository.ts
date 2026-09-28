@@ -14,7 +14,7 @@ import {
 } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvent } from "../events.ts";
-import { threadRejectsTurns } from "../routines/execution.ts";
+import { lockRoutineSettlementOf, routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
 import type { PendingToolApproval, ToolCallRepository } from "../tools/calls/repository.ts";
 import {
@@ -22,6 +22,7 @@ import {
 	type Ended,
 	endedAs,
 	type FollowUp,
+	ROUTINE_EXECUTION_ENDED,
 	runsAgainAfterFailure,
 	TURN_CANCELLED,
 	TURN_STOPPED_UNEXPECTEDLY,
@@ -47,7 +48,9 @@ export interface TurnRepository {
 	/**
 	 * Opens the turn an agent takes on a trigger message, with its reply: starts
 	 * it, or reopens it for another run. A turn that may not run again says
-	 * why, and how it ended if opening it ended it.
+	 * why, and how it ended if opening it ended it. A routine run that takes no
+	 * more work (see `routineAcceptsWork`) opens no turn, and ends the one it
+	 * finds.
 	 */
 	openReplyTurn(
 		request: ReplyTurnRequest,
@@ -114,9 +117,12 @@ export interface TurnRepository {
 	markActed(turnId: string): Effect.Effect<void, never, Database>;
 	/**
 	 * Cancels the turns waiting in these threads, and asks the running ones to
-	 * stop, because the routine run they work for ended.
+	 * stop, because the routine run they work for ended. A running turn another
+	 * transaction holds is skipped: its worker is recording how it ended.
+	 * Returns the workflow executions of the waiting turns it cancelled, which
+	 * are still waiting and have to be told.
 	 */
-	cancelUnder(threadIds: readonly string[]): Effect.Effect<void, never, Database>;
+	cancelUnder(threadIds: readonly string[]): Effect.Effect<readonly string[], never, Database>;
 }
 
 /** Where an agent's turn is: its thread and workspace, and the reply it writes. */
@@ -391,6 +397,37 @@ export function turnRepository(
 			return created.id;
 		});
 
+	/** Ends `existing`, if it is still active, because its routine run takes no more work. */
+	const endForEndedRoutine = (existing: { id: string; state: TurnState } | undefined) =>
+		Effect.gen(function* () {
+			const reason = "The Routine execution has ended";
+			const decided =
+				existing &&
+				transition(
+					existing.state,
+					TurnEvent.Abandon({ status: "cancelled", userMessage: ROUTINE_EXECUTION_ENDED }),
+				);
+			if (!existing || decided?._tag !== "Next") return notRunnable(reason);
+			yield* write(existing.id, decided.state);
+			return notRunnable(
+				reason,
+				yield* endRun(existing.id, decided.state, ROUTINE_EXECUTION_ENDED),
+			);
+		});
+
+	/**
+	 * Holds the settlement lock of the routine run the turn found by
+	 * `condition` works for, if any, before the turn itself is locked (see
+	 * `lockRoutineSettlement`).
+	 */
+	const lockRoutineSettlementOfTurn = (condition: SQL | undefined) =>
+		Effect.gen(function* () {
+			const [found] = yield* query((db) =>
+				db.select({ threadId: turn.threadId }).from(turn).where(condition).limit(1),
+			);
+			if (found) yield* lockRoutineSettlementOf(found.threadId);
+		});
+
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
 		emit([
 			ConversationEvent.TurnStarted({
@@ -409,7 +446,9 @@ export function turnRepository(
 					never,
 					Database | Transaction
 				> {
+					const acceptsWork = yield* routineAcceptsWork(request.threadId);
 					const existing = yield* lockedTurn(onTrigger(request));
+					if (!acceptsWork) return yield* endForEndedRoutine(existing);
 					if (!existing) {
 						const turnId = yield* insertTurn(request);
 						const [created] = yield* query((db) =>
@@ -493,7 +532,7 @@ export function turnRepository(
 		suspend: (reply, checkpoint, approvals) =>
 			transaction(
 				Effect.gen(function* () {
-					if (yield* threadRejectsTurns(reply.threadId)) return false;
+					if (!(yield* routineAcceptsWork(reply.threadId))) return false;
 					const locked = yield* lockAndTransition(eq(turn.id, reply.turnId), TurnEvent.Suspend());
 					if (locked?.decided._tag !== "Next") return false;
 					yield* write(locked.id, locked.decided.state, { checkpoint });
@@ -636,6 +675,7 @@ export function turnRepository(
 		stopWaiting: (request) =>
 			transaction(
 				Effect.gen(function* () {
+					yield* lockRoutineSettlementOfTurn(onTrigger(request));
 					const locked = yield* lockAndTransition(onTrigger(request), TurnEvent.StopWaiting());
 					if (locked?.decided._tag !== "Next") return;
 					yield* write(locked.id, locked.decided.state);
@@ -648,10 +688,9 @@ export function turnRepository(
 		abandon: (owner, outcome) =>
 			transaction(
 				Effect.gen(function* () {
-					const locked = yield* lockAndTransition(
-						and(eq(turn.owner, owner), inArray(turn.status, [...ACTIVE_STATUSES])),
-						TurnEvent.Abandon(outcome),
-					);
+					const owned = and(eq(turn.owner, owner), inArray(turn.status, [...ACTIVE_STATUSES]));
+					yield* lockRoutineSettlementOfTurn(owned);
+					const locked = yield* lockAndTransition(owned, TurnEvent.Abandon(outcome));
 					if (locked?.decided._tag !== "Next") return undefined;
 					yield* write(locked.id, locked.decided.state);
 					return yield* endRun(locked.id, locked.decided.state, outcome.userMessage);
@@ -666,38 +705,41 @@ export function turnRepository(
 		cancelUnder: (threadIds) =>
 			transaction(
 				Effect.gen(function* () {
-					if (threadIds.length === 0) return;
+					if (threadIds.length === 0) return [];
 					const under = inArray(turn.threadId, [...threadIds]);
-					// A waiting turn is waited for, since nobody else will end it. A running
-					// one held by its worker is skipped: the worker is recording how it
-					// ended, which settles the routine run again.
+					// Whoever else locks a waiting turn takes the routine's settlement lock
+					// first, or emits nothing settlement reacts to, so waiting here cannot
+					// deadlock.
 					const waiting = yield* query((db) =>
 						db
-							.select(stateColumns)
+							.select({ ...stateColumns, threadId: turn.threadId })
 							.from(turn)
 							.where(and(under, eq(turn.status, "waiting")))
 							.for("update"),
 					);
 					const running = yield* query((db) =>
 						db
-							.select(stateColumns)
+							.select({ ...stateColumns, threadId: turn.threadId })
 							.from(turn)
 							.where(and(under, eq(turn.status, "running")))
 							.for("update", { skipLocked: true }),
 					);
-					yield* Effect.forEach(
-						[...waiting, ...running],
-						(row) =>
-							Effect.gen(function* () {
-								const decided = transition(stateOf(row), TurnEvent.RoutineEnded());
-								if (decided._tag === "Refused") return;
-								yield* write(row.id, decided.state);
-								if (decided.followUp?._tag === "End") {
-									yield* endRun(row.id, decided.state, decided.followUp.userMessage);
-								}
-							}),
-						{ discard: true },
+					const ownersToTell = yield* Effect.forEach([...waiting, ...running], (row) =>
+						Effect.gen(function* () {
+							const decided = transition(stateOf(row), TurnEvent.RoutineEnded());
+							if (decided._tag === "Refused") return [];
+							yield* write(row.id, decided.state);
+							if (decided.followUp?._tag === "AnnounceCancelRequest") {
+								yield* emit([
+									ConversationEvent.TurnCancelRequested({ threadId: row.threadId, turnId: row.id }),
+								]);
+							}
+							if (decided.followUp?._tag !== "End") return [];
+							yield* endRun(row.id, decided.state, decided.followUp.userMessage);
+							return row.owner ? [row.owner] : [];
+						}),
 					);
+					return ownersToTell.flat();
 				}),
 			),
 	};

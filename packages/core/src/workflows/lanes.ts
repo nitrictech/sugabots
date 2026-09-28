@@ -84,17 +84,19 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 /**
  * A statement dropping the requests waiting in lanes about any of `subjects`
  * (a subquery of ids) for `workflows`, so they never start. What is already
- * running is left alone.
+ * running is left alone, and so is a request another transaction holds.
  */
 export const dropWaiting = (subjects: SQLWrapper, workflows: ReadonlyArray<string>) =>
 	sql`delete from ${laneRequest}
-		where ${laneRequest.laneKey} in (
-			select ${lane.key} from ${lane}
+		where ${laneRequest.id} in (
+			select waiting.id from ${laneRequest} waiting
+			join ${lane} on ${lane.key} = waiting.lane_key
 			where ${lane.subject} in (select (id)::text from (${subjects}) as subject(id))
 				and ${lane.workflow} in (${sql.join(
 					workflows.map((name) => sql`${name}`),
 					sql`, `,
 				)})
+			for update of waiting skip locked
 		)`;
 
 /** How long a lane may stay `starting` before `reconcile` starts its workflow again. */

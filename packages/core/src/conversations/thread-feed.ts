@@ -71,6 +71,10 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		TurnCancelRequested: ({ threadId, turnId }) => [
 			onThread(threadId, streamEvent("turn.cancel_requested", { threadId, turnId })),
 		],
+		// Watchers see nothing new in these; only routine settlement reacts to them.
+		TurnAbandoned: () => [],
+		LaneReleased: () => [],
+		FacilitationFailed: () => [],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
@@ -93,6 +97,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		],
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
+		CollaborationFailed: (change) => [collaborationUpdated(change)],
 		ThreadSummarised: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
 		RoutineExecutionAccepted: ({ workspaceId, chatId, threadId }) => [
 			routineThreadChanged(workspaceId, chatId, threadId),

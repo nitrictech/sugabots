@@ -5,7 +5,6 @@ import { ModelRequestFailed } from "./model.ts";
 
 const mocks = vi.hoisted(() => ({
 	queueTurn: vi.fn(),
-	settleThread: vi.fn(),
 	scope: undefined as unknown,
 }));
 
@@ -59,7 +58,6 @@ const execution = (model: FacilitatorExecution["model"]): FacilitatorExecution =
 	model,
 	emit: () => Effect.void,
 	requests: { queueTurn: mocks.queueTurn },
-	routines: { settleThread: mocks.settleThread },
 });
 
 describe("an attempt at facilitation", () => {
@@ -67,10 +65,9 @@ describe("an attempt at facilitation", () => {
 		vi.clearAllMocks();
 		mocks.scope = scope;
 		mocks.queueTurn.mockReturnValue(Effect.void);
-		mocks.settleThread.mockReturnValue(Effect.succeed(true));
 	});
 
-	it("queues the chosen agent's turn and settles the Routine", async () => {
+	it("queues the chosen agent's turn", async () => {
 		const outcome = await runWithoutDatabase(
 			attemptFacilitation(request, 1, execution(answering("@host-agent"))),
 		);
@@ -82,17 +79,15 @@ describe("an attempt at facilitation", () => {
 			triggerMessageId: request.triggerMessageId,
 			reason: "facilitator",
 		});
-		expect(mocks.settleThread).toHaveBeenCalledWith(request.threadId);
 	});
 
-	it("settles a Routine when the facilitator answers nobody", async () => {
+	it("queues no turn when the facilitator answers nobody", async () => {
 		const outcome = await runWithoutDatabase(
 			attemptFacilitation(request, 1, execution(answering("nobody"))),
 		);
 
 		expect(outcome).toBe("decided");
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
-		expect(mocks.settleThread).toHaveBeenCalledWith(request.threadId);
 	});
 
 	it("does not ask the model for a Chat", async () => {
@@ -108,14 +103,13 @@ describe("an attempt at facilitation", () => {
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
 	});
 
-	it("reports a failed attempt without settling the Routine", async () => {
+	it("reports a failed attempt, having queued no turn", async () => {
 		const outcome = await runWithoutDatabase(
 			attemptFacilitation(request, 3, execution(unavailable)),
 		);
 
 		expect(outcome).toBe("failed");
 		expect(mocks.queueTurn).not.toHaveBeenCalled();
-		expect(mocks.settleThread).not.toHaveBeenCalled();
 	});
 });
 

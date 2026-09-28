@@ -1,6 +1,7 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
+import type { Ended } from "./turns/lifecycle.ts";
 import type { ModelAccounting } from "./turns/model.ts";
 
 /**
@@ -62,11 +63,27 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly messageId: string;
 		readonly content: string;
 	};
-	/** Somebody asked a running turn to stop. */
+	/** Somebody asked a running turn to stop, or its routine run ended. */
 	TurnCancelRequested: {
 		readonly threadId: string;
 		readonly turnId: string;
 	};
+	/**
+	 * An agent's turn in the thread was given up with no active turn left to
+	 * end: it could not open, or its workflow failed while none was running.
+	 * `outcome` is how it ended.
+	 */
+	TurnAbandoned: { readonly threadId: string; readonly outcome: Ended };
+	/**
+	 * A turn's or facilitation's workflow in the thread finished and freed its
+	 * lane, so it no longer keeps the thread busy.
+	 */
+	LaneReleased: { readonly threadId: string };
+	/**
+	 * Every attempt at choosing who speaks after a message in the thread
+	 * failed. `userMessage` says so in words fit for people.
+	 */
+	FacilitationFailed: { readonly threadId: string; readonly userMessage: UserMessage };
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
 	/** A person allowed or denied a call. */
@@ -87,6 +104,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 	CollaborationStoppedWaiting: CollaborationChange;
 	/** The collaborator's reply was recorded as the answer. */
 	CollaborationAnswered: CollaborationChange;
+	/** The collaboration ended unanswered, because the routine run it worked for ended. */
+	CollaborationFailed: CollaborationChange;
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: { readonly workspaceId: string; readonly threadId: string };
 	/** A routine run began in its own thread, listed in the agent's chat. */

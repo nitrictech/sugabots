@@ -1,21 +1,14 @@
 import type { ToolApprovalDecision, ToolCallPart } from "@sugabots/contracts";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, transaction } from "../../../database/database.ts";
-import {
-	connection,
-	pod,
-	routineExecution,
-	thread,
-	toolCall,
-	turn,
-} from "../../../database/schema.ts";
+import { thread, toolCall, turn } from "../../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { podStandingFor } from "../../../workspaces/access.ts";
-import { findRoutineExecutionId, routineSettlementLockKey } from "../../routines/execution.ts";
+import { lockRoutineSettlementOf } from "../../routines/execution.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
-import { awaitsDecisions, mayRunTools } from "../../turns/lifecycle.ts";
+import { awaitsDecisions } from "../../turns/lifecycle.ts";
 import type { TurnRepository } from "../../turns/repository.ts";
 import { TurnSignals } from "../../turns/signals.ts";
 import { awaitsDecision } from "../calls/lifecycle.ts";
@@ -140,65 +133,6 @@ export const toolApprovalStore = Effect.fnUntraced(function* (
 		beginExecution: (input) =>
 			transaction(
 				Effect.gen(function* () {
-					const executionId = yield* query((db) => findRoutineExecutionId(db, input.threadId));
-					if (executionId) {
-						const lockKey = routineSettlementLockKey(executionId);
-						yield* query((db) =>
-							db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
-						);
-						const [execution] = yield* query((db) =>
-							db
-								.select({
-									state: routineExecution.state,
-									pendingTerminalState: routineExecution.pendingTerminalState,
-								})
-								.from(routineExecution)
-								.where(eq(routineExecution.id, executionId))
-								.limit(1),
-						);
-						if (execution?.state !== "running" || execution.pendingTerminalState) {
-							return yield* new ToolExecutionRefused({ message: "Routine execution has ended" });
-						}
-					}
-					const [scope] = yield* query((db) =>
-						db
-							.select({
-								workspaceId: thread.workspaceId,
-								podId: thread.podId,
-								status: turn.status,
-								cancelRequested: turn.cancelRequested,
-							})
-							.from(turn)
-							.innerJoin(thread, eq(thread.id, turn.threadId))
-							.innerJoin(pod, eq(pod.id, thread.podId))
-							.where(and(eq(turn.id, input.turnId), eq(turn.threadId, input.threadId)))
-							.limit(1)
-							.for("update"),
-					);
-					if (!scope || !mayRunTools(scope)) {
-						return yield* new ToolExecutionRefused({ message: "Turn is not running" });
-					}
-					const [currentConnection] = yield* query((db) =>
-						db
-							.select({ revision: connection.configurationRevision })
-							.from(connection)
-							.where(
-								and(
-									eq(connection.id, input.connectionId),
-									eq(connection.workspaceId, scope.workspaceId),
-									eq(connection.podId, scope.podId),
-									ne(connection.access, "off"),
-									eq(connection.configurationRevision, input.connectionRevision),
-								),
-							)
-							.limit(1)
-							.for("update"),
-					);
-					if (!currentConnection) {
-						return yield* new ToolExecutionRefused({
-							message: "Connection configuration changed after approval",
-						});
-					}
 					const began = yield* toolCalls.beginExecution(input);
 					if (began._tag === "Refused") {
 						return yield* new ToolExecutionRefused({ message: began.reason });
@@ -226,15 +160,7 @@ export const toolApprovalStore = Effect.fnUntraced(function* (
 							.limit(1),
 					);
 					if (!approvalThread) return yield* new ToolApprovalNotFound();
-					const routineExecutionId = yield* query((db) =>
-						findRoutineExecutionId(db, approvalThread.id),
-					);
-					if (routineExecutionId) {
-						const lockKey = routineSettlementLockKey(routineExecutionId);
-						yield* query((db) =>
-							db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
-						);
-					}
+					const routineExecutionId = yield* lockRoutineSettlementOf(approvalThread.id);
 					const [candidate] = yield* query((db) =>
 						db
 							.select({

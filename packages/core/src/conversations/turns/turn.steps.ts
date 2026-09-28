@@ -15,8 +15,9 @@ import {
 } from "effect";
 import { Database, effectRunner, transaction } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { RoutineStore } from "../routines/store.ts";
+import { ConversationEvent } from "../events.ts";
 import type { ToolApprovalStore, ToolApprovalsIncomplete } from "../tools/approvals/store.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { PendingToolApproval, ToolCallRepository } from "../tools/calls/repository.ts";
@@ -83,7 +84,8 @@ export interface TurnStepsDependencies {
 	connectionTools: ConnectionTools;
 	/** Where token deltas go, and where tools watch for things to happen. */
 	events: Pick<EventBus, "publish" | "subscribe">;
-	routines?: Pick<RoutineStore, "settleThread">;
+	/** Where the workflow records what no turn command announces: its lane freed, or a turn given up with none to end. */
+	emit: DomainEvents.Emit<ConversationEvent>;
 	/** Asks the Scribe to catch up on the thread after a completed reply. */
 	requests: Pick<TurnRequests.Interface, "queueSummary">;
 }
@@ -95,8 +97,6 @@ export const stepsLayer = (options: Omit<TurnStepsDependencies, "requests">) =>
 		Effect.gen(function* () {
 			const database = yield* Database;
 			const dependencies = { ...options, requests: yield* TurnRequests.Service };
-			const settleRoutine = (threadId: string, outcome?: { state: "failed"; error: UserMessage }) =>
-				(dependencies.routines?.settleThread(threadId, outcome) ?? Effect.void).pipe(Effect.asVoid);
 			return TurnSteps.of({
 				segment: (request) =>
 					Effect.flatMap(turnRunFor(request), (run) => runSegment(run, dependencies)).pipe(
@@ -106,14 +106,18 @@ export const stepsLayer = (options: Omit<TurnStepsDependencies, "requests">) =>
 					transaction(
 						Effect.gen(function* () {
 							const run = yield* turnRunFor(request);
-							yield* dependencies.turns.abandon(run.executionId, {
+							const ended = yield* dependencies.turns.abandon(run.executionId, {
 								status: "failed",
 								userMessage: TURN_STOPPED_UNEXPECTEDLY,
 							});
-							yield* settleRoutine(request.threadId, {
-								state: "failed",
-								error: TURN_STOPPED_UNEXPECTEDLY,
-							});
+							// Ending an active turn announced how it ended.
+							if (ended) return;
+							yield* dependencies.emit([
+								ConversationEvent.TurnAbandoned({
+									threadId: request.threadId,
+									outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
+								}),
+							]);
 						}),
 					).pipe(Effect.provideService(Database, database)),
 				decide: (request, decided) =>
@@ -122,8 +126,10 @@ export const stepsLayer = (options: Omit<TurnStepsDependencies, "requests">) =>
 						.pipe(Effect.provideService(Database, database)),
 				stopWaiting: (request) =>
 					dependencies.turns.stopWaiting(request).pipe(Effect.provideService(Database, database)),
-				settleRoutine: (request) =>
-					settleRoutine(request.threadId).pipe(Effect.provideService(Database, database)),
+				announceReleased: (request) =>
+					transaction(
+						dependencies.emit([ConversationEvent.LaneReleased({ threadId: request.threadId })]),
+					).pipe(Effect.provideService(Database, database)),
 			});
 		}),
 	);
@@ -144,13 +150,7 @@ export const runSegment = (
 	Effect.flatMap(dependencies.execution.prepare(run), (preparation) =>
 		preparation._tag === "Prepared"
 			? generateReply(preparation, dependencies)
-			: Effect.as(
-					dependencies.routines?.settleThread(
-						run.request.threadId,
-						preparation.ended ?? { state: "cancelled" },
-					) ?? Effect.void,
-					finished,
-				),
+			: Effect.succeed(finished),
 	);
 
 const finished: SegmentOutcome = { _tag: "Finished" };
@@ -245,7 +245,7 @@ const generateReply = (
 ): Effect.Effect<SegmentOutcome, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { turns, execution, collaborations, routines } = dependencies;
+			const { turns, execution, collaborations } = dependencies;
 			const replyTurn = replyTurnOf(prepared);
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, dependencies, reply)));
@@ -256,21 +256,9 @@ const generateReply = (
 			 * runs again only while that is safe.
 			 */
 			const failed = (failure: TurnFailure) =>
-				Effect.andThen(
-					logTurnFailure(prepared, failure.message),
-					transaction(
-						Effect.gen(function* () {
-							const error = failure.userMessage;
-							const willRetry = yield* turns.fail(replyTurn, draft, error);
-							if (!willRetry && routines) {
-								yield* routines.settleThread(prepared.context.thread.id, {
-									state: "failed",
-									error,
-								});
-							}
-							return willRetry ? retry : finished;
-						}),
-					),
+				logTurnFailure(prepared, failure.message).pipe(
+					Effect.andThen(turns.fail(replyTurn, draft, failure.userMessage)),
+					Effect.map((willRetry) => (willRetry ? retry : finished)),
 				);
 
 			if (Exit.isSuccess(streamed)) {
@@ -285,9 +273,6 @@ const generateReply = (
 								} satisfies SegmentOutcome;
 							}
 							yield* turns.cancel(replyTurn, draft);
-							if (routines) {
-								yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
-							}
 							return finished;
 						}),
 					);
@@ -318,7 +303,6 @@ const generateReply = (
 						if (!answered) {
 							yield* execution.giveFloor(prepared, draft);
 						}
-						if (routines) yield* routines.settleThread(prepared.context.thread.id);
 					}),
 				);
 				yield* dependencies.requests
@@ -341,15 +325,7 @@ const generateReply = (
 			if (Option.isNone(expected)) yield* Effect.logError("A turn's stream died", cause);
 			const failure = Option.getOrElse(expected, () => new TurnStoppedUnexpectedly());
 			if (failure instanceof TurnCancelled) {
-				return yield* transaction(
-					Effect.gen(function* () {
-						yield* turns.cancel(replyTurn, draft);
-						if (routines) {
-							yield* routines.settleThread(prepared.context.thread.id, { state: "cancelled" });
-						}
-						return finished;
-					}),
-				);
+				return yield* Effect.as(turns.cancel(replyTurn, draft), finished);
 			}
 			return yield* failed(failure);
 		}),

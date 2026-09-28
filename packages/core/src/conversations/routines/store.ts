@@ -14,7 +14,7 @@ import {
 	DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT,
 	MAX_THREAD_TITLE_CHARACTERS,
 } from "@sugabots/contracts";
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { type Database, query, queryCatching, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
@@ -24,26 +24,19 @@ import type * as schema from "../../database/schema.ts";
 import {
 	agent,
 	chat,
-	collaboration,
 	message,
 	pod,
 	routine,
 	routineExecution,
 	thread,
 	threadParticipant,
-	turn,
 } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
 import { reachesPod } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/store.ts";
 import { ConversationEvent } from "../events.ts";
-import { Facilitate } from "../turns/facilitate.workflow.ts";
-import type { TurnRepository } from "../turns/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
-import { TurnSignals } from "../turns/signals.ts";
-import { Turn } from "../turns/turn.workflow.ts";
-import { routineSettlementLockKey, toRoutineExecution } from "./execution.ts";
+import { toRoutineExecution } from "./execution.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { RoutineRuns } from "./runs.ts";
 import {
@@ -53,9 +46,6 @@ import {
 } from "./schedule.ts";
 
 const deriveKey = promisify(scrypt);
-
-/** What people are told about a run whose workflow failed; the cause goes only to the logs. */
-const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;
 
 interface ExecutionCursor {
 	acceptedAt: Date;
@@ -170,18 +160,6 @@ export interface RoutineStore {
 	): Effect.Effect<RoutineExecutionPage | undefined, InvalidRoutineExecutionCursor, Database>;
 	/** Marks a queued run started and asks for its turn. Does nothing once the run has ended. */
 	startRun(run: RoutineRun): Effect.Effect<void, never, Database>;
-	settleThread(
-		threadId: string,
-		outcome?: { state: "failed" | "cancelled"; error?: UserMessage },
-	): Effect.Effect<boolean, never, Database>;
-	/** Settles the run if its work is done. Returns whether it has ended. */
-	settleRun(run: RoutineRun): Effect.Effect<boolean, never, Database>;
-	/**
-	 * Records a run that has not ended as failed, at once, and stops its work.
-	 * People are told only that it stopped unexpectedly. Does nothing once the
-	 * run has ended.
-	 */
-	failRun(run: RoutineRun): Effect.Effect<void, never, Database>;
 	processNextDue(
 		now?: Date,
 	): Effect.Effect<
@@ -207,10 +185,8 @@ export interface RoutineStore {
 
 export const routineStore = Effect.fnUntraced(function* (
 	emit: DomainEvents.Emit<ConversationEvent>,
-	turns: Pick<TurnRepository, "cancelUnder">,
 ) {
 	const requests = yield* TurnRequests.Service;
-	const signals = yield* TurnSignals.Service;
 	const runs = yield* RoutineRuns.Service;
 	const store: RoutineStore = {
 		listInWorkspace: (workspaceId, userId) =>
@@ -616,80 +592,6 @@ export const routineStore = Effect.fnUntraced(function* (
 				}),
 			),
 
-		settleThread: (threadId, outcome) =>
-			settleRoutineThread(threadId, outcome, emit, turns, signals, runs),
-
-		failRun: (run) =>
-			transaction(
-				Effect.gen(function* () {
-					// The settlement lock comes before the execution row, in the order
-					// settlement takes them.
-					const lockKey = routineSettlementLockKey(run.executionId);
-					yield* query((db) =>
-						db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`),
-					);
-					const [execution] = yield* query((db) =>
-						db
-							.select()
-							.from(routineExecution)
-							.where(eq(routineExecution.id, run.executionId))
-							.limit(1),
-					);
-					if (execution?.state === "running") {
-						yield* settleRoutineThread(
-							execution.threadId,
-							{ state: "failed", error: RUN_STOPPED_UNEXPECTEDLY },
-							emit,
-							turns,
-							signals,
-							runs,
-						);
-					}
-					// Settling waits for work that is still stopping, but the run ends
-					// now: its routine's next run cannot start while it is running.
-					const [failed] = yield* query((db) =>
-						db
-							.update(routineExecution)
-							.set({
-								state: "failed",
-								error: RUN_STOPPED_UNEXPECTEDLY,
-								finishedAt: new Date(),
-								pendingTerminalState: null,
-								pendingTerminalError: null,
-							})
-							.where(
-								and(
-									eq(routineExecution.id, run.executionId),
-									inArray(routineExecution.state, ["queued", "running"]),
-								),
-							)
-							.returning(),
-					);
-					if (failed) yield* announceRunEnded(emit, failed);
-				}),
-			),
-
-		settleRun: (run) =>
-			Effect.gen(function* () {
-				const [execution] = yield* query((db) =>
-					db
-						.select({ threadId: routineExecution.threadId })
-						.from(routineExecution)
-						.where(eq(routineExecution.id, run.executionId))
-						.limit(1),
-				);
-				if (!execution) return true;
-				yield* settleRoutineThread(execution.threadId, undefined, emit, turns, signals, runs);
-				const [settled] = yield* query((db) =>
-					db
-						.select({ state: routineExecution.state })
-						.from(routineExecution)
-						.where(eq(routineExecution.id, run.executionId))
-						.limit(1),
-				);
-				return settled?.state !== "running";
-			}),
-
 		processNextDue: (now = new Date()) =>
 			transaction(
 				Effect.gen(function* () {
@@ -882,282 +784,6 @@ function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigg
 		isDeepStrictEqual(left.payload, right.payload)
 	);
 }
-
-/**
- * The child threads of `tree` that belong to a routine run's work: its
- * collaborations. A system agent's thread (the Scribe's summaries) hangs off
- * the thread it serves but is not part of the run, so its turns neither keep
- * the run open nor decide how it ended.
- */
-const workingChildThreads = sql`select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id and child.type <> 'system_agent'`;
-
-function settleRoutineThread(
-	threadId: string,
-	outcome: { state: "failed" | "cancelled"; error?: UserMessage } | undefined,
-	emit: DomainEvents.Emit<ConversationEvent>,
-	turns: Pick<TurnRepository, "cancelUnder">,
-	signals: TurnSignals.Interface,
-	runs: RoutineRuns.Interface,
-) {
-	return transaction(
-		Effect.gen(function* () {
-			const target = yield* query((db) =>
-				Effect.gen(function* () {
-					const rows = yield* db.execute<{ id: string }>(
-						sql`
-					with recursive ancestors as (
-						select id, parent_thread_id from ${thread} where id = ${threadId}
-						union all
-						select parent.id, parent.parent_thread_id
-						from ${thread} parent
-						join ancestors child on child.parent_thread_id = parent.id
-					)
-					select execution.id
-					from ${routineExecution} execution
-					join ancestors on ancestors.id = execution.thread_id
-					where execution.state = 'running'
-					limit 1
-				`,
-						"objects",
-					);
-					return rows[0];
-				}),
-			);
-			if (!target) return false;
-			const settlementLockKey = routineSettlementLockKey(target.id);
-			yield* query((db) =>
-				db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${settlementLockKey}, 0))`),
-			);
-			const status = yield* query((db) =>
-				Effect.gen(function* () {
-					const rows = yield* db.execute<{
-						id: string;
-						routine_id: string;
-						thread_id: string;
-						workspace_id: string;
-						active: boolean;
-						last_turn_status: string | null;
-						last_turn_error: UserMessage | null;
-						pending_terminal_state: "failed" | "cancelled" | null;
-						pending_terminal_error: UserMessage | null;
-					}>(
-						sql`
-					with recursive tree as (
-						select root.id
-						from ${thread} root
-						join ${routineExecution} root_execution on root_execution.thread_id = root.id
-						where root_execution.id = ${target.id} and root_execution.state = 'running'
-						union all
-						${workingChildThreads}
-					)
-					select execution.id, execution.routine_id, execution.thread_id, execution.workspace_id,
-						execution.pending_terminal_state, execution.pending_terminal_error,
-							exists (
-							select 1 from tree busy_thread
-							where ${laneBusy(sql`busy_thread.id`, [Turn._tag, Facilitate._tag])}
-						) or exists (
-							select 1 from ${turn} active_turn
-							join tree on tree.id = active_turn.thread_id
-							where active_turn.status in ('running', 'waiting')
-						) or exists (
-							select 1 from ${collaboration} active_collaboration
-							join tree on tree.id = active_collaboration.parent_thread_id
-							where active_collaboration.status in ('waiting', 'pending')
-						) as active,
-						(
-							select terminal_turn.status from ${turn} terminal_turn
-							join tree on tree.id = terminal_turn.thread_id
-							order by terminal_turn.finished_at desc nulls last, terminal_turn.id desc
-							limit 1
-						) as last_turn_status,
-						(
-							select terminal_turn.error from ${turn} terminal_turn
-							join tree on tree.id = terminal_turn.thread_id
-							order by terminal_turn.finished_at desc nulls last, terminal_turn.id desc
-							limit 1
-						) as last_turn_error
-					from ${routineExecution} execution
-					where execution.id = ${target.id} and execution.state = 'running'
-				`,
-						"objects",
-					);
-					return rows[0];
-				}),
-			);
-			if (!status) return false;
-			let pendingState = status.pending_terminal_state;
-			let pendingError = status.pending_terminal_error;
-			let active = status.active;
-			if (outcome) {
-				const affectedThreadIds = yield* query((db) =>
-					Effect.gen(function* () {
-						const rows = yield* db.execute<{ id: string }>(
-							sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						select id from tree
-					`,
-							"objects",
-						);
-						return rows.map(({ id }) => id);
-					}),
-				);
-				if (pendingState !== "failed") {
-					pendingState = outcome.state;
-					pendingError = outcome.state === "failed" ? (outcome.error ?? null) : null;
-					yield* query((db) =>
-						db
-							.update(routineExecution)
-							.set({
-								pendingTerminalState: pendingState,
-								pendingTerminalError: pendingError,
-							})
-							.where(
-								and(eq(routineExecution.id, status.id), eq(routineExecution.state, "running")),
-							),
-					);
-				}
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						update ${collaboration}
-						set status = 'failed', updated_at = now()
-						where ${collaboration.id} in (
-							select active_collaboration.id
-							from ${collaboration} active_collaboration
-							join tree on active_collaboration.parent_thread_id = tree.id
-							where active_collaboration.status in ('waiting', 'pending')
-							for update of active_collaboration skip locked
-						)
-					`),
-				);
-				// Each waiting turn's owner is told to stop first: a workflow records
-				// the cancellation itself, which finds the turn already cancelled here.
-				const waitingOwners = yield* query((db) =>
-					db.execute<{ owner: string | null }>(
-						sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							select child.id from ${thread} child join tree parent on child.parent_thread_id = parent.id
-						)
-						select ${turn.owner} as owner from ${turn}
-						where ${turn.threadId} in (select id from tree) and ${turn.status} = 'waiting'
-					`,
-						"objects",
-					),
-				);
-				yield* Effect.forEach(waitingOwners, ({ owner }) =>
-					owner ? signals.cancel(owner) : Effect.void,
-				);
-				yield* turns.cancelUnder(affectedThreadIds);
-				// Turns and facilitations asked for but not yet started never start.
-				yield* query((db) =>
-					db.execute(sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						${dropWaiting(sql`select id from tree`, [Turn._tag, Facilitate._tag])}
-					`),
-				);
-				active = yield* query((db) =>
-					Effect.gen(function* () {
-						const rows = yield* db.execute<{ active: boolean }>(
-							sql`
-						with recursive tree as (
-							select id from ${thread} where id = ${status.thread_id}
-							union all
-							${workingChildThreads}
-						)
-						select exists (
-							select 1 from tree busy_thread
-							where ${laneBusy(sql`busy_thread.id`, [Facilitate._tag])}
-						) or exists (
-							select 1 from ${turn} active_turn
-							join tree on tree.id = active_turn.thread_id
-							where active_turn.status = 'running'
-						) as active
-					`,
-							"objects",
-						);
-						return rows[0]?.active ?? false;
-					}),
-				);
-				yield* emit([
-					ConversationEvent.RoutineWorkCancelled({
-						workspaceId: status.workspace_id,
-						threadIds: affectedThreadIds,
-					}),
-				]);
-			}
-			if (active) return false;
-
-			const state =
-				pendingState ??
-				(status.last_turn_status === "failed"
-					? "failed"
-					: status.last_turn_status === "cancelled"
-						? "cancelled"
-						: "completed");
-			const error = pendingError ?? (state === "failed" ? status.last_turn_error : null);
-			const [settled] = yield* query((db) =>
-				db
-					.update(routineExecution)
-					.set({
-						state,
-						error: error ?? null,
-						finishedAt: new Date(),
-						pendingTerminalState: null,
-						pendingTerminalError: null,
-					})
-					.where(and(eq(routineExecution.id, status.id), eq(routineExecution.state, "running")))
-					.returning({ id: routineExecution.id }),
-			);
-			if (!settled) return false;
-			yield* runs.settled({ routineId: status.routine_id, executionId: status.id });
-			yield* announceRunEnded(emit, {
-				workspaceId: status.workspace_id,
-				threadId: status.thread_id,
-			});
-			return true;
-		}),
-	);
-}
-
-/** Tells the workspace that a routine run's thread changed because the run ended. */
-const announceRunEnded = (
-	emit: DomainEvents.Emit<ConversationEvent>,
-	run: { readonly workspaceId: string; readonly threadId: string },
-) =>
-	Effect.gen(function* () {
-		const chatId = yield* query((db) =>
-			Effect.gen(function* () {
-				const [root] = yield* db
-					.select({ chatId: thread.chatId })
-					.from(thread)
-					.where(eq(thread.id, run.threadId))
-					.limit(1);
-				if (!root?.chatId) throw new Error("Routine thread has no Chat");
-				return root.chatId;
-			}),
-		);
-		yield* emit([
-			ConversationEvent.RoutineExecutionSettled({
-				workspaceId: run.workspaceId,
-				chatId,
-				threadId: run.threadId,
-			}),
-		]);
-	});
 
 function generateSecret() {
 	return randomBytes(32).toString("base64url");

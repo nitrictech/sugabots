@@ -363,7 +363,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
 			stopWaiting: (request) => Effect.promise(() => turns.stopWaiting(request)),
 			abandon: () => Effect.void,
-			settleRoutine: () => Effect.void,
+			announceReleased: () => Effect.void,
 		});
 		const workflows = ManagedRuntime.make(
 			turnWorkflow.layer.pipe(

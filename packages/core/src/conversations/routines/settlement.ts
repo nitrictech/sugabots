@@ -1,0 +1,381 @@
+export * as RoutineSettlement from "./settlement.ts";
+
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { DateTime, Effect } from "effect";
+import { afterCommit, type Database, query, transaction } from "../../database/database.ts";
+import type { DomainEvents } from "../../database/events/domain-events.ts";
+import {
+	collaboration,
+	type RoutineExecutionRow,
+	routineExecution,
+	thread,
+	turn,
+} from "../../database/schema.ts";
+import { UserMessage } from "../../user-message.ts";
+import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
+import { ConversationEvent } from "../events.ts";
+import type { CollaborationStore } from "../tools/collaborate/store.ts";
+import { Facilitate } from "../turns/facilitate.workflow.ts";
+import type { Ended } from "../turns/lifecycle.ts";
+import type { TurnRepository } from "../turns/repository.ts";
+import { TurnSignals } from "../turns/signals.ts";
+import { Turn } from "../turns/turn.workflow.ts";
+import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
+import type { RoutineRun } from "./routine.workflow.ts";
+import { RoutineRuns } from "./runs.ts";
+
+/**
+ * Settles routine runs: records how a run ended once nothing in its threads
+ * is running, waiting or about to start.
+ *
+ * `handler` reacts to the conversation events that can end a run, inside the
+ * transaction that emitted them. A turn or facilitation that failed for good,
+ * or a turn that was cancelled, starts ending its run early: the rest of the
+ * run's work is cancelled, and the run ends that way once what is still
+ * running stops. Every later settlement of an ending run cancels whatever
+ * work is left, since some may have been held by another transaction.
+ */
+export interface Interface {
+	readonly handler: DomainEvents.Handler<ConversationEvent>;
+	/**
+	 * Settles the run if its work is done, for the run's workflow to check in
+	 * case a signal was lost. Returns whether the run has ended.
+	 */
+	readonly settleRun: (run: RoutineRun) => Effect.Effect<boolean, never, Database>;
+	/**
+	 * Records a run that has not ended as failed, at once, and stops its work.
+	 * People are told only that it stopped unexpectedly. Does nothing once the
+	 * run has ended.
+	 */
+	readonly failRun: (run: RoutineRun) => Effect.Effect<void, never, Database>;
+}
+
+/** Settlement cancelling work through `turns` and `collaborations`, and recording what happened on `emit`. */
+export const make = Effect.fnUntraced(function* (
+	emit: DomainEvents.Emit<ConversationEvent>,
+	turns: Pick<TurnRepository, "cancelUnder">,
+	collaborations: Pick<CollaborationStore, "failUnder">,
+) {
+	const signals = yield* TurnSignals.Service;
+	const runs = yield* RoutineRuns.Service;
+
+	/** Cancels the work still going on in the run's threads `work`. */
+	const cancelWork = (work: readonly string[]) =>
+		Effect.gen(function* () {
+			yield* collaborations.failUnder(work);
+			// A cancelled waiting turn's workflow still waits for its approvals,
+			// holding its lane, until it is told to stop.
+			const stillWaiting = yield* turns.cancelUnder(work);
+			yield* afterCommit(
+				Effect.forEach(stillWaiting, (owner) => signals.cancel(owner), { discard: true }),
+			);
+			yield* query((db) =>
+				db.execute(dropWaiting(threadIdsRelation(work), [Turn._tag, Facilitate._tag])),
+			);
+		});
+
+	/**
+	 * Settles the running routine run the thread `threadId` belongs to, if its
+	 * work is done, first adding `outcome` to how it is ending.
+	 */
+	const settle = (threadId: string, outcome?: Ended) =>
+		transaction(
+			Effect.gen(function* () {
+				const executionId = yield* query((db) => findRoutineExecutionId(db, threadId));
+				if (!executionId) return;
+				yield* lockRoutineSettlement(executionId);
+				const run = yield* runningRun(executionId);
+				if (!run) return;
+				const work = yield* workingThreads(run.threadId);
+				const wasEnding = endingOf(run);
+				const ending = endingAfter(wasEnding, outcome);
+				if (ending !== wasEnding) yield* recordEnding(run.id, ending);
+				if (ending) yield* cancelWork(work);
+				if (ending && !wasEnding) {
+					yield* emit([
+						ConversationEvent.RoutineWorkCancelled({
+							workspaceId: run.workspaceId,
+							threadIds: work,
+						}),
+					]);
+				}
+				if (yield* stillBusy(work, ending !== undefined)) return;
+
+				const settled = settledAs(ending, yield* lastTurnIn(work));
+				const finishedAt = yield* DateTime.nowAsDate;
+				const [recorded] = yield* query((db) =>
+					db
+						.update(routineExecution)
+						.set({
+							...settled,
+							finishedAt,
+							pendingTerminalState: null,
+							pendingTerminalError: null,
+						})
+						.where(and(eq(routineExecution.id, run.id), eq(routineExecution.state, "running")))
+						.returning({ id: routineExecution.id }),
+				);
+				if (!recorded) return;
+				yield* runs.settled({ routineId: run.routineId, executionId: run.id });
+				yield* announceRunEnded(emit, run);
+			}),
+		);
+
+	return {
+		handler: (events) =>
+			Effect.forEach(
+				events.flatMap(settlementFor),
+				({ threadId, outcome }) => settle(threadId, outcome),
+				{ discard: true },
+			),
+
+		settleRun: (run) =>
+			Effect.gen(function* () {
+				const threadId = yield* executionThread(run.executionId);
+				if (!threadId) return true;
+				yield* settle(threadId);
+				const [after] = yield* query((db) =>
+					db
+						.select({ state: routineExecution.state })
+						.from(routineExecution)
+						.where(eq(routineExecution.id, run.executionId))
+						.limit(1),
+				);
+				return after?.state !== "running";
+			}),
+
+		failRun: (run) =>
+			transaction(
+				Effect.gen(function* () {
+					yield* lockRoutineSettlement(run.executionId);
+					const threadId = yield* executionThread(run.executionId);
+					if (threadId) {
+						yield* settle(threadId, { state: "failed", error: RUN_STOPPED_UNEXPECTEDLY });
+					}
+					// Settling waits for work that is still stopping, but the run ends
+					// now: its routine's next run cannot start while it is running.
+					const finishedAt = yield* DateTime.nowAsDate;
+					const [failed] = yield* query((db) =>
+						db
+							.update(routineExecution)
+							.set({
+								state: "failed",
+								error: RUN_STOPPED_UNEXPECTEDLY,
+								finishedAt,
+								pendingTerminalState: null,
+								pendingTerminalError: null,
+							})
+							.where(
+								and(
+									eq(routineExecution.id, run.executionId),
+									inArray(routineExecution.state, ["queued", "running"]),
+								),
+							)
+							.returning(),
+					);
+					if (failed) yield* announceRunEnded(emit, failed);
+				}),
+			),
+	} satisfies Interface;
+});
+
+/** What people are told about a run whose workflow failed; the cause goes only to the logs. */
+const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;
+
+/** The thread an event may let a routine run settle in, and how the run ends if it ends it early. */
+function settlementFor(
+	event: ConversationEvent,
+): Array<{ readonly threadId: string; readonly outcome?: Ended }> {
+	switch (event._tag) {
+		case "TurnCompleted":
+		case "LaneReleased":
+			return [{ threadId: event.threadId }];
+		case "TurnFailed":
+			// A turn that runs again has not failed for good.
+			return event.willRetry
+				? []
+				: [{ threadId: event.threadId, outcome: { state: "failed", error: event.userMessage } }];
+		case "TurnCancelled":
+			return [{ threadId: event.threadId, outcome: { state: "cancelled" } }];
+		case "TurnAbandoned":
+			return [{ threadId: event.threadId, outcome: event.outcome }];
+		case "FacilitationFailed":
+			return [{ threadId: event.threadId, outcome: { state: "failed", error: event.userMessage } }];
+		case "CollaborationAnswered":
+		case "CollaborationStoppedWaiting":
+			return [{ threadId: event.parentThreadId }];
+		default:
+			return [];
+	}
+}
+
+/**
+ * endingAfter returns how a run ends once `outcome` is added to `ending`, how
+ * it was already ending. A failure stands over a cancellation.
+ */
+function endingAfter(ending: Ended | undefined, outcome: Ended | undefined): Ended | undefined {
+	if (!outcome || ending?.state === "failed") return ending;
+	return outcome;
+}
+
+/** settledAs returns how a run whose work is over ends: as it was ending, or else as its last turn did. */
+function settledAs(
+	ending: Ended | undefined,
+	lastTurn: { status: string; error: UserMessage | null } | undefined,
+): { state: "completed" | "failed" | "cancelled"; error: UserMessage | null } {
+	if (ending?.state === "failed") return { state: "failed", error: ending.error };
+	if (ending?.state === "cancelled") return { state: "cancelled", error: null };
+	if (lastTurn?.status === "failed") return { state: "failed", error: lastTurn.error };
+	if (lastTurn?.status === "cancelled") return { state: "cancelled", error: null };
+	return { state: "completed", error: null };
+}
+
+/** The run, if it is still running. */
+const runningRun = (executionId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select()
+				.from(routineExecution)
+				.where(and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running")))
+				.limit(1),
+		),
+		([row]) => row,
+	);
+
+/** How the run is already ending, if something has started ending it. */
+function endingOf(run: RoutineExecutionRow): Ended | undefined {
+	if (run.pendingTerminalState === "cancelled") return { state: "cancelled" };
+	if (run.pendingTerminalState === "failed") {
+		// `pending_terminal_error` is nullable in the schema; a failure recorded
+		// without one reads as having stopped unexpectedly.
+		return { state: "failed", error: run.pendingTerminalError ?? RUN_STOPPED_UNEXPECTEDLY };
+	}
+	return undefined;
+}
+
+const recordEnding = (executionId: string, ending: Ended | undefined) =>
+	query((db) =>
+		db
+			.update(routineExecution)
+			.set({
+				pendingTerminalState: ending?.state ?? null,
+				pendingTerminalError: ending?.state === "failed" ? ending.error : null,
+			})
+			.where(and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running"))),
+	);
+
+const executionThread = (executionId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ threadId: routineExecution.threadId })
+				.from(routineExecution)
+				.where(eq(routineExecution.id, executionId))
+				.limit(1),
+		),
+		([row]) => row?.threadId,
+	);
+
+/**
+ * The threads a run's work happens in: its own thread and the collaborations
+ * under it. A system agent's thread (the Scribe's summaries) hangs off the
+ * thread it serves but is not part of the run, so its turns neither keep the
+ * run open nor decide how it ended.
+ */
+const workingThreads = (rootThreadId: string) =>
+	Effect.map(
+		query((db) =>
+			db.execute<{ id: string }>(
+				sql`
+					with recursive tree as (
+						select id from ${thread} where id = ${rootThreadId}
+						union all
+						select child.id from ${thread} child
+						join tree parent on child.parent_thread_id = parent.id
+						where child.type <> 'system_agent'
+					)
+					select id from tree
+				`,
+				"objects",
+			),
+		),
+		(rows) => rows.map(({ id }) => id),
+	);
+
+/** `threadIds` as a subquery of one uuid column. */
+const threadIdsRelation = (threadIds: readonly string[]) =>
+	sql`select unnest(array[${sql.join(
+		threadIds.map((id) => sql`${id}`),
+		sql`, `,
+	)}]::uuid[])`;
+
+/**
+ * stillBusy reports whether work in the threads `work` keeps the run from
+ * settling. Until the run is `ending`, that is anything running, waiting or
+ * asked for. An ending run waits only for its running turns, which record how
+ * they ended, and its running facilitations: its waiting turns and
+ * collaborations were cancelled, and the turns its workflows still ask for
+ * are refused.
+ */
+const stillBusy = (work: readonly string[], ending: boolean) =>
+	Effect.map(
+		query((db) =>
+			db.execute<{ busy: boolean }>(
+				sql`select (
+					exists (
+						select 1 from (${threadIdsRelation(work)}) as work(id)
+						where ${laneBusy(sql`work.id`, ending ? [Facilitate._tag] : [Turn._tag, Facilitate._tag])}
+					)
+					or exists (
+						select 1 from ${turn}
+						where ${inArray(turn.threadId, [...work])}
+							and ${inArray(turn.status, ending ? ["running"] : ["running", "waiting"])}
+					)
+					${ending ? sql`` : sql`or ${unansweredCollaborations(work)}`}
+				) as busy`,
+				"objects",
+			),
+		),
+		([row]) => row?.busy ?? false,
+	);
+
+const unansweredCollaborations = (work: readonly string[]) =>
+	sql`exists (
+		select 1 from ${collaboration}
+		where ${inArray(collaboration.parentThreadId, [...work])}
+			and ${inArray(collaboration.status, ["waiting", "pending"])}
+	)`;
+
+/** How the last turn to end in the threads `work` ended, if any has. */
+const lastTurnIn = (work: readonly string[]) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ status: turn.status, error: turn.error })
+				.from(turn)
+				.where(inArray(turn.threadId, [...work]))
+				.orderBy(sql`${turn.finishedAt} desc nulls last`, desc(turn.id))
+				.limit(1),
+		),
+		([row]) => row,
+	);
+
+/** Tells the workspace that a routine run's thread changed because the run ended. */
+const announceRunEnded = (
+	emit: DomainEvents.Emit<ConversationEvent>,
+	run: { readonly workspaceId: string; readonly threadId: string },
+) =>
+	Effect.gen(function* () {
+		const [root] = yield* query((db) =>
+			db.select({ chatId: thread.chatId }).from(thread).where(eq(thread.id, run.threadId)).limit(1),
+		);
+		if (!root?.chatId) return yield* Effect.die(new Error("Routine thread has no Chat"));
+		yield* emit([
+			ConversationEvent.RoutineExecutionSettled({
+				workspaceId: run.workspaceId,
+				chatId: root.chatId,
+				threadId: run.threadId,
+			}),
+		]);
+	});
