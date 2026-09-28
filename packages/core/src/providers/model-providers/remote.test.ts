@@ -72,37 +72,40 @@ function discover(
 }
 
 /** A registry that knows two OpenAI models and one Anthropic one. */
-const knownModels = registryFrom({
-	openai: {
-		models: {
-			"gpt-4o": {
-				name: "GPT-4o",
-				tool_call: true,
-				reasoning: false,
-				modalities: { input: ["text", "image"], output: ["text"] },
-				limit: { context: 128_000 },
+const knownModels = registryFrom(
+	{
+		openai: {
+			models: {
+				"gpt-4o": {
+					name: "GPT-4o",
+					tool_call: true,
+					reasoning: false,
+					modalities: { input: ["text", "image"], output: ["text"] },
+					limit: { context: 128_000 },
+				},
+				"text-embedding-3-small": {
+					name: "text-embedding-3-small",
+					tool_call: false,
+					reasoning: false,
+					modalities: { input: ["text"], output: ["text"] },
+					limit: { context: 8_191 },
+				},
 			},
-			"text-embedding-3-small": {
-				name: "text-embedding-3-small",
-				tool_call: false,
-				reasoning: false,
-				modalities: { input: ["text"], output: ["text"] },
-				limit: { context: 8_191 },
+		},
+		anthropic: {
+			models: {
+				"claude-sonnet-4-5": {
+					name: "Claude Sonnet 4.5",
+					tool_call: true,
+					reasoning: true,
+					modalities: { input: ["text", "image", "pdf"], output: ["text"] },
+					limit: { context: 200_000 },
+				},
 			},
 		},
 	},
-	anthropic: {
-		models: {
-			"claude-sonnet-4-5": {
-				name: "Claude Sonnet 4.5",
-				tool_call: true,
-				reasoning: true,
-				modalities: { input: ["text", "image", "pdf"], output: ["text"] },
-				limit: { context: 200_000 },
-			},
-		},
-	},
-});
+	"test",
+);
 
 it("uses the injected http client for model discovery", async () => {
 	const found = connection({ headers: { "x-workspace": "workspace" } });

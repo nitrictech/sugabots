@@ -1,5 +1,5 @@
-import type { Modality } from "@opencode-ai/models";
-import { providers } from "@opencode-ai/models/snapshot";
+import type { Modality, ModelCost } from "@opencode-ai/models";
+import { generatedAt, providers } from "@opencode-ai/models/snapshot";
 import type { ProviderModelCapability, ProviderPresetId } from "@sugabots/contracts";
 import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
 
@@ -30,6 +30,7 @@ export type RegistrySource = Record<
 				reasoning?: boolean;
 				modalities?: { input?: readonly Modality[]; output?: readonly Modality[] };
 				limit?: { context?: number };
+				cost?: ModelCost;
 			}
 		>;
 	}
@@ -40,6 +41,14 @@ type RegistryModel = RegistrySource[string]["models"][string];
 export interface ModelRegistry {
 	/** The model with what the provider left blank filled in from the registry. */
 	complete(model: DiscoveredModel, provider: ProviderIdentity): DiscoveredModel;
+	/**
+	 * What the provider publishes it charges for the model, from its own entry.
+	 * Undefined when the provider has none: another provider's price for a
+	 * model of the same name is no estimate of this one's.
+	 */
+	cost(modelId: string, provider: ProviderIdentity): ModelCost | undefined;
+	/** Which snapshot of the registry answered, recorded beside each estimate it priced. */
+	readonly version: string;
 }
 
 /**
@@ -76,7 +85,7 @@ const preference = (providerId: string) => {
 /** The last path segment: a gateway lists a vendor's model as `openai/gpt-4o`. */
 const bare = (modelId: string) => modelId.slice(modelId.lastIndexOf("/") + 1);
 
-export function registryFrom(source: RegistrySource): ModelRegistry {
+export function registryFrom(source: RegistrySource, version: string): ModelRegistry {
 	const providerByHost = new Map<string, string>();
 	const byBareId = new Map<string, { providerId: string; model: RegistryModel }>();
 	for (const [providerId, provider] of Object.entries(source)) {
@@ -96,15 +105,18 @@ export function registryFrom(source: RegistrySource): ModelRegistry {
 		}
 	}
 
-	const lookup = (modelId: string, provider: ProviderIdentity): RegistryModel | undefined => {
+	const ownEntry = (modelId: string, provider: ProviderIdentity): RegistryModel | undefined => {
 		const providerId =
 			(provider.preset && MODELS_DEV_PROVIDER[provider.preset]) ??
 			providerByHost.get(new URL(provider.baseUrl).hostname);
-		const own = providerId ? source[providerId]?.models[modelId] : undefined;
-		return own ?? byBareId.get(bare(modelId))?.model;
+		return providerId ? source[providerId]?.models[modelId] : undefined;
 	};
+	const lookup = (modelId: string, provider: ProviderIdentity): RegistryModel | undefined =>
+		ownEntry(modelId, provider) ?? byBareId.get(bare(modelId))?.model;
 
 	return {
+		version,
+		cost: (modelId, provider) => ownEntry(modelId, provider)?.cost,
 		complete(model, provider) {
 			const known = lookup(model.modelId, provider);
 			if (!known) return model;
@@ -138,7 +150,11 @@ function capabilitiesOf(modelId: string, known: RegistryModel): ProviderModelCap
 }
 
 /** Fills nothing in, for a test about something else. */
-export const emptyRegistry: ModelRegistry = { complete: (model) => model };
+export const emptyRegistry: ModelRegistry = {
+	complete: (model) => model,
+	cost: () => undefined,
+	version: "empty",
+};
 
 /** The registry over the models.dev snapshot shipped with the installed package. */
-export const modelsDev: ModelRegistry = registryFrom(providers);
+export const modelsDev: ModelRegistry = registryFrom(providers, `models.dev@${generatedAt}`);

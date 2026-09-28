@@ -1,4 +1,4 @@
-import type { TurnModelInput } from "../turns/model.ts";
+import type { TurnModelPrompt } from "../turns/model.ts";
 import type { PreparedCompaction } from "./compactions.ts";
 
 /** How long a summary may be, in words: room for the sections below over a long thread. */
@@ -26,7 +26,7 @@ export function compactionPrompt(
 		"workspaceId" | "model" | "threadTitle" | "previousSummary" | "transcript"
 	>,
 	signal: AbortSignal,
-): TurnModelInput {
+): TurnModelPrompt {
 	const transcript = prepared.transcript
 		.map(
 			(entry) =>

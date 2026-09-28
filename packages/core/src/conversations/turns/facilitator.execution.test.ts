@@ -32,6 +32,7 @@ const hostAgentId = "0199a3a0-0000-7000-8000-000000000003";
 
 const scope: FacilitatorScope = {
 	threadId: request.threadId,
+	podId: "0199a3a0-0000-7000-8000-000000000004",
 	threadType: "routine",
 	workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 	model: "small-model",

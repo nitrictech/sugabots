@@ -14,9 +14,12 @@ import {
 	type ToolSet,
 } from "ai";
 import { Context, Data, Effect, Layer } from "effect";
+import { ModelRequests } from "../../accounting/model-requests.ts";
+import { streamLedger } from "../../accounting/stream-ledger.ts";
 import { Database } from "../../database/database.ts";
 import type { TurnUsage } from "../../database/schema.ts";
 import { withChatgptAccess } from "../../providers/model-providers/chatgpt.ts";
+import { type ModelRegistry, modelsDev } from "../../providers/model-providers/dialects/index.ts";
 import { ModelProbe } from "../../providers/model-providers/model-probe.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
@@ -36,6 +39,8 @@ export interface ModelAccounting {
 
 export interface TurnModelInput {
 	workspaceId: string;
+	/** What the request is for, which the ledger records as whose spend it is. */
+	activity: ModelRequests.Activity;
 	model: string;
 	system: string;
 	messages: readonly TurnPromptMessage[];
@@ -47,6 +52,9 @@ export interface TurnModelInput {
 	maxSteps?: number;
 	signal: AbortSignal;
 }
+
+/** A request as its prompt is written; whoever sends it says what it is for. */
+export type TurnModelPrompt = Omit<TurnModelInput, "activity">;
 
 export interface TurnPromptMessage {
 	role: "user" | "assistant";
@@ -136,9 +144,18 @@ const MODEL_REQUEST_USER_MESSAGES: Record<ModelRequestFailure, UserMessage> = {
 interface TurnModelOptions {
 	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewChatgptTokens">;
 	httpClients: EgressHttpClients;
+	/** Where every request the model makes is recorded. */
+	requests: ModelRequests.Interface;
+	/** What a request is priced from when its provider doesn't say what it cost. */
+	registry: Pick<ModelRegistry, "cost" | "version">;
 }
 
-export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOptions): TurnModel {
+export function workspaceTurnModel({
+	modelProviders,
+	httpClients,
+	requests,
+	registry,
+}: TurnModelOptions): TurnModel {
 	return {
 		stream: (input) =>
 			Effect.gen(function* () {
@@ -165,6 +182,14 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 					),
 				);
 				const fetch = httpClients.for(connection);
+				const ledger = yield* streamLedger({
+					requests,
+					registry,
+					workspaceId: input.workspaceId,
+					activity: input.activity,
+					model: input.model,
+					connection,
+				});
 				const codex = connection.preset === "chatgpt";
 				// The SDK does not throw a provider's error into the text stream: it
 				// reports it here and ends the stream, and whatever is asked of the
@@ -196,9 +221,13 @@ export function workspaceTurnModel({ modelProviders, httpClients }: TurnModelOpt
 							approvalRequests.push(chunk);
 						}
 					},
+					onLanguageModelCallStart: () => ledger.started(),
+					onLanguageModelCallEnd: ({ usage }) => ledger.ended(usage),
 					onError: ({ error }) => {
 						providerFailure ??= error;
+						return ledger.failed();
 					},
+					onAbort: () => ledger.aborted(),
 					stopWhen: stepCountIs(input.maxSteps ?? 8),
 					maxRetries: 0,
 				});
@@ -270,9 +299,15 @@ export const layer = Layer.effect(
 	Effect.gen(function* () {
 		const modelProviders = yield* ModelProviderRepository.Service;
 		const egress = yield* Egress.Service;
-		return workspaceTurnModel({ modelProviders, httpClients: egress.providers });
+		const requests = yield* ModelRequests.Service;
+		return workspaceTurnModel({
+			modelProviders,
+			httpClients: egress.providers,
+			requests,
+			registry: modelsDev,
+		});
 	}),
-).pipe(Layer.provide(ModelProviderRepository.layer));
+).pipe(Layer.provide(Layer.mergeAll(ModelProviderRepository.layer, ModelRequests.layer)));
 
 /** {@link probeModel} through {@link Service}, for settings to try a model the way a turn would. */
 export const probeLayer = Layer.effect(
@@ -304,6 +339,7 @@ function probeModel(
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
 			const generated = yield* model.stream({
 				workspaceId,
+				activity: { purpose: "probe" },
 				model: modelId,
 				system: "Answer with the single word OK.",
 				messages: [{ role: "user", content: "OK?" }],

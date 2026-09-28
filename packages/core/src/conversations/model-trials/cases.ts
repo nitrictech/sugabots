@@ -3,7 +3,7 @@ import { COMPACTION_SUMMARY_WORDS, compactionPrompt } from "../compaction/prompt
 import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
 import { parseGenerated } from "../summaries/summary.steps.ts";
 import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../turns/facilitator.ts";
-import type { TurnModelInput } from "../turns/model.ts";
+import type { TurnModelPrompt } from "../turns/model.ts";
 
 /**
  * What a model has to get right to do a system agent's job.
@@ -22,7 +22,7 @@ import type { TurnModelInput } from "../turns/model.ts";
 export interface TrialCase {
 	/** What this checks, in the words a person choosing a model would use. */
 	readonly name: string;
-	readonly prompt: (model: string, workspaceId: string, signal: AbortSignal) => TurnModelInput;
+	readonly prompt: (model: string, workspaceId: string, signal: AbortSignal) => TurnModelPrompt;
 	/** Whether the answer is one the product could have used. */
 	readonly accepts: (answer: string) => boolean;
 }
@@ -46,6 +46,7 @@ const crew = [
 
 const routing = (recent: FacilitatorScope["recent"], available = crew): FacilitatorScope => ({
 	threadId: "trial",
+	podId: "trial",
 	threadType: "routine",
 	workspaceId: "trial",
 	model: "trial",

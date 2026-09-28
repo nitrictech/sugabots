@@ -46,6 +46,7 @@ ENV NODE_ENV=production \
     PORT=3000
 
 COPY --from=server /app ./
+COPY packages/accounting packages/accounting
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
 COPY packages/server packages/server

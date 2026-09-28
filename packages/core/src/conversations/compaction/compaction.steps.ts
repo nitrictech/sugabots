@@ -87,7 +87,15 @@ const generate = (
 			const stop = new AbortController();
 			yield* Effect.addFinalizer(() => Effect.sync(() => stop.abort()));
 
-			const generated = yield* model.stream(compactionPrompt(prepared, stop.signal));
+			const generated = yield* model.stream({
+				...compactionPrompt(prepared, stop.signal),
+				activity: {
+					purpose: "compaction",
+					podId: prepared.podId,
+					threadId: prepared.threadId,
+					turnId: prepared.turnId,
+				},
+			});
 			const collected = yield* Ref.make("");
 			yield* forEachDelta(generated.text, stop, (text) =>
 				Ref.updateAndGet(collected, (soFar) => soFar + text).pipe(
