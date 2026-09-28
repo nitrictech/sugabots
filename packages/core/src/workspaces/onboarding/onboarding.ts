@@ -30,10 +30,9 @@ export interface Interface {
 	readonly isCompleted: Effect.Effect<boolean, never, CurrentActor.Service>;
 	/**
 	 * Marks onboarding done, once `podId` and `agentId` are a pod the actor is
-	 * in and its crew agent. Finishing settles the first agent and the model
-	 * the workspace runs it on, so it takes `workspace.providers.manage`.
-	 * Connecting a model can be skipped, so the agent need not run on one yet:
-	 * its chat says it has no model and where to choose one.
+	 * in and its crew agent, and that agent runs on a model the workspace
+	 * offers. Finishing settles the first agent and the model the workspace
+	 * runs it on, so it takes `workspace.providers.manage`.
 	 *
 	 * It does not choose a model for the Scribe. A model chosen here is for an
 	 * agent somebody talks to, and reusing it for an unattended summariser would
@@ -44,7 +43,11 @@ export interface Interface {
 		workspaceId: string;
 		podId: string;
 		agentId: string;
-	}) => Effect.Effect<void, AuthorizationDenied | NotReadyToFinish, CurrentActor.Service>;
+	}) => Effect.Effect<
+		void,
+		AuthorizationDenied | NotReadyToFinish | NoModelChosen,
+		CurrentActor.Service
+	>;
 	/**
 	 * Marks onboarding done for an actor who joined through `invitationId`,
 	 * pointing their Personal Assistant at a model the workspace offers, if it
@@ -91,7 +94,7 @@ export const make = Effect.gen(function* () {
 						);
 						const [eligible] = yield* query((db) =>
 							db
-								.select({ agentId: agent.id })
+								.select({ model: agent.model })
 								.from(pod)
 								.innerJoin(
 									podMember,
@@ -112,6 +115,10 @@ export const make = Effect.gen(function* () {
 						);
 						if (!eligible) {
 							return yield* new NotReadyToFinish();
+						}
+						const { models } = yield* offeredModels(resolved);
+						if (!models.some((offered) => offered.modelId === eligible.model)) {
+							return yield* new NoModelChosen();
 						}
 						yield* markCompleted(actor.userId);
 					}),
@@ -172,6 +179,13 @@ export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Person
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
 	get userMessage() {
 		return UserMessage.of`Finish creating your pod and agent first`;
+	}
+}
+
+/** The first agent runs on no model, or on one the workspace does not offer. */
+export class NoModelChosen extends Data.TaggedError("NoModelChosen") implements UserFacing {
+	get userMessage() {
+		return UserMessage.of`Choose a model for your first bot first`;
 	}
 }
 

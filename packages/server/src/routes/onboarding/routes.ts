@@ -35,6 +35,7 @@ export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (h
 const onboardingErrors = {
 	...refusals,
 	NotReadyToFinish: BadRequest,
+	NoModelChosen: BadRequest,
 	InvitationNotAccepted: BadRequest,
 	ModelNotEnabled: BadRequest,
 };

@@ -51,6 +51,8 @@ const enabledModel = {
 	displayName: "Claude Sonnet",
 };
 
+const API = import.meta.env.VITE_API_URL;
+
 /** Where the workspace has got to: none yet, one with no model, or one with a model on. */
 type Stage = "new" | "no-model" | "model";
 
@@ -116,7 +118,7 @@ export const Workspace = meta.story({
 	},
 });
 
-/** Connecting a first model: four providers to pick from, and a key. It can wait. */
+/** Connecting a first model: four providers to pick from, and a key. It cannot be skipped. */
 export const Model = meta.story({
 	render: (args) => (
 		<Preview stage="no-model">
@@ -130,7 +132,78 @@ export const Model = meta.story({
 			await canvas.findByRole("heading", { name: "Connect a model" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("radio", { name: /Anthropic/ })).toBeChecked();
-		await expect(canvas.getByRole("button", { name: "Skip for now" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Skip for now" })).toBeNull();
+	},
+});
+
+/** Anthropic as it is once its key is in, with its model list fetched and nothing switched on. */
+const anthropic = {
+	id: "0199a3a0-0000-7000-8000-000000000201",
+	workspaceId: WORKSPACE,
+	preset: "anthropic",
+	name: "Anthropic",
+	baseUrl: "https://api.anthropic.com",
+	apiFormat: "anthropic",
+	active: true,
+	status: "connected",
+	hasApiKey: true,
+	apiKeyHint: "abcd",
+	signedIn: false,
+	customHeaders: [],
+	modelCount: 3,
+	enabledModelCount: 0,
+	lastTestedAt: null,
+	lastTestError: null,
+	models: [
+		["claude-3-5-haiku-20241022", "Claude 3.5 Haiku"],
+		["claude-opus-4", "Claude Opus 4.1"],
+		["claude-sonnet-4-20250514", "Claude Sonnet 4"],
+	].map(([modelId, displayName], index) => ({
+		id: `0199a3a0-0000-7000-8000-00000000030${index}`,
+		modelId,
+		displayName,
+		capabilities: ["tools", "vision"],
+		disabledCapabilities: [],
+		contextLength: 200_000,
+		enabled: false,
+		source: "fetched",
+	})),
+};
+
+/** After the key: the provider's models, the catalog's picks first, and nothing chosen for you. */
+export const ChooseModel = meta.story({
+	render: (args) => (
+		<Preview stage="no-model">
+			<div className="h-screen">
+				<Onboarding {...args} />
+			</div>
+		</Preview>
+	),
+	beforeEach: ({ msw }) => {
+		const root = `${API}/workspaces/:workspace/model-providers`;
+		msw.use(
+			http.get(`${root}/models`, () => HttpResponse.json({ models: [] })),
+			http.get(root, () => HttpResponse.json([anthropic])),
+			http.post(root, () => HttpResponse.json(anthropic, { status: 201 })),
+			http.post(`${root}/:providerId/fetch-models`, () =>
+				HttpResponse.json({ added: 0, updated: 3, unchanged: 0 }),
+			),
+			http.get(`${root}/:providerId`, () => HttpResponse.json(anthropic)),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.type(await canvas.findByLabelText("API key"), "sk-ant-test");
+		await userEvent.click(canvas.getByRole("button", { name: "Continue" }));
+		await expect(
+			await canvas.findByRole("heading", { name: "Choose a model" }),
+		).toBeInTheDocument();
+		const choices = canvas
+			.getAllByRole("radio")
+			.map((radio) => radio.closest("label")?.textContent);
+		await expect(choices).toEqual(["Claude Opus 4.1", "Claude Sonnet 4", "Claude 3.5 Haiku"]);
+		await expect(canvas.getByRole("button", { name: "Continue" })).toBeDisabled();
+		await userEvent.click(canvas.getByRole("radio", { name: "Claude Sonnet 4" }));
+		await expect(canvas.getByRole("button", { name: "Continue" })).toBeEnabled();
 	},
 });
 
@@ -153,7 +226,6 @@ export const FirstBot = meta.story({
 	},
 });
 
-const API = import.meta.env.VITE_API_URL;
 /** The placeholder once it has been made the first bot, as the API gives it back. */
 const chief = {
 	...placeholder,
