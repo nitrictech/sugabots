@@ -116,6 +116,28 @@ describe("the rail", () => {
 		).toBeNull();
 	});
 
+	it("opens a pod's settings from its menu and leads back to the Chat", async () => {
+		const router = mount(linearPage);
+
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		fireEvent.contextMenu(await within(rail).findByRole("link", { name: "Sales" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Pod settings" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/pods/sales"));
+		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+	});
+
+	it("makes a new bot in the pod whose menu it is chosen from", async () => {
+		mount(linearPage);
+
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		fireEvent.contextMenu(await within(rail).findByRole("link", { name: "Sales" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "New bot" }));
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		expect(within(dialog).queryByRole("button", { name: /^Pod:/ })).toBeNull();
+	});
+
 	it("opens settings from your avatar", async () => {
 		mount(linearPage);
 

@@ -1,11 +1,16 @@
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "cn";
 
 /*
  * A menu that floats over the page, drawn as the design draws every floating
  * surface: a raised panel with the dialog's shadow, and rows the size of a
- * settings row's text.
+ * settings row's text. It opens from a trigger, or as a context menu where the
+ * pointer is right-clicked; both hold the same items.
  */
+
+const popupClassName =
+	"z-50 max-h-(--available-height) min-w-[8rem] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-panel bg-panel p-1.5 text-foreground shadow-dialog outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root {...props} />;
@@ -35,10 +40,7 @@ function DropdownMenuContent({
 			>
 				<MenuPrimitive.Popup
 					data-slot="dropdown-menu-content"
-					className={cn(
-						"z-50 max-h-(--available-height) min-w-[8rem] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-panel bg-panel p-1.5 text-foreground shadow-dialog outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
-						className,
-					)}
+					className={cn(popupClassName, className)}
 					{...props}
 				/>
 			</MenuPrimitive.Positioner>
@@ -67,4 +69,46 @@ function DropdownMenuItem({
 	);
 }
 
-export { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger };
+function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
+	return (
+		<MenuPrimitive.Separator
+			data-slot="dropdown-menu-separator"
+			className={cn("-mx-1.5 my-1.5 h-px bg-border", className)}
+			{...props}
+		/>
+	);
+}
+
+function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
+	return <ContextMenuPrimitive.Root {...props} />;
+}
+
+/** The area that opens the menu when right-clicked, or long-pressed on a touch screen. */
+function ContextMenuTrigger({ ...props }: ContextMenuPrimitive.Trigger.Props) {
+	return <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />;
+}
+
+function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Popup.Props) {
+	return (
+		<ContextMenuPrimitive.Portal>
+			<ContextMenuPrimitive.Positioner className="isolate z-50 outline-none">
+				<ContextMenuPrimitive.Popup
+					data-slot="context-menu-content"
+					className={cn(popupClassName, className)}
+					{...props}
+				/>
+			</ContextMenuPrimitive.Positioner>
+		</ContextMenuPrimitive.Portal>
+	);
+}
+
+export {
+	ContextMenu,
+	ContextMenuContent,
+	ContextMenuTrigger,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+};
