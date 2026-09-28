@@ -627,7 +627,7 @@ describe("routes", () => {
 		fireEvent.change(await screen.findByLabelText("Name"), {
 			target: { value: name },
 		});
-		fireEvent.change(screen.getByLabelText("Work email"), {
+		fireEvent.change(screen.getByLabelText("Email"), {
 			target: { value: email },
 		});
 		fireEvent.change(screen.getByLabelText("Password"), {
@@ -675,7 +675,7 @@ describe("routes", () => {
 		mount("/", null);
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
-		fireEvent.change(await screen.findByLabelText("Work email"), {
+		fireEvent.change(await screen.findByLabelText("Email"), {
 			target: { value: "sam@example.com" },
 		});
 		fireEvent.change(screen.getByLabelText("Password"), {
@@ -760,7 +760,7 @@ describe("routes", () => {
 		const refresh = vi.fn().mockRejectedValue(new Error("Offline"));
 		mount("/login", null, refresh);
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
-		fireEvent.change(await screen.findByLabelText("Work email"), {
+		fireEvent.change(await screen.findByLabelText("Email"), {
 			target: { value: "sam@example.com" },
 		});
 		fireEvent.change(screen.getByLabelText("Password"), {
