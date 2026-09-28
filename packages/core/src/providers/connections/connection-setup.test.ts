@@ -19,6 +19,9 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { ActionForbidden } from "../../workspaces/access.ts";
+import { Authorization } from "../../workspaces/authorization.ts";
+import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
 import { ConnectionSetup } from "./connection-setup.ts";
@@ -67,51 +70,65 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 	let memberId: string;
 	let podId: string;
 
-	/** The setup under an egress policy allowing private addresses or not, and OAuth as `signIn` says. */
-	const setupWith = (
-		options: { allowPrivateNetwork?: boolean; signIn?: Partial<ConnectionSignIn.Interface> } = {},
+	/**
+	 * The setup as `as`, by default the workspace's administrator, under an
+	 * egress policy allowing private addresses or not, and OAuth as `signIn`
+	 * says.
+	 */
+	const setupWith = async (
+		options: {
+			allowPrivateNetwork?: boolean;
+			signIn?: Partial<ConnectionSignIn.Interface>;
+			as?: string;
+		} = {},
 	) =>
-		servedOnPostgres(
-			ConnectionSetup.Service,
-			ConnectionSetup.layerNoDeps.pipe(
-				Layer.provide([
-					ConnectionRepository.layer,
-					Layer.succeed(ConnectionSignIn.Service, {
-						clients: Effect.succeed({
-							for: () =>
-								storedOAuthProvider(
-									{ load: async () => undefined, save: async () => {} },
-									{ redirectUrl: "http://localhost:3000/callback", clientName: "Test" },
-								),
-						}),
-						begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
-						finish: () => Effect.void,
-						...options.signIn,
-					}),
-					Layer.succeed(Egress.Service, {
-						providers: { for: () => fetch },
-						validateProviderUrl: urlValidation(
-							createEgressUrlValidator({
-								allowPrivateNetwork: options.allowPrivateNetwork ?? true,
+		(
+			await servedOnPostgresAs(
+				ConnectionSetup.Service,
+				ConnectionSetup.layerNoDeps.pipe(
+					Layer.provide([
+						Authorization.layer,
+						ConnectionRepository.layer,
+						Layer.succeed(ConnectionSignIn.Service, {
+							clients: Effect.succeed({
+								for: () =>
+									storedOAuthProvider(
+										{ load: async () => undefined, save: async () => {} },
+										{ redirectUrl: "http://localhost:3000/callback", clientName: "Test" },
+									),
 							}),
-						),
-						oauth: fetch,
-						webFetch: fetch,
-					}),
-				]),
-			),
-		);
+							begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
+							finish: () => Effect.void,
+							...options.signIn,
+						}),
+						Layer.succeed(Egress.Service, {
+							providers: { for: () => fetch },
+							validateProviderUrl: urlValidation(
+								createEgressUrlValidator({
+									allowPrivateNetwork: options.allowPrivateNetwork ?? true,
+								}),
+							),
+							oauth: fetch,
+							webFetch: fetch,
+						}),
+					]),
+				),
+			)
+		)(options.as ?? adminId);
 
-	const inPod = () => ({ workspaceId, podId });
+	const inPod = () => ({ podId });
 
-	/** An OAuth connection to `url` waiting on the sign-in whose state is `state`. */
-	const waitingOnSignIn = async (url: string, state: string) => {
+	/**
+	 * An OAuth connection to `url` waiting on the sign-in whose state is
+	 * `state`, which `startedByUserId`, by default the administrator, started.
+	 */
+	const waitingOnSignIn = async (url: string, state: string, startedByUserId = adminId) => {
 		const made = await connections.create(workspaceId, podId, adminId, {
 			name: `Signs in ${state}`,
 			url,
 			auth: "oauth",
 		});
-		await connections.saveOauthRecord(workspaceId, made.id, { state });
+		await connections.saveOauthRecord(workspaceId, made.id, { state, startedByUserId });
 		return made;
 	};
 
@@ -166,7 +183,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		const made = await setup.create({
 			...inPod(),
-			createdById: adminId,
 			connection: {
 				name: "Wiki",
 				url: `${serverUrl}/mcp`,
@@ -184,7 +200,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		await expect(
 			setup.create({
 				...inPod(),
-				createdById: adminId,
 				connection: { name: "Local", url: `${serverUrl}/mcp` },
 			}),
 		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
@@ -195,7 +210,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		const setup = await setupWith();
 		const made = await setup.create({
 			...inPod(),
-			createdById: adminId,
 			connection: { name: "Gone", url: "http://127.0.0.1:9/mcp" },
 		});
 
@@ -227,7 +241,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		await expect(
 			setup.connectFromCatalog({
 				...inPod(),
-				createdById: adminId,
 				server: { name: "GitHub", url: "https://api.githubcopilot.com/mcp/" },
 			}),
 		).rejects.toMatchObject({
@@ -237,17 +250,26 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		expect(await setup.list(inPod())).toEqual([]);
 	});
 
+	it("lets a member of the pod see its connections, and change none of them", async () => {
+		const setup = await setupWith({ as: memberId });
+
+		expect(await setup.list(inPod())).toEqual([]);
+		await expect(
+			setup.create({ ...inPod(), connection: { name: "Wiki", url: `${serverUrl}/mcp` } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		expect(await setup.list(inPod())).toEqual([]);
+	});
+
 	describe("finishing a sign-in", () => {
 		it("turns the connection on, learns its tools, and names the pod", async () => {
 			const setup = await setupWith();
 			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-ok");
 
 			const outcome = await setup.completeOAuth({
-				userId: adminId,
 				callback: { code: "the-code", state: "state-ok" },
 			});
 
-			expect(outcome).toEqual({ pod: inPod() });
+			expect(outcome).toEqual({ pod: { workspaceId, podId } });
 			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
 				access: "allow",
 				tools: [{ name: "lookup" }],
@@ -264,16 +286,27 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		])("gives only a code for a callback $case", async ({ callback, failure }) => {
 			const setup = await setupWith();
 
-			expect(await setup.completeOAuth({ userId: adminId, callback })).toEqual({ failure });
+			expect(await setup.completeOAuth({ callback })).toEqual({ failure });
+		});
+
+		it("does not finish for anybody but the person who started it", async () => {
+			const setup = await setupWith();
+			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-other", memberId);
+
+			expect(
+				await setup.completeOAuth({ callback: { code: "the-code", state: "state-other" } }),
+			).toEqual({ failure: "not_allowed" });
+			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
+				access: "off",
+			});
 		});
 
 		it("does not finish for somebody who may not manage the pod's connections", async () => {
-			const setup = await setupWith();
-			await waitingOnSignIn(`${serverUrl}/open`, "state-member");
+			const setup = await setupWith({ as: memberId });
+			await waitingOnSignIn(`${serverUrl}/open`, "state-member", memberId);
 
 			expect(
 				await setup.completeOAuth({
-					userId: memberId,
 					callback: { code: "the-code", state: "state-member" },
 				}),
 			).toEqual({ failure: "not_allowed" });
@@ -285,14 +318,13 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 			expect(
 				await setup.completeOAuth({
-					userId: adminId,
 					callback: {
 						state: "state-refused",
 						error: "access_denied",
 						errorDescription: "Visit evil.example to continue",
 					},
 				}),
-			).toEqual({ failure: "refused", pod: inPod() });
+			).toEqual({ failure: "refused", pod: { workspaceId, podId } });
 		});
 
 		it("gives a code when the code could not be exchanged for tokens", async () => {
@@ -311,10 +343,9 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 			expect(
 				await setup.completeOAuth({
-					userId: adminId,
 					callback: { code: "stale", state: "state-bad-code" },
 				}),
-			).toEqual({ failure: "not_completed", pod: inPod() });
+			).toEqual({ failure: "not_completed", pod: { workspaceId, podId } });
 		});
 	});
 });

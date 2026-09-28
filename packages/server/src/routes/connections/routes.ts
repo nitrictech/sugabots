@@ -1,12 +1,12 @@
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
-import { BadRequest, Conflict, CurrentUser, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedPod } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 export interface ConnectionRoutesOptions {
 	/**
@@ -22,61 +22,36 @@ export function connectionRoutes({ webAppUrl }: ConnectionRoutesOptions) {
 	return HttpApiBuilder.group(ServerApi, "connections", (handlers) =>
 		Effect.gen(function* () {
 			const connections = yield* ConnectionSetup.Service;
-			const inPod = (pod: { workspaceId: string; id: string }) => ({
-				workspaceId: pod.workspaceId,
-				podId: pod.id,
-			});
-
 			return handlers
-				.handle("list", () => Effect.flatMap(grantedPod, ({ pod }) => connections.list(inPod(pod))))
-				.handle("create", ({ payload }) =>
-					Effect.flatMap(grantedPod, ({ pod, actor }) =>
-						connections
-							.create({ ...inPod(pod), createdById: actor.userId, connection: payload })
-							.pipe(asHttpError(connectionErrors)),
-					),
+				.handle("list", ({ params }) =>
+					connections.list(params).pipe(asSessionUser, asHttpError(connectionErrors)),
+				)
+				.handle("create", ({ params, payload }) =>
+					connections
+						.create({ ...params, connection: payload })
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("get", ({ params }) =>
-					Effect.flatMap(grantedPod, ({ pod }) =>
-						connections
-							.get({ ...inPod(pod), connectionId: params.connectionId })
-							.pipe(asHttpError(connectionErrors)),
-					),
+					connections.get(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
-					Effect.flatMap(grantedPod, ({ pod }) =>
-						connections
-							.update({ ...inPod(pod), connectionId: params.connectionId, changes: payload })
-							.pipe(asHttpError(connectionErrors)),
-					),
+					connections
+						.update({ ...params, changes: payload })
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("remove", ({ params }) =>
-					Effect.flatMap(grantedPod, ({ pod }) =>
-						connections
-							.remove({ ...inPod(pod), connectionId: params.connectionId })
-							.pipe(asHttpError(connectionErrors)),
-					),
+					connections.remove(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("test", ({ params }) =>
-					Effect.flatMap(grantedPod, ({ pod }) =>
-						connections
-							.test({ ...inPod(pod), connectionId: params.connectionId })
-							.pipe(asHttpError(connectionErrors)),
-					),
+					connections.test(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
-				.handle("connectFromCatalog", ({ payload }) =>
-					Effect.flatMap(grantedPod, ({ pod, actor }) =>
-						connections
-							.connectFromCatalog({ ...inPod(pod), createdById: actor.userId, server: payload })
-							.pipe(asHttpError(connectionErrors)),
-					),
+				.handle("connectFromCatalog", ({ params, payload }) =>
+					connections
+						.connectFromCatalog({ ...params, server: payload })
+						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("startOAuth", ({ params }) =>
-					Effect.flatMap(grantedPod, ({ pod }) =>
-						connections
-							.startOAuth({ ...inPod(pod), connectionId: params.connectionId })
-							.pipe(asHttpError(connectionErrors)),
-					),
+					connections.startOAuth(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("oauthCallback", ({ request, query }) =>
 					Effect.gen(function* () {
@@ -84,10 +59,8 @@ export function connectionRoutes({ webAppUrl }: ConnectionRoutesOptions) {
 						if (request.method === "HEAD") {
 							return HttpServerResponse.empty({ status: 405, headers: { allow: "GET" } });
 						}
-						const { id: userId } = yield* CurrentUser;
 						const outcome = yield* connections
 							.completeOAuth({
-								userId,
 								callback: {
 									code: query.code,
 									state: query.state,
@@ -95,7 +68,7 @@ export function connectionRoutes({ webAppUrl }: ConnectionRoutesOptions) {
 									errorDescription: query.error_description,
 								},
 							})
-							.pipe(asHttpError(connectionErrors));
+							.pipe(asSessionUser, asHttpError(connectionErrors));
 						const back = new URL(webAppUrl);
 						back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
 						if (outcome.pod) {
@@ -113,6 +86,7 @@ export function connectionRoutes({ webAppUrl }: ConnectionRoutesOptions) {
 }
 
 const connectionErrors = {
+	...refusals,
 	ConnectionNameTaken: Conflict,
 	ConnectionNotFound: NotFound,
 	UrlNotAllowed: BadRequest,

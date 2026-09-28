@@ -1,81 +1,83 @@
-import { BadRequest, Conflict, CurrentUser, Forbidden, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 /** `Membership` decides who may do what; these map its refusals to HTTP. */
 export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (handlers) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
 		return handlers
-			.handle("list", () =>
-				Effect.flatMap(CurrentUser, (user) => membership.workspaces({ userId: user.id })),
-			)
+			.handle("list", () => asSessionUser(membership.workspaces))
 			.handle("create", ({ payload }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.create({ userId: user.id, details: payload }),
-				).pipe(asHttpError({ SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest })),
+				membership
+					.create({ details: payload })
+					.pipe(
+						asSessionUser,
+						asHttpError({ SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
+					),
 			)
 			.handle("update", ({ params, payload }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.update({ userId: user.id, workspace: params.workspace, details: payload }),
-				).pipe(asHttpError({ ...denied, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest })),
+				membership
+					.update({ workspace: params.workspace, details: payload })
+					.pipe(
+						asSessionUser,
+						asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
+					),
 			)
 			.handle("members", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.members({ userId: user.id, workspace: params.workspace }),
-				).pipe(asHttpError(denied)),
+				membership
+					.members({ workspace: params.workspace })
+					.pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("updateMember", ({ params, payload }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.changeRole({
-						userId: user.id,
+				membership
+					.changeRole({
 						workspace: params.workspace,
 						memberId: params.memberId,
 						role: payload.role,
-					}),
-				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
+					})
+					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
 			)
 			.handle("removeMember", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.remove({
-						userId: user.id,
-						workspace: params.workspace,
-						memberId: params.memberId,
-					}),
-				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
+				membership
+					.remove({ workspace: params.workspace, memberId: params.memberId })
+					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
 			)
 			.handle("leave", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.leave({ userId: user.id, workspace: params.workspace }),
-				).pipe(asHttpError({ ...denied, LastAdministrator: BadRequest })),
+				membership
+					.leave({ workspace: params.workspace })
+					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
 			)
 			.handle("invitations", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.invitations({ userId: user.id, workspace: params.workspace }),
-				).pipe(asHttpError(denied)),
+				membership
+					.invitations({ workspace: params.workspace })
+					.pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("invite", ({ params, payload }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.invite({ userId: user.id, workspace: params.workspace, invitation: payload }),
-				).pipe(asHttpError({ ...denied, AlreadyMember: Conflict, AlreadyInvited: Conflict })),
+				membership
+					.invite({ workspace: params.workspace, invitation: payload })
+					.pipe(
+						asSessionUser,
+						asHttpError({ ...refusals, AlreadyMember: Conflict, AlreadyInvited: Conflict }),
+					),
 			)
 			.handle("cancelInvitation", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.cancelInvitation({ userId: user.id, invitationId: params.invitationId }),
-				).pipe(asHttpError(denied)),
+				membership
+					.cancelInvitation({ invitationId: params.invitationId })
+					.pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("invitation", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.invitation({ userId: user.id, invitationId: params.invitationId }),
-				).pipe(asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden })),
+				membership
+					.invitation({ invitationId: params.invitationId })
+					.pipe(asSessionUser, asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden })),
 			)
 			.handle("acceptInvitation", ({ params }) =>
-				Effect.flatMap(CurrentUser, (user) =>
-					membership.accept({ userId: user.id, invitationId: params.invitationId }),
-				).pipe(
+				membership.accept({ invitationId: params.invitationId }).pipe(
+					asSessionUser,
 					Effect.catchTag("EmailUnverified", (unverified) =>
 						Effect.fail(
 							new Forbidden({ message: unverified.userMessage, details: EMAIL_UNVERIFIED }),
@@ -92,5 +94,3 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
  * refusals that share its status. `isEmailUnverified` in the SDK knows it.
  */
 const EMAIL_UNVERIFIED = "EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION";
-
-const denied = { ResourceHidden: NotFound, ActionForbidden: Forbidden };

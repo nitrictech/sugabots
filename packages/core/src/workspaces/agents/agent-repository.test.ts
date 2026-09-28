@@ -5,14 +5,15 @@ import {
 	closeDatabase,
 	onDatabase,
 	type Promised,
-	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { visibleCrewAgents } from "./agent-reads.ts";
+import { servedOnPostgresAs } from "../testing.ts";
+import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	let store: Promised<AgentRepository.Interface>;
+	let administrationAs: (userId: string) => Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
@@ -20,6 +21,10 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 	beforeAll(async () => {
 		store = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+		administrationAs = await servedOnPostgresAs(
+			AgentAdministration.Service,
+			AgentAdministration.layer,
+		);
 	});
 
 	afterAll(async () => {
@@ -28,7 +33,7 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 	const create = (createdById: string, input: NewAgent) =>
 		store.create(workspaceId, { createdById, agent: input });
-	const visibleTo = (userId: string) => runOnPostgres(visibleCrewAgents(workspaceId, userId));
+	const visibleTo = (userId: string) => administrationAs(userId).list({ workspace: workspaceId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

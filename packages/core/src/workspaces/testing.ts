@@ -1,6 +1,12 @@
 import { DEFAULT_POD_ROUTING, type WorkspaceRole } from "@sugabots/contracts";
-import { Effect } from "effect";
+import { type Context, Effect, type Layer } from "effect";
 import type * as schema from "../database/schema.ts";
+import {
+	type Promised,
+	promising,
+	runOnPostgres,
+	type TestInfrastructure,
+} from "../database/testing.ts";
 import {
 	ActionForbidden,
 	type AgentStanding,
@@ -11,7 +17,33 @@ import {
 	podStanding,
 	ResourceHidden,
 } from "./access.ts";
+import { CurrentActor } from "./current-actor.ts";
 import { type Actor, mayInWorkspace, type PodPermission } from "./permissions.ts";
+
+/**
+ * `service`, built by `layer` over the test infrastructure, with its methods
+ * returning promises and called as the person the returned function is given.
+ * Call it from `beforeAll`, so a file whose cases skip without a database
+ * never connects.
+ */
+export async function servedOnPostgresAs<
+	Identifier,
+	Shape extends Record<
+		keyof Shape,
+		(...args: never[]) => Effect.Effect<unknown, unknown, CurrentActor.Service>
+	>,
+>(
+	service: Context.Key<Identifier, Shape>,
+	layer: Layer.Layer<Identifier, never, TestInfrastructure>,
+): Promise<(userId: string) => Promised<Shape>> {
+	const served = await runOnPostgres(Effect.provide(service, layer));
+	return (userId) =>
+		promising<CurrentActor.Service>((effect) =>
+			runOnPostgres(
+				effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
+			),
+		)(served);
+}
 
 /**
  * `Authorization` over a workspace a test describes, decided by the real
@@ -78,10 +110,11 @@ export function testAuthorization(world: TestWorkspace): Authorization {
 
 	return {
 		workspace: (userId, workspaceId, permission) => {
-			const actor = actorIn(userId);
-			if (workspaceId !== world.id || !actor.workspaceRole) {
+			const workspaceRole = world.roles[userId];
+			if (workspaceId !== world.id || !workspaceRole) {
 				return Effect.fail(new ResourceHidden({ resource: "workspace" }));
 			}
+			const actor = { userId, workspaceRole };
 			if (!mayInWorkspace(actor, permission)) {
 				return Effect.fail(new ActionForbidden({ permission }));
 			}

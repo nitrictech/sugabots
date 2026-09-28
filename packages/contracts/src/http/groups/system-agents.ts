@@ -2,7 +2,8 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { systemAgentSchema, systemAgentUpdateSchema } from "../../system-agents.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Authorise, Session } from "../middleware.ts";
+import { refused } from "../errors.ts";
+import { Session } from "../middleware.ts";
 
 /**
  * The workspace's Scribe and Facilitator: what they are, and the model each
@@ -23,6 +24,7 @@ export class SystemAgentsApi extends HttpApiGroup.make("systemAgents")
 		HttpApiEndpoint.get("list", "/workspaces/:workspace/system-agents", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: Schema.Array(systemAgentSchema),
+			error: refused,
 		}),
 		// The key is a string here rather than `systemAgentKeySchema`, so a key
 		// that names no system agent is `NotFound` like any other missing thing,
@@ -31,7 +33,7 @@ export class SystemAgentsApi extends HttpApiGroup.make("systemAgents")
 			params: { workspace: workspaceIdOrSlugSchema, key: Schema.String },
 			payload: systemAgentUpdateSchema,
 			success: systemAgentSchema,
+			error: refused,
 		}),
 	)
-	.middleware(Authorise)
 	.middleware(Session) {}

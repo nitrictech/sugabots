@@ -15,7 +15,7 @@ import { offeredModels } from "../../providers/model-providers/model-provider-re
 import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { rolesWith } from "../permissions.ts";
-import { PodAdministration } from "../pods/pod-administration.ts";
+import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**
  * Finishing someone's first run through the product.
@@ -58,7 +58,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Onboarding");
-	const pods = yield* PodAdministration.Service;
+	const personalPods = yield* PersonalPods.Service;
 
 	return Service.of({
 		isCompleted: (userId) =>
@@ -146,13 +146,13 @@ export const make = Effect.gen(function* () {
 						const workspaceId = accepted.workspaceId;
 						const [offered] = (yield* offeredModels(workspaceId)).models;
 						if (offered) {
-							yield* pods.provisionPersonalWithModel({
+							yield* personalPods.provisionWithModel({
 								workspaceId,
 								userId,
 								model: offered.modelId,
 							});
 						} else {
-							yield* pods.provisionPersonal({ workspaceId, userId });
+							yield* personalPods.provision({ workspaceId, userId });
 						}
 						yield* markCompleted(userId);
 						return workspaceId;
@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(PodAdministration.layer));
+export const layer = layerNoDeps.pipe(Layer.provide(PersonalPods.layer));
 
 /** The pod and agent named are not ones this person may finish onboarding with. */
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {

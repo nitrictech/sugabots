@@ -2,7 +2,13 @@ import type { NewModelProvider } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { modelProvider, providerModel, user, workspace } from "../../database/schema.ts";
+import {
+	modelProvider,
+	providerModel,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -11,6 +17,8 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { ActionForbidden } from "../../workspaces/access.ts";
+import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ModelProbe } from "./model-probe.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
@@ -32,28 +40,31 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	/**
-	 * The setup, with every provider answering `respond` for whichever address
-	 * was asked, and a model that answers a probe as `probe` does.
+	 * The setup as the workspace's administrator, with every provider
+	 * answering `respond` for whichever address was asked, and a model that
+	 * answers a probe as `probe` does.
 	 */
-	const setupWith = (
+	const setupWith = async (
 		respond: (url: string) => Response | Promise<Response>,
 		probe: ModelProbe.Interface["probe"] = () => Effect.void,
-		{ allowPrivateNetwork = true } = {},
+		{ allowPrivateNetwork = true, as = userId } = {},
 	) =>
-		servedOnPostgres(
-			ModelProviderSetup.Service,
-			ModelProviderSetup.layer.pipe(
-				Layer.provide([
-					Layer.succeed(Egress.Service, {
-						providers: { for: () => async (url) => respond(String(url)) },
-						validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
-						oauth: async () => new Response(null, { status: 503 }),
-						webFetch: async () => new Response(null, { status: 503 }),
-					}),
-					Layer.succeed(ModelProbe.Service, { probe }),
-				]),
-			),
-		);
+		(
+			await servedOnPostgresAs(
+				ModelProviderSetup.Service,
+				ModelProviderSetup.layer.pipe(
+					Layer.provide([
+						Layer.succeed(Egress.Service, {
+							providers: { for: () => async (url) => respond(String(url)) },
+							validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
+							oauth: async () => new Response(null, { status: 503 }),
+							webFetch: async () => new Response(null, { status: 503 }),
+						}),
+						Layer.succeed(ModelProbe.Service, { probe }),
+					]),
+				),
+			)
+		)(as);
 
 	const view = (providerId: string) => runOnPostgres(providerIn(workspaceId, providerId));
 	const list = (inWorkspace: string) => runOnPostgres(providersIn(inWorkspace));
@@ -93,6 +104,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!made || !person) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
 		userId = person.id;
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
+		);
 		await store.seedPresets(workspaceId);
 		const provider = await create({
 			name: `Gateway ${stamp}`,
@@ -112,8 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		async ({ httpStatus, active, status }) => {
 			const setup = await setupWith(() => Response.json({ data: [] }, { status: httpStatus }));
 			const created = await setup.create({
-				workspaceId,
-				createdById: userId,
+				workspace: workspaceId,
 				provider: {
 					name: "New gateway",
 					baseUrl: "https://new.example/v1",
@@ -145,7 +158,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			});
 
 			const saved = await setup.update({
-				workspaceId,
+				workspace: workspaceId,
 				providerId: openai.id,
 				changes: { apiKey: "secret" },
 			});
@@ -167,7 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		async ({ requestedActive, active }) => {
 			const setup = await setupWith(() => Response.json({ data: [] }));
 			const saved = await setup.update({
-				workspaceId,
+				workspace: workspaceId,
 				providerId,
 				changes: { apiKey: "replacement", active: requestedActive },
 			});
@@ -198,7 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			expect(ollama).toMatchObject({ active: false, hasApiKey: false });
 
 			const setup = await setupWith(() => Response.json({ models: [] }, { status: httpStatus }));
-			const result = await setup.test({ workspaceId, providerId: ollama.id });
+			const result = await setup.test({ workspace: workspaceId, providerId: ollama.id });
 
 			expect(result.reachable).toBe(reachable);
 			expect(await view(ollama.id)).toMatchObject({
@@ -212,7 +225,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await store.update(workspaceId, providerId, { active: false });
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
-		expect(await setup.test({ workspaceId, providerId })).toMatchObject({ reachable: true });
+		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
+			reachable: true,
+		});
 		expect(await view(providerId)).toMatchObject({ active: true });
 	});
 
@@ -220,7 +235,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await switchOn(providerId);
 		const setup = await setupWith(() => new Response(null, { status: 401 }));
 
-		expect(await setup.test({ workspaceId, providerId })).toMatchObject({ reachable: false });
+		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
+			reachable: false,
+		});
 		expect(await view(providerId)).toMatchObject({
 			active: false,
 			status: "error",
@@ -230,7 +247,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it("does not allow manual activation to bypass a rejected key", async () => {
 		const setup = await setupWith(() => new Response(null, { status: 401 }));
 
-		const saved = await setup.update({ workspaceId, providerId, changes: { active: true } });
+		const saved = await setup.update({
+			workspace: workspaceId,
+			providerId,
+			changes: { active: true },
+		});
 
 		expect(saved).toMatchObject({ active: false, status: "error" });
 	});
@@ -258,7 +279,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				}),
 		);
 
-		expect(await setup.test({ workspaceId, providerId })).toMatchObject({ reachable: false });
+		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
+			reachable: false,
+		});
 		expect(await view(providerId)).toMatchObject({
 			active: false,
 			status: "error",
@@ -277,7 +300,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				return Response.json({ data: [] });
 			});
 
-			await setup.test({ workspaceId, providerId });
+			await setup.test({ workspace: workspaceId, providerId });
 
 			expect(await view(providerId)).toMatchObject({ active: false });
 		} finally {
@@ -289,7 +312,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await store.update(workspaceId, providerId, { active: false });
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
-		await setup.fetchModels({ workspaceId, providerId });
+		await setup.fetchModels({ workspace: workspaceId, providerId });
 
 		expect(await view(providerId)).toMatchObject({
 			active: false,
@@ -302,10 +325,32 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!openai) throw new Error("fixture");
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
-		expect(await setup.test({ workspaceId, providerId: openai.id })).toMatchObject({
+		expect(await setup.test({ workspace: workspaceId, providerId: openai.id })).toMatchObject({
 			reachable: false,
 		});
 		expect(await view(openai.id)).toMatchObject({ active: false });
+	});
+
+	it("lets a member see the models offered, and nothing more", async () => {
+		const [sam] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!sam) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: sam.id, role: "member" }),
+		);
+		const setup = await setupWith(() => Response.json({ data: [] }), undefined, { as: sam.id });
+
+		expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
+			models: [],
+		});
+		await expect(setup.list({ workspace: workspaceId })).rejects.toBeInstanceOf(ActionForbidden);
+		await expect(
+			setup.update({ workspace: workspaceId, providerId, changes: { apiKey: "stolen" } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
 	});
 
 	describe("under an egress policy that forbids private addresses", () => {
@@ -317,7 +362,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			const before = await list(workspaceId);
 
 			await expect(
-				setup.create({ workspaceId, createdById: userId, provider: { preset: "lmstudio" } }),
+				setup.create({ workspace: workspaceId, provider: { preset: "lmstudio" } }),
 			).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
 			expect(await list(workspaceId)).toEqual(before);
 		});
@@ -329,7 +374,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 			await expect(
 				setup.update({
-					workspaceId,
+					workspace: workspaceId,
 					providerId: ollama.id,
 					changes: { baseUrl: "http://192.168.1.10:11434/v1" },
 				}),
@@ -344,7 +389,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		const setup = await setupWith(() => Response.json({ models: [] }));
 
 		const saved = await setup.update({
-			workspaceId,
+			workspace: workspaceId,
 			providerId: ollama.id,
 			changes: { active: true },
 		});
@@ -362,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		await expect(
-			setup.update({ workspaceId, providerId: keyless.id, changes: { active: true } }),
+			setup.update({ workspace: workspaceId, providerId: keyless.id, changes: { active: true } }),
 		).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresApiKey);
 		expect(await view(keyless.id)).toMatchObject({ active: false });
 	});

@@ -17,8 +17,17 @@ import { createTestApp } from "./app.test-support.ts";
 /** Public by intent. Anything else reaching here without credentials is a bug. */
 const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
 
-/** Groups whose service checks every action itself: behind `Session` only, with no rule in `accessPolicy`. */
-const CHECKED_BY_THEIR_SERVICE = new Set(["workspaces"]);
+/** Groups whose use case checks every action itself: behind `Session` only, with no rule in `accessPolicy`. */
+const CHECKED_BY_THEIR_SERVICE = new Set([
+	"system",
+	"workspaces",
+	"agents",
+	"pods",
+	"systemAgents",
+	"modelProviders",
+	"searchProviders",
+	"connections",
+]);
 
 const STRANGER = "0199a3a0-0000-7000-8000-0000000000ee";
 

@@ -1,12 +1,15 @@
+import { PERSONAL_POD_SLUG } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	agent,
 	modelProvider,
 	pod,
+	podMember,
 	providerModel,
 	user,
 	workspace,
+	workspaceMember,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -15,6 +18,8 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { ActionForbidden, ResourceHidden } from "../access.ts";
+import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
@@ -23,6 +28,8 @@ const OFFERED = "offered-model";
 
 describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => {
 	let agents: Promised<AgentRepository.Interface>;
+	let administrationAs: (userId: string) => Promised<AgentAdministration.Interface>;
+	/** The administration as the workspace's administrator. */
 	let administration: Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let creatorId: string;
@@ -30,7 +37,10 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 	beforeAll(async () => {
 		agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
-		administration = await servedOnPostgres(AgentAdministration.Service, AgentAdministration.layer);
+		administrationAs = await servedOnPostgresAs(
+			AgentAdministration.Service,
+			AgentAdministration.layer,
+		);
 	});
 
 	afterAll(async () => {
@@ -54,6 +64,10 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		if (!space || !person) throw new Error("could not create the fixtures");
 		workspaceId = space.id;
 		creatorId = person.id;
+		administration = administrationAs(creatorId);
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: creatorId, role: "admin" }),
+		);
 		const [room] = await onDatabase((db) =>
 			db
 				.insert(pod)
@@ -84,10 +98,8 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 	it("creates an agent on a model the workspace offers", async () => {
 		const made = await administration.create({
-			workspaceId,
-			createdById: creatorId,
+			podId,
 			agent: {
-				podId,
 				name: "Triage",
 				model: OFFERED,
 			},
@@ -100,11 +112,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		"refuses to create an agent on %s, and creates nothing",
 		async (model) => {
 			await expect(
-				administration.create({
-					workspaceId,
-					createdById: creatorId,
-					agent: { podId, name: "Triage", model },
-				}),
+				administration.create({ podId, agent: { name: "Triage", model } }),
 			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 
 			expect(
@@ -115,49 +123,166 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 	it("refuses to move an agent to a model the workspace does not offer, but lets it be cleared", async () => {
 		const made = await administration.create({
-			workspaceId,
-			createdById: creatorId,
+			podId,
 			agent: {
-				podId,
 				name: "Triage",
 				model: OFFERED,
 			},
 		});
 
 		await expect(
-			administration.update({ workspaceId, agentId: made.id, changes: { model: "switched-off" } }),
+			administration.update({ agentId: made.id, changes: { model: "switched-off" } }),
 		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 		expect(
-			(await administration.update({ workspaceId, agentId: made.id, changes: { model: null } }))
-				.model,
+			(await administration.update({ agentId: made.id, changes: { model: null } })).model,
 		).toBeNull();
 	});
 
 	it("refuses a change that changes nothing", async () => {
 		const made = await administration.create({
-			workspaceId,
-			createdById: creatorId,
+			podId,
 			agent: {
-				podId,
 				name: "Triage",
 				model: OFFERED,
 			},
 		});
 
-		await expect(
-			administration.update({ workspaceId, agentId: made.id, changes: {} }),
-		).rejects.toBeInstanceOf(AgentAdministration.EmptyAgentUpdate);
+		await expect(administration.update({ agentId: made.id, changes: {} })).rejects.toBeInstanceOf(
+			AgentAdministration.EmptyAgentUpdate,
+		);
 	});
 
 	it("sets a system agent up only on a model the workspace offers", async () => {
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		await expect(
-			administration.setSystemAgentModel({ workspaceId, key: "summarise", model: "unknown-model" }),
+			administration.setSystemAgentModel({
+				workspace: workspaceId,
+				key: "summarise",
+				model: "unknown-model",
+			}),
 		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 		expect(
-			(await administration.setSystemAgentModel({ workspaceId, key: "summarise", model: OFFERED }))
-				.model,
+			(
+				await administration.setSystemAgentModel({
+					workspace: workspaceId,
+					key: "summarise",
+					model: OFFERED,
+				})
+			).model,
 		).toBe(OFFERED);
+	});
+
+	it("refuses what the pod does not let somebody do, and hides it from who cannot reach it", async () => {
+		const made = await administration.create({ podId, agent: { name: "Triage", model: OFFERED } });
+		const [viewer, stranger] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values([
+					{ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` },
+					{ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` },
+				])
+				.returning(),
+		);
+		if (!viewer || !stranger) throw new Error("could not create the people");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
+		);
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: viewer.id }),
+		);
+
+		await expect(
+			administrationAs(viewer.id).create({ podId, agent: { name: "Scout", model: OFFERED } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		await expect(
+			administrationAs(viewer.id).setSystemAgentModel({
+				workspace: workspaceId,
+				key: "summarise",
+				model: OFFERED,
+			}),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		expect(await administrationAs(viewer.id).get({ agentId: made.id })).toMatchObject({
+			id: made.id,
+		});
+		await expect(administrationAs(stranger.id).get({ agentId: made.id })).rejects.toBeInstanceOf(
+			ResourceHidden,
+		);
+		await expect(administrationAs(stranger.id).remove({ agentId: made.id })).rejects.toBeInstanceOf(
+			ResourceHidden,
+		);
+	});
+
+	describe("in a pod the actor is not in", () => {
+		/** Sam, a member with a Personal pod holding an agent of his own. */
+		const aMemberWithPersonalAgent = async () => {
+			const [person] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` })
+					.returning(),
+			);
+			if (!person) throw new Error("could not create the member");
+			await onDatabase((db) =>
+				db.insert(workspaceMember).values({ workspaceId, userId: person.id, role: "member" }),
+			);
+			const [personal] = await onDatabase((db) =>
+				db
+					.insert(pod)
+					.values({
+						workspaceId,
+						kind: "personal",
+						ownerId: person.id,
+						name: "Personal",
+						slug: PERSONAL_POD_SLUG,
+					})
+					.returning(),
+			);
+			if (!personal) throw new Error("could not create the Personal pod");
+			await onDatabase((db) =>
+				db.insert(podMember).values({ workspaceId, podId: personal.id, userId: person.id }),
+			);
+			const made = await administrationAs(person.id).create({
+				podId: personal.id,
+				agent: { name: "Helper", model: OFFERED },
+			});
+			return { memberId: person.id, agentId: made.id };
+		};
+
+		it("lets an administrator change and remove a shared pod's agent without joining it", async () => {
+			const made = await administration.create({
+				podId,
+				agent: { name: "Triage", model: OFFERED },
+			});
+
+			expect(
+				await administration.update({ agentId: made.id, changes: { name: "Sorter" } }),
+			).toMatchObject({ id: made.id, name: "Sorter" });
+			await administration.remove({ agentId: made.id });
+
+			expect(
+				await onDatabase((db) => db.select().from(agent).where(eq(agent.id, made.id))),
+			).toEqual([]);
+		});
+
+		it("hides an agent in somebody else's Personal pod from an administrator", async () => {
+			const { agentId } = await aMemberWithPersonalAgent();
+
+			await expect(administration.get({ agentId })).rejects.toBeInstanceOf(ResourceHidden);
+			await expect(
+				administration.update({ agentId, changes: { name: "Mine now" } }),
+			).rejects.toBeInstanceOf(ResourceHidden);
+			await expect(administration.remove({ agentId })).rejects.toBeInstanceOf(ResourceHidden);
+		});
+
+		it("lets the owner of a Personal pod remove its agent", async () => {
+			const { memberId, agentId } = await aMemberWithPersonalAgent();
+
+			await administrationAs(memberId).remove({ agentId });
+
+			expect(
+				await onDatabase((db) => db.select().from(agent).where(eq(agent.id, agentId))),
+			).toEqual([]);
+		});
 	});
 });

@@ -6,6 +6,7 @@ import {
 	Session,
 	Unauthorized,
 } from "@sugabots/contracts/http";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
@@ -80,6 +81,16 @@ export function sessionLayer(
 		}),
 	);
 }
+
+/**
+ * Runs a handler's work as the person the request's session belongs to, the
+ * actor core authorizes, for an endpoint behind `Session`.
+ */
+export const asSessionUser = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.flatMap(CurrentUser, (user) =>
+		// `Session` put the user there only once `identify` accepted the credentials.
+		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(user.id))),
+	);
 
 export function bearerToken(header: string | undefined): string | undefined {
 	const [scheme, ...rest] = header?.trim().split(/\s+/) ?? [];

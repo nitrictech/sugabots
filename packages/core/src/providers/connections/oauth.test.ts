@@ -127,13 +127,14 @@ function memoryStorage() {
 describe("signing a connection in", () => {
 	it("registers, sends the browser to sign in, exchanges the code, and then lists tools with the token", async () => {
 		const storage = memoryStorage();
-		const provider = () =>
+		const provider = (startedByUserId?: string) =>
 			storedOAuthProvider(storage, {
 				redirectUrl: "http://localhost:3000/connections/oauth/callback",
 				clientName: "Sugabots",
+				startedByUserId,
 			});
 
-		const started = await beginAuthorization(provider(), serverUrl, fetch);
+		const started = await beginAuthorization(provider("person-1"), serverUrl, fetch);
 		if (!("authorizationUrl" in started)) throw new Error("expected a URL to sign in at");
 		const sendTo = new URL(started.authorizationUrl);
 		expect(sendTo.origin + sendTo.pathname).toBe(`${origin}/authorize`);
@@ -147,6 +148,7 @@ describe("signing a connection in", () => {
 		expect(storage.record()).toMatchObject({
 			clientInformation: { client_id: "client-1" },
 			state,
+			startedByUserId: "person-1",
 		});
 		expect(storage.record()?.codeVerifier).toBeTruthy();
 
@@ -154,6 +156,7 @@ describe("signing a connection in", () => {
 
 		expect(storage.record()?.tokens).toMatchObject({ access_token: "token-1" });
 		expect(storage.record()?.state).toBe("");
+		expect(storage.record()?.startedByUserId).toBeUndefined();
 		expect(tokenRequests.at(-1)?.get("code_verifier")).toBeTruthy();
 
 		const listed = await listServerTools(

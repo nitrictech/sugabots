@@ -1,17 +1,20 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { agent, pod, user, workspace } from "../../database/schema.ts";
+import { agent, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () => {
 	let agents: Promised<AgentRepository.Interface>;
+	let administrationAs: (userId: string) => Promised<AgentAdministration.Interface>;
+	/** The administration as the administrator of both workspaces. */
 	let administration: Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let otherWorkspaceId: string;
@@ -19,7 +22,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 
 	beforeAll(async () => {
 		agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
-		administration = await servedOnPostgres(AgentAdministration.Service, AgentAdministration.layer);
+		administrationAs = await servedOnPostgresAs(
+			AgentAdministration.Service,
+			AgentAdministration.layer,
+		);
 	});
 
 	afterAll(async () => {
@@ -48,6 +54,13 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		workspaceId = space.id;
 		otherWorkspaceId = other.id;
 		creatorId = person.id;
+		administration = administrationAs(creatorId);
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId: creatorId, role: "admin" },
+				{ workspaceId: otherWorkspaceId, userId: creatorId, role: "admin" },
+			]),
+		);
 	});
 
 	const placed = () =>
@@ -95,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		await agents.ensureSystemAgents({ workspaceId: otherWorkspaceId, createdById: creatorId });
 		await agents.setSystemAgentModel(workspaceId, "facilitate", "one-workspace-only");
 
-		const listed = await administration.systemAgents(otherWorkspaceId);
+		const listed = await administration.systemAgents({ workspace: otherWorkspaceId });
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
 			{ key: "facilitate", model: null },
@@ -103,7 +116,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	});
 
 	it("reports a workspace with no rows as one that is not set up", async () => {
-		const listed = await administration.systemAgents(workspaceId);
+		const listed = await administration.systemAgents({ workspace: workspaceId });
 
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "summarise", model: null },
@@ -116,7 +129,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
 
 		const turnedOff = await administration.setSystemAgentModel({
-			workspaceId,
+			workspace: workspaceId,
 			key: "summarise",
 			model: null,
 		});
@@ -130,7 +143,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		const routed = await placePod("routed", { facilitator: true });
 		const quiet = await placePod("quiet", { facilitator: false });
 
-		await administration.setSystemAgentModel({ workspaceId, key: "facilitate", model: null });
+		await administration.setSystemAgentModel({
+			workspace: workspaceId,
+			key: "facilitate",
+			model: null,
+		});
 
 		const after = await onDatabase((db) =>
 			db
@@ -151,7 +168,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		await agents.setSystemAgentModel(workspaceId, "facilitate", "chosen-model");
 		const routed = await placePod("routed", { facilitator: true });
 
-		await administration.setSystemAgentModel({ workspaceId, key: "summarise", model: null });
+		await administration.setSystemAgentModel({
+			workspace: workspaceId,
+			key: "summarise",
+			model: null,
+		});
 
 		const [after] = await onDatabase((db) =>
 			db.select({ routing: pod.routing }).from(pod).where(eq(pod.id, routed.id)),

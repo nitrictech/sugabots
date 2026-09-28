@@ -1,24 +1,29 @@
 import type { Pod, PodMember } from "@sugabots/contracts";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { pod, podMember, user } from "../../database/schema.ts";
-import { podStanding, reachesPod } from "../access.ts";
+import { podStanding } from "../access.ts";
 import type { Actor } from "../permissions.ts";
 import { podSeenBy } from "./pod.ts";
 
 /**
  * The pods `actor` reaches in a workspace, by name, each with the permissions
- * they hold in it. Scoped with `reachesPod`, the rule `Authorization` applies
- * to a single pod, so a list and a direct read cannot disagree.
+ * they hold in it. `reachesPod` is `Visibility`'s rule for `actor`, the one
+ * `Authorization` applies to a single pod, so a list and a direct read cannot
+ * disagree.
  */
-export const visiblePods = (workspaceId: string, actor: Actor) =>
+export const visiblePods = (
+	workspaceId: string,
+	actor: Actor,
+	reachesPod: (podId: SQLWrapper) => SQL<boolean>,
+) =>
 	query((db) =>
 		db
 			.select({ pod, isExplicitMember: sql<boolean>`${podMember.id} is not null` })
 			.from(pod)
 			.leftJoin(podMember, and(eq(podMember.podId, pod.id), eq(podMember.userId, actor.userId)))
-			.where(and(eq(pod.workspaceId, workspaceId), reachesPod(pod.id, actor.userId)))
+			.where(and(eq(pod.workspaceId, workspaceId), reachesPod(pod.id)))
 			.orderBy(asc(pod.name)),
 	).pipe(
 		Effect.map((rows): Pod[] =>

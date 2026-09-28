@@ -1,17 +1,20 @@
 import type { Agent, SystemAgent } from "@sugabots/contracts";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { agent } from "../../database/schema.ts";
-import { reachesPod } from "../access.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { SYSTEM_AGENTS } from "./system-agents.ts";
 
 /**
- * The crew agents `userId` can see in a workspace, by name: those in the pods
- * `reachesPod` says they reach. System agents are in no pod and are not here.
+ * The crew agents in a workspace's pods that `reachesPod`, `Visibility`'s
+ * rule for somebody, says they reach, by name. System agents are in no pod
+ * and are not here.
  */
-export const visibleCrewAgents = (workspaceId: string, userId: string) =>
+export const visibleCrewAgents = (
+	workspaceId: string,
+	reachesPod: (podId: SQLWrapper) => SQL<boolean>,
+) =>
 	query((db) =>
 		db
 			.select()
@@ -19,11 +22,7 @@ export const visibleCrewAgents = (workspaceId: string, userId: string) =>
 			// `reachesPod` is already false for a null pod; the explicit check keeps
 			// system agents out without relying on how NULL propagates in it.
 			.where(
-				and(
-					eq(agent.workspaceId, workspaceId),
-					isNotNull(agent.podId),
-					reachesPod(agent.podId, userId),
-				),
+				and(eq(agent.workspaceId, workspaceId), isNotNull(agent.podId), reachesPod(agent.podId)),
 			)
 			.orderBy(asc(agent.name)),
 	).pipe(

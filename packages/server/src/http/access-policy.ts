@@ -45,73 +45,13 @@ type AccessPolicy = {
 };
 
 export const accessPolicy: AccessPolicy = {
-	system: {
-		me: { reach: "the signed-in person, and nothing about a workspace" },
-		workspaceAccess: { workspace: "workspace.read" },
-	},
-	agents: {
-		list: { workspace: "workspace.read" },
-		create: { pod: "agent.create" },
-		get: { agent: "agent.read" },
-		update: { agent: "agent.update" },
-		remove: { agent: "agent.delete" },
-	},
-	pods: {
-		list: { workspace: "workspace.read" },
-		create: { workspace: "pod.create" },
-		ensurePersonal: { workspace: "workspace.read" },
-		update: { pod: "pod.update" },
-		remove: { pod: "pod.delete" },
-		listMembers: { pod: "pod.read" },
-		addMember: { pod: "pod.members.manage" },
-		removeMember: { pod: "pod.members.manage" },
-	},
 	onboarding: {
 		status: { reach: "the signed-in person's own progress" },
 		complete: { reach: "Onboarding.complete checks the pod and agent named" },
 		completeInvite: { reach: "matches the invitation against this account" },
 	},
-	systemAgents: {
-		list: { workspace: "workspace.read" },
-		update: { workspace: "workspace.builtInAgents.configure" },
-	},
 	modelTrials: {
 		run: { workspace: "workspace.providers.manage" },
-	},
-	modelProviders: {
-		list: { workspace: "workspace.providers.manage" },
-		listEnabledModels: { workspace: "workspace.read" },
-		create: { workspace: "workspace.providers.manage" },
-		get: { workspace: "workspace.providers.manage" },
-		update: { workspace: "workspace.providers.manage" },
-		remove: { workspace: "workspace.providers.manage" },
-		test: { workspace: "workspace.providers.manage" },
-		fetchModels: { workspace: "workspace.providers.manage" },
-		addModel: { workspace: "workspace.providers.manage" },
-		setModelsEnabled: { workspace: "workspace.providers.manage" },
-		updateModel: { workspace: "workspace.providers.manage" },
-		removeModel: { workspace: "workspace.providers.manage" },
-	},
-	searchProviders: {
-		get: { workspace: "workspace.providers.manage" },
-		webAccess: { workspace: "workspace.read" },
-		replace: { workspace: "workspace.providers.manage" },
-		update: { workspace: "workspace.providers.manage" },
-		remove: { workspace: "workspace.providers.manage" },
-		test: { workspace: "workspace.providers.manage" },
-	},
-	connections: {
-		list: { pod: "connection.read" },
-		create: { pod: "connection.manage" },
-		get: { pod: "connection.read" },
-		update: { pod: "connection.manage" },
-		remove: { pod: "connection.manage" },
-		test: { pod: "connection.manage" },
-		connectFromCatalog: { pod: "connection.manage" },
-		startOAuth: { pod: "connection.manage" },
-		oauthCallback: {
-			reach: "ConnectionSetup.completeOAuth asks again on the way back from the provider",
-		},
 	},
 	events: {
 		workspace: { reach: "events/access.ts asks Authorization itself" },

@@ -1,4 +1,4 @@
-import type { ApiFailure } from "@sugabots/contracts/http";
+import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
 import type { UserFacing } from "@sugabots/core/user-message";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
@@ -33,6 +33,14 @@ export const asHttpError =
 			const Failure = statuses[failure._tag] as Statuses[Exclude<E, ApiFailure>["_tag"]];
 			return new Failure({ message: failure.userMessage }) as InstanceType<typeof Failure>;
 		});
+
+/**
+ * How core's refusals are answered, for the `asHttpError` of any endpoint
+ * whose use case authorizes. Something the caller cannot reach is `NotFound`,
+ * so an id cannot be probed for; something they reach but may not act on is
+ * `Forbidden`.
+ */
+export const refusals = { ResourceHidden: NotFound, ActionForbidden: Forbidden };
 
 /**
  * A failure as a response, for the router-level middleware that answers

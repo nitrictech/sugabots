@@ -8,8 +8,9 @@ import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { and, eq, type SQL } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
@@ -36,7 +37,7 @@ const seed = Effect.gen(function* () {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
 	const membership = yield* Membership.Service;
-	const administration = yield* PodAdministration.Service;
+	const personalPods = yield* PersonalPods.Service;
 	const pods = yield* PodRepository.Service;
 	const agents = yield* AgentRepository.Service;
 	const [existingAccount] = yield* query((db) =>
@@ -60,13 +61,14 @@ const seed = Effect.gen(function* () {
 	// the seed provisions no model provider, so naming a model would only make
 	// them look ready while nothing they need is configured.
 	const workspaceId = yield* membership
-		.create({ userId: person.id, details: { name: "Development", slug: "dev" } })
+		.create({ details: { name: "Development", slug: "dev" } })
 		.pipe(
+			CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(person.id)),
 			Effect.map((created) => created.id),
 			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
 		);
 
-	const personal = yield* administration.provisionPersonal({ workspaceId, userId: person.id });
+	const personal = yield* personalPods.provision({ workspaceId, userId: person.id });
 	const supportId = yield* pods
 		.create(workspaceId, { creatorId: person.id, name: "Support", slug: "support" })
 		.pipe(
@@ -153,7 +155,7 @@ seed.pipe(
 		Layer.mergeAll(
 			Authentication.layerNoDeps,
 			Membership.layer,
-			PodAdministration.layer,
+			PersonalPods.layer,
 			PodRepository.layer,
 			AgentRepository.layer,
 		).pipe(

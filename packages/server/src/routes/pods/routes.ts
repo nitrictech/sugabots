@@ -3,17 +3,11 @@ import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedPod, grantedWorkspace } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
-/**
- * Pods, and who is in them.
- *
- * Every endpoint names the action it performs in `PodsApi` and `Authorise`
- * decides it, so the rules live in
- * `packages/core/src/workspaces/permissions.ts` and not in each handler.
- */
+/** Pods, and who is in them. `PodAdministration` decides who may do what. */
 
 const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
@@ -21,14 +15,11 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 	Effect.gen(function* () {
 		const pods = yield* PodAdministration.Service;
 		return handlers
-			.handle("list", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					pods.list({ workspaceId, actor }),
-				),
+			.handle("list", ({ params }) =>
+				pods.list({ workspace: params.workspace }).pipe(asSessionUser, asHttpError(podErrors)),
 			)
-			.handle("create", ({ payload }) =>
+			.handle("create", ({ params, payload }) =>
 				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* grantedWorkspace;
 					// Derived before anything is written, so an unsluggable name such as
 					// "!!!", or one only a Personal pod may have, is a bad request about
 					// the name rather than a slug conflict.
@@ -45,52 +36,46 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 					}
 					return yield* pods
 						.create({
-							workspaceId,
-							creator: actor,
+							workspace: params.workspace,
 							name: payload.name,
 							slug: slug.success,
 							color: payload.color,
 						})
-						.pipe(asHttpError(podErrors));
+						.pipe(asSessionUser, asHttpError(podErrors));
 				}),
 			)
-			.handle("ensurePersonal", ({ payload }) =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					pods
-						.ensurePersonal({ workspaceId, owner: actor, model: payload.model })
-						.pipe(asHttpError(podErrors)),
-				),
+			.handle("ensurePersonal", ({ params, payload }) =>
+				pods
+					.ensurePersonal({ workspace: params.workspace, model: payload.model })
+					.pipe(asSessionUser, asHttpError(podErrors)),
 			)
-			.handle("update", ({ payload }) =>
-				Effect.flatMap(grantedPod, (standing) =>
-					pods.update({ standing, changes: payload }).pipe(asHttpError(podErrors)),
-				),
+			.handle("update", ({ params, payload }) =>
+				pods
+					.update({ podId: params.podId, changes: payload })
+					.pipe(asSessionUser, asHttpError(podErrors)),
 			)
-			.handle("remove", () =>
-				Effect.flatMap(grantedPod, ({ pod }) =>
-					pods.remove({ workspaceId: pod.workspaceId, podId: pod.id }).pipe(asHttpError(podErrors)),
-				),
+			.handle("remove", ({ params }) =>
+				pods.remove({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
 			)
-			.handle("listMembers", () => Effect.flatMap(grantedPod, ({ pod }) => pods.members(pod.id)))
-			.handle("addMember", ({ payload }) =>
-				Effect.flatMap(grantedPod, ({ pod }) =>
-					pods
-						.addMember({ workspaceId: pod.workspaceId, podId: pod.id, userId: payload.userId })
-						.pipe(asHttpError(podErrors)),
-				),
+			.handle("listMembers", ({ params }) =>
+				pods.members({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("addMember", ({ params, payload }) =>
+				pods
+					.addMember({ podId: params.podId, userId: payload.userId })
+					.pipe(asSessionUser, asHttpError(podErrors)),
 			)
 			.handle("removeMember", ({ params }) =>
-				Effect.flatMap(grantedPod, ({ pod }) =>
-					pods
-						.removeMember({ workspaceId: pod.workspaceId, podId: pod.id, userId: params.userId })
-						.pipe(asHttpError(podErrors)),
-				),
+				pods
+					.removeMember({ podId: params.podId, userId: params.userId })
+					.pipe(asSessionUser, asHttpError(podErrors)),
 			);
 	}),
 );
 
 /** What each way a pod write can fail means over HTTP. */
 const podErrors = {
+	...refusals,
 	PodSlugTaken: Conflict,
 	PersonalPodFixed: BadRequest,
 	FacilitatorNotSetUp: BadRequest,

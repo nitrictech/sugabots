@@ -223,13 +223,15 @@ export const queryCatching = <A, Failure>(
  * Returns `operation`, which runs one method's database work on the
  * `Database` the calling service was built with, in a span named
  * `${service}.${method}`. A service whose methods go through it keeps
- * `Database` out of their types, so its callers need not provide one.
+ * `Database` out of their types, so its callers need not provide one. Any
+ * other service `work` needs, such as `CurrentActor`, stays in the method's
+ * type for its caller to provide.
  */
 export const serviceOperations = <Methods>(service: string) =>
 	Effect.map(
 		Database,
 		(database) =>
-			<A, E>(method: keyof Methods & string, work: Effect.Effect<A, E, Database>) =>
+			<A, E, R>(method: keyof Methods & string, work: Effect.Effect<A, E, R>) =>
 				work.pipe(
 					Effect.provideService(Database, database),
 					Effect.withSpan(`${service}.${method}`),

@@ -41,10 +41,10 @@ import {
  * hand `createTestApp` their own.
  */
 
-/** The caller's standing in a workspace, once an action has been allowed. */
+/** The caller's standing in a workspace they belong to, so their role is known. */
 export interface WorkspaceStanding {
 	workspaceId: string;
-	actor: Actor;
+	actor: Actor & { workspaceRole: WorkspaceRole };
 }
 
 /** The caller's standing towards a pod. */
@@ -126,35 +126,18 @@ export interface Authorization {
 export const authorization: Authorization = {
 	workspace: (userId, workspaceRef, permission) =>
 		Effect.gen(function* () {
-			// A uuid is compared as an id, and anything else as a slug, so a
-			// malformed id is never handed to Postgres as a uuid.
-			const named = isUuid(workspaceRef)
-				? eq(workspace.id, workspaceRef)
-				: eq(workspace.slug, workspaceRef);
-			const [row] = yield* query((db) =>
-				db
-					.select({ workspaceId: workspace.id, role: workspaceMember.role })
-					.from(workspaceMember)
-					.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
-					.where(and(named, eq(workspaceMember.userId, userId)))
-					.limit(1),
-			);
-
-			if (!row) {
+			const standing = yield* query((db) => workspaceStandingFor(db, workspaceRef, userId));
+			if (!standing) {
 				return yield* new ResourceHidden({ resource: "workspace" });
 			}
-			const actor: Actor = { userId, workspaceRole: row.role };
-			if (!mayInWorkspace(actor, permission)) {
+			if (!mayInWorkspace(standing.actor, permission)) {
 				return yield* new ActionForbidden({ permission });
 			}
-			return { workspaceId: row.workspaceId, actor };
+			return standing;
 		}),
 
 	pod: (userId, podId, permission) =>
 		Effect.gen(function* () {
-			if (!isUuid(podId)) {
-				return yield* new ResourceHidden({ resource: "pod" });
-			}
 			const standing = yield* query((db) => podStandingFor(db, podId, userId));
 			if (!standing) {
 				return yield* new ResourceHidden({ resource: "pod" });
@@ -164,36 +147,11 @@ export const authorization: Authorization = {
 
 	agent: (userId, agentId, permission) =>
 		Effect.gen(function* () {
-			if (!isUuid(agentId)) {
+			const standing = yield* query((db) => agentStandingFor(db, agentId, userId));
+			if (!standing) {
 				return yield* new ResourceHidden({ resource: "agent" });
 			}
-
-			// One round trip: the agent, its pod, the caller's workspace role, and
-			// whether a membership row puts them in that pod.
-			const [row] = yield* query((db) =>
-				db
-					.select({ agent, ...standingColumns })
-					.from(agent)
-					.innerJoin(pod, eq(pod.id, agent.podId))
-					.leftJoin(
-						workspaceMember,
-						and(
-							eq(workspaceMember.workspaceId, agent.workspaceId),
-							eq(workspaceMember.userId, userId),
-						),
-					)
-					.leftJoin(podMember, and(eq(podMember.podId, agent.podId), eq(podMember.userId, userId)))
-					.where(eq(agent.id, agentId))
-					.limit(1),
-			);
-
-			if (!row) {
-				return yield* new ResourceHidden({ resource: "agent" });
-			}
-			return yield* Effect.map(
-				decideInPod(standingFromRow(row, userId), permission, "agent"),
-				(allowed): AgentStanding => ({ ...allowed, agent: row.agent }),
-			);
+			return yield* Effect.as(decideInPod(standing, permission, "agent"), standing);
 		}),
 };
 
@@ -243,22 +201,45 @@ function standingFromRow(row: StandingRow, userId: string): PodStanding {
 }
 
 /**
+ * The workspace `workspaceRef` names, by its id or its slug, and `userId`'s
+ * role in it. `undefined` when there is no such workspace or they are not in
+ * it, which are answered alike.
+ */
+export const workspaceStandingFor = Effect.fn("Authorization.workspaceStandingFor")(function* (
+	db: Executor,
+	workspaceRef: string,
+	userId: string,
+) {
+	// A uuid is compared as an id, and anything else as a slug, so a malformed
+	// id is never handed to Postgres as a uuid.
+	const named = isUuid(workspaceRef)
+		? eq(workspace.id, workspaceRef)
+		: eq(workspace.slug, workspaceRef);
+	const [row] = yield* db
+		.select({ workspaceId: workspace.id, role: workspaceMember.role })
+		.from(workspaceMember)
+		.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
+		.where(and(named, eq(workspaceMember.userId, userId)))
+		.limit(1);
+	return row
+		? { workspaceId: row.workspaceId, actor: { userId, workspaceRole: row.role } }
+		: undefined;
+});
+
+/**
  * Everything a decision about one pod needs, in one query: the pod, the
  * caller's workspace role and whether a `pod_member` row puts them in it.
  *
  * `undefined` only when there is no such pod. Somebody outside the workspace
  * gets a standing that permits nothing, because "there is no such pod" and
  * "you are in no position here" are answered differently.
- *
- * Every decision about a pod made outside an HTTP route — in the worker, in a
- * store settling a tool call — starts here, so none of them reconstructs the
- * facts its own way.
  */
 export const podStandingFor = Effect.fn("Authorization.podStandingFor")(function* (
 	db: Executor,
 	podId: string,
 	userId: string,
 ) {
+	if (!isUuid(podId)) return undefined;
 	const [row] = yield* db
 		.select(standingColumns)
 		.from(pod)
@@ -270,6 +251,30 @@ export const podStandingFor = Effect.fn("Authorization.podStandingFor")(function
 		.where(eq(pod.id, podId))
 		.limit(1);
 	return row ? standingFromRow(row, userId) : undefined;
+});
+
+/**
+ * An agent and `userId`'s standing in its pod, in one query. `undefined` when
+ * there is no such agent or it is in no pod, as a system agent is.
+ */
+export const agentStandingFor = Effect.fn("Authorization.agentStandingFor")(function* (
+	db: Executor,
+	agentId: string,
+	userId: string,
+) {
+	if (!isUuid(agentId)) return undefined;
+	const [row] = yield* db
+		.select({ agent, ...standingColumns })
+		.from(agent)
+		.innerJoin(pod, eq(pod.id, agent.podId))
+		.leftJoin(
+			workspaceMember,
+			and(eq(workspaceMember.workspaceId, agent.workspaceId), eq(workspaceMember.userId, userId)),
+		)
+		.leftJoin(podMember, and(eq(podMember.podId, agent.podId), eq(podMember.userId, userId)))
+		.where(eq(agent.id, agentId))
+		.limit(1);
+	return row ? { ...standingFromRow(row, userId), agent: row.agent } : undefined;
 });
 
 /**

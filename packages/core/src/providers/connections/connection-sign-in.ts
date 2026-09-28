@@ -25,12 +25,16 @@ export interface Interface {
 	 * read in, so they are traced under the request or turn that caused them.
 	 */
 	readonly clients: Effect.Effect<OAuthProviders>;
-	/** Starts signing a connection in to the server at `serverUrl`, or finds it already is. */
-	readonly begin: (
-		workspaceId: string,
-		connectionId: string,
-		serverUrl: string,
-	) => Effect.Effect<OAuthSignIn, SignInFailed>;
+	/**
+	 * Starts signing a connection in to the server at `serverUrl`, or finds it
+	 * already is. Only `startedByUserId` may finish the sign-in.
+	 */
+	readonly begin: (input: {
+		workspaceId: string;
+		connectionId: string;
+		serverUrl: string;
+		startedByUserId: string;
+	}) => Effect.Effect<OAuthSignIn, SignInFailed>;
 	/** Exchanges the `code` the browser brought back for tokens, kept on the connection's row. */
 	readonly finish: (
 		workspaceId: string,
@@ -50,32 +54,43 @@ export const make = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
 	const redirectUrl = `${installation.publicUrl}${API_BASE_PATH}${CONNECTION_SIGN_IN_CALLBACK_PATH}`;
 
+	const providerFor = (
+		context: Context.Context<never>,
+		workspaceId: string,
+		connectionId: string,
+		startedByUserId?: string,
+	) =>
+		storedOAuthProvider(
+			{
+				load: () =>
+					Effect.runPromiseWith(context)(connections.oauthRecord(workspaceId, connectionId)),
+				save: (record) =>
+					Effect.runPromiseWith(context)(
+						connections.saveOauthRecord(workspaceId, connectionId, record),
+					),
+			},
+			{ redirectUrl, clientName: "Sugabots", startedByUserId },
+		);
+
 	const clients = Effect.map(
 		Effect.context<never>(),
 		(context): OAuthProviders => ({
-			for: (workspaceId, connectionId) =>
-				storedOAuthProvider(
-					{
-						load: () =>
-							Effect.runPromiseWith(context)(connections.oauthRecord(workspaceId, connectionId)),
-						save: (record) =>
-							Effect.runPromiseWith(context)(
-								connections.saveOauthRecord(workspaceId, connectionId, record),
-							),
-					},
-					{ redirectUrl, clientName: "Sugabots" },
-				),
+			for: (workspaceId, connectionId) => providerFor(context, workspaceId, connectionId),
 		}),
 	);
 
 	return Service.of({
 		clients,
 
-		begin: (workspaceId, connectionId, serverUrl) =>
-			Effect.flatMap(clients, (providers) =>
+		begin: ({ workspaceId, connectionId, serverUrl, startedByUserId }) =>
+			Effect.flatMap(Effect.context<never>(), (context) =>
 				Effect.tryPromise({
 					try: () =>
-						beginAuthorization(providers.for(workspaceId, connectionId), serverUrl, egress.oauth),
+						beginAuthorization(
+							providerFor(context, workspaceId, connectionId, startedByUserId),
+							serverUrl,
+							egress.oauth,
+						),
 					catch: (cause) => new SignInFailed({ step: "begin", cause }),
 				}),
 			).pipe(Effect.withSpan("ConnectionSignIn.begin")),

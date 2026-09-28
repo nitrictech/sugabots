@@ -68,10 +68,19 @@ export interface Interface {
 		connectionId: string,
 		record: OAuthRecord,
 	) => Effect.Effect<void>;
-	/** The connection a sign-in callback belongs to, by the `state` it carries. */
-	readonly byOauthState: (
-		state: string,
-	) => Effect.Effect<{ workspaceId: string; podId: string; connectionId: string } | undefined>;
+	/**
+	 * The connection a sign-in callback belongs to, by the `state` it carries,
+	 * and who started that sign-in, if anybody did.
+	 */
+	readonly byOauthState: (state: string) => Effect.Effect<
+		| {
+				workspaceId: string;
+				podId: string;
+				connectionId: string;
+				startedByUserId: string | undefined;
+		  }
+		| undefined
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -294,16 +303,18 @@ export const make = Effect.gen(function* () {
 			operation(
 				"byOauthState",
 				query((db) =>
-					db
-						.select({
-							workspaceId: connection.workspaceId,
-							podId: connection.podId,
-							connectionId: connection.id,
-						})
-						.from(connection)
-						.where(eq(connection.oauthState, state))
-						.limit(1),
-				).pipe(Effect.map(([row]) => row)),
+					db.select().from(connection).where(eq(connection.oauthState, state)).limit(1),
+				).pipe(
+					Effect.map(
+						([row]) =>
+							row && {
+								workspaceId: row.workspaceId,
+								podId: row.podId,
+								connectionId: row.id,
+								startedByUserId: unsealOauthRecord(row, cipher)?.startedByUserId,
+							},
+					),
+				),
 			),
 	});
 });

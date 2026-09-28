@@ -1,60 +1,39 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import { crewAgentRow, toAgent } from "@sugabots/core/workspaces/agents/agent";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { grantedAgent, grantedPod, grantedWorkspace } from "../../http/authorisation.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, refusals } from "../../http/errors.ts";
 
 export const agentRoutes = HttpApiBuilder.group(ServerApi, "agents", (handlers) =>
 	Effect.gen(function* () {
 		const agents = yield* AgentAdministration.Service;
 		return handlers
-			.handle("list", () =>
-				Effect.flatMap(grantedWorkspace, ({ workspaceId, actor }) =>
-					agents.list({ workspaceId, userId: actor.userId }),
-				),
+			.handle("list", ({ params }) =>
+				agents.list({ workspace: params.workspace }).pipe(asSessionUser, asHttpError(agentErrors)),
 			)
-			.handle("create", ({ payload }) =>
-				Effect.flatMap(grantedPod, ({ pod, actor }) =>
-					agents
-						.create({
-							workspaceId: pod.workspaceId,
-							createdById: actor.userId,
-							agent: { ...payload, podId: pod.id },
-						})
-						.pipe(asHttpError(agentErrors)),
-				),
+			.handle("create", ({ params, payload }) =>
+				agents
+					.create({ podId: params.podId, agent: payload })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
 			)
-			.handle("get", () =>
-				Effect.flatMap(grantedAgent, ({ agent }) => {
-					// A system agent belongs to the workspace and is read through the
-					// system agents' own endpoints, not this one.
-					const crew = crewAgentRow(agent);
-					return crew
-						? Effect.succeed(toAgent(crew))
-						: Effect.fail(new NotFound({ message: "No such agent" }));
-				}),
+			.handle("get", ({ params }) =>
+				agents.get({ agentId: params.agentId }).pipe(asSessionUser, asHttpError(agentErrors)),
 			)
-			.handle("update", ({ payload }) =>
-				Effect.flatMap(grantedAgent, ({ agent }) =>
-					agents
-						.update({ workspaceId: agent.workspaceId, agentId: agent.id, changes: payload })
-						.pipe(asHttpError(agentErrors)),
-				),
+			.handle("update", ({ params, payload }) =>
+				agents
+					.update({ agentId: params.agentId, changes: payload })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
 			)
-			.handle("remove", () =>
-				Effect.flatMap(grantedAgent, ({ agent }) =>
-					agents
-						.remove({ workspaceId: agent.workspaceId, agentId: agent.id })
-						.pipe(asHttpError(agentErrors)),
-				),
+			.handle("remove", ({ params }) =>
+				agents.remove({ agentId: params.agentId }).pipe(asSessionUser, asHttpError(agentErrors)),
 			);
 	}),
 );
 
 const agentErrors = {
+	...refusals,
 	ModelNotEnabled: BadRequest,
 	EmptyAgentUpdate: BadRequest,
 	AgentNameTaken: Conflict,

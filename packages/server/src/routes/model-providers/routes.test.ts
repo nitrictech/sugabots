@@ -6,7 +6,8 @@ import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { UserMessage } from "@sugabots/core/user-message";
-import { testAuthorization } from "@sugabots/core/workspaces/testing";
+import { ResourceHidden } from "@sugabots/core/workspaces/access";
+import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -28,8 +29,6 @@ const resolveUser: UserResolver = async (requestHeaders) =>
 	requestHeaders.get("authorization") === "Bearer good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
-
-const authorization = testAuthorization({ id: WORKSPACE_ID, roles: { [USER_ID]: "admin" } });
 
 const groq: ModelProvider = {
 	id: PROVIDER_ID,
@@ -53,13 +52,18 @@ const groq: ModelProvider = {
 const app = (providers: Partial<ModelProviderSetup.Interface>) =>
 	createTestApp({
 		resolveUser,
-		authorization,
 		services: unimplemented(ModelProviderSetup.Service, providers),
 	});
 
 describe("model provider routes", () => {
 	it("adds a provider from the catalog as the person asking", async () => {
-		const create = vi.fn<ModelProviderSetup.Interface["create"]>(() => Effect.succeed(groq));
+		let askedAs: string | undefined;
+		const create = vi.fn<ModelProviderSetup.Interface["create"]>(() =>
+			Effect.map(CurrentActor.Service, ({ userId }) => {
+				askedAs = userId;
+				return groq;
+			}),
+		);
 
 		const response = await app({ create }).request(root, {
 			method: "POST",
@@ -69,10 +73,10 @@ describe("model provider routes", () => {
 
 		expect(response.status).toBe(201);
 		expect(create).toHaveBeenCalledWith({
-			workspaceId: WORKSPACE_ID,
-			createdById: USER_ID,
+			workspace: WORKSPACE_ID,
 			provider: { preset: "groq", apiKey: "gsk-test" },
 		});
+		expect(askedAs).toBe(USER_ID);
 	});
 
 	it("reports an address the network policy refuses as a bad request, in its own words", async () => {
@@ -123,10 +127,18 @@ describe("model provider routes", () => {
 
 		expect(response.status).toBe(400);
 		expect(update).toHaveBeenCalledWith({
-			workspaceId: WORKSPACE_ID,
+			workspace: WORKSPACE_ID,
 			providerId: PROVIDER_ID,
 			changes: { active: true },
 		});
+	});
+
+	it("answers a workspace hidden from the caller as not found", async () => {
+		const response = await app({
+			list: () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
+		}).request(root, { headers });
+
+		expect(response.status).toBe(404);
 	});
 
 	it("keeps what a provider or the network said about a failed refresh out of the response", async () => {
