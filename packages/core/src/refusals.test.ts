@@ -12,7 +12,7 @@ import { RoutineView } from "./conversations/routines/routine-view.ts";
 import { Routines } from "./conversations/routines/routines.ts";
 import { conversationsForTests } from "./conversations/testing.ts";
 import { ThreadView } from "./conversations/threads/thread-view.ts";
-import { ToolApprovals } from "./conversations/tools/approvals/tool-approvals.ts";
+import { ToolApprovals } from "./conversations/turns/approvals/tool-approvals.ts";
 import { TurnCancellation } from "./conversations/turns/cancellation.ts";
 import { TurnExecution } from "./conversations/turns/execution.ts";
 import { prepareRunnable, runningTurns } from "./conversations/turns/testing.ts";

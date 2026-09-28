@@ -1,6 +1,6 @@
 import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { ToolApprovals } from "@sugabots/core/conversations/turns/approvals/tool-approvals";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";

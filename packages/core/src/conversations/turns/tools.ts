@@ -3,14 +3,14 @@ import type { ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import type { PreparedTurn } from "../turns/execution.ts";
+import type { Collaborations } from "../tools/collaborate/collaborations.ts";
+import { collaborateTool } from "../tools/collaborate/tool.ts";
+import type { OfferedTool } from "../tools/connections.ts";
+import { SEARCH_HISTORY_TOOL, searchHistoryTool } from "../tools/search-history/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
-import { type RecordingOptions, recorded } from "./calls/recorded.ts";
-import type { ToolCallRepository } from "./calls/repository.ts";
-import type { Collaborations } from "./collaborate/collaborations.ts";
-import { collaborateTool } from "./collaborate/tool.ts";
-import type { OfferedTool } from "./connections.ts";
-import { SEARCH_HISTORY_TOOL, searchHistoryTool } from "./search-history/tool.ts";
+import type { PreparedTurn } from "./execution.ts";
+import { type RecordingOptions, recorded } from "./tool-calls/recorded.ts";
+import type { ToolCallRepository } from "./tool-calls/repository.ts";
 
 /**
  * The tools a turn's model may call. One directory per tool under `tools/`;

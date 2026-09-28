@@ -11,19 +11,19 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
+import { FloorControl } from "../floor/floor-control.ts";
+import { BuiltInTools } from "../tools/built-in.ts";
+import { Collaborations } from "../tools/collaborate/collaborations.ts";
+import { ConnectionTools } from "../tools/connections.ts";
 import {
 	ApprovedToolCalls,
 	ToolApprovalsIncomplete,
 	ToolExecutionRefused,
-} from "../tools/approvals/approved-calls.ts";
-import { BuiltInTools } from "../tools/built-in.ts";
-import { ToolCallRepository } from "../tools/calls/repository.ts";
-import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { ConnectionTools } from "../tools/connections.ts";
+} from "./approvals/approved-calls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
-import { FloorControl } from "./floor-control.ts";
 import { type NotRunnable, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { runSegment } from "./turn.steps.ts";
 
 /**

@@ -25,7 +25,6 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { lockRoutineSettlementOf, routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
-import { ToolCallRepository } from "../tools/calls/repository.ts";
 import {
 	ACTIVE_STATUSES,
 	type Ended,
@@ -39,6 +38,7 @@ import {
 	type TurnState,
 	transition,
 } from "./lifecycle.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
 
 /**
  * The only writer of `turn`, and of a turn's reply message while the turn

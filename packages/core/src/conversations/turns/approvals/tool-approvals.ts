@@ -11,10 +11,10 @@ import { thread, toolCall, turn } from "../../../database/schema.ts";
 import { isUuid } from "../../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../../user-message.ts";
 import { lockRoutineSettlementOf } from "../../routines/execution.ts";
-import { awaitsDecisions } from "../../turns/lifecycle.ts";
-import { TurnSignals } from "../../turns/signals.ts";
-import { awaitsDecision } from "../calls/lifecycle.ts";
-import { ToolCallRepository } from "../calls/repository.ts";
+import { awaitsDecisions } from "../lifecycle.ts";
+import { TurnSignals } from "../signals.ts";
+import { awaitsDecision } from "../tool-calls/lifecycle.ts";
+import { ToolCallRepository } from "../tool-calls/repository.ts";
 
 /**
  * People deciding the tool calls a reply parked for approval. The turn reading

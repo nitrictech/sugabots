@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Database, transactional } from "../../database/database.ts";
 import { unimplemented } from "../../testing.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { TurnRequests } from "./requests.ts";
+import { TurnRequests } from "../turns/requests.ts";
 
 const mocks = vi.hoisted(() => ({
 	queueTurn: vi.fn(),

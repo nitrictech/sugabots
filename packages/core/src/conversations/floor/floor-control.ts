@@ -3,8 +3,8 @@ export * as FloorControl from "./floor-control.ts";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { TurnRequests } from "../turns/requests.ts";
 import { decideFloor, type FloorDecision, type FloorMessage, loadFloorScope } from "./floor.ts";
-import { TurnRequests } from "./requests.ts";
 
 /** Who speaks after a message, in a thread of any type. */
 export interface Interface {

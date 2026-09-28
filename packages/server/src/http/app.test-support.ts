@@ -8,7 +8,7 @@ import { RoutineView } from "@sugabots/core/conversations/routines/routine-view"
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { ToolApprovals } from "@sugabots/core/conversations/turns/approvals/tool-approvals";
 import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";

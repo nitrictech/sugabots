@@ -8,8 +8,12 @@ import {
 	type CompactionRequest,
 	compactionLane,
 } from "../compaction/compaction.workflow.ts";
+import {
+	Facilitate,
+	type FacilitateRequest,
+	facilitateLane,
+} from "../floor/facilitate.workflow.ts";
 import { Summary, type SummaryRequest, summaryLane } from "../summaries/summary.workflow.ts";
-import { Facilitate, type FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
 import { Turn, type TurnRequest, turnLane } from "./turn.workflow.ts";
 
 /**

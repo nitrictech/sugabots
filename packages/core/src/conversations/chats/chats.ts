@@ -11,9 +11,9 @@ import { query, serviceOperations, transaction } from "../../database/database.t
 import type * as schema from "../../database/schema.ts";
 import { agent, pod, user } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { FloorControl } from "../floor/floor-control.ts";
 import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
-import { FloorControl } from "../turns/floor-control.ts";
 
 /**
  * Talking to a crew agent: the current actor opens a chat with an agent in a

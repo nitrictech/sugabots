@@ -18,13 +18,13 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { crewOf } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { TurnRequests } from "../turns/requests.ts";
 import {
 	type AttemptOutcome,
 	type FacilitateRequest,
 	FacilitateSteps,
 	FacilitationFailed,
 } from "./facilitate.workflow.ts";
-import { TurnRequests } from "./requests.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a

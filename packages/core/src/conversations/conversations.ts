@@ -8,6 +8,7 @@ import { Chats } from "./chats/chats.ts";
 import { Compactions } from "./compaction/compactions.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
+import { FloorControl } from "./floor/floor-control.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
 import { RoutineView } from "./routines/routine-view.ts";
 import { RoutineWebhooks } from "./routines/routine-webhooks.ts";
@@ -17,14 +18,13 @@ import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
-import { ApprovedToolCalls } from "./tools/approvals/approved-calls.ts";
-import { ToolApprovals } from "./tools/approvals/tool-approvals.ts";
-import { ToolCallRepository } from "./tools/calls/repository.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
+import { ApprovedToolCalls } from "./turns/approvals/approved-calls.ts";
+import { ToolApprovals } from "./turns/approvals/tool-approvals.ts";
 import { TurnCancellation } from "./turns/cancellation.ts";
 import { TurnExecution } from "./turns/execution.ts";
-import { FloorControl } from "./turns/floor-control.ts";
 import { TurnRepository } from "./turns/repository.ts";
+import { ToolCallRepository } from "./turns/tool-calls/repository.ts";
 
 const services = Layer.mergeAll(
 	Chats.layer,

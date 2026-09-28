@@ -1,9 +1,9 @@
 import { DateTime, Effect, Exit } from "effect";
 import type { Models } from "../../providers/models/models.ts";
 import { COMPACTION_SUMMARY_WORDS, compactionPrompt } from "../compaction/prompt.ts";
+import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../floor/facilitator.ts";
 import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
 import { parseGenerated } from "../summaries/summary.steps.ts";
-import { type FacilitatorScope, facilitatorPrompt, parseDecision } from "../turns/facilitator.ts";
 
 /**
  * What a model has to get right to do a system agent's job.

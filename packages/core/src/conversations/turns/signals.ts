@@ -2,7 +2,7 @@ export * as TurnSignals from "./signals.ts";
 
 import { Context, Effect, Layer, type Schema } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
-import type { ApprovalDecision } from "../tools/calls/lifecycle.ts";
+import type { ApprovalDecision } from "./tool-calls/lifecycle.ts";
 import { approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
 
 /**

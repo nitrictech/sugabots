@@ -25,20 +25,20 @@ import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../threads/thread-view.ts";
-import { TurnCancellation } from "../../turns/cancellation.ts";
-import { type PreparedTurn, replyTurnOf, TurnExecution } from "../../turns/execution.ts";
-import { type TurnCheckpoint, TurnRepository } from "../../turns/repository.ts";
-import { TurnSignals } from "../../turns/signals.ts";
-import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../../turns/testing.ts";
+import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
+import { ToolApprovalConflict, ToolApprovals } from "../approvals/tool-approvals.ts";
+import { TurnCancellation } from "../cancellation.ts";
+import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
+import { type TurnCheckpoint, TurnRepository } from "../repository.ts";
+import { TurnSignals } from "../signals.ts";
+import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../testing.ts";
 import {
 	type SegmentOutcome,
 	Turn,
 	type TurnRequest,
 	TurnSteps,
 	turnWorkflow,
-} from "../../turns/turn.workflow.ts";
-import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { ToolApprovalConflict, ToolApprovals } from "../approvals/tool-approvals.ts";
+} from "../turn.workflow.ts";
 import {
 	boundedJson,
 	MAX_STORED_JSON_CHARACTERS,

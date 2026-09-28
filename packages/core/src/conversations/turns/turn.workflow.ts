@@ -13,7 +13,7 @@ import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { TurnReason } from "../sql.ts";
-import { ApprovalDecision, DecidedApproval } from "../tools/calls/lifecycle.ts";
+import { ApprovalDecision, DecidedApproval } from "./tool-calls/lifecycle.ts";
 
 export const TurnRequest = Schema.Struct({
 	threadId: Schema.String,

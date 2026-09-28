@@ -1,5 +1,5 @@
 import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
+import { ToolApprovals } from "@sugabots/core/conversations/turns/approvals/tool-approvals";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";

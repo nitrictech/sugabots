@@ -3,8 +3,8 @@ import { TestClock } from "effect/testing";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Lanes } from "../../workflows/lanes.ts";
-import type { DecidedApproval } from "../tools/calls/lifecycle.ts";
 import { TurnSignals } from "./signals.ts";
+import type { DecidedApproval } from "./tool-calls/lifecycle.ts";
 import {
 	type SegmentOutcome,
 	Turn,

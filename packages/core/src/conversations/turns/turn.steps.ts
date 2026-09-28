@@ -22,15 +22,11 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import {
-	ApprovedToolCalls,
-	type ToolApprovalsIncomplete,
-} from "../tools/approvals/approved-calls.ts";
+import { FloorControl } from "../floor/floor-control.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
-import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
-import { toolsForTurn } from "../tools/for-turn.ts";
+import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
 	type PreparedTurn,
@@ -40,7 +36,6 @@ import {
 	type TurnRun,
 	turnRunFor,
 } from "./execution.ts";
-import { FloorControl } from "./floor-control.ts";
 import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
 import {
 	type ReplyDraft,
@@ -49,6 +44,8 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
+import { ToolCallRepository } from "./tool-calls/repository.ts";
+import { toolsForTurn } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */

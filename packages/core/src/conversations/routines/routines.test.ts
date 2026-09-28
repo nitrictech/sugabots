@@ -32,7 +32,7 @@ import {
 } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
-import { ToolApprovalForbidden, ToolApprovals } from "../tools/approvals/tool-approvals.ts";
+import { ToolApprovalForbidden, ToolApprovals } from "../turns/approvals/tool-approvals.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../turns/execution.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { prepareRunnable, runningTurns } from "../turns/testing.ts";

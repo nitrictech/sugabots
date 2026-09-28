@@ -25,7 +25,7 @@ import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
 import { routineAcceptsWork } from "../../routines/execution.ts";
 import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
-import { mayRunTools } from "../../turns/lifecycle.ts";
+import { mayRunTools } from "../lifecycle.ts";
 import {
 	type ApprovalDecision,
 	isFinished,

@@ -17,6 +17,7 @@ import { loadContextWindow } from "../compaction/context-window.ts";
 import { estimatedTokens, historyLimitTokens, newestWithinLimit } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
+import type { FloorMessage } from "../floor/floor.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -26,7 +27,6 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { messageTextWithPlacedParts } from "./context.ts";
-import type { FloorMessage } from "./floor.ts";
 import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import {
 	type NotRunnable,
