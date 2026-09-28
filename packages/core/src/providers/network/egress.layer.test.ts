@@ -1,5 +1,6 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
+import { Installation } from "../../installation/installation.ts";
 import { Egress } from "./egress.ts";
 
 /** Runs `use` against `Egress.layer` as `env` configures it, before its clients close. */
@@ -7,7 +8,10 @@ function withEgress<A>(env: Record<string, string>, use: (egress: Egress.Interfa
 	return Effect.runPromiseExit(
 		Effect.flatMap(Egress.Service, (egress) => Effect.promise(() => use(egress))).pipe(
 			Effect.provide(
-				Egress.layer.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
+				Egress.layer.pipe(
+					Layer.provide(Installation.layer),
+					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+				),
 			),
 		),
 	);

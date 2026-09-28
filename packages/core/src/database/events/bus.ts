@@ -1,12 +1,15 @@
+export * as EventBus from "./bus.ts";
+
 import {
 	type Channel,
 	isDurableEventType,
 	resetEvent,
 	type StreamEvent,
 } from "@sugabots/contracts";
+import { Context, Effect, Layer } from "effect";
 import type { CommittedEvent } from "./outbox.ts";
-import type { EventRelay } from "./relay.ts";
-import type { EventStore } from "./store.ts";
+import { type EventRelay, postgresEventRelay } from "./relay.ts";
+import { EventStore } from "./store.ts";
 
 /**
  * Publish and fan-out for live updates (ADR 001).
@@ -17,6 +20,41 @@ import type { EventStore } from "./store.ts";
  * relay, which carries it to the other processes' buses; what they broadcast
  * arrives here and is delivered like a local publish.
  */
+
+export interface Interface {
+	publish(channel: Channel, event: StreamEvent): Promise<void>;
+	publishCommitted(events: CommittedEvent[]): Promise<void>;
+	subscribe(channel: Channel, options?: SubscribeOptions): AsyncIterable<Delivery>;
+	/**
+	 * Stops listening to other processes and ends every subscription here.
+	 *
+	 * Ending them is what lets the process stop. A subscriber parks forever
+	 * waiting for the next event, and behind each one is an open response
+	 * holding a socket, so a server that closes without this waits on clients
+	 * that are never going to hang up. Closing twice is the same as once.
+	 */
+	close(): Promise<void>;
+}
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventBus") {}
+
+/**
+ * The process's bus, over the event store and relayed to the other processes
+ * through Postgres: every process runs workflows, so what one writes the
+ * others must hear about. Closed when the layer's scope is.
+ */
+export const make = Effect.gen(function* () {
+	const store = yield* EventStore.Service;
+	const runFork = Effect.runForkWith(yield* Effect.context<never>());
+	const log = (message: string, cause: unknown) => void runFork(Effect.logError(message, cause));
+	const relay = yield* postgresEventRelay(store, { log });
+	return yield* Effect.acquireRelease(
+		Effect.sync(() => inProcess({ store, relay, log })),
+		(bus) => Effect.promise(() => bus.close()),
+	);
+});
+
+export const layer = Layer.effect(Service, make);
 
 /** An event as a subscriber receives it. Only durable events carry a `seq`. */
 export interface Delivery {
@@ -29,12 +67,6 @@ export interface SubscribeOptions {
 	since?: number;
 	/** Ends the subscription. The stream route aborts on disconnect and on age. */
 	signal?: AbortSignal;
-}
-
-export interface EventBus {
-	publish(channel: Channel, event: StreamEvent): Promise<void>;
-	publishCommitted(events: CommittedEvent[]): Promise<void>;
-	subscribe(channel: Channel, options?: SubscribeOptions): AsyncIterable<Delivery>;
 }
 
 /** How many events a subscriber may fall behind before it is dropped. */
@@ -54,33 +86,21 @@ interface Subscriber {
 	overflowed: boolean;
 }
 
-/** The bus a process owns: the one that can be closed when the process stops. */
-export interface OwnedEventBus extends EventBus {
-	/**
-	 * Stops listening to other processes and ends every subscription here.
-	 *
-	 * Ending them is what lets the process stop. A subscriber parks forever
-	 * waiting for the next event, and behind each one is an open response
-	 * holding a socket, so a server that closes without this waits on clients
-	 * that are never going to hang up.
-	 */
-	close(): Promise<void>;
-}
-
-export interface EventBusOptions {
-	store: EventStore;
+export interface InProcessOptions {
+	store: EventStore.Interface;
 	/** Without one, deliveries stay in this process: right for tests, wrong for a server. */
 	relay?: EventRelay;
 	maxBuffered?: number;
 	log?: (message: string, cause: unknown) => void;
 }
 
-export function createEventBus({
+/** The bus in this process, with `relay` carrying its deliveries to other processes. */
+export function inProcess({
 	store,
 	relay,
 	maxBuffered = MAX_BUFFERED,
 	log = console.error,
-}: EventBusOptions): OwnedEventBus {
+}: InProcessOptions): Interface {
 	const channels = new Map<Channel, Set<Subscriber>>();
 	let closed = false;
 

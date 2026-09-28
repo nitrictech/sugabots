@@ -4,8 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../../database/database.ts";
-import { createEventBus } from "../../database/events/bus.ts";
-import { memoryEventStore } from "../../database/events/store.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	connection,
@@ -43,7 +43,9 @@ import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const conversations = await conversationsForTests(
+		EventBus.inProcess({ store: EventStore.inMemory() }),
+	);
 	const routinesAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	/** As the routines' owner, who administers their workspace. */

@@ -1,5 +1,17 @@
 export * as Workflows from "./workflows.ts";
 
+import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
+import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
+import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
+import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
+import {
+	Facilitate,
+	facilitateWorkflow,
+} from "@sugabots/core/conversations/turns/facilitate.workflow";
+import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
+import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/turn.steps";
+import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
+import { Lanes } from "@sugabots/core/workflows/lanes";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { Config, Effect, Layer } from "effect";
 
@@ -23,3 +35,19 @@ export const engine = Layer.unwrap(
 		}
 	}),
 );
+
+/** The lanes every durable workflow runs in, on the engine. */
+export const lanes = Lanes.layer([Summary, Turn, Facilitate, Routine]);
+
+/**
+ * The workflows, run by the engine: summaries, turns, facilitation and
+ * routine runs, each over its steps, and the repair of lanes a crash left
+ * behind.
+ */
+export const layer = Layer.mergeAll(
+	summaryWorkflow.layer,
+	turnWorkflow.layer,
+	facilitateWorkflow.layer,
+	routineWorkflow.layer,
+	Lanes.reconcileLayer,
+).pipe(Layer.provide(Layer.mergeAll(summarySteps, routineSteps, facilitateSteps, turnSteps)));

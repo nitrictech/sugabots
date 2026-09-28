@@ -27,6 +27,7 @@ import {
 import {
 	forEachDelta,
 	type ModelRequestFailed,
+	Models,
 	type TurnModel,
 	type TurnModelInput,
 } from "./model.ts";
@@ -48,33 +49,31 @@ const CONTEXT_MESSAGES = 8;
 const MAX_ANSWER_CHARACTERS = 200;
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = (options: { model: TurnModel }) =>
-	Layer.effect(
-		FacilitateSteps,
-		Effect.gen(function* () {
-			const services = yield* Effect.context<
-				ThreadRepository.Service | TurnRequests.Service | Database
-			>();
-			const { emit } = yield* ConversationEvents.Service;
-			const announce = (event: ConversationEvent) =>
-				transaction(emit([event])).pipe(Effect.provideContext(services));
-			return FacilitateSteps.of({
-				attempt: (request, attempt) =>
-					attemptFacilitation(request, attempt, options.model).pipe(
-						Effect.provideContext(services),
-					),
-				abandon: (request) =>
-					announce(
-						ConversationEvent.FacilitationFailed({
-							threadId: request.threadId,
-							userMessage: new FacilitationFailed().userMessage,
-						}),
-					),
-				announceReleased: (request) =>
-					announce(ConversationEvent.LaneReleased({ threadId: request.threadId })),
-			});
-		}),
-	);
+export const stepsLayer = Layer.effect(
+	FacilitateSteps,
+	Effect.gen(function* () {
+		const model = yield* Models;
+		const services = yield* Effect.context<
+			ThreadRepository.Service | TurnRequests.Service | Database
+		>();
+		const { emit } = yield* ConversationEvents.Service;
+		const announce = (event: ConversationEvent) =>
+			transaction(emit([event])).pipe(Effect.provideContext(services));
+		return FacilitateSteps.of({
+			attempt: (request, attempt) =>
+				attemptFacilitation(request, attempt, model).pipe(Effect.provideContext(services)),
+			abandon: (request) =>
+				announce(
+					ConversationEvent.FacilitationFailed({
+						threadId: request.threadId,
+						userMessage: new FacilitationFailed().userMessage,
+					}),
+				),
+			announceReleased: (request) =>
+				announce(ConversationEvent.LaneReleased({ threadId: request.threadId })),
+		});
+	}),
+);
 
 /** What the facilitator sees: who is here, and what was last said. */
 export interface FacilitatorScope {

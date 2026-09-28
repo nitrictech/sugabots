@@ -1,23 +1,15 @@
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { noBuiltInTools } from "@sugabots/core/conversations/tools/built-in";
-import { noConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import {
-	Facilitate,
-	facilitateLane,
-	facilitateWorkflow,
-} from "@sugabots/core/conversations/turns/facilitate.workflow";
-import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
-import type { TurnModel } from "@sugabots/core/conversations/turns/model";
+import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
+import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import { facilitateLane } from "@sugabots/core/conversations/turns/facilitate.workflow";
+import { Models, type TurnModel } from "@sugabots/core/conversations/turns/model";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
 import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
-import { stepsLayer } from "@sugabots/core/conversations/turns/turn.steps";
-import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
-import { createEventBus } from "@sugabots/core/database/events/bus";
+import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
-import { eventPruningLayer } from "@sugabots/core/database/events/prune";
-import { postgresEventStore } from "@sugabots/core/database/events/store";
+import { EventStore } from "@sugabots/core/database/events/store";
 import {
 	agent,
 	collaboration,
@@ -29,14 +21,14 @@ import {
 	workspace,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
-import { closeDatabase, databaseForTests, onDatabase } from "@sugabots/core/database/testing";
-import { Lanes } from "@sugabots/core/workflows/lanes";
+import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { lane } from "@sugabots/core/workflows/sql";
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it } from "vitest";
+import { Workflows } from "./workflows.ts";
 
 /**
  * The whole round trip through the real turn workflow and workers: the host's
@@ -44,23 +36,6 @@ import { afterAll, describe, expect, it } from "vitest";
  * workflow, and the host's turn should finish as soon as the helper's does,
  * not when the wait expires.
  */
-const database = await databaseForTests.context();
-const eventStore = await databaseForTests.runPromise(postgresEventStore);
-const bus = createEventBus({ store: eventStore });
-const workflows = ManagedRuntime.make(
-	Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer).pipe(
-		Layer.provideMerge(Lanes.layer([Turn, Facilitate])),
-		Layer.provideMerge(WorkflowEngine.layerMemory),
-		Layer.merge(EventOutbox.layer(bus)),
-		Layer.provide(Layer.succeedContext(database)),
-	),
-);
-const services = await workflows.context();
-const conversations = await workflows.runPromise(
-	Layer.build(Conversations.layer).pipe(Effect.scoped, Effect.provide(database)),
-);
-const chats = Context.get(conversations, Chats.Service);
-
 describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the workers", () => {
 	// The Scribe is left out: nothing here runs its workflow.
 	const withoutSummaries = Layer.succeed(TurnRequests.Service, {
@@ -90,30 +65,37 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			})),
 	};
 
-	// The routine scheduler is left out: nothing here is scheduled.
-	const background = eventPruningLayer(eventStore);
-	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
-		Layer.provideMerge(facilitateSteps({ model })),
-		Layer.provideMerge(
-			stepsLayer({
-				model,
-				events: bus,
-				builtInTools: noBuiltInTools,
-				connectionTools: noConnectionTools,
-			}),
-		),
-		Layer.provide(withoutSummaries),
-		Layer.provide(Layer.succeedContext(Context.merge(services, conversations))),
-	);
+	// The server's tiers, over the test database and a workflow engine in
+	// memory, with the model above and no tools but collaboration. The routine
+	// scheduler, pruning and seeding are left out: nothing here needs them.
 	const runtime = ManagedRuntime.make(
-		Layer.merge(background, workflowLayers).pipe(
-			Layer.provideMerge(Layer.succeedContext(database)),
+		Workflows.layer.pipe(
+			Layer.provideMerge(
+				Conversations.layer.pipe(
+					Layer.provideMerge(
+						Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer),
+					),
+				),
+			),
+			Layer.provide(
+				Layer.mergeAll(
+					Layer.succeed(Models, model),
+					Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
+					Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
+				),
+			),
+			Layer.provideMerge(Layer.mergeAll(EventOutbox.layer, Workflows.lanes)),
+			Layer.provideMerge(
+				Layer.mergeAll(
+					Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
+					WorkflowEngine.layerMemory,
+				),
+			),
+			Layer.provideMerge(testInfrastructure),
 		),
 	);
-
 	afterAll(async () => {
 		await runtime.dispose();
-		await workflows.dispose();
 		await closeDatabase();
 	});
 
@@ -206,17 +188,22 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 		const asPerson = CurrentActor.provide(
 			CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
 		);
-		const opened = await runtime.runPromise(
-			chats
-				.open({ workspace: input.workspaceId, podId: input.podId, hostAgentId: input.hostAgentId })
-				.pipe(asPerson),
+		return runtime.runPromise(
+			Effect.gen(function* () {
+				const chats = yield* Chats.Service;
+				const opened = yield* chats.open({
+					workspace: input.workspaceId,
+					podId: input.podId,
+					hostAgentId: input.hostAgentId,
+				});
+				yield* chats.post({
+					chatId: opened.id,
+					messageId: crypto.randomUUID(),
+					content: input.content,
+				});
+				return opened;
+			}).pipe(asPerson),
 		);
-		await runtime.runPromise(
-			chats
-				.post({ chatId: opened.id, messageId: crypto.randomUUID(), content: input.content })
-				.pipe(asPerson),
-		);
-		return opened;
 	}
 
 	it("finishes the host's turn when the helper answers", async () => {

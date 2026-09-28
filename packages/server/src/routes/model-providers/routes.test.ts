@@ -8,10 +8,10 @@ import { unimplemented } from "@sugabots/core/testing";
 import { UserMessage } from "@sugabots/core/user-message";
 import { ResourceHidden } from "@sugabots/core/workspaces/access";
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The model provider routes over doubles of `ModelProviderSetup`: what each
@@ -51,10 +51,9 @@ const groq: ModelProvider = {
 };
 
 const app = (providers: Partial<ModelProviderSetup.Interface>) =>
-	createTestApp({
-		resolveUser,
-		services: unimplemented(ModelProviderSetup.Service, providers),
-	});
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(ModelProviderSetup.Service, providers)),
+	);
 
 describe("model provider routes", () => {
 	it("adds a provider from the catalog as the person asking", async () => {

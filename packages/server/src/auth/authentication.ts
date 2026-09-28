@@ -3,11 +3,7 @@ export * as Authentication from "./authentication.ts";
 import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import {
-	type Database,
-	layer as databaseLayer,
-	effectRunner,
-} from "@sugabots/core/database/database";
+import { type Database, effectRunner } from "@sugabots/core/database/database";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { account, session, user, verification } from "@sugabots/core/workspaces/sql";
@@ -137,11 +133,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(
-	Layer.provide([databaseLayer, Installation.layer, Email.layer, Accounts.layer]),
-);
+export const layer = Layer.effect(Service, make);
 
 export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
 	message: string;

@@ -1,10 +1,10 @@
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { unimplemented } from "@sugabots/core/testing";
 import { ActionForbidden } from "@sugabots/core/workspaces/access";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The trial route, over a double of `ModelTrials`. How a model is judged is
@@ -21,14 +21,13 @@ const resolveUser: UserResolver = async () => ({
 });
 
 const trial = (run: ModelTrials.Interface["run"], body: unknown) =>
-	createTestApp({ resolveUser, services: unimplemented(ModelTrials.Service, { run }) }).request(
-		`/workspaces/${WORKSPACE}/model-trials`,
-		{
-			method: "POST",
-			headers: { authorization: "Bearer admin-token", "content-type": "application/json" },
-			body: JSON.stringify(body),
-		},
-	);
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(ModelTrials.Service, { run })),
+	).request(`/workspaces/${WORKSPACE}/model-trials`, {
+		method: "POST",
+		headers: { authorization: "Bearer admin-token", "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
 
 const report = {
 	systemAgentKey: "facilitate" as const,

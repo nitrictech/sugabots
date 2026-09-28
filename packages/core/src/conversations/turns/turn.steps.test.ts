@@ -3,8 +3,8 @@ import { tool } from "ai";
 import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
-import { createEventBus, type EventBus } from "../../database/events/bus.ts";
-import { memoryEventStore } from "../../database/events/store.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
@@ -13,10 +13,10 @@ import {
 	ToolApprovalsIncomplete,
 	ToolExecutionRefused,
 } from "../tools/approvals/approved-calls.ts";
-import { type BuiltInTools, noBuiltInTools } from "../tools/built-in.ts";
+import { BuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { type ConnectionTools, noConnectionTools } from "../tools/connections.ts";
+import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
 import { ModelRequestFailed, type TurnModel, type TurnModelInput } from "./model.ts";
@@ -842,9 +842,9 @@ interface Given {
 		Partial<Pick<TurnRequests.Interface, "queueCompaction">>;
 	approvals?: ApprovedToolCalls.Interface;
 	model: TurnModel;
-	events: EventBus;
-	builtInTools?: BuiltInTools;
-	connectionTools?: ConnectionTools;
+	events: EventBus.Interface;
+	builtInTools?: BuiltInTools.Interface;
+	connectionTools?: ConnectionTools.Interface;
 }
 
 /**
@@ -855,8 +855,8 @@ function segmentWith(given: Given) {
 	return runSegment(run, {
 		model: given.model,
 		events: given.events,
-		builtInTools: given.builtInTools ?? noBuiltInTools,
-		connectionTools: given.connectionTools ?? noConnectionTools,
+		builtInTools: given.builtInTools ?? BuiltInTools.none,
+		connectionTools: given.connectionTools ?? ConnectionTools.none,
 	}).pipe(
 		Effect.provide(
 			Layer.mergeAll(
@@ -914,20 +914,21 @@ function collaborations(): Given["collaborations"] {
 	return {};
 }
 
-function eventBus(): EventBus {
+function eventBus(): EventBus.Interface {
 	return {
 		publish: vi.fn(async () => {}),
 		publishCommitted: vi.fn(async () => {}),
 		subscribe: vi.fn(async function* () {}),
+		close: vi.fn(async () => {}),
 	};
 }
 
 /** The real in-process bus, so a cancellation reaches the worker the way it does in production. */
-function liveEventBus(): EventBus {
-	return createEventBus({ store: memoryEventStore() });
+function liveEventBus(): EventBus.Interface {
+	return EventBus.inProcess({ store: EventStore.inMemory() });
 }
 
-function requestCancellation(events: EventBus) {
+function requestCancellation(events: EventBus.Interface) {
 	return events.publish(
 		threadChannel(run.request.threadId),
 		streamEvent("turn.cancel_requested", {
@@ -937,7 +938,7 @@ function requestCancellation(events: EventBus) {
 	);
 }
 
-function eventTypes(events: EventBus): string[] {
+function eventTypes(events: EventBus.Interface): string[] {
 	return vi.mocked(events.publish).mock.calls.map(([, event]) => event.type);
 }
 

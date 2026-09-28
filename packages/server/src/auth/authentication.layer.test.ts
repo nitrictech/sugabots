@@ -23,7 +23,7 @@ async function startup(env: Record<string, string>) {
 	const exit = await Effect.runPromiseExit(
 		Effect.scoped(
 			Layer.build(
-				Authentication.layerNoDeps.pipe(
+				Authentication.layer.pipe(
 					Layer.provide([
 						noDatabase,
 						Installation.layer,

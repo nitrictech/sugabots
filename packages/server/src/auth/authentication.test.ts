@@ -9,7 +9,12 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BASE_URL, createTestApp, type TestApp } from "../http/app.test-support.ts";
+import {
+	BASE_URL,
+	createTestApp,
+	installationWithWebAppAt,
+	type TestApp,
+} from "../http/app.test-support.ts";
 import { Authentication } from "./authentication.ts";
 
 /** The test app at the server root, where better-auth's own links point. */
@@ -39,9 +44,8 @@ async function appWith(
 	sent: Email.Message[],
 ) {
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layerNoDeps, Membership.layer).pipe(
+		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
 			Layer.provide([
-				testInfrastructure,
 				Installation.layer,
 				Accounts.layer,
 				Layer.succeed(
@@ -54,6 +58,7 @@ async function appWith(
 					}),
 				),
 			]),
+			Layer.provide(testInfrastructure),
 			Layer.provide(
 				ConfigProvider.layer(
 					ConfigProvider.fromEnv({
@@ -75,11 +80,13 @@ async function appWith(
 		Effect.all({ authentication: Authentication.Service, membership: Membership.Service }),
 	);
 	return atServerRoot(
-		createTestApp({
-			authentication: services.authentication,
-			services: Layer.succeed(Membership.Service, services.membership),
-			webAppUrl: ORIGIN,
-		}),
+		createTestApp(
+			Layer.mergeAll(
+				Layer.succeed(Authentication.Service, services.authentication),
+				Layer.succeed(Membership.Service, services.membership),
+				installationWithWebAppAt(ORIGIN),
+			),
+		),
 	);
 }
 

@@ -17,8 +17,8 @@ import { TurnExecution } from "./conversations/turns/execution.ts";
 import { Models } from "./conversations/turns/model.ts";
 import { prepareRunnable, runningTurns } from "./conversations/turns/testing.ts";
 import { query } from "./database/database.ts";
-import { createEventBus } from "./database/events/bus.ts";
-import { memoryEventStore } from "./database/events/store.ts";
+import { EventBus } from "./database/events/bus.ts";
+import { EventStore } from "./database/events/store.ts";
 import {
 	agent,
 	chat,
@@ -446,7 +446,9 @@ const workspaceServices = Layer.mergeAll(
 );
 
 describe.skipIf(!process.env.DATABASE_URL)("refusing whoever may not", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const conversations = await conversationsForTests(
+		EventBus.inProcess({ store: EventStore.inMemory() }),
+	);
 	let services: Context.Context<Everything>;
 	let fixture: Fixture;
 	let people: Record<"stranger" | Lacking, string>;

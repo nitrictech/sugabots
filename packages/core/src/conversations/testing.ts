@@ -1,7 +1,8 @@
 import { Effect, Layer } from "effect";
-import type { EventBus } from "../database/events/bus.ts";
+import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { runOnPostgres } from "../database/testing.ts";
+import { unimplemented } from "../testing.ts";
 import { workflowsForTests } from "../workflows/testing.ts";
 import { Conversations } from "./conversations.ts";
 import { RoutineRuns } from "./routines/runs.ts";
@@ -15,14 +16,17 @@ import { TurnSignals } from "./turns/signals.ts";
  * `signals`, when given, replaces how turns' workflows are signalled.
  */
 export const conversationsForTests = (
-	bus: Pick<EventBus, "publishCommitted">,
+	bus: Pick<EventBus.Interface, "publishCommitted">,
 	signals?: TurnSignals.Interface,
 ) => {
 	const composedFrom = Layer.mergeAll(
 		TurnRequests.layer,
 		signals ? Layer.succeed(TurnSignals.Service, signals) : TurnSignals.layer,
 		RoutineRuns.layer,
-	).pipe(Layer.provide(workflowsForTests), Layer.merge(EventOutbox.layer(bus)));
+	).pipe(
+		Layer.provide(workflowsForTests),
+		Layer.merge(EventOutbox.layer.pipe(Layer.provide(unimplemented(EventBus.Service, bus)))),
+	);
 	return runOnPostgres(
 		Effect.context<Conversations.Services | Layer.Success<typeof composedFrom>>().pipe(
 			Effect.provide(Conversations.layer.pipe(Layer.provideMerge(composedFrom))),

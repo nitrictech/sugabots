@@ -19,7 +19,7 @@ export interface CollaborateToolOptions {
 	from: { threadId: string; agentId: string; turnId: string; messageId: string };
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** For noticing the collaboration being answered. */
-	bus: Pick<EventBus, "subscribe">;
+	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
 	/** How much of the reply has been written so far, which is where the collaboration sits. */
@@ -108,7 +108,7 @@ export function collaborateTool({
  * `wait` passes, or `signal` aborts.
  */
 async function waitUntilSettled(
-	bus: Pick<EventBus, "subscribe">,
+	bus: Pick<EventBus.Interface, "subscribe">,
 	threadId: string,
 	collaborationId: string,
 	wait: Duration.Input,

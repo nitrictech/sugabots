@@ -6,7 +6,7 @@ import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/acces
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
 
 const ROUTINE_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -26,10 +26,7 @@ function webhookApp() {
 		),
 	);
 	return {
-		app: createTestApp({
-			resolveUser: async () => null,
-			services: unimplemented(RoutineWebhooks.Service, { accept }),
-		}),
+		app: createTestApp(unimplemented(RoutineWebhooks.Service, { accept })),
 		accept,
 	};
 }
@@ -138,13 +135,18 @@ describe("Routine webhooks", () => {
 function appAs(
 	services: { routines?: Partial<Routines.Interface>; view?: Partial<RoutineView.Interface> } = {},
 ) {
-	return createTestApp({
-		resolveUser: async () => ({ id: USER_ID, name: "Ada", email: "ada@example.com", image: null }),
-		services: Layer.merge(
+	return createTestApp(
+		Layer.mergeAll(
+			identifiedBy(async () => ({
+				id: USER_ID,
+				name: "Ada",
+				email: "ada@example.com",
+				image: null,
+			})),
 			unimplemented(Routines.Service, services.routines),
 			unimplemented(RoutineView.Service, services.view),
 		),
-	});
+	);
 }
 
 const session = { authorization: "Bearer session", "content-type": "application/json" };

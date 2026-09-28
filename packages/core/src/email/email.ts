@@ -27,7 +27,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([FetchHttpClient.layer, Installation.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
 
 export interface Address {
 	email: string;

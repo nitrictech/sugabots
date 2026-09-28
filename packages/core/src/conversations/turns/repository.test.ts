@@ -1,18 +1,18 @@
 import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEventBus } from "../../database/events/bus.ts";
+import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { memoryEventStore } from "../../database/events/store.ts";
+import { EventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
-import { noBuiltInTools } from "../tools/built-in.ts";
+import { BuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
-import { noConnectionTools } from "../tools/connections.ts";
+import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { ModelRequestFailed, type TurnModel } from "./model.ts";
@@ -203,15 +203,15 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	describe("a segment", () => {
-		const events = createEventBus({ store: memoryEventStore() });
+		const events = EventBus.inProcess({ store: EventStore.inMemory() });
 		// The real services, with the Scribe asked for nothing after a reply.
 		const requests = Context.get(conversations, TurnRequests.Service);
 		const segmentWith = (model: TurnModel) =>
 			runOnPostgres(
 				runSegment(prepared.run, {
 					model,
-					builtInTools: noBuiltInTools,
-					connectionTools: noConnectionTools,
+					builtInTools: BuiltInTools.none,
+					connectionTools: ConnectionTools.none,
 					events,
 				}).pipe(
 					Effect.provideService(

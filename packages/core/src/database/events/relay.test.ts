@@ -1,25 +1,25 @@
 import { type Channel, streamEvent } from "@sugabots/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, databaseForTests, runOnPostgres } from "../testing.ts";
-import { createEventBus, type Delivery, type OwnedEventBus } from "./bus.ts";
+import { EventBus } from "./bus.ts";
 import { postgresEventRelay } from "./relay.ts";
-import { type EventStore, postgresEventStore } from "./store.ts";
+import { EventStore } from "./store.ts";
 
 /**
  * Two buses in one test process stand in for two API processes: each has its
  * own subscribers and relay identity, and they share only Postgres.
  */
 describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses", () => {
-	let store: EventStore;
+	let store: EventStore.Interface;
 	const channel = `thread:relay-${Date.now()}` as const satisfies Channel;
-	const buses: OwnedEventBus[] = [];
+	const buses: EventBus.Interface[] = [];
 
 	beforeAll(async () => {
-		store = await runOnPostgres(postgresEventStore);
+		store = await runOnPostgres(EventStore.make);
 	});
 
-	async function processBus(): Promise<OwnedEventBus> {
-		const bus = createEventBus({
+	async function processBus(): Promise<EventBus.Interface> {
+		const bus = EventBus.inProcess({
 			store,
 			relay: await databaseForTests.runPromise(postgresEventRelay(store)),
 		});
@@ -33,10 +33,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 	});
 
 	/** Collects deliveries on a channel until `count` have arrived. */
-	function collect(bus: OwnedEventBus, count: number): Promise<Delivery[]> {
+	function collect(bus: EventBus.Interface, count: number): Promise<EventBus.Delivery[]> {
 		return new Promise((resolve, reject) => {
 			const stop = new AbortController();
-			const taken: Delivery[] = [];
+			const taken: EventBus.Delivery[] = [];
 			const timer = setTimeout(() => {
 				stop.abort();
 				reject(new Error(`only ${taken.length} of ${count} arrived`));

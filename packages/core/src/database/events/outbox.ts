@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { afterCommit, type Database, type Executor, query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
-import type { EventBus } from "./bus.ts";
+import { EventBus } from "./bus.ts";
 
 /**
  * Records events on the current transaction and delivers them once it
@@ -20,8 +20,8 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventOutbox") {}
 
-/** An outbox whose events are delivered through `bus`. */
-export const make = (bus: Pick<EventBus, "publishCommitted">): Interface =>
+/** An outbox whose events are delivered through the process's bus. */
+export const make = Effect.map(EventBus.Service, (bus) =>
 	Service.of({
 		publish: (pending) =>
 			transaction(
@@ -30,9 +30,10 @@ export const make = (bus: Pick<EventBus, "publishCommitted">): Interface =>
 					yield* afterCommit(Effect.promise(() => bus.publishCommitted(committed)));
 				}),
 			),
-	});
+	}),
+);
 
-export const layer = (bus: Pick<EventBus, "publishCommitted">) => Layer.succeed(Service, make(bus));
+export const layer = Layer.effect(Service, make);
 
 export interface PendingEvent {
 	channel: Channel;

@@ -139,7 +139,7 @@ const signUp = Effect.gen(function* () {
 });
 
 /** Whoever may sign up and whether they must verify is the installation's to configure, so the seed configures its own. */
-const seedAccounts = Accounts.layerNoDeps.pipe(
+const seedAccounts = Accounts.layer.pipe(
 	Layer.provide(
 		ConfigProvider.layer(
 			ConfigProvider.fromEnv({
@@ -153,7 +153,7 @@ seed.pipe(
 	Effect.scoped,
 	Effect.provide(
 		Layer.mergeAll(
-			Authentication.layerNoDeps,
+			Authentication.layer,
 			Membership.layer,
 			PersonalPods.layer,
 			PodRepository.layer,

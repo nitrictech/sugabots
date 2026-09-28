@@ -1,10 +1,10 @@
 import { unimplemented } from "@sugabots/core/testing";
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const USER_ID = "0199a3a0-0000-7000-8000-0000000000ff";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -18,7 +18,9 @@ const resolveUser: UserResolver = async (headers) =>
 		: null;
 
 const app = (onboarding: Partial<Onboarding.Interface>) =>
-	createTestApp({ resolveUser, services: unimplemented(Onboarding.Service, onboarding) });
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(Onboarding.Service, onboarding)),
+	);
 
 const authorization = { authorization: "Bearer good-token", "content-type": "application/json" };
 

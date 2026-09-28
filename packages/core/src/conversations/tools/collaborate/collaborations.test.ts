@@ -2,8 +2,8 @@ import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createEventBus } from "../../../database/events/bus.ts";
-import { memoryEventStore } from "../../../database/events/store.ts";
+import { EventBus } from "../../../database/events/bus.ts";
+import { EventStore } from "../../../database/events/store.ts";
 import {
 	agent,
 	collaboration,
@@ -43,7 +43,9 @@ import { collaborateTool } from "./tool.ts";
  * how a collaboration moves between the asking agent and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const conversations = await conversationsForTests(
+		EventBus.inProcess({ store: EventStore.inMemory() }),
+	);
 	const collaborations: Promised<Collaborations.Interface> = onPostgres(
 		Context.get(conversations, Collaborations.Service),
 	);
@@ -429,7 +431,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				messageId: reply.messageId,
 			},
 			collaborations: Context.get(conversations, Collaborations.Service),
-			bus: createEventBus({ store: memoryEventStore() }),
+			bus: EventBus.inProcess({ store: EventStore.inMemory() }),
 			run: runOnPostgres,
 			replyLength: () => 0,
 			// The routine run it works for ends as soon as it is opened.

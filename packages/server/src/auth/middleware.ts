@@ -1,4 +1,3 @@
-import type { SessionUser } from "@sugabots/contracts";
 import {
 	API_BASE_PATH,
 	CurrentUser,
@@ -10,6 +9,7 @@ import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer } from "effect";
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
+import { Authentication } from "./authentication.ts";
 
 /**
  * Bearer authentication for native and script clients, or a Better Auth cookie
@@ -56,31 +56,33 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 		});
 }
 
-/** The `Session` middleware, asking `identify` who holds the request's credentials. */
-export function sessionLayer(
-	identify: (headers: Headers) => Effect.Effect<SessionUser | undefined>,
-) {
-	return Layer.succeed(Session, (httpEffect) =>
-		Effect.gen(function* () {
-			const request = yield* HttpServerRequest.HttpServerRequest;
-			const authorization = request.headers.authorization;
-			let headers = new Headers(request.headers);
-			if (authorization !== undefined) {
-				const token = bearerToken(authorization);
-				if (!token) {
-					return yield* new Unauthorized({ message: "Invalid Authorization header" });
-				}
-				headers = new Headers({ authorization: `Bearer ${token}` });
-			}
+/** The `Session` middleware, asking `Authentication` who holds the request's credentials. */
+export const sessionLayer = Layer.effect(
+	Session,
+	Effect.map(
+		Authentication.Service,
+		({ identify }) =>
+			(httpEffect) =>
+				Effect.gen(function* () {
+					const request = yield* HttpServerRequest.HttpServerRequest;
+					const authorization = request.headers.authorization;
+					let headers = new Headers(request.headers);
+					if (authorization !== undefined) {
+						const token = bearerToken(authorization);
+						if (!token) {
+							return yield* new Unauthorized({ message: "Invalid Authorization header" });
+						}
+						headers = new Headers({ authorization: `Bearer ${token}` });
+					}
 
-			const holder = yield* identify(headers);
-			if (!holder) {
-				return yield* new Unauthorized({ message: "Invalid or expired session" });
-			}
-			return yield* Effect.provideService(httpEffect, CurrentUser, holder);
-		}),
-	);
-}
+					const holder = yield* identify(headers);
+					if (!holder) {
+						return yield* new Unauthorized({ message: "Invalid or expired session" });
+					}
+					return yield* Effect.provideService(httpEffect, CurrentUser, holder);
+				}),
+	),
+);
 
 /**
  * Runs a handler's work as the person the request's session belongs to, the

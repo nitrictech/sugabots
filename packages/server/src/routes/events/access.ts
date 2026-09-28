@@ -1,8 +1,10 @@
+export * as ChannelAccess from "./access.ts";
+
 import { type Channel, threadChannel, workspaceChannel } from "@sugabots/contracts";
-import type { Authorization } from "@sugabots/core/workspaces/authorization";
+import { Authorization } from "@sugabots/core/workspaces/authorization";
 import type { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import type { Visibility } from "@sugabots/core/workspaces/visibility";
-import { Effect } from "effect";
+import { Visibility } from "@sugabots/core/workspaces/visibility";
+import { Context, Effect, Layer } from "effect";
 
 /**
  * Who may listen to what.
@@ -15,20 +17,21 @@ import { Effect } from "effect";
  * to, or `undefined` when they may not have it. A thread's events go on that
  * thread's own channel, and a workspace channel carries what its lists need
  * (`ThreadFeed` in core decides both).
- *
- * It is an interface so stream routes can be tested without a database.
  */
-export interface ChannelAccess {
+export interface Interface {
 	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
 	workspace(workspaceRef: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	thread(threadId: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 }
 
-export function channelAccess(
-	authorization: Authorization.Interface,
-	visibility: Visibility.Interface,
-): ChannelAccess {
-	return {
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/server/ChannelAccess",
+) {}
+
+export const make = Effect.gen(function* () {
+	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
+	return Service.of({
 		workspace: (workspaceRef) =>
 			authorization.workspace(workspaceRef, "workspace.read").pipe(
 				Effect.match({
@@ -44,13 +47,13 @@ export function channelAccess(
 					onFailure: () => undefined,
 				}),
 			),
-	};
-}
+	});
+});
 
-/** Grants nothing. The default, so a stream route is never open by omission. */
-export function closedChannelAccess(): ChannelAccess {
-	return {
-		workspace: () => Effect.undefined,
-		thread: () => Effect.undefined,
-	};
-}
+export const layer = Layer.effect(Service, make);
+
+/** Grants nothing, so a stream route is never open by omission. */
+export const closed: Interface = {
+	workspace: () => Effect.undefined,
+	thread: () => Effect.undefined,
+};

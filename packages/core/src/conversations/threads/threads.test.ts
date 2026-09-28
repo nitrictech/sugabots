@@ -3,8 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
-import { createEventBus } from "../../database/events/bus.ts";
-import { postgresEventStore } from "../../database/events/store.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	event,
@@ -47,10 +47,10 @@ import { ThreadView } from "./thread-view.ts";
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
 
-const eventStore = await runOnPostgres(postgresEventStore);
+const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async () => {
-	const eventBus = createEventBus({ store: eventStore });
+	const eventBus = EventBus.inProcess({ store: eventStore });
 	const conversations = await conversationsForTests(eventBus);
 	const viewAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));

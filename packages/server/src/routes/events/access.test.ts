@@ -14,9 +14,9 @@ import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { onPostgresAs } from "@sugabots/core/workspaces/testing";
 import { Visibility } from "@sugabots/core/workspaces/visibility";
 import { and, eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access.ts";
+import { ChannelAccess } from "./access.ts";
 
 /**
  * Who may listen to what. The workspace half is a membership query, so it needs
@@ -24,7 +24,7 @@ import { type ChannelAccess, channelAccess, closedChannelAccess } from "./access
  */
 
 /** The access with its answers run as `userId`, with nothing else to reach. */
-function asSomebody(access: ChannelAccess, userId: string) {
+function asSomebody(access: ChannelAccess.Interface, userId: string) {
 	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId));
 	return {
 		workspace: (id: string) => Effect.runPromise(access.workspace(id).pipe(asThem)),
@@ -33,7 +33,7 @@ function asSomebody(access: ChannelAccess, userId: string) {
 }
 
 it("denies event access when no access dependency is configured", async () => {
-	const { workspace, thread } = asSomebody(closedChannelAccess(), crypto.randomUUID());
+	const { workspace, thread } = asSomebody(ChannelAccess.closed, crypto.randomUUID());
 
 	expect(await workspace("w1")).toBeUndefined();
 	expect(await thread("c1")).toBeUndefined();
@@ -137,9 +137,11 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
-		const channels = channelAccess(
-			await runOnPostgres(Effect.provide(Authorization.Service, Authorization.layer)),
-			await runOnPostgres(Effect.provide(Visibility.Service, Visibility.layer)),
+		const channels = await runOnPostgres(
+			Effect.provide(
+				ChannelAccess.Service,
+				ChannelAccess.layer.pipe(Layer.provide([Authorization.layer, Visibility.layer])),
+			),
 		);
 		return {
 			/** The channels `userId` is given. */

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import type { Channel, StreamEvent } from "@sugabots/contracts";
 import { Deferred, Duration, Effect, Fiber, Queue } from "effect";
-import type { Delivery } from "./bus.ts";
+import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
 
 /**
@@ -16,12 +16,14 @@ import type { EventStore } from "./store.ts";
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
-	broadcast(channel: Channel, delivery: Delivery): Promise<void>;
+	broadcast(channel: Channel, delivery: EventBus.Delivery): Promise<void>;
 	/**
 	 * Hands over what other processes broadcast, until the returned function is
 	 * called. Resolves once listening, so nothing published after that is missed.
 	 */
-	listen(receive: (channel: Channel, delivery: Delivery) => void): Promise<() => Promise<void>>;
+	listen(
+		receive: (channel: Channel, delivery: EventBus.Delivery) => void,
+	): Promise<() => Promise<void>>;
 }
 
 /** The Postgres notification channel every process listens on. */
@@ -51,7 +53,7 @@ interface Notice {
  * was built in to run on.
  */
 export const postgresEventRelay = (
-	store: Pick<EventStore, "replay">,
+	store: Pick<EventStore.Interface, "replay">,
 	{ log = console.error }: { log?: (message: string, cause: unknown) => void } = {},
 ): Effect.Effect<EventRelay, never, PgClient.PgClient> =>
 	Effect.gen(function* () {

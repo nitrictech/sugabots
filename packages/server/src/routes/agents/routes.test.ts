@@ -5,10 +5,10 @@ import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/acces
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The agent routes, over doubles of `AgentAdministration`. Who may do what to
@@ -46,7 +46,9 @@ const resolveUser: UserResolver = async () => ({
 
 /** The app with `agents` as the only agent methods it has. */
 const app = (agents: Partial<AgentAdministration.Interface> = {}) =>
-	createTestApp({ resolveUser, services: unimplemented(AgentAdministration.Service, agents) });
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(AgentAdministration.Service, agents)),
+	);
 
 const auth = (body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",

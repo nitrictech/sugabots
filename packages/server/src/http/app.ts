@@ -1,7 +1,7 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
-import type { Installation } from "@sugabots/core/installation/installation";
+import { Installation } from "@sugabots/core/installation/installation";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -13,13 +13,12 @@ import {
 	HttpServerResponse,
 } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import type { Authentication } from "../auth/authentication.ts";
+import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
-import type { ChannelAccess } from "../routes/events/access.ts";
-import { eventRoutes, type StreamOptions } from "../routes/events/routes.ts";
+import { eventRoutes } from "../routes/events/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
@@ -36,6 +35,20 @@ import { failureResponse } from "./errors.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
+/** Sign-up, sign-in, workspaces and invitations, answered by better-auth. */
+const betterAuthRoutes = Layer.effectDiscard(
+	Effect.gen(function* () {
+		const router = yield* HttpRouter.HttpRouter;
+		const authentication = yield* Authentication.Service;
+		yield* router.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
+			toWebRequest(request).pipe(
+				Effect.flatMap(authentication.handler),
+				Effect.map(HttpServerResponse.fromWeb),
+			),
+		);
+	}),
+);
+
 /**
  * The API, as routes on an `HttpRouter`.
  *
@@ -46,75 +59,59 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The routes take their services from the layer's context, which is
- * `HttpServices` and nothing else of core's, and the events take theirs here.
- * Each use case authorizes the person the request's session belongs to, so no
- * middleware decides access. `createTestApp` in `app.test-support.ts` drives
- * the same routes with fakes.
+ * The routes take their services from the layer's context: `HttpServices`,
+ * and of what core provides besides only the database, the installation and
+ * the event bus (`ApiInfrastructure`). Each use case authorizes the
+ * person the request's session belongs to, so no middleware decides access.
+ * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
-
-export interface AppOptions {
-	/** Mounted under `/auth`, and asked who a token belongs to. */
-	authentication: Authentication.Interface;
-	/** Where the API and web app are reached, and which origins may send a cookie. */
-	installation: Installation.Interface;
-	/** Where live updates are published, who may listen, and for how long. */
-	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
-}
+export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructure> = Layer.mergeAll(
+	HttpApiBuilder.layer(ServerApi).pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				systemRoutes,
+				workspaceRoutes,
+				eventRoutes,
+				onboardingRoutes,
+				podRoutes,
+				systemAgentRoutes,
+				modelTrialRoutes,
+				modelProviderRoutes,
+				searchProviderRoutes,
+				connectionRoutes,
+				agentRoutes,
+				chatRoutes,
+				routineRoutes,
+				toolApprovalRoutes,
+				threadRoutes,
+			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
+		),
+	),
+	betterAuthRoutes,
+).pipe(
+	// Each handler's Effect runs against the process's database, which the
+	// router hands to it per request rather than capturing it once.
+	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
+	Layer.provide(
+		HttpRouter.middleware(
+			Effect.map(Installation.Service, ({ trustedOrigins }) => everyRequest(trustedOrigins)),
+			{ global: true },
+		),
+	),
+);
 
 /**
  * What the API is built on besides the core services: the database each
- * request runs against, and the platform the router serves from.
+ * request runs against, the installation's addresses, who holds a session,
+ * the bus the streams listen on, and the platform the router serves from.
  */
 type ApiInfrastructure =
 	| Database
+	| Installation.Service
+	| Authentication.Service
+	| EventBus.Service
 	| HttpRouter.HttpRouter
 	| Layer.Success<typeof HttpServer.layerServices>;
-
-export function apiLayer({
-	authentication,
-	installation,
-	events,
-}: AppOptions): Layer.Layer<never, never, HttpServices | ApiInfrastructure> {
-	const groups = Layer.mergeAll(
-		systemRoutes,
-		workspaceRoutes,
-		eventRoutes({ bus: events.bus, access: events.access, stream: events.stream }),
-		onboardingRoutes,
-		podRoutes,
-		systemAgentRoutes,
-		modelTrialRoutes,
-		modelProviderRoutes,
-		searchProviderRoutes,
-		connectionRoutes({ webAppUrl: installation.webAppUrl }),
-		agentRoutes,
-		chatRoutes,
-		routineRoutes,
-		toolApprovalRoutes,
-		threadRoutes,
-	);
-	const middleware = Layer.merge(sessionLayer(authentication.identify), validateRequestLayer);
-	const api = HttpApiBuilder.layer(ServerApi).pipe(
-		Layer.provide(groups.pipe(Layer.provide(middleware))),
-	);
-
-	// Sign-up, sign-in, workspaces and invitations.
-	const betterAuth = HttpRouter.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
-		toWebRequest(request).pipe(
-			Effect.flatMap(authentication.handler),
-			Effect.map(HttpServerResponse.fromWeb),
-		),
-	);
-
-	return Layer.mergeAll(api, betterAuth).pipe(
-		// Each handler's Effect runs against the process's database, which the
-		// router hands to it per request rather than capturing it once.
-		HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
-		Layer.provide(
-			HttpRouter.middleware(everyRequest(installation.trustedOrigins), { global: true }),
-		),
-	);
-}
 
 /**
  * The request as a web `Request`, for better-auth.

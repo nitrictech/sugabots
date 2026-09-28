@@ -270,7 +270,7 @@ export const modelsLayer = Layer.effect(
 		const egress = yield* Egress.Service;
 		return workspaceTurnModel({ modelProviders, httpClients: egress.providers });
 	}),
-);
+).pipe(Layer.provide(ModelProviderRepository.layer));
 
 /** {@link probeModel} through {@link Models}, for settings to try a model the way a turn would. */
 export const modelProbeLayer = Layer.effect(
@@ -283,7 +283,7 @@ export const modelProbeLayer = Layer.effect(
 				probeModel(model, workspaceId, modelId).pipe(Effect.provideService(Database, database)),
 		});
 	}),
-);
+).pipe(Layer.provide(modelsLayer));
 
 /**
  * Asks a model for one word, to learn whether it will answer at all. What

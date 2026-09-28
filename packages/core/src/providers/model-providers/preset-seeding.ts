@@ -45,4 +45,4 @@ export const seedEveryWorkspaceLayer = Layer.effectDiscard(
 			Effect.catchCause((cause) => Effect.logError("Seeding model provider presets failed", cause)),
 		),
 	),
-);
+).pipe(Layer.provide(ModelProviderRepository.layer));

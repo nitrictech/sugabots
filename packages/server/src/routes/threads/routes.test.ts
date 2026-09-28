@@ -8,7 +8,7 @@ import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const POD = "0199a3a0-0000-7000-8000-000000000002";
@@ -108,9 +108,9 @@ beforeEach(() => {
 });
 
 const app = () =>
-	createTestApp({
-		resolveUser,
-		services: Layer.merge(
+	createTestApp(
+		Layer.mergeAll(
+			identifiedBy(resolveUser),
 			Layer.succeed(ThreadView.Service, view),
 			unimplemented(TurnCancellation.Service, {
 				request: (turnId) =>
@@ -122,7 +122,7 @@ const app = () =>
 					}),
 			}),
 		),
-	});
+	);
 
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,

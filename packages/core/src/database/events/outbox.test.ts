@@ -5,7 +5,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
 import { closeDatabase, runOnPostgres } from "../testing.ts";
+import { EventBus } from "./bus.ts";
 import { type CommittedEvent, EventOutbox, type PendingEvent } from "./outbox.ts";
+import { EventStore } from "./store.ts";
 
 class Abandoned extends Data.TaggedError("Abandoned") {}
 
@@ -17,8 +19,13 @@ class Abandoned extends Data.TaggedError("Abandoned") {}
  */
 
 describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
-	const bus = { publishCommitted: vi.fn(async (_events: CommittedEvent[]) => {}) };
-	const publish = EventOutbox.make(bus).publish;
+	const bus = {
+		...EventBus.inProcess({ store: EventStore.inMemory() }),
+		publishCommitted: vi.fn(async (_events: CommittedEvent[]) => {}),
+	};
+	const { publish } = Effect.runSync(
+		EventOutbox.make.pipe(Effect.provideService(EventBus.Service, bus)),
+	);
 	let channel: Channel;
 
 	afterAll(closeDatabase);

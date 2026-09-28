@@ -60,9 +60,7 @@ export const make = Effect.gen(function* () {
 	} satisfies Interface;
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(Layer.provide(Installation.layer));
+export const layer = Layer.effect(Service, make);
 
 /**
  * How the API reaches the outside world: `fetch`, with this installation's

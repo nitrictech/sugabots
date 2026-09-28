@@ -2,8 +2,8 @@ import { type CollaborationPart, streamEvent, threadChannel } from "@sugabots/co
 import { type Duration, Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
-import { createEventBus } from "../../../database/events/bus.ts";
-import { memoryEventStore } from "../../../database/events/store.ts";
+import { EventBus } from "../../../database/events/bus.ts";
+import { EventStore } from "../../../database/events/store.ts";
 import { noDatabase } from "../../../database/testing.ts";
 import { CollaborationRefused, type Collaborations } from "./collaborations.ts";
 import { collaborateTool } from "./tool.ts";
@@ -52,7 +52,7 @@ function fakeCollaborations(answer: () => string | undefined): FakeCollaboration
 function toolWith(
 	collaborations: FakeCollaborations,
 	options: {
-		bus?: ReturnType<typeof createEventBus>;
+		bus?: EventBus.Interface;
 		wait?: Duration.Input;
 		signal?: AbortSignal;
 	} = {},
@@ -61,7 +61,7 @@ function toolWith(
 	const tool = collaborateTool({
 		from,
 		collaborations,
-		bus: options.bus ?? createEventBus({ store: memoryEventStore() }),
+		bus: options.bus ?? EventBus.inProcess({ store: EventStore.inMemory() }),
 		run,
 		replyLength: () => 12,
 		noteCollaboration: (made) => Effect.sync(() => void noted.push(made)),
@@ -83,7 +83,7 @@ async function call(
 
 describe("collaborate tool", () => {
 	it("returns the answer when the collaboration is answered in time, and marks the reply", async () => {
-		const bus = createEventBus({ store: memoryEventStore() });
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 		let answer: string | undefined;
 		const collaborations = fakeCollaborations(() => answer);
 		const { tool, noted } = toolWith(collaborations, { bus });
@@ -103,7 +103,7 @@ describe("collaborate tool", () => {
 	});
 
 	it("keeps waiting through updates that do not answer the collaboration", async () => {
-		const bus = createEventBus({ store: memoryEventStore() });
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 		const collaborations = fakeCollaborations(() => undefined);
 		const { tool } = toolWith(collaborations, { bus, wait: "200 millis" });
 		const started = Date.now();
@@ -151,7 +151,7 @@ describe("collaborate tool", () => {
 		"stops waiting when aborted (already aborted: %s)",
 		async (alreadyAborted) => {
 			const controller = new AbortController();
-			const bus = createEventBus({ store: memoryEventStore() });
+			const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 			const subscribe = vi.spyOn(bus, "subscribe");
 			const collaborations = fakeCollaborations(() => undefined);
 			const { tool } = toolWith(collaborations, {

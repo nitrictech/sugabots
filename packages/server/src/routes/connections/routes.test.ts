@@ -3,10 +3,10 @@ import { ConnectionSetup } from "@sugabots/core/providers/connections/connection
 import { unimplemented } from "@sugabots/core/testing";
 import { ActionForbidden } from "@sugabots/core/workspaces/access";
 import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The connection routes over doubles of `ConnectionSetup`: what each request
@@ -54,10 +54,9 @@ const wiki: Connection = {
 };
 
 const app = (connections: Partial<ConnectionSetup.Interface>) =>
-	createTestApp({
-		resolveUser,
-		services: unimplemented(ConnectionSetup.Service, connections),
-	});
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(ConnectionSetup.Service, connections)),
+	);
 
 describe("a pod's connections", () => {
 	it("adds a server as the person asking, in the pod it is posted to", async () => {
