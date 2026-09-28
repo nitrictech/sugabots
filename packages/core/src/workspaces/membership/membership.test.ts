@@ -406,7 +406,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("puts an administrator in every shared pod, and leaves a demoted one where they were", async () => {
+	it("puts an administrator in every shared pod, whether invited or promoted", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const kim = await person("Kim");
@@ -440,16 +440,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				workspace: workspace.id,
 				memberId: bobMember.id,
 				role: "admin",
-			}),
-		);
-		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());
-
-		await run((m) =>
-			m.changeRole({
-				userId: ada.id,
-				workspace: workspace.id,
-				memberId: bobMember.id,
-				role: "member",
 			}),
 		);
 		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());

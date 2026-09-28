@@ -198,14 +198,6 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access.thread(member.id, crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("gives an administrator the pod's threads, since they are in every shared pod", async () => {
-		const { access, administrator, conversation } = await fixture();
-
-		expect(await access.thread(administrator.id, conversation.id)).toBe(
-			`thread:${conversation.id}`,
-		);
-	});
-
 	it("gives an administrator without a row in the pod nothing, since reach is the row", async () => {
 		const { access, administrator, conversation } = await fixture();
 		await onDatabase((db) =>

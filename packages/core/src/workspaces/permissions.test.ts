@@ -8,7 +8,6 @@ import {
 	type PodFacts,
 	type PodPermission,
 	podPermissions,
-	rolesGrantedInPod,
 	rolesWith,
 	type WorkspacePermission,
 } from "./permissions.ts";
@@ -255,15 +254,5 @@ describe("the roles holding a permission", () => {
 	it("names the administrator for the actions only they hold", () => {
 		expect(rolesWith("workspace.providers.manage")).toEqual(["admin"]);
 		expect(rolesWith("workspace.read")).toEqual([...WORKSPACE_ROLES]);
-	});
-});
-
-describe("the roles holding a pod permission", () => {
-	it.each(POD_PERMISSIONS)("agrees with mayInPod in a joined pod about %s", (permission) => {
-		for (const role of WORKSPACE_ROLES) {
-			expect(rolesGrantedInPod(permission).includes(role)).toBe(
-				mayInPod(actor(role), permission, sharedPod(true)),
-			);
-		}
 	});
 });

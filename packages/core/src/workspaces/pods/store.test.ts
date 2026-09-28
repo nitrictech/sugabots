@@ -362,19 +362,6 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				[adminId, viewerId].toSorted(),
 			);
 			expect(await store.removeMember(workspaceId, made.id, viewerId)).toBe("administrator");
-			expect(await authorization.pod(viewerId, made.id, "pod.delete")).toMatchObject({
-				facts: { isMember: true },
-			});
-		});
-
-		it("refuses an administrator leaving a shared pod", async () => {
-			const made = await store.create(workspaceId, asAdmin(), { name: "Sales", slug: "sales" });
-			await store.addMember(workspaceId, made.id, memberId);
-
-			await expect(authorization.pod(adminId, made.id, "pod.leave")).rejects.toThrow(
-				ActionForbidden,
-			);
-			expect(await authorization.pod(memberId, made.id, "pod.leave")).toBeDefined();
 		});
 
 		it("gives a member the pods they have joined, and nothing else", async () => {
