@@ -30,8 +30,8 @@ import {
 	waitingFacilitation,
 } from "../turns/testing.ts";
 import { Turn, turnLane } from "../turns/turn.workflow.ts";
+import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
-import { routineStore } from "./store.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 /**
@@ -47,7 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	};
 	const conversations = await conversationsForTests(bus);
 	const { emit } = Context.get(conversations, ConversationEvents.Service);
-	const routines = onPostgres(await runOnPostgres(Effect.provide(routineStore, conversations)));
+	const routines = onPostgres(Context.get(conversations, Routines.Service));
 	const { settleRun, failRun } = Context.get(conversations, RoutineSettlement.Service);
 	const settlement = onPostgres({ settleRun, failRun });
 	const turns = onPostgres(Context.get(conversations, TurnRepository.Service));
@@ -80,11 +80,14 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 	/** A routine with one accepted manual trigger, whose run has started and asked for its turn. */
 	async function aRunningRun() {
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: `Settlement ${crypto.randomUUID()}`,
-			instructions: "Complete the delegated work.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: `Settlement ${crypto.randomUUID()}`,
+				instructions: "Complete the delegated work.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.acceptTrigger({
 			workspaceId,
@@ -191,11 +194,14 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		);
 
 	it("fails a run whose workflow failed at once, while its turn still runs, so the next run can start", async () => {
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: "Failing run",
-			instructions: "Do the work.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: "Failing run",
+				instructions: "Do the work.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const accepted = [];
 		for (let run = 0; run < 2; run++) {
 			const requestId = crypto.randomUUID();
@@ -229,11 +235,14 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	});
 
 	it("fails a run whose workflow failed before starting it", async () => {
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: "Never started",
-			instructions: "Do the work.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: "Never started",
+				instructions: "Do the work.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.acceptTrigger({
 			workspaceId,

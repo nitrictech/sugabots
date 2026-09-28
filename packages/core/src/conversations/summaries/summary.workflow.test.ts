@@ -3,31 +3,32 @@ import { Duration, Effect, Layer, ManagedRuntime, Schedule } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { layer as databaseLayer, query } from "../../database/database.ts";
+import { unimplemented } from "../../testing.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
 import { ModelRequestFailed } from "../turns/model.ts";
+import { TurnRepository } from "../turns/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
-import type { SummaryStore } from "./store.ts";
+import { Summaries } from "./summaries.ts";
 import { stepsLayer } from "./summary.steps.ts";
 import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
 
-const store: SummaryStore = {
-	prepare: vi.fn(() => Effect.succeed({ _tag: "Skipped" as const, reason: "already summarised" })),
-	complete: vi.fn(() => Effect.void),
-	fail: vi.fn(() => Effect.void),
-};
+const prepare = vi.fn(() =>
+	Effect.succeed({ _tag: "Skipped" as const, reason: "already summarised" }),
+);
 
 const runtime = ManagedRuntime.make(
 	summaryWorkflow.layer.pipe(
 		Layer.provideMerge(
 			stepsLayer({
-				store,
 				model: {
 					stream: () =>
 						Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
 				},
 			}),
 		),
+		Layer.provide(unimplemented(Summaries.Service, { prepare })),
+		Layer.provide(unimplemented(TurnRepository.Service)),
 		Layer.provideMerge(Lanes.layer([Summary])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
@@ -62,6 +63,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the summary workflow", () => {
 			),
 		);
 		expect(idle.executionId).toBeNull();
-		expect(store.prepare).toHaveBeenCalledWith(request);
+		expect(prepare).toHaveBeenCalledWith(request);
 	});
 });

@@ -5,8 +5,6 @@ import { Conversations } from "@sugabots/core/conversations/composition";
 import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
-import { routineStore } from "@sugabots/core/conversations/routines/store";
-import { summaryStore } from "@sugabots/core/conversations/summaries/store";
 import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
 import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
@@ -83,21 +81,17 @@ const main = Effect.gen(function* () {
 
 	// One model client for turns, summaries, facilitation, trials and settings.
 	const model = yield* Models;
-	// What the conversations are composed from: how they start and signal durable
-	// workflows, on the engine WORKFLOW_ENGINE names, and where their stream
-	// events are recorded.
-	const conversationServices = yield* Layer.build(
-		Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer).pipe(
+	// The conversations, over what they are composed from: how they start and
+	// signal durable workflows, on the engine WORKFLOW_ENGINE names, and where
+	// their stream events are recorded.
+	const conversations = yield* Layer.build(
+		Conversations.layer.pipe(
+			Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
 			Layer.provideMerge(Lanes.layer([Summary, Turn, Facilitate, Routine])),
 			Layer.provideMerge(Workflows.engine),
-			Layer.merge(EventOutbox.layer(bus)),
+			Layer.provideMerge(EventOutbox.layer(bus)),
 		),
 	);
-	const conversations = yield* Layer.build(
-		Conversations.layer.pipe(Layer.provide(Layer.succeedContext(conversationServices))),
-	);
-	const composed = Context.merge(conversationServices, conversations);
-	const routines = yield* routineStore.pipe(Effect.provide(composed));
 	// A search goes to the workspace's own provider, so its client is bound to
 	// that address like a model provider's.
 	const builtInTools = builtInToolsFor({
@@ -123,23 +117,22 @@ const main = Effect.gen(function* () {
 			routineWorkflow.layer,
 			Lanes.reconcileLayer,
 		).pipe(
-			Layer.provideMerge(
-				summarySteps({ store: yield* summaryStore.pipe(Effect.provide(composed)), model }),
-			),
-			Layer.provideMerge(routineSteps({ routines })),
+			Layer.provideMerge(summarySteps({ model })),
+			Layer.provideMerge(routineSteps),
 			Layer.provideMerge(facilitateSteps({ model })),
 			Layer.provideMerge(turnSteps({ model, events: bus, builtInTools, connectionTools })),
-			Layer.provide(Layer.succeedContext(composed)),
+			Layer.provide(Layer.succeedContext(conversations)),
 		),
 	);
 
 	yield* Layer.build(seedEveryWorkspaceLayer);
-	yield* Layer.build(backgroundLayer({ eventStore, routines }));
+	yield* Layer.build(
+		backgroundLayer(eventStore).pipe(Layer.provide(Layer.succeedContext(conversations))),
+	);
 	const api = apiLayer({
 		authentication,
 		installation,
 		authorization,
-		stores: { routines },
 		events: {
 			bus,
 			access: channelAccess(authorization, Context.get(conversations, ThreadView.Service)),

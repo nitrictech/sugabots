@@ -7,7 +7,10 @@ import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
+import { RoutineView } from "./routines/routine-view.ts";
+import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
+import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadRepository } from "./threads/repository.ts";
 import { ThreadView } from "./threads/thread-view.ts";
@@ -23,9 +26,12 @@ const services = Layer.mergeAll(
 	Collaborations.layer,
 	ToolApprovals.layer,
 	TurnExecution.layer,
+	Routines.layer,
+	Summaries.layer,
 	RoutineSettlement.layer,
 	ChatView.layer,
 	ThreadView.layer,
+	RoutineView.layer,
 	// For the workflows' steps, which record a turn's progress directly.
 	TurnRepository.layer,
 	ToolCallRepository.layer,

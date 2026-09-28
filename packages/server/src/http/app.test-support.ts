@@ -2,7 +2,8 @@ import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
-import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
+import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
+import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { TurnExecution } from "@sugabots/core/conversations/turns/execution";
@@ -25,7 +26,7 @@ import { HttpRouter, HttpServer } from "effect/unstable/http";
 import type { Authentication } from "../auth/authentication.ts";
 import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
 import type { StreamOptions } from "../routes/events/routes.ts";
-import { apiLayer, type Stores } from "./app.ts";
+import { apiLayer } from "./app.ts";
 
 type TestIdentity =
 	| { authentication: Authentication.Interface; resolveUser?: never }
@@ -38,8 +39,6 @@ type TestAppOptions<Provided> = TestIdentity & {
 	authorization?: Authorization;
 	/** The services a case is about, in place of the unimplemented ones. */
 	services?: Layer.Layer<Provided>;
-	/** The stores a case is about. Anything left out answers nothing. */
-	stores?: Partial<Stores>;
 	model?: TurnModel;
 };
 
@@ -71,7 +70,6 @@ export function createTestApp<Provided extends Layer.Success<typeof emptyService
 			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
 		}),
 		authorization: options.authorization ?? closedAuthorization(),
-		stores: { ...emptyStores, ...options.stores },
 		events: {
 			bus,
 			access: options.events?.access ?? closedChannelAccess(),
@@ -103,34 +101,6 @@ function authenticationForResolver(resolveUser: UserResolver): Authentication.In
 }
 
 /**
- * A store method a test app never wires but the interface requires. Dying names
- * the method, rather than handing back an `undefined` typed as a real value
- * that fails somewhere else entirely.
- */
-function notStubbed(method: string): Effect.Effect<never> {
-	return Effect.die(new Error(`${method} has no test double. Pass one to createTestApp.`));
-}
-
-const emptyRoutineStore: RoutineStore = {
-	listInWorkspace: () => Effect.succeed([]),
-	list: () => Effect.succeed([]),
-	get: () => Effect.undefined,
-	create: () => notStubbed("routines.create"),
-	update: () => notStubbed("routines.update"),
-	remove: () => Effect.void,
-	acceptTrigger: () => notStubbed("routines.acceptTrigger"),
-	listExecutions: () => Effect.undefined,
-	startRun: () => Effect.void,
-	processNextDue: () => Effect.undefined,
-	rotateSecret: () => notStubbed("routines.rotateSecret"),
-	acceptWebhook: () => Effect.undefined,
-};
-
-const emptyStores: Stores = {
-	routines: emptyRoutineStore,
-};
-
-/**
  * Services whose every method dies naming itself, so a case supplies, through
  * `services`, exactly the ones it is about.
  */
@@ -147,6 +117,8 @@ const emptyServices = Layer.mergeAll(
 	unimplemented(ThreadView.Service),
 	unimplemented(TurnExecution.Service),
 	unimplemented(ToolApprovals.Service),
+	unimplemented(Routines.Service),
+	unimplemented(RoutineView.Service),
 );
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */

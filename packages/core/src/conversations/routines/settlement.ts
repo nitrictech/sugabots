@@ -1,14 +1,13 @@
 export * as RoutineSettlement from "./settlement.ts";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	collaboration,
 	type RoutineExecutionRow,
 	routineExecution,
-	thread,
 	turn,
 } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
@@ -23,6 +22,7 @@ import { TurnRepository } from "../turns/repository.ts";
 import { TurnSignals } from "../turns/signals.ts";
 import { Turn } from "../turns/turn.workflow.ts";
 import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
+import { RoutineRepository } from "./repository.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { RoutineRuns } from "./runs.ts";
 
@@ -61,6 +61,7 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* TurnRepository.Service;
 	const collaborations = yield* CollaborationRepository.Service;
+	const routines = yield* RoutineRepository.Service;
 	const signals = yield* TurnSignals.Service;
 	const runs = yield* RoutineRuns.Service;
 
@@ -94,7 +95,7 @@ export const make = Effect.gen(function* () {
 				const work = yield* workingThreads(run.threadId);
 				const wasEnding = endingOf(run);
 				const ending = endingAfter(wasEnding, outcome);
-				if (ending !== wasEnding) yield* recordEnding(run.id, ending);
+				if (ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
 				if (ending) yield* cancelWork(work);
 				if (ending && !wasEnding) {
 					yield* emit([
@@ -105,24 +106,9 @@ export const make = Effect.gen(function* () {
 					]);
 				}
 				if (yield* stillBusy(work, ending !== undefined)) return;
-
-				const settled = settledAs(ending, yield* lastTurnIn(work));
-				const finishedAt = yield* DateTime.nowAsDate;
-				const [recorded] = yield* query((db) =>
-					db
-						.update(routineExecution)
-						.set({
-							...settled,
-							finishedAt,
-							pendingTerminalState: null,
-							pendingTerminalError: null,
-						})
-						.where(and(eq(routineExecution.id, run.id), eq(routineExecution.state, "running")))
-						.returning({ id: routineExecution.id }),
-				);
-				if (!recorded) return;
-				yield* runs.settled({ routineId: run.routineId, executionId: run.id });
-				yield* announceRunEnded(emit, run);
+				if (yield* routines.settle(run.id, settledAs(ending, yield* lastTurnIn(work)))) {
+					yield* runs.settled({ routineId: run.routineId, executionId: run.id });
+				}
 			}),
 		);
 
@@ -164,26 +150,7 @@ export const make = Effect.gen(function* () {
 						}
 						// Settling waits for work that is still stopping, but the run ends
 						// now: its routine's next run cannot start while it is running.
-						const finishedAt = yield* DateTime.nowAsDate;
-						const [failed] = yield* query((db) =>
-							db
-								.update(routineExecution)
-								.set({
-									state: "failed",
-									error: RUN_STOPPED_UNEXPECTEDLY,
-									finishedAt,
-									pendingTerminalState: null,
-									pendingTerminalError: null,
-								})
-								.where(
-									and(
-										eq(routineExecution.id, run.executionId),
-										inArray(routineExecution.state, ["queued", "running"]),
-									),
-								)
-								.returning(),
-						);
-						if (failed) yield* announceRunEnded(emit, failed);
+						yield* routines.fail(run.executionId, RUN_STOPPED_UNEXPECTEDLY);
 					}),
 				),
 			),
@@ -193,7 +160,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([TurnRepository.layer, CollaborationRepository.layer]),
+	Layer.provide([TurnRepository.layer, CollaborationRepository.layer, RoutineRepository.layer]),
 );
 
 /** What people are told about a run whose workflow failed; the cause goes only to the logs. */
@@ -239,7 +206,7 @@ function endingAfter(ending: Ended | undefined, outcome: Ended | undefined): End
 function settledAs(
 	ending: Ended | undefined,
 	lastTurn: { status: string; error: UserMessage | null } | undefined,
-): { state: "completed" | "failed" | "cancelled"; error: UserMessage | null } {
+): RoutineRepository.Settled {
 	if (ending?.state === "failed") return { state: "failed", error: ending.error };
 	if (ending?.state === "cancelled") return { state: "cancelled", error: null };
 	if (lastTurn?.status === "failed") return { state: "failed", error: lastTurn.error };
@@ -270,17 +237,6 @@ function endingOf(run: RoutineExecutionRow): Ended | undefined {
 	}
 	return undefined;
 }
-
-const recordEnding = (executionId: string, ending: Ended | undefined) =>
-	query((db) =>
-		db
-			.update(routineExecution)
-			.set({
-				pendingTerminalState: ending?.state ?? null,
-				pendingTerminalError: ending?.state === "failed" ? ending.error : null,
-			})
-			.where(and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running"))),
-	);
 
 const executionThread = (executionId: string) =>
 	Effect.map(
@@ -363,22 +319,3 @@ const lastTurnIn = (work: readonly string[]) =>
 		),
 		([row]) => row,
 	);
-
-/** Tells the workspace that a routine run's thread changed because the run ended. */
-const announceRunEnded = (
-	emit: DomainEvents.Emit<ConversationEvent>,
-	run: { readonly workspaceId: string; readonly threadId: string },
-) =>
-	Effect.gen(function* () {
-		const [root] = yield* query((db) =>
-			db.select({ chatId: thread.chatId }).from(thread).where(eq(thread.id, run.threadId)).limit(1),
-		);
-		if (!root?.chatId) return yield* Effect.die(new Error("Routine thread has no Chat"));
-		yield* emit([
-			ConversationEvent.RoutineExecutionSettled({
-				workspaceId: run.workspaceId,
-				chatId: root.chatId,
-				threadId: run.threadId,
-			}),
-		]);
-	});

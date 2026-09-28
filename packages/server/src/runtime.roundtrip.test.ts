@@ -16,6 +16,7 @@ import { stepsLayer } from "@sugabots/core/conversations/turns/turn.steps";
 import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
 import { createEventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
+import { eventPruningLayer } from "@sugabots/core/database/events/prune";
 import { postgresEventStore } from "@sugabots/core/database/events/store";
 import {
 	agent,
@@ -35,7 +36,6 @@ import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it } from "vitest";
-import { backgroundLayer } from "./runtime.ts";
 
 /**
  * The whole round trip through the real turn workflow and workers: the host's
@@ -88,7 +88,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a collaboration round trip on the wo
 			})),
 	};
 
-	const background = backgroundLayer({ eventStore });
+	// The routine scheduler is left out: nothing here is scheduled.
+	const background = eventPruningLayer(eventStore);
 	const workflowLayers = Layer.merge(turnWorkflow.layer, facilitateWorkflow.layer).pipe(
 		Layer.provideMerge(facilitateSteps({ model })),
 		Layer.provideMerge(

@@ -1,5 +1,4 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
-import type { RoutineStore } from "@sugabots/core/conversations/routines/store";
 import type { TurnModel } from "@sugabots/core/conversations/turns/model";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
@@ -48,15 +47,10 @@ import { limitJsonBody, validateRequestLayer } from "./validation.ts";
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * Most routes take their services from the layer's context; the rest take
- * their dependencies here. `createTestApp` in `app.test-support.ts` drives the
- * same routes with fakes.
+ * The routes take their services from the layer's context, and the events
+ * and model trials take theirs here. `createTestApp` in `app.test-support.ts`
+ * drives the same routes with fakes.
  */
-
-/** What the route table reads and writes. */
-export interface Stores {
-	routines: RoutineStore;
-}
 
 export interface AppOptions {
 	/** Mounted under `/auth`, and asked who a token belongs to. */
@@ -65,7 +59,6 @@ export interface AppOptions {
 	installation: Installation.Interface;
 	/** Who may do what in which workspace, pod and agent. */
 	authorization: Authorization;
-	stores: Stores;
 	/** Where live updates are published, who may listen, and for how long. */
 	events: { bus: EventBus; access: ChannelAccess; stream?: StreamOptions };
 	/** Runs a model, for trying one out on a system agent before choosing it. */
@@ -76,7 +69,6 @@ export function apiLayer({
 	authentication,
 	installation,
 	authorization,
-	stores,
 	events,
 	model,
 }: AppOptions) {
@@ -93,7 +85,7 @@ export function apiLayer({
 		connectionRoutes({ webAppUrl: installation.webAppUrl }),
 		agentRoutes,
 		chatRoutes,
-		routineRoutes({ routines: stores.routines }),
+		routineRoutes,
 		toolApprovalRoutes,
 		threadRoutes,
 	);

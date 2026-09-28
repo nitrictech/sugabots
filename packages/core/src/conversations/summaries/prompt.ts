@@ -1,5 +1,5 @@
 import type { TurnModelInput } from "../turns/model.ts";
-import type { PreparedSummary } from "./store.ts";
+import type { PreparedSummary } from "./summaries.ts";
 
 /** What the prompt reads. Narrower than a `PreparedSummary` so a model trial can build one. */
 export type SummaryPromptInput = Pick<

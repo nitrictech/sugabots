@@ -1,6 +1,6 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
 import { createEventBus } from "../../database/events/bus.ts";
@@ -28,7 +28,7 @@ import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
 import { Chats } from "../chats/chats.ts";
-import { summaryStore } from "../summaries/store.ts";
+import { Summaries } from "../summaries/summaries.ts";
 import { conversationsForTests } from "../testing.ts";
 import { replyTurnOf, TurnExecution } from "../turns/execution.ts";
 import { loadFacilitatorScope } from "../turns/facilitator.ts";
@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	const chats = onPostgres(Context.get(conversations, Chats.Service));
 	const turns = onPostgres(Context.get(conversations, TurnExecution.Service));
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const summaries = onPostgres(await runOnPostgres(Effect.provide(summaryStore, conversations)));
+	const summaries = onPostgres(Context.get(conversations, Summaries.Service));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;

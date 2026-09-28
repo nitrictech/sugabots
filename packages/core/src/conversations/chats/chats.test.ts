@@ -1,6 +1,6 @@
 import { type ChatMessageItem, handleFromName } from "@sugabots/contracts";
 import { eq, like } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../../database/events/bus.ts";
 import { postgresEventStore } from "../../database/events/store.ts";
@@ -21,7 +21,7 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { routineStore } from "../routines/store.ts";
+import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 import { ChatView } from "./chat-view.ts";
@@ -33,7 +33,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	const conversations = await conversationsForTests(createEventBus({ store: eventStore }));
 	const chats = onPostgres(Context.get(conversations, Chats.Service));
 	const view = onPostgres(Context.get(conversations, ChatView.Service));
-	const routines = onPostgres(await runOnPostgres(Effect.provide(routineStore, conversations)));
+	const routines = onPostgres(Context.get(conversations, Routines.Service));
 	let workspaceId: string;
 	let podId: string;
 	let agentId: string;
@@ -258,11 +258,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("includes Routine runs in the main Chat timeline", async () => {
 		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: "Overnight review",
-			instructions: "Review overnight changes.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: "Overnight review",
+				instructions: "Review overnight changes.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.acceptTrigger({
 			workspaceId,
@@ -290,11 +293,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("paginates interleaved messages and Routine runs without gaps", async () => {
 		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: "Overnight review",
-			instructions: "Review overnight changes.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: "Overnight review",
+				instructions: "Review overnight changes.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const requestId = crypto.randomUUID();
 		const accepted = await routines.acceptTrigger({
 			workspaceId,
@@ -462,11 +468,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("reports each history thread's own status, participants, and Routine run", async () => {
 		const current = await chats.open({ workspaceId, podId, hostAgentId: agentId, userId });
-		const created = await routines.create(workspaceId, agentId, userId, {
-			name: "Overnight review",
-			instructions: "Review overnight changes.",
-			trigger: { kind: "webhook" },
-		});
+		const created = await routines.create(
+			{ workspaceId, agentId, createdById: userId },
+			{
+				name: "Overnight review",
+				instructions: "Review overnight changes.",
+				trigger: { kind: "webhook" },
+			},
+		);
 		const requestId = crypto.randomUUID();
 		const requestedAt = new Date().toISOString();
 		const accepted = await routines.acceptTrigger({

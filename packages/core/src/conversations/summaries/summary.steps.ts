@@ -9,8 +9,9 @@ import {
 	type ModelRequestFailed,
 	type TurnModel,
 } from "../turns/model.ts";
+import { TurnRepository } from "../turns/repository.ts";
 import { threadSummaryPrompt } from "./prompt.ts";
-import type { PreparedSummary, SummaryStore } from "./store.ts";
+import { type PreparedSummary, Summaries } from "./summaries.ts";
 import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
 
 const SUMMARY_TIMEOUT = Duration.minutes(2);
@@ -27,16 +28,23 @@ const firstSummarySchema = Schema.Struct({
 });
 
 export interface SummaryExecution {
-	store: SummaryStore;
+	summaries: Pick<Summaries.Interface, "prepare" | "complete">;
+	/** Where a failed summary is recorded, on the Scribe's turn. */
+	turns: Pick<TurnRepository.Interface, "failScribeTurn">;
 	model: TurnModel;
 }
 
 /** The summary workflow's step, which its activity reaches through `SummarySteps`. */
-export const stepsLayer = (execution: SummaryExecution) =>
+export const stepsLayer = (options: Pick<SummaryExecution, "model">) =>
 	Layer.effect(
 		SummarySteps,
 		Effect.gen(function* () {
 			const database = yield* Database;
+			const execution: SummaryExecution = {
+				...options,
+				summaries: yield* Summaries.Service,
+				turns: yield* TurnRepository.Service,
+			};
 			return SummarySteps.of({
 				summarise: (request) =>
 					summarise(request, execution).pipe(Effect.provideService(Database, database)),
@@ -54,7 +62,7 @@ export const summarise = (
 	request: SummaryRequest,
 	execution: SummaryExecution,
 ): Effect.Effect<void, never, Database> =>
-	Effect.flatMap(execution.store.prepare(request), (preparation) =>
+	Effect.flatMap(execution.summaries.prepare(request), (preparation) =>
 		preparation._tag === "Prepared" ? generateSummary(preparation, execution) : Effect.void,
 	);
 
@@ -64,14 +72,14 @@ export const summarise = (
  */
 const generateSummary = (
 	prepared: PreparedSummary,
-	{ store, model }: SummaryExecution,
+	{ summaries, turns, model }: SummaryExecution,
 ): Effect.Effect<void, never, Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
 			const generated = yield* Effect.exit(restore(generate(prepared, model)));
 			if (Exit.isSuccess(generated)) {
 				const [result, accounting] = generated.value;
-				return yield* store.complete(prepared, result, accounting);
+				return yield* summaries.complete(prepared, result, accounting);
 			}
 			const cause = generated.cause;
 			const expected = Cause.findErrorOption(cause);
@@ -83,7 +91,7 @@ const generateSummary = (
 			yield* failure instanceof SummaryStoppedUnexpectedly
 				? Effect.logError("A summary died", cause)
 				: Effect.logWarning(`A summary failed: ${failure.message}`);
-			yield* store.fail(prepared, failure.userMessage);
+			yield* turns.failScribeTurn(prepared.turnId, failure.userMessage);
 		}),
 	);
 
