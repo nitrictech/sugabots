@@ -5,8 +5,10 @@ import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
+import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import type * as schema from "../../../database/schema.ts";
 import { agent, collaboration, thread } from "../../../database/schema.ts";
+import type { ConversationEvent } from "../../events.ts";
 import { toCollaborationPart } from "../../threads/collaborations.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
@@ -62,6 +64,13 @@ export interface Interface {
 	 * as usual.
 	 */
 	readonly answer: (input: { threadId: string; answer: string }) => Effect.Effect<boolean>;
+	/**
+	 * Fails a collaboration once its collaborator's turn in its thread ends for
+	 * good without answering: failed with no retry, cancelled, or given up
+	 * on. Otherwise the asking agent, told the answer would follow, waits for
+	 * one that never comes.
+	 */
+	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -164,6 +173,11 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
+
+		handler: (events) =>
+			Effect.forEach(events.flatMap(unansweredBy), (ended) => repository.failUnanswered(ended), {
+				discard: true,
+			}),
 	});
 });
 
@@ -172,6 +186,24 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([ThreadRepository.layer, CollaborationRepository.layer]),
 );
+
+/** The collaborator whose turn in a collaboration's thread the event ended without an answer. */
+function unansweredBy(
+	event: ConversationEvent,
+): Array<{ readonly childThreadId: string; readonly collaboratorAgentId: string }> {
+	switch (event._tag) {
+		case "TurnFailed":
+			// A turn that runs again may still answer.
+			return event.willRetry
+				? []
+				: [{ childThreadId: event.threadId, collaboratorAgentId: event.agentId }];
+		case "TurnCancelled":
+		case "TurnAbandoned":
+			return [{ childThreadId: event.threadId, collaboratorAgentId: event.agentId }];
+		default:
+			return [];
+	}
+}
 
 /** How deep collaboration may nest: a root thread, a child, and a grandchild. */
 const MAX_DEPTH = 2;

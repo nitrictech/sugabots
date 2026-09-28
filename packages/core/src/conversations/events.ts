@@ -50,6 +50,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly threadId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
+		readonly agentId: string;
 		readonly messageId: string;
 		/** What people are told went wrong. */
 		readonly userMessage: UserMessage;
@@ -60,6 +61,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly threadId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
+		readonly agentId: string;
 		readonly messageId: string;
 		readonly content: string;
 	};
@@ -69,11 +71,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 	};
 	/**
-	 * An agent's turn in the thread was given up with no active turn left to
-	 * end: it could not open, or its workflow failed while none was running.
-	 * `outcome` is how it ended.
+	 * The agent `agentId`'s turn in the thread was given up with no active
+	 * turn left to end: it could not open, or its workflow failed while none
+	 * was running. `outcome` is how it ended.
 	 */
-	TurnAbandoned: { readonly threadId: string; readonly outcome: Ended };
+	TurnAbandoned: { readonly threadId: string; readonly agentId: string; readonly outcome: Ended };
 	/**
 	 * A turn's or facilitation's workflow in the thread finished and freed its
 	 * lane, so it no longer keeps the thread busy.
@@ -104,7 +106,10 @@ export type ConversationEvent = Data.TaggedEnum<{
 	CollaborationStoppedWaiting: CollaborationChange;
 	/** The collaborator's reply was recorded as the answer. */
 	CollaborationAnswered: CollaborationChange;
-	/** The collaboration ended unanswered, because the routine run it worked for ended. */
+	/**
+	 * The collaboration ended unanswered: the routine run it worked for ended,
+	 * or the collaborator's turn ended without an answer.
+	 */
 	CollaborationFailed: CollaborationChange;
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: { readonly workspaceId: string; readonly threadId: string };

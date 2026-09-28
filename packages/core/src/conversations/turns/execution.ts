@@ -163,6 +163,7 @@ export const make = Effect.gen(function* () {
 								? emit([
 										ConversationEvent.TurnAbandoned({
 											threadId: run.request.threadId,
+											agentId: run.request.agentId,
 											outcome: { state: "cancelled" },
 										}),
 									])

@@ -11,10 +11,11 @@ import {
 	writtenRow,
 } from "../../../database/database.ts";
 import type * as schema from "../../../database/schema.ts";
-import { agent, chat, collaboration, message, thread } from "../../../database/schema.ts";
+import { agent, chat, collaboration, message, thread, turn } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
+import { ACTIVE_STATUSES } from "../../turns/lifecycle.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -54,6 +55,16 @@ export interface Interface {
 	 * another transaction holds is skipped: its holder is moving it on.
 	 */
 	readonly failUnder: (threadIds: readonly string[]) => Effect.Effect<void>;
+	/**
+	 * Fails the collaboration asked of `collaboratorAgentId` in its thread
+	 * `childThreadId`, if it is still waiting or pending, because the
+	 * collaborator's turn there ended without answering. One the collaborator
+	 * still has an active turn for is left alone: that turn may answer it.
+	 */
+	readonly failUnanswered: (collaborator: {
+		childThreadId: string;
+		collaboratorAgentId: string;
+	}) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -190,6 +201,43 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
+
+		failUnanswered: ({ childThreadId, collaboratorAgentId }) =>
+			operation(
+				"failUnanswered",
+				transaction(
+					Effect.gen(function* () {
+						const current = yield* locked(
+							and(
+								eq(collaboration.childThreadId, childThreadId),
+								eq(collaboration.collaboratorAgentId, collaboratorAgentId),
+								inArray(collaboration.status, ["waiting", "pending"]),
+							),
+						);
+						if (!current) return;
+						const [stillAnswering] = yield* query((db) =>
+							db
+								.select({ id: turn.id })
+								.from(turn)
+								.where(
+									and(
+										eq(turn.threadId, childThreadId),
+										eq(turn.agentId, collaboratorAgentId),
+										inArray(turn.status, [...ACTIVE_STATUSES]),
+									),
+								)
+								.limit(1),
+						);
+						if (stillAnswering) return;
+						const updated = yield* writeStatus(current.row.id, { status: "failed" });
+						yield* emit([
+							ConversationEvent.CollaborationFailed(
+								collaborationChange(updated, current.collaboratorName),
+							),
+						]);
+					}),
+				),
+			),
 	});
 });
 
@@ -217,7 +265,7 @@ export interface Answered {
  * The collaboration, locked for update so a transition is serialised, with
  * the names its announcement and the asker's resume need.
  */
-const locked = (by: SQL) =>
+const locked = (by: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db

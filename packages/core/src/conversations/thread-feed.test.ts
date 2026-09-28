@@ -29,6 +29,7 @@ describe("the thread feed", () => {
 	const workspaceId = crypto.randomUUID();
 	const threadId = crypto.randomUUID();
 	const turnId = crypto.randomUUID();
+	const agentId = crypto.randomUUID();
 
 	beforeEach(() => {
 		published = [];
@@ -88,6 +89,7 @@ describe("the thread feed", () => {
 						threadId,
 						workspaceId,
 						turnId,
+						agentId,
 						messageId: "m1",
 						userMessage,
 						willRetry,
@@ -124,6 +126,7 @@ describe("the thread feed", () => {
 					threadId,
 					workspaceId,
 					turnId,
+					agentId,
 					messageId: "m1",
 					content: "Half a thou",
 				}),

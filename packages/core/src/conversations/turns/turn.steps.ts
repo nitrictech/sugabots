@@ -108,6 +108,7 @@ export const turnStepsLayer = Layer.effect(
 						yield* emit([
 							ConversationEvent.TurnAbandoned({
 								threadId: request.threadId,
+								agentId: request.agentId,
 								outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
 							}),
 						]);

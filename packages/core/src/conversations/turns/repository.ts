@@ -184,6 +184,7 @@ export const make = Effect.gen(function* () {
 						messageId: message.id,
 						content: message.content,
 						threadId: turn.threadId,
+						agentId: turn.agentId,
 						workspaceId: thread.workspaceId,
 					})
 					.from(message)
@@ -206,7 +207,12 @@ export const make = Effect.gen(function* () {
 	const lockAndTransition = (condition: SQL | undefined, event: TurnEvent) =>
 		Effect.map(lockedTurn(condition), (locked) =>
 			locked
-				? { id: locked.id, state: locked.state, decided: transition(locked.state, event) }
+				? {
+						id: locked.id,
+						agentId: locked.agentId,
+						state: locked.state,
+						decided: transition(locked.state, event),
+					}
 				: undefined,
 		);
 
@@ -493,6 +499,7 @@ export const make = Effect.gen(function* () {
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
+								agentId: locked.agentId,
 								messageId: reply.messageId,
 								userMessage,
 								willRetry,
@@ -518,6 +525,7 @@ export const make = Effect.gen(function* () {
 								threadId: reply.threadId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
+								agentId: locked.agentId,
 								messageId: reply.messageId,
 								content: draft.content,
 							}),
@@ -868,13 +876,14 @@ const lockedTurn = (condition: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ ...stateColumns, threadId: turn.threadId })
+				.select({ ...stateColumns, threadId: turn.threadId, agentId: turn.agentId })
 				.from(turn)
 				.where(condition)
 				.limit(1)
 				.for("update"),
 		),
-		([row]) => row && { id: row.id, threadId: row.threadId, state: stateOf(row) },
+		([row]) =>
+			row && { id: row.id, threadId: row.threadId, agentId: row.agentId, state: stateOf(row) },
 	);
 
 function notRunnable(reason: string, ended?: Ended): NotRunnable {
@@ -887,6 +896,7 @@ function endAnnouncement(
 		turnId: string;
 		threadId: string;
 		workspaceId: string;
+		agentId: string;
 		messageId: string;
 		content: string;
 	},
@@ -897,6 +907,7 @@ function endAnnouncement(
 				threadId: reply.threadId,
 				workspaceId: reply.workspaceId,
 				turnId: reply.turnId,
+				agentId: reply.agentId,
 				messageId: reply.messageId,
 				userMessage: ended.error,
 				willRetry: false,

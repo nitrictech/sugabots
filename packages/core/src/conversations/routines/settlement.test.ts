@@ -68,7 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	const announce = (...events: ConversationEvent[]) => runOnPostgres(transaction(emit(events)));
 	/** An event ending the thread's routine run early, as `outcome`. */
 	const ended = (threadId: string, outcome: Ended) =>
-		ConversationEvent.TurnAbandoned({ threadId, outcome });
+		ConversationEvent.TurnAbandoned({ threadId, agentId, outcome });
 	const failed = (error: UserMessage): Ended => ({ state: "failed", error });
 	const executionOf = async (executionId: string) => {
 		const [row] = await onDatabase((db) =>
