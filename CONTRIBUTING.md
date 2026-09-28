@@ -38,6 +38,11 @@ its place and the bot beside it. Pages can use the components in
 `src/docs/components/mdx-components.ts` without importing them. Preview with
 `bun run --cwd packages/website dev`.
 
+The website sends analytics to PostHog, through Suga's proxy at `p.suga.app`,
+only from a production build made with `VITE_POSTHOG_KEY` set to the project
+key. Build previews without it so they send nothing. It runs in PostHog's
+cookieless mode, so the site sets no cookies and has no consent banner.
+
 ## Branches, commits, and PRs
 
 Branch names should be short (2-5 words), hyphen-separated, no slashes, no prefixes (e.g. `auth-token-refresh`, `dark-mode-toggle`).

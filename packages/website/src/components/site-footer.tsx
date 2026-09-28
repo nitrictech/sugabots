@@ -1,4 +1,5 @@
 import { cn } from "cn";
+import { trackCallToActionClick } from "@/analytics";
 import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
@@ -29,12 +30,14 @@ export function SiteFooter({ width = "narrow" }: { width?: keyof typeof footerWi
 						<>
 							<a
 								href={siteLinks.docs}
+								onClick={() => trackCallToActionClick("docs", "footer")}
 								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								Docs
 							</a>
 							<a
 								href={siteLinks.github}
+								onClick={() => trackCallToActionClick("github", "footer")}
 								aria-label="GitHub"
 								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
@@ -44,6 +47,7 @@ export function SiteFooter({ width = "narrow" }: { width?: keyof typeof footerWi
 					)}
 					<a
 						href={siteLinks.discord}
+						onClick={() => trackCallToActionClick("discord", "footer")}
 						aria-label="Discord"
 						className={buttonVariants({ variant: "nav", size: "inline" })}
 					>
