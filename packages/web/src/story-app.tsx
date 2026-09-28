@@ -90,6 +90,7 @@ const ADMIN_PERMISSIONS = {
 	manageProviders: true,
 	manageMembers: true,
 	configureBuiltInAgents: true,
+	manageUsage: true,
 };
 
 /** What a chat's thread holds: its messages, and who is in it. */
@@ -207,6 +208,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 								manageProviders: false,
 								manageMembers: false,
 								configureBuiltInAgents: false,
+								manageUsage: false,
 							},
 			}),
 		),

@@ -46,6 +46,8 @@ export type WorkspacePermission =
 	| "workspace.members.manage"
 	/** Choose the models the Scribe and the Facilitator run on. */
 	| "workspace.builtInAgents.configure"
+	/** See what the workspace's models cost, every pod's and bot's included, and limit it. */
+	| "workspace.usage.manage"
 	/** Create a shared pod. */
 	| "pod.create";
 
@@ -113,6 +115,7 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 		"workspace.providers.manage",
 		"workspace.members.manage",
 		"workspace.builtInAgents.configure",
+		"workspace.usage.manage",
 		"pod.create",
 	]),
 	member: new Set<WorkspacePermission>(["workspace.read"]),
@@ -245,5 +248,6 @@ export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 		manageProviders: mayInWorkspace(actor, "workspace.providers.manage"),
 		manageMembers: mayInWorkspace(actor, "workspace.members.manage"),
 		configureBuiltInAgents: mayInWorkspace(actor, "workspace.builtInAgents.configure"),
+		manageUsage: mayInWorkspace(actor, "workspace.usage.manage"),
 	};
 }

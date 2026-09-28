@@ -1,3 +1,4 @@
+import type { Usage } from "@sugabots/core/accounting/usage";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -36,6 +37,7 @@ export type HttpServices =
 	| SearchProviderSetup.Service
 	| ConnectionSetup.Service
 	| ModelTrials.Service
+	| Usage.Service
 	| Chats.Service
 	| ChatView.Service
 	| ThreadView.Service

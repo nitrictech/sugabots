@@ -93,6 +93,7 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.providers.manage": true,
 	"workspace.members.manage": true,
 	"workspace.builtInAgents.configure": true,
+	"workspace.usage.manage": true,
 	"pod.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
 
@@ -108,6 +109,7 @@ describe("workspace actions", () => {
 			expect(mayInWorkspace(actor(role), "workspace.providers.manage")).toBe(false);
 			expect(mayInWorkspace(actor(role), "workspace.members.manage")).toBe(false);
 			expect(mayInWorkspace(actor(role), "workspace.builtInAgents.configure")).toBe(false);
+			expect(mayInWorkspace(actor(role), "workspace.usage.manage")).toBe(false);
 			expect(mayInWorkspace(actor(role), "pod.create")).toBe(false);
 		},
 	);

@@ -29,6 +29,7 @@ import { systemRoutes } from "../routes/system/routes.ts";
 import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
 import { threadRoutes } from "../routes/threads/routes.ts";
 import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
+import { usageRoutes } from "../routes/usage/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
 import { failureResponse } from "./errors.ts";
@@ -84,6 +85,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				routineRoutes,
 				toolApprovalRoutes,
 				threadRoutes,
+				usageRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),

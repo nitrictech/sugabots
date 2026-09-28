@@ -172,6 +172,7 @@ function Preview({
 				manageProviders: true,
 				manageMembers: true,
 				configureBuiltInAgents: true,
+				manageUsage: true,
 			},
 		});
 		client.setQueryData(["model-providers", WORKSPACE], providers);
