@@ -1,5 +1,6 @@
 import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
 import { motion } from "motion/react";
+import { trackCallToActionClick } from "@/analytics";
 import { accentText } from "@/components/accent";
 import { BotCrowd } from "@/components/bot-crowd";
 import { Emphasis } from "@/components/emphasis";
@@ -31,12 +32,17 @@ export function Hero() {
 				</motion.p>
 				{launched ? (
 					<RevealItem className="flex flex-wrap items-center gap-3">
-						<a href={siteLinks.getStarted} className={buttonVariants({ size: "lg" })}>
+						<a
+							href={siteLinks.getStarted}
+							onClick={() => trackCallToActionClick("get_started", "hero")}
+							className={buttonVariants({ size: "lg" })}
+						>
 							Start a pod
 							<ArrowRightIcon data-icon="inline-end" />
 						</a>
 						<a
 							href={siteLinks.github}
+							onClick={() => trackCallToActionClick("github", "hero")}
 							className={buttonVariants({ variant: "outline", size: "lg" })}
 						>
 							View on GitHub
@@ -45,7 +51,7 @@ export function Hero() {
 					</RevealItem>
 				) : (
 					<RevealItem className="flex flex-wrap items-center gap-x-4 gap-y-3">
-						<JoinDiscordLink size="lg" />
+						<JoinDiscordLink placement="hero" size="lg" />
 						<span className="text-sm text-muted-foreground">Releasing soon.</span>
 					</RevealItem>
 				)}

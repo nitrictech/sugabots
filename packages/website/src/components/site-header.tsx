@@ -1,3 +1,4 @@
+import { trackCallToActionClick } from "@/analytics";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
 import { launched, siteLinks } from "@/site-links";
@@ -15,12 +16,14 @@ export function SiteHeader() {
 						<>
 							<a
 								href={siteLinks.docs}
+								onClick={() => trackCallToActionClick("docs", "header")}
 								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								Docs
 							</a>
 							<a
 								href={siteLinks.github}
+								onClick={() => trackCallToActionClick("github", "header")}
 								className={buttonVariants({ variant: "nav", size: "inline" })}
 							>
 								GitHub
@@ -29,11 +32,19 @@ export function SiteHeader() {
 					)}
 				</div>
 				{launched ? (
-					<a href={siteLinks.getStarted} className={buttonVariants()}>
+					<a
+						href={siteLinks.getStarted}
+						onClick={() => trackCallToActionClick("get_started", "header")}
+						className={buttonVariants()}
+					>
 						Get started
 					</a>
 				) : (
-					<a href={siteLinks.discord} className={buttonVariants()}>
+					<a
+						href={siteLinks.discord}
+						onClick={() => trackCallToActionClick("discord", "header")}
+						className={buttonVariants()}
+					>
 						Join Discord
 					</a>
 				)}

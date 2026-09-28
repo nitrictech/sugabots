@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { trackCallToActionClick } from "@/analytics";
 import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
@@ -22,6 +23,7 @@ export function DocsHeader() {
 				<div className="flex flex-1 justify-end gap-5">
 					<a
 						href={siteLinks.github}
+						onClick={() => trackCallToActionClick("github", "docs_header")}
 						aria-label="GitHub"
 						className={buttonVariants({ variant: "nav", size: "inline" })}
 					>
@@ -29,6 +31,7 @@ export function DocsHeader() {
 					</a>
 					<a
 						href={siteLinks.discord}
+						onClick={() => trackCallToActionClick("discord", "docs_header")}
 						aria-label="Discord"
 						className={buttonVariants({ variant: "nav", size: "inline" })}
 					>

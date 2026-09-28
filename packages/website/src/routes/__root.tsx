@@ -1,7 +1,8 @@
 import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+import { startAnalytics } from "@/analytics";
 import { pageUrl, siteMeta } from "@/site-meta";
 import stylesUrl from "../styles.css?url";
 
@@ -42,6 +43,8 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: ReactNode }) {
+	useEffect(startAnalytics, []);
+
 	return (
 		<html lang="en">
 			<head>

@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { trackCallToActionClick } from "@/analytics";
 import { BotAvatar } from "@/components/bot-avatar";
 import { JoinDiscordLink } from "@/components/join-discord-link";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
@@ -34,18 +35,23 @@ export function GetStartedSection() {
 				<RevealItem className="flex flex-wrap justify-center gap-3">
 					{launched ? (
 						<>
-							<a href={siteLinks.docs} className={buttonVariants({ size: "lg" })}>
+							<a
+								href={siteLinks.docs}
+								onClick={() => trackCallToActionClick("docs", "get_started_section")}
+								className={buttonVariants({ size: "lg" })}
+							>
 								Read the docs
 							</a>
 							<a
 								href={siteLinks.github}
+								onClick={() => trackCallToActionClick("github", "get_started_section")}
 								className={buttonVariants({ variant: "outline", size: "lg" })}
 							>
 								View on GitHub
 							</a>
 						</>
 					) : (
-						<JoinDiscordLink size="lg" />
+						<JoinDiscordLink placement="get_started_section" size="lg" />
 					)}
 				</RevealItem>
 			</Reveal>
