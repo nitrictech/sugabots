@@ -5,28 +5,22 @@ import {
 	useNavigate,
 	useParams,
 	useRouteContext,
-	useRouter,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Link2, Lock, Plus, Settings } from "lucide-react";
+import { Lock, Plus } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
-import { agentChatLink, allAgentChatLink, allLink, podLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { AllPodsTile, PodTile } from "@/shell/PodTile.tsx";
+import { AllPodsMenuItems, PodMenuItems } from "@/shell/RailMenus.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
-import {
-	ContextMenu,
-	ContextMenuContent,
-	ContextMenuTrigger,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-} from "@/ui/dropdown-menu.tsx";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/ui/dropdown-menu.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** What the rail has open over it: a new pod, or a new bot in a pod or, from All, in one chosen. */
@@ -124,22 +118,10 @@ export function RailView({
 			onNewBot={onNewBot && pod.permissions.createAgents ? () => onNewBot(pod) : undefined}
 		/>
 	);
+	const newBotFromAll = onNewBot && mayAddBotFromAll ? () => onNewBot(undefined) : undefined;
 	const allMenu =
-		(onNewBot && mayAddBotFromAll) || onNewPod ? (
-			<>
-				{onNewBot && mayAddBotFromAll && (
-					<DropdownMenuItem onClick={() => onNewBot(undefined)}>
-						<Plus />
-						New bot
-					</DropdownMenuItem>
-				)}
-				{onNewPod && (
-					<DropdownMenuItem onClick={onNewPod}>
-						<Plus />
-						New pod
-					</DropdownMenuItem>
-				)}
-			</>
+		newBotFromAll || onNewPod ? (
+			<AllPodsMenuItems onNewBot={newBotFromAll} onNewPod={onNewPod} />
 		) : undefined;
 
 	return (
@@ -238,51 +220,6 @@ function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
 /** The pods a new bot can go in: shared ones the viewer may add a bot to. */
 function podsToAddBotsTo(pods: readonly Pod[]): Pod[] {
 	return pods.filter((pod) => pod.kind === "shared" && pod.permissions.createAgents);
-}
-
-/**
- * What right-clicking a pod offers: a new bot in it, its settings, and, for a
- * shared pod, its address to send somebody else.
- */
-function PodMenuItems({
-	pod,
-	settingsBack,
-	onNewBot,
-}: {
-	pod: Pod;
-	/** History state for the settings link, so its Back returns to the page it left. */
-	settingsBack?: ReturnType<typeof useBackToHere>;
-	/** Absent when the viewer may not add a bot to this pod. */
-	onNewBot?: () => void;
-}) {
-	const router = useRouter();
-	function copyLink() {
-		const href = router.buildLocation(podLink(pod)).href;
-		void navigator.clipboard?.writeText(new URL(href, window.location.origin).href).catch(() => {});
-	}
-	return (
-		<>
-			{onNewBot && (
-				<>
-					<DropdownMenuItem onClick={onNewBot}>
-						<Plus />
-						New bot
-					</DropdownMenuItem>
-					<DropdownMenuSeparator />
-				</>
-			)}
-			<DropdownMenuItem render={<Link {...podSettingsLink(pod)} state={settingsBack} />}>
-				<Settings />
-				Pod settings
-			</DropdownMenuItem>
-			{pod.kind === "shared" && (
-				<DropdownMenuItem onClick={copyLink}>
-					<Link2 />
-					Copy link
-				</DropdownMenuItem>
-			)}
-		</>
-	);
 }
 
 function RailItem({
