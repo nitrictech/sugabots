@@ -1,11 +1,11 @@
+import { ActionForbidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The approval route, over a double of `ToolApprovals`, which decides who may
@@ -24,7 +24,9 @@ const resolveUser: UserResolver = async () => ({
 });
 
 function app(decide: ToolApprovals.Interface["decide"]) {
-	return createTestApp({ resolveUser, services: unimplemented(ToolApprovals.Service, { decide }) });
+	return createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(ToolApprovals.Service, { decide })),
+	);
 }
 
 const approve = (routes: ReturnType<typeof app>, decision: string) =>

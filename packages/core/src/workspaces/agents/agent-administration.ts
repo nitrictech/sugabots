@@ -8,14 +8,14 @@ import type {
 	SystemAgentKey,
 } from "@sugabots/contracts";
 import { Context, Data, Effect, Layer } from "effect";
+import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { Visibility } from "../../authorization/visibility.ts";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { type AuthorizationDenied, ResourceHidden } from "../access.ts";
-import { Authorization } from "../authorization.ts";
-import type { CurrentActor } from "../current-actor.ts";
 import { PodRepository } from "../pods/pod-repository.ts";
-import { Visibility } from "../visibility.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { systemAgents, visibleCrewAgents } from "./agent-reads.ts";
 import { AgentRepository } from "./agent-repository.ts";

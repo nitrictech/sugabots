@@ -1,7 +1,7 @@
 import { isoTimestampSchema } from "@sugabots/contracts";
 import { tool } from "ai";
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
 import { agent, message, user } from "../../../database/schema.ts";
 import { formatHistoryTime } from "../../compaction/prompt.ts";
@@ -75,8 +75,8 @@ export function searchHistoryTool({
 			}
 			const search: HistorySearch = {
 				...(words ? { words } : {}),
-				...(after ? { after: new Date(after) } : {}),
-				...(before ? { before: new Date(before) } : {}),
+				...(after ? { after: DateTime.toDate(DateTime.makeUnsafe(after)) } : {}),
+				...(before ? { before: DateTime.toDate(DateTime.makeUnsafe(before)) } : {}),
 			};
 			return run(query((db) => searchHistory(db, threadId, keptFrom, search)));
 		},

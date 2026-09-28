@@ -2,9 +2,10 @@ import { handleFromName, threadChannel } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { ResourceHidden } from "../../authorization/access.ts";
 import { query } from "../../database/database.ts";
-import { createEventBus } from "../../database/events/bus.ts";
-import { postgresEventStore } from "../../database/events/store.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	event,
@@ -26,7 +27,6 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { ResourceHidden } from "../../workspaces/access.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
 import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
@@ -47,10 +47,10 @@ import { ThreadView } from "./thread-view.ts";
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";
 
-const eventStore = await runOnPostgres(postgresEventStore);
+const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async () => {
-	const eventBus = createEventBus({ store: eventStore });
+	const eventBus = EventBus.inProcess({ store: eventStore });
 	const conversations = await conversationsForTests(eventBus);
 	const viewAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
@@ -835,7 +835,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await expect(cancellationAs(outsiderId).request(prepared.turnId)).rejects.toThrow(
 			ResourceHidden,
 		);
-		// Announced once, for the worker waiting on it.
+		// Announced once, for the workflow running the turn.
 		const announced = await onDatabase((db) =>
 			db
 				.select({ payload: event.payload })

@@ -158,8 +158,9 @@ export const toolApprovalStatusSchema = Schema.Literals([
 export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 
 /**
- * jsonValueSchema validates JSON recursively but exposes shallow types because
- * recursive message-part types exceed Hono RPC's instantiation depth.
+ * jsonValueSchema validates JSON recursively but exposes shallow types, so the
+ * recursive message-part types built on it stay within TypeScript's
+ * instantiation depth.
  */
 export const jsonValueSchema = Schema.Unknown.check(
 	Schema.makeFilter(Schema.is(Schema.Json), { expected: "a JSON value" }),
@@ -204,7 +205,7 @@ export const toolCallPartSchema = Schema.Struct({
 		),
 	),
 	error: Schema.NullOr(Schema.String),
-	/** Whether the tool may have changed something at the other end (ADR 002). */
+	/** Whether the tool may have changed something at the other end. */
 	mutating: Schema.Boolean,
 	/** How many characters of the reply's text had been written when the call was made. */
 	atOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

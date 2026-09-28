@@ -13,7 +13,7 @@ import {
 import { crewOf } from "../threads/participants.ts";
 
 /**
- * Who has the floor: which agent, if any, speaks after a message (ADR 004).
+ * Who has the floor: which agent, if any, speaks after a message.
  *
  * The decision is a pure function of the message and the thread, so it can be
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,

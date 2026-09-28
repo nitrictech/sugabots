@@ -2,10 +2,10 @@ export * as ModelTrials from "./model-trials.ts";
 
 import type { NewModelTrial } from "@sugabots/contracts";
 import { Context, Effect, Layer } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
-import type { AuthorizationDenied } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Models } from "../turns/model.ts";
 import { runTrial, type TrialReport } from "./trial.ts";
 
@@ -27,7 +27,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelTrials");
 	const authorization = yield* Authorization.Service;
-	const models = yield* Models;
+	const models = yield* Models.Service;
 	return Service.of({
 		run: ({ workspace, systemAgentKey, model }) =>
 			operation(
@@ -42,5 +42,5 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/** Needs `Models`, the model client turns use. */
+/** Needs `Models.Service`, the model client turns use. */
 export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));

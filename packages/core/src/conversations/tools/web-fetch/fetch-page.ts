@@ -21,12 +21,12 @@ import { readablePage } from "./readable.ts";
  */
 
 export const MAX_REDIRECTS = 5;
-export const DEFAULT_TIMEOUT_MS = 15_000;
-export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
-export const DEFAULT_MAX_CHARACTERS = 40_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_MAX_CHARACTERS = 40_000;
 const USER_AGENT = "Sugabots/1 (+https://github.com/nitrictech/agents)";
 
-export interface FetchedPage {
+interface FetchedPage {
 	/** As asked for. */
 	url: string;
 	/** Where the page was, after redirects. */
@@ -40,16 +40,16 @@ export interface FetchedPage {
 }
 
 /** Why a page was not fetched, as the model reads it. */
-export interface Refusal {
+interface Refusal {
 	ok: false;
 	reason: string;
 }
 
-export type PageOutcome = { ok: true; page: FetchedPage } | Refusal;
+type PageOutcome = { ok: true; page: FetchedPage } | Refusal;
 
 export type FetchPage = (url: string, signal?: AbortSignal) => Promise<PageOutcome>;
 
-export interface PageFetcherOptions {
+interface PageFetcherOptions {
 	/** An unbound egress client, `createEgressHttpClient`. */
 	fetch: EgressHttpClient;
 	timeoutMs?: number;

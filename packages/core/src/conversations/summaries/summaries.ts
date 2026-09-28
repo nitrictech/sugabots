@@ -181,7 +181,7 @@ const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
  * A summary that has nothing to do: its thread or source is gone, it is
  * already written, or the Scribe's turn may not run. `reason` is for the logs.
  */
-export interface SummarySkipped {
+interface SummarySkipped {
 	readonly _tag: "Skipped";
 	readonly reason: string;
 }
@@ -207,7 +207,7 @@ function skipped(reason: string): SummarySkipped {
 }
 
 /** A thread's current summary, and the last message it covers. */
-export const loadThreadSummary = Effect.fn("Summaries.loadThreadSummary")(function* (
+const loadThreadSummary = Effect.fn("Summaries.loadThreadSummary")(function* (
 	db: Executor,
 	threadId: string,
 ) {

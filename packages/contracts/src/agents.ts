@@ -116,7 +116,7 @@ export const agentSchema = Schema.Struct({
 	/**
 	 * The built-in tools switched off for this agent, by key. A list of what is
 	 * off rather than what is on, so a new built-in tool reaches every existing
-	 * agent (ADR 005). Empty for an agent with everything.
+	 * agent. Empty for an agent with everything.
 	 */
 	disabledTools: Schema.mutable(Schema.Array(Schema.String)),
 	createdAt: isoTimestampSchema,

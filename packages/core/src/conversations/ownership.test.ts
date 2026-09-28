@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { shippedSourceFiles } from "../shipped-source.test-support.ts";
 
 /**
  * Each conversation table has one owner: only its repository writes it. This
@@ -26,34 +26,16 @@ const OWNERS: Record<string, readonly string[]> = {
 	toolCall: ["core/src/conversations/tools/calls/repository.ts"],
 };
 
-const packages = join(import.meta.dirname, "../../..");
 const write = new RegExp(`\\.(insert|update|delete)\\((${Object.keys(OWNERS).join("|")})\\)`, "g");
 
 describe("conversation table ownership", () => {
 	it("leaves each table's writes to its owning repository", () => {
-		const strayWrites = ["core/src", "server/src"]
-			.flatMap((root) => sourceFiles(join(packages, root)))
-			.flatMap((file) => {
-				const path = relative(packages, file);
-				return [...readFileSync(file, "utf8").matchAll(write)]
-					.filter((found) => !OWNERS[found[2] ?? ""]?.includes(path))
-					.map((found) => `${path}: ${found[0]}`);
-			});
+		const strayWrites = shippedSourceFiles().flatMap(({ path, absolute }) =>
+			[...readFileSync(absolute, "utf8").matchAll(write)]
+				.filter((found) => !OWNERS[found[2] ?? ""]?.includes(path))
+				.map((found) => `${path}: ${found[0]}`),
+		);
 
 		expect(strayWrites).toEqual([]);
 	});
 });
-
-/** The TypeScript files under `directory` that ship, leaving out tests and their fixtures. */
-function sourceFiles(directory: string): string[] {
-	return readdirSync(directory, { recursive: true, encoding: "utf8" })
-		.filter(
-			(name) =>
-				name.endsWith(".ts") &&
-				!name.endsWith(".test.ts") &&
-				!name.endsWith(".test-support.ts") &&
-				!name.endsWith("testing.ts") &&
-				!name.split("/").includes("node_modules"),
-		)
-		.map((name) => join(directory, name));
-}

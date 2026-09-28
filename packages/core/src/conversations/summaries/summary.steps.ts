@@ -7,6 +7,7 @@ import {
 	forEachDelta,
 	type ModelAccounting,
 	type ModelRequestFailed,
+	Models,
 	type TurnModel,
 } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
@@ -28,19 +29,16 @@ const firstSummarySchema = Schema.Struct({
 });
 
 /** The summary workflow's step, which its activity reaches through `SummarySteps`. */
-export const stepsLayer = (options: { model: TurnModel }) =>
-	Layer.effect(
-		SummarySteps,
-		Effect.gen(function* () {
-			const services = yield* Effect.context<
-				Summaries.Service | TurnRepository.Service | Database
-			>();
-			return SummarySteps.of({
-				summarise: (request) =>
-					summarise(request, options.model).pipe(Effect.provideContext(services)),
-			});
-		}),
-	);
+export const summaryStepsLayer = Layer.effect(
+	SummarySteps,
+	Effect.gen(function* () {
+		const model = yield* Models.Service;
+		const services = yield* Effect.context<Summaries.Service | TurnRepository.Service | Database>();
+		return SummarySteps.of({
+			summarise: (request) => summarise(request, model).pipe(Effect.provideContext(services)),
+		});
+	}),
+);
 
 /**
  * Prepares, generates and records one summary. Nothing to do (the thread is

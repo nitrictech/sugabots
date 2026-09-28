@@ -27,6 +27,7 @@ import {
 import {
 	forEachDelta,
 	type ModelRequestFailed,
+	Models,
 	type TurnModel,
 	type TurnModelInput,
 } from "./model.ts";
@@ -34,7 +35,7 @@ import { TurnRequests } from "./requests.ts";
 
 /**
  * The facilitator: a small model call that decides who speaks after a
- * message when nothing else did (ADR 004). Runs as a workflow so the request
+ * message when nothing else did. Runs as a workflow so the request
  * that committed the message does not wait on a model.
  *
  * It answers one of the handles in the thread, or `nobody`. A person being
@@ -48,33 +49,31 @@ const CONTEXT_MESSAGES = 8;
 const MAX_ANSWER_CHARACTERS = 200;
 
 /** The facilitate workflow's steps, which its activities reach through `FacilitateSteps`. */
-export const stepsLayer = (options: { model: TurnModel }) =>
-	Layer.effect(
-		FacilitateSteps,
-		Effect.gen(function* () {
-			const services = yield* Effect.context<
-				ThreadRepository.Service | TurnRequests.Service | Database
-			>();
-			const { emit } = yield* ConversationEvents.Service;
-			const announce = (event: ConversationEvent) =>
-				transaction(emit([event])).pipe(Effect.provideContext(services));
-			return FacilitateSteps.of({
-				attempt: (request, attempt) =>
-					attemptFacilitation(request, attempt, options.model).pipe(
-						Effect.provideContext(services),
-					),
-				abandon: (request) =>
-					announce(
-						ConversationEvent.FacilitationFailed({
-							threadId: request.threadId,
-							userMessage: new FacilitationFailed().userMessage,
-						}),
-					),
-				announceReleased: (request) =>
-					announce(ConversationEvent.LaneReleased({ threadId: request.threadId })),
-			});
-		}),
-	);
+export const facilitateStepsLayer = Layer.effect(
+	FacilitateSteps,
+	Effect.gen(function* () {
+		const model = yield* Models.Service;
+		const services = yield* Effect.context<
+			ThreadRepository.Service | TurnRequests.Service | Database
+		>();
+		const { emit } = yield* ConversationEvents.Service;
+		const announce = (event: ConversationEvent) =>
+			transaction(emit([event])).pipe(Effect.provideContext(services));
+		return FacilitateSteps.of({
+			attempt: (request, attempt) =>
+				attemptFacilitation(request, attempt, model).pipe(Effect.provideContext(services)),
+			abandon: (request) =>
+				announce(
+					ConversationEvent.FacilitationFailed({
+						threadId: request.threadId,
+						userMessage: new FacilitationFailed().userMessage,
+					}),
+				),
+			announceReleased: (request) =>
+				announce(ConversationEvent.LaneReleased({ threadId: request.threadId })),
+		});
+	}),
+);
 
 /** What the facilitator sees: who is here, and what was last said. */
 export interface FacilitatorScope {

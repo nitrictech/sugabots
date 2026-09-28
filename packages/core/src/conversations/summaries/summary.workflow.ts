@@ -34,7 +34,7 @@ export class SummarySteps extends Context.Service<
 	}
 >()("@sugabots/core/SummarySteps") {}
 
-export const summaryActivities = Activities.fromService<SummaryRequest>()(SummarySteps, {
+const summaryActivities = Activities.fromService<SummaryRequest>()(SummarySteps, {
 	summarise: {},
 });
 

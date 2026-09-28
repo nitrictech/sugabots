@@ -6,11 +6,11 @@ import { layer as databaseLayer, query } from "../../database/database.ts";
 import { unimplemented } from "../../testing.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { lane } from "../../workflows/sql.ts";
-import { ModelRequestFailed } from "../turns/model.ts";
+import { ModelRequestFailed, Models } from "../turns/model.ts";
 import { TurnRepository } from "../turns/repository.ts";
 import { TurnRequests } from "../turns/requests.ts";
 import { Summaries } from "./summaries.ts";
-import { stepsLayer } from "./summary.steps.ts";
+import { summaryStepsLayer } from "./summary.steps.ts";
 import { Summary, type SummaryRequest, summaryLane, summaryWorkflow } from "./summary.workflow.ts";
 
 const prepare = vi.fn(() =>
@@ -20,16 +20,18 @@ const prepare = vi.fn(() =>
 const runtime = ManagedRuntime.make(
 	summaryWorkflow.layer.pipe(
 		Layer.provideMerge(
-			stepsLayer({
-				model: {
-					stream: () =>
-						Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
-				},
-			}),
+			summaryStepsLayer.pipe(
+				Layer.provide(
+					Layer.succeed(Models.Service, {
+						stream: () =>
+							Effect.fail(new ModelRequestFailed({ message: "unused", reason: "unavailable" })),
+					}),
+				),
+			),
 		),
 		Layer.provide(unimplemented(Summaries.Service, { prepare })),
 		Layer.provide(unimplemented(TurnRepository.Service)),
-		Layer.provideMerge(Lanes.layer([Summary])),
+		Layer.provideMerge(Lanes.layerFor([Summary])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),

@@ -1,9 +1,9 @@
 import type { Agent, SystemAgent } from "@sugabots/contracts";
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
+import type { Visibility } from "../../authorization/visibility.ts";
 import { query } from "../../database/database.ts";
 import { agent } from "../../database/schema.ts";
-import type { Visibility } from "../visibility.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { SYSTEM_AGENTS } from "./system-agents.ts";
 

@@ -8,8 +8,7 @@ import { uuidSchema } from "./uuid.ts";
  *
  * A shared pod is reached by the members added to it and by every workspace
  * admin, who needs no membership row. A Personal pod is reached by its owner
- * and by nobody else, admins included. `docs/permissions.md` is the
- * specification.
+ * and by nobody else, admins included.
  */
 
 /**
@@ -76,7 +75,7 @@ export function leastUsedPodColor(taken: readonly (PodColor | null)[]): PodColor
 	return podColors.reduce((best, color) => (uses(color) < uses(best) ? color : best));
 }
 
-/** Whether the Facilitator chooses speakers in non-chat threads (ADR 004). */
+/** Whether the Facilitator chooses speakers in non-chat threads. */
 export const podRoutingSchema = Schema.Struct({
 	facilitator: Schema.Boolean,
 });

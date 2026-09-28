@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { event } from "../schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../testing.ts";
-import { type EventStore, memoryEventStore, postgresEventStore } from "./store.ts";
+import { EventStore } from "./store.ts";
 
 /**
  * Both stores, against the same cases.
@@ -27,7 +27,7 @@ const stores = [
 	{
 		name: "memory",
 		skip: false,
-		make: () => memoryEventStore({ now: () => clock }),
+		make: () => EventStore.inMemory({ now: () => clock }),
 		// Nothing here to reach into, so the store's clock moves on instead:
 		// what is already written stays in the past, what comes next is today.
 		backdate: async (_seq: number) => {
@@ -37,7 +37,7 @@ const stores = [
 	{
 		name: "postgres",
 		skip: !process.env.DATABASE_URL,
-		make: () => runOnPostgres(postgresEventStore),
+		make: () => runOnPostgres(EventStore.make),
 		backdate: async (seq: number) => {
 			await onDatabase((db) =>
 				db
@@ -53,7 +53,7 @@ afterAll(closeDatabase);
 
 for (const { name, skip, make, backdate } of stores) {
 	describe.skipIf(skip)(`${name} event store`, () => {
-		let store: EventStore;
+		let store: EventStore.Interface;
 		// Channels are per-test so a shared Postgres instance, and whatever a
 		// previous run left in it, cannot affect the result.
 		let channel: Channel;

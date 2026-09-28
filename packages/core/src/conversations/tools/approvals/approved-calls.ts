@@ -28,7 +28,7 @@ export interface Interface {
 	) => Effect.Effect<ToolModelMessage, ToolApprovalsIncomplete>;
 	/**
 	 * Starts an allowed call (see `ToolCallRepository.beginExecution`). A call
-	 * that may change something marks its turn as having acted (ADR 002).
+	 * that may change something marks its turn as having acted.
 	 */
 	readonly beginExecution: (input: {
 		threadId: string;

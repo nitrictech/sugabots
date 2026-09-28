@@ -4,7 +4,7 @@ import { RoutineRunner } from "./routine-runner.ts";
 import { RoutineSettlement } from "./settlement.ts";
 
 /** The routine workflow's steps, which its activities reach through `RoutineSteps`. */
-export const stepsLayer = Layer.effect(
+export const routineStepsLayer = Layer.effect(
 	RoutineSteps,
 	Effect.gen(function* () {
 		const runner = yield* RoutineRunner.Service;

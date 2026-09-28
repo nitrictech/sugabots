@@ -1,3 +1,5 @@
+export * as RoutineScheduler from "./scheduler.ts";
+
 import { Duration, Effect, Layer } from "effect";
 import { RoutineRunner } from "./routine-runner.ts";
 
@@ -5,10 +7,10 @@ import { RoutineRunner } from "./routine-runner.ts";
 const POLL_INTERVAL = Duration.seconds(15);
 
 /** Accepts the runs of cron routines as they fall due. */
-export const routineSchedulerLayer = Layer.effectDiscard(
+export const layer = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const runner = yield* RoutineRunner.Service;
-		const iteration = Effect.suspend(() => runner.processNextDue()).pipe(
+		const iteration = runner.processNextDue().pipe(
 			Effect.flatMap((accepted) => (accepted ? Effect.void : Effect.sleep(POLL_INTERVAL))),
 			Effect.catchCause((cause) =>
 				Effect.logError("Routine scheduler iteration failed", cause).pipe(

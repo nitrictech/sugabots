@@ -1,11 +1,13 @@
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Redacted } from "effect";
+import { TestClock } from "effect/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { transaction } from "../../database/database.ts";
-import { createEventBus } from "../../database/events/bus.ts";
-import { memoryEventStore } from "../../database/events/store.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	connection,
@@ -26,7 +28,6 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
-import { ActionForbidden, ResourceHidden } from "../../workspaces/access.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import { ToolApprovalForbidden, ToolApprovals } from "../tools/approvals/tool-approvals.ts";
@@ -43,7 +44,9 @@ import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const conversations = await conversationsForTests(
+		EventBus.inProcess({ store: EventStore.inMemory() }),
+	);
 	const routinesAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	/** As the routines' owner, who administers their workspace. */
@@ -191,23 +194,46 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			payload: { event: "created" },
 			receivedAt: new Date().toISOString(),
 		};
-		expect(await webhooks.accept(webhook.routine.id, webhook.secret ?? "", delivery)).toEqual({
+		expect(
+			await webhooks.accept({
+				routineId: webhook.routine.id,
+				secret: Redacted.make(webhook.secret ?? ""),
+				trigger: delivery,
+			}),
+		).toEqual({
 			executionId: expect.any(String),
 			threadId: expect.any(String),
 			duplicate: false,
 		});
-		expect(await webhooks.accept(webhook.routine.id, "incorrect", delivery)).toBeUndefined();
+		expect(
+			await webhooks.accept({
+				routineId: webhook.routine.id,
+				secret: Redacted.make("incorrect"),
+				trigger: delivery,
+			}),
+		).toBeUndefined();
 		const rotatedSecret = await routines.rotateSecret({ agentId, routineId: webhook.routine.id });
 		expect(
-			await webhooks.accept(webhook.routine.id, webhook.secret ?? "", delivery),
+			await webhooks.accept({
+				routineId: webhook.routine.id,
+				secret: Redacted.make(webhook.secret ?? ""),
+				trigger: delivery,
+			}),
 		).toBeUndefined();
 		expect(
-			await webhooks.accept(webhook.routine.id, rotatedSecret, {
-				...delivery,
-				idempotencyKey: "after-rotation",
+			await webhooks.accept({
+				routineId: webhook.routine.id,
+				secret: Redacted.make(rotatedSecret),
+				trigger: { ...delivery, idempotencyKey: "after-rotation" },
 			}),
 		).toMatchObject({ duplicate: false });
-		expect(await webhooks.accept("not-a-uuid", "incorrect", delivery)).toBeUndefined();
+		expect(
+			await webhooks.accept({
+				routineId: "not-a-uuid",
+				secret: Redacted.make("incorrect"),
+				trigger: delivery,
+			}),
+		).toBeUndefined();
 		expect(await view.list({ agentId })).toHaveLength(2);
 	});
 
@@ -235,11 +261,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await lockHeld;
 
 		const refused = await Promise.race([
-			webhooks.accept(created.routine.id, "incorrect", {
-				kind: "webhook",
-				idempotencyKey: null,
-				payload: {},
-				receivedAt: new Date().toISOString(),
+			webhooks.accept({
+				routineId: created.routine.id,
+				secret: Redacted.make("incorrect"),
+				trigger: {
+					kind: "webhook",
+					idempotencyKey: null,
+					payload: {},
+					receivedAt: new Date().toISOString(),
+				},
 			}),
 			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
 		]);
@@ -377,9 +407,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			payload: { amount },
 			receivedAt: new Date().toISOString(),
 		});
-		await webhooks.accept(created.routine.id, created.secret ?? "", delivery(1));
+		await webhooks.accept({
+			routineId: created.routine.id,
+			secret: Redacted.make(created.secret ?? ""),
+			trigger: delivery(1),
+		});
 		await expect(
-			webhooks.accept(created.routine.id, created.secret ?? "", delivery(2)),
+			webhooks.accept({
+				routineId: created.routine.id,
+				secret: Redacted.make(created.secret ?? ""),
+				trigger: delivery(2),
+			}),
 		).rejects.toThrow(RoutineTriggerConflict);
 	});
 
@@ -454,8 +492,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				.set({ nextScheduledAt: new Date("2026-09-18T10:00:00Z") })
 				.where(eq(routine.id, created.routine.id)),
 		);
+		const processDueAt = (now: Date) =>
+			runOnPostgres(
+				TestClock.setTime(now.getTime()).pipe(
+					Effect.andThen(Context.get(conversations, RoutineRunner.Service).processNextDue()),
+					Effect.provide(TestClock.layer()),
+				),
+			);
 		const now = new Date("2026-09-18T12:37:40Z");
-		const accepted = await runner.processNextDue(now);
+		const accepted = await processDueAt(now);
 		expect(accepted?.duplicate).toBe(false);
 		const [execution] =
 			(await view.listExecutions({ agentId, routineId: created.routine.id }))?.items ?? [];
@@ -467,7 +512,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			db.select().from(routine).where(eq(routine.id, created.routine.id)),
 		);
 		expect(updated?.nextScheduledAt?.toISOString()).toBe("2026-09-18T12:45:00.000Z");
-		expect(await runner.processNextDue(now)).toBeUndefined();
+		expect(await processDueAt(now)).toBeUndefined();
 	});
 
 	it("pages execution history with opaque cursors", async () => {

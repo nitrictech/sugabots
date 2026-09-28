@@ -1,4 +1,4 @@
-import { Effect, Exit } from "effect";
+import { DateTime, Effect, Exit } from "effect";
 import { COMPACTION_SUMMARY_WORDS, compactionPrompt } from "../compaction/prompt.ts";
 import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
 import { parseGenerated } from "../summaries/summary.steps.ts";
@@ -77,7 +77,7 @@ const routerCase = (
 	},
 });
 
-export const FACILITATE_CASES: readonly TrialCase[] = [
+const FACILITATE_CASES: readonly TrialCase[] = [
 	routerCase(
 		"Sends a question to the agent who knows the subject",
 		routing([{ speaker: "@sam", kind: "person", content: "Why was invoice 4021 rejected?" }]),
@@ -165,7 +165,7 @@ const summary = (previousContent?: string): SummaryPromptInput => ({
 	transcript,
 });
 
-export const SUMMARISE_CASES: readonly TrialCase[] = [
+const SUMMARISE_CASES: readonly TrialCase[] = [
 	{
 		// The failure people saw: prose where strict JSON was asked for.
 		name: "Returns a title and summary as strict JSON the first time",
@@ -193,7 +193,7 @@ export const SUMMARISE_CASES: readonly TrialCase[] = [
 	},
 ];
 
-/** Exactly what the worker would do with this text. */
+/** Exactly what the system agent's own step would do with this text. */
 function accepted(answer: string, first: boolean): boolean {
 	return Exit.isSuccess(Effect.runSyncExit(parseGenerated(answer, first)));
 }
@@ -214,7 +214,7 @@ const compaction = (model: string, workspaceId: string) => ({
 	previousSummary: undefined,
 	transcript: compactionTranscript.map((entry, index) => ({
 		...entry,
-		createdAt: new Date(Date.UTC(2026, 8, 30, 9, index * 5)),
+		createdAt: DateTime.toDate(DateTime.makeUnsafe(Date.UTC(2026, 8, 30, 9, index * 5))),
 	})),
 });
 

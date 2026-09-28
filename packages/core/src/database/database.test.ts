@@ -155,9 +155,9 @@ it("rolls back only the inner work when a nested transaction fails", async () =>
 		transaction(
 			Effect.gen(function* () {
 				yield* insert(10);
-				// The inner failure is recovered by the outer, which used to leave
-				// the inner write committed: a helper that is atomic when called
-				// from a route and not when called from another store.
+				// The outer transaction recovers from the inner failure, and the
+				// inner write must still roll back, so a helper is atomic whether
+				// it runs on its own or inside another service's transaction.
 				yield* transaction(
 					Effect.gen(function* () {
 						yield* insert(20);

@@ -1,21 +1,21 @@
 import { eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEventBus } from "../../database/events/bus.ts";
+import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { memoryEventStore } from "../../database/events/store.ts";
+import { EventStore } from "../../database/events/store.ts";
 import { message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
-import { noBuiltInTools } from "../tools/built-in.ts";
+import { BuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
-import { noConnectionTools } from "../tools/connections.ts";
+import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
-import { ModelRequestFailed, type TurnModel } from "./model.ts";
+import { ModelRequestFailed, Models, type TurnModel } from "./model.ts";
 import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
 import { TurnRequests } from "./requests.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
@@ -85,7 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			status: "streaming",
 		});
 		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
-		// Running again could act again, so the turn stops here for a person (ADR 002).
+		// Running again could act again, so the turn stops here for a person.
 		expect(
 			await turns.fail(replyTurnOf(second), { ...emptyReply, acted: true }, providerDown),
 		).toBe(false);
@@ -114,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(await storedTurn()).toMatchObject({ status: "waiting", runs: 0 });
 	});
 
-	it("resumes a checkpointed turn left running by a stopped worker from its checkpoint", async () => {
+	it("resumes a checkpointed turn left running by a stopped server from its checkpoint", async () => {
 		const saved = checkpoint();
 		await turns.suspend(replyTurnOf(prepared), saved, []);
 		await onDatabase((db) =>
@@ -203,20 +203,23 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	describe("a segment", () => {
-		const events = createEventBus({ store: memoryEventStore() });
+		const events = EventBus.inProcess({ store: EventStore.inMemory() });
 		// The real services, with the Scribe asked for nothing after a reply.
 		const requests = Context.get(conversations, TurnRequests.Service);
 		const segmentWith = (model: TurnModel) =>
 			runOnPostgres(
-				runSegment(prepared.run, {
-					model,
-					builtInTools: noBuiltInTools,
-					connectionTools: noConnectionTools,
-					events,
-				}).pipe(
-					Effect.provideService(
-						TurnRequests.Service,
-						TurnRequests.Service.of({ ...requests, queueSummary: vi.fn(() => Effect.void) }),
+				runSegment(prepared.run).pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							Layer.succeed(Models.Service, model),
+							Layer.succeed(EventBus.Service, events),
+							Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
+							Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
+							Layer.succeed(
+								TurnRequests.Service,
+								TurnRequests.Service.of({ ...requests, queueSummary: vi.fn(() => Effect.void) }),
+							),
+						),
 					),
 					Effect.provideContext(conversations),
 				),

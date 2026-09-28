@@ -317,7 +317,8 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 		return Service.of({ admit, release, reconcile });
 	});
 
-export const layer = (workflows: ReadonlyArray<Workflow.Any>) =>
+/** Lanes for `workflows`, as {@link make} builds them. */
+export const layerFor = (workflows: ReadonlyArray<Workflow.Any>) =>
 	Layer.effect(Service, make(workflows));
 
 /**
@@ -377,6 +378,7 @@ export const workflow = <
 			}),
 		});
 	return {
+		definition,
 		layer: definition.toLayer((payload) =>
 			Effect.gen(function* () {
 				const ended = yield* Effect.exit(options.body(payload));

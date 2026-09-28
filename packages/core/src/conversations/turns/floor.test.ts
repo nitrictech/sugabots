@@ -3,7 +3,7 @@ import type { TurnReason } from "../../database/schema.ts";
 import { decideFloor, type FloorInput, MAX_AGENT_RUN } from "./floor.ts";
 
 /**
- * The floor decision on its own (ADR 004). What each layer does, and that the
+ * The floor decision on its own. What each layer does, and that the
  * layers above win over the ones below.
  */
 

@@ -4,7 +4,7 @@ import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { AcceptedRoutineExecution, RoutineExecutionTrigger } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Redacted } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { routine } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
@@ -24,11 +24,11 @@ export interface Interface {
 	 * it is not, or there is no such enabled webhook routine: the caller is
 	 * told the same either way.
 	 */
-	readonly accept: (
-		routineId: string,
-		secret: string,
-		trigger: Extract<RoutineExecutionTrigger, { kind: "webhook" }>,
-	) => Effect.Effect<
+	readonly accept: (delivery: {
+		routineId: string;
+		secret: Redacted.Redacted<string>;
+		trigger: Extract<RoutineExecutionTrigger, { kind: "webhook" }>;
+	}) => Effect.Effect<
 		AcceptedRoutineExecution | undefined,
 		RoutineTriggerConflict | RoutineTriggerRejected
 	>;
@@ -42,7 +42,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineWebhooks");
 	const acceptTrigger = yield* makeAcceptTrigger;
 	return Service.of({
-		accept: (routineId, secret, trigger) =>
+		accept: ({ routineId, secret, trigger }) =>
 			operation(
 				"accept",
 				Effect.gen(function* () {
@@ -51,7 +51,7 @@ export const make = Effect.gen(function* () {
 					// deliberately slow hash runs.
 					const found = isUuid(routineId) ? yield* enabledWebhook(routineId) : undefined;
 					const valid = yield* Effect.promise(() =>
-						verifySecret(secret, found?.digest ?? DUMMY_SECRET_DIGEST),
+						verifySecret(Redacted.value(secret), found?.digest ?? DUMMY_SECRET_DIGEST),
 					);
 					if (!valid || !found) return undefined;
 					return yield* transaction(

@@ -10,7 +10,7 @@ import {
 import type { EgressHttpClient } from "../network/egress.ts";
 
 /**
- * Signing a connection in through the server's own OAuth (ADR 006, C14c).
+ * Signing a connection in through the server's own OAuth.
  *
  * The AI SDK's client does the protocol: discovers the authorization server,
  * registers this installation as a client, sends the browser to sign in with
@@ -33,12 +33,12 @@ export interface OAuthRecord {
 }
 
 /** Where a connection's record lives. */
-export interface OAuthStorage {
+interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
 	save(record: OAuthRecord): Promise<void>;
 }
 
-export interface OAuthProviderOptions {
+interface OAuthProviderOptions {
 	/** Where the authorization server sends the browser back: the API's callback route. */
 	redirectUrl: string;
 	clientName: string;
@@ -51,7 +51,7 @@ export interface OAuthProviderOptions {
 }
 
 /** The SDK's provider, plus the authorization URL it was asked to send the browser to. */
-export interface StoredOAuthProvider extends OAuthClientProvider {
+interface StoredOAuthProvider extends OAuthClientProvider {
 	authorizationUrl(): URL | undefined;
 }
 

@@ -5,7 +5,7 @@
  * what a transaction rolls back — so they run against a real Postgres and
  * leave rows behind. That is fine in a database kept for them and not fine in
  * the one a dev server is using, where the rows pile up in the sidebar and
- * every test run queues jobs the running workers try to claim.
+ * every test run leaves workflow executions the dev server would resume.
  *
  * So there is no falling back to `DATABASE_URL`. A test database is named, or
  * one is derived by suffixing the development database's name, and using the
@@ -15,7 +15,7 @@
 export class DevelopmentDatabaseRefused extends Error {
 	constructor(url: string) {
 		super(
-			`The tests were pointed at the development database (${redact(url)}). They write rows and queue jobs, so they need one of their own: set TEST_DATABASE_URL, or leave it unset and a "_test" database is used.`,
+			`The tests were pointed at the development database (${redact(url)}). They write rows and start workflows, so they need one of their own: set TEST_DATABASE_URL, or leave it unset and a "_test" database is used.`,
 		);
 		this.name = "DevelopmentDatabaseRefused";
 	}

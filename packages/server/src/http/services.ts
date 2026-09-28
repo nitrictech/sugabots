@@ -14,12 +14,14 @@ import type { AgentAdministration } from "@sugabots/core/workspaces/agents/agent
 import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import type { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import type { ChannelAccess } from "../routes/events/access.ts";
 
 /**
  * Everything the routes may ask core for. Each is a use case or a view whose
- * every method requires the current actor and authorizes them, except
- * `RoutineWebhooks`, which nobody signs in to call: the routine's secret admits
- * the run instead.
+ * every method requires the current actor and authorizes them, or the event
+ * streams' `ChannelAccess`, which does the same for a channel. The exception
+ * is `RoutineWebhooks`, which nobody signs in to call: the routine's secret
+ * admits the run instead.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a
  * repository, a workflow's steps or a service that acts for nobody, such as
@@ -41,4 +43,5 @@ export type HttpServices =
 	| ToolApprovals.Service
 	| Routines.Service
 	| RoutineView.Service
-	| RoutineWebhooks.Service;
+	| RoutineWebhooks.Service
+	| ChannelAccess.Service;

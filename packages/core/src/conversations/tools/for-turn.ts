@@ -37,7 +37,7 @@ export interface ToolDependencies {
 	/** The pod connections' tools, keyed `handle__tool`, each with whether it changes things. */
 	connections?: Record<string, OfferedTool>;
 	/** For a tool that watches for something else to happen. */
-	bus: Pick<EventBus, "subscribe">;
+	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
 	run: RunEffect;
 	/** The reply being written, for tools that leave a mark in it. */

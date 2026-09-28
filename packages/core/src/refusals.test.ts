@@ -3,6 +3,7 @@ import { type SQL, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Accounts } from "./accounts/accounts.ts";
+import { CurrentActor } from "./authorization/current-actor.ts";
 import { ChatView } from "./conversations/chats/chat-view.ts";
 import { Chats } from "./conversations/chats/chats.ts";
 import type { Conversations } from "./conversations/conversations.ts";
@@ -17,8 +18,8 @@ import { TurnExecution } from "./conversations/turns/execution.ts";
 import { Models } from "./conversations/turns/model.ts";
 import { prepareRunnable, runningTurns } from "./conversations/turns/testing.ts";
 import { query } from "./database/database.ts";
-import { createEventBus } from "./database/events/bus.ts";
-import { memoryEventStore } from "./database/events/store.ts";
+import { EventBus } from "./database/events/bus.ts";
+import { EventStore } from "./database/events/store.ts";
 import {
 	agent,
 	chat,
@@ -56,7 +57,6 @@ import { Egress } from "./providers/network/egress.ts";
 import { SearchProviderSetup } from "./providers/search-providers/search-provider-setup.ts";
 import { unimplemented } from "./testing.ts";
 import { AgentAdministration } from "./workspaces/agents/agent-administration.ts";
-import { CurrentActor } from "./workspaces/current-actor.ts";
 import { Membership } from "./workspaces/membership/membership.ts";
 import { Onboarding } from "./workspaces/onboarding/onboarding.ts";
 import { PodAdministration } from "./workspaces/pods/pod-administration.ts";
@@ -427,7 +427,7 @@ const workspaceServices = Layer.mergeAll(
 			},
 		}),
 		unimplemented(ModelProbe.Service),
-		unimplemented(Models),
+		unimplemented(Models.Service),
 		unimplemented(Email.Service),
 		Layer.succeed(
 			Accounts.Service,
@@ -446,7 +446,9 @@ const workspaceServices = Layer.mergeAll(
 );
 
 describe.skipIf(!process.env.DATABASE_URL)("refusing whoever may not", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: memoryEventStore() }));
+	const conversations = await conversationsForTests(
+		EventBus.inProcess({ store: EventStore.inMemory() }),
+	);
 	let services: Context.Context<Everything>;
 	let fixture: Fixture;
 	let people: Record<"stranger" | Lacking, string>;

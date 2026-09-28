@@ -24,8 +24,8 @@ describe("asking a model again", () => {
 	});
 
 	it("does not ask again for anything but the shape", async () => {
-		// A timeout costs the same next time, and a dead provider is the job's
-		// problem, not this one's.
+		// A timeout costs the same next time, and a dead provider is for the
+		// caller to handle.
 		const ask = vi.fn(() =>
 			Effect.fail(new AnswerTimedOut({ message: "Thread summary timed out" })),
 		);

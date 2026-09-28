@@ -1,16 +1,16 @@
 import type { Pod } from "@sugabots/contracts";
 import { DEFAULT_POD_ROUTING, podSchema } from "@sugabots/contracts";
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
+import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { podPermissions } from "@sugabots/core/authorization/permissions";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { podPermissions } from "@sugabots/core/workspaces/permissions";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The pod routes, over doubles of `PodAdministration`, so what is under test
@@ -64,7 +64,9 @@ const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
 
 /** The app with `pods` as the only pod methods it has. */
 const app = (pods: Partial<PodAdministration.Interface>) =>
-	createTestApp({ resolveUser, services: unimplemented(PodAdministration.Service, pods) });
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(PodAdministration.Service, pods)),
+	);
 
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,

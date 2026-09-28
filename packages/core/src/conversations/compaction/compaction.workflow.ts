@@ -40,7 +40,7 @@ export class CompactionSteps extends Context.Service<
 	}
 >()("@sugabots/core/CompactionSteps") {}
 
-export const compactionActivities = Activities.fromService<CompactionRequest>()(CompactionSteps, {
+const compactionActivities = Activities.fromService<CompactionRequest>()(CompactionSteps, {
 	compact: {},
 });
 

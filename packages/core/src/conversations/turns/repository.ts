@@ -121,14 +121,14 @@ export interface Interface {
 	) => Effect.Effect<Ended | undefined>;
 	/**
 	 * Records that a mutating tool crossed its dispatch boundary, so the turn
-	 * is not run again after a failure from here on (ADR 002). A fact the
+	 * is not run again after a failure from here on. A fact the
 	 * lifecycle reads rather than a transition, so it takes no lock.
 	 */
 	readonly markActed: (turnId: string) => Effect.Effect<void>;
 	/**
 	 * Cancels the turns waiting in these threads, and asks the running ones to
 	 * stop, because the routine run they work for ended. A running turn another
-	 * transaction holds is skipped: its worker is recording how it ended.
+	 * transaction holds is skipped: its workflow is recording how it ended.
 	 * Returns the workflow executions of the waiting turns it cancelled, which
 	 * are still waiting and have to be told.
 	 */
@@ -566,7 +566,7 @@ export const make = Effect.gen(function* () {
 						if (decided.followUp?._tag === "SignalOwner") {
 							return { _tag: "SignalOwner", owner: decided.followUp.owner };
 						}
-						// The worker running it stops on this event; it reads the flag only as a fallback.
+						// The turn's workflow stops on this event; it reads the flag only as a fallback.
 						yield* emit([
 							ConversationEvent.TurnCancelRequested({ threadId: locked.threadId, turnId }),
 						]);
@@ -691,7 +691,7 @@ export interface ReplyTurn {
 	readonly messageId: string;
 }
 
-export interface ReplyTurnRequest {
+interface ReplyTurnRequest {
 	readonly threadId: string;
 	readonly agentId: string;
 	readonly triggerMessageId: string;
@@ -704,14 +704,14 @@ export interface ReplyTurnRequest {
 	readonly author: ParticipantRow;
 }
 
-export interface SystemAgentTurnRequest {
+interface SystemAgentTurnRequest {
 	readonly threadId: string;
 	readonly agentId: string;
 	readonly triggerMessageId: string;
 	readonly model: string;
 }
 
-export interface OpenedReplyTurn {
+interface OpenedReplyTurn {
 	readonly _tag: "Opened";
 	readonly turnId: string;
 	/** The reply, `streaming`. */
@@ -720,7 +720,7 @@ export interface OpenedReplyTurn {
 	readonly checkpoint: TurnCheckpoint | undefined;
 }
 
-export interface OpenedSystemAgentTurn {
+interface OpenedSystemAgentTurn {
 	readonly _tag: "Opened";
 	readonly turnId: string;
 }
@@ -732,7 +732,7 @@ export interface NotRunnable {
 	readonly ended: Ended | undefined;
 }
 
-export type CancelRequest =
+type CancelRequest =
 	| { readonly _tag: "SignalOwner"; readonly owner: string }
 	| { readonly _tag: "Announced" }
 	| { readonly _tag: "Refused" };
@@ -749,7 +749,7 @@ export const ReplyDraft = Schema.Struct({
 	toolCalls: Schema.Array(PlacedPart),
 	/**
 	 * A tool that may have changed something ran. A failed run is then not
-	 * retried, since the retry could do it again (ADR 002).
+	 * retried, since the retry could do it again.
 	 */
 	acted: Schema.optional(Schema.Boolean),
 });

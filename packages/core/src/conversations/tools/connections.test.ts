@@ -3,12 +3,12 @@ import type { AddressInfo } from "node:net";
 import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Effect, ManagedRuntime, Schema } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Effect, Logger, ManagedRuntime, Schema } from "effect";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
-import { connectionTools } from "./connections.ts";
+import { ConnectionTools } from "./connections.ts";
 
 /**
  * A turn's connection tools against a real MCP server in this process. What
@@ -86,7 +86,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 });
 
 function toolsFor(...targets: ConnectionTarget[]) {
-	const offered = connectionTools({
+	const offered = ConnectionTools.from({
 		connections: { targetsForPod: () => Effect.succeed(targets) },
 		httpClients: { for: () => fetch },
 	});
@@ -126,22 +126,22 @@ describe("a turn's connection tools", () => {
 	});
 
 	it("leaves out a server that will not answer, and keeps the ones that do", async () => {
-		const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const logged: unknown[] = [];
 		const offered = toolsFor(
 			target({ handle: "locked", headers: { "x-fixture-key": "nope" } }),
 			target(),
 		);
 
-		const set = await run(offered.forPod("w", "p"));
+		const set = await run(
+			offered
+				.forPod("w", "p")
+				.pipe(Effect.provide(Logger.layer([Logger.make(({ message }) => logged.push(message))]))),
+		);
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			expect(quiet).toHaveBeenCalledWith(
-				"Connection locked left out of the turn",
-				expect.anything(),
-			);
+			expect(logged).toContainEqual(["Connection locked left out of the turn", expect.anything()]);
 		} finally {
 			await set.close();
-			quiet.mockRestore();
 		}
 	});
 });

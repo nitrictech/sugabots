@@ -1,7 +1,7 @@
 import { Api, Session } from "@sugabots/contracts/http";
 import { HttpApi } from "effect/unstable/httpapi";
 import { describe, expect, it } from "vitest";
-import { createTestApp } from "./app.test-support.ts";
+import { createTestApp, identifiedBy } from "./app.test-support.ts";
 
 /**
  * Every endpoint fails closed without a session.
@@ -92,7 +92,7 @@ describe("every endpoint requires a session", () => {
 	});
 
 	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
-		const app = createTestApp({ resolveUser: async () => null });
+		const app = createTestApp(identifiedBy(async () => null));
 		const { path, ...init } = requestTo(endpoint);
 
 		const response = await app.request(path, init);

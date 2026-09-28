@@ -8,7 +8,6 @@ import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
-import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
@@ -89,7 +88,6 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ConnectionRepository");
-	const ids = yield* Ids.Service;
 	const cipher = yield* Credentials.Service;
 
 	const toTarget = (row: ConnectionRow): ConnectionTarget => {
@@ -124,13 +122,11 @@ export const make = Effect.gen(function* () {
 						// Nothing can be asked of a server before it is signed in to.
 						access: oauth ? ("off" as const) : ("allow" as const),
 					};
-					const id = yield* ids.next;
 					const [inserted] = yield* queryCatching(
 						(db) =>
 							db
 								.insert(connection)
 								.values({
-									id,
 									workspaceId,
 									podId,
 									createdById: userId,

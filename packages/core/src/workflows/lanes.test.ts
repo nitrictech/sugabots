@@ -80,7 +80,7 @@ const endingSteps = Layer.effect(
 const runtime = ManagedRuntime.make(
 	Layer.mergeAll(HeldLive, DoneLive, EndingWorkflow.layer).pipe(
 		Layer.provideMerge(endingSteps),
-		Layer.provideMerge(Lanes.layer([Held, Done, Ending])),
+		Layer.provideMerge(Lanes.layerFor([Held, Done, Ending])),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
 		Layer.provideMerge(databaseLayer),
 	),

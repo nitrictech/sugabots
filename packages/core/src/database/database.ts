@@ -76,7 +76,7 @@ export const afterCommit = (work: Effect.Effect<void>): Effect.Effect<void> =>
 
 const loggingFailure = (work: Effect.Effect<void>): Effect.Effect<void> =>
 	Effect.catchCause(work, (cause) =>
-		Effect.sync(() => console.error("Work deferred to after commit failed", cause)),
+		Effect.logError("Work deferred to after commit failed", cause),
 	);
 
 export class Database extends Context.Service<

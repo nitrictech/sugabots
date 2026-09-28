@@ -7,7 +7,6 @@ import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
-import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchConnection } from "./search-connection.ts";
@@ -58,7 +57,6 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviderRepository");
-	const ids = yield* Ids.Service;
 	const cipher = yield* Credentials.Service;
 
 	const load = (workspaceId: string) =>
@@ -83,22 +81,18 @@ export const make = Effect.gen(function* () {
 		provisionDefault: (workspaceId, createdById) =>
 			operation(
 				"provisionDefault",
-				Effect.gen(function* () {
-					const id = yield* ids.next;
-					yield* query((db) =>
-						db
-							.insert(searchProvider)
-							.values({
-								id,
-								workspaceId,
-								preset: DEFAULT_SEARCH_PRESET,
-								baseUrl: searchProviderPreset(DEFAULT_SEARCH_PRESET).baseUrl,
-								enabled: true,
-								createdById,
-							})
-							.onConflictDoNothing({ target: searchProvider.workspaceId }),
-					);
-				}),
+				query((db) =>
+					db
+						.insert(searchProvider)
+						.values({
+							workspaceId,
+							preset: DEFAULT_SEARCH_PRESET,
+							baseUrl: searchProviderPreset(DEFAULT_SEARCH_PRESET).baseUrl,
+							enabled: true,
+							createdById,
+						})
+						.onConflictDoNothing({ target: searchProvider.workspaceId }),
+				).pipe(Effect.asVoid),
 			),
 
 		replace: (workspaceId, { createdById, provider }) =>
@@ -117,11 +111,10 @@ export const make = Effect.gen(function* () {
 						lastTestedAt: null,
 						lastTestError: null,
 					};
-					const id = yield* ids.next;
 					const [row] = yield* query((db) =>
 						db
 							.insert(searchProvider)
-							.values({ id, workspaceId, createdById, ...values })
+							.values({ workspaceId, createdById, ...values })
 							.onConflictDoUpdate({
 								target: searchProvider.workspaceId,
 								set: { ...values, createdById },

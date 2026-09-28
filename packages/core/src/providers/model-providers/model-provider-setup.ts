@@ -12,13 +12,13 @@ import type {
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { presetSignsIn, providerLacksCredential, providerPreset } from "@sugabots/contracts";
-import { Clock, Context, Data, Effect, Layer, Schema } from "effect";
+import { Clock, Context, Data, DateTime, Effect, Layer, Schema } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import type { AuthorizationDenied } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
@@ -403,7 +403,7 @@ export const make = Effect.gen(function* () {
 							expiresAt: code.expiresAt,
 						}),
 						pollIntervalMs: code.pollIntervalMs,
-						expiresAt: new Date(code.expiresAt).toISOString(),
+						expiresAt: DateTime.formatIso(DateTime.makeUnsafe(code.expiresAt)),
 					};
 				}),
 			),

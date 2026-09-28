@@ -11,20 +11,20 @@ import type {
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
 import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, DateTime, Effect, Layer } from "effect";
+import {
+	type AuthorizationDenied,
+	ResourceHidden,
+	type ThreadStanding,
+} from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { Visibility } from "../../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { thread, threadCompaction, threadSummary, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import {
-	type AuthorizationDenied,
-	ResourceHidden,
-	type ThreadStanding,
-} from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
-import { Visibility } from "../../workspaces/visibility.ts";
 import { compactionLineTokens, contextWindowTokens } from "../compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
@@ -263,7 +263,7 @@ function toThreadContext(measured: Measurement, compactedAt: Date | null): Threa
 	const windowTokens = contextWindowTokens(measured.window);
 	return {
 		usedTokens: measured.tokens,
-		measuredAt: new Date(measured.at).toISOString(),
+		measuredAt: DateTime.formatIso(DateTime.makeUnsafe(measured.at)),
 		windowTokens,
 		compactionLineTokens: compactionLineTokens(windowTokens),
 		compactedAt: compactedAt?.toISOString() ?? null,

@@ -1,27 +1,29 @@
-import { randomUUID } from "node:crypto";
 import { PgClient } from "@effect/sql-pg";
 import type { Channel, StreamEvent } from "@sugabots/contracts";
 import { Deferred, Duration, Effect, Fiber, Queue } from "effect";
-import type { Delivery } from "./bus.ts";
+import { Ids } from "../../ids/ids.ts";
+import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
 
 /**
  * How one process's deliveries reach the subscribers of another.
  *
- * Every API process has its own bus, and any of them may run the worker that
- * makes a change. Without a relay a client streaming from one process, or a
- * tool waiting in it, never hears about a turn another process ran. This is
- * the seam ADR 001 left for that: Postgres `NOTIFY` for the wake-up, the
- * `event` table for a payload too large to carry.
+ * Every API process has its own bus, and any of them may run the workflow
+ * that makes a change. Without a relay a client streaming from one process,
+ * or a tool waiting in it, never hears about a turn another process ran. It
+ * carries deliveries over Postgres: `NOTIFY` for the wake-up, and the `event`
+ * table for a payload too large to carry.
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
-	broadcast(channel: Channel, delivery: Delivery): Promise<void>;
+	broadcast(channel: Channel, delivery: EventBus.Delivery): Promise<void>;
 	/**
 	 * Hands over what other processes broadcast, until the returned function is
 	 * called. Resolves once listening, so nothing published after that is missed.
 	 */
-	listen(receive: (channel: Channel, delivery: Delivery) => void): Promise<() => Promise<void>>;
+	listen(
+		receive: (channel: Channel, delivery: EventBus.Delivery) => void,
+	): Promise<() => Promise<void>>;
 }
 
 /** The Postgres notification channel every process listens on. */
@@ -51,15 +53,16 @@ interface Notice {
  * was built in to run on.
  */
 export const postgresEventRelay = (
-	store: Pick<EventStore, "replay">,
+	store: Pick<EventStore.Interface, "replay">,
 	{ log = console.error }: { log?: (message: string, cause: unknown) => void } = {},
-): Effect.Effect<EventRelay, never, PgClient.PgClient> =>
+): Effect.Effect<EventRelay, never, PgClient.PgClient | Ids.Service> =>
 	Effect.gen(function* () {
 		const client = yield* PgClient.PgClient;
+		const ids = yield* Ids.Service;
 		const context = yield* Effect.context<never>();
 		const runPromise = Effect.runPromiseWith(context);
 		/** Identifies this process, so it can ignore its own notices coming back. */
-		const origin = randomUUID();
+		const origin = yield* ids.random;
 
 		return {
 			async broadcast(channel, delivery) {

@@ -5,6 +5,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
 import {
 	connection,
 	pod,
@@ -19,8 +21,6 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { ActionForbidden } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ConnectionRepository } from "./connection-repository.ts";

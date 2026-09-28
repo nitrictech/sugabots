@@ -7,11 +7,11 @@ import type {
 	RoutineUpdate,
 } from "@sugabots/contracts";
 import { Context, DateTime, Effect, Layer } from "effect";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { routine } from "../../database/schema.ts";
-import type { AuthorizationDenied } from "../../workspaces/access.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
@@ -112,27 +112,27 @@ export const make = Effect.gen(function* () {
 					const state = input.state ?? "enabled";
 					const schedule =
 						input.trigger.kind === "cron" && state === "enabled"
-							? yield* nextOccurrence(input.trigger.expression, input.trigger.timezone)
+							? yield* nextOccurrence(
+									input.trigger.expression,
+									input.trigger.timezone,
+									yield* DateTime.nowAsDate,
+								)
 							: null;
 					const secret = input.trigger.kind === "webhook" ? generateSecret() : null;
-					return yield* transaction(
-						Effect.gen(function* () {
-							const row = yield* repository.create({
-								workspaceId: owner.workspaceId,
-								agentId: owner.id,
-								createdById: actor.userId,
-								name: input.name,
-								instructions: input.instructions,
-								triggerKind: input.trigger.kind,
-								cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
-								cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
-								nextScheduledAt: schedule,
-								webhookSecretDigest: secret ? hashSecret(secret) : null,
-								state,
-							});
-							return { routine: toRoutine(row), secret };
-						}),
-					);
+					const row = yield* repository.create({
+						workspaceId: owner.workspaceId,
+						agentId: owner.id,
+						createdById: actor.userId,
+						name: input.name,
+						instructions: input.instructions,
+						triggerKind: input.trigger.kind,
+						cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
+						cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
+						nextScheduledAt: schedule,
+						webhookSecretDigest: secret ? hashSecret(secret) : null,
+						state,
+					});
+					return { routine: toRoutine(row), secret };
 				}),
 			),
 
@@ -154,7 +154,11 @@ export const make = Effect.gen(function* () {
 							trigger.kind !== "cron" || state === "paused"
 								? null
 								: scheduleChanged || reenabled
-									? yield* nextOccurrence(trigger.expression, trigger.timezone)
+									? yield* nextOccurrence(
+											trigger.expression,
+											trigger.timezone,
+											yield* DateTime.nowAsDate,
+										)
 									: current.nextScheduledAt;
 						const switchedToWebhook =
 							input.trigger?.kind === "webhook" && current.triggerKind !== "webhook";
@@ -215,7 +219,9 @@ export const make = Effect.gen(function* () {
 				"previewSchedule",
 				Effect.andThen(
 					authorization.agent(agentId, "routine.manage"),
-					upcomingOccurrences(expression, timezone),
+					Effect.flatMap(DateTime.nowAsDate, (now) =>
+						upcomingOccurrences(expression, timezone, now),
+					),
 				),
 			),
 

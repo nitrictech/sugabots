@@ -5,7 +5,7 @@ import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 import type { TurnPromptMessage } from "./model.ts";
 
-export interface ModelPrompt {
+interface ModelPrompt {
 	system: string;
 	messages: TurnPromptMessage[];
 }
@@ -19,7 +19,7 @@ export interface TurnEnvironment {
 	now: Date;
 	/** The built-in tools on offer this turn, by key, so the agent is told it has them. */
 	builtInTools: readonly string[];
-	/** The connection tools on offer, keyed `handle__tool` (ADR 006). */
+	/** The connection tools on offer, keyed `handle__tool`. */
 	connectionTools: readonly string[];
 }
 
@@ -124,7 +124,7 @@ function authoredMessage(message: Message, currentAgentId: string): TurnPromptMe
 }
 
 /** The part of the prompt that changes from turn to turn, kept at the end. */
-export function turnInstruction(context: TurnContext, environment: TurnEnvironment): string {
+function turnInstruction(context: TurnContext, environment: TurnEnvironment): string {
 	const participants = context.participants
 		.map((participant) => `${participant.name} (@${participant.handle}, ${participant.kind})`)
 		.join(", ");

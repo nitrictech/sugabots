@@ -7,10 +7,9 @@ import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** Pods, and who is in them. `PodAdministration` decides who may do what. */
-
 const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
+/** Pods, and who is in them. `PodAdministration` decides who may do what. */
 export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 	Effect.gen(function* () {
 		const pods = yield* PodAdministration.Service;

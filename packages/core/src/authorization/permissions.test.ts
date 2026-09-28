@@ -13,7 +13,7 @@ import {
 } from "./permissions.ts";
 
 /**
- * The permission matrix in `docs/permissions.md`, asserted directly.
+ * The grant tables, asserted role by role and permission by permission.
  *
  * Written as tables rather than as cases, because the thing under test is a
  * table: a grant that moves between roles should fail here loudly and in one

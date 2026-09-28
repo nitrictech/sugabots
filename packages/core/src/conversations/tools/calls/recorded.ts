@@ -19,11 +19,11 @@ export interface RecordingOptions {
 	from: RecordingTurn;
 	/** How much of the reply has been written so far, which is where the call sits. */
 	replyLength: () => number;
-	/** Tells the worker a call was made, so the reply's parts include it from now on. */
+	/** Tells the running turn a call was made, so the reply's parts include it from now on. */
 	noteToolCall: (call: { id: string; atOffset: number; mutating: boolean }) => Effect.Effect<void>;
 	/** Marks the external mutation boundary, after approval and before dispatch. */
 	markActed?: () => Effect.Effect<void>;
-	/** Whether the tool may change something at the other end (ADR 002). Built-in tools do not. */
+	/** Whether the tool may change something at the other end. Built-in tools do not. */
 	mutating?: boolean;
 	approval?: {
 		approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
@@ -53,7 +53,7 @@ const APPROVAL_NO_LONGER_APPLIES = UserMessage.of`The tool was not run: its appr
  * runs, closed with its output or error after.
  *
  * A tool that throws is recorded as failed and the model is told so as an
- * ordinary result (ADR 002), so the agent can recover or explain rather than
+ * ordinary result, so the agent can recover or explain rather than
  * the turn dying. The SDK's own tool-error path would also reach the model,
  * but through a shape this codebase does not otherwise handle, and with
  * whatever text was thrown.

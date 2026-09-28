@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ActionForbidden, ResourceHidden } from "../../../authorization/access.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
 	connection,
@@ -20,7 +21,6 @@ import {
 } from "../../../database/testing.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
-import { ActionForbidden, ResourceHidden } from "../../../workspaces/access.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";

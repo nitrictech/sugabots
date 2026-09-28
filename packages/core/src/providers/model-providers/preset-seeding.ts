@@ -1,3 +1,5 @@
+export * as PresetSeeding from "./preset-seeding.ts";
+
 import { asc, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { query, transaction } from "../../database/database.ts";
@@ -39,10 +41,10 @@ export const seedEveryWorkspace = Effect.gen(function* () {
  * process: every workspace keeps the presets it has, and the next start tries
  * again.
  */
-export const seedEveryWorkspaceLayer = Layer.effectDiscard(
+export const layer = Layer.effectDiscard(
 	Effect.forkScoped(
 		seedEveryWorkspace.pipe(
 			Effect.catchCause((cause) => Effect.logError("Seeding model provider presets failed", cause)),
 		),
 	),
-);
+).pipe(Layer.provide(ModelProviderRepository.layer));

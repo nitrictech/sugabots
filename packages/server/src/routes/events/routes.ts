@@ -1,18 +1,18 @@
 import type { Channel } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
-import type { Delivery, EventBus } from "@sugabots/core/database/events/bus";
-import type { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
+import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { EventBus } from "@sugabots/core/database/events/bus";
+import { Context, Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import type { ChannelAccess } from "./access.ts";
+import { ChannelAccess } from "./access.ts";
 
 /**
  * The HTTP end of a stream: one channel, held open, until the client leaves or
  * the clock turns out. Everything about *what* is on the channel belongs to the
- * bus; this file is the transport and its housekeeping (ADR 001).
+ * bus; this file is the transport and its housekeeping.
  *
  * It is a `Stream` rather than a callback with its own bookkeeping. The client
  * hanging up cancels the web stream, which interrupts the fibre, which runs the
@@ -39,56 +39,59 @@ const STREAM_HEADERS = {
 
 const STREAM_CONTENT_TYPE = "text/event-stream";
 
-export interface StreamOptions {
-	ping?: Duration.Input;
-	maxAge?: Duration.Input;
+/** How often a stream pings, and how long it lives. */
+export interface Timing {
+	readonly ping: Duration.Input;
+	readonly maxAge: Duration.Input;
 }
 
-export interface EventRoutesOptions {
-	bus: EventBus;
-	access: ChannelAccess;
-	stream?: StreamOptions;
-}
+/** The streams' timing, which a test may shorten. */
+export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTiming", {
+	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE }),
+});
 
 /** The workspace and thread streams, with authorization resolved before streaming. */
-export function eventRoutes({ bus, access, stream }: EventRoutesOptions) {
-	const streamFor = (
-		request: HttpServerRequest.HttpServerRequest,
-		channelFor: () => Effect.Effect<Channel | undefined, never, CurrentActor.Service>,
-	) =>
-		Effect.gen(function* () {
-			const channel = yield* channelFor();
-			if (!channel) {
-				return yield* new NotFound({ message: "No such stream" });
-			}
-			if (request.method === "HEAD") {
-				return HttpServerResponse.empty({
-					status: 200,
-					headers: { ...STREAM_HEADERS, "content-type": STREAM_CONTENT_TYPE },
+export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
+	Effect.gen(function* () {
+		const bus = yield* EventBus.Service;
+		const access = yield* ChannelAccess.Service;
+		const timing = yield* StreamTiming;
+		const streamFor = (
+			request: HttpServerRequest.HttpServerRequest,
+			channelFor: () => Effect.Effect<Channel | undefined, never, CurrentActor.Service>,
+		) =>
+			Effect.gen(function* () {
+				const channel = yield* channelFor();
+				if (!channel) {
+					return yield* new NotFound({ message: "No such stream" });
+				}
+				if (request.method === "HEAD") {
+					return HttpServerResponse.empty({
+						status: 200,
+						headers: { ...STREAM_HEADERS, "content-type": STREAM_CONTENT_TYPE },
+					});
+				}
+				return yield* streamChannel({
+					bus,
+					channel,
+					since: resumeFrom(request.headers["last-event-id"]),
+					timing,
+					stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
 				});
-			}
-			return yield* streamChannel({
-				bus,
-				channel,
-				since: resumeFrom(request.headers["last-event-id"]),
-				options: stream,
-				stillAuthorized: Effect.map(Effect.suspend(channelFor), (current) => current === channel),
-			});
-		}).pipe(asSessionUser);
+			}).pipe(asSessionUser);
 
-	return HttpApiBuilder.group(ServerApi, "events", (handlers) =>
-		handlers
+		return handlers
 			.handle("workspace", ({ params, request }) =>
 				streamFor(request, () => access.workspace(params.workspace)),
 			)
 			.handle("thread", ({ params, request }) =>
 				streamFor(request, () => access.thread(params.threadId)),
-			),
-	);
-}
+			);
+	}),
+);
 
 /** One event, as the wire format. */
-function frame({ seq, event }: Delivery): string {
+function frame({ seq, event }: EventBus.Delivery): string {
 	// An ephemeral event carries no id, so it does not move the client's resume
 	// point past a state change it never saw.
 	const id = seq === undefined ? "" : `id: ${seq}\n`;
@@ -106,13 +109,13 @@ const streamChannel = Effect.fnUntraced(function* ({
 	bus,
 	channel,
 	since,
-	options: { ping = PING, maxAge = MAX_AGE } = {},
+	timing: { ping, maxAge },
 	stillAuthorized,
 }: {
-	bus: EventBus;
+	bus: EventBus.Interface;
 	channel: Channel;
 	since: number | undefined;
-	options?: StreamOptions | undefined;
+	timing: Timing;
 	/**
 	 * Re-asked before every event, as the actor the stream was opened for. It
 	 * is the only thing that notices access being revoked mid-stream, which is
@@ -127,7 +130,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 	// child of the request it would sit under a span that is not exported until
 	// the stream closes, up to `maxAge` later.
 	const streamSpan = yield* Effect.option(Effect.currentParentSpan);
-	const stillAuthorizedFor = ({ seq, event }: Delivery) =>
+	const stillAuthorizedFor = ({ seq, event }: EventBus.Delivery) =>
 		runPromise(
 			stillAuthorized.pipe(
 				Effect.withSpan("EventStream.recheckAccess", {
@@ -174,7 +177,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 						}
 					} catch (failure) {
 						if (!leaving.signal.aborted) {
-							console.error(`Streaming ${channel} failed`, failure);
+							await runPromise(Effect.logError(`Streaming ${channel} failed`, failure));
 						}
 					} finally {
 						clearTimeout(expiry);

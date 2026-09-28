@@ -1,13 +1,13 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
-import { memoryEventStore } from "@sugabots/core/database/events/store";
-import { Effect } from "effect";
+import { EventBus } from "@sugabots/core/database/events/bus";
+import { EventStore } from "@sugabots/core/database/events/store";
+import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp, type TestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, type TestApp } from "../../http/app.test-support.ts";
 import { openChannelAccess } from "./access.test-support.ts";
-import type { ChannelAccess } from "./access.ts";
-import type { StreamOptions } from "./routes.ts";
+import { ChannelAccess } from "./access.ts";
+import { StreamTiming, type Timing } from "./routes.ts";
 
 /**
  * The stream routes, driven through `createTestApp`: no socket, no database,
@@ -31,9 +31,29 @@ const user = {
 const resolveUser: UserResolver = async (headers) =>
 	headers.get("authorization") === "Bearer good-token" ? user : null;
 
-function server(access: ChannelAccess = openChannelAccess(), stream?: StreamOptions) {
-	const bus = createEventBus({ store: memoryEventStore() });
-	return { bus, app: createTestApp({ resolveUser, events: { bus, access, stream } }) };
+function server(access: ChannelAccess.Interface = openChannelAccess, timing?: Partial<Timing>) {
+	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+	return { bus, app: streaming(bus, { access, timing }) };
+}
+
+/** The app with its streams on `bus`, open to everyone unless `access` says otherwise. */
+function streaming(
+	bus: EventBus.Interface,
+	{
+		access = openChannelAccess,
+		timing = {},
+		logs = Layer.empty,
+	}: { access?: ChannelAccess.Interface; timing?: Partial<Timing>; logs?: Layer.Layer<never> } = {},
+) {
+	return createTestApp(
+		Layer.mergeAll(
+			identifiedBy(resolveUser),
+			Layer.succeed(EventBus.Service, bus),
+			Layer.succeed(ChannelAccess.Service, access),
+			Layer.succeed(StreamTiming, { ...StreamTiming.defaultValue(), ...timing }),
+			logs,
+		),
+	);
 }
 
 interface Frame {
@@ -195,9 +215,9 @@ describe("the stream", () => {
 	});
 
 	it("unsubscribes when the client hangs up, rather than leaving a subscriber behind", async () => {
-		const bus = createEventBus({ store: memoryEventStore() });
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 		let open = 0;
-		const counted: EventBus = {
+		const counted: EventBus.Interface = {
 			...bus,
 			async *subscribe(channel, options) {
 				open += 1;
@@ -208,10 +228,7 @@ describe("the stream", () => {
 				}
 			},
 		};
-		const app = createTestApp({
-			resolveUser,
-			events: { bus: counted, access: openChannelAccess() },
-		});
+		const app = streaming(counted);
 
 		const response = await app.request(`/workspaces/${WORKSPACE}/events`, {
 			headers: { authorization: "Bearer good-token" },
@@ -227,7 +244,7 @@ describe("the stream", () => {
 	});
 
 	it("pings so a proxy does not close an idle stream", async () => {
-		const { app } = server(openChannelAccess(), { ping: 5 });
+		const { app } = server(openChannelAccess, { ping: 5 });
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
 		expect((await stream.take(2)).map((frame) => frame.comment)).toEqual(["ping", "ping"]);
@@ -235,7 +252,7 @@ describe("the stream", () => {
 	});
 
 	it("hangs up eventually, so a client that went away cannot hold a connection", async () => {
-		const { app } = server(openChannelAccess(), { maxAge: "10 millis" });
+		const { app } = server(openChannelAccess, { maxAge: "10 millis" });
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
@@ -257,53 +274,40 @@ describe("the stream", () => {
 
 	it("logs a subscription failure and ends after flushing queued events", async () => {
 		const failure = new Error("subscription failed");
-		const log = vi.spyOn(console, "error").mockImplementation(() => {});
-		const bus = createEventBus({ store: memoryEventStore() });
-		const app = createTestApp({
-			resolveUser,
-			events: {
-				access: openChannelAccess(),
-				bus: {
-					...bus,
-					async *subscribe() {
-						yield { seq: 1, event: rawEvent("message.created") };
-						throw failure;
-					},
+		const logged: unknown[] = [];
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+		const app = streaming(
+			{
+				...bus,
+				async *subscribe() {
+					yield { seq: 1, event: rawEvent("message.created") };
+					throw failure;
 				},
 			},
-		});
-		try {
-			const stream = await open(app, `/threads/${THREAD}/events`);
-			expect((await stream.take(1))[0]?.id).toBe("1");
-			await expect(stream.take(1)).rejects.toThrow("stream ended");
-			expect(log).toHaveBeenCalledWith(`Streaming thread:${THREAD} failed`, failure);
-		} finally {
-			log.mockRestore();
-		}
+			{ logs: Logger.layer([Logger.make(({ message }) => logged.push(message))]) },
+		);
+		const stream = await open(app, `/threads/${THREAD}/events`);
+		expect((await stream.take(1))[0]?.id).toBe("1");
+		await expect(stream.take(1)).rejects.toThrow("stream ended");
+		expect(logged).toContainEqual([`Streaming thread:${THREAD} failed`, failure]);
 	});
 
 	it("bounds read-ahead and releases a producer blocked by a slow client", async () => {
 		let produced = 0;
 		let subscribed = false;
-		const bus = createEventBus({ store: memoryEventStore() });
-		const app = createTestApp({
-			resolveUser,
-			events: {
-				access: openChannelAccess(),
-				bus: {
-					...bus,
-					async *subscribe() {
-						subscribed = true;
-						try {
-							while (true) {
-								produced += 1;
-								yield { seq: produced, event: rawEvent("message.created") };
-							}
-						} finally {
-							subscribed = false;
-						}
-					},
-				},
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+		const app = streaming({
+			...bus,
+			async *subscribe() {
+				subscribed = true;
+				try {
+					while (true) {
+						produced += 1;
+						yield { seq: produced, event: rawEvent("message.created") };
+					}
+				} finally {
+					subscribed = false;
+				}
 			},
 		});
 		const response = await app.request(`/threads/${THREAD}/events`, {
@@ -319,11 +323,8 @@ describe("the stream", () => {
 	});
 
 	it("flushes a reset and ends when a slow subscriber overflows the bus", async () => {
-		const bus = createEventBus({ store: memoryEventStore(), maxBuffered: 2 });
-		const app = createTestApp({
-			resolveUser,
-			events: { bus, access: openChannelAccess() },
-		});
+		const bus = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 2 });
+		const app = streaming(bus);
 		const response = await app.request(`/threads/${THREAD}/events`, {
 			headers: { authorization: "Bearer good-token" },
 		});

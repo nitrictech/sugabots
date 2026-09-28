@@ -1,220 +1,122 @@
-import { createServer } from "node:http";
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { NodeRuntime } from "@effect/platform-node";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { stepsLayer as compactionSteps } from "@sugabots/core/conversations/compaction/compaction.steps";
-import {
-	Compaction,
-	compactionWorkflow,
-} from "@sugabots/core/conversations/compaction/compaction.workflow";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import { Routine, routineWorkflow } from "@sugabots/core/conversations/routines/routine.workflow";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { stepsLayer as routineSteps } from "@sugabots/core/conversations/routines/steps";
-import { stepsLayer as summarySteps } from "@sugabots/core/conversations/summaries/summary.steps";
-import { Summary, summaryWorkflow } from "@sugabots/core/conversations/summaries/summary.workflow";
-import { builtInTools as builtInToolsFor } from "@sugabots/core/conversations/tools/built-in";
-import { connectionTools as connectionToolsFor } from "@sugabots/core/conversations/tools/connections";
-import { pageFetcher } from "@sugabots/core/conversations/tools/web-fetch/fetch-page";
-import {
-	Facilitate,
-	facilitateWorkflow,
-} from "@sugabots/core/conversations/turns/facilitate.workflow";
-import { stepsLayer as facilitateSteps } from "@sugabots/core/conversations/turns/facilitator";
-import { Models, modelProbeLayer, modelsLayer } from "@sugabots/core/conversations/turns/model";
+import { RoutineScheduler } from "@sugabots/core/conversations/routines/scheduler";
+import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
+import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import { Models } from "@sugabots/core/conversations/turns/model";
 import { TurnRequests } from "@sugabots/core/conversations/turns/requests";
 import { TurnSignals } from "@sugabots/core/conversations/turns/signals";
-import { stepsLayer as turnSteps } from "@sugabots/core/conversations/turns/turn.steps";
-import { Turn, turnWorkflow } from "@sugabots/core/conversations/turns/turn.workflow";
+import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer } from "@sugabots/core/database/database";
-import { createEventBus } from "@sugabots/core/database/events/bus";
+import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
-import { postgresEventRelay } from "@sugabots/core/database/events/relay";
-import { postgresEventStore } from "@sugabots/core/database/events/store";
+import { EventPruning } from "@sugabots/core/database/events/prune";
+import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
-import { ConnectionRepository } from "@sugabots/core/providers/connections/connection-repository";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import { ConnectionSignIn } from "@sugabots/core/providers/connections/connection-sign-in";
-import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { seedEveryWorkspaceLayer } from "@sugabots/core/providers/model-providers/preset-seeding";
+import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Egress } from "@sugabots/core/providers/network/egress";
-import { SearchProviderRepository } from "@sugabots/core/providers/search-providers/search-provider-repository";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { Lanes } from "@sugabots/core/workflows/lanes";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
-import { Authorization } from "@sugabots/core/workspaces/authorization";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { Visibility } from "@sugabots/core/workspaces/visibility";
-import { Config, Duration, Effect, Layer } from "effect";
-import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { Layer } from "effect";
+import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { apiLayer } from "./http/app.ts";
 import { webAppLayer } from "./http/mount.ts";
+import { listeningLayer, nodeServerLayer } from "./http/serve.ts";
 import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
-import { channelAccess } from "./routes/events/access.ts";
-import { backgroundLayer } from "./runtime.ts";
-import { VERSION } from "./version.ts";
+import { ChannelAccess } from "./routes/events/access.ts";
 import { Workflows } from "./workflows.ts";
 
 /**
- * How long a client gets to finish what it was sent before its socket is cut.
- *
- * Past this the process is holding the port and, in development, the watcher
- * cannot restart. A request still running here was going to be abandoned by
- * the restart anyway.
+ * What the process owns once and every service above builds on: the pool,
+ * ids, the cipher, the installation's settings and egress policy, the durable
+ * events and the bus that fans them out, and the workflow engine with its
+ * lanes. A service's `layer` never provides these, so there is one of each
+ * however many services use them.
  */
-const SHUTDOWN_GRACE = Duration.seconds(3);
+const Infrastructure = Layer.mergeAll(
+	Credentials.layer,
+	Egress.layer,
+	EventOutbox.layer,
+	ConversationWorkflows.lanes,
+).pipe(
+	Layer.provideMerge(Layer.mergeAll(Installation.layer, EventBus.layer, Workflows.engine)),
+	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
+	Layer.provideMerge(databaseLayer),
+);
 
-/** The process: builds every part of the API and binds a port. */
-const main = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+/** The outside systems: email, the workspaces' models, and the tools turns are offered. */
+const Integrations = Layer.mergeAll(
+	Email.layer,
+	Models.layer,
+	Models.probeLayer,
+	BuiltInTools.layer,
+	ConnectionTools.layer,
+);
 
-	const authentication = yield* Authentication.Service;
-
-	const eventStore = yield* postgresEventStore;
-	// Every process runs a worker, so what one writes the others must hear about.
-	const bus = createEventBus({ store: eventStore, relay: yield* postgresEventRelay(eventStore) });
-
-	const egress = yield* Egress.Service;
-	const httpClients = egress.providers;
-
-	// One model client for turns, summaries, compactions, facilitation, trials and settings.
-	const model = yield* Models;
-	// The conversations, over what they are composed from: how they start and
-	// signal durable workflows, on the engine WORKFLOW_ENGINE names, and where
-	// their stream events are recorded.
-	const conversations = yield* Layer.build(
-		Conversations.layer.pipe(
-			Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
-			Layer.provideMerge(Lanes.layer([Summary, Compaction, Turn, Facilitate, Routine])),
-			Layer.provideMerge(Workflows.engine),
-			Layer.provideMerge(EventOutbox.layer(bus)),
-		),
-	);
-	// A search goes to the workspace's own provider, so its client is bound to
-	// that address like a model provider's.
-	const builtInTools = builtInToolsFor({
-		fetchPage: pageFetcher({ fetch: egress.webFetch }),
-		searchProviders: yield* SearchProviderRepository.Service,
-		httpClients,
-	});
-
-	// A connection's session is bound to its own address the same way. One signed
-	// in with OAuth carries the tokens its row holds.
-	const connectionTools = connectionToolsFor({
-		connections: yield* ConnectionRepository.Service,
-		httpClients,
-		oauth: { clients: (yield* ConnectionSignIn.Service).clients, fetch: egress.oauth },
-	});
-
-	// Summaries, turns, facilitation and routine runs are workflows.
-	yield* Layer.build(
-		Layer.mergeAll(
-			summaryWorkflow.layer,
-			compactionWorkflow.layer,
-			turnWorkflow.layer,
-			facilitateWorkflow.layer,
-			routineWorkflow.layer,
-			Lanes.reconcileLayer,
-		).pipe(
-			Layer.provideMerge(summarySteps({ model })),
-			Layer.provideMerge(compactionSteps({ model })),
-			Layer.provideMerge(routineSteps),
-			Layer.provideMerge(facilitateSteps({ model })),
-			Layer.provideMerge(turnSteps({ model, events: bus, builtInTools, connectionTools })),
-			Layer.provide(Layer.succeedContext(conversations)),
-		),
-	);
-
-	yield* Layer.build(seedEveryWorkspaceLayer);
-	yield* Layer.build(
-		backgroundLayer(eventStore).pipe(Layer.provide(Layer.succeedContext(conversations))),
-	);
-	const api = apiLayer({
-		authentication,
-		installation,
-		events: {
-			bus,
-			access: channelAccess(yield* Authorization.Service, yield* Visibility.Service),
-		},
-	}).pipe(Layer.provide(Layer.succeedContext(conversations)));
-	const server = yield* Layer.build(
-		HttpRouter.serve(Layer.merge(api, webAppLayer), { disableListenLog: true }).pipe(
-			Layer.provide(requestSpanNames),
-			Layer.provideMerge(
-				NodeHttpServer.layerConfig(createServer, {
-					port: Config.Port("PORT").pipe(Config.withDefault(3000)),
-					gracefulShutdownTimeout: Config.succeed(SHUTDOWN_GRACE),
-				}),
-			),
-		),
-	);
-	// Added after the server so the event streams end before it closes. Each one
-	// holds a socket open for as long as its browser is there, and closing the
-	// server first would wait on clients that never hang up.
-	yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
-	yield* HttpServer.addressFormattedWith((address) =>
-		Effect.sync(() => console.log(`sugabots ${VERSION} listening on ${address}`)),
-	).pipe(Effect.provide(server));
-	return yield* Effect.never;
-});
+/** Accounts, members, pods, agents and the providers they use, and trying a model. */
+const WorkspacesAndProviders = Layer.mergeAll(
+	Membership.layer,
+	Onboarding.layer,
+	PodAdministration.layer,
+	AgentAdministration.layer,
+	ModelProviderSetup.layer,
+	SearchProviderSetup.layer,
+	ConnectionSetup.layer,
+	ModelTrials.layer,
+).pipe(Layer.provideMerge(Accounts.layer));
 
 /**
- * What the process owns once and every service below builds on. A service's
- * `layer` provides the services it is built from, but never these, so there
- * is one pool, one cipher and one egress policy however many services use
- * them.
+ * The conversations, over how they start and signal their workflows. Their
+ * events go through the outbox.
  */
-const infrastructure = Layer.mergeAll(
-	databaseLayer,
-	Ids.layer,
-	Credentials.layer,
-	Installation.layer,
-	Egress.layer,
-	Email.layer,
-	Accounts.layer,
+const ConversationServices = Conversations.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(TurnRequests.layer, TurnSignals.layer, RoutineRuns.layer)),
 );
 
-main.pipe(
-	Effect.scoped,
-	// The tracer goes in with the database so that everything is traced: routes,
-	// better-auth's hooks, the background loops, and the statements they all send.
-	Effect.provide(
-		Layer.mergeAll(
-			Authentication.layer,
-			Membership.layer,
-			Onboarding.layer,
-			PodAdministration.layer,
-			AgentAdministration.layer,
-			ModelProviderSetup.layer,
-			SearchProviderSetup.layer,
-			ConnectionSetup.layer,
-			ModelTrials.layer,
-			// For the event streams, which ask them directly.
-			Authorization.layer,
-			Visibility.layer,
-		).pipe(
-			// Settings try a model through the model client turns use.
-			Layer.provideMerge(modelProbeLayer),
-			Layer.provideMerge(modelsLayer),
-			Layer.provideMerge(
-				Layer.mergeAll(
-					ModelProviderRepository.layer,
-					SearchProviderRepository.layer,
-					ConnectionRepository.layer,
-					ConnectionSignIn.layer,
-				),
-			),
-			Layer.provideMerge(infrastructure),
-			Layer.provideMerge(observabilityLayer),
-		),
-	),
-	NodeRuntime.runMain,
+/**
+ * What runs without a request: the workflows, the routine scheduler, the
+ * nightly event prune, and seeding the preset providers into every workspace.
+ */
+const Background = Layer.mergeAll(
+	ConversationWorkflows.layer,
+	RoutineScheduler.layer,
+	EventPruning.layer,
+	PresetSeeding.layer,
 );
+
+/** The API and the web app on `PORT`, with better-auth answering who is calling. */
+const Http = listeningLayer.pipe(
+	Layer.provideMerge(
+		HttpRouter.serve(Layer.merge(apiLayer, webAppLayer), { disableListenLog: true }),
+	),
+	Layer.provide([Authentication.layer, ChannelAccess.layer, requestSpanNames]),
+	Layer.provide(nodeServerLayer),
+);
+
+/**
+ * The process, tier by tier. The tracer goes in at the bottom so that
+ * everything is traced: routes, better-auth's hooks, the background work, and
+ * the statements they all send.
+ */
+const Main = Layer.mergeAll(Http, Background).pipe(
+	Layer.provide(ConversationServices),
+	Layer.provide(WorkspacesAndProviders),
+	Layer.provide(Integrations),
+	Layer.provide(Infrastructure),
+	Layer.provide(observabilityLayer),
+);
+
+Layer.launch(Main).pipe(NodeRuntime.runMain);

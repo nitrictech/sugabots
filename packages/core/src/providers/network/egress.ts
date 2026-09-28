@@ -60,9 +60,7 @@ export const make = Effect.gen(function* () {
 	} satisfies Interface;
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(Layer.provide(Installation.layer));
+export const layer = Layer.effect(Service, make);
 
 /**
  * How the API reaches the outside world: `fetch`, with this installation's
@@ -79,7 +77,7 @@ export type EgressHttpClient = typeof fetch;
 export type ClosableEgressHttpClient = EgressHttpClient & { close(): Promise<void> };
 
 /** The service being called; a bound client goes nowhere but under its base URL. */
-export interface EgressEndpoint {
+interface EgressEndpoint {
 	baseUrl: string;
 }
 
@@ -93,7 +91,7 @@ export interface ClosableEgressHttpClients extends EgressHttpClients {
 	close(): Promise<void>;
 }
 
-export type EgressUrlValidator = (value: string) => Promise<void>;
+type EgressUrlValidator = (value: string) => Promise<void>;
 
 interface ResolvedAddress {
 	address: string;
@@ -403,7 +401,7 @@ async function dispatchWithUndici(
 	) as unknown as Response;
 }
 
-export function egressUrl(value: string, { allowHttp = false }: { allowHttp?: boolean } = {}): URL {
+function egressUrl(value: string, { allowHttp = false }: { allowHttp?: boolean } = {}): URL {
 	let url: URL;
 	try {
 		url = new URL(value);

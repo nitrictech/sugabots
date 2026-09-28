@@ -1,10 +1,9 @@
 import type { AgentColor, Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
-import { asc, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
-import { Effect, Schema } from "effect";
-import type { Executor } from "../../database/database.ts";
+import { eq, type SQLWrapper, sql } from "drizzle-orm";
+import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
-import { agent, message, threadParticipant, user } from "../../database/schema.ts";
+import { agent, message, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { toCollaborationPart } from "./collaborations.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
@@ -182,41 +181,6 @@ export function authorRow(
 		agentFace: author?.face ?? null,
 	};
 }
-
-/** Everyone in a thread, in the order they joined. */
-export const loadParticipants = Effect.fn("Participants.loadParticipants")(function* (
-	db: Executor,
-	threadId: string,
-) {
-	const byThread = yield* loadParticipantsByThread(db, [threadId]);
-	return byThread.get(threadId) ?? [];
-});
-
-/**
- * Everyone in each of these threads, in the order they joined, keyed by
- * thread id, in one query. A thread with no participants has no entry.
- */
-export const loadParticipantsByThread = Effect.fn("Participants.loadParticipantsByThread")(
-	function* (db: Executor, threadIds: readonly string[]) {
-		const byThread = new Map<string, ThreadParticipant[]>();
-		if (threadIds.length === 0) {
-			return byThread;
-		}
-		const rows = yield* db
-			.select({ threadId: threadParticipant.threadId, ...participantColumns })
-			.from(threadParticipant)
-			.leftJoin(user, eq(user.id, threadParticipant.userId))
-			.leftJoin(agent, eq(agent.id, threadParticipant.agentId))
-			.where(inArray(threadParticipant.threadId, [...threadIds]))
-			.orderBy(asc(threadParticipant.createdAt), asc(threadParticipant.id));
-		for (const row of rows) {
-			const participants = byThread.get(row.threadId) ?? [];
-			participants.push(toParticipant(row));
-			byThread.set(row.threadId, participants);
-		}
-		return byThread;
-	},
-);
 
 /** However quiet a thread is, its latest messages still count as recent. */
 const RECENT_MESSAGE_COUNT = 100;

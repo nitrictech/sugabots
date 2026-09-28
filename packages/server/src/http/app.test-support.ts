@@ -9,8 +9,8 @@ import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
 import { ToolApprovals } from "@sugabots/core/conversations/tools/approvals/tool-approvals";
 import { TurnCancellation } from "@sugabots/core/conversations/turns/cancellation";
-import { createEventBus, type EventBus } from "@sugabots/core/database/events/bus";
-import { memoryEventStore } from "@sugabots/core/database/events/store";
+import { EventBus } from "@sugabots/core/database/events/bus";
+import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
@@ -23,28 +23,16 @@ import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
-import type { Authentication } from "../auth/authentication.ts";
-import { type ChannelAccess, closedChannelAccess } from "../routes/events/access.ts";
-import type { StreamOptions } from "../routes/events/routes.ts";
+import { Authentication } from "../auth/authentication.ts";
+import { closedChannelAccess } from "../routes/events/access.test-support.ts";
+import { ChannelAccess } from "../routes/events/access.ts";
 import { apiLayer } from "./app.ts";
 import type { HttpServices } from "./services.ts";
-
-type TestIdentity =
-	| { authentication: Authentication.Interface; resolveUser?: never }
-	| { authentication?: never; resolveUser: UserResolver };
-
-type TestAppOptions<Provided> = TestIdentity & {
-	/** Where the web app is served, when a case needs it apart from the API. */
-	webAppUrl?: string;
-	events?: { bus?: EventBus; access?: ChannelAccess; stream?: StreamOptions };
-	/** The services a case is about, in place of the unimplemented ones. */
-	services?: Layer.Layer<Provided>;
-};
 
 /** The test API's address. */
 export const BASE_URL = "http://localhost:3000";
 /** Where the test app's web app is served, a browser origin it trusts besides its own. */
-export const WEB_ORIGIN = "http://localhost:5173";
+const WEB_ORIGIN = "http://localhost:5173";
 
 export interface TestApp {
 	/** A request to `path` under `API_BASE_PATH`, e.g. `/agents/…`. */
@@ -53,28 +41,20 @@ export interface TestApp {
 	fetch(request: Request): Promise<Response>;
 }
 
+/** What a case may replace: the routes' services and what the API is built on. */
+type TestServices = HttpServices | Authentication.Service | Installation.Service | EventBus.Service;
+
 /**
- * The complete route table over fakes that reach nothing and store nothing,
- * so a case supplies only what it is about.
+ * The complete route table, built by `apiLayer` as the server builds it, over
+ * `services` and, for everything else, fakes that reach nothing and store
+ * nothing. Nobody is signed in unless `services` says who is, with
+ * `identifiedBy`.
  */
-export function createTestApp<Provided extends HttpServices = never>(
-	options: TestAppOptions<Provided>,
+export function createTestApp<Provided extends TestServices = never>(
+	services?: Layer.Layer<Provided>,
 ): TestApp {
-	const bus = options.events?.bus ?? createEventBus({ store: memoryEventStore() });
-	const routes = apiLayer({
-		authentication: options.authentication ?? authenticationForResolver(options.resolveUser),
-		installation: Installation.fromUrls({
-			isProduction: false,
-			publicUrl: BASE_URL,
-			webAppUrl: options.webAppUrl ?? WEB_ORIGIN,
-		}),
-		events: {
-			bus,
-			access: options.events?.access ?? closedChannelAccess(),
-			stream: options.events?.stream,
-		},
-	}).pipe(
-		Layer.provide(Layer.merge(emptyServices, options.services ?? Layer.empty)),
+	const routes = apiLayer.pipe(
+		Layer.provide(Layer.merge(fakes, services ?? Layer.empty)),
 		Layer.provide([noDatabase, HttpServer.layerServices]),
 	);
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
@@ -85,18 +65,28 @@ export function createTestApp<Provided extends HttpServices = never>(
 	};
 }
 
-function authenticationForResolver(resolveUser: UserResolver): Authentication.Interface {
-	return {
+/** `Authentication` asking `resolveUser` who holds a request's credentials. */
+export function identifiedBy(resolveUser: UserResolver): Layer.Layer<Authentication.Service> {
+	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
 		identify: identifyFromResolver(resolveUser),
-	};
+	});
+}
+
+/** The test installation, with its web app at `webAppUrl`. */
+export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Installation.Service> {
+	return Layer.succeed(
+		Installation.Service,
+		Installation.fromUrls({ isProduction: false, publicUrl: BASE_URL, webAppUrl }),
+	);
 }
 
 /**
- * Services whose every method dies naming itself, so a case supplies, through
- * `services`, exactly the ones it is about.
+ * Services whose every method dies naming itself, nobody signed in, no
+ * channel open to listen on, and a bus in memory, so a case supplies exactly
+ * what it is about.
  */
-const emptyServices: Layer.Layer<HttpServices> = Layer.mergeAll(
+const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Membership.Service),
 	unimplemented(PodAdministration.Service),
 	unimplemented(AgentAdministration.Service),
@@ -113,13 +103,17 @@ const emptyServices: Layer.Layer<HttpServices> = Layer.mergeAll(
 	unimplemented(Routines.Service),
 	unimplemented(RoutineView.Service),
 	unimplemented(RoutineWebhooks.Service),
+	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
+	identifiedBy(async () => null),
+	installationWithWebAppAt(WEB_ORIGIN),
+	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
 );
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
 export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
 
 /** The `Authentication.identify` a test's resolver stands in for. */
-export function identifyFromResolver(resolveUser: UserResolver) {
+function identifyFromResolver(resolveUser: UserResolver) {
 	return (headers: Headers) =>
 		Effect.map(
 			Effect.promise(() => resolveUser(headers)),

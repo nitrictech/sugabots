@@ -13,8 +13,8 @@ import {
 } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { lanesForTests, workflowsForTests } from "../../workflows/testing.ts";
 import type { Chats } from "../chats/chats.ts";
+import { lanesForTests, workflowsForTests } from "../testing.ts";
 import { type PreparedTurn, type TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
 import { Facilitate, FacilitateRequest, facilitateLane } from "./facilitate.workflow.ts";
 import { TurnRequests } from "./requests.ts";

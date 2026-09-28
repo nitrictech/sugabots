@@ -7,7 +7,7 @@ function accountsFor(env: Record<string, string>) {
 	return Effect.runPromiseExit(
 		Accounts.Service.pipe(
 			Effect.provide(
-				Accounts.layerNoDeps.pipe(
+				Accounts.layer.pipe(
 					Layer.provide(noDatabase),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),

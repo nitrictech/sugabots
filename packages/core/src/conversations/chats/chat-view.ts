@@ -13,17 +13,17 @@ import type {
 import { DEFAULT_CHAT_PAGE_LIMIT } from "@sugabots/contracts";
 import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
+import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
+import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { Visibility } from "../../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, chat, message, pod, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { type AuthorizationDenied, ResourceHidden } from "../../workspaces/access.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
-import { Authorization } from "../../workspaces/authorization.ts";
-import type { CurrentActor } from "../../workspaces/current-actor.ts";
-import { Visibility } from "../../workspaces/visibility.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import {
 	agentColumns,

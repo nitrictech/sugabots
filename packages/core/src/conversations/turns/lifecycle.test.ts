@@ -76,11 +76,14 @@ describe("reopening a turn for another run", () => {
 		});
 	});
 
-	// ADR 002: running it again could make the change a second time.
+	// Running it again could make the change a second time.
 	it("ends as failed a turn whose mutating tool may have run without a checkpoint", () => {
 		expect(reopen(turn({ mutationStarted: true }))).toMatchObject({
 			_tag: "Next",
-			state: { status: "failed", userMessage: expect.stringContaining("mutating tool") },
+			state: {
+				status: "failed",
+				userMessage: expect.stringContaining("tool that can make changes"),
+			},
 			followUp: { _tag: "End" },
 		});
 	});
@@ -174,7 +177,7 @@ describe("cancelling", () => {
 		});
 	});
 
-	it("asks a running turn's worker to stop, once", () => {
+	it("asks a running turn's workflow to stop, once", () => {
 		expect(transition(turn(), TurnEvent.RequestCancel())).toEqual({
 			_tag: "Next",
 			state: turn({ cancelRequested: true }),
@@ -216,7 +219,7 @@ describe("running a failed turn again", () => {
 		expect(runsAgainAfterFailure(turn({ runs: MAX_TURN_RUNS }), false)).toBe(false);
 	});
 
-	// ADR 002: running it again could make the change a second time.
+	// Running it again could make the change a second time.
 	it("does not happen once the turn has a checkpoint or a tool that changes things ran", () => {
 		expect(runsAgainAfterFailure(turn({ checkpointed: true }), false)).toBe(false);
 		expect(runsAgainAfterFailure(turn(), true)).toBe(false);

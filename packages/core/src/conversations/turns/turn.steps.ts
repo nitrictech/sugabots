@@ -4,6 +4,7 @@ import {
 	Cause,
 	Clock,
 	Data,
+	DateTime,
 	Duration,
 	Effect,
 	Exit,
@@ -14,7 +15,8 @@ import {
 	Semaphore,
 } from "effect";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
-import type { EventBus } from "../../database/events/bus.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { Ids } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { needsCompaction } from "../compaction/window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -23,10 +25,10 @@ import {
 	ApprovedToolCalls,
 	type ToolApprovalsIncomplete,
 } from "../tools/approvals/approved-calls.ts";
-import type { BuiltInTools } from "../tools/built-in.ts";
+import { BuiltInTools } from "../tools/built-in.ts";
 import { ToolCallRepository } from "../tools/calls/repository.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import type { ConnectionTools } from "../tools/connections.ts";
+import { ConnectionTools } from "../tools/connections.ts";
 import { toolsForTurn } from "../tools/for-turn.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
@@ -39,12 +41,7 @@ import {
 } from "./execution.ts";
 import { FloorControl } from "./floor-control.ts";
 import { TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
-import {
-	forEachDelta,
-	type ModelAccounting,
-	type ModelRequestFailed,
-	type TurnModel,
-} from "./model.ts";
+import { forEachDelta, type ModelAccounting, type ModelRequestFailed, Models } from "./model.ts";
 import {
 	type ReplyDraft,
 	type ReplyTurn,
@@ -62,75 +59,70 @@ const MESSAGE_FLUSH_INTERVAL = Duration.seconds(1);
 const MESSAGE_FLUSH_CHARACTERS = 500;
 /**
  * A running turn stops on `turn.cancel_requested`. The flag is also read this
- * often, from the start, for a request made before the worker subscribed or
+ * often, from the start, for a request made before the turn subscribed or
  * relayed from a process whose relay is down.
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
 
-/** What a turn's steps are given beside the conversation services they take from context. */
-export interface TurnStepsOptions {
-	model: TurnModel;
-	/** The built-in tools a workspace's crew turns are offered. */
-	builtInTools: BuiltInTools;
-	/** The tools inherited from the agent's pod, opened for the turn (ADR 006). */
-	connectionTools: ConnectionTools;
-	/** Where token deltas go, and where tools watch for things to happen. */
-	events: Pick<EventBus, "publish" | "subscribe">;
-}
-
-/** The conversation services a segment runs on. */
+/**
+ * The services a segment runs on: the conversation services, the model, the
+ * built-in and connection tools it offers, and the bus, which carries its
+ * token deltas and which its tools watch.
+ */
 type SegmentServices =
+	| Models.Service
+	| BuiltInTools.Service
+	| ConnectionTools.Service
+	| EventBus.Service
 	| TurnExecution.Service
 	| TurnRepository.Service
 	| ToolCallRepository.Service
 	| Collaborations.Service
 	| ApprovedToolCalls.Service
 	| FloorControl.Service
-	| TurnRequests.Service;
+	| TurnRequests.Service
+	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
-export const stepsLayer = (options: TurnStepsOptions) =>
-	Layer.effect(
-		TurnSteps,
-		Effect.gen(function* () {
-			const services = yield* Effect.context<SegmentServices | Database>();
-			const turns = yield* TurnRepository.Service;
-			const toolCalls = yield* ToolCallRepository.Service;
-			const { emit } = yield* ConversationEvents.Service;
-			return TurnSteps.of({
-				segment: (request) =>
-					Effect.flatMap(turnRunFor(request), (run) => runSegment(run, options)).pipe(
-						Effect.provideContext(services),
-					),
-				abandon: (request) =>
-					transaction(
-						Effect.gen(function* () {
-							const run = yield* turnRunFor(request);
-							const ended = yield* turns.abandon(run.executionId, {
-								status: "failed",
-								userMessage: TURN_STOPPED_UNEXPECTEDLY,
-							});
-							// Ending an active turn announced how it ended.
-							if (ended) return;
-							yield* emit([
-								ConversationEvent.TurnAbandoned({
-									threadId: request.threadId,
-									outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
-								}),
-							]);
-						}),
-					).pipe(Effect.provideContext(services)),
-				decide: (request, decided) =>
-					toolCalls.recordDecision({ threadId: request.threadId, ...decided }),
-				cancelWaiting: (request) => turns.cancelWaiting(request),
-				announceReleased: (request) =>
-					transaction(emit([ConversationEvent.LaneReleased({ threadId: request.threadId })])).pipe(
-						Effect.provideContext(services),
-					),
-			});
-		}),
-	);
+export const turnStepsLayer = Layer.effect(
+	TurnSteps,
+	Effect.gen(function* () {
+		const services = yield* Effect.context<SegmentServices | Database>();
+		const turns = yield* TurnRepository.Service;
+		const toolCalls = yield* ToolCallRepository.Service;
+		const { emit } = yield* ConversationEvents.Service;
+		return TurnSteps.of({
+			segment: (request) =>
+				Effect.flatMap(turnRunFor(request), runSegment).pipe(Effect.provideContext(services)),
+			abandon: (request) =>
+				transaction(
+					Effect.gen(function* () {
+						const run = yield* turnRunFor(request);
+						const ended = yield* turns.abandon(run.executionId, {
+							status: "failed",
+							userMessage: TURN_STOPPED_UNEXPECTEDLY,
+						});
+						// Ending an active turn announced how it ended.
+						if (ended) return;
+						yield* emit([
+							ConversationEvent.TurnAbandoned({
+								threadId: request.threadId,
+								outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
+							}),
+						]);
+					}),
+				).pipe(Effect.provideContext(services)),
+			decide: (request, decided) =>
+				toolCalls.recordDecision({ threadId: request.threadId, ...decided }),
+			cancelWaiting: (request) => turns.cancelWaiting(request),
+			announceReleased: (request) =>
+				transaction(emit([ConversationEvent.LaneReleased({ threadId: request.threadId })])).pipe(
+					Effect.provideContext(services),
+				),
+		});
+	}),
+);
 
 /**
  * Runs one segment of a turn, from preparation to recorded outcome, and says
@@ -143,12 +135,11 @@ export const stepsLayer = (options: TurnStepsOptions) =>
  */
 export const runSegment = (
 	run: TurnRun,
-	options: TurnStepsOptions,
 ): Effect.Effect<SegmentOutcome, never, SegmentServices | Database> =>
 	Effect.gen(function* () {
 		const execution = yield* TurnExecution.Service;
 		const preparation = yield* execution.prepare(run);
-		return preparation._tag === "Prepared" ? yield* generateReply(preparation, options) : finished;
+		return preparation._tag === "Prepared" ? yield* generateReply(preparation) : finished;
 	});
 
 const finished: SegmentOutcome = { _tag: "Finished" };
@@ -236,14 +227,13 @@ class ApprovalForUnknownTool
  * Streams the model's reply into the response message and records how it ended.
  *
  * The streaming half may be interrupted: by a person cancelling, by the time
- * limit, or by the worker shutting down. The recording half may not, or the
+ * limit, or by the server shutting down. The recording half may not, or the
  * turn would be left `running` and the message `streaming` forever. Hence the
  * mask: only the stream runs interruptibly, and whatever exit it produces is
  * written back before the fibre yields to the interrupt.
  */
 const generateReply = (
 	prepared: PreparedTurn,
-	options: TurnStepsOptions,
 ): Effect.Effect<SegmentOutcome, never, SegmentServices | Database> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
@@ -253,7 +243,7 @@ const generateReply = (
 			const requests = yield* TurnRequests.Service;
 			const replyTurn = replyTurnOf(prepared);
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
-			const streamed = yield* Effect.exit(restore(streamReply(prepared, options, reply)));
+			const streamed = yield* Effect.exit(restore(streamReply(prepared, reply)));
 			const draft = yield* Ref.get(reply);
 
 			/**
@@ -370,7 +360,6 @@ const logTurnFailure = (prepared: PreparedTurn, why: string) =>
  */
 const streamReply = (
 	prepared: PreparedTurn,
-	{ model, events, builtInTools, connectionTools }: TurnStepsOptions,
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
@@ -384,6 +373,10 @@ const streamReply = (
 > =>
 	Effect.scoped(
 		Effect.gen(function* () {
+			const model = yield* Models.Service;
+			const events = yield* EventBus.Service;
+			const builtInTools = yield* BuiltInTools.Service;
+			const connectionTools = yield* ConnectionTools.Service;
 			const turns = yield* TurnRepository.Service;
 			const toolCalls = yield* ToolCallRepository.Service;
 			const collaborations = yield* Collaborations.Service;
@@ -403,7 +396,7 @@ const streamReply = (
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
-			const now = new Date(yield* Clock.currentTimeMillis);
+			const now = yield* DateTime.nowAsDate;
 			const builtIn = withoutDisabled(
 				yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId),
 				prepared.context.agent.disabledTools,
@@ -507,13 +500,14 @@ const streamReply = (
 					};
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
+				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(terminal.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
 					if (!offered?.requiresApproval) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
-					return Effect.succeed({
-						id: crypto.randomUUID(),
+					return Effect.map(ids.next, (id) => ({
+						id,
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
 						tool: request.toolCall.toolName,
@@ -524,7 +518,7 @@ const streamReply = (
 						remoteToolName: offered.remoteToolName,
 						mutating: offered.mutating,
 						atOffset,
-					});
+					}));
 				});
 				yield* Ref.update(reply, (draft) => ({
 					...draft,
@@ -613,7 +607,7 @@ const consumeDeltas = (
 	prepared: PreparedTurn,
 	text: AsyncIterable<string>,
 	stop: AbortController,
-	events: Pick<EventBus, "publish">,
+	events: Pick<EventBus.Interface, "publish">,
 	reply: Ref.Ref<ReplyDraft>,
 	saveReply: Effect.Effect<void, never, Database>,
 ) =>
@@ -655,7 +649,7 @@ const consumeDeltas = (
 	});
 
 /** Waits for `turn.cancel_requested` on this turn. Never succeeds if the bus closes first. */
-function cancelRequested(events: Pick<EventBus, "subscribe">, prepared: PreparedTurn) {
+function cancelRequested(events: Pick<EventBus.Interface, "subscribe">, prepared: PreparedTurn) {
 	return Effect.promise(async (signal) => {
 		const channel = threadChannel(prepared.context.thread.id);
 		for await (const { event } of events.subscribe(channel, { signal })) {
@@ -670,7 +664,7 @@ const publishDelta = (
 	prepared: PreparedTurn,
 	offset: number,
 	text: string,
-	events: Pick<EventBus, "publish">,
+	events: Pick<EventBus.Interface, "publish">,
 ) =>
 	Effect.promise(() =>
 		events.publish(

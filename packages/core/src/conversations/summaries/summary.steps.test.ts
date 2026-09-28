@@ -105,7 +105,7 @@ describe("summarise", () => {
 		);
 
 		// Three asks, then the thread is left without a summary rather than the
-		// job being burned on one bad answer.
+		// whole summary being retried over one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
 		expect(turns.failSystemAgentTurn).toHaveBeenCalledWith(

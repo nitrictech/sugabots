@@ -380,7 +380,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** Stored inputs and outputs are cut at this many characters of JSON (ADR 002). */
+/** Stored inputs and outputs are cut at this many characters of JSON. */
 export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
 export type ToolCallOutcome = { output: unknown } | { error: UserMessage };

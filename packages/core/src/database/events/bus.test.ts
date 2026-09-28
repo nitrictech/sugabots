@@ -1,7 +1,7 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
-import { createEventBus, type Delivery, type EventBus } from "./bus.ts";
-import { memoryEventStore } from "./store.ts";
+import { EventBus } from "./bus.ts";
+import { EventStore } from "./store.ts";
 
 /**
  * The bus, without an HTTP layer. `events.test.ts` beside the routes proves the
@@ -22,12 +22,12 @@ function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEv
  * and registration happens before that.
  */
 function take(
-	stream: AsyncIterable<Delivery>,
+	stream: AsyncIterable<EventBus.Delivery>,
 	count: number,
 	timeoutMs = 1000,
-): Promise<Delivery[]> {
+): Promise<EventBus.Delivery[]> {
 	const iterator = stream[Symbol.asyncIterator]();
-	const taken: Delivery[] = [];
+	const taken: EventBus.Delivery[] = [];
 
 	let deadline: ReturnType<typeof setTimeout> | undefined;
 	const expired = new Promise<never>((_, reject) => {
@@ -54,16 +54,17 @@ function take(
 	})();
 }
 
-const types = (deliveries: Delivery[]) => deliveries.map((delivery) => delivery.event.type);
+const types = (deliveries: EventBus.Delivery[]) =>
+	deliveries.map((delivery) => delivery.event.type);
 
-function bus(): EventBus {
-	return createEventBus({ store: memoryEventStore() });
+function bus(): EventBus.Interface {
+	return EventBus.inProcess({ store: EventStore.inMemory() });
 }
 
 describe("publish and subscribe", () => {
 	it("fans out an already committed event without storing it twice", async () => {
-		const store = memoryEventStore();
-		const events = createEventBus({ store });
+		const store = EventStore.inMemory();
+		const events = EventBus.inProcess({ store });
 		const live = take(events.subscribe(CHANNEL), 1);
 		const event = streamEvent("agent.updated", { id: "m1" });
 		const seq = await store.append(CHANNEL, event);
@@ -126,13 +127,13 @@ describe("publish and subscribe", () => {
 		const appendBlocked = new Promise<void>((resolve) => {
 			releaseAppend = resolve;
 		});
-		const store = memoryEventStore();
+		const store = EventStore.inMemory();
 		const append = store.append.bind(store);
 		store.append = async (channel, event) => {
 			await appendBlocked;
 			return append(channel, event);
 		};
-		const events = createEventBus({ store });
+		const events = EventBus.inProcess({ store });
 		const stream = take(events.subscribe(CHANNEL), 2);
 		const first = events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
 		const second = events.publishCommitted([
@@ -151,7 +152,7 @@ describe("publish and subscribe", () => {
 		const stream = events.subscribe(CHANNEL, { signal: abort.signal });
 
 		const drained = (async () => {
-			const seen: Delivery[] = [];
+			const seen: EventBus.Delivery[] = [];
 			for await (const delivery of stream) {
 				seen.push(delivery);
 				abort.abort();
@@ -209,8 +210,8 @@ describe("resume", () => {
 	});
 
 	it("resets a resume point that has been pruned away", async () => {
-		const store = memoryEventStore();
-		const events = createEventBus({ store });
+		const store = EventStore.inMemory();
+		const events = EventBus.inProcess({ store });
 
 		await events.publish(CHANNEL, rawEvent("message.created"));
 		await store.prune(new Date(Date.now() + 1000));
@@ -246,7 +247,7 @@ describe("resume", () => {
 
 describe("slow subscribers", () => {
 	it("are dropped with a reset rather than buffered forever", async () => {
-		const events = createEventBus({ store: memoryEventStore(), maxBuffered: 3 });
+		const events = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 3 });
 		const iterator = events.subscribe(CHANNEL)[Symbol.asyncIterator]();
 
 		// One read, so the subscriber exists and is registered. It then sits on
@@ -301,7 +302,7 @@ describe("closing the bus", () => {
 		// Behind a parked subscriber is an open response holding a socket. Left
 		// parked, they keep the server from closing and the process from exiting,
 		// which is a restart that never finishes.
-		const bus = createEventBus({ store: memoryEventStore() });
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 		const stream = bus.subscribe(CHANNEL)[Symbol.asyncIterator]();
 		// Parks it: nothing has been published, so it is waiting for the first event.
 		const parked = stream.next();

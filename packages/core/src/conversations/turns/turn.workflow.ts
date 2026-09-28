@@ -84,7 +84,7 @@ export class TurnSteps extends Context.Service<
 >()("@sugabots/core/TurnSteps") {}
 
 /** Each run of a segment is a separate activity, numbered from 0 within the execution. */
-export const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
+const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
 	segment: { input: Schema.Int, success: SegmentOutcome },
 	decide: { input: DecidedApproval },
 	cancelWaiting: {},

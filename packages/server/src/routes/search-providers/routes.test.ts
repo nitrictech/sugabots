@@ -1,15 +1,15 @@
 import type { SearchProvider } from "@sugabots/contracts";
+import { ActionForbidden } from "@sugabots/core/authorization/access";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { SearchProviderRepository } from "@sugabots/core/providers/search-providers/search-provider-repository";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
-import { ActionForbidden } from "@sugabots/core/workspaces/access";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
-import { createTestApp } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
  * The search provider routes over doubles of `SearchProviderSetup`: what each
@@ -43,10 +43,9 @@ const brave: SearchProvider = {
 };
 
 const app = (search: Partial<SearchProviderSetup.Interface>) =>
-	createTestApp({
-		resolveUser,
-		services: unimplemented(SearchProviderSetup.Service, search),
-	});
+	createTestApp(
+		Layer.merge(identifiedBy(resolveUser), unimplemented(SearchProviderSetup.Service, search)),
+	);
 
 describe("a workspace's search provider", () => {
 	it("answers null when the workspace has none", async () => {

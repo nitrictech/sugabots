@@ -2,8 +2,9 @@ import { type ChatMessageItem, handleFromName, threadChannel } from "@sugabots/c
 import { and, eq, like } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { createEventBus } from "../../database/events/bus.ts";
-import { postgresEventStore } from "../../database/events/store.ts";
+import { Visibility } from "../../authorization/visibility.ts";
+import { EventBus } from "../../database/events/bus.ts";
+import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	chat,
@@ -23,17 +24,16 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Visibility } from "../../workspaces/visibility.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
 
-const eventStore = await runOnPostgres(postgresEventStore);
+const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
-	const conversations = await conversationsForTests(createEventBus({ store: eventStore }));
+	const conversations = await conversationsForTests(EventBus.inProcess({ store: eventStore }));
 	/** As the member the chats are with. */
 	let chats: Promised<Chats.Interface>;
 	let view: Promised<ChatView.Interface>;

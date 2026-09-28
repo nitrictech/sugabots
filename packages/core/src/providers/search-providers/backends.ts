@@ -16,7 +16,7 @@ import type { SearchConnection } from "./search-connection.ts";
  * reads it as a sentence.
  */
 
-export interface SearchResult {
+interface SearchResult {
 	title: string;
 	url: string;
 	snippet: string;
@@ -24,11 +24,9 @@ export interface SearchResult {
 	published: string | null;
 }
 
-export type SearchOutcome =
-	| { ok: true; results: SearchResult[] }
-	| { ok: false; reason: UserMessage };
+type SearchOutcome = { ok: true; results: SearchResult[] } | { ok: false; reason: UserMessage };
 
-export interface SearchRequest {
+interface SearchRequest {
 	query: string;
 	/** How many results to ask for; a backend may return fewer. */
 	count: number;

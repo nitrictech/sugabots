@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import { pod, user, workspace } from "@sugabots/core/database/schema";
@@ -8,7 +9,6 @@ import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
-import { CurrentActor } from "@sugabots/core/workspaces/current-actor";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
@@ -139,7 +139,7 @@ const signUp = Effect.gen(function* () {
 });
 
 /** Whoever may sign up and whether they must verify is the installation's to configure, so the seed configures its own. */
-const seedAccounts = Accounts.layerNoDeps.pipe(
+const seedAccounts = Accounts.layer.pipe(
 	Layer.provide(
 		ConfigProvider.layer(
 			ConfigProvider.fromEnv({
@@ -153,7 +153,7 @@ seed.pipe(
 	Effect.scoped,
 	Effect.provide(
 		Layer.mergeAll(
-			Authentication.layerNoDeps,
+			Authentication.layer,
 			Membership.layer,
 			PersonalPods.layer,
 			PodRepository.layer,

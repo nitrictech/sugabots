@@ -44,8 +44,8 @@ const unparseable = (cause: unknown) =>
 export function upcomingOccurrences(
 	expression: string,
 	timezone: string,
+	from: Date,
 	count = 5,
-	from = new Date(),
 ): Effect.Effect<Date[], InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
@@ -60,8 +60,8 @@ export function upcomingOccurrences(
 	});
 }
 
-export const nextOccurrence = (expression: string, timezone: string, from = new Date()) =>
-	Effect.map(upcomingOccurrences(expression, timezone, 1, from), ([next]) => {
+export const nextOccurrence = (expression: string, timezone: string, from: Date) =>
+	Effect.map(upcomingOccurrences(expression, timezone, from, 1), ([next]) => {
 		if (!next) throw new Error("Cron parser returned no next occurrence");
 		return next;
 	});
@@ -69,13 +69,13 @@ export const nextOccurrence = (expression: string, timezone: string, from = new 
 export function latestMissedAndNextOccurrence(
 	expression: string,
 	timezone: string,
-	now = new Date(),
+	now: Date,
 ): Effect.Effect<{ latest: Date; next: Date }, InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
 			requireRunnable(expression, timezone);
 			const latest = CronExpressionParser.parse(expression, {
-				currentDate: new Date(now.getTime() + 1),
+				currentDate: now.getTime() + 1,
 				tz: timezone,
 			})
 				.prev()

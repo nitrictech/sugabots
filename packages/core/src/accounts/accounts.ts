@@ -1,8 +1,8 @@
 export * as Accounts from "./accounts.ts";
 
 import { and, eq, gt } from "drizzle-orm";
-import { Config, Context, Data, Effect, Layer } from "effect";
-import { Database, layer as databaseLayer, query } from "../database/database.ts";
+import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
+import { Database, query } from "../database/database.ts";
 import { user, workspaceInvite } from "../database/schema.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
 
@@ -36,9 +36,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(Layer.provide(databaseLayer));
+export const layer = Layer.effect(Service, make);
 
 export class SignUpClosed extends Data.TaggedError("SignUpClosed") implements UserFacing {
 	get userMessage() {
@@ -56,7 +54,7 @@ const isEmpty = Effect.map(
 );
 
 const hasPendingInvitation = (email: string) =>
-	Effect.map(
+	Effect.flatMap(DateTime.nowAsDate, (now) =>
 		query((db) =>
 			db
 				.select({ id: workspaceInvite.id })
@@ -65,10 +63,9 @@ const hasPendingInvitation = (email: string) =>
 					and(
 						eq(workspaceInvite.email, email),
 						eq(workspaceInvite.status, "pending"),
-						gt(workspaceInvite.expiresAt, new Date()),
+						gt(workspaceInvite.expiresAt, now),
 					),
 				)
 				.limit(1),
-		),
-		([pending]) => pending !== undefined,
+		).pipe(Effect.map(([pending]) => pending !== undefined)),
 	);

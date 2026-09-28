@@ -7,7 +7,7 @@ import { uuidSchema } from "./uuid.ts";
  * Search providers: where a workspace's `web_search` tool sends its queries.
  *
  * Search costs money per query, so the workspace that wants it configures and
- * pays for it (ADR 005). One provider per workspace, made from a preset the
+ * pays for it. One provider per workspace, made from a preset the
  * way a model provider is, with the workspace's own key. `web_search` is
  * offered to an agent only while the provider is enabled and, where the
  * preset needs one, has a key.

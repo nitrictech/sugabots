@@ -1,6 +1,7 @@
 import { PERSONAL_POD_SLUG } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import {
 	agent,
 	modelProvider,
@@ -18,7 +19,6 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
-import { ActionForbidden, ResourceHidden } from "../access.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
