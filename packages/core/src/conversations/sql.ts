@@ -382,8 +382,22 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorUserId}, ${table.authorAgentId}, ${table.routineTrigger}) = 1`,
 		),
 		index("message_thread_created_at_idx").on(table.threadId, table.createdAt),
-		// What a bot's search_history tool matches against, stemmed so "hotels" finds "hotel".
-		index("message_content_search_idx").using("gin", sql`to_tsvector('english', ${table.content})`),
+		// What a bot's search_history tool matches against. Stemmed so "hotels"
+		// finds "hotel"; unstemmed as well, so a word the English rules drop or
+		// change (German "was", French "hôtels") still matches as written; and
+		// by trigram, a substring match that works in any script, including
+		// languages written without spaces between words. Only complete messages
+		// are searched, so only they are indexed: a streaming reply rewrites its
+		// content every second, and would otherwise re-index it each time.
+		index("message_content_search_idx")
+			.using("gin", sql`to_tsvector('english', ${table.content})`)
+			.where(sql`${table.status} = 'complete'`),
+		index("message_content_simple_search_idx")
+			.using("gin", sql`to_tsvector('simple', ${table.content})`)
+			.where(sql`${table.status} = 'complete'`),
+		index("message_content_trigram_idx")
+			.using("gin", table.content.op("gin_trgm_ops"))
+			.where(sql`${table.status} = 'complete'`),
 	],
 );
 

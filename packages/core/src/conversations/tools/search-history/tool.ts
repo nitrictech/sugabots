@@ -1,6 +1,6 @@
 import { isoTimestampSchema } from "@sugabots/contracts";
 import { tool } from "ai";
-import { and, asc, desc, eq, gte, lt, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
 import { agent, message, user } from "../../../database/schema.ts";
@@ -50,7 +50,7 @@ export function searchHistoryTool({
 	run: RunEffect;
 }) {
 	return tool({
-		description: `Search the messages in this thread from before ${formatHistoryTime(keptFrom)}, which you only have a summary of or none at all. Give words to look for, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
+		description: `Search the messages in this thread from before ${formatHistoryTime(keptFrom)}, which you only have a summary of or none at all. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
 		inputSchema: Schema.Struct({
 			query: Schema.optional(
 				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
@@ -90,15 +90,13 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 	{ words, after, before }: HistorySearch,
 ) {
 	const until = before && before < keptFrom ? before : keptFrom;
-	// The same expression as `message_content_search_idx`, so the index is used.
-	const document = sql`to_tsvector('english', ${message.content})`;
-	const searched = words ? sql`websearch_to_tsquery('english', ${words})` : undefined;
+	const matching = words ? wordMatch(words) : undefined;
 	const conditions: SQL[] = [
 		eq(message.threadId, threadId),
 		eq(message.status, "complete"),
 		lt(message.createdAt, until),
 		...(after ? [gte(message.createdAt, after)] : []),
-		...(searched ? [sql`${document} @@ ${searched}`] : []),
+		...(matching ? [matching.where] : []),
 	];
 	const rows = yield* db
 		.select({ message, ...participantColumns })
@@ -107,8 +105,8 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 		.leftJoin(agent, eq(agent.id, message.authorAgentId))
 		.where(and(...conditions))
 		.orderBy(
-			...(searched
-				? [desc(sql`ts_rank(${document}, ${searched})`), desc(message.createdAt)]
+			...(matching
+				? [...matching.best, desc(message.createdAt)]
 				: [asc(message.createdAt), asc(message.id)]),
 		)
 		// One more than is returned, to tell whether there are more.
@@ -129,3 +127,51 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 		more: rows.length > MAX_MATCHES,
 	};
 });
+
+/**
+ * Which messages match `words`, and how to put the best first. Three ways,
+ * any of which will do:
+ *
+ * - English full-text, stemmed, so "hotels" finds "hotel".
+ * - Full-text without stemming or stop words, so a word the English rules
+ *   drop or change (German "was", a French plural) still matches as written.
+ * - Every word as a substring, for scripts written without spaces between
+ *   words, which full-text cannot split, and for anything the others miss.
+ *
+ * Full-text matches come first, ranked by the better of their two scores;
+ * substring-only matches follow. Each expression is the one its index on
+ * `message.content` is built on, so the indexes are used.
+ */
+function wordMatch(words: string): { where: SQL; best: SQL[] } {
+	const english = sql`to_tsvector('english', ${message.content}) @@ websearch_to_tsquery('english', ${words})`;
+	const simple = sql`to_tsvector('simple', ${message.content}) @@ websearch_to_tsquery('simple', ${words})`;
+	const terms = substringTerms(words);
+	const substring =
+		terms.length > 0
+			? and(...terms.map((term) => ilike(message.content, `%${escapeLike(term)}%`)))
+			: undefined;
+	const rank = sql`greatest(
+		ts_rank(to_tsvector('english', ${message.content}), websearch_to_tsquery('english', ${words})),
+		ts_rank(to_tsvector('simple', ${message.content}), websearch_to_tsquery('simple', ${words}))
+	)`;
+	return {
+		where: or(english, simple, substring) as SQL,
+		best: [desc(sql`(${english}) or (${simple})`), desc(rank)],
+	};
+}
+
+/**
+ * The words to find as substrings: quotes dropped, and the search syntax's
+ * `OR` and excluded `-words` left out, since a substring cannot say either.
+ */
+function substringTerms(words: string): string[] {
+	return words
+		.replaceAll('"', " ")
+		.split(/\s+/)
+		.filter((term) => term !== "" && term !== "OR" && !term.startsWith("-"));
+}
+
+/** `term` with LIKE's wildcards taken literally. */
+function escapeLike(term: string): string {
+	return term.replace(/[\\%_]/g, (character) => `\\${character}`);
+}

@@ -1011,6 +1011,60 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		]);
 	});
 
+	it("searches history in any language: stemmed, as written, and as substrings", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Plan the trip",
+		});
+		const said = [
+			"The hotels near the river are all booked.",
+			// "was" is an English stop word, so stemmed English search drops it.
+			"Was kostet das Hotel pro Nacht?",
+			// No spaces between words: full-text search reads this as one token.
+			"我们的酒店预算是每晚150欧元。",
+			"Discount code: 50%_OFF",
+			// "river" only as part of a longer word: a substring match, not a full-text one.
+			"Riverside parking is free.",
+		];
+		await onDatabase((db) =>
+			db.insert(message).values(
+				said.map((content, index) => ({
+					threadId: details.thread.id,
+					authorUserId: memberId,
+					kind: "text" as const,
+					status: "complete" as const,
+					parts: [{ type: "text" as const, text: content }],
+					content,
+					createdAt: new Date(Date.now() - (said.length - index) * 60_000),
+				})),
+			),
+		);
+		const search = searchHistoryTool({
+			threadId: details.thread.id,
+			before: new Date(Date.now() + 60_000),
+			run: runOnPostgres,
+		});
+		const found = async (query: string) => {
+			const result = await search.execute?.({ query }, {
+				toolCallId: "search",
+				messages: [],
+			} as never);
+			return result && "messages" in result ? result.messages.map(({ text }) => text) : [];
+		};
+
+		expect(await found("hotel booking")).toEqual([said[0]]);
+		expect(await found("was kostet")).toEqual([said[1]]);
+		expect(await found("酒店预算")).toEqual([said[2]]);
+		// Wildcards the bot types are taken literally.
+		expect(await found("50%_OFF")).toEqual([said[3]]);
+		expect(await found("5%OFF")).toEqual([]);
+		// A full-text match ranks above one found only as a substring, even a newer one.
+		expect(await found("river")).toEqual([said[0], said[4]]);
+	});
+
 	it("sizes compaction to the bot's model, and caps it to what the Compaction agent's model can read", async () => {
 		const [provider] = await onDatabase((db) =>
 			db
