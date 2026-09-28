@@ -1,4 +1,13 @@
-# Sugabots
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="packages/avatars/assets/sugabots-wordmark-dark.svg">
+    <img alt="Sugabots" src="packages/avatars/assets/sugabots-wordmark-light.svg" width="338">
+  </picture>
+</p>
+
+<p align="center">
+  <img alt="" src="packages/avatars/assets/bot-crowd.svg" width="376">
+</p>
 
 Sugabots is a self-hosted workspace where people and AI agents work together.
 Create agents, organise them into shared pods, and run conversations that can use
