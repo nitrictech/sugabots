@@ -21,6 +21,7 @@ import { ChatSidebar } from "./ChatSidebar.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { PinnedApproval } from "./ToolApprovalCard.tsx";
+import { awaitsApproval } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -93,12 +94,7 @@ export function ChatThreadPanel({
 	// The first call still waiting on a person, whose answer a phone pins to the sheet's foot.
 	const waiting = details?.messages
 		.flatMap((message) => message.parts)
-		.find(
-			(part): part is ToolCallPart =>
-				part.type === "tool_call" &&
-				part.status === "awaiting_approval" &&
-				part.approval?.status === "pending",
-		);
+		.find((part): part is ToolCallPart => part.type === "tool_call" && awaitsApproval(part));
 	return (
 		<ChatSidebar
 			label={title}

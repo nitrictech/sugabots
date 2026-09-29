@@ -112,12 +112,17 @@ export const makeControls = Effect.gen(function* () {
 						const approvalId = candidate.call.approvalId;
 						const decision = { decision: input.decision, userId: decider.actor.userId };
 						if (!candidate.owner) return yield* new ToolApprovalNotFound();
-						// Only one person's decision reaches the workflow, so the first to
-						// claim the call decides it and anyone after is told it is taken.
-						// The claim is undone with this transaction if the send fails.
-						if (!(yield* toolCalls.claimDecision(input.toolCallId, decider.actor.userId))) {
-							return yield* new ToolApprovalConflict();
-						}
+						// Recorded here, so everyone watching the thread sees it decided as
+						// this commits rather than once the workflow wakes; the workflow's
+						// own recording then changes nothing. The first decision recorded
+						// stands, and the record is undone with this transaction if the
+						// send fails.
+						const recorded = yield* toolCalls.recordDecision({
+							threadId: approvalThread.id,
+							approvalId,
+							decision,
+						});
+						if (!recorded) return yield* new ToolApprovalConflict();
 						return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
 					}),
 				),

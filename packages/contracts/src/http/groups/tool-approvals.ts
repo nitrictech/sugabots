@@ -8,8 +8,8 @@ import { Session } from "../middleware.ts";
 export class ToolApprovalsApi extends HttpApiGroup.make("toolApprovals")
 	.add(
 		// Who may decide depends on the tool call as well as the pod: a Routine's
-		// action asks more than an ordinary approval. The decision is accepted,
-		// then recorded by the turn: the call's status changes on the thread's
+		// action asks more than an ordinary approval. The decision is recorded
+		// before this answers, and the call's status changes on the thread's
 		// event stream.
 		HttpApiEndpoint.post("decide", "/pods/:podId/tool-calls/:toolCallId/approval", {
 			params: { podId: uuidSchema, toolCallId: Schema.String },

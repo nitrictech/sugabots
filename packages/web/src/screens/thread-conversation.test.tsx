@@ -332,6 +332,29 @@ describe("a reply still being written", () => {
 		expect(await screen.findByRole("button", { name: "Allow" })).toBeDefined();
 		expect(screen.queryByRole("status")).toBeNull();
 	});
+
+	it("types again once the write is allowed, before it starts", async () => {
+		show([
+			reply(
+				[
+					toolCall("linear__create_issue", {
+						status: "awaiting_approval",
+						output: null,
+						finishedAt: null,
+						mutating: true,
+						approval: { status: "allowed", decidedByName: "Ryan Eyes", decidedAt: null },
+					}),
+				],
+				{ status: "streaming" },
+			),
+		]);
+
+		const line = await screen.findByRole("button", { name: /Using Linear/ });
+		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
+		expect(screen.queryByRole("region", { name: /Approval needed/ })).toBeNull();
+		fireEvent.click(line);
+		expect(screen.getByText("Allowed by Ryan Eyes")).toBeDefined();
+	});
 });
 
 describe("a write that needs approving", () => {

@@ -54,13 +54,6 @@ describe("closing a call", () => {
 });
 
 describe("deciding an approval", () => {
-	it("lets the first person claim a pending call, and nobody after", () => {
-		const claimed = transition(parked, ToolCallEvent.Claim({ userId: sam }));
-		expect(claimed).toEqual({ _tag: "Next", state: { ...parked, decidedById: sam } });
-		if (claimed._tag !== "Next") return;
-		expect(transition(claimed.state, ToolCallEvent.Claim({ userId: alex }))._tag).toBe("Refused");
-	});
-
 	it("allows a call, which then waits to run", () => {
 		expect(transition(parked, decide("allow_once", sam))).toEqual({
 			_tag: "Next",

@@ -7,9 +7,10 @@ import { approvalDecided, cancelRequested, Turn } from "./turn.workflow.ts";
 
 /**
  * What people tell a turn's workflow execution while it waits for approvals.
- * Sending is the write: the workflow records each decision, and the first one
- * sent is the one that stands, so a repeated or late signal changes nothing.
- * `owner` is the turn's execution id.
+ * A decision is recorded as it is sent (see `Turns.Controls`); the workflow
+ * records it again in case it was not, and the first recorded is the one
+ * that stands, so a repeated or late signal changes nothing. `owner` is the
+ * turn's execution id.
  */
 export interface Interface {
 	readonly decide: (signal: {
