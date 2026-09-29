@@ -181,7 +181,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		});
 		const members = (await roster.json()) as WorkspaceMember[];
 		expect(members.map((member) => [member.user.email, member.role]).sort()).toEqual([
-			[adaEmail, "admin"],
+			[adaEmail, "owner"],
 			[bobEmail, "member"],
 		]);
 	});

@@ -3,6 +3,10 @@ import { CheckIcon, MinusIcon } from "lucide-react";
 import { useState } from "react";
 
 const roles = {
+	owner: {
+		label: "Owner",
+		summary: "Administers the workspace, decides who else does, and can hand it on.",
+	},
 	admin: {
 		label: "Admin",
 		summary: "Administers the workspace, its providers and every shared pod.",
@@ -24,18 +28,20 @@ interface Ability {
 const abilities: readonly Ability[] = [
 	{
 		label: "Chat with bots",
-		roles: ["admin", "member", "viewer"],
-		note: "In pods they're in; admins reach every shared pod",
+		roles: ["owner", "admin", "member", "viewer"],
+		note: "In pods they're in; the owner and admins reach every shared pod",
 	},
-	{ label: "Create and edit bots", roles: ["admin", "member"] },
-	{ label: "Answer a bot's approval in a chat", roles: ["admin", "member"] },
-	{ label: "Delete bots", roles: ["admin"] },
-	{ label: "Create pods", roles: ["admin"] },
-	{ label: "Add and manage connections", roles: ["admin"] },
-	{ label: "Create and manage routines", roles: ["admin"] },
-	{ label: "Answer approvals from routine runs", roles: ["admin"] },
-	{ label: "Connect models and web search", roles: ["admin"] },
-	{ label: "Invite and manage people", roles: ["admin"] },
+	{ label: "Create and edit bots", roles: ["owner", "admin", "member"] },
+	{ label: "Answer a bot's approval in a chat", roles: ["owner", "admin", "member"] },
+	{ label: "Delete bots", roles: ["owner", "admin"] },
+	{ label: "Create pods", roles: ["owner", "admin"] },
+	{ label: "Add and manage connections", roles: ["owner", "admin"] },
+	{ label: "Create and manage routines", roles: ["owner", "admin"] },
+	{ label: "Answer approvals from routine runs", roles: ["owner", "admin"] },
+	{ label: "Connect models and web search", roles: ["owner", "admin"] },
+	{ label: "Invite and manage members and viewers", roles: ["owner", "admin"] },
+	{ label: "Make, unmake and remove admins", roles: ["owner"] },
+	{ label: "Transfer ownership", roles: ["owner"] },
 ];
 
 /** Who can do what, with a role to pick out. */

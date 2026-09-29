@@ -45,6 +45,13 @@ export type WorkspacePermission =
 	| "workspace.providers.manage"
 	/** Invite, remove and set the access of the people in the workspace. */
 	| "workspace.members.manage"
+	/**
+	 * Make somebody an administrator or stop them being one, and remove an
+	 * administrator. Taken with `workspace.members.manage`, never instead of it.
+	 */
+	| "workspace.admins.manage"
+	/** Hand the workspace to another member, who becomes its owner. */
+	| "workspace.ownership.transfer"
 	/** Choose the models the Scribe and the Facilitator run on. */
 	| "workspace.builtInAgents.configure"
 	/** See what the workspace's models cost, every pod's and bot's included, and limit it. */
@@ -101,16 +108,23 @@ export interface PodFacts {
 	isMember: boolean;
 }
 
+const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
+	"workspace.read",
+	"workspace.update",
+	"workspace.providers.manage",
+	"workspace.members.manage",
+	"workspace.builtInAgents.configure",
+	"workspace.usage.manage",
+	"pod.create",
+];
+
 const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
-	admin: new Set<WorkspacePermission>([
-		"workspace.read",
-		"workspace.update",
-		"workspace.providers.manage",
-		"workspace.members.manage",
-		"workspace.builtInAgents.configure",
-		"workspace.usage.manage",
-		"pod.create",
+	owner: new Set<WorkspacePermission>([
+		...ADMINISTRATOR_WORKSPACE_GRANTS,
+		"workspace.admins.manage",
+		"workspace.ownership.transfer",
 	]),
+	admin: new Set<WorkspacePermission>(ADMINISTRATOR_WORKSPACE_GRANTS),
 	member: new Set<WorkspacePermission>(["workspace.read"]),
 	viewer: new Set<WorkspacePermission>(["workspace.read"]),
 };
@@ -122,25 +136,30 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
  * no exception: database triggers make them members of every shared pod, as
  * `podMember` in `packages/core/src/workspaces/sql.ts` describes.
  */
+const ADMINISTRATOR_POD_GRANTS = new Set<PodPermission>([
+	"pod.read",
+	"pod.update",
+	"pod.delete",
+	"pod.members.manage",
+	"agent.read",
+	"agent.create",
+	"agent.update",
+	"agent.delete",
+	"connection.read",
+	"connection.manage",
+	"routine.read",
+	"routine.manage",
+	"routine.run",
+	"routine.history.read",
+	"approval.decide",
+	"approval.routine.decide",
+]);
+
 const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
-	admin: new Set<PodPermission>([
-		"pod.read",
-		"pod.update",
-		"pod.delete",
-		"pod.members.manage",
-		"agent.read",
-		"agent.create",
-		"agent.update",
-		"agent.delete",
-		"connection.read",
-		"connection.manage",
-		"routine.read",
-		"routine.manage",
-		"routine.run",
-		"routine.history.read",
-		"approval.decide",
-		"approval.routine.decide",
-	]),
+	// The owner administers pods exactly as an administrator does; what sets
+	// them apart is in the workspace grants.
+	owner: ADMINISTRATOR_POD_GRANTS,
+	admin: ADMINISTRATOR_POD_GRANTS,
 	member: new Set<PodPermission>([
 		"pod.read",
 		"pod.leave",
@@ -244,5 +263,7 @@ export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 		manageMembers: mayInWorkspace(actor, "workspace.members.manage"),
 		configureBuiltInAgents: mayInWorkspace(actor, "workspace.builtInAgents.configure"),
 		manageUsage: mayInWorkspace(actor, "workspace.usage.manage"),
+		manageAdmins: mayInWorkspace(actor, "workspace.admins.manage"),
+		transferOwnership: mayInWorkspace(actor, "workspace.ownership.transfer"),
 	};
 }

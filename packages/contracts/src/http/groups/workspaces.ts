@@ -5,6 +5,7 @@ import {
 	invitationPreviewSchema,
 	newWorkspaceInvitationSchema,
 	newWorkspaceSchema,
+	ownershipTransferSchema,
 	workspaceDetailsSchema,
 	workspaceInvitationSchema,
 	workspaceMemberSchema,
@@ -47,6 +48,11 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		HttpApiEndpoint.delete("removeMember", "/workspaces/:workspace/members/:memberId", {
 			params: { ...workspace, memberId: uuidSchema },
 			error: [BadRequest, ...refused],
+		}),
+		HttpApiEndpoint.put("transferOwnership", "/workspaces/:workspace/owner", {
+			params: workspace,
+			payload: ownershipTransferSchema,
+			error: refused,
 		}),
 		HttpApiEndpoint.post("leave", "/workspaces/:workspace/leave", {
 			params: workspace,

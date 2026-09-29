@@ -10,6 +10,7 @@ import {
 	searchProvider,
 	user,
 	workspaceInvite,
+	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
@@ -106,7 +107,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		return row;
 	}
 
-	/** A workspace Ada administers. */
+	/** A workspace Ada owns. */
 	async function workspaceOfAda() {
 		const ada = await person("Ada");
 		const created = await run(ada.id, (m) =>
@@ -137,11 +138,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		return member;
 	}
 
-	it("makes the creator its administrator, and provisions the workspace and their Personal pod", async () => {
+	it("makes the creator its owner, and provisions the workspace and their Personal pod", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 
 		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual([
-			expect.objectContaining({ role: "admin", user: expect.objectContaining({ id: ada.id }) }),
+			expect.objectContaining({ role: "owner", user: expect.objectContaining({ id: ada.id }) }),
 		]);
 		expect(
 			await onDatabase((db) =>
@@ -490,34 +491,140 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());
 	});
 
-	it("keeps the last administrator", async () => {
+	/** The membership `userId` holds in the workspace, as they see it on the roster. */
+	async function membershipOf(workspaceId: string, userId: string) {
+		const members = await run(userId, (m) => m.members({ workspace: workspaceId }));
+		if ("failed" in members) throw new Error(members.failed);
+		const own = members.find((one) => one.user.id === userId);
+		if (!own) throw new Error("They are not in the workspace");
+		return own;
+	}
+
+	it("keeps the owner, whom nobody demotes or removes and who cannot leave", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
-		await join(workspace.id, ada.id, bob);
-		const members = await run(ada.id, (m) => m.members({ workspace: workspace.id }));
-		if ("failed" in members) throw new Error(members.failed);
-		const adaMember = members.find((one) => one.user.id === ada.id);
-		if (!adaMember) throw new Error("Ada is missing");
+		await join(workspace.id, ada.id, bob, "admin");
+		const adaMember = await membershipOf(workspace.id, ada.id);
+
+		for (const actor of [ada.id, bob.id]) {
+			expect(
+				await run(actor, (m) => m.remove({ workspace: workspace.id, memberId: adaMember.id })),
+			).toEqual({ failed: "OwnerStays" });
+			expect(
+				await run(actor, (m) =>
+					m.changeRole({ workspace: workspace.id, memberId: adaMember.id, role: "member" }),
+				),
+			).toEqual({ failed: "OwnerStays" });
+		}
+		expect(await run(ada.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
+			failed: "OwnerStays",
+		});
+		expect(await membershipOf(workspace.id, ada.id)).toMatchObject({ role: "owner" });
+	});
+
+	it("leaves making, unmaking and removing administrators to the owner", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const kim = await person("Kim");
+		const lee = await person("Lee");
+		await join(workspace.id, ada.id, bob, "admin");
+		const kimMember = await join(workspace.id, ada.id, kim, "admin");
+		const leeMember = await join(workspace.id, ada.id, lee);
 
 		expect(
-			await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: adaMember.id })),
-		).toEqual({
-			failed: "LastAdministrator",
-		});
+			await run(bob.id, (m) =>
+				m.changeRole({ workspace: workspace.id, memberId: leeMember.id, role: "admin" }),
+			),
+		).toEqual({ failed: "ActionForbidden" });
 		expect(
-			await run(ada.id, (m) =>
-				m.changeRole({
+			await run(bob.id, (m) =>
+				m.changeRole({ workspace: workspace.id, memberId: kimMember.id, role: "member" }),
+			),
+		).toEqual({ failed: "ActionForbidden" });
+		expect(
+			await run(bob.id, (m) => m.remove({ workspace: workspace.id, memberId: kimMember.id })),
+		).toEqual({ failed: "ActionForbidden" });
+		expect(
+			await run(bob.id, (m) =>
+				m.invite({
 					workspace: workspace.id,
-					memberId: adaMember.id,
-					role: "member",
+					invitation: { email: `new-${unique()}@example.com`, role: "admin" },
 				}),
 			),
-		).toEqual({
-			failed: "LastAdministrator",
+		).toEqual({ failed: "ActionForbidden" });
+
+		// Everybody who is not an administrator is still an administrator's to manage.
+		await run(bob.id, (m) =>
+			m.changeRole({ workspace: workspace.id, memberId: leeMember.id, role: "viewer" }),
+		);
+		expect(await membershipOf(workspace.id, lee.id)).toMatchObject({ role: "viewer" });
+
+		await run(ada.id, (m) =>
+			m.changeRole({ workspace: workspace.id, memberId: kimMember.id, role: "member" }),
+		);
+		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "member" });
+		// An administrator may leave: the owner is still there to administer.
+		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
+	});
+
+	it("transfers ownership, making the new owner an administrator of every shared pod and the old one an admin", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
+		const [shared] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values({
+					workspaceId: workspace.id,
+					kind: "shared",
+					name: "Launch",
+					slug: `launch-${unique()}`,
+				})
+				.returning(),
+		);
+		if (!shared) throw new Error("The pod was not created");
+
+		expect(
+			await run(ada.id, (m) =>
+				m.transferOwnership({ workspace: workspace.id, memberId: bobMember.id }),
+			),
+		).toBeUndefined();
+
+		expect(await membershipOf(workspace.id, bob.id)).toMatchObject({ role: "owner" });
+		expect(await membershipOf(workspace.id, ada.id)).toMatchObject({ role: "admin" });
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ userId: podMember.userId })
+					.from(podMember)
+					.where(eq(podMember.podId, shared.id)),
+			).then((rows) => rows.map((row) => row.userId).toSorted()),
+		).toEqual([ada.id, bob.id].toSorted());
+		// Ada holds nothing of the owner's now, and Bob can leave nothing behind.
+		const adaMember = await membershipOf(workspace.id, ada.id);
+		expect(
+			await run(ada.id, (m) =>
+				m.transferOwnership({ workspace: workspace.id, memberId: adaMember.id }),
+			),
+		).toEqual({ failed: "ActionForbidden" });
+		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
+			failed: "OwnerStays",
 		});
-		expect(await run(ada.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
-			failed: "LastAdministrator",
-		});
+	});
+
+	it("lets a workspace have only one owner", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const bobMember = await join(workspace.id, ada.id, bob);
+
+		await expect(
+			onDatabase((db) =>
+				db
+					.update(workspaceMember)
+					.set({ role: "owner" })
+					.where(eq(workspaceMember.id, bobMember.id)),
+			),
+		).rejects.toThrow();
 	});
 
 	it("hides a workspace from somebody outside it", async () => {
@@ -625,12 +732,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await join(workspace.id, ada.id, bob, "viewer");
 
 		expect(await run(ada.id, (m) => m.access({ workspace: workspace.slug }))).toMatchObject({
-			role: "admin",
-			permissions: { manageMembers: true, createPods: true },
+			role: "owner",
+			permissions: {
+				manageMembers: true,
+				createPods: true,
+				manageAdmins: true,
+				transferOwnership: true,
+			},
 		});
 		expect(await run(bob.id, (m) => m.access({ workspace: workspace.id }))).toMatchObject({
 			role: "viewer",
-			permissions: { manageMembers: false, createPods: false },
+			permissions: {
+				manageMembers: false,
+				createPods: false,
+				manageAdmins: false,
+				transferOwnership: false,
+			},
 		});
 		expect(await run(eve.id, (m) => m.access({ workspace: workspace.id }))).toEqual({
 			failed: "ResourceHidden",

@@ -1,6 +1,7 @@
 export * as PodRepository from "./pod-repository.ts";
 
 import {
+	administersWorkspace,
 	leastUsedPodColor,
 	PERSONAL_POD_SLUG,
 	type PodColor,
@@ -303,7 +304,7 @@ export const make = Effect.gen(function* () {
 								)
 								.limit(1),
 						);
-						if (membership?.role === "admin") {
+						if (administersWorkspace(membership?.role)) {
 							return "administrator";
 						}
 						const removed = yield* query((db) =>

@@ -27,6 +27,7 @@ export const client = {
 			members: vi.fn(),
 			updateMember: vi.fn(),
 			removeMember: vi.fn(),
+			transferOwnership: vi.fn(),
 			leave: vi.fn(),
 			invitations: vi.fn(),
 			invite: vi.fn(),

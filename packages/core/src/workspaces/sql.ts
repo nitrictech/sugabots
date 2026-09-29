@@ -1,12 +1,18 @@
 import type {
 	AgentColor,
 	AgentFace,
+	AssignableWorkspaceRole,
 	PodColor,
 	PodRouting,
 	SystemAgentKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
-import { DEFAULT_POD_ROUTING, DEFAULT_TIME_ZONE, WORKSPACE_ROLES } from "@sugabots/contracts";
+import {
+	ASSIGNABLE_WORKSPACE_ROLES,
+	DEFAULT_POD_ROUTING,
+	DEFAULT_TIME_ZONE,
+	WORKSPACE_ROLES,
+} from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
@@ -24,11 +30,12 @@ import {
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 
 /** Text with a check constraint rather than a Postgres enum, so adding a role needs no type migration. */
-const workspaceRole = (name: string) => text(name).$type<WorkspaceRole>();
+const workspaceRole = <Role extends WorkspaceRole = WorkspaceRole>(name: string) =>
+	text(name).$type<Role>();
 
-function supportedRole(column: AnyPgColumn) {
+function roleIsOneOf(column: AnyPgColumn, roles: readonly WorkspaceRole[]) {
 	return sql`${column} in (${sql.join(
-		WORKSPACE_ROLES.map((role) => sql.raw(`'${role}'`)),
+		roles.map((role) => sql.raw(`'${role}'`)),
 		sql`, `,
 	)})`;
 }
@@ -134,7 +141,13 @@ export const workspace = pgTable(
 	(table) => [uniqueIndex("workspace_slug_idx").on(table.slug)],
 );
 
-/** Who belongs to a workspace, and whether they may administer it. */
+/**
+ * Who belongs to a workspace, and whether they may administer it.
+ *
+ * `workspace_member_owner_idx` lets a workspace have one owner at most. That
+ * it has one at least is `Membership`'s to keep: the creator is made owner, and
+ * the owner's row changes only by transferring ownership.
+ */
 export const workspaceMember = pgTable(
 	"workspace_member",
 	{
@@ -151,7 +164,10 @@ export const workspaceMember = pgTable(
 	(table) => [
 		uniqueIndex("workspace_member_idx").on(table.workspaceId, table.userId),
 		index("workspace_member_user_id_idx").on(table.userId),
-		check("workspace_member_role_check", supportedRole(table.role)),
+		uniqueIndex("workspace_member_owner_idx")
+			.on(table.workspaceId)
+			.where(sql`${table.role} = 'owner'`),
+		check("workspace_member_role_check", roleIsOneOf(table.role, WORKSPACE_ROLES)),
 	],
 );
 
@@ -165,7 +181,7 @@ export const workspaceInvite = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		// Stored lower-cased, and compared with the account's address lower-cased.
 		email: text("email").notNull(),
-		role: workspaceRole("role").notNull().default("member"),
+		role: workspaceRole<AssignableWorkspaceRole>("role").notNull().default("member"),
 		status: text("status")
 			.$type<"pending" | "accepted" | "canceled">()
 			.notNull()
@@ -179,7 +195,7 @@ export const workspaceInvite = pgTable(
 	(table) => [
 		index("workspace_invite_workspace_id_idx").on(table.workspaceId),
 		index("workspace_invite_email_idx").on(table.email),
-		check("workspace_invite_role_check", supportedRole(table.role)),
+		check("workspace_invite_role_check", roleIsOneOf(table.role, ASSIGNABLE_WORKSPACE_ROLES)),
 		check(
 			"workspace_invite_status_check",
 			sql`${table.status} in ('pending', 'accepted', 'canceled')`,
@@ -262,9 +278,11 @@ export const pod = pgTable(
  * added it (`20260922010506_productive_dreadnoughts`) and is named here
  * because this is where somebody checking what constrains these rows looks.
  *
- * The admin rows are written by triggers too, in `20260928013544_admins_in_every_pod`:
- * `shared_pod_administrators` adds every admin to a new shared pod, and
- * `administrator_shared_pods` adds a new admin to every shared pod. Both take
+ * The administrators' rows are written by triggers too, added in
+ * `20260928141359_admins_in_every_pod` and extended to the owner in
+ * `20260929002409_workspace_owner`: `shared_pod_administrators` adds every
+ * owner and admin to a new shared pod, and `administrator_shared_pods` adds a
+ * new owner or admin to every shared pod. Both take
  * `lock_pod_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */

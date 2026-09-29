@@ -1,14 +1,14 @@
 ---
 title: People and roles
-description: Who can join a workspace, and what admins, members and viewers can do.
+description: Who can join a workspace, and what its owner, admins, members and viewers can do.
 ---
 
-Everyone in a workspace has a role: admin, member or viewer. The role decides
+Everyone in a workspace has a role: owner, admin, member or viewer. The role decides
 what they can change, and pods decide what they can see.
 
 ## Who gets in
 
-The first person to sign up on an installation owns it, and becomes the admin of
+The first person to sign up on an installation owns it, and becomes the owner of
 the workspace they create. After that, sign-up is by invitation only, unless the
 installation turns on [`ALLOW_OPEN_SIGNUP`](/docs/configuration#access).
 
@@ -25,12 +25,16 @@ Invites expire after two days. Anyone who joins gets their own
 
 ## Roles
 
-There are three. Pick one to see what it can do.
+There are four. Pick one to see what it can do.
 
 <RoleMatrix />
 
-Members and viewers only see the pods they've been added to. Admins can reach
-every shared pod, but nobody can see into someone else's Personal pod.
+Members and viewers only see the pods they've been added to. The owner and admins
+can reach every shared pod, but nobody can see into someone else's Personal pod.
+
+Each workspace has exactly one owner: whoever created it. The owner can do
+everything an admin can, and is the only one who can make someone an admin, stop
+them being one, or remove them.
 
 ## Leaving and removing
 
@@ -38,5 +42,7 @@ Open a person in **Settings → Members** to change their role or remove them.
 Removing someone takes away their access to the workspace and every pod in it. Their Personal pod
 and its conversations are deleted, but pods they made stay.
 
-A workspace always keeps at least one admin: the only admin can't be removed or
-lose the admin role.
+The owner can't be removed or lose their role, and can't leave. To hand the
+workspace on, the owner opens another person in **Settings → Members** and makes
+them the owner. The new owner takes over, and the old one stays on as an
+admin.

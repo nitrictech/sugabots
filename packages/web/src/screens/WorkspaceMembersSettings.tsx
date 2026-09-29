@@ -1,7 +1,8 @@
 import {
+	ASSIGNABLE_WORKSPACE_ROLES,
+	type AssignableWorkspaceRole,
+	administersWorkspace,
 	type Pod,
-	WORKSPACE_ROLES,
-	type WorkspaceRole,
 	workspaceRoleDescription,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
@@ -17,6 +18,7 @@ import {
 	useInviteWorkspaceMember,
 	useLeaveWorkspace,
 	useRemoveWorkspaceMember,
+	useTransferWorkspaceOwnership,
 	useUpdateWorkspaceMemberRole,
 	useWorkspaceInvitations,
 	useWorkspaceMembers,
@@ -49,18 +51,25 @@ import { Toggle } from "@/ui/toggle.tsx";
 /**
  * The people in a workspace and the invitations still out, each person a
  * click into their own page: their role, the pods they are in, and removing
- * them. Whoever may manage members gets the controls; everybody else reads
- * the same pages without them. The API decides either way.
+ * them. Whoever may manage members gets the controls, over administrators
+ * only when they may manage those too; everybody else reads the same pages
+ * without them. The API decides either way.
  */
 export function WorkspaceMembersSettings({
 	workspaceId,
 	canManage,
+	canManageAdmins,
+	canTransferOwnership,
 	currentUserId,
 	selectedMemberId,
 }: {
 	workspaceId: string;
 	/** `workspace.members.manage`, as the API resolved it. */
 	canManage: boolean;
+	/** `workspace.admins.manage`: making, unmaking and removing administrators. */
+	canManageAdmins: boolean;
+	/** `workspace.ownership.transfer`: handing the workspace to somebody else. */
+	canTransferOwnership: boolean;
 	currentUserId?: string;
 	selectedMemberId?: string;
 }) {
@@ -84,6 +93,8 @@ export function WorkspaceMembersSettings({
 				workspaceId={workspaceId}
 				member={member}
 				canManage={canManage}
+				canManageAdmins={canManageAdmins}
+				canTransferOwnership={canTransferOwnership}
 				isYou={member.user.id === currentUserId}
 			/>
 		);
@@ -93,6 +104,7 @@ export function WorkspaceMembersSettings({
 		<Roster
 			workspaceId={workspaceId}
 			canManage={canManage}
+			canManageAdmins={canManageAdmins}
 			currentUserId={currentUserId}
 			members={members}
 		/>
@@ -102,19 +114,23 @@ export function WorkspaceMembersSettings({
 type Member = NonNullable<ReturnType<typeof useWorkspaceMembers>["data"]>[number];
 type Invitation = NonNullable<ReturnType<typeof useWorkspaceInvitations>["data"]>[number];
 
-const roleOptions = WORKSPACE_ROLES.map((role) => ({
-	value: role,
-	label: workspaceRoleLabel(role),
-}));
+/** The roles somebody can be given, without Admin for whoever may not make one. */
+function roleOptions(canManageAdmins: boolean) {
+	return ASSIGNABLE_WORKSPACE_ROLES.filter((role) => canManageAdmins || role !== "admin").map(
+		(role) => ({ value: role, label: workspaceRoleLabel(role) }),
+	);
+}
 
 function Roster({
 	workspaceId,
 	canManage,
+	canManageAdmins,
 	currentUserId,
 	members,
 }: {
 	workspaceId: string;
 	canManage: boolean;
+	canManageAdmins: boolean;
 	currentUserId?: string;
 	members: ReturnType<typeof useWorkspaceMembers>;
 }) {
@@ -166,7 +182,11 @@ function Roster({
 				/>
 			)}
 			<Dialog open={inviting} onOpenChange={setInviting}>
-				<InviteDialog workspaceId={workspaceId} done={() => setInviting(false)} />
+				<InviteDialog
+					workspaceId={workspaceId}
+					canManageAdmins={canManageAdmins}
+					done={() => setInviting(false)}
+				/>
 			</Dialog>
 		</SettingsPage>
 	);
@@ -253,28 +273,37 @@ function MemberPage({
 	workspaceId,
 	member,
 	canManage,
+	canManageAdmins,
+	canTransferOwnership,
 	isYou,
 }: {
 	workspaceId: string;
 	member: Member;
 	canManage: boolean;
+	canManageAdmins: boolean;
+	canTransferOwnership: boolean;
 	isYou: boolean;
 }) {
 	const updateRole = useUpdateWorkspaceMemberRole(workspaceId);
 	const remove = useRemoveWorkspaceMember(workspaceId);
 	const leave = useLeaveWorkspace(workspaceId);
+	const transfer = useTransferWorkspaceOwnership(workspaceId);
 	const pods = usePods();
 	const navigate = useNavigate();
 	const [confirming, setConfirming] = useState(false);
+	const [transferring, setTransferring] = useState(false);
 	const back = useBackTarget({
 		label: "Members",
 		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "members" }} />,
 	});
 	const role = member.role;
+	const isOwner = role === "owner";
 	const sharedPods = pods.data?.filter((pod) => pod.kind === "shared") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
 	// control you would need to undo it. Leaving stays, behind a confirmation.
-	const mayChangeRole = canManage && !isYou;
+	// The owner's role and place change only by their handing ownership on.
+	const mayManageThem = canManage && !isYou && !isOwner && (role !== "admin" || canManageAdmins);
+	const mayLeave = isYou && !isOwner;
 	const ending = isYou ? leave : remove;
 
 	async function confirmEnding() {
@@ -301,14 +330,21 @@ function MemberPage({
 			title={member.user.name}
 			description={member.user.email}
 		>
-			<SettingsGroup label="Role" note={role && workspaceRoleDescription(role)}>
+			<SettingsGroup
+				label="Role"
+				note={
+					isYou && isOwner
+						? `${workspaceRoleDescription(role)} To leave, transfer ownership to somebody else first.`
+						: role && workspaceRoleDescription(role)
+				}
+			>
 				<SettingsRow
 					label="Role"
 					trailing={
-						mayChangeRole && role ? (
+						mayManageThem ? (
 							<SegmentedControl
 								label={`Role for ${member.user.name}`}
-								options={roleOptions}
+								options={roleOptions(canManageAdmins)}
 								value={role}
 								onChange={(next) => updateRole.mutate({ memberId: member.id, role: next })}
 							/>
@@ -327,7 +363,7 @@ function MemberPage({
 				<SettingsGroup
 					label="Pods"
 					note={
-						role === "admin"
+						administersWorkspace(role)
 							? "Administrators are in every shared pod."
 							: "They can talk to every bot in the pods they are in."
 					}
@@ -338,7 +374,7 @@ function MemberPage({
 							pod={pod}
 							userId={member.user.id}
 							name={member.user.name}
-							canManage={canManage && role !== "admin"}
+							canManage={canManage && !administersWorkspace(role)}
 						/>
 					))}
 				</SettingsGroup>
@@ -349,11 +385,38 @@ function MemberPage({
 					trailing={<SettingsValue>{joinedDate(member.joinedAt)}</SettingsValue>}
 				/>
 			</SettingsGroup>
-			{(isYou || canManage) && (
+			{canTransferOwnership && !isYou && (
+				<SettingsGroup
+					label="Ownership"
+					note="The owner decides who administers the workspace, and is the only one who can hand it on."
+				>
+					<SettingsRow
+						label={`Make ${member.user.name} the owner`}
+						chevron
+						onClick={() => setTransferring(true)}
+					/>
+				</SettingsGroup>
+			)}
+			{(mayLeave || mayManageThem) && (
 				<SettingsDanger onClick={() => setConfirming(true)}>
 					{isYou ? "Leave workspace" : "Remove from workspace"}
 				</SettingsDanger>
 			)}
+			<DeleteDialog
+				open={transferring}
+				onOpenChange={setTransferring}
+				title={`Make ${member.user.name} the owner?`}
+				description={`You stay on as an admin. Only ${member.user.name} can decide who else administers the workspace, or hand it back to you.`}
+				confirmLabel="Transfer"
+				pending={transfer.isPending}
+				error={transfer.error ? failureMessage(transfer.error) : undefined}
+				onDelete={() =>
+					transfer.mutateAsync(member.id).then(
+						() => setTransferring(false),
+						() => {},
+					)
+				}
+			/>
 			<DeleteDialog
 				open={confirming}
 				onOpenChange={setConfirming}
@@ -422,9 +485,18 @@ function PodMembershipRow({
 }
 
 /** Emails separated by commas, spaces or new lines, each asked in with the same role. */
-function InviteDialog({ workspaceId, done }: { workspaceId: string; done: () => void }) {
+function InviteDialog({
+	workspaceId,
+	canManageAdmins,
+	done,
+}: {
+	workspaceId: string;
+	/** Offers Admin only to whoever may make one. */
+	canManageAdmins: boolean;
+	done: () => void;
+}) {
 	const [text, setText] = useState("");
-	const [role, setRole] = useState<WorkspaceRole>("member");
+	const [role, setRole] = useState<AssignableWorkspaceRole>("member");
 	const [failed, setFailed] = useState<{ email: string; reason: string }[]>([]);
 	const [sending, setSending] = useState(false);
 	const invite = useInviteWorkspaceMember(workspaceId);
@@ -475,7 +547,7 @@ function InviteDialog({ workspaceId, done }: { workspaceId: string; done: () => 
 						trailing={
 							<SegmentedControl
 								label="Role"
-								options={roleOptions}
+								options={roleOptions(canManageAdmins)}
 								value={role}
 								onChange={setRole}
 							/>

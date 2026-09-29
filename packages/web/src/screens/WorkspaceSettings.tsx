@@ -89,6 +89,8 @@ export function WorkspaceSettings({
 						<WorkspaceMembersSettings
 							workspaceId={workspace.id}
 							canManage={may.manageMembers}
+							canManageAdmins={may.manageAdmins}
+							canTransferOwnership={may.transferOwnership}
 							currentUserId={session.user?.id}
 							selectedMemberId={selectedMemberId}
 						/>
