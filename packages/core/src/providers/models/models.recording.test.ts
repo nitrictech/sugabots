@@ -59,6 +59,8 @@ type Recorded = ModelRequests.Started &
 /** A model over an OpenAI provider that answers with `responses`, one per request. */
 function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Response>) {
 	const recorded: Recorded[] = [];
+	/** Each request's body, as the provider was sent it. */
+	const sent: Array<Record<string, unknown>> = [];
 	const answers = [...responses];
 	const model = Models.make({
 		modelProviders: {
@@ -75,8 +77,10 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 				}),
 		},
 		httpClients: {
-			for: () => async () =>
-				answers.shift()?.(recorded) ?? new Response("No more answers", { status: 500 }),
+			for: () => async (_url, init) => {
+				sent.push(JSON.parse(String(init?.body)));
+				return answers.shift()?.(recorded) ?? new Response("No more answers", { status: 500 });
+			},
 		},
 		requests: {
 			start: (request) =>
@@ -88,7 +92,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 		},
 		registry: { version: "models.dev@test", cost: () => ({ input: 3, output: 15 }) },
 	});
-	return { model, recorded };
+	return { model, recorded, sent };
 }
 
 const input: Models.StreamRequest = {
@@ -107,14 +111,19 @@ const input: Models.StreamRequest = {
 	maxSteps: 8,
 };
 
-/** Reads the whole response, and how it ended. */
-const answer = (model: ReturnType<typeof modelAnswering>["model"]) =>
+/** Reads the whole response: its text, and how it ended. */
+const answer = (model: ReturnType<typeof modelAnswering>["model"], request = input) =>
 	run(
 		Effect.scoped(
 			Effect.gen(function* () {
-				const generated = yield* model.stream(input);
-				yield* Models.forEachDelta(generated.text, () => Effect.void);
-				return yield* Effect.exit(generated.finished);
+				const generated = yield* model.stream(request);
+				let text = "";
+				yield* Models.forEachDelta(generated.text, (delta) =>
+					Effect.sync(() => {
+						text += delta;
+					}),
+				);
+				return { text, finished: yield* Effect.exit(generated.finished) };
 			}),
 		),
 	);
@@ -174,5 +183,28 @@ describe("recording model requests", () => {
 		await answer(model);
 
 		expect(seenByProvider).toEqual(["started"]);
+	});
+});
+
+describe("a response at its step limit", () => {
+	it("tells its last model call to answer, changing nothing earlier calls sent", async () => {
+		const { model, sent } = modelAnswering([toolCall, reply]);
+
+		const { text } = await answer(model, { ...input, maxSteps: 2 });
+
+		expect(text).toBe("Found it.");
+		expect(sent).toHaveLength(2);
+		const [first = {}, last = {}] = sent;
+		expect(last.tools).toEqual(first.tools);
+		expect(last.tool_choice).toEqual(first.tool_choice);
+		expect(last.messages).toEqual([
+			...(first.messages as unknown[]),
+			expect.objectContaining({ role: "assistant" }),
+			{
+				role: "tool",
+				tool_call_id: "call-1",
+				content: expect.stringMatching(/^It is here\.\n\n\(This is your last step/),
+			},
+		]);
 	});
 });

@@ -380,7 +380,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await turns.fail(
 			replyTurnOf(prepared),
 			{ content: "", collaborations: [], toolCalls: [] },
-			UserMessage.of`provider down`,
+			{ userMessage: UserMessage.of`provider down`, mayRunAgain: true },
 		);
 
 		await prepareRunnable(execution, prepared.run);

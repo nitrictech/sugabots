@@ -535,11 +535,31 @@ describe("runSegment", () => {
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(turns.fail).toHaveBeenCalledWith(
-			replyTurn,
-			reply(""),
-			"The model provider could not answer.",
+		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(""), {
+			userMessage: "The model provider could not answer.",
+			mayRunAgain: true,
+		});
+	});
+
+	it("fails a reply the model finished without writing anything, without running it again", async () => {
+		const { execution, turns } = fakes();
+
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model: Models.fromStream(() => Effect.sync(() => streamed(chunks(" \n")))),
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+			}),
 		);
+
+		expect(turns.complete).not.toHaveBeenCalled();
+		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(" \n"), {
+			userMessage: "The reply stopped before answering.",
+			mayRunAgain: false,
+		});
 	});
 
 	it("keeps a turn successful when an ephemeral delta cannot be published", async () => {
@@ -582,11 +602,10 @@ describe("runSegment", () => {
 		);
 
 		expect(outcome).toEqual({ _tag: "Retry" });
-		expect(turns.fail).toHaveBeenCalledWith(
-			replyTurn,
-			reply(""),
-			"The model provider could not answer.",
-		);
+		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(""), {
+			userMessage: "The model provider could not answer.",
+			mayRunAgain: true,
+		});
 		expect(eventTypes(events)).toEqual([]);
 	});
 

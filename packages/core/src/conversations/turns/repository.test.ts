@@ -75,7 +75,12 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
-		expect(await turns.fail(replyTurnOf(prepared), emptyReply, providerDown)).toBe(true);
+		expect(
+			await turns.fail(replyTurnOf(prepared), emptyReply, {
+				userMessage: providerDown,
+				mayRunAgain: true,
+			}),
+		).toBe(true);
 
 		const second = await prepareRunnable(execution, prepared.run);
 
@@ -87,8 +92,31 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
 		// Running again could act again, so the turn stops here for a person.
 		expect(
-			await turns.fail(replyTurnOf(second), { ...emptyReply, acted: true }, providerDown),
+			await turns.fail(
+				replyTurnOf(second),
+				{ ...emptyReply, acted: true },
+				{
+					userMessage: providerDown,
+					mayRunAgain: true,
+				},
+			),
 		).toBe(false);
+	});
+
+	it("does not run a failed turn again when its failure rules that out", async () => {
+		const told = UserMessage.of`The reply stopped before answering.`;
+
+		expect(
+			await turns.fail(replyTurnOf(prepared), emptyReply, {
+				userMessage: told,
+				mayRunAgain: false,
+			}),
+		).toBe(false);
+
+		expect(await storedTurn()).toMatchObject({ status: "failed" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.failed", willRetry: false, error: told }),
+		);
 	});
 
 	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {
