@@ -1,26 +1,22 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { capabilitiesNamed, capabilityWords, discoveredModel } from "./dialect.ts";
+import { capabilitiesNamed, discoveredModel } from "./dialect.ts";
 import { anthropic, dialectFor, ollama, openaiCompatible, openrouter } from "./index.ts";
 
 describe("capabilitiesNamed", () => {
-	it("translates the words it knows and drops the rest", () => {
-		expect(
-			capabilitiesNamed({ tools: "tools", thinking: "reasoning" }, [
-				"completion",
-				"tools",
-				"thinking",
-				"hot",
-			]),
-		).toEqual(["tools", "reasoning"]);
-	});
-});
+	const named = capabilitiesNamed({ tools: "tools", thinking: "reasoning" });
 
-describe("capabilityWords", () => {
+	it("translates the words it knows and drops the rest", () => {
+		expect(Schema.decodeSync(named)(["completion", "tools", "thinking", "hot"])).toEqual([
+			"tools",
+			"reasoning",
+		]);
+	});
+
 	it("reads a missing or malformed list as no capabilities", () => {
-		expect(Schema.decodeSync(capabilityWords)(undefined)).toEqual([]);
-		expect(Schema.decodeUnknownSync(capabilityWords)("tools")).toEqual([]);
-		expect(Schema.decodeUnknownSync(capabilityWords)([1, null])).toEqual([]);
+		expect(Schema.decodeSync(named)(undefined)).toEqual([]);
+		expect(Schema.decodeUnknownSync(named)("tools")).toEqual([]);
+		expect(Schema.decodeUnknownSync(named)([1, null])).toEqual([]);
 	});
 });
 

@@ -3,6 +3,7 @@ import {
 	type Agent,
 	type AgentColor,
 	type AgentFace,
+	effectiveCapabilities,
 	type ModelProvider,
 	type Pod,
 	type ProviderModel,
@@ -403,7 +404,9 @@ function ChooseModelStep({
 		const index = starters.indexOf(model.modelId);
 		return index === -1 ? starters.length : index;
 	};
-	const choices = [...provider.models].sort((a, b) => rank(a) - rank(b));
+	const choices = provider.models
+		.filter((model) => !effectiveCapabilities(model).includes("embeddings"))
+		.sort((a, b) => rank(a) - rank(b));
 	const [chosenId, setChosenId] = useState(
 		() => choices.find((model) => model.enabled && model.modelId === bot?.model)?.id,
 	);

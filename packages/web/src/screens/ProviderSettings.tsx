@@ -16,6 +16,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
 	Brain,
 	Eye,
+	Grid2X2,
 	Image,
 	type LucideIcon,
 	Mic,
@@ -556,6 +557,7 @@ const capabilityIcons: Record<ProviderModelCapability, LucideIcon> = {
 	images: Image,
 	audio: Mic,
 	reasoning: Brain,
+	embeddings: Grid2X2,
 };
 
 /** What a model can do, as small icons after its line; a capability switched off is left out. */

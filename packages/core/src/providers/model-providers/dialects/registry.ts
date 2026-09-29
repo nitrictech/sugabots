@@ -124,14 +124,19 @@ export function registryFrom(source: RegistrySource, version: string): ModelRegi
 			return {
 				modelId: model.modelId,
 				displayName: model.displayName ?? known.name ?? null,
-				capabilities: model.capabilities.length > 0 ? model.capabilities : capabilitiesOf(known),
+				capabilities:
+					model.capabilities.length > 0 ? model.capabilities : capabilitiesOf(model.modelId, known),
 				contextLength: model.contextLength ?? (context > 0 ? context : null),
 			};
 		},
 	};
 }
 
-function capabilitiesOf(known: RegistryModel): ProviderModelCapability[] {
+/**
+ * The registry has no word for an embedding model, but every one it lists is
+ * named for it, and the picker relies on the capability to leave them out.
+ */
+function capabilitiesOf(modelId: string, known: RegistryModel): ProviderModelCapability[] {
 	const capabilities: ProviderModelCapability[] = [];
 	const input = known.modalities?.input ?? [];
 	const output = known.modalities?.output ?? [];
@@ -140,6 +145,7 @@ function capabilitiesOf(known: RegistryModel): ProviderModelCapability[] {
 	if (input.includes("image")) capabilities.push("vision");
 	if (input.includes("audio")) capabilities.push("audio");
 	if (output.includes("image")) capabilities.push("images");
+	if (/embed/.test(bare(modelId))) capabilities.push("embeddings");
 	return capabilities;
 }
 

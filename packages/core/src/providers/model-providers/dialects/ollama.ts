@@ -2,7 +2,6 @@ import { Effect, Schema, SchemaGetter } from "effect";
 import {
 	type CapabilityVocabulary,
 	capabilitiesNamed,
-	capabilityWords,
 	discoveredModel,
 	ModelInspectionFailed,
 	type ProviderDialect,
@@ -15,12 +14,13 @@ const INSPECT_TIMEOUT_MS = 10_000;
 const OLLAMA_CAPABILITIES: CapabilityVocabulary = {
 	tools: "tools",
 	vision: "vision",
+	embedding: "embeddings",
 	thinking: "reasoning",
 };
 
 /** What `/api/show` says about a model, as the two fields the listing lacked. */
 const shown = Schema.Struct({
-	capabilities: capabilityWords,
+	capabilities: capabilitiesNamed(OLLAMA_CAPABILITIES),
 	model_info: Schema.Record(Schema.String, Schema.Unknown).pipe(
 		Schema.withDecodingDefault(Effect.succeed({})),
 		Schema.catchDecoding(() => Effect.succeedSome({})),
@@ -79,10 +79,9 @@ export const ollama: ProviderDialect = {
 			});
 			const details = Schema.decodeUnknownResult(shown)(body);
 			if (details._tag === "Failure") return model;
-			if (details.success.capabilities.includes("embedding")) return undefined;
 			const refined = Schema.decodeUnknownResult(discoveredModel)({
 				...model,
-				capabilities: capabilitiesNamed(OLLAMA_CAPABILITIES, details.success.capabilities),
+				capabilities: details.success.capabilities,
 				contextLength: Object.entries(details.success.model_info).find(([key]) =>
 					key.endsWith(".context_length"),
 				)?.[1],

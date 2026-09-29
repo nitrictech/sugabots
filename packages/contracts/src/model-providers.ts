@@ -24,6 +24,7 @@ export const providerModelCapabilitySchema = Schema.Literals([
 	"vision",
 	"images",
 	"audio",
+	"embeddings",
 	"reasoning",
 ]);
 export type ProviderModelCapability = typeof providerModelCapabilitySchema.Type;
@@ -158,6 +159,11 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	{ key: "images", name: "Images", description: "Makes images." },
 	{ key: "audio", name: "Audio", description: "Hears or speaks." },
 	{ key: "reasoning", name: "Reasoning", description: "Thinks before it answers." },
+	{
+		key: "embeddings",
+		name: "Embeddings",
+		description: "Turns text into vectors. Not offered to agents as a chat model.",
+	},
 ];
 
 export const providerModelSchema = Schema.Struct({

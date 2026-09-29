@@ -616,7 +616,8 @@ export class ModelNotEnabled
 
 /**
  * A model the workspace offers, in a query joining `provider_model` to
- * `model_provider`: switched on, at a provider that is, both in the workspace.
+ * `model_provider`: switched on, at a provider that is, both in the workspace,
+ * and not an embedding model.
  */
 export function offeredIn(workspaceId: string) {
 	return and(
@@ -624,8 +625,15 @@ export function offeredIn(workspaceId: string) {
 		eq(providerModel.enabled, true),
 		eq(modelProvider.active, true),
 		eq(modelProvider.workspaceId, workspaceId),
+		notEmbedding,
 	);
 }
+
+/**
+ * An embedding model cannot hold a conversation, so no agent runs on one. It
+ * is one while it has the capability and an admin has not switched it off.
+ */
+const notEmbedding = sql`not (${providerModel.capabilities} @> '["embeddings"]' and not ${providerModel.disabledCapabilities} @> '["embeddings"]')`;
 
 /**
  * The row a new provider is inserted as. From a preset, the catalog supplies

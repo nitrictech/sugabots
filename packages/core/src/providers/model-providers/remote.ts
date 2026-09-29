@@ -246,26 +246,15 @@ function requestModels(
 				const model = Schema.decodeUnknownResult(dialect.model)(entry);
 				return model._tag === "Success" ? [model.success] : [];
 			}),
-		).filter((model) => !isNamedForEmbeddings(model));
+		);
 		const inspect = dialect.inspect;
 		if (!inspect) return listed;
-		const inspected = yield* Effect.forEach(
+		return yield* Effect.forEach(
 			listed,
 			(model) => inspect(root, model, http).pipe(Effect.orElseSucceed(() => model)),
 			{ concurrency: INSPECT_CONCURRENCY },
 		);
-		return inspected.filter((model) => model !== undefined);
 	});
-}
-
-/**
- * An embedding model cannot hold a conversation, so no agent can run on one.
- * Providers name theirs for it (`text-embedding-3-small`, `nomic-embed-text`,
- * `gemini-embedding-001`); a dialect whose provider says so more reliably
- * leaves the rest out in `inspect`.
- */
-function isNamedForEmbeddings({ modelId }: DiscoveredModel): boolean {
-	return /embed/.test(modelId);
 }
 
 /** A listing that names a model twice is recorded once; the sync would otherwise refuse the batch. */
