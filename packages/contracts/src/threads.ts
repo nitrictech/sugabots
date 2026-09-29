@@ -251,6 +251,26 @@ export function isNarration(parts: readonly { type: string }[], index: number): 
 	return parts[index]?.type === "text" && parts[index + 1]?.type === "tool_call";
 }
 
+/** The longest `messagePreview` gives. */
+export const MESSAGE_PREVIEW_CHARACTERS = 140;
+
+/**
+ * A message shortened for one line, as a chat list row shows it: its first
+ * line with words in it, runs of spaces closed up, cut at a word to fit
+ * `MESSAGE_PREVIEW_CHARACTERS`.
+ */
+export function messagePreview(content: string): string {
+	const firstLine =
+		content
+			.split("\n")
+			.map((line) => line.replace(/\s+/g, " ").trim())
+			.find((line) => line !== "") ?? "";
+	if (firstLine.length <= MESSAGE_PREVIEW_CHARACTERS) return firstLine;
+	const cut = firstLine.slice(0, MESSAGE_PREVIEW_CHARACTERS - 1);
+	const atWord = cut.lastIndexOf(" ");
+	return `${(atWord > 0 ? cut.slice(0, atWord) : cut).trimEnd()}…`;
+}
+
 /** A message's text as a thread shows it: every text part but its narration. */
 export function textWithoutNarration<Part extends { type: string; text?: string }>(
 	parts: readonly Part[],

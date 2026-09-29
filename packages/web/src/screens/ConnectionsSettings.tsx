@@ -11,6 +11,7 @@ import { ArrowUpRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -33,7 +34,6 @@ import {
 	SettingsRowIcon,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { wordsFromKey } from "./tool-activity.ts";
 
 /*
  * The apps a pod's bots can reach, as one group on the pod's page: each with

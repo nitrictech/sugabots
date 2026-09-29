@@ -12,6 +12,7 @@ import { cn } from "cn";
 import { Fragment, type ReactNode, useRef } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
+import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
@@ -20,7 +21,7 @@ import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
-import { awaitsApproval, splitToolKey } from "./tool-activity.ts";
+import { awaitsApproval } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 

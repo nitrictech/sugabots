@@ -5,7 +5,9 @@ import {
 	jsonValueSchema,
 	MAX_THREAD_HISTORY_LIMIT,
 	MAX_THREAD_TITLE_CHARACTERS,
+	MESSAGE_PREVIEW_CHARACTERS,
 	messagePartsFor,
+	messagePreview,
 	messageSchema,
 	newMessageSchema,
 	textWithoutNarration,
@@ -224,5 +226,20 @@ describe("textWithoutNarration", () => {
 				{ type: "text", text: "They say it is paid." },
 			]),
 		).toBe("Asking Finance. They say it is paid.");
+	});
+});
+
+describe("messagePreview", () => {
+	it("takes the first line with words in it, with its spaces closed up", () => {
+		expect(messagePreview("\n  Budget   review is Friday\nand bring the numbers")).toBe(
+			"Budget review is Friday",
+		);
+	});
+
+	it("cuts a long line at a word, within the limit", () => {
+		const preview = messagePreview(`Here is the summary. ${"word ".repeat(60)}`);
+
+		expect(preview.length).toBeLessThanOrEqual(MESSAGE_PREVIEW_CHARACTERS);
+		expect(preview).toMatch(/ word…$/);
 	});
 });

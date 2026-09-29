@@ -5,11 +5,11 @@ import { Fragment, type ReactNode, useId, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
+import { connectionLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog, DialogContent } from "@/ui/dialog.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
-import { connectionLabel, splitToolKey, stepLabel, wordsFromKey } from "./tool-activity.ts";
 
 /*
  * A write a bot wants to make, and its reply stopped until someone answers:

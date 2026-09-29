@@ -14,6 +14,7 @@ import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
+	mayDecideApprovals,
 	ResourceHidden,
 	type ThreadStanding,
 } from "../../authorization/access.ts";
@@ -221,9 +222,7 @@ function toThreadDetails(
 		// What this person may do with the approvals this thread raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: standing.may(
-				row.routineExecutionId ? "approval.routine.decide" : "approval.decide",
-			),
+			approveToolCalls: mayDecideApprovals(standing, row.routineExecutionId !== null),
 		},
 		routineExecution: row.routineExecution ? toRoutineExecution(row.routineExecution) : null,
 		participants: row.participants.map(({ user: person, agent: participant }) =>
