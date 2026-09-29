@@ -20,7 +20,14 @@ import { ConnectionRow, valueText } from "./connection-row.tsx";
  * OpenAI's site by entering a code shown here, as with Codex CLI's headless
  * sign-in, while the page asks the server whether they have finished.
  */
-export function ChatgptSignInRow({ provider }: { provider: ModelProvider }) {
+export function ChatgptSignInRow({
+	provider,
+	signOutBlocked,
+}: {
+	provider: ModelProvider;
+	/** Why signing out is not allowed yet; the button is disabled while there is a reason. */
+	signOutBlocked?: string;
+}) {
 	const actions = useProviderActions();
 	const [started, setStarted] = useState<ChatgptSignInStarted>();
 	const [error, setError] = useState<string>();
@@ -60,7 +67,8 @@ export function ChatgptSignInRow({ provider }: { provider: ModelProvider }) {
 								variant="ghost"
 								size="bare"
 								className="text-sm"
-								disabled={actions.signOutChatgpt.isPending}
+								disabled={actions.signOutChatgpt.isPending || signOutBlocked !== undefined}
+								title={signOutBlocked}
 								onClick={() => actions.signOutChatgpt.mutate({ providerId: provider.id })}
 							>
 								Sign out

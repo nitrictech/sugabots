@@ -238,11 +238,23 @@ export const Overview = meta.story({
 	},
 });
 
-/** A provider with a few models: its key, which models are on (listed first), and who uses each. */
+/**
+ * A provider with a few models: its key, which models are on (listed first),
+ * and who uses each. Sonnet is the default and Haiku the system agents', so
+ * neither can be switched off, nor can the provider be disconnected.
+ */
 export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Sonnet" })).toBeDisabled();
+		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Haiku" })).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeDisabled();
+		await expect(
+			canvas.getByText(
+				"New bots and system agents use one of its models. Choose another model for them under Models → Default first.",
+			),
+		).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -251,7 +263,6 @@ export const Provider = meta.story({
 		await expect(
 			canvas.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-checked")),
 		).toEqual(["true", "true", "false"]);
-		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeInTheDocument();
 	},
 });
 

@@ -400,9 +400,10 @@ export const make = Effect.gen(function* () {
 						...changes,
 						active: changes.active === false ? false : undefined,
 					});
-					const updated = yield* changes.active === false
-						? keepingHeldModelsOffered(workspaceId, write)
-						: write;
+					// Switching it off and taking its key away both stop it answering. A
+					// new key does only until it is tried, just below.
+					const takesAway = changes.active === false || changes.apiKey === null;
+					const updated = yield* takesAway ? keepingHeldModelsOffered(workspaceId, write) : write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
 					}

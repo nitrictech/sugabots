@@ -26,7 +26,7 @@ export function Tooltip({
 			<TooltipPrimitive.Trigger render={children} />
 			<TooltipPrimitive.Portal>
 				<TooltipPrimitive.Positioner side={side} sideOffset={6} className="isolate z-50">
-					<TooltipPrimitive.Popup className="rounded-md bg-foreground px-2 py-1 font-sans text-xs text-background shadow-sm">
+					<TooltipPrimitive.Popup className="max-w-60 text-balance rounded-md bg-foreground px-2 py-1 font-sans text-xs text-background shadow-sm">
 						{label}
 					</TooltipPrimitive.Popup>
 				</TooltipPrimitive.Positioner>

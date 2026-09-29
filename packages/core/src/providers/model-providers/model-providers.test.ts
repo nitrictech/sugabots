@@ -648,6 +648,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await expect(
 				setup.update({ workspace: workspaceId, providerId, changes: { active: false } }),
 			).rejects.toBeInstanceOf(ModelInUse);
+			await expect(
+				setup.update({ workspace: workspaceId, providerId, changes: { apiKey: null } }),
+			).rejects.toBeInstanceOf(ModelInUse);
 			expect(await view(providerId)).toMatchObject({ active: true });
 
 			await setup.setDefaultModel({ workspace: workspaceId, model: "second" });
