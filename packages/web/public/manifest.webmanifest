@@ -1,0 +1,21 @@
+{
+	"id": "/",
+	"name": "Sugabots",
+	"short_name": "Sugabots",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#0b0c0f",
+	"theme_color": "#0b0c0f",
+	"icons": [
+		{ "src": "/icon-64.png", "sizes": "64x64", "type": "image/png" },
+		{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+		{ "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+		{
+			"src": "/icon-maskable-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}
