@@ -1,0 +1,232 @@
+---
+title: Deploy with Docker
+description: Host Sugabots on a server or a hosting platform so your team can use it.
+---
+
+The [Quickstart](/docs/quickstart) runs Sugabots on your own computer, where
+nobody else can reach it. To use it with other people, host it somewhere they
+can reach over HTTPS, and set up email so they receive their invites.
+
+Sugabots is a single Docker image, `ghcr.io/nitrictech/sugabots`, that serves
+both the web app and the API. It stores everything in PostgreSQL 18.
+
+## Requirements
+
+- A Linux server with [Docker](https://docs.docker.com/engine/install/) and
+  Docker Compose, or a hosting platform that runs Docker images
+- A domain name, such as `sugabots.example.com`, pointed at the server
+- An email provider, such as [Resend](#resend)
+
+## On your own server
+
+<Steps>
+
+1. Create `compose.yml`
+
+   Make a folder for Sugabots, and save this in it as `compose.yml`. Replace
+   `sugabots.example.com` with your domain, and `example.com` in the sender with
+   the domain you'll send email from.
+
+   ```yaml title="compose.yml"
+   name: sugabots
+
+   services:
+     sugabots:
+       image: ghcr.io/nitrictech/sugabots:latest
+       ports:
+         - "127.0.0.1:3000:3000"
+       environment:
+         DATABASE_URL: postgres://sugabots:${POSTGRES_PASSWORD}@postgres:5432/sugabots
+         PUBLIC_URL: https://sugabots.example.com
+         BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set it in .env}
+         CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?Set it in .env}
+         EMAIL_PROVIDER: resend
+         EMAIL_RESEND_API_KEY: ${EMAIL_RESEND_API_KEY:?Set it in .env}
+         EMAIL_TRANSACTIONAL_FROM: Sugabots <no-reply@example.com>
+       depends_on:
+         postgres:
+           condition: service_healthy
+       restart: unless-stopped
+
+     postgres:
+       image: postgres:18-alpine
+       environment:
+         POSTGRES_USER: sugabots
+         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set it in .env}
+         POSTGRES_DB: sugabots
+       volumes:
+         - postgres_data:/var/lib/postgresql
+       healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U sugabots -d sugabots"]
+         interval: 5s
+         retries: 12
+       restart: unless-stopped
+
+   volumes:
+     postgres_data:
+   ```
+
+   `PUBLIC_URL` must be the address people see in their browser: links in
+   emails and sign-in redirects are built from it. Every other setting is in the
+   [configuration reference](/docs/configuration).
+
+2. Create `.env`
+
+   In the same folder, generate the database password and the two secret keys:
+
+   ```sh
+   echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env
+   echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> .env
+   echo "CREDENTIALS_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
+   ```
+
+   Then add your Resend API key. If you don't have one yet, follow
+   [Resend](#resend) to get one:
+
+   ```sh title=".env"
+   EMAIL_RESEND_API_KEY=re_your_api_key
+   ```
+
+3. Start Sugabots
+
+   ```sh
+   docker compose up -d
+   ```
+
+   Sugabots sets up its database on the first start. Check that it's running
+   with `docker compose logs sugabots`.
+
+4. Add HTTPS
+
+   Sugabots only listens on the server itself, at `127.0.0.1:3000`. Put a reverse
+   proxy in front of it to serve HTTPS. With [Caddy](https://caddyserver.com/docs/install),
+   which gets and renews certificates automatically, add this to
+   `/etc/caddy/Caddyfile`:
+
+   ```text title="/etc/caddy/Caddyfile"
+   sugabots.example.com {
+   	reverse_proxy 127.0.0.1:3000
+   }
+   ```
+
+   Then reload Caddy:
+
+   ```sh
+   sudo systemctl reload caddy
+   ```
+
+   Your domain's DNS must already point at the server for Caddy to get a
+   certificate.
+
+5. Create your account
+
+   Open `https://sugabots.example.com` and sign up. The first account owns the
+   installation.
+
+</Steps>
+
+## On a hosting platform
+
+Platforms such as Railway, Render and Suga can run the image and provide HTTPS.
+Create a PostgreSQL 18 database, then a service from
+`ghcr.io/nitrictech/sugabots:latest`, and set these on it:
+
+- `DATABASE_URL`: the database's connection string
+- `PUBLIC_URL`: the service's HTTPS address
+- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`: generate each with
+  `openssl rand -base64 32`
+- The email settings from `compose.yml` above: `EMAIL_PROVIDER`,
+  `EMAIL_RESEND_API_KEY` and `EMAIL_TRANSACTIONAL_FROM`
+
+See the [configuration reference](/docs/configuration) for what each does.
+
+## Email
+
+Sugabots sends email for invites and address verification. Without a provider,
+emails are only printed to the logs, and you have to send people their links
+yourself.
+
+### Resend
+
+<Steps>
+
+1. Verify your domain
+
+   Create a [Resend](https://resend.com) account. Under **Domains**, add the
+   domain you'll send from, add the DNS records Resend shows you, and wait for
+   the domain to be verified.
+
+2. Create an API key
+
+   Under **API Keys**, create a key with **Sending access**.
+
+3. Configure Sugabots
+
+   Put the key in `.env` as `EMAIL_RESEND_API_KEY`, and set
+   `EMAIL_TRANSACTIONAL_FROM` in `compose.yml` to an address on the domain you
+   verified. Then restart with `docker compose up -d`, and invite someone from
+   **Settings → Members** to check that email arrives.
+
+</Steps>
+
+### Other providers
+
+To send through another provider, point Sugabots at a small service of your own
+that passes each email on. See the webhook settings in the
+[configuration reference](/docs/configuration#email).
+
+Resend is the first provider built in, and more are on the way. Each one is a
+[short module](https://github.com/nitrictech/sugabots/tree/main/packages/core/src/email/implementations)
+in the Sugabots repository, so if yours isn't supported yet, adding it is a
+welcome contribution.
+
+## Updating
+
+Back up first, then pull the new image and restart:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Sugabots applies any database migrations when it starts.
+
+## Backups
+
+Back up two things: the database, and the `.env` file holding the keys. Keep
+them together: without its keys, a restored database can't read its saved API
+keys, and everyone has to sign in again.
+
+To write the database to a file:
+
+```sh
+docker compose exec -T postgres pg_dump -U sugabots sugabots > sugabots-backup.sql
+```
+
+To restore, put the `.env` from the same backup beside `compose.yml`. Then
+stop Sugabots, replace the database with an empty one, load the backup, and
+start Sugabots again:
+
+```sh
+docker compose stop sugabots
+docker compose exec -T postgres dropdb -U sugabots sugabots
+docker compose exec -T postgres createdb -U sugabots sugabots
+docker compose exec -T postgres psql -U sugabots -d sugabots < sugabots-backup.sql
+docker compose start sugabots
+```
+
+This deletes whatever is in the database before loading the backup. If the
+backup is from an older version, Sugabots applies the newer migrations when it
+starts.
+
+On a hosting platform, use the platform's database backups, and keep a copy of
+the two keys.
+
+## Building the image yourself
+
+To run your own changes, build the image from a checkout of the repository and
+use it in place of `ghcr.io/nitrictech/sugabots:latest`:
+
+```sh
+docker build -t sugabots .
+```

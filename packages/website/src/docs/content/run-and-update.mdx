@@ -1,0 +1,72 @@
+---
+title: Run, update, and reset
+description: Start, stop, update and reset a Docker Compose installation.
+---
+
+Run these commands from the folder that holds your `compose.yml`: the
+`sugabots` folder, if you followed the [Quickstart](/docs/quickstart).
+
+## Start and stop
+
+```sh
+docker compose up -d    # start
+docker compose down     # stop
+```
+
+Stopping keeps your data. It lives in the `sugabots_postgres_data` Docker
+volume.
+
+## View the logs
+
+```sh
+docker compose logs -f sugabots
+```
+
+Until you [set up email](/docs/deploy-with-docker#email), this is also where
+emails such as verification links are printed.
+
+## Update
+
+Pull the latest image and restart:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Sugabots updates its database when it starts.
+
+<Tip>
+
+Before updating an installation with data you want to keep,
+[back it up](/docs/deploy-with-docker#backups).
+
+</Tip>
+
+## Reset
+
+To delete all data and start again with an empty installation:
+
+```sh
+docker compose down -v
+docker compose up -d
+```
+
+<Careful>
+
+`docker compose down -v` deletes the database volume: every account, workspace,
+conversation and saved API key. It can't be undone.
+
+</Careful>
+
+## Uninstall
+
+Delete the containers and data:
+
+```sh
+docker compose down -v
+```
+
+Then delete the folder.
+
+`.env` holds your keys, so keep a copy if you might restore a backup later.

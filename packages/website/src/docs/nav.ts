@@ -44,6 +44,15 @@ export const docGroups: readonly DocGroup[] = [
 		],
 	},
 	{
+		title: "Run it yourself",
+		tone: "orange",
+		summary: "Keep an installation up to date, or host it for your team.",
+		pages: [
+			{ slug: "run-and-update", bot: { color: "orange", face: "pill" } },
+			{ slug: "deploy-with-docker", bot: { color: "ice", face: "dot" } },
+		],
+	},
+	{
 		title: "Reference",
 		tone: "purple",
 		summary: "Every setting, in one place.",
