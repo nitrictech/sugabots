@@ -52,6 +52,8 @@ export type WorkspacePermission =
 	| "workspace.admins.manage"
 	/** Hand the workspace to another member, who becomes its owner. */
 	| "workspace.ownership.transfer"
+	/** Delete the workspace and everything in it. */
+	| "workspace.delete"
 	/** Choose the models the Scribe and the Facilitator run on. */
 	| "workspace.builtInAgents.configure"
 	/** See what the workspace's models cost, every pod's and bot's included, and limit it. */
@@ -123,6 +125,7 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 		...ADMINISTRATOR_WORKSPACE_GRANTS,
 		"workspace.admins.manage",
 		"workspace.ownership.transfer",
+		"workspace.delete",
 	]),
 	admin: new Set<WorkspacePermission>(ADMINISTRATOR_WORKSPACE_GRANTS),
 	member: new Set<WorkspacePermission>(["workspace.read"]),
@@ -265,5 +268,6 @@ export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 		manageUsage: mayInWorkspace(actor, "workspace.usage.manage"),
 		manageAdmins: mayInWorkspace(actor, "workspace.admins.manage"),
 		transferOwnership: mayInWorkspace(actor, "workspace.ownership.transfer"),
+		deleteWorkspace: mayInWorkspace(actor, "workspace.delete"),
 	};
 }

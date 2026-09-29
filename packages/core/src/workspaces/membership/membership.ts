@@ -62,6 +62,13 @@ export interface Interface {
 		SlugTaken | SlugShapedLikeUuid | TimeZoneUnknown,
 		CurrentActor.Service
 	>;
+	/**
+	 * Its pods, bots, conversations and providers go with it, and its members
+	 * lose it. What its models cost stays on the ledger. The owner's alone.
+	 */
+	readonly delete: (
+		input: InWorkspace,
+	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	readonly update: (
 		input: InWorkspace & { details: WorkspaceDetails },
 	) => Effect.Effect<
@@ -229,6 +236,15 @@ export const make = Effect.gen(function* () {
 							return created;
 						}),
 					);
+				}),
+			),
+
+		delete: (input) =>
+			operation(
+				"delete",
+				Effect.gen(function* () {
+					const standing = yield* authorization.workspace(input.workspace, "workspace.delete");
+					yield* query((db) => db.delete(workspace).where(eq(workspace.id, standing.workspaceId)));
 				}),
 			),
 

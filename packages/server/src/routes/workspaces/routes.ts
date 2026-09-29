@@ -30,6 +30,11 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 						asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
 					),
 			)
+			.handle("delete", ({ params }) =>
+				membership
+					.delete({ workspace: params.workspace })
+					.pipe(asSessionUser, asHttpError(refusals)),
+			)
 			.handle("members", ({ params }) =>
 				membership
 					.members({ workspace: params.workspace })

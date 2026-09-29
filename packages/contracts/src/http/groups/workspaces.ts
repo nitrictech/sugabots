@@ -35,6 +35,10 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 			success: workspaceSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
+		HttpApiEndpoint.delete("delete", "/workspaces/:workspace", {
+			params: workspace,
+			error: refused,
+		}),
 		HttpApiEndpoint.get("members", "/workspaces/:workspace/members", {
 			params: workspace,
 			success: Schema.Array(workspaceMemberSchema),

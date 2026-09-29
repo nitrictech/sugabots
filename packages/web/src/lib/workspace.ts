@@ -62,6 +62,24 @@ export function useCreateWorkspace() {
 }
 
 /**
+ * Deletes a workspace for good. It leaves the list at once, so `/` opens
+ * another one, or onboarding when there is none.
+ */
+export function useDeleteWorkspace() {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: (workspaceId: string) =>
+			Effect.runPromise(client.api.workspaces.delete({ params: { workspace: workspaceId } })),
+		onSuccess: async (_, workspaceId) => {
+			queries.setQueryData<readonly Workspace[]>(["workspaces"], (workspaces) =>
+				workspaces?.filter((workspace) => workspace.id !== workspaceId),
+			);
+			await queries.invalidateQueries({ queryKey: ["workspaces"] });
+		},
+	});
+}
+
+/**
  * The time zone this browser is set to, which a new workspace takes. Undefined
  * when the API would not accept it, and the workspace is then in the default.
  */
@@ -277,6 +295,7 @@ const NOTHING_YET: WorkspacePermissions = {
 	manageUsage: false,
 	manageAdmins: false,
 	transferOwnership: false,
+	deleteWorkspace: false,
 };
 
 function useWorkspaceStanding() {

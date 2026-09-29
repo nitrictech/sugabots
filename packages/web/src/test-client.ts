@@ -24,6 +24,7 @@ export const client = {
 			list: vi.fn(),
 			create: vi.fn(),
 			update: vi.fn(),
+			delete: vi.fn(),
 			members: vi.fn(),
 			updateMember: vi.fn(),
 			removeMember: vi.fn(),

@@ -119,6 +119,8 @@ export const workspacePermissionsSchema = Schema.Struct({
 	manageAdmins: Schema.Boolean,
 	/** Hand the workspace to another member, who becomes its owner. */
 	transferOwnership: Schema.Boolean,
+	/** Delete the workspace and everything in it. */
+	deleteWorkspace: Schema.Boolean,
 });
 
 export type WorkspacePermissions = typeof workspacePermissionsSchema.Type;

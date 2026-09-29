@@ -95,15 +95,17 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.members.manage": true,
 	"workspace.admins.manage": true,
 	"workspace.ownership.transfer": true,
+	"workspace.delete": true,
 	"workspace.builtInAgents.configure": true,
 	"workspace.usage.manage": true,
 	"pod.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
 
-/** What only the owner may do: decide who administers, and hand the workspace on. */
+/** What only the owner may do: decide who administers, hand the workspace on, and delete it. */
 const OWNER_ONLY: WorkspacePermission[] = [
 	"workspace.admins.manage",
 	"workspace.ownership.transfer",
+	"workspace.delete",
 ];
 
 describe("workspace actions", () => {

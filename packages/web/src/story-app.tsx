@@ -94,6 +94,7 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 	manageUsage: false,
 	manageAdmins: false,
 	transferOwnership: false,
+	deleteWorkspace: false,
 };
 
 /** What each role may do in the workspace, as the API's grant tables decide it. */
@@ -106,6 +107,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		manageUsage: true,
 		manageAdmins: true,
 		transferOwnership: true,
+		deleteWorkspace: true,
 	},
 	admin: {
 		createPods: true,
@@ -115,6 +117,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		manageUsage: true,
 		manageAdmins: false,
 		transferOwnership: false,
+		deleteWorkspace: false,
 	},
 	member: NO_PERMISSIONS,
 	viewer: NO_PERMISSIONS,
