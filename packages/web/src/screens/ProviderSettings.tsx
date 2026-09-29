@@ -200,7 +200,9 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const disconnect = seeded ? actions.update : actions.remove;
 	const disconnectPending = disconnect.isPending || actions.signOutChatgpt.isPending;
 	const disconnectError = disconnect.error ?? actions.signOutChatgpt.error;
-	const held = useProviderHolders(provider);
+	// Switching a provider off only stops what it offers; removing one deletes
+	// every model it lists, including one held while the provider is off.
+	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
 
 	async function confirmDisconnect() {
 		try {
@@ -305,7 +307,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 	const custom = provider.preset === null;
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
-	const held = useProviderHolders(provider);
+	const held = useHoldersOf(offeredModelsOf(provider));
 
 	return (
 		<SettingsGroup
@@ -480,15 +482,12 @@ function EditableRow({
 }
 
 /**
- * What must keep running on this provider's models while it answers, all of
- * them together, or nothing when it can be switched off.
+ * What must keep running on any of `models`, all of them together, or nothing
+ * when none is held.
  */
-function useProviderHolders(provider: ModelProvider): ModelHolders | undefined {
+function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefined {
 	const holdersOf = useModelHolders();
-	if (!isConnected(provider)) return undefined;
-	const held = provider.models
-		.filter((model) => model.enabled)
-		.flatMap((model) => holdersOf(model.modelId) ?? []);
+	const held = models.flatMap((model) => holdersOf(model.modelId) ?? []);
 	if (held.length === 0) return undefined;
 	return {
 		newBots: held.some((holders) => holders.newBots),
@@ -496,10 +495,15 @@ function useProviderHolders(provider: ModelProvider): ModelHolders | undefined {
 	};
 }
 
+/** The models the provider offers agents: none while it is not connected. */
+function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
+	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
+}
+
 /** The key, shown only by its last few characters once saved; Replace swaps it for a new one. */
 function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boolean }) {
 	const actions = useProviderActions();
-	const held = useProviderHolders(provider);
+	const held = useHoldersOf(offeredModelsOf(provider));
 	const [replacing, setReplacing] = useState(!provider.hasApiKey && !optional);
 	const [apiKey, setApiKey] = useState("");
 	const id = useId();
@@ -753,7 +757,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							label={modelName(model)}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `Default · ${who}` : who}
+									{held ? `${held.newBots ? "Default" : "System agents"} · ${who}` : who}
 									<CapabilityIcons model={model} />
 								</span>
 							}

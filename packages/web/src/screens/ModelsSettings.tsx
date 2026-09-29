@@ -1,4 +1,5 @@
 import {
+	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderPreset,
 	type ProviderPresetId,
@@ -232,7 +233,9 @@ function ModelChoicePage({
 		.filter((provider) => isConnected(provider))
 		.map((provider) => ({
 			provider,
-			models: provider.models.filter((model) => model.enabled),
+			models: provider.models.filter(
+				(model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"),
+			),
 		}))
 		.filter((group) => group.models.length > 0);
 
