@@ -1,4 +1,5 @@
 import type { Models } from "../../providers/models/models.ts";
+import { formatHistoryTime } from "../threads/message-text.ts";
 import type { PreparedCompaction } from "./compactions.ts";
 
 /** How long a summary may be, in words: room for the sections below over a long thread. */
@@ -54,22 +55,3 @@ export function compactionPrompt(
 		messages: [{ role: "user", content: transcript }],
 	};
 }
-
-/**
- * A point in a thread's history, with the day as well as the time since long
- * threads span days: "Fri, 15 May 2026, 17:40 UTC".
- */
-export function formatHistoryTime(at: Date): string {
-	return `${historyTime.format(at)} UTC`;
-}
-
-const historyTime = new Intl.DateTimeFormat("en-GB", {
-	weekday: "short",
-	day: "numeric",
-	month: "short",
-	year: "numeric",
-	hour: "2-digit",
-	minute: "2-digit",
-	hourCycle: "h23",
-	timeZone: "UTC",
-});

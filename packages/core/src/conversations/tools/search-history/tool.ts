@@ -4,10 +4,8 @@ import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-o
 import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
 import { agent, message, user } from "../../../database/schema.ts";
-import { formatHistoryTime } from "../../compaction/prompt.ts";
+import { formatHistoryTime } from "../../threads/message-text.ts";
 import { participantColumns, toMessage } from "../../threads/participants.ts";
-
-export const SEARCH_HISTORY_TOOL = "search_history";
 
 const MAX_MATCHES = 10;
 /** Enough of a message to answer from; the whole of a long one would crowd out the others. */
