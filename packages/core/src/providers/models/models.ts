@@ -26,9 +26,9 @@ import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { withChatgptAccess } from "../model-providers/chatgpt.ts";
 import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
+import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
 
 /** What asking a model once is about: which model, for which workspace, and what it is told. */
@@ -160,14 +160,14 @@ type RequestFailure = "noProvider" | "signInFailed" | "rejected" | "rateLimited"
 
 const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
 	noProvider: UserMessage.of`No active provider offers this model.`,
-	signInFailed: UserMessage.of`The model provider's ChatGPT sign-in failed. Sign in again.`,
+	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
 };
 
 interface Options {
-	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewChatgptTokens">;
+	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewOAuthTokens">;
 	httpClients: EgressHttpClients;
 	/** Where every request the model makes is recorded. */
 	requests: ModelRequests.Interface;
@@ -186,7 +186,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					reason: "noProvider",
 				});
 			}
-			const connection = yield* withChatgptAccess(
+			const connection = yield* withSignInAccess(
 				modelProviders,
 				httpClients,
 				input.workspaceId,

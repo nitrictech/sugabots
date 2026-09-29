@@ -97,6 +97,17 @@ export const providerLogos: Record<ProviderPresetId, ProviderLogoAsset> = {
 		caution:
 			"This is the Grok logomark; the SpaceXAI symbol is too thin to read at icon size. Use only to refer to xAI, without implying endorsement.",
 	},
+	// SuperGrok is xAI's Grok subscription, so it wears the same Grok logomark.
+	supergrok: {
+		light: xai,
+		dark: xaiDark,
+		source:
+			"https://data.x.ai/logos/SpaceXAI_Grok_Assets.zip (Grok_Logomark_Dark.svg for light backgrounds, Grok_Logomark_Light.svg for dark)",
+		guidelines: "https://x.ai/legal/brand-guidelines",
+		fetched: FETCHED,
+		caution:
+			"This is the Grok logomark; the SpaceXAI symbol is too thin to read at icon size. Use only to refer to xAI, without implying endorsement.",
+	},
 	mistral: {
 		light: mistral,
 		source:

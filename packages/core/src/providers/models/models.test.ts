@@ -54,7 +54,7 @@ describe("models", () => {
 			const httpClient = vi.fn<typeof fetch>();
 			const model = Models.make({
 				modelProviders: {
-					renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+					renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 					resolve: () =>
 						Effect.succeed({
 							providerId: "provider-id",
@@ -98,7 +98,7 @@ describe("models", () => {
 		};
 		const model = Models.make({
 			modelProviders: {
-				renewChatgptTokens: (_workspaceId, _providerId, renew) => renew(tokens),
+				renewOAuthTokens: (_workspaceId, _providerId, renew) => renew(tokens),
 				resolve: () =>
 					Effect.succeed({
 						providerId: "provider-id",
@@ -106,7 +106,7 @@ describe("models", () => {
 						baseUrl: "https://chatgpt.com/backend-api/codex",
 						apiFormat: "openai",
 						headers: {},
-						chatgptTokens: tokens,
+						oauthTokens: tokens,
 						configurationUpdatedAt: new Date(),
 					}),
 			},

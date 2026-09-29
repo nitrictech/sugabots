@@ -1,17 +1,23 @@
 export * as ModelProviderSetup from "./model-provider-setup.ts";
 
 import type {
-	ChatgptSignInOutcome,
-	ChatgptSignInStarted,
 	ModelProvider,
 	ModelProviderUpdate,
 	NewModelProvider,
 	ProviderModel,
 	ProviderModelUpdate,
 	ProviderPresetId,
+	ProviderSignInOutcome,
+	ProviderSignInStarted,
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
-import { presetSignsIn, providerLacksCredential, providerPreset } from "@sugabots/contracts";
+import {
+	presetSignInService,
+	providerLacksCredential,
+	providerPreset,
+	type SignInServiceId,
+	signInServiceNames,
+} from "@sugabots/contracts";
 import { Clock, Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -24,13 +30,6 @@ import { Models } from "../models/models.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
-	CHATGPT_ISSUER,
-	type ChatgptSignInFailed,
-	type ChatgptTokens,
-	redeemDeviceCode,
-	requestDeviceCode,
-} from "./chatgpt.ts";
-import {
 	holdingModel,
 	keepingHeldModelsOffered,
 	type ModelInUse,
@@ -39,6 +38,12 @@ import {
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./remote.ts";
+import {
+	type OAuthTokens,
+	type ProviderSignInFailed,
+	type SubscriptionSignIn,
+	signInFor,
+} from "./sign-in/sign-in.ts";
 
 /**
  * Connecting a workspace to model providers: checking an address against the
@@ -108,35 +113,35 @@ export interface Interface {
 		AuthorizationDenied | ModelProviderNotFound,
 		CurrentActor.Service
 	>;
-	/** Asks ChatGPT for a code the person enters to sign the provider in. */
-	readonly startChatgptSignIn: (
+	/** Asks the provider's sign-in service for a code the person enters to sign it in. */
+	readonly startSignIn: (
 		input: InProvider,
 	) => Effect.Effect<
-		ChatgptSignInStarted,
-		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered | ChatgptSignInFailed,
+		ProviderSignInStarted,
+		AuthorizationDenied | ModelProviderNotFound | ProviderSignInNotOffered | ProviderSignInFailed,
 		CurrentActor.Service
 	>;
 	/**
 	 * Asks whether the person has entered the code of `attempt`, from
-	 * `startChatgptSignIn`; once they have, the provider is signed in and its
+	 * `startSignIn`; once they have, the provider is signed in and its
 	 * models are discovered.
 	 */
-	readonly completeChatgptSignIn: (
+	readonly completeSignIn: (
 		input: InProvider & { attempt: string },
 	) => Effect.Effect<
-		ChatgptSignInOutcome,
+		ProviderSignInOutcome,
 		| AuthorizationDenied
 		| ModelProviderNotFound
-		| ChatgptSignInNotOffered
-		| ChatgptSignInAttemptInvalid
-		| ChatgptSignInFailed,
+		| ProviderSignInNotOffered
+		| ProviderSignInAttemptInvalid
+		| ProviderSignInFailed,
 		CurrentActor.Service
 	>;
-	readonly signOutChatgpt: (
+	readonly signOut: (
 		input: InProvider,
 	) => Effect.Effect<
 		ModelProvider,
-		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered | ModelInUse,
+		AuthorizationDenied | ModelProviderNotFound | ProviderSignInNotOffered | ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly fetchModels: (
@@ -218,7 +223,6 @@ export const make = Effect.gen(function* () {
 	const models = yield* Models.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
 	const cipher = yield* Credentials.Service;
-	const chatgptAuth = egress.providers.for({ baseUrl: CHATGPT_ISSUER });
 
 	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
 	const managed = (workspace: string) =>
@@ -243,12 +247,18 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
-	const requireSignInProvider = (workspaceId: string, providerId: string) =>
+	/** The provider's sign-in, and a client that reaches its service. */
+	const requireSignIn = (workspaceId: string, providerId: string) =>
 		requireProvider(workspaceId, providerId).pipe(
+			Effect.map((provider) => signInFor(provider.preset)),
 			Effect.filterOrFail(
-				(provider) => presetSignsIn(provider.preset),
-				() => new ChatgptSignInNotOffered(),
+				(signIn): signIn is SubscriptionSignIn => signIn !== undefined,
+				() => new ProviderSignInNotOffered(),
 			),
+			Effect.map((signIn) => ({
+				signIn,
+				http: egress.providers.for({ baseUrl: signIn.issuer }),
+			})),
 		);
 
 	const sealSignInAttempt = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
@@ -258,13 +268,13 @@ export const make = Effect.gen(function* () {
 			const now = yield* Clock.currentTimeMillis;
 			return yield* Effect.try(() => JSON.parse(cipher.decrypt(sealed)) as unknown).pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(SignInAttempt)),
-				Effect.mapError(() => new ChatgptSignInAttemptInvalid()),
+				Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 				Effect.filterOrFail(
 					(attempt) =>
 						attempt.workspaceId === workspaceId &&
 						attempt.providerId === providerId &&
 						attempt.expiresAt > now,
-					() => new ChatgptSignInAttemptInvalid(),
+					() => new ProviderSignInAttemptInvalid(),
 				),
 			);
 		});
@@ -295,9 +305,9 @@ export const make = Effect.gen(function* () {
 			activateOnSuccess,
 		}).pipe(Effect.catchTag("ModelDiscoveryFailed", () => Effect.void));
 
-	const saveSignIn = (workspaceId: string, providerId: string, tokens: ChatgptTokens) =>
+	const saveSignIn = (workspaceId: string, providerId: string, tokens: OAuthTokens) =>
 		Effect.gen(function* () {
-			yield* providers.saveChatgptSignIn(workspaceId, providerId, tokens);
+			yield* providers.saveOAuthTokens(workspaceId, providerId, tokens);
 			yield* discoverModelsQuietly(workspaceId, providerId, true);
 			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
@@ -449,20 +459,20 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		startChatgptSignIn: ({ workspace, providerId }) =>
+		startSignIn: ({ workspace, providerId }) =>
 			operation(
-				"startChatgptSignIn",
+				"startSignIn",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					yield* requireSignInProvider(workspaceId, providerId);
-					const code = yield* requestDeviceCode(chatgptAuth);
+					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
+					const code = yield* signIn.requestDeviceCode(http);
 					return {
 						verificationUrl: code.verificationUrl,
 						userCode: code.userCode,
 						attempt: sealSignInAttempt({
 							workspaceId,
 							providerId,
-							deviceAuthId: code.deviceAuthId,
+							deviceCode: code.deviceCode,
 							userCode: code.userCode,
 							expiresAt: code.expiresAt,
 						}),
@@ -472,14 +482,14 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		completeChatgptSignIn: ({ workspace, providerId, attempt: sealed }) =>
+		completeSignIn: ({ workspace, providerId, attempt: sealed }) =>
 			operation(
-				"completeChatgptSignIn",
+				"completeSignIn",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					yield* requireSignInProvider(workspaceId, providerId);
+					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
 					const attempt = yield* openSignInAttempt(sealed, workspaceId, providerId);
-					const tokens = yield* redeemDeviceCode(chatgptAuth, attempt);
+					const tokens = yield* signIn.redeemDeviceCode(http, attempt);
 					if (!tokens) return { status: "pending" as const };
 					return {
 						status: "signed_in" as const,
@@ -488,15 +498,15 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		signOutChatgpt: ({ workspace, providerId }) =>
+		signOut: ({ workspace, providerId }) =>
 			operation(
-				"signOutChatgpt",
+				"signOut",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					yield* requireSignInProvider(workspaceId, providerId);
+					yield* requireSignIn(workspaceId, providerId);
 					yield* keepingHeldModelsOffered(
 						workspaceId,
-						providers.saveChatgptSignIn(workspaceId, providerId, null),
+						providers.saveOAuthTokens(workspaceId, providerId, null),
 					);
 					return yield* requireProvider(workspaceId, providerId);
 				}),
@@ -610,7 +620,7 @@ export const layer = layerNoDeps.pipe(
 const SignInAttempt = Schema.Struct({
 	workspaceId: Schema.String,
 	providerId: Schema.String,
-	deviceAuthId: Schema.String,
+	deviceCode: Schema.String,
 	userCode: Schema.String,
 	expiresAt: Schema.Number,
 });
@@ -631,11 +641,11 @@ export class ModelProviderNotFound
 	}
 }
 
-/** What a provider lacks before it can be used: a key, or for ChatGPT, a sign-in. */
-type MissingCredential = "api-key" | "chatgpt-sign-in";
+/** What a provider lacks before it can be used: a key, or a sign-in to a subscription. */
+type MissingCredential = "api-key" | SignInServiceId;
 
 function missingCredential(preset: ProviderPresetId | null): MissingCredential {
-	return presetSignsIn(preset) ? "chatgpt-sign-in" : "api-key";
+	return presetSignInService(preset) ?? "api-key";
 }
 
 export class ProviderModelsRequireCredential
@@ -645,9 +655,9 @@ export class ProviderModelsRequireCredential
 	implements UserFacing
 {
 	get userMessage() {
-		return this.missing === "chatgpt-sign-in"
-			? UserMessage.of`Sign in with ChatGPT before managing models`
-			: UserMessage.of`Add an API key before managing models`;
+		return this.missing === "api-key"
+			? UserMessage.of`Add an API key before managing models`
+			: UserMessage.of`Sign in with ${signInServiceNames[this.missing]} before managing models`;
 	}
 }
 
@@ -658,9 +668,9 @@ export class ProviderActivationRequiresCredential
 	implements UserFacing
 {
 	get userMessage() {
-		return this.missing === "chatgpt-sign-in"
-			? UserMessage.of`Sign in with ChatGPT before activating this provider`
-			: UserMessage.of`Add an API key before activating this provider`;
+		return this.missing === "api-key"
+			? UserMessage.of`Add an API key before activating this provider`
+			: UserMessage.of`Sign in with ${signInServiceNames[this.missing]} before activating this provider`;
 	}
 }
 
@@ -709,17 +719,17 @@ export class ProviderModelRemovalNotAllowed
 	}
 }
 
-export class ChatgptSignInNotOffered
-	extends Data.TaggedError("ChatgptSignInNotOffered")
+export class ProviderSignInNotOffered
+	extends Data.TaggedError("ProviderSignInNotOffered")
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This provider is not signed in to with ChatGPT`;
+		return UserMessage.of`This provider takes an API key, not a sign-in`;
 	}
 }
 
-export class ChatgptSignInAttemptInvalid
-	extends Data.TaggedError("ChatgptSignInAttemptInvalid")
+export class ProviderSignInAttemptInvalid
+	extends Data.TaggedError("ProviderSignInAttemptInvalid")
 	implements UserFacing
 {
 	get userMessage() {

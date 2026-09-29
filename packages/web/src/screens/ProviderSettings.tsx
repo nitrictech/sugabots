@@ -5,6 +5,7 @@ import {
 	type ProviderModel,
 	type ProviderModelCapability,
 	type ProviderPresetId,
+	presetSignInService,
 	presetSignsIn,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
@@ -56,8 +57,8 @@ import {
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { ChatgptSignInRow } from "./ChatgptSignIn.tsx";
 import { ConnectionRow, valueText } from "./connection-row.tsx";
+import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
  * One provider: how it is reached, which of its models bots may use, and
@@ -198,8 +199,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const seeded = provider.preset !== null && seededPresets.includes(provider.preset);
 	const signsIn = presetSignsIn(provider.preset);
 	const disconnect = seeded ? actions.update : actions.remove;
-	const disconnectPending = disconnect.isPending || actions.signOutChatgpt.isPending;
-	const disconnectError = disconnect.error ?? actions.signOutChatgpt.error;
+	const disconnectPending = disconnect.isPending || actions.signOut.isPending;
+	const disconnectError = disconnect.error ?? actions.signOut.error;
 	// Switching a provider off only stops what it offers; removing one deletes
 	// every model it lists, including one held while the provider is off.
 	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
@@ -208,7 +209,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 		try {
 			if (seeded) {
 				if (provider.signedIn) {
-					await actions.signOutChatgpt.mutateAsync({ providerId: provider.id });
+					await actions.signOut.mutateAsync({ providerId: provider.id });
 				}
 				await actions.update.mutateAsync({
 					providerId: provider.id,
@@ -298,13 +299,14 @@ export function BackToModels() {
 }
 
 /**
- * How the provider is reached. A hosted one is its key, or for ChatGPT a
- * sign-in; one you run is its address and an optional key; a custom one also
+ * How the provider is reached. A hosted one is its key, or for a
+ * subscription a sign-in; one you run is its address and an optional key; a custom one also
  * says which API it speaks.
  */
 function Connection({ provider, local }: { provider: ModelProvider; local: boolean }) {
 	const actions = useProviderActions();
 	const custom = provider.preset === null;
+	const signInService = presetSignInService(provider.preset);
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
 	const held = useHoldersOf(offeredModelsOf(provider));
@@ -369,9 +371,10 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 					{null}
 				</ConnectionRow>
 			)}
-			{presetSignsIn(provider.preset) ? (
-				<ChatgptSignInRow
+			{signInService ? (
+				<ProviderSignInRow
 					provider={provider}
+					service={signInService}
 					signOutBlocked={held && heldReason(held, "one of its models")}
 				/>
 			) : (

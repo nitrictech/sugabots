@@ -2,9 +2,6 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	bulkProviderModelUpdateSchema,
-	chatgptSignInCompletionSchema,
-	chatgptSignInOutcomeSchema,
-	chatgptSignInStartedSchema,
 	defaultModelUpdateSchema,
 	modelProviderSchema,
 	modelProviderUpdateSchema,
@@ -12,6 +9,9 @@ import {
 	newProviderModelSchema,
 	providerFetchResultSchema,
 	providerModelUpdateSchema,
+	providerSignInCompletionSchema,
+	providerSignInOutcomeSchema,
+	providerSignInStartedSchema,
 	providerTestResultSchema,
 	workspaceModelsResponseSchema,
 } from "../../model-providers.ts";
@@ -74,18 +74,18 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: providerTestResultSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.post("startChatgptSignIn", `${root}/:providerId/chatgpt-sign-in`, {
+		HttpApiEndpoint.post("startSignIn", `${root}/:providerId/sign-in`, {
 			params: provider,
-			success: chatgptSignInStartedSchema,
+			success: providerSignInStartedSchema,
 			error: [BadRequest, ...refused],
 		}),
-		HttpApiEndpoint.post("completeChatgptSignIn", `${root}/:providerId/chatgpt-sign-in/complete`, {
+		HttpApiEndpoint.post("completeSignIn", `${root}/:providerId/sign-in/complete`, {
 			params: provider,
-			payload: chatgptSignInCompletionSchema,
-			success: chatgptSignInOutcomeSchema,
+			payload: providerSignInCompletionSchema,
+			success: providerSignInOutcomeSchema,
 			error: [BadRequest, ...refused],
 		}),
-		HttpApiEndpoint.delete("signOutChatgpt", `${root}/:providerId/chatgpt-sign-in`, {
+		HttpApiEndpoint.delete("signOut", `${root}/:providerId/sign-in`, {
 			params: provider,
 			success: modelProviderSchema,
 			error: [BadRequest, Conflict, ...refused],

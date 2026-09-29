@@ -1,4 +1,10 @@
-import type { ChatgptSignInStarted, ModelProvider } from "@sugabots/contracts";
+import {
+	type ModelProvider,
+	type ProviderSignInStarted,
+	providerPreset,
+	type SignInServiceId,
+	signInServiceNames,
+} from "@sugabots/contracts";
 import { Check, Copy, ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
@@ -16,20 +22,23 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { ConnectionRow, valueText } from "./connection-row.tsx";
 
 /**
- * A ChatGPT provider's credential, in place of a key: the person signs in on
- * OpenAI's site by entering a code shown here, as with Codex CLI's headless
- * sign-in, while the page asks the server whether they have finished.
+ * A subscription provider's credential, in place of a key: the person signs
+ * in on the service's site by entering a code shown here, as with Codex CLI's
+ * or Grok Build's headless sign-in, while the page asks the server whether they
+ * have finished.
  */
-export function ChatgptSignInRow({
+export function ProviderSignInRow({
 	provider,
+	service,
 	signOutBlocked,
 }: {
 	provider: ModelProvider;
+	service: SignInServiceId;
 	/** Why signing out is not allowed yet; the button is disabled while there is a reason. */
 	signOutBlocked?: string;
 }) {
 	const actions = useProviderActions();
-	const [started, setStarted] = useState<ChatgptSignInStarted>();
+	const [started, setStarted] = useState<ProviderSignInStarted>();
 	const [error, setError] = useState<string>();
 	const [warning, setWarning] = useState(false);
 
@@ -37,21 +46,21 @@ export function ChatgptSignInRow({
 		setWarning(false);
 		setError(undefined);
 		try {
-			setStarted(await actions.startChatgptSignIn.mutateAsync({ providerId: provider.id }));
+			setStarted(await actions.startSignIn.mutateAsync({ providerId: provider.id }));
 		} catch (cause) {
 			setError(failureMessage(cause));
 		}
 	}
 
 	const shownError =
-		error ??
-		(actions.signOutChatgpt.error ? failureMessage(actions.signOutChatgpt.error) : undefined);
+		error ?? (actions.signOut.error ? failureMessage(actions.signOut.error) : undefined);
 
 	return (
 		<>
 			{started ? (
-				<ChatgptSignInCode
+				<SignInCode
 					providerId={provider.id}
+					service={service}
 					started={started}
 					onFinished={(failure) => {
 						setStarted(undefined);
@@ -67,9 +76,9 @@ export function ChatgptSignInRow({
 								variant="ghost"
 								size="bare"
 								className="text-sm"
-								disabled={actions.signOutChatgpt.isPending || signOutBlocked !== undefined}
+								disabled={actions.signOut.isPending || signOutBlocked !== undefined}
 								title={signOutBlocked}
-								onClick={() => actions.signOutChatgpt.mutate({ providerId: provider.id })}
+								onClick={() => actions.signOut.mutate({ providerId: provider.id })}
 							>
 								Sign out
 							</Button>
@@ -78,10 +87,10 @@ export function ChatgptSignInRow({
 								variant="link"
 								size="bare"
 								className="text-sm"
-								disabled={actions.startChatgptSignIn.isPending}
+								disabled={actions.startSignIn.isPending}
 								onClick={() => setWarning(true)}
 							>
-								Sign in with ChatGPT
+								Sign in with {signInServiceNames[service]}
 							</Button>
 						)
 					}
@@ -95,21 +104,42 @@ export function ChatgptSignInRow({
 				</div>
 			)}
 			<Dialog open={warning} onOpenChange={setWarning}>
-				{warning && <SingleUserWarning onContinue={start} />}
+				{warning && (
+					<SingleUserWarning
+						plan={provider.preset ? providerPreset(provider.preset).name : provider.name}
+						service={service}
+						onContinue={start}
+					/>
+				)}
 			</Dialog>
 		</>
 	);
 }
 
-/** Where OpenAI's terms say an account may not be shared. */
-const OPENAI_ACCOUNT_SHARING_TERMS =
-	"https://openai.com/policies/terms-of-use/#registration-and-access";
+/** Where each service's terms say an account may not be shared. */
+const ACCOUNT_SHARING_TERMS: Record<SignInServiceId, { owner: string; url: string }> = {
+	chatgpt: {
+		owner: "OpenAI",
+		url: "https://openai.com/policies/terms-of-use/#registration-and-access",
+	},
+	xai: { owner: "xAI", url: "https://x.ai/legal/terms-of-service" },
+};
 
 /**
- * Said before anyone signs in: a ChatGPT plan is one person's, and every bot
+ * Said before anyone signs in: a subscription is one person's, and every bot
  * in the workspace would run on it.
  */
-function SingleUserWarning({ onContinue }: { onContinue: () => void }) {
+function SingleUserWarning({
+	plan,
+	service,
+	onContinue,
+}: {
+	/** The subscription, as the page names it: "ChatGPT", "SuperGrok". */
+	plan: string;
+	service: SignInServiceId;
+	onContinue: () => void;
+}) {
+	const terms = ACCOUNT_SHARING_TERMS[service];
 	return (
 		<DialogForm
 			width="compact"
@@ -123,15 +153,10 @@ function SingleUserWarning({ onContinue }: { onContinue: () => void }) {
 				<DialogDescription className="m-0 flex gap-2.5 text-md text-muted-foreground">
 					<TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
 					<span>
-						A ChatGPT plan is for one person. Only connect yours if nobody else uses this Sugabots
+						A {plan} plan is for one person. Only connect yours if nobody else uses this Sugabots
 						install. See{" "}
-						<a
-							href={OPENAI_ACCOUNT_SHARING_TERMS}
-							target="_blank"
-							rel="noreferrer"
-							className="text-link"
-						>
-							OpenAI's terms
+						<a href={terms.url} target="_blank" rel="noreferrer" className="text-link">
+							{terms.owner}'s terms
 						</a>
 						.
 					</span>
@@ -143,17 +168,19 @@ function SingleUserWarning({ onContinue }: { onContinue: () => void }) {
 }
 
 /** The code to enter, shown until the person has entered it, the code expires, or they give up. */
-function ChatgptSignInCode({
+function SignInCode({
 	providerId,
+	service,
 	started,
 	onFinished,
 }: {
 	providerId: string;
-	started: ChatgptSignInStarted;
+	service: SignInServiceId;
+	started: ProviderSignInStarted;
 	/** With a sentence to show when the sign-in did not work out. */
 	onFinished: (failure?: string) => void;
 }) {
-	const { mutateAsync: complete } = useProviderActions().completeChatgptSignIn;
+	const { mutateAsync: complete } = useProviderActions().completeSignIn;
 	const [copied, setCopied] = useState(false);
 	// Read through a ref so a parent re-render does not restart the polling.
 	const finished = useRef(onFinished);
@@ -182,7 +209,8 @@ function ChatgptSignInCode({
 	return (
 		<div className="flex flex-col gap-3 border-border border-b px-4 py-3 last:border-b-0">
 			<p className="m-0 text-[14px] text-muted-foreground">
-				Open ChatGPT's sign-in page and enter this code. This page carries on once you have.
+				Open {signInServiceNames[service]}'s sign-in page and enter this code. This page carries on
+				once you have.
 			</p>
 			<div className="flex flex-wrap items-center gap-3">
 				<span className="inline-flex items-center gap-1 rounded-lg bg-chip py-1 pr-1 pl-3">

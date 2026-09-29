@@ -4,6 +4,7 @@ import {
 	type ProviderPreset,
 	type ProviderPresetId,
 	providerCatalog,
+	signInServiceNames,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Code } from "lucide-react";
@@ -401,7 +402,8 @@ function PresetStep({
 	const [error, setError] = useState<unknown>();
 	const local = preset.hosting === "local";
 	const requiresApiKey = preset.credential === "api-key";
-	const signsIn = preset.credential === "chatgpt-sign-in";
+	const signInService = preset.credential === "sign-in" ? preset.signIn : undefined;
+	const signsIn = signInService !== undefined;
 	const typedBaseUrl = parseProviderBaseUrl(baseUrl);
 	const ready = (!requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
 	const pending = actions.create.isPending || actions.update.isPending;
@@ -411,7 +413,7 @@ function PresetStep({
 		if (!ready) return;
 		setError(undefined);
 		try {
-			// A seeded ChatGPT provider already exists; its page is where the person
+			// A seeded subscription provider, like ChatGPT, already exists; its page is where the person
 			// signs in, which is what switches it on.
 			if (signsIn && existing) {
 				await onAdded(existing);
@@ -443,7 +445,12 @@ function PresetStep({
 			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
 				<SettingsGroup note={preset.hint}>
-					{signsIn && <SettingsRow label="ChatGPT account" sub="Sign in after you continue" />}
+					{signInService && (
+						<SettingsRow
+							label={`${signInServiceNames[signInService]} account`}
+							sub="Sign in after you continue"
+						/>
+					)}
 					{local && (
 						<SettingsFieldRow
 							label="Server URL"

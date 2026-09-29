@@ -39,7 +39,7 @@ function repository(found: ModelProviderRepository.ProviderEndpoint) {
 			}),
 		),
 		recordTest: vi.fn(() => Effect.void),
-		renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+		renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 	};
 }
 

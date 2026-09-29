@@ -26,8 +26,8 @@ import {
 } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
-import { ChatgptTokens } from "./chatgpt.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
+import { OAuthTokens } from "./sign-in/sign-in.ts";
 
 /**
  * The only writer of `model_provider`, `provider_model` and
@@ -56,13 +56,13 @@ export interface Interface {
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Signs a ChatGPT provider in with `tokens`, or out with null. Like a new
+	 * Signs a subscription provider in with `tokens`, or out with null. Like a new
 	 * key, it leaves the provider inactive and untested until it is tried.
 	 */
-	readonly saveChatgptSignIn: (
+	readonly saveOAuthTokens: (
 		workspaceId: string,
 		providerId: string,
-		tokens: ChatgptTokens | null,
+		tokens: OAuthTokens | null,
 	) => Effect.Effect<void>;
 	/**
 	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
@@ -70,11 +70,11 @@ export interface Interface {
 	 * two turns must not both spend it. Not a configuration change, so the
 	 * provider's last test still stands. `undefined` if it is not signed in.
 	 */
-	readonly renewChatgptTokens: <E>(
+	readonly renewOAuthTokens: <E>(
 		workspaceId: string,
 		providerId: string,
-		renew: (current: ChatgptTokens) => Effect.Effect<ChatgptTokens, E>,
-	) => Effect.Effect<ChatgptTokens | undefined, E>;
+		renew: (current: OAuthTokens) => Effect.Effect<OAuthTokens, E>,
+	) => Effect.Effect<OAuthTokens | undefined, E>;
 	/**
 	 * Records how a test of the configuration last updated at `testedAt` went,
 	 * unless the provider has been reconfigured since. A failure switches the
@@ -231,8 +231,8 @@ export const make = Effect.gen(function* () {
 				baseUrl: row.baseUrl,
 				apiFormat: row.apiFormat,
 				apiKey: row.apiKeyEncrypted ? cipher.decrypt(row.apiKeyEncrypted) : undefined,
-				chatgptTokens: row.chatgptTokensEncrypted
-					? openChatgptTokens(row.chatgptTokensEncrypted, cipher)
+				oauthTokens: row.oauthTokensEncrypted
+					? openOAuthTokens(row.oauthTokensEncrypted, cipher)
 					: undefined,
 				configurationUpdatedAt: row.updatedAt,
 				headers: Object.fromEntries(
@@ -343,15 +343,15 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
-		saveChatgptSignIn: (workspaceId, providerId, tokens) =>
+		saveOAuthTokens: (workspaceId, providerId, tokens) =>
 			operation(
-				"saveChatgptSignIn",
+				"saveOAuthTokens",
 				query((db) =>
 					db
 						.update(modelProvider)
 						.set({
 							active: false,
-							chatgptTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
+							oauthTokensEncrypted: tokens ? cipher.encrypt(JSON.stringify(tokens)) : null,
 							lastTestedAt: null,
 							lastTestError: null,
 						})
@@ -361,15 +361,15 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		renewChatgptTokens: (workspaceId, providerId, renew) =>
+		renewOAuthTokens: (workspaceId, providerId, renew) =>
 			operation(
-				"renewChatgptTokens",
+				"renewOAuthTokens",
 				transaction(
 					Effect.gen(function* () {
 						const [row] = yield* query((db) =>
 							db
 								.select({
-									sealed: modelProvider.chatgptTokensEncrypted,
+									sealed: modelProvider.oauthTokensEncrypted,
 									updatedAt: modelProvider.updatedAt,
 								})
 								.from(modelProvider)
@@ -379,7 +379,7 @@ export const make = Effect.gen(function* () {
 								.for("update"),
 						);
 						if (!row?.sealed) return undefined;
-						const current = openChatgptTokens(row.sealed, cipher);
+						const current = openOAuthTokens(row.sealed, cipher);
 						const renewed = yield* renew(current);
 						if (renewed === current) return current;
 						yield* query((db) =>
@@ -387,7 +387,7 @@ export const make = Effect.gen(function* () {
 								.update(modelProvider)
 								// Kept as it was, so a test of the configuration still records against it.
 								.set({
-									chatgptTokensEncrypted: cipher.encrypt(JSON.stringify(renewed)),
+									oauthTokensEncrypted: cipher.encrypt(JSON.stringify(renewed)),
 									updatedAt: row.updatedAt,
 								})
 								.where(eq(modelProvider.id, providerId)),
@@ -638,11 +638,11 @@ export interface ProviderEndpoint {
 	apiKey?: string;
 	headers: Record<string, string>;
 	/**
-	 * A signed-in ChatGPT provider's tokens, which stand in for its key. Use
-	 * the endpoint through `withChatgptAccess`, which puts a live token in
+	 * A signed-in subscription provider's tokens, which stand in for its key.
+	 * Use the endpoint through `withSignInAccess`, which puts a live token in
 	 * `apiKey`.
 	 */
-	chatgptTokens?: ChatgptTokens;
+	oauthTokens?: OAuthTokens;
 	/** The provider's `updatedAt`, so a test's result is recorded against what it tried. */
 	configurationUpdatedAt: Date;
 }
@@ -738,12 +738,12 @@ function storedApiKey(apiKey: ModelProviderUpdate["apiKey"], cipher: Credentials
 
 /** A provider that cannot be used yet: it wants a key, or a sign-in, it has not had. */
 export function lacksCredential(
-	row: Pick<ModelProviderRow, "preset" | "apiKeyEncrypted" | "chatgptTokensEncrypted">,
+	row: Pick<ModelProviderRow, "preset" | "apiKeyEncrypted" | "oauthTokensEncrypted">,
 ): boolean {
-	if (presetSignsIn(row.preset)) return row.chatgptTokensEncrypted === null;
+	if (presetSignsIn(row.preset)) return row.oauthTokensEncrypted === null;
 	return presetRequiresApiKey(row.preset) && row.apiKeyEncrypted === null;
 }
 
-function openChatgptTokens(sealed: string, cipher: Credentials.Interface): ChatgptTokens {
-	return Schema.decodeUnknownSync(ChatgptTokens)(JSON.parse(cipher.decrypt(sealed)));
+function openOAuthTokens(sealed: string, cipher: Credentials.Interface): OAuthTokens {
+	return Schema.decodeUnknownSync(OAuthTokens)(JSON.parse(cipher.decrypt(sealed)));
 }

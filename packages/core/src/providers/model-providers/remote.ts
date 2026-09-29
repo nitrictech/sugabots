@@ -1,7 +1,6 @@
 import { Clock, Data, Effect, Schema } from "effect";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
-import { type ChatgptSignInFailed, withChatgptAccess } from "./chatgpt.ts";
 import {
 	type DiscoveredModel,
 	dialectFor,
@@ -9,6 +8,7 @@ import {
 	modelsDev,
 } from "./dialects/index.ts";
 import type { ModelProviderRepository } from "./model-provider-repository.ts";
+import { type ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
 
 /**
  * Asking a provider which models it offers and what they can do.
@@ -35,9 +35,9 @@ class ProviderRejected extends Data.TaggedError("ProviderRejected")<{
 class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{
 	readonly cause: unknown;
 }> {}
-/** The ChatGPT sign-in could not give a live token. */
+/** The subscription sign-in could not give a live token. */
 class SignInLapsed extends Data.TaggedError("SignInLapsed")<{
-	readonly failure: ChatgptSignInFailed;
+	readonly failure: ProviderSignInFailed;
 }> {}
 /** It answered with something that is not a model list. */
 class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
@@ -93,7 +93,7 @@ function detail(failure: ProviderFailure): string {
 		case "InvalidModelList":
 			return failure.reason;
 		case "SignInLapsed":
-			return `The ChatGPT sign-in gave no live token: ${failure.failure.message}`;
+			return `The subscription sign-in gave no live token: ${failure.failure.message}`;
 		case "ProviderUnreachable":
 			return `The provider could not be reached: ${String(failure.cause)}`;
 	}
@@ -105,7 +105,7 @@ const logFailure = (failure: ProviderFailure) =>
 export function testProvider(
 	providers: Pick<
 		ModelProviderRepository.Interface,
-		"endpoint" | "recordTest" | "renewChatgptTokens"
+		"endpoint" | "recordTest" | "renewOAuthTokens"
 	>,
 	workspaceId: string,
 	providerId: string,
@@ -143,7 +143,7 @@ export function testProvider(
 export function fetchProviderModels(
 	providers: Pick<
 		ModelProviderRepository.Interface,
-		"endpoint" | "recordTest" | "syncDiscovered" | "renewChatgptTokens"
+		"endpoint" | "recordTest" | "syncDiscovered" | "renewOAuthTokens"
 	>,
 	workspaceId: string,
 	providerId: string,
@@ -201,7 +201,7 @@ function requireConnection(
 }
 
 function requestModels(
-	providers: Pick<ModelProviderRepository.Interface, "renewChatgptTokens">,
+	providers: Pick<ModelProviderRepository.Interface, "renewOAuthTokens">,
 	workspaceId: string,
 	stored: ModelProviderRepository.ProviderEndpoint,
 	httpClients: EgressHttpClients,
@@ -211,7 +211,7 @@ function requestModels(
 	const root = dialect.discoveryRoot?.(baseUrl) ?? baseUrl;
 	const http = httpClients.for({ baseUrl: root });
 	return Effect.gen(function* () {
-		const connection = yield* withChatgptAccess(providers, httpClients, workspaceId, stored).pipe(
+		const connection = yield* withSignInAccess(providers, httpClients, workspaceId, stored).pipe(
 			Effect.mapError((failure) => new SignInLapsed({ failure })),
 		);
 		const response = yield* Effect.tryPromise({

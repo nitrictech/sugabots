@@ -197,7 +197,7 @@ export const modelProviderSchema = Schema.Struct({
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,
 	apiKeyHint: Schema.NullOr(Schema.String),
-	/** For a provider signed in to rather than given a key (ChatGPT), whether somebody has. */
+	/** For a provider signed in to rather than given a key (ChatGPT, SuperGrok), whether somebody has. */
 	signedIn: Schema.Boolean,
 	customHeaders: Schema.mutable(
 		Schema.Array(Schema.Struct({ name: Schema.String, valueHint: Schema.String })),
@@ -220,11 +220,11 @@ export function providerLacksCredential(
 }
 
 /**
- * A ChatGPT sign-in waiting on the person: they open `verificationUrl`, enter
+ * A subscription sign-in waiting on the person: they open `verificationUrl`, enter
  * `userCode`, and the page asks for the outcome with `attempt` every
  * `pollIntervalMs` until it is no longer pending.
  */
-export const chatgptSignInStartedSchema = Schema.Struct({
+export const providerSignInStartedSchema = Schema.Struct({
 	verificationUrl: Schema.String,
 	userCode: Schema.String,
 	/** Opaque to the page: the sealed sign-in it hands back when it asks. */
@@ -232,9 +232,9 @@ export const chatgptSignInStartedSchema = Schema.Struct({
 	pollIntervalMs: Schema.Int.check(Schema.isGreaterThan(0)),
 	expiresAt: isoTimestampSchema,
 });
-export type ChatgptSignInStarted = typeof chatgptSignInStartedSchema.Type;
+export type ProviderSignInStarted = typeof providerSignInStartedSchema.Type;
 
-export const chatgptSignInCompletionSchema = Schema.Struct({
+export const providerSignInCompletionSchema = Schema.Struct({
 	attempt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
 });
 
@@ -357,11 +357,11 @@ export const defaultModelUpdateSchema = Schema.Struct({
 export type DefaultModelUpdate = typeof defaultModelUpdateSchema.Type;
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;
 
-export const chatgptSignInOutcomeSchema = Schema.Union([
+export const providerSignInOutcomeSchema = Schema.Union([
 	Schema.Struct({ status: Schema.Literal("pending") }),
 	Schema.Struct({ status: Schema.Literal("signed_in"), provider: modelProviderSchema }),
 ]);
-export type ChatgptSignInOutcome = typeof chatgptSignInOutcomeSchema.Type;
+export type ProviderSignInOutcome = typeof providerSignInOutcomeSchema.Type;
 
 export const providerTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
