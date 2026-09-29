@@ -21,15 +21,10 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
+import { Turns } from "../turns/turns.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
-import { loadContextWindow } from "./context-window.ts";
 import { CompactionRepository } from "./repository.ts";
-import {
-	estimatedTokens,
-	MAX_CONTEXT_WINDOW_TOKENS,
-	needsCompaction,
-	planCompaction,
-} from "./window.ts";
+import { needsCompaction, planCompaction } from "./window.ts";
 
 /**
  * Thread compaction, done by the `compact` system agent, Compaction.
@@ -102,19 +97,21 @@ export const make = Effect.gen(function* () {
 						const history = transcript
 							.slice(0, sourceIndex + 1)
 							.flatMap(({ createdAt, entry }) =>
-								entry ? [{ ...entry, createdAt, tokens: estimatedTokens(entry.content) }] : [],
+								entry
+									? [{ ...entry, createdAt, tokens: Turns.estimatedTokens(entry.content) }]
+									: [],
 							);
 						// Sized to the bot that reads the thread next, and capped to what
 						// the model summarising it can read.
 						const readerModel = scope.agentModel;
 						const readerTokens =
 							readerModel === null
-								? MAX_CONTEXT_WINDOW_TOKENS
-								: yield* query((db) => loadContextWindow(db, scope.workspaceId, readerModel));
+								? Turns.MAX_CONTEXT_WINDOW_TOKENS
+								: yield* query((db) => Turns.loadContextWindow(db, scope.workspaceId, readerModel));
 						const summariserTokens =
 							model === readerModel
 								? readerTokens
-								: yield* query((db) => loadContextWindow(db, scope.workspaceId, model));
+								: yield* query((db) => Turns.loadContextWindow(db, scope.workspaceId, model));
 						const plan = planCompaction(history, previous?.keptFrom, {
 							readerTokens,
 							summariserTokens,
