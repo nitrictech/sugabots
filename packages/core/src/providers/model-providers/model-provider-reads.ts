@@ -1,5 +1,5 @@
 import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
-import { effectiveCapabilities, presetSignsIn, seededPresets } from "@sugabots/contracts";
+import { presetSignsIn, seededPresets } from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
@@ -72,7 +72,7 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 		return toProvider(row, models);
 	});
 
-/** The models the workspace offers for agents to run on; embedding models are not among them. */
+/** The models the workspace offers for agents to run on. */
 export const offeredModels = (workspaceId: string) =>
 	query((db) =>
 		db
@@ -83,16 +83,14 @@ export const offeredModels = (workspaceId: string) =>
 	).pipe(
 		Effect.map(
 			(rows): WorkspaceModelsResponse => ({
-				models: rows
-					.filter(({ model }) => !effectiveCapabilities(model).includes("embeddings"))
-					.map(({ model, provider }) => ({
-						providerId: provider.id,
-						providerName: provider.name,
-						providerPreset: provider.preset,
-						providerActive: provider.active,
-						modelId: model.modelId,
-						displayName: model.displayName,
-					})),
+				models: rows.map(({ model, provider }) => ({
+					providerId: provider.id,
+					providerName: provider.name,
+					providerPreset: provider.preset,
+					providerActive: provider.active,
+					modelId: model.modelId,
+					displayName: model.displayName,
+				})),
 			}),
 		),
 	);

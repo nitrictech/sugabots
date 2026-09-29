@@ -62,13 +62,15 @@ export interface ProviderDialect {
 	readonly model: Schema.Decoder<DiscoveredModel>;
 	/**
 	 * What the listing left out, asked of the provider about one model. It may
-	 * only refine what the listing said: a failure keeps the listed model.
+	 * only refine what the listing said, or answer nothing for a model that
+	 * cannot hold a conversation, such as an embedding model: a failure keeps
+	 * the listed model.
 	 */
 	inspect?(
 		root: string,
 		model: DiscoveredModel,
 		http: EgressHttpClient,
-	): Effect.Effect<DiscoveredModel, ModelInspectionFailed>;
+	): Effect.Effect<DiscoveredModel | undefined, ModelInspectionFailed>;
 }
 
 export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
@@ -89,21 +91,21 @@ export const dataListing = Schema.Struct({
 /** What a provider calls each capability, in the word this API uses for it. */
 export type CapabilityVocabulary = Record<string, ProviderModelCapability>;
 
+/** A provider's list of capability words; one it sent malformed counts as none. */
+export const capabilityWords = Schema.Array(Schema.String).pipe(
+	Schema.withDecodingDefault(Effect.succeed([])),
+	Schema.catchDecoding(() => Effect.succeedSome([])),
+);
+
 /**
- * A provider's list of capability words, translated through its vocabulary.
- * Words this API has no name for are dropped rather than failing the model,
- * since every provider lists things we do not track: `completion`, `hot`,
- * `rerank`.
+ * A provider's capability words, translated through its vocabulary. Words
+ * this API has no name for are dropped rather than failing the model, since
+ * every provider lists things we do not track: `completion`, `hot`, `rerank`.
  */
-export const capabilitiesNamed = (vocabulary: CapabilityVocabulary) =>
-	Schema.Array(Schema.String).pipe(
-		Schema.withDecodingDefault(Effect.succeed([])),
-		Schema.catchDecoding(() => Effect.succeedSome([])),
-		Schema.decodeTo(Schema.mutable(Schema.Array(providerModelCapabilitySchema)), {
-			decode: SchemaGetter.transform((names) => names.flatMap((name) => vocabulary[name] ?? [])),
-			encode: SchemaGetter.forbiddenEncoding,
-		}),
-	);
+export const capabilitiesNamed = (
+	vocabulary: CapabilityVocabulary,
+	words: readonly string[],
+): ProviderModelCapability[] => words.flatMap((word) => vocabulary[word] ?? []);
 
 /** The fields a dialect reads out of a provider's entry, before the contract has checked them. */
 export type ProviderModelFields = typeof newProviderModelSchema.Encoded;

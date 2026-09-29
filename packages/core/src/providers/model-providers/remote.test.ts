@@ -83,13 +83,6 @@ const knownModels = registryFrom(
 					modalities: { input: ["text", "image"], output: ["text"] },
 					limit: { context: 128_000 },
 				},
-				"text-embedding-3-small": {
-					name: "text-embedding-3-small",
-					tool_call: false,
-					reasoning: false,
-					modalities: { input: ["text"], output: ["text"] },
-					limit: { context: 8_191 },
-				},
 			},
 		},
 		anthropic: {
@@ -137,7 +130,7 @@ it("fills in from the registry what a listing says nothing about", async () => {
 	const found = connection({ preset: "openai", baseUrl: "https://api.openai.com/v1" });
 	const models = repository(found);
 	const httpClient = vi.fn(async () =>
-		Response.json({ data: [{ id: "gpt-4o", object: "model" }, { id: "text-embedding-3-small" }] }),
+		Response.json({ data: [{ id: "gpt-4o", object: "model" }] }),
 	);
 
 	await discover(models, found, httpClient, knownModels).result;
@@ -149,13 +142,19 @@ it("fills in from the registry what a listing says nothing about", async () => {
 			capabilities: ["tools", "vision"],
 			contextLength: 128_000,
 		},
-		{
-			modelId: "text-embedding-3-small",
-			displayName: "text-embedding-3-small",
-			capabilities: ["embeddings"],
-			contextLength: 8_191,
-		},
 	]);
+});
+
+it("leaves out the embedding models a provider lists, since no agent can run on one", async () => {
+	const found = connection({});
+	const models = repository(found);
+	const httpClient = vi.fn(async () =>
+		Response.json({ data: [{ id: "chat-model" }, { id: "text-embedding-3-small" }] }),
+	);
+
+	await discover(models, found, httpClient).result;
+
+	expect(models.synced[0]?.map(({ modelId }) => modelId)).toEqual(["chat-model"]);
 });
 
 it("asks Anthropic for a whole page and keys with its own header", async () => {
@@ -199,7 +198,7 @@ it("asks Ollama about each model through its native API, without an authorizatio
 	const models = repository(found);
 	const httpClient = vi.fn(async (url: string, init?: RequestInit) => {
 		if (url.endsWith("/api/tags")) {
-			return Response.json({ models: [{ name: "llama3.2:latest" }, { name: "nomic-embed-text" }] });
+			return Response.json({ models: [{ name: "llama3.2:latest" }, { name: "all-minilm" }] });
 		}
 		const { model } = JSON.parse(String(init?.body)) as { model: string };
 		return model === "llama3.2:latest"
@@ -222,18 +221,13 @@ it("asks Ollama about each model through its native API, without an authorizatio
 		"http://127.0.0.1:11434/api/show",
 		expect.objectContaining({ method: "POST", body: JSON.stringify({ model: "llama3.2:latest" }) }),
 	);
+	// all-minilm is an embedding model only Ollama's own answer gives away.
 	expect(models.synced[0]).toEqual([
 		{
 			modelId: "llama3.2:latest",
 			displayName: null,
 			capabilities: ["tools", "reasoning"],
 			contextLength: 131_072,
-		},
-		{
-			modelId: "nomic-embed-text",
-			displayName: null,
-			capabilities: ["embeddings"],
-			contextLength: null,
 		},
 	]);
 });

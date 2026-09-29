@@ -15,10 +15,6 @@ const source: RegistrySource = {
 				limit: { context: 128_000 },
 				cost: { input: 2.5, output: 10 },
 			}),
-			"text-embedding-3-small": entry({
-				name: "text-embedding-3-small",
-				limit: { context: 8_191 },
-			}),
 			"gpt-image-1": entry({ modalities: { input: ["text"], output: ["image"] } }),
 			"shared-id": entry({ name: "From the vendor", tool_call: true }),
 		},
@@ -77,12 +73,6 @@ describe("registryFrom", () => {
 			capabilities: ["images"],
 			contextLength: null,
 		});
-	});
-
-	it("marks an embedding model by its name, since the registry has no word for it", () => {
-		expect(registry.complete(blank("text-embedding-3-small"), openai).capabilities).toEqual([
-			"embeddings",
-		]);
 	});
 
 	it("matches a custom provider by host", () => {
