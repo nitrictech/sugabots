@@ -2,7 +2,7 @@ import type { ToolCallPart } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { toolLineText } from "./ToolLine.tsx";
-import { formatDuration, formatTotal, stepLabel } from "./tool-activity.ts";
+import { formatDuration, formatTotal } from "./tool-activity.ts";
 
 let nextId = 0;
 
@@ -83,11 +83,5 @@ describe("how tools are worded", () => {
 		expect(formatDuration(1_400)).toBe("1.4s");
 		expect(formatTotal(31_960)).toBe("32s");
 		expect(formatTotal(473)).toBe("473ms");
-	});
-
-	it("turns a tool key into a phrase", () => {
-		expect(stepLabel("sentry__search_issues")).toBe("Search issues");
-		expect(stepLabel("linear__searchIssues")).toBe("Search issues");
-		expect(stepLabel("web_fetch")).toBe("Read web pages");
 	});
 });

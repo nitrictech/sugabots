@@ -9,7 +9,7 @@ import type {
 	ChatMessagesPage,
 	ChatPageQuery,
 } from "@sugabots/contracts";
-import { DEFAULT_CHAT_PAGE_LIMIT, textWithoutNarration } from "@sugabots/contracts";
+import { DEFAULT_CHAT_PAGE_LIMIT, messagePreview, textWithoutNarration } from "@sugabots/contracts";
 import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
@@ -90,7 +90,7 @@ export const make = Effect.gen(function* () {
 								chatId: row.chatId,
 								lastMessage: last
 									? {
-											preview: previewOf(textWithoutNarration(last.parts) || last.content),
+											preview: messagePreview(textWithoutNarration(last.parts) || last.content),
 											authorUserId: last.authorUserId,
 											at: last.createdAt.toISOString(),
 										}
@@ -212,20 +212,6 @@ const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 		.orderBy(message.threadId, desc(message.createdAt));
 	return new Map(rows.map((row) => [row.threadId, row]));
 });
-
-const PREVIEW_MAX_LENGTH = 140;
-
-/** A message's first non-empty line, with runs of spaces closed up, cut to fit one row. */
-function previewOf(content: string): string {
-	const firstLine = content
-		.split("\n")
-		.map((line) => line.replace(/\s+/g, " ").trim())
-		.find((line) => line !== "");
-	if (!firstLine) return "";
-	return firstLine.length > PREVIEW_MAX_LENGTH
-		? `${firstLine.slice(0, PREVIEW_MAX_LENGTH - 1).trimEnd()}…`
-		: firstLine;
-}
 
 function byLatestMessage(left: ChatListItem, right: ChatListItem): number {
 	const leftAt = left.lastMessage?.at;

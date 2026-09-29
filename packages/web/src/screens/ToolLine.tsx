@@ -3,18 +3,15 @@ import { cn } from "cn";
 import { ChevronRight, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import {
-	awaitsApproval,
 	BUILT_IN_HANDLE,
 	connectionLabel,
-	durationOf,
-	formatDuration,
-	formatTotal,
 	splitToolKey,
 	stepLabel,
 	wordsFromKey,
-} from "./tool-activity.ts";
+} from "@/lib/tool-names.ts";
+import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { awaitsApproval, durationOf, formatDuration, formatTotal } from "./tool-activity.ts";
 
 /**
  * What a bot used on the way to a reply, as one line above it: "Used HubSpot

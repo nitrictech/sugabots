@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { ResourceHidden } from "../../authorization/access.ts";
+import { mayDecideApprovals, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
@@ -106,7 +106,7 @@ export const makeControls = Effect.gen(function* () {
 							return yield* new ToolApprovalNotFound();
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
-						if (routineExecutionId && !decider.may("approval.routine.decide")) {
+						if (!mayDecideApprovals(decider, routineExecutionId !== undefined)) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;

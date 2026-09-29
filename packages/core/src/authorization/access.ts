@@ -272,6 +272,20 @@ export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")
 });
 
 /**
+ * Whether `standing` may decide a tool call's approval: `approval.decide`,
+ * and `approval.routine.decide` as well for one raised while a routine runs.
+ */
+export function mayDecideApprovals(
+	standing: Pick<PodStanding, "may">,
+	inRoutine: boolean,
+): boolean {
+	const needed: readonly PodPermission[] = inRoutine
+		? ["approval.decide", "approval.routine.decide"]
+		: ["approval.decide"];
+	return needed.every((permission) => standing.may(permission));
+}
+
+/**
  * SQL for "`userId` reaches the pod `podId` names": what `mayInPod(actor,
  * "pod.read", …)` decides for one pod, written again as a `where` clause. A
  * Personal pod is reached by its owner and by nobody else, and a shared pod by
