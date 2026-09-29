@@ -2,7 +2,7 @@ import { resetEvent, type StreamEvent, streamEventSchema } from "@sugabots/contr
 import { type ApiFailure, InternalServerError } from "@sugabots/contracts/http";
 import { Schema } from "effect";
 import { createParser } from "eventsource-parser";
-import { failureFromResponse } from "./errors.ts";
+import { apiFailureIn, failureForStatus } from "./errors.ts";
 import type { TokenStore } from "./tokens.ts";
 
 /**
@@ -119,10 +119,7 @@ function createEventStream(context: StreamContext): EventStream {
 				// help, and a silent retry loop would hide it. Anything else —
 				// a dropped socket, a restart, a 503, a rate limit — is worth
 				// waiting out.
-				if (
-					error instanceof StreamRefused &&
-					(isPermanent(error.status) || (error.status >= 200 && error.status < 300))
-				) {
+				if (error instanceof StreamRefused && error.permanent) {
 					throw error.failure;
 				}
 			}
@@ -142,20 +139,19 @@ function createEventStream(context: StreamContext): EventStream {
 }
 
 /**
- * A response that ended a connection, with the status it came with: whether
- * to reconnect is decided by the status, and what the caller sees is the
- * failure.
+ * A response that ended a connection: what the caller sees is the failure,
+ * and `permanent` is whether reconnecting could ever get anything else.
  */
 class StreamRefused {
 	constructor(
 		readonly failure: ApiFailure,
-		readonly status: number,
+		readonly permanent: boolean,
 	) {}
 }
 
 /** A successful response that is not a usable stream. Reconnecting would get the same. */
-function malformed(message: string, status: number): StreamRefused {
-	return new StreamRefused(new InternalServerError({ message }), status);
+function malformed(message: string): StreamRefused {
+	return new StreamRefused(new InternalServerError({ message }), true);
 }
 
 interface Message {
@@ -185,17 +181,21 @@ async function connect(
 		return undefined;
 	}
 	if (!response.ok) {
+		const refusal = apiFailureIn(await response.json().catch(() => undefined));
+		// Only the API's own refusal is final. The same status from something in
+		// front of it, such as a development proxy answering 404 while the API
+		// restarts, says nothing about the stream.
 		throw new StreamRefused(
-			failureFromResponse(await response.json().catch(() => undefined), response.status),
-			response.status,
+			refusal ?? failureForStatus(response.status, `Request failed with status ${response.status}`),
+			refusal !== undefined && isPermanent(response.status),
 		);
 	}
 	const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
 	if (contentType !== "text/event-stream") {
-		throw malformed("The event stream returned an invalid content type", response.status);
+		throw malformed("The event stream returned an invalid content type");
 	}
 	if (!response.body) {
-		throw malformed("The event stream returned no body", response.status);
+		throw malformed("The event stream returned no body");
 	}
 
 	return readMessages(response.body);
@@ -233,7 +233,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 				buffered = buffered.slice(lineEnd + delimiterLength);
 				eventChars += line.length;
 				if (eventChars > MAX_EVENT_CHARS) {
-					throw malformed("The event stream frame exceeded the size limit", 200);
+					throw malformed("The event stream frame exceeded the size limit");
 				}
 
 				parser.feed(line);
@@ -246,7 +246,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 			}
 
 			if (eventChars + buffered.length > MAX_EVENT_CHARS) {
-				throw malformed("The event stream frame exceeded the size limit", 200);
+				throw malformed("The event stream frame exceeded the size limit");
 			}
 		}
 	} finally {
