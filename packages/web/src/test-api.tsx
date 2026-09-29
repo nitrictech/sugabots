@@ -317,7 +317,10 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.events.workspace.mockImplementation(() => quietEventStream());
 	client.events.member.mockImplementation(() => quietEventStream());
 	client.api.notifications.preferences.mockReturnValue(
-		Effect.succeed({ kinds: { approve: true }, delivery: defaultNotificationDelivery }),
+		Effect.succeed({
+			kinds: { approve: true, dm: true, mention: true, routine: false, collab: false },
+			delivery: defaultNotificationDelivery,
+		}),
 	);
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));

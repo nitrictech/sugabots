@@ -17,6 +17,7 @@ const approval = (chatId: string | null): Notification => ({
 		podId: "0199a1b2-0000-7000-8000-000000000004",
 		chatId,
 		threadId: "0199a1b2-0000-7000-8000-000000000005",
+		threadType: "chat",
 		agentId: "0199a1b2-0000-7000-8000-000000000006",
 		agentName: "Growth Desk",
 		tools: ["linear__list_issues"],
@@ -79,6 +80,31 @@ describe("noticeText", () => {
 			title: "Growth Desk needs your approval",
 			body: "List issues in Linear",
 		});
+	});
+
+	it("says who mentioned the person, with the start of what they wrote", () => {
+		expect(
+			noticeText({
+				...approval(CHAT_ID).subject,
+				kind: "mention",
+				messageId: "0199a1b2-0000-7000-8000-000000000007",
+				authorName: "Sam",
+				preview: "@ada can you check the invoice?",
+			}),
+		).toEqual({ title: "Sam mentioned you", body: "@ada can you check the invoice?" });
+	});
+
+	it("says how a routine run ended", () => {
+		const routine = {
+			...approval(CHAT_ID).subject,
+			kind: "routine" as const,
+			threadType: "routine" as const,
+			routineName: "Morning brief",
+		};
+		expect(noticeText({ ...routine, outcome: "completed" }).title).toBe("Morning brief finished");
+		expect(noticeText({ ...routine, outcome: "cancelled" }).title).toBe(
+			"Morning brief was cancelled",
+		);
 	});
 
 	it("counts the other tools waiting after the first", () => {

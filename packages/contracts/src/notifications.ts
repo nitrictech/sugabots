@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { threadTypeSchema } from "./threads.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -11,28 +12,95 @@ import { uuidSchema } from "./uuid.ts";
  * gets its `defaultOn`, so adding a kind needs nothing stored for anyone.
  */
 
-/** A bot's reply stopped until somebody decides the tool calls it asked to make. */
-export const approveSubjectSchema = Schema.Struct({
-	kind: Schema.Literal("approve"),
+/**
+ * Where a notification is about, which is what opening it shows: the bot
+ * `agentId`'s chat, and beside it the thread when that is not the chat's own,
+ * such as a routine run's.
+ */
+const placeFields = {
 	podId: uuidSchema,
 	/** The chat to open. Null for a thread in no chat, such as a collaboration's. */
 	chatId: Schema.NullOr(uuidSchema),
 	threadId: uuidSchema,
+	threadType: threadTypeSchema,
 	agentId: uuidSchema,
 	agentName: Schema.String,
+};
+
+/** A bot's reply stopped until somebody decides the tool calls it asked to make. */
+export const approveSubjectSchema = Schema.Struct({
+	kind: Schema.Literal("approve"),
+	...placeFields,
 	/** The tools the calls waiting for a decision would run, in the order the reply asked. */
 	tools: Schema.Array(Schema.String),
 });
 
-export const notificationSubjectSchema = Schema.Union([approveSubjectSchema]);
+/** The longest `preview` of a message a subject carries. */
+export const NOTIFICATION_PREVIEW_CHARACTERS = 140;
+
+/**
+ * A bot replied to the person: in their Personal pod, to a message of theirs,
+ * or mentioning them.
+ */
+export const dmSubjectSchema = Schema.Struct({
+	kind: Schema.Literal("dm"),
+	...placeFields,
+	messageId: uuidSchema,
+	/** The start of the reply. */
+	preview: Schema.String,
+});
+
+/** Somebody mentioned the person in a message. `agentId` is the bot whose chat it was in. */
+export const mentionSubjectSchema = Schema.Struct({
+	kind: Schema.Literal("mention"),
+	...placeFields,
+	messageId: uuidSchema,
+	authorName: Schema.String,
+	/** The start of the message. */
+	preview: Schema.String,
+});
+
+/** A run of a routine the person made ended. `threadId` is the run's own thread. */
+export const routineSubjectSchema = Schema.Struct({
+	kind: Schema.Literal("routine"),
+	...placeFields,
+	routineName: Schema.String,
+	outcome: Schema.Literals(["completed", "failed", "cancelled"]),
+});
+
+/**
+ * A bot asked another for help in a thread the person started, and that
+ * ended. The place is the asking bot's; `threadId` is the thread it asked in.
+ */
+export const collabSubjectSchema = Schema.Struct({
+	kind: Schema.Literal("collab"),
+	...placeFields,
+	collaboratorName: Schema.String,
+	outcome: Schema.Literals(["answered", "failed"]),
+});
+
+export const notificationSubjectSchema = Schema.Union([
+	approveSubjectSchema,
+	dmSubjectSchema,
+	mentionSubjectSchema,
+	routineSubjectSchema,
+	collabSubjectSchema,
+]);
 
 export type NotificationSubject = typeof notificationSubjectSchema.Type;
 
 export type NotificationKind = NotificationSubject["kind"];
 
-/** Every kind, with what the settings call it and whether a person hears about it before choosing. */
+/**
+ * Every kind, with what the settings call it and whether a person hears about
+ * it before choosing, in the order the settings list them.
+ */
 export const notificationKinds: Record<NotificationKind, { label: string; defaultOn: boolean }> = {
 	approve: { label: "A bot needs my approval", defaultOn: true },
+	dm: { label: "A bot messages me directly", defaultOn: true },
+	mention: { label: "Someone mentions me in a pod", defaultOn: true },
+	routine: { label: "A routine finishes", defaultOn: false },
+	collab: { label: "A collaboration finishes", defaultOn: false },
 };
 
 export const notificationKindSchema = Schema.Literals(

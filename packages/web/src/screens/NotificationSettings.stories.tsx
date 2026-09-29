@@ -14,7 +14,7 @@ const preferencesUrl = `${import.meta.env.VITE_API_URL}/notifications/preference
 const deliveryUrl = `${import.meta.env.VITE_API_URL}/notifications/delivery`;
 
 const defaults: NotificationPreferences = {
-	kinds: { approve: true },
+	kinds: { approve: true, dm: true, mention: true, routine: false, collab: false },
 	delivery: { desktop: true, quietOnWeekends: false },
 };
 
@@ -72,6 +72,14 @@ export const Defaults = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("Tell me when")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "A bot needs my approval" })).toBeChecked();
+		await expect(canvas.getByRole("switch", { name: "A bot messages me directly" })).toBeChecked();
+		await expect(
+			canvas.getByRole("switch", { name: "Someone mentions me in a pod" }),
+		).toBeChecked();
+		await expect(canvas.getByRole("switch", { name: "A routine finishes" })).not.toBeChecked();
+		await expect(
+			canvas.getByRole("switch", { name: "A collaboration finishes" }),
+		).not.toBeChecked();
 		await expect(canvas.getByRole("switch", { name: "Desktop notifications" })).toBeChecked();
 		await expect(canvas.getByRole("switch", { name: "Quiet on weekends" })).not.toBeChecked();
 		await expect(canvas.queryByText(/browser/)).not.toBeInTheDocument();

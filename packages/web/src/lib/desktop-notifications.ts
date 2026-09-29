@@ -88,7 +88,11 @@ export function useDesktopNotifications(): void {
 		});
 		if (!interrupt) return;
 		const { title, body } = noticeText(notification.subject);
-		const agent = agents?.find((one) => one.id === notification.subject.agentId);
+		// A mention is from a person, so it shows no bot's face.
+		const agent =
+			notification.subject.kind === "mention"
+				? undefined
+				: agents?.find((one) => one.id === notification.subject.agentId);
 		const icon = agent ? faceIcon(agent).catch(() => APP_ICON) : Promise.resolve(APP_ICON);
 		void icon.then((drawn) => {
 			// The tag is the notification's, so several open tabs show it once.
@@ -123,8 +127,33 @@ export function noticeText(subject: NotificationSubject): { title: string; body:
 				body: others.length > 0 ? `${asked}, and ${others.length} more` : asked,
 			};
 		}
+		case "dm":
+			return { title: subject.agentName, body: subject.preview };
+		case "mention":
+			return { title: `${subject.authorName} mentioned you`, body: subject.preview };
+		case "routine":
+			return {
+				title: `${subject.routineName} ${ROUTINE_OUTCOME_WORDS[subject.outcome]}`,
+				body: `A routine run by ${subject.agentName}`,
+			};
+		case "collab":
+			return {
+				title:
+					subject.outcome === "answered"
+						? `${subject.collaboratorName} answered ${subject.agentName}`
+						: `${subject.collaboratorName} couldn't answer ${subject.agentName}`,
+				body: `${subject.agentName} asked for help with your request`,
+			};
 	}
 }
+
+const ROUTINE_OUTCOME_WORDS: Record<RoutineSubject["outcome"], string> = {
+	completed: "finished",
+	failed: "failed",
+	cancelled: "was cancelled",
+};
+
+type RoutineSubject = Extract<NotificationSubject, { kind: "routine" }>;
 
 /** A tool as its approval card titles it: `List issues in Linear`, or a built-in tool's name alone. */
 function toolTitle(tool: string): string {
@@ -149,7 +178,7 @@ function useShownChatId(): () => string | undefined {
 	};
 }
 
-/** Opens the chat of the bot a notification is about, with its thread beside it when it is in no chat. */
+/** Opens the chat of the bot a notification is about, with its thread beside it when that is not the chat's own. */
 function useOpenSubject(): (subject: NotificationSubject) => void {
 	const navigate = useNavigate();
 	const { agents } = useAgents();
@@ -159,7 +188,10 @@ function useOpenSubject(): (subject: NotificationSubject) => void {
 		const pod = pods?.find((one) => one.id === subject.podId);
 		if (!agent || !pod) return;
 		void navigate(
-			agentChatLink({ pod, agent }, subject.chatId === null ? { thread: subject.threadId } : {}),
+			agentChatLink(
+				{ pod, agent },
+				subject.threadType === "chat" ? {} : { thread: subject.threadId },
+			),
 		);
 	};
 }

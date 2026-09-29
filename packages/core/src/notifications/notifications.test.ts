@@ -9,6 +9,8 @@ import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { Chats } from "../conversations/chats/chats.ts";
+import { ConversationEvents } from "../conversations/conversation-events.ts";
+import { ConversationEvent } from "../conversations/events.ts";
 import { conversationsForTests } from "../conversations/testing.ts";
 import {
 	aChatAwaitingReply,
@@ -20,13 +22,17 @@ import {
 	TurnExecution,
 	TurnRepository,
 } from "../conversations/turns/testing.ts";
+import { transaction } from "../database/database.ts";
 import type { CommittedEvent } from "../database/events/outbox.ts";
 import {
 	agent,
+	collaboration,
+	message,
 	notification,
 	podMember,
 	routine,
 	routineExecution,
+	thread,
 	user,
 	workspaceMember,
 } from "../database/schema.ts";
@@ -53,6 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
 	const notifications = Context.get(conversations, Notifications.Service);
+	const { emit } = Context.get(conversations, ConversationEvents.Service);
+	const announce = (...events: ConversationEvent[]) => runOnPostgres(transaction(emit(events)));
 	const as = (userId: string) =>
 		CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId));
 	const preferencesOf = (userId: string) =>
@@ -154,17 +162,45 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 			approvals,
 		);
 
-	const toldUsers = async () =>
+	/** Who has been told anything in the workspace, or about `kind` alone. */
+	const toldUsers = async (kind?: NotificationKind) =>
 		(
 			await onDatabase((db) =>
 				db
-					.select({ userId: notification.userId })
+					.select({ userId: notification.userId, kind: notification.kind })
 					.from(notification)
 					.where(eq(notification.workspaceId, workspaceId)),
 			)
 		)
+			.filter((row) => kind === undefined || row.kind === kind)
 			.map(({ userId }) => userId)
 			.sort();
+
+	const subjectsOf = async (userId: string, kind: NotificationKind) =>
+		(
+			await onDatabase((db) =>
+				db.select().from(notification).where(eq(notification.userId, userId)),
+			)
+		)
+			.filter((row) => row.kind === kind)
+			.map((row) => row.subject);
+
+	/** Finishes the host's reply with `content`. */
+	const reply = (content: string) =>
+		turns.complete(
+			replyTurnOf(prepared),
+			{ content, collaborations: [], toolCalls: [] },
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+		);
+
+	/** `userId` posts `content` in the host's chat. */
+	const post = async (userId: string, content: string) => {
+		const [chat] = await onDatabase((db) =>
+			db.select({ chatId: thread.chatId }).from(thread).where(eq(thread.id, threadId)),
+		);
+		if (!chat?.chatId) throw new Error("fixture");
+		await chatsAs(userId).post({ chatId: chat.chatId, messageId: crypto.randomUUID(), content });
+	};
 
 	const noticesDelivered = () =>
 		delivered.filter(({ event }) => event.type === "notification.created");
@@ -270,14 +306,16 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 		expect(await toldUsers()).toEqual([people.owner, people.admin].sort());
 	});
 
-	it("hears about every kind by default, and remembers a change", async () => {
-		expect((await preferencesOf(people.member)).kinds).toEqual({ approve: true });
+	it("hears about each kind as its default says, and remembers a change", async () => {
+		const defaults = { approve: true, dm: true, mention: true, routine: false, collab: false };
+		expect((await preferencesOf(people.member)).kinds).toEqual(defaults);
 
 		expect((await setPreference(people.member, "approve", false)).kinds).toEqual({
+			...defaults,
 			approve: false,
 		});
-		expect((await preferencesOf(people.member)).kinds).toEqual({ approve: false });
-		expect((await preferencesOf(people.admin)).kinds).toEqual({ approve: true });
+		expect((await preferencesOf(people.member)).kinds).toEqual({ ...defaults, approve: false });
+		expect((await preferencesOf(people.admin)).kinds).toEqual(defaults);
 	});
 
 	it("is told the default way, and keeps each delivery setting changed", async () => {
@@ -293,5 +331,279 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 			quietOnWeekends: true,
 		});
 		expect((await preferencesOf(people.admin)).delivery).toEqual(defaultNotificationDelivery);
+	});
+	describe("a bot messaging somebody directly", () => {
+		it("tells the person the reply answers, and the pod's people it mentions", async () => {
+			await reply("Done. @member, @bystander: have a look.");
+
+			expect(await toldUsers("dm")).toEqual([people.admin, people.member].sort());
+			const [told] = await subjectsOf(people.member, "dm");
+			expect(told).toMatchObject({
+				kind: "dm",
+				podId,
+				threadId,
+				threadType: "chat",
+				agentId: hostId,
+				messageId: replyTurnOf(prepared).messageId,
+				preview: "Done. @member, @bystander: have a look.",
+			});
+		});
+
+		it("previews the reply as the chat shows it, without the words before a tool call", async () => {
+			const { messageId } = replyTurnOf(prepared);
+			await reply("Let me check:It is paid.");
+			await onDatabase((db) =>
+				db
+					.update(message)
+					.set({
+						parts: [
+							{ type: "text", text: "Let me check:" },
+							{ type: "tool_call", toolCallId: crypto.randomUUID() },
+							{ type: "text", text: "It is paid." },
+						],
+					})
+					.where(eq(message.id, messageId)),
+			);
+			await onDatabase((db) =>
+				db.delete(notification).where(eq(notification.workspaceId, workspaceId)),
+			);
+			await announce(
+				ConversationEvent.TurnCompleted({
+					threadId,
+					workspaceId,
+					podId,
+					turnId: prepared.turnId,
+					agentId: hostId,
+					reason: undefined,
+					messageId,
+					content: "Let me check:It is paid.",
+					contextTokens: undefined,
+					contextCapacity: 128_000,
+					readKeptFrom: null,
+					answeredCollaboration: false,
+				}),
+			);
+
+			expect(await subjectsOf(people.admin, "dm")).toMatchObject([{ preview: "It is paid." }]);
+		});
+
+		it("tells a person once when the reply both answers and mentions them", async () => {
+			await reply("@sam here it is.");
+
+			expect(await toldUsers("dm")).toEqual([people.admin]);
+		});
+
+		it("cuts a long reply to a preview", async () => {
+			await reply(`Here is the summary. ${"word ".repeat(60)}`);
+
+			const [told] = await subjectsOf(people.admin, "dm");
+			expect(told?.kind === "dm" && told.preview.length).toBeLessThanOrEqual(140);
+			expect(told?.kind === "dm" && told.preview.endsWith("…")).toBe(true);
+		});
+
+		it("leaves out somebody who turned it off", async () => {
+			await setPreference(people.admin, "dm", false);
+
+			await reply("@member here it is.");
+
+			expect(await toldUsers("dm")).toEqual([people.member]);
+		});
+	});
+
+	describe("somebody mentioning a person", () => {
+		it("tells the pod's people it mentions, but not the person who wrote it", async () => {
+			await post(people.member, "@sam @viewer @member @bystander can you look at this?");
+
+			expect(await toldUsers("mention")).toEqual([people.admin, people.viewer].sort());
+			const [told] = await subjectsOf(people.viewer, "mention");
+			expect(told).toMatchObject({
+				kind: "mention",
+				podId,
+				threadId,
+				threadType: "chat",
+				agentId: hostId,
+				authorName: "Member",
+				preview: "@sam @viewer @member @bystander can you look at this?",
+			});
+		});
+
+		it("tells nobody about a message that mentions no one", async () => {
+			await post(people.member, "Can somebody look at this?");
+
+			expect(await toldUsers("mention")).toEqual([]);
+		});
+	});
+
+	/** A routine `createdById` made, with a run in the fixture's thread that ended as `state`. */
+	async function aRunThatEnded(createdById: string, state: "completed" | "failed" | "running") {
+		const [made] = await onDatabase((db) =>
+			db
+				.insert(routine)
+				.values({
+					workspaceId,
+					agentId: hostId,
+					name: "Morning brief",
+					instructions: "Brief the team",
+					triggerKind: "webhook",
+					webhookSecretDigest: "digest",
+					createdById,
+				})
+				.returning({ id: routine.id }),
+		);
+		if (!made) throw new Error("fixture");
+		const now = new Date();
+		await onDatabase((db) =>
+			db.insert(routineExecution).values({
+				routineId: made.id,
+				workspaceId,
+				agentId: hostId,
+				threadId,
+				triggerKind: "webhook",
+				trigger: {
+					kind: "webhook",
+					receivedAt: now.toISOString(),
+					idempotencyKey: null,
+					payload: {},
+				},
+				routineName: "Morning brief",
+				instructions: "Brief the team",
+				state,
+				startedAt: now,
+			}),
+		);
+		await announce(
+			ConversationEvent.RoutineExecutionSettled({ workspaceId, podId, chatId: podId, threadId }),
+		);
+	}
+
+	describe("a routine finishing", () => {
+		it("tells the person who made the routine how its run ended", async () => {
+			await setPreference(people.member, "routine", true);
+
+			await aRunThatEnded(people.member, "failed");
+
+			expect(await toldUsers("routine")).toEqual([people.member]);
+			expect(await subjectsOf(people.member, "routine")).toMatchObject([
+				{ kind: "routine", routineName: "Morning brief", outcome: "failed", agentId: hostId },
+			]);
+		});
+
+		it("tells nobody who has not turned it on", async () => {
+			await aRunThatEnded(people.member, "completed");
+
+			expect(await toldUsers("routine")).toEqual([]);
+		});
+
+		it("tells nobody of a run still going", async () => {
+			await setPreference(people.member, "routine", true);
+
+			await aRunThatEnded(people.member, "running");
+
+			expect(await toldUsers("routine")).toEqual([]);
+		});
+	});
+
+	describe("a collaboration finishing", () => {
+		/** The host asked a helper for help in its reply, and that ended as `outcome`. */
+		async function aCollaborationThat(outcome: "answered" | "failed") {
+			const [helper] = await onDatabase((db) =>
+				db
+					.insert(agent)
+					.values({
+						workspaceId,
+						podId,
+						name: "Helper",
+						handle: `helper-${crypto.randomUUID().slice(0, 8)}`,
+						color: "sky",
+						face: "dot",
+						model: "m",
+					})
+					.returning({ id: agent.id }),
+			);
+			if (!helper) throw new Error("fixture");
+			const [child] = await onDatabase((db) =>
+				db
+					.insert(thread)
+					.values({
+						workspaceId,
+						podId,
+						hostAgentId: helper.id,
+						type: "collaboration",
+						title: "Help",
+						parentThreadId: threadId,
+					})
+					.returning({ id: thread.id }),
+			);
+			if (!child) throw new Error("fixture");
+			const parentMessageId = replyTurnOf(prepared).messageId;
+			const [asked] = await onDatabase((db) =>
+				db
+					.insert(collaboration)
+					.values({
+						parentThreadId: threadId,
+						parentMessageId,
+						turnId: prepared.turnId,
+						childThreadId: child.id,
+						collaboratorAgentId: helper.id,
+						brief: "Check the invoice",
+						status: outcome,
+						answer: outcome === "answered" ? "It is paid" : null,
+						atOffset: 0,
+					})
+					.returning({ id: collaboration.id }),
+			);
+			if (!asked) throw new Error("fixture");
+			const change = {
+				parentThreadId: threadId,
+				parentMessageId,
+				collaboration: {
+					type: "collaboration" as const,
+					id: asked.id,
+					agentId: helper.id,
+					agentName: "Helper",
+					threadId: child.id,
+					brief: "Check the invoice",
+					status: outcome,
+					answer: outcome === "answered" ? "It is paid" : null,
+					atOffset: 0,
+				},
+			};
+			await announce(
+				outcome === "answered"
+					? ConversationEvent.CollaborationAnswered(change)
+					: ConversationEvent.CollaborationFailed(change),
+			);
+		}
+
+		it("tells the person whose message the asking bot was answering", async () => {
+			await setPreference(people.admin, "collab", true);
+
+			await aCollaborationThat("answered");
+
+			expect(await toldUsers("collab")).toEqual([people.admin]);
+			expect(await subjectsOf(people.admin, "collab")).toMatchObject([
+				{
+					kind: "collab",
+					agentId: hostId,
+					collaboratorName: "Helper",
+					outcome: "answered",
+					threadId,
+				},
+			]);
+		});
+
+		it("says when the helper could not answer", async () => {
+			await setPreference(people.admin, "collab", true);
+
+			await aCollaborationThat("failed");
+
+			expect(await subjectsOf(people.admin, "collab")).toMatchObject([{ outcome: "failed" }]);
+		});
+
+		it("tells nobody who has not turned it on", async () => {
+			await aCollaborationThat("answered");
+
+			expect(await toldUsers("collab")).toEqual([]);
+		});
 	});
 });
