@@ -19,9 +19,6 @@ import { UserMessage } from "../../user-message.ts";
  */
 export const MAX_TURN_RUNS = 3;
 
-/** The statuses of a turn somebody is still running or waiting on. */
-export const ACTIVE_STATUSES = ["running", "waiting"] as const satisfies readonly TurnStatus[];
-
 /** What people are told of a cancelled turn's tool calls that were cut short. */
 export const TURN_CANCELLED = UserMessage.of`Turn cancelled`;
 

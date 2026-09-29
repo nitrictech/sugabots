@@ -13,7 +13,6 @@ import { toCollaborationPart } from "../../threads/collaborations.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
 import { lineageOf } from "../../threads/tree.ts";
-import { Turns } from "../../turns/turns.ts";
 import { CollaborationRepository } from "./repository.ts";
 
 /**
@@ -28,9 +27,9 @@ import { CollaborationRepository } from "./repository.ts";
  */
 export interface Interface {
 	/**
-	 * Opens the collaborator's thread with the brief as its first message,
-	 * asks for the collaborator's turn, and records the collaboration. Fails,
-	 * writing nothing, when policy refuses.
+	 * Opens the collaborator's thread with the brief as its first message and
+	 * records the collaboration; floor control asks for the collaborator's
+	 * turn when it is opened. Fails, writing nothing, when policy refuses.
 	 */
 	readonly open: (input: {
 		/** The asking agent's thread, agent, turn, reply message, and how far into the reply it was. */
@@ -54,8 +53,8 @@ export interface Interface {
 	readonly collectAnswer: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
 	 * Hands the collaborator's reply in its thread `threadId` back to the
-	 * agent that asked. An agent that stopped waiting gets a turn in the
-	 * parent thread to pick the answer up.
+	 * agent that asked. Floor control gives an agent that stopped waiting a
+	 * turn in the parent thread to pick the answer up.
 	 *
 	 * `true` when this reply answered an outstanding brief, which concludes
 	 * that exchange: the answer has gone to the parent and the asking agent
@@ -81,7 +80,6 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Collaborations");
 	const threads = yield* ThreadRepository.Service;
 	const repository = yield* CollaborationRepository.Service;
-	const turns = yield* Turns.Service;
 
 	return Service.of({
 		open: ({ from, to, brief }) =>
@@ -130,17 +128,12 @@ export const make = Effect.gen(function* () {
 							title: firstLine(brief),
 							brief,
 						});
-						yield* turns.ask({
-							threadId: child.threadId,
-							agentId: collaborator.id,
-							triggerMessageId: child.briefMessageId,
-							reason: "collaboration",
-						});
 						const opened = yield* repository.open({
 							parentThreadId: parent.id,
 							parentMessageId: from.messageId,
 							turnId: from.turnId,
 							childThreadId: child.threadId,
+							briefMessageId: child.briefMessageId,
 							collaborator,
 							brief,
 							atOffset: from.atOffset,
@@ -159,17 +152,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const answered = yield* repository.answer(threadId, answer);
-						if (!answered) return false;
-						// While it was still waiting, the asking tool reads the answer itself.
-						if (answered.askerMovedOn) {
-							yield* turns.ask({
-								threadId: answered.collaboration.parentThreadId,
-								agentId: answered.askingAgentId,
-								triggerMessageId: answered.collaboration.parentMessageId,
-								reason: "resume",
-							});
-						}
-						return true;
+						return answered !== undefined;
 					}),
 				),
 			),

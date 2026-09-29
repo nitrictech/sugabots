@@ -23,6 +23,8 @@ export interface Interface {
 	 * Gives the floor after each completed reply, in the transaction that
 	 * completed it. A reply that answered a brief goes back to the agent that
 	 * asked, which carries on in the parent thread, so nobody speaks next there.
+	 * Also asks for the collaborator's turn when a collaboration opens, and for
+	 * the asking agent's when an answer arrives after it stopped waiting.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
@@ -75,15 +77,38 @@ export const make = Effect.gen(function* () {
 		handler: (events) =>
 			Effect.forEach(
 				events,
-				(event) =>
-					event._tag === "TurnCompleted" && !event.answeredCollaboration
-						? giveFloor({
-								id: event.messageId,
-								threadId: event.threadId,
-								content: event.content,
-								author: { kind: "agent", agentId: event.agentId, spokeBecause: event.reason },
-							})
-						: Effect.void,
+				(event): Effect.Effect<unknown> => {
+					switch (event._tag) {
+						case "TurnCompleted":
+							return event.answeredCollaboration
+								? Effect.void
+								: giveFloor({
+										id: event.messageId,
+										threadId: event.threadId,
+										content: event.content,
+										author: { kind: "agent", agentId: event.agentId, spokeBecause: event.reason },
+									});
+						case "CollaborationOpened":
+							return turns.ask({
+								threadId: event.collaboration.threadId,
+								agentId: event.collaboratorAgentId,
+								triggerMessageId: event.briefMessageId,
+								reason: "collaboration",
+							});
+						case "CollaborationAnswered":
+							// While it was still waiting, the asking tool reads the answer itself.
+							return event.askerMovedOn
+								? turns.ask({
+										threadId: event.parentThreadId,
+										agentId: event.askingAgentId,
+										triggerMessageId: event.parentMessageId,
+										reason: "resume",
+									})
+								: Effect.void;
+						default:
+							return Effect.void;
+					}
+				},
 				{ discard: true },
 			),
 	});

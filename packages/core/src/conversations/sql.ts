@@ -296,6 +296,9 @@ export type TurnReason =
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 
+/** The statuses of a turn that has not ended. */
+export const ACTIVE_TURN_STATUSES = ["running", "waiting"] as const satisfies readonly TurnStatus[];
+
 export const turn = pgTable(
 	"turn",
 	{
