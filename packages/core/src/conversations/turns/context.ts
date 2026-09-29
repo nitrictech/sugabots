@@ -1,8 +1,11 @@
 import type { Message } from "@sugabots/contracts";
 import type { Models } from "../../providers/models/models.ts";
-import { formatHistoryTime } from "../compaction/prompt.ts";
-import { describeCollaboration, describeToolCall } from "../threads/message-text.ts";
-import { SEARCH_HISTORY_TOOL } from "../tools/search-history/tool.ts";
+import {
+	describeCollaboration,
+	describeToolCall,
+	formatHistoryTime,
+	SEARCH_HISTORY_TOOL,
+} from "../threads/message-text.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 

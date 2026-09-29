@@ -1,5 +1,7 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
-import { SEARCH_HISTORY_TOOL } from "../tools/search-history/tool.ts";
+
+/** The tool an agent searches its thread's older history with. */
+export const SEARCH_HISTORY_TOOL = "search_history";
 
 /** How much of a tool call's input and output the agent's history keeps. */
 const DESCRIBED_INPUT_CHARACTERS = 200;
@@ -66,3 +68,22 @@ export function describeCollaboration(collaboration: CollaborationPart): string 
 			return `${asked}\n[Platform collaboration record: ${collaboration.agentName} could not answer]`;
 	}
 }
+
+/**
+ * A point in a thread's history, with the day as well as the time since long
+ * threads span days: "Fri, 15 May 2026, 17:40 UTC".
+ */
+export function formatHistoryTime(at: Date): string {
+	return `${historyTime.format(at)} UTC`;
+}
+
+const historyTime = new Intl.DateTimeFormat("en-GB", {
+	weekday: "short",
+	day: "numeric",
+	month: "short",
+	year: "numeric",
+	hour: "2-digit",
+	minute: "2-digit",
+	hourCycle: "h23",
+	timeZone: "UTC",
+});
