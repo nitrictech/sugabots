@@ -3,6 +3,9 @@ import { Schema } from "effect";
 /**
  * What a member may do in a workspace.
  *
+ * - `owner` is the one person who holds the workspace: an administrator who
+ *   also decides who else administers it, and who alone can hand it on.
+ *   Every workspace has exactly one, from the moment its creator makes it.
  * - `admin` administers the workspace, its people, its providers and every
  *   shared pod.
  * - `member` uses the shared pods they have been added to.
@@ -17,9 +20,34 @@ import { Schema } from "effect";
  * The grants each role holds are in
  * `packages/core/src/authorization/permissions.ts`.
  */
-export const WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;
+export const WORKSPACE_ROLES = ["owner", "admin", "member", "viewer"] as const;
 
 export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
+
+/**
+ * The roles somebody can be invited with or given. Owner is not one: it
+ * changes hands only by the owner transferring it, so there is always one.
+ */
+export const ASSIGNABLE_WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;
+
+export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPACE_ROLES);
+
+export type AssignableWorkspaceRole = typeof assignableWorkspaceRoleSchema.Type;
+
+/**
+ * The roles that administer the workspace. Each is in every shared pod, put
+ * there by database triggers, and can neither leave one nor be taken out.
+ */
+export const ADMINISTERING_WORKSPACE_ROLES = [
+	"owner",
+	"admin",
+] as const satisfies readonly WorkspaceRole[];
+
+export function administersWorkspace(role: WorkspaceRole | undefined): boolean {
+	return (
+		role !== undefined && (ADMINISTERING_WORKSPACE_ROLES as readonly WorkspaceRole[]).includes(role)
+	);
+}
 
 export const workspaceIdOrSlugSchema = Schema.String.check(Schema.isMinLength(1));
 
@@ -32,6 +60,7 @@ export type WorkspaceRole = typeof workspaceRoleSchema.Type;
  * bargain.
  */
 const ROLE_LABELS: Record<WorkspaceRole, string> = {
+	owner: "Owner",
 	admin: "Admin",
 	member: "Member",
 	viewer: "Viewer",
@@ -50,6 +79,7 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
  * conversation.
  */
 const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
+	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin: "Administers the workspace, its providers and every shared pod.",
 	member: "Builds agents in the pods they are added to.",
 	viewer: "Reads and takes part in the pods they are added to.",
@@ -85,6 +115,10 @@ export const workspacePermissionsSchema = Schema.Struct({
 	configureBuiltInAgents: Schema.Boolean,
 	/** See what the workspace's models cost, and limit it. */
 	manageUsage: Schema.Boolean,
+	/** Make somebody an administrator or stop them being one, and remove an administrator. */
+	manageAdmins: Schema.Boolean,
+	/** Hand the workspace to another member, who becomes its owner. */
+	transferOwnership: Schema.Boolean,
 });
 
 export type WorkspacePermissions = typeof workspacePermissionsSchema.Type;

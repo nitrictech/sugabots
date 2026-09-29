@@ -5,7 +5,7 @@ import { podSlugSchema } from "./pods.ts";
 import { timeZoneSchema } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
-import { workspaceRoleSchema } from "./workspaces.ts";
+import { assignableWorkspaceRoleSchema, workspaceRoleSchema } from "./workspaces.ts";
 
 /** Unique across the installation. */
 export const workspaceSlugSchema = podSlugSchema;
@@ -46,20 +46,23 @@ export const workspaceMemberSchema = Schema.Struct({
 });
 export type WorkspaceMember = typeof workspaceMemberSchema.Type;
 
-export const workspaceMemberUpdateSchema = Schema.Struct({ role: workspaceRoleSchema });
+export const workspaceMemberUpdateSchema = Schema.Struct({ role: assignableWorkspaceRoleSchema });
+
+/** Who the owner hands the workspace to: one of its members, by membership id. */
+export const ownershipTransferSchema = Schema.Struct({ memberId: uuidSchema });
 
 /** An invitation still waiting to be accepted. */
 export const workspaceInvitationSchema = Schema.Struct({
 	id: uuidSchema,
 	email: emailSchema,
-	role: workspaceRoleSchema,
+	role: assignableWorkspaceRoleSchema,
 	expiresAt: isoTimestampSchema,
 });
 export type WorkspaceInvitation = typeof workspaceInvitationSchema.Type;
 
 export const newWorkspaceInvitationSchema = Schema.Struct({
 	email: emailSchema,
-	role: workspaceRoleSchema,
+	role: assignableWorkspaceRoleSchema,
 	/** Refreshes an invitation already outstanding to this address, and sends it again. */
 	resend: Schema.optional(Schema.Boolean),
 });

@@ -1,5 +1,5 @@
-import type { PodMember } from "@sugabots/contracts";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { ADMINISTERING_WORKSPACE_ROLES, type PodMember } from "@sugabots/contracts";
+import { and, asc, eq, inArray, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { pod, podMember, user, workspaceMember } from "../../database/schema.ts";
@@ -14,7 +14,7 @@ export const podMembers = (podId: string) =>
 				email: user.email,
 				image: user.image,
 				addedAt: podMember.createdAt,
-				removable: sql<boolean>`${pod.kind} = 'shared' and ${workspaceMember.role} <> 'admin'`,
+				removable: sql<boolean>`${pod.kind} = 'shared' and ${not(inArray(workspaceMember.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
 			})
 			.from(podMember)
 			.innerJoin(user, eq(user.id, podMember.userId))

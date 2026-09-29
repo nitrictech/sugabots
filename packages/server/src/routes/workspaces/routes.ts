@@ -42,17 +42,22 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 						memberId: params.memberId,
 						role: payload.role,
 					})
-					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
+					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
 			)
 			.handle("removeMember", ({ params }) =>
 				membership
 					.remove({ workspace: params.workspace, memberId: params.memberId })
-					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
+					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
 			)
 			.handle("leave", ({ params }) =>
 				membership
 					.leave({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError({ ...refusals, LastAdministrator: BadRequest })),
+					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
+			)
+			.handle("transferOwnership", ({ params, payload }) =>
+				membership
+					.transferOwnership({ workspace: params.workspace, memberId: payload.memberId })
+					.pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("invitations", ({ params }) =>
 				membership

@@ -1,4 +1,5 @@
 import {
+	type AssignableWorkspaceRole,
 	type TimeZone,
 	timeZoneSchema,
 	type Workspace,
@@ -94,7 +95,7 @@ export function useInviteWorkspaceMember(workspaceId: string) {
 			resend,
 		}: {
 			email: string;
-			role: WorkspaceRole;
+			role: AssignableWorkspaceRole;
 			resend?: boolean;
 		}) =>
 			Effect.runPromise(
@@ -163,7 +164,7 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
 				queries.invalidateQueries({ queryKey: ["pods"] }),
-				// Making somebody an administrator puts them in every shared pod.
+				// Making somebody an administrator or the owner puts them in every shared pod.
 				queries.invalidateQueries({ queryKey: ["pod-members"] }),
 				queries.invalidateQueries({ queryKey: ["agents"] }),
 			]),
@@ -173,13 +174,25 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 export function useUpdateWorkspaceMemberRole(workspaceId: string) {
 	return useMemberChange(
 		workspaceId,
-		({ memberId, role }: { memberId: string; role: WorkspaceRole }) =>
+		({ memberId, role }: { memberId: string; role: AssignableWorkspaceRole }) =>
 			Effect.runPromise(
 				client.api.workspaces.updateMember({
 					params: { workspace: workspaceId, memberId },
 					payload: { role },
 				}),
 			),
+	);
+}
+
+/** Hands the workspace to another member. The caller stays on as an administrator. */
+export function useTransferWorkspaceOwnership(workspaceId: string) {
+	return useMemberChange(workspaceId, (memberId: string) =>
+		Effect.runPromise(
+			client.api.workspaces.transferOwnership({
+				params: { workspace: workspaceId },
+				payload: { memberId },
+			}),
+		),
 	);
 }
 
@@ -262,6 +275,8 @@ const NOTHING_YET: WorkspacePermissions = {
 	manageMembers: false,
 	configureBuiltInAgents: false,
 	manageUsage: false,
+	manageAdmins: false,
+	transferOwnership: false,
 };
 
 function useWorkspaceStanding() {

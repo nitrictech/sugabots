@@ -34,7 +34,7 @@ function person(n: number, name: string, email: string, role: string) {
 	};
 }
 
-const ryan = person(1, "Ryan Eyes", "ryan@nitric.io", "admin");
+const ryan = person(1, "Ryan Eyes", "ryan@nitric.io", "owner");
 const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
 const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
 const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
@@ -45,7 +45,7 @@ const inPod = (member: typeof ryan) => ({
 	email: member.user.email,
 	image: null,
 	addedAt: member.joinedAt,
-	removable: member.role !== "admin",
+	removable: member.role !== "owner" && member.role !== "admin",
 });
 
 /** Somebody asked and not yet arrived. Half a day from now, so the copy reads the same whenever it runs. */
@@ -89,7 +89,13 @@ const meta = preview.meta({
 	title: "Views/WorkspaceMembersSettings",
 	component: WorkspaceMembersSettings,
 	tags: ["ai-generated"],
-	args: { workspaceId: workspace.id, canManage: true, currentUserId: ryan.user.id },
+	args: {
+		workspaceId: workspace.id,
+		canManage: true,
+		canManageAdmins: true,
+		canTransferOwnership: true,
+		currentUserId: ryan.user.id,
+	},
 	parameters: {
 		layout: "fullscreen",
 		// Inline docs examples share MSW handlers; separate frames keep their responses independent.
@@ -112,6 +118,7 @@ const meta = preview.meta({
 			http.delete(`${roster}/members/:memberId`, () =>
 				refuses("This preview does not remove anybody."),
 			),
+			http.put(`${roster}/owner`, () => refuses("This preview does not transfer ownership.")),
 			http.post(`${roster}/invitations`, () => refuses("This preview does not send invitations.")),
 		);
 	},
@@ -161,19 +168,76 @@ export const Person = meta.story({
 	},
 });
 
-/** Your own page: your role stated rather than chosen, and leaving in place of removing. */
+/** The owner hands the workspace on from somebody else's page, after saying what it means. */
+export const TransferringOwnership = meta.story({
+	args: { selectedMemberId: mara.id },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Make Mara Kent the owner" }));
+
+		const dialog = await screen.findByRole("dialog", { name: "Make Mara Kent the owner?" });
+		await expect(dialog).toHaveTextContent("You stay on as an admin.");
+		await userEvent.click(within(dialog).getByRole("button", { name: "Transfer" }));
+		await expect(
+			await within(dialog).findByText("This preview does not transfer ownership."),
+		).toBeInTheDocument();
+	},
+});
+
+/** The owner's own page: their role stated, and no way out until they hand the workspace on. */
 export const You = meta.story({
 	args: { selectedMemberId: ryan.id },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Ryan Eyes" })).toBeInTheDocument();
+		await expect(canvas.getByText("Owner")).toBeInTheDocument();
 		await expect(canvas.queryByRole("radio", { name: "Member" })).toBeNull();
-		await expect(canvas.getByRole("button", { name: "Leave workspace" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Leave workspace" })).toBeNull();
+		await expect(
+			canvas.getByText(/To leave, transfer ownership to somebody else first/),
+		).toBeInTheDocument();
+	},
+});
+
+/** An admin manages members and viewers, but only the owner makes or unmakes an admin. */
+export const AdminManaging = meta.story({
+	args: {
+		canManageAdmins: false,
+		canTransferOwnership: false,
+		currentUserId: jay.user.id,
+		selectedMemberId: mara.id,
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("radio", { name: "Member" })).toBeChecked();
+		await expect(canvas.getByRole("radio", { name: "Viewer" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("radio", { name: "Admin" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: /the owner$/ })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Remove from workspace" })).toBeInTheDocument();
+	},
+});
+
+/** Nobody but the owner changes the owner: an admin reads their page and nothing more. */
+export const AdminOnOwner = meta.story({
+	args: {
+		canManageAdmins: false,
+		canTransferOwnership: false,
+		currentUserId: jay.user.id,
+		selectedMemberId: ryan.id,
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "Ryan Eyes" })).toBeInTheDocument();
+		await expect(canvas.getByText("Owner")).toBeInTheDocument();
+		await expect(canvas.queryByRole("radio")).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
 	},
 });
 
 /** Leaving says what it costs before it happens. */
 export const Leaving = meta.story({
-	args: { selectedMemberId: ryan.id },
+	args: {
+		canManageAdmins: false,
+		canTransferOwnership: false,
+		currentUserId: jay.user.id,
+		selectedMemberId: jay.id,
+	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Leave workspace" }));
 

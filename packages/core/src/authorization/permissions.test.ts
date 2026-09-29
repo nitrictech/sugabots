@@ -93,14 +93,26 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.update": true,
 	"workspace.providers.manage": true,
 	"workspace.members.manage": true,
+	"workspace.admins.manage": true,
+	"workspace.ownership.transfer": true,
 	"workspace.builtInAgents.configure": true,
 	"workspace.usage.manage": true,
 	"pod.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
 
+/** What only the owner may do: decide who administers, and hand the workspace on. */
+const OWNER_ONLY: WorkspacePermission[] = [
+	"workspace.admins.manage",
+	"workspace.ownership.transfer",
+];
+
 describe("workspace actions", () => {
-	it.each(WORKSPACE_PERMISSIONS)("an admin may %s", (permission) => {
-		expect(mayInWorkspace(actor("admin"), permission)).toBe(true);
+	it.each(WORKSPACE_PERMISSIONS)("the owner may %s", (permission) => {
+		expect(mayInWorkspace(actor("owner"), permission)).toBe(true);
+	});
+
+	it.each(WORKSPACE_PERMISSIONS)("an admin may %s unless only the owner may", (permission) => {
+		expect(mayInWorkspace(actor("admin"), permission)).toBe(!OWNER_ONLY.includes(permission));
 	});
 
 	it.each(["member", "viewer"] as const)(
@@ -109,6 +121,8 @@ describe("workspace actions", () => {
 			expect(mayInWorkspace(actor(role), "workspace.read")).toBe(true);
 			expect(mayInWorkspace(actor(role), "workspace.providers.manage")).toBe(false);
 			expect(mayInWorkspace(actor(role), "workspace.members.manage")).toBe(false);
+			expect(mayInWorkspace(actor(role), "workspace.admins.manage")).toBe(false);
+			expect(mayInWorkspace(actor(role), "workspace.ownership.transfer")).toBe(false);
 			expect(mayInWorkspace(actor(role), "workspace.builtInAgents.configure")).toBe(false);
 			expect(mayInWorkspace(actor(role), "workspace.usage.manage")).toBe(false);
 			expect(mayInWorkspace(actor(role), "pod.create")).toBe(false);
@@ -121,12 +135,14 @@ describe("workspace actions", () => {
 });
 
 describe("shared pods", () => {
-	it.each(POD_PERMISSIONS)("an admin in the pod may %s unless it is leaving", (permission) => {
-		expect(mayInPod(actor("admin"), permission, sharedPod(true))).toBe(permission !== "pod.leave");
-	});
+	describe.each(["owner", "admin"] as const)("as %s", (role) => {
+		it.each(POD_PERMISSIONS)("in the pod may %s unless it is leaving", (permission) => {
+			expect(mayInPod(actor(role), permission, sharedPod(true))).toBe(permission !== "pod.leave");
+		});
 
-	it.each(POD_PERMISSIONS)("an admin outside the pod may not %s", (permission) => {
-		expect(mayInPod(actor("admin"), permission, sharedPod(false))).toBe(false);
+		it.each(POD_PERMISSIONS)("outside the pod may not %s", (permission) => {
+			expect(mayInPod(actor(role), permission, sharedPod(false))).toBe(false);
+		});
 	});
 
 	it.each(POD_PERMISSIONS)("a member in the pod may %s only when granted", (permission) => {
@@ -205,9 +221,13 @@ describe("personal pods", () => {
 		expect(mayInPod(actor("viewer"), permission, personalPodOf(ALICE))).toBe(true);
 	});
 
-	it.each(POD_PERMISSIONS)("an admin may not %s in somebody else's pod", (permission) => {
-		expect(mayInPod(actor("admin"), permission, personalPodOf(BOB))).toBe(false);
-	});
+	it.each(POD_PERMISSIONS)(
+		"an admin, or the workspace's owner, may not %s in somebody else's pod",
+		(permission) => {
+			expect(mayInPod(actor("admin"), permission, personalPodOf(BOB))).toBe(false);
+			expect(mayInPod(actor("owner"), permission, personalPodOf(BOB))).toBe(false);
+		},
+	);
 
 	it("an admin is an ordinary owner of their own personal pod", () => {
 		expect(mayInPod(actor("admin"), "agent.delete", personalPodOf(ALICE))).toBe(true);

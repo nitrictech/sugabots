@@ -1,6 +1,7 @@
 export * as Membership from "./membership.ts";
 
 import type {
+	AssignableWorkspaceRole,
 	InvitationPreview,
 	NewWorkspace,
 	NewWorkspaceInvitation,
@@ -11,13 +12,22 @@ import type {
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
-import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
-import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import {
+	ActionForbidden,
+	type AuthorizationDenied,
+	ResourceHidden,
+	type WorkspaceStanding,
+} from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
-import { workspacePermissions } from "../../authorization/permissions.ts";
+import {
+	mayInWorkspace,
+	type WorkspacePermission,
+	workspacePermissions,
+} from "../../authorization/permissions.ts";
 import {
 	afterCommit,
 	query,
@@ -44,7 +54,7 @@ import { PersonalPods } from "../pods/personal-pods.ts";
 export interface Interface {
 	/** In the order they joined them. */
 	readonly workspaces: Effect.Effect<readonly Workspace[], never, CurrentActor.Service>;
-	/** Administered by the person who created it. */
+	/** Owned by the person who created it. */
 	readonly create: (input: {
 		details: NewWorkspace;
 	}) => Effect.Effect<
@@ -70,16 +80,28 @@ export interface Interface {
 	readonly members: (
 		input: InWorkspace,
 	) => Effect.Effect<readonly WorkspaceMember[], AuthorizationDenied, CurrentActor.Service>;
+	/** Making or unmaking an administrator is the owner's alone. The owner's own role is fixed. */
 	readonly changeRole: (
-		input: InWorkspace & { memberId: string; role: WorkspaceRole },
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
-	/** Their Personal pod and pod memberships go with them. */
+		input: InWorkspace & { memberId: string; role: AssignableWorkspaceRole },
+	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
+	/**
+	 * Their Personal pod and pod memberships go with them. Only the owner
+	 * removes an administrator, and nobody removes the owner.
+	 */
 	readonly remove: (
 		input: InWorkspace & { memberId: string },
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
+	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
+	/** The owner stays until they have transferred ownership. */
 	readonly leave: (
 		input: InWorkspace,
-	) => Effect.Effect<void, AuthorizationDenied | LastAdministrator, CurrentActor.Service>;
+	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
+	/**
+	 * Makes the member the workspace's owner, and the owner an administrator,
+	 * together. Handing it to the owner changes nothing.
+	 */
+	readonly transferOwnership: (
+		input: InWorkspace & { memberId: string },
+	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/** The invitations still waiting to be accepted. */
 	readonly invitations: (
 		input: InWorkspace,
@@ -198,7 +220,7 @@ export const make = Effect.gen(function* () {
 							yield* query((db) =>
 								db
 									.insert(workspaceMember)
-									.values({ workspaceId: created.id, userId, role: "admin" }),
+									.values({ workspaceId: created.id, userId, role: "owner" }),
 							);
 							yield* agents.ensureSystemAgents({ workspaceId: created.id, createdById: userId });
 							yield* searchProviders.provisionDefault(created.id, userId);
@@ -272,8 +294,9 @@ export const make = Effect.gen(function* () {
 						);
 						yield* lockWorkspace(standing.workspaceId);
 						const target = yield* memberIn(standing.workspaceId, input.memberId);
-						if (target.role === "admin" && input.role !== "admin") {
-							yield* requireAnotherAdministrator(standing.workspaceId, target.id);
+						if (target.role === "owner") return yield* new OwnerStays();
+						if (target.role === "admin" || input.role === "admin") {
+							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
 						// Promoting puts them in every shared pod, by the
 						// `administrator_shared_pods` trigger; demoting leaves their pods as they are.
@@ -298,8 +321,9 @@ export const make = Effect.gen(function* () {
 						);
 						yield* lockWorkspace(standing.workspaceId);
 						const target = yield* memberIn(standing.workspaceId, input.memberId);
+						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin") {
-							yield* requireAnotherAdministrator(standing.workspaceId, target.id);
+							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
 						yield* deleteMember(target.id);
 					}),
@@ -326,10 +350,45 @@ export const make = Effect.gen(function* () {
 								),
 						);
 						if (!own) return yield* new ResourceHidden({ resource: "workspace" });
-						if (own.role === "admin") {
-							yield* requireAnotherAdministrator(standing.workspaceId, own.id);
-						}
+						if (own.role === "owner") return yield* new OwnerStays();
 						yield* deleteMember(own.id);
+					}),
+				),
+			),
+
+		transferOwnership: (input) =>
+			operation(
+				"transferOwnership",
+				transaction(
+					Effect.gen(function* () {
+						const standing = yield* authorization.workspace(
+							input.workspace,
+							"workspace.ownership.transfer",
+						);
+						yield* lockWorkspace(standing.workspaceId);
+						const target = yield* memberIn(standing.workspaceId, input.memberId);
+						if (target.role === "owner") return;
+						// The owner steps down first: `workspace_member_owner_idx` allows
+						// one owner, and would refuse the new one while the old one stands.
+						// The new owner joins every shared pod by the
+						// `administrator_shared_pods` trigger, as an admin would.
+						yield* query((db) =>
+							db
+								.update(workspaceMember)
+								.set({ role: "admin" })
+								.where(
+									and(
+										eq(workspaceMember.workspaceId, standing.workspaceId),
+										eq(workspaceMember.role, "owner"),
+									),
+								),
+						);
+						yield* query((db) =>
+							db
+								.update(workspaceMember)
+								.set({ role: "owner" })
+								.where(eq(workspaceMember.id, target.id)),
+						);
 					}),
 				),
 			),
@@ -369,6 +428,9 @@ export const make = Effect.gen(function* () {
 							input.workspace,
 							"workspace.members.manage",
 						);
+						if (input.invitation.role === "admin") {
+							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
+						}
 						const workspaceId = standing.workspaceId;
 						const inviterId = standing.actor.userId;
 						const address = input.invitation.email.toLowerCase();
@@ -555,9 +617,10 @@ export class TimeZoneUnknown extends Data.TaggedError("TimeZoneUnknown") impleme
 	}
 }
 
-export class LastAdministrator extends Data.TaggedError("LastAdministrator") implements UserFacing {
+/** The owner cannot be demoted, removed or leave: ownership has to be handed on first. */
+export class OwnerStays extends Data.TaggedError("OwnerStays") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`A workspace needs at least one administrator`;
+		return UserMessage.of`The owner stays until they transfer ownership to somebody else`;
 	}
 }
 
@@ -612,7 +675,7 @@ function requireTimeZoneKnownToPostgres(timeZone: string) {
 	);
 }
 
-/** Serialises membership changes, so two cannot each count on the other's administrator. */
+/** Serialises membership changes, so a transfer of ownership cannot cross another change to the same people. */
 function lockWorkspace(workspaceId: string) {
 	return query((db) =>
 		db
@@ -636,23 +699,14 @@ function memberIn(workspaceId: string, memberId: string) {
 	);
 }
 
-function requireAnotherAdministrator(workspaceId: string, exceptMemberId: string) {
-	return Effect.flatMap(
-		query((db) =>
-			db
-				.select({ id: workspaceMember.id })
-				.from(workspaceMember)
-				.where(
-					and(
-						eq(workspaceMember.workspaceId, workspaceId),
-						eq(workspaceMember.role, "admin"),
-						ne(workspaceMember.id, exceptMemberId),
-					),
-				)
-				.limit(1),
-		),
-		([another]) => (another ? Effect.void : Effect.fail(new LastAdministrator())),
-	);
+/**
+ * A further permission the caller must hold for this change, beyond the one
+ * `authorization.workspace` already checked, decided from the same standing.
+ */
+function requireWorkspacePermission(standing: WorkspaceStanding, permission: WorkspacePermission) {
+	return mayInWorkspace(standing.actor, permission)
+		? Effect.void
+		: Effect.fail(new ActionForbidden({ permission }));
 }
 
 /** Cascades to the Personal pod and pod memberships. */
@@ -704,7 +758,7 @@ function invitationFor(userId: string, invitationId: string) {
 function invitationView(row: {
 	id: string;
 	email: string;
-	role: WorkspaceRole;
+	role: AssignableWorkspaceRole;
 	expiresAt: Date;
 }): WorkspaceInvitation {
 	return { id: row.id, email: row.email, role: row.role, expiresAt: row.expiresAt.toISOString() };

@@ -1,5 +1,6 @@
 import {
 	type Agent,
+	administersWorkspace,
 	DEFAULT_POD_ROUTING,
 	type ModelProvider,
 	type Pod,
@@ -350,7 +351,11 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			? Effect.succeed({ workspaceId: WORKSPACE })
 			: Effect.fail(new BadRequest({ message: "Pending" })),
 	);
-	const inPod = role === "admin" ? ADMIN_IN_POD : role === "member" ? MEMBER_IN_POD : VIEWER_IN_POD;
+	const inPod = administersWorkspace(role)
+		? ADMIN_IN_POD
+		: role === "member"
+			? MEMBER_IN_POD
+			: VIEWER_IN_POD;
 	client.api.pods.list.mockReturnValue(
 		Effect.succeed(pods.map((pod) => ({ ...pod, permissions: inPod }) satisfies Pod)),
 	);
@@ -386,11 +391,13 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		Effect.succeed({
 			role,
 			permissions: {
-				createPods: role === "admin",
-				manageProviders: role === "admin",
-				manageMembers: role === "admin",
-				configureBuiltInAgents: role === "admin",
-				manageUsage: role === "admin",
+				createPods: administersWorkspace(role),
+				manageProviders: administersWorkspace(role),
+				manageMembers: administersWorkspace(role),
+				configureBuiltInAgents: administersWorkspace(role),
+				manageUsage: administersWorkspace(role),
+				manageAdmins: role === "owner",
+				transferOwnership: role === "owner",
 			},
 		}),
 	);

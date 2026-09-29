@@ -9,6 +9,7 @@ import type {
 	SystemAgent,
 	ThreadActivity,
 	ThreadDetails,
+	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -85,12 +86,38 @@ const systemAgents: SystemAgent[] = (["summarise", "facilitate"] as const).map((
 	model: storyModel.modelId,
 }));
 
-const ADMIN_PERMISSIONS = {
-	createPods: true,
-	manageProviders: true,
-	manageMembers: true,
-	configureBuiltInAgents: true,
-	manageUsage: true,
+const NO_PERMISSIONS: WorkspacePermissions = {
+	createPods: false,
+	manageProviders: false,
+	manageMembers: false,
+	configureBuiltInAgents: false,
+	manageUsage: false,
+	manageAdmins: false,
+	transferOwnership: false,
+};
+
+/** What each role may do in the workspace, as the API's grant tables decide it. */
+const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
+	owner: {
+		createPods: true,
+		manageProviders: true,
+		manageMembers: true,
+		configureBuiltInAgents: true,
+		manageUsage: true,
+		manageAdmins: true,
+		transferOwnership: true,
+	},
+	admin: {
+		createPods: true,
+		manageProviders: true,
+		manageMembers: true,
+		configureBuiltInAgents: true,
+		manageUsage: true,
+		manageAdmins: false,
+		transferOwnership: false,
+	},
+	member: NO_PERMISSIONS,
+	viewer: NO_PERMISSIONS,
 };
 
 /** What a chat's thread holds: its messages, and who is in it. */
@@ -188,7 +215,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json([
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000d1",
-					role: data.role ?? "admin",
+					role: data.role ?? "owner",
 					user: storyUser,
 					joinedAt: "2026-09-01T00:00:00.000Z",
 				},
@@ -198,18 +225,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/onboarding"), () => HttpResponse.json({ completed: data.onboarded ?? true })),
 		http.get(api("/workspaces/:workspace/me"), () =>
 			HttpResponse.json({
-				role: data.role ?? "admin",
-				permissions:
-					(data.role ?? "admin") === "admin"
-						? ADMIN_PERMISSIONS
-						: {
-								...ADMIN_PERMISSIONS,
-								createPods: false,
-								manageProviders: false,
-								manageMembers: false,
-								configureBuiltInAgents: false,
-								manageUsage: false,
-							},
+				role: data.role ?? "owner",
+				permissions: PERMISSIONS_BY_ROLE[data.role ?? "owner"],
 			}),
 		),
 		http.get(api("/workspaces/:workspace/pods"), () => HttpResponse.json(pods)),
