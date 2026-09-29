@@ -533,6 +533,34 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
 	});
 
+	it("shows the reply that finished while you were elsewhere", async () => {
+		const writing: Message = {
+			...agentMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fb",
+			status: "streaming",
+			content: "",
+			parts: [],
+			createdAt: "2026-09-18T09:20:00.000Z",
+		};
+		const answered: Message = {
+			...writing,
+			status: "complete",
+			content: "Checkout timeouts are tracked.",
+			parts: [{ type: "text", text: "Checkout timeouts are tracked." }],
+		};
+		const threadWith = (reply: Message) =>
+			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [mainMessage, reply]));
+		client.api.threads.get.mockReturnValue(threadWith(writing));
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByRole("status", { name: `${linear.name} is typing` });
+
+		client.api.threads.get.mockReturnValue(threadWith(answered));
+		await leaveAndReturn(router);
+
+		await screen.findByText("Checkout timeouts are tracked.");
+		expect(screen.queryByRole("status", { name: `${linear.name} is typing` })).toBeNull();
+	});
+
 	it("says a message waits behind the reply being written, until that reply is done", async () => {
 		const updates = controlledEventStream();
 		client.events.thread.mockReturnValue(updates.stream);
