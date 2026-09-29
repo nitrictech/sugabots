@@ -397,6 +397,17 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
+	it("offers the pod's other bots to mention, though they never join the chat, and not you", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		fireEvent.change(composer, { target: { value: "@" } });
+
+		const list = within(await screen.findByRole("listbox"));
+		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
+		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
+		expect(list.getAllByRole("option")).toHaveLength(2);
+	});
+
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed(agents.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),

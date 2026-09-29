@@ -89,17 +89,43 @@ export type MessageAuthor = typeof messageAuthorSchema.Type;
 
 export const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
 
+/** Where a mention sits in a message's text: `@` and the handle, `length` characters from `index`. */
+export interface MentionInText {
+	/** Lowercased, as handles are. */
+	handle: string;
+	index: number;
+	length: number;
+}
+
 /**
- * The handles mentioned in a message, in order, without duplicates. A mention
- * is `@` at the start of a word followed by a handle; an email address is not
- * one, which is what the look-behind is for.
+ * What may not come just before a mention's `@`: a word character, so an email
+ * address is not a mention, and a `.` or `@`, so neither is a domain or `@@`.
+ * Anything else may, such as a space, `(` or a quote.
  */
+const NOT_BEFORE_MENTION = /[\w.@]/;
+
+const MENTION = new RegExp(`(?<!${NOT_BEFORE_MENTION.source})@([a-z0-9]+(?:-[a-z0-9]+)*)`, "gi");
+
+/** Whether the `@` at `index` in `content` can start a mention, handle or not. */
+export function canStartMention(content: string, index: number): boolean {
+	return content[index] === "@" && !NOT_BEFORE_MENTION.test(content[index - 1] ?? "");
+}
+
+/**
+ * Every mention in a message, in order: an `@` that `canStartMention`, followed
+ * by a handle. Whether the handle names anyone is for the caller to say.
+ */
+export function mentionsIn(content: string): MentionInText[] {
+	return [...content.matchAll(MENTION)].map((match) => ({
+		handle: (match[1] ?? "").toLowerCase(),
+		index: match.index,
+		length: match[0].length,
+	}));
+}
+
+/** The handles mentioned in a message, in order, without duplicates. */
 export function mentionedHandles(content: string): string[] {
-	const found = new Set<string>();
-	for (const match of content.matchAll(/(?<![\w.@])@([a-z0-9]+(?:-[a-z0-9]+)*)/gi)) {
-		if (match[1]) found.add(match[1].toLowerCase());
-	}
-	return [...found];
+	return [...new Set(mentionsIn(content).map((mention) => mention.handle))];
 }
 
 /**

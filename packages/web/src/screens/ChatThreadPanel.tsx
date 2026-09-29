@@ -7,7 +7,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, Repeat } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useAgentWithPod } from "@/lib/agents.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -18,6 +18,7 @@ import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
+import { mentionableIn } from "./mentions.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { PinnedApproval } from "./ToolApprovalCard.tsx";
@@ -56,6 +57,7 @@ export function ChatThreadPanel({
 	const heading = useRef<HTMLHeadingElement>(null);
 	const timeline = useRef<HTMLDivElement>(null);
 	const details = query.data;
+	const mentionable = useMemo(() => (details ? mentionableIn(details) : []), [details]);
 	const type = openableThreadType(entry?.type ?? details?.thread.type);
 	const routineExecution = details?.routineExecution;
 	const parentRoutine = history.find(
@@ -213,7 +215,7 @@ export function ChatThreadPanel({
 							host={host}
 							// A notice says the reply is not coming, so nobody is shown typing it.
 							isRunning={details.thread.status === "running" && notices.length === 0}
-							participants={[...details.participants, ...details.crew]}
+							participants={mentionable}
 							user={user}
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
 							onOpenCollaboration={onOpenThread}

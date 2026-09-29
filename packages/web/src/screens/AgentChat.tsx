@@ -7,7 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	useChat,
 	useChatHistory,
@@ -33,6 +33,7 @@ import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
@@ -75,6 +76,15 @@ export function AgentChat({
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
 	const details = mainThread.data;
+	const mentionable = useMemo(() => (details ? mentionableIn(details) : []), [details]);
+	// Anyone but yourself; naming another bot here has this chat's bot ask it.
+	const composerMentionable = useMemo(
+		() =>
+			mentionable.filter(
+				(participant) => participant.kind !== "person" || participant.id !== user.id,
+			),
+		[mentionable, user.id],
+	);
 	const host = details?.participants.find(
 		(participant): participant is AgentParticipant =>
 			participant.kind === "agent" && participant.id === agent.id,
@@ -213,7 +223,7 @@ export function AgentChat({
 										messages={group.messages}
 										host={host}
 										isRunning={false}
-										participants={[...details.participants, ...details.crew]}
+										participants={mentionable}
 										user={user}
 										dividers={false}
 										onOpenCollaboration={openThread}
@@ -252,6 +262,7 @@ export function AgentChat({
 							submitDisabled={!draft.trim() || send.isPending}
 							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
 							className="w-full"
+							mentionable={composerMentionable}
 						/>
 					)}
 				</div>
