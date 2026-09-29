@@ -6,7 +6,8 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./bot-crowd.svg": "./assets/bot-crowd.svg",
-		"./sugabots-logo.svg": "./assets/sugabots-logo.svg"
+		"./sugabots-logo.svg": "./assets/sugabots-logo.svg",
+		"./app-icons/*": "./assets/app-icons/*"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",

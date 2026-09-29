@@ -54,6 +54,7 @@
 		"storybook": "11.0.0-alpha.1",
 		"tailwindcss": "^4.3.3",
 		"unified": "^11.0.5",
-		"vite": "catalog:"
+		"vite": "catalog:",
+		"vite-plugin-static-copy": "^4.1.1"
 	}
 }
