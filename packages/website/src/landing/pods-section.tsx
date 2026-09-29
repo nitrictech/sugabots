@@ -3,6 +3,7 @@ import { PodIcon } from "@/components/pod-icon";
 import { MotionCard, Reveal, riseIn } from "@/components/reveal";
 import { Section } from "@/components/section";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PodChat } from "@/landing/pod-chat";
 import { pods } from "@/landing/pods";
 
 export function PodsSection() {
@@ -31,6 +32,7 @@ export function PodsSection() {
 					</MotionCard>
 				))}
 			</Reveal>
+			<PodChat />
 		</Section>
 	);
 }

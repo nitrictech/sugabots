@@ -105,7 +105,7 @@ function ApprovalRequest({
 }
 
 /** A demo pod chat in which a bot asks for approval before booking. */
-export function HeroChat() {
+export function PodChat() {
 	const [approval, setApproval] = useState<Approval>("pending");
 
 	return (
