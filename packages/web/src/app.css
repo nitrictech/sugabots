@@ -338,7 +338,12 @@
 	animation: reply-grow var(--reveal-duration, 500ms) cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both;
 }
 
+/*
+ * A grid item is otherwise never narrower than its widest content, so a wide
+ * table would stretch past the bubble instead of scrolling in it.
+ */
 .reply-grow > * {
+	min-width: 0;
 	min-height: 0;
 	mask-image: linear-gradient(
 		to bottom,

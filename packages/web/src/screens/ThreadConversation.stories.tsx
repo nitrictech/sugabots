@@ -7,7 +7,7 @@ import type {
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fn, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -365,7 +365,7 @@ export const FailedInTheSidebar = meta.story({
 /** A fenced code block whose lines are far wider than the bubble. */
 export const WideCodeBlock = meta.story({
 	play: async ({ canvas }) => {
-		const code = canvas.getByRole("region", { name: "Code block" });
+		const code = canvas.getByRole("group", { name: "Code block" });
 		await expect(code.scrollWidth).toBeGreaterThan(code.clientWidth);
 		code.focus();
 		await expect(code).toHaveFocus();
@@ -407,6 +407,57 @@ export const UnlabelledCodeBlock = meta.story({
 				].join("\n"),
 			),
 		],
+	},
+});
+
+const wideTableAnswer = [
+	"Here's where each region stands:",
+	"",
+	"| Region | Service | Requests (24h) | p95 latency (ms) | Error rate | Last deploy | Owner |",
+	"| --- | --- | --- | --- | --- | --- | --- |",
+	"| ap-southeast-2 | checkout-api | 1,284,019 | 412 | 0.8% | 2026-09-21 22:14 | payments-oncall |",
+	"| us-east-1 | checkout-api | 3,902,771 | 388 | 0.4% | 2026-09-21 22:09 | payments-oncall |",
+	"| eu-west-1 | checkout-api | 2,117,430 | 455 | 1.2% | 2026-09-20 18:40 | payments-oncall |",
+	"",
+	"eu-west-1 is the outlier.",
+].join("\n");
+
+/**
+ * Shows the last message as a reply being written, then finished, so it lands
+ * as it does while someone watches rather than being loaded with the history.
+ */
+function LastReplyLandsWhileWatched(props: ComponentProps<typeof ThreadConversation>) {
+	const [landed, setLanded] = useState(false);
+	useEffect(() => setLanded(true), []);
+	const last = props.messages.at(-1);
+	if (landed || !last) return <ThreadConversation {...props} />;
+	const writing: Message = { ...last, status: "streaming", parts: [], content: "" };
+	return <ThreadConversation {...props} messages={[...props.messages.slice(0, -1), writing]} />;
+}
+
+/**
+ * A table wider than the bubble, in a reply that finishes while the thread is
+ * open and grows in: it scrolls inside the bubble instead of running past its
+ * edge, and a keyboard can reach it to scroll it.
+ */
+export const WideTableArriving = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000109",
+				person,
+				"How is checkout doing in each region?",
+			),
+			message("0199a3a0-0000-7000-8000-000000000110", host, wideTableAnswer),
+		],
+	},
+	render: (args) => <LastReplyLandsWhileWatched {...args} />,
+	play: async ({ canvas }) => {
+		const table = await canvas.findByRole("group", { name: "Table" });
+		await waitFor(() => expect(table.scrollWidth).toBeGreaterThan(table.clientWidth));
+		table.focus();
+		await expect(table).toHaveFocus();
 	},
 });
 
