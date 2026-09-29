@@ -22,7 +22,7 @@ export function ChatComposer({
 	submitDisabled,
 	error,
 	className,
-	mentionable = [],
+	mentionable,
 }: {
 	label: string;
 	placeholder: string;
@@ -34,7 +34,7 @@ export function ChatComposer({
 	error?: ReactNode;
 	className?: string;
 	/** Who the draft can mention. */
-	mentionable?: ThreadParticipant[];
+	mentionable: ThreadParticipant[];
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -84,11 +84,7 @@ export function ChatComposer({
 		const nextCursor = typing.start + `@${participant.handle} `.length;
 		onValueChange(`${value.slice(0, typing.start)}${mention}${after}`);
 		setCursor(nextCursor);
-		setDismissedMentionAt(typing.start);
-		requestAnimationFrame(() => {
-			textarea.current?.focus();
-			textarea.current?.setSelectionRange(nextCursor, nextCursor);
-		});
+		requestAnimationFrame(() => textarea.current?.setSelectionRange(nextCursor, nextCursor));
 	}
 
 	return (
@@ -234,22 +230,16 @@ function MentionMenu({
 }
 
 /**
- * The mention the cursor is in: an `@` where the API would read one, and what
- * has been typed after it on the same line. Spaces are allowed, so a person can
- * type a name as it is written, but not straight after the `@`: in "meet @ noon"
- * the `@` means "at", and a space matches every name with one in it. A query
- * that matches nobody closes the menu.
- * It ends past any handle characters after the cursor, so choosing someone
- * with the cursor inside a handle replaces all of it.
+ * The mention the cursor is in: an `@` where the API would read one, and the
+ * handle characters typed after it. It ends past any handle characters after
+ * the cursor, so choosing someone with the cursor inside a handle replaces all
+ * of it.
  */
 function mentionBeingTyped(value: string, cursor: number) {
-	const beforeCursor = value.slice(0, cursor);
-	const start = beforeCursor.lastIndexOf("@");
-	if (!canStartMention(value, start)) return undefined;
-	const query = beforeCursor.slice(start + 1);
-	if (/^\s/.test(query) || query.includes("\n")) return undefined;
-	const restOfHandle = value.slice(cursor).match(/^[a-z0-9-]*/i)?.[0] ?? "";
-	return { start, end: cursor + restOfHandle.length, query };
+	const typed = /@([a-z0-9-]*)$/i.exec(value.slice(0, cursor));
+	if (!typed || !canStartMention(value, typed.index)) return undefined;
+	const restOfHandle = /^[a-z0-9-]*/i.exec(value.slice(cursor))?.[0] ?? "";
+	return { start: typed.index, end: cursor + restOfHandle.length, query: typed[1] ?? "" };
 }
 
 function matchesQuery(participant: ThreadParticipant, query: string): boolean {

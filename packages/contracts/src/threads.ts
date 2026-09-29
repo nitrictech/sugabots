@@ -89,18 +89,9 @@ export type MessageAuthor = typeof messageAuthorSchema.Type;
 
 export const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
 
-/** Where a mention sits in a message's text: `@` and the handle, `length` characters from `index`. */
-export interface MentionInText {
-	/** Lowercased, as handles are. */
-	handle: string;
-	index: number;
-	length: number;
-}
-
 /**
  * What may not come just before a mention's `@`: a word character, so an email
  * address is not a mention, and a `.` or `@`, so neither is a domain or `@@`.
- * Anything else may, such as a space, `(` or a quote.
  */
 const NOT_BEFORE_MENTION = /[\w.@]/;
 
@@ -112,20 +103,20 @@ export function canStartMention(content: string, index: number): boolean {
 }
 
 /**
- * Every mention in a message, in order: an `@` that `canStartMention`, followed
- * by a handle. Whether the handle names anyone is for the caller to say.
+ * `content` split around its mentions: text at even indexes and, between them,
+ * each mentioned handle as written, without its `@`.
  */
-export function mentionsIn(content: string): MentionInText[] {
-	return [...content.matchAll(MENTION)].map((match) => ({
-		handle: (match[1] ?? "").toLowerCase(),
-		index: match.index,
-		length: match[0].length,
-	}));
+export function splitAroundMentions(content: string): string[] {
+	return content.split(MENTION);
 }
 
 /** The handles mentioned in a message, in order, without duplicates. */
 export function mentionedHandles(content: string): string[] {
-	return [...new Set(mentionsIn(content).map((mention) => mention.handle))];
+	const found = new Set<string>();
+	for (const match of content.matchAll(MENTION)) {
+		if (match[1]) found.add(match[1].toLowerCase());
+	}
+	return [...found];
 }
 
 /**

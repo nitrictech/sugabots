@@ -7,7 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import {
 	useChat,
 	useChatHistory,
@@ -33,7 +33,6 @@ import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
-import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
@@ -76,15 +75,6 @@ export function AgentChat({
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
 	const details = mainThread.data;
-	const mentionable = useMemo(() => (details ? mentionableIn(details) : []), [details]);
-	// Anyone but yourself; naming another bot here has this chat's bot ask it.
-	const composerMentionable = useMemo(
-		() =>
-			mentionable.filter(
-				(participant) => participant.kind !== "person" || participant.id !== user.id,
-			),
-		[mentionable, user.id],
-	);
 	const host = details?.participants.find(
 		(participant): participant is AgentParticipant =>
 			participant.kind === "agent" && participant.id === agent.id,
@@ -173,6 +163,13 @@ export function AgentChat({
 			</EmptyState>
 		);
 
+	// Anyone but yourself; naming another bot here has this chat's bot ask it.
+	// The crew is the pod's agents, so leave out those who have joined.
+	const composerMentionable = [
+		...details.participants.filter((participant) => participant.id !== user.id),
+		...details.crew.filter((member) => !details.participants.some(({ id }) => id === member.id)),
+	];
+
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
 		<div className="flex min-h-0 flex-1 md:relative">
@@ -223,7 +220,7 @@ export function AgentChat({
 										messages={group.messages}
 										host={host}
 										isRunning={false}
-										participants={mentionable}
+										participants={[...details.participants, ...details.crew]}
 										user={user}
 										dividers={false}
 										onOpenCollaboration={openThread}
