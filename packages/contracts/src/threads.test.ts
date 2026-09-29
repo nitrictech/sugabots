@@ -8,6 +8,7 @@ import {
 	messagePartsFor,
 	messageSchema,
 	newMessageSchema,
+	textWithoutNarration,
 	threadHistoryQuerySchema,
 	threadParticipantSchema,
 	threadSchema,
@@ -201,5 +202,27 @@ describe("thread contracts", () => {
 
 	it.each([undefined, { nested: [NaN] }, new Date(0)])("rejects non-JSON values: %s", (value) => {
 		expect(Schema.decodeResult(jsonValueSchema)(value)._tag).toBe("Failure");
+	});
+});
+
+describe("textWithoutNarration", () => {
+	it("leaves out the words that come straight before a tool call", () => {
+		expect(
+			textWithoutNarration([
+				{ type: "text", text: "Let me check:" },
+				{ type: "tool_call", toolCallId: ID },
+				{ type: "text", text: "It is paid." },
+			]),
+		).toBe("It is paid.");
+	});
+
+	it("keeps words before a collaboration, which the thread shows", () => {
+		expect(
+			textWithoutNarration([
+				{ type: "text", text: "Asking Finance. " },
+				{ type: "collaboration", collaborationId: ID },
+				{ type: "text", text: "They say it is paid." },
+			]),
+		).toBe("Asking Finance. They say it is paid.");
 	});
 });

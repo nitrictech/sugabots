@@ -1,11 +1,12 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type {
-	CollaborationPart,
-	Message,
-	PersonParticipant,
-	SessionUser,
-	ThreadParticipant,
-	ToolCallPart,
+import {
+	type CollaborationPart,
+	isNarration,
+	type Message,
+	type PersonParticipant,
+	type SessionUser,
+	type ThreadParticipant,
+	type ToolCallPart,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Fragment, type ReactNode, useRef } from "react";
@@ -19,7 +20,7 @@ import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
-import { awaitsApproval, isNarration, splitToolKey } from "./tool-activity.ts";
+import { awaitsApproval, splitToolKey } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 

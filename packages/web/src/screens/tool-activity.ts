@@ -1,7 +1,6 @@
 import {
 	builtInToolCatalog,
 	CONNECTION_TOOL_SEPARATOR,
-	type MessagePart,
 	type ToolCallPart,
 } from "@sugabots/contracts";
 
@@ -24,14 +23,6 @@ export const BUILT_IN_HANDLE = "";
  */
 export function awaitsApproval(call: ToolCallPart): boolean {
 	return call.status === "awaiting_approval" && call.approval?.status === "pending";
-}
-
-/**
- * Whether the part at `index` is narration: text that comes straight before a
- * tool call, which the thread leaves out.
- */
-export function isNarration(parts: readonly MessagePart[], index: number): boolean {
-	return parts[index]?.type === "text" && parts[index + 1]?.type === "tool_call";
 }
 
 /**
