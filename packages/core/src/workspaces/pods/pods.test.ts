@@ -315,9 +315,15 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 
 		it("moves an assistant to the model named when the workspace does not offer its own", async () => {
-			// Provisioned without a model, as somebody joining is, so it runs on the
-			// fallback, which this workspace does not offer.
+			// Provisioned without a model, as somebody joining is.
 			const personal = await personalPods.provision({ workspaceId, userId: memberId });
+			const [unassigned] = await onDatabase((db) =>
+				db
+					.select({ model: agent.model })
+					.from(agent)
+					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
+			);
+			expect(unassigned?.model).toBeNull();
 
 			await ensurePersonal(memberId, "second-model");
 
