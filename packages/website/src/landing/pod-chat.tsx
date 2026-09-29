@@ -109,7 +109,7 @@ export function PodChat() {
 	const [approval, setApproval] = useState<Approval>("pending");
 
 	return (
-		<Reveal delay={0.4}>
+		<Reveal>
 			<MotionCard variants={riseIn} className="flex-row gap-0 rounded-3xl py-0 shadow-2xl">
 				<PodRail />
 				<div className="flex min-w-0 flex-1 flex-col">
@@ -124,7 +124,7 @@ export function PodChat() {
 					</Item>
 					<Separator />
 					{/* The conversation plays out once the window has settled into place. */}
-					<Reveal stagger={0.5} delay={1} className="flex flex-col gap-3 px-4 py-5 sm:px-8">
+					<Reveal stagger={0.5} delay={0.5} className="flex flex-col gap-3 px-4 py-5 sm:px-8">
 						<ChatNote className="pb-1">
 							<span className="text-foreground">Today</span> 19:12
 						</ChatNote>
