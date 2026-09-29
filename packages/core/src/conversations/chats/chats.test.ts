@@ -180,6 +180,28 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
+	it("previews a bot's reply as the chat shows it, without the words before a tool call", async () => {
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		await onDatabase((db) =>
+			db.insert(message).values({
+				threadId: current.mainThreadId,
+				authorAgentId: agentId,
+				kind: "text",
+				status: "complete",
+				parts: [
+					{ type: "text", text: "Let me try again:" },
+					{ type: "tool_call", toolCallId: crypto.randomUUID() },
+					{ type: "text", text: "I'm still getting denied." },
+				],
+				content: "Let me try again:I'm still getting denied.",
+			}),
+		);
+
+		const list = await view.list({ workspace: workspaceId, pod: podId });
+
+		expect(list?.items[0]?.lastMessage?.preview).toBe("I'm still getting denied.");
+	});
+
 	it("covers every shared pod the person reaches in All, and no pod they cannot", async () => {
 		const suffix = crypto.randomUUID();
 		const [personal, unjoined] = await onDatabase((db) =>
