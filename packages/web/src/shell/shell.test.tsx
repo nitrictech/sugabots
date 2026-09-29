@@ -268,7 +268,7 @@ describe("the workspace choice", () => {
 });
 
 describe("the rail", () => {
-	it("lists All, each shared pod and Personal, and marks the pod you are in", async () => {
+	it("lists each shared pod and Personal, and marks the pod you are in", async () => {
 		client.api.pods.list.mockReturnValue(Effect.succeed([...pods, personalPod]));
 		mount(linearPage);
 
@@ -277,23 +277,10 @@ describe("the rail", () => {
 		const names = within(rail)
 			.getAllByRole("link")
 			.map((link) => link.getAttribute("aria-label"));
-		expect(names).toEqual(["All", "Suga-Team", "Sales", "Personal", "Settings"]);
+		expect(names).toEqual(["Suga-Team", "Sales", "Personal", "Settings"]);
 		expect(within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current")).toBe(
 			"page",
 		);
-	});
-
-	it("keeps All selected for a chat opened from it", async () => {
-		mount(`/suga/all/pods/suga-team/agents/${linear.handle}`);
-
-		const rail = await screen.findByRole("navigation", { name: "Pods" });
-		await within(rail).findByRole("link", { name: "Suga-Team" });
-		expect(within(rail).getByRole("link", { name: "All" }).getAttribute("aria-current")).toBe(
-			"page",
-		);
-		expect(
-			within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current"),
-		).toBeNull();
 	});
 
 	it("opens a pod's settings from its menu and leads back to the Chat", async () => {
@@ -391,18 +378,6 @@ describe("the conversation list", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
 	});
 
-	it("opens chats from All under All, and asks for every shared pod", async () => {
-		mount("/suga/all");
-
-		const list = await screen.findByRole("region", { name: "All" });
-		const row = await within(list).findByRole("link", { name: /Linear Handler/ });
-		expect(row.getAttribute("href")).toBe(`/suga/all/pods/suga-team/agents/${linear.handle}`);
-		expect(client.api.chats.list).toHaveBeenCalledWith({
-			params: { workspace: workspace.id },
-			query: { pod: "all" },
-		});
-	});
-
 	it("says a pod has no bots yet, and offers the first", async () => {
 		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
 		mount("/suga/pods/sales");
@@ -410,27 +385,6 @@ describe("the conversation list", () => {
 		expect(await screen.findByText("No bots in Sales yet")).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "New bot" }));
 		expect(await screen.findByRole("dialog", { name: "New bot" })).toBeDefined();
-	});
-
-	it("offers a new bot from All, in a pod chosen in the dialog", async () => {
-		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
-		mount("/suga/all");
-
-		expect(await screen.findByText("No bots yet")).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "New bot" }));
-		const dialog = await screen.findByRole("dialog", { name: "New bot" });
-		expect(within(dialog).getByRole("button", { name: /^Pod:/ })).toBeDefined();
-	});
-
-	it("offers a first pod from All when there is none", async () => {
-		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
-		client.api.chats.list.mockReturnValue(Effect.succeed({ items: [] }));
-		mount("/suga/all");
-
-		const list = await screen.findByRole("region", { name: "All" });
-		expect(await within(list).findByText("No pods yet")).toBeDefined();
-		fireEvent.click(within(list).getByRole("button", { name: "New pod" }));
-		expect(await screen.findByRole("dialog", { name: "New pod" })).toBeDefined();
 	});
 
 	it("offers no New bot to somebody who may not make one", async () => {
@@ -602,10 +556,12 @@ describe("the settings navigation", () => {
 });
 
 describe("routes", () => {
-	it("lands on All", async () => {
+	it("lands on the first shared pod", async () => {
 		const router = mount("/");
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/all"));
+		await waitFor(() =>
+			expect(router.state.location.pathname.startsWith("/suga/pods/suga-team")).toBe(true),
+		);
 	});
 
 	it("lands on Personal for somebody in no shared pod", async () => {

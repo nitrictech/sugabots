@@ -23,20 +23,6 @@ export function podLink(pod: Pod) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod", params: { pod: pod.slug } });
 }
 
-/** The conversation list across every shared pod. */
-export function allLink() {
-	return linkOptions({ from: "/$workspace", to: "./all" });
-}
-
-/** A bot's chat opened from All, which keeps All selected on the rail and in the list. */
-export function allAgentChatLink({ pod, agent }: AgentInPod) {
-	return linkOptions({
-		from: "/$workspace",
-		to: "./all/pods/$pod/agents/$agent",
-		params: { pod: pod.slug, agent: agent.handle },
-	});
-}
-
 export function podSettingsLink(pod: Pod) {
 	return linkOptions({
 		from: "/$workspace",

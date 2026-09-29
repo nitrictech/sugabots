@@ -368,14 +368,11 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.threads.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
-	// Every crew bot in the scope, none messaged yet. Personal stays out of All.
+	// Every crew bot in the pod, none messaged yet.
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
-		const shared = new Set(pods.filter((pod) => pod.kind === "shared").map((pod) => pod.id));
-		const inScope = (agent: Agent) =>
-			query.pod === "all" ? shared.has(agent.podId) : agent.podId === query.pod;
 		return Effect.succeed({
 			items: agents
-				.filter((agent) => agent.systemAgentKey === null && inScope(agent))
+				.filter((agent) => agent.systemAgentKey === null && agent.podId === query.pod)
 				.map((agent) => ({ agent, chatId: null, lastMessage: null })),
 		});
 	});

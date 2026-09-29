@@ -786,14 +786,6 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
 	});
 
-	it("leads back to All from a chat opened there", async () => {
-		mount(`/suga/all/pods/suga-team/agents/${linear.handle}`);
-
-		expect((await screen.findByRole("link", { name: "Back to All" })).getAttribute("href")).toBe(
-			"/suga/all",
-		);
-	});
-
 	it("lists who has written in the Chat lately, most recent first", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));

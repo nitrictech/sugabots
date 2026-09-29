@@ -1,9 +1,9 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useState } from "react";
-import { allLink, podLink } from "@/lib/links.ts";
+import { podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDEBAR_BESIDE } from "@/lib/media.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -69,20 +69,12 @@ function ChatHeader({
 	detailsOpen: boolean;
 	onDetailsChange: (open: boolean) => void;
 }) {
-	const matchRoute = useMatchRoute();
-	const fromAll = Boolean(matchRoute({ to: "/$workspace/all", fuzzy: true }));
 	return (
 		// On a phone the design centres the bot: its face over its name, and Back to the left.
 		<header className="relative flex shrink-0 items-center gap-3 border-border-subtle border-b bg-list/70 px-[22px] py-3.5 max-md:justify-center max-md:px-12 max-md:pt-2.5 max-md:pb-2">
-			{fromAll ? (
-				<Link {...allLink()} aria-label="Back to All" className={backClass}>
-					<ChevronLeft size={24} strokeWidth={2.2} />
-				</Link>
-			) : (
-				<Link {...podLink(pod)} aria-label={`Back to ${pod.name}`} className={backClass}>
-					<ChevronLeft size={24} strokeWidth={2.2} />
-				</Link>
-			)}
+			<Link {...podLink(pod)} aria-label={`Back to ${pod.name}`} className={backClass}>
+				<ChevronLeft size={24} strokeWidth={2.2} />
+			</Link>
 			{/* The name's button stretches over the face and pod too, so the whole of it opens Details. */}
 			<div className="relative flex min-w-0 flex-1 items-center gap-3 max-md:flex-none max-md:flex-col max-md:gap-1.5">
 				<AgentAvatar color={agent.color} face={agent.face} size={40} className="max-md:size-14" />

@@ -5,7 +5,6 @@ import type {
 	ChatHistoryPage,
 	ChatList,
 	ChatListItem,
-	ChatListScope,
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
@@ -41,10 +40,10 @@ import {
  * pod's bots with their chats, and a chat's two timelines.
  */
 export interface Interface {
-	/** The bots with their chats, in the pods of a workspace, by its id or its slug. */
+	/** The bots with their chats in one pod, `pod` by its id, of a workspace by its id or its slug. */
 	readonly list: (input: {
 		workspace: string;
-		pod: ChatListScope;
+		pod: string;
 	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
 	/** A page of the chat's main conversation, newest last. */
 	readonly messages: (
@@ -76,10 +75,8 @@ export const make = Effect.gen(function* () {
 						pod: input.pod,
 						reachesPod: yield* visibility.reachesPod,
 					};
-					if (input.pod !== "all") {
-						const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
-						if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
-					}
+					const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
+					if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
 					const bots = yield* query((db) => listedBots(db, listing));
 					const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
 					const latest = yield* query((db) => latestMessages(db, threadIds));
@@ -149,10 +146,10 @@ export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") imp
 	}
 }
 
-/** Which bots a list covers, and `Visibility`'s rule for who is asking. */
+/** Which pod's bots a list covers, and `Visibility`'s rule for who is asking. */
 interface Listing {
 	workspaceId: string;
-	pod: ChatListScope;
+	pod: string;
 	reachesPod: Visibility.ReachesPod;
 }
 
@@ -171,13 +168,18 @@ const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
 
 /** Every crew bot the list covers, with its chat in its pod when it has one. */
 const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
-	const scope = input.pod === "all" ? eq(pod.kind, "shared") : eq(pod.id, input.pod);
 	return yield* db
 		.select({ agent, chatId: chat.id, mainThreadId: chat.mainThreadId })
 		.from(agent)
 		.innerJoin(pod, crewOf(pod.id))
 		.leftJoin(chat, and(eq(chat.podId, agent.podId), eq(chat.hostAgentId, agent.id)))
-		.where(and(eq(agent.workspaceId, input.workspaceId), scope, input.reachesPod(pod.id)))
+		.where(
+			and(
+				eq(agent.workspaceId, input.workspaceId),
+				eq(pod.id, input.pod),
+				input.reachesPod(pod.id),
+			),
+		)
 		.orderBy(asc(agent.name));
 });
 

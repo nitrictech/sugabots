@@ -202,7 +202,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(list?.items[0]?.lastMessage?.preview).toBe("I'm still getting denied.");
 	});
 
-	it("covers every shared pod the person reaches in All, and no pod they cannot", async () => {
+	it("lists a pod the person reaches, and hides one they cannot", async () => {
 		const suffix = crypto.randomUUID();
 		const [personal, unjoined] = await onDatabase((db) =>
 			db
@@ -243,11 +243,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			),
 		);
 
-		const all = await view.list({ workspace: workspaceId, pod: "all" });
-
-		expect(all?.items.map((item) => item.agent.id).sort()).toEqual(
-			[agentId, recipientAgentId].sort(),
-		);
 		await expect(view.list({ workspace: workspaceId, pod: unjoined.id })).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});

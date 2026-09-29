@@ -1,4 +1,4 @@
-import type { Workspace } from "@sugabots/contracts";
+import type { Pod, Workspace } from "@sugabots/contracts";
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { useQuery } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
@@ -19,7 +19,7 @@ import { type ComponentType, lazy, useEffect, useRef, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
+import { agentChatLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -32,7 +32,7 @@ import {
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
-import { ConversationList, type ListScope } from "@/shell/ConversationList.tsx";
+import { ConversationList } from "@/shell/ConversationList.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
@@ -83,9 +83,7 @@ function lazyNamed<Name extends string, Props>(
  *   /invite/$id
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
- *   /$workspace/agents       lands on All, or on Personal when there is no shared pod
- *   /$workspace/all          the conversation list across every shared pod
- *   /$workspace/all/pods/$pod/agents/$agent   a chat opened from All
+ *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/agents/$agent       one agent's chat, by pod slug and agent handle
  *   /$workspace/settings/members/$member   one person, by membership id
@@ -648,7 +646,7 @@ function SettingsSectionRoute() {
 	);
 }
 
-/** Where `/` and closing settings land: All, or Personal for somebody in no shared pod. */
+/** Where `/` and closing settings land: the first shared pod, or Personal for somebody in none. */
 const agentsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/agents",
@@ -664,19 +662,25 @@ function AgentsRoute() {
 				<EmptyState title="Could not load your pods" />
 			</Panes>
 		);
-	const shared = pods?.some((pod) => pod.kind === "shared");
-	const personal = pods?.find((pod) => pod.kind === "personal");
-	if (!shared && personal) return <Navigate {...podLink(personal)} replace />;
-	return <Navigate {...allLink()} replace />;
+	const first =
+		pods?.find((pod) => pod.kind === "shared") ?? pods?.find((pod) => pod.kind === "personal");
+	if (!first) {
+		return (
+			<Panes>
+				<EmptyState title="No pods here yet" />
+			</Panes>
+		);
+	}
+	return <Navigate {...podLink(first)} replace />;
 }
 
 /** A conversation list beside the thread it opens. */
 function ConversationLayout({
-	scope,
+	pod,
 	selectedAgentId,
 	children,
 }: {
-	scope: ListScope;
+	pod: Pod;
 	selectedAgentId: string | undefined;
 	children: React.ReactNode;
 }) {
@@ -685,7 +689,7 @@ function ConversationLayout({
 	return (
 		<>
 			<ConversationList
-				scope={scope}
+				pod={pod}
 				selectedAgentId={selectedAgentId}
 				className={chatOpen ? "max-md:hidden" : undefined}
 			/>
@@ -693,28 +697,6 @@ function ConversationLayout({
 		</>
 	);
 }
-
-const allRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/all",
-	component: AllRoute,
-});
-
-function AllRoute() {
-	const { pod: podSlug, agent: handle } = useParams({ strict: false });
-	const { found } = usePodAgent(podSlug ?? "", handle ?? "");
-	return (
-		<ConversationLayout scope={{ kind: "all" }} selectedAgentId={found?.agent.id}>
-			<Outlet />
-		</ConversationLayout>
-	);
-}
-
-const allIndexRoute = createRoute({
-	getParentRoute: () => allRoute,
-	path: "/",
-	component: () => <OpenTopChat scope={{ kind: "all" }} />,
-});
 
 const podRoute = createRoute({
 	getParentRoute: () => shellRoute,
@@ -741,7 +723,7 @@ function PodRoute() {
 		);
 	}
 	return (
-		<ConversationLayout scope={{ kind: "pod", pod }} selectedAgentId={found?.agent.id}>
+		<ConversationLayout pod={pod} selectedAgentId={found?.agent.id}>
 			<Outlet />
 		</ConversationLayout>
 	);
@@ -756,30 +738,21 @@ const podIndexRoute = createRoute({
 function PodIndexRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const pod = findPod(usePods().data, podSlug);
-	return pod ? <OpenTopChat scope={{ kind: "pod", pod }} /> : null;
+	return pod ? <OpenTopChat pod={pod} /> : null;
 }
 
 /**
- * A pod or All opened without a chat chosen opens the list's top one, where
+ * A pod opened without a chat chosen opens the list's top one, where
  * the list and the chat sit side by side. On a phone the list is the page, so
  * it stays.
  */
-function OpenTopChat({ scope }: { scope: ListScope }) {
+function OpenTopChat({ pod }: { pod: Pod }) {
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-	const { data: list } = useChatList(scope.kind === "all" ? "all" : scope.pod.id);
-	const { data: pods } = usePods();
+	const { data: list } = useChatList(pod.id);
 	if (!sideBySide) return null;
-	const top = list?.items
-		.map((item) => ({ agent: item.agent, pod: pods?.find((one) => one.id === item.agent.podId) }))
-		.find((entry) => entry.pod !== undefined);
-	if (!top?.pod) return null;
-	const placed = { agent: top.agent, pod: top.pod };
-	return (
-		<Navigate
-			{...(scope.kind === "all" ? allAgentChatLink(placed) : agentChatLink(placed))}
-			replace
-		/>
-	);
+	const top = list?.items[0];
+	if (!top) return null;
+	return <Navigate {...agentChatLink({ pod, agent: top.agent })} replace />;
 }
 
 interface AgentSearch {
@@ -802,26 +775,6 @@ const agentRoute = createRoute({
 				podSlug={pod}
 				handle={agent}
 				search={agentRoute.useSearch()}
-				onSearchChange={(change) =>
-					void navigate({ search: (previous) => ({ ...previous, ...change }) })
-				}
-			/>
-		);
-	},
-});
-
-const allAgentRoute = createRoute({
-	getParentRoute: () => allRoute,
-	path: "/pods/$pod/agents/$agent",
-	validateSearch: validateAgentSearch,
-	component: () => {
-		const { pod, agent } = allAgentRoute.useParams();
-		const navigate = allAgentRoute.useNavigate();
-		return (
-			<AgentChatRoute
-				podSlug={pod}
-				handle={agent}
-				search={allAgentRoute.useSearch()}
 				onSearchChange={(change) =>
 					void navigate({ search: (previous) => ({ ...previous, ...change }) })
 				}
@@ -903,7 +856,6 @@ const routeTree = rootRoute.addChildren([
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
 		agentsRoute,
-		allRoute.addChildren([allIndexRoute, allAgentRoute]),
 		podRoute.addChildren([podIndexRoute, agentRoute]),
 	]),
 ]);
