@@ -17,7 +17,7 @@ import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
-import { serviceOperations, transaction } from "../../database/database.ts";
+import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Models } from "../models/models.ts";
@@ -30,7 +30,12 @@ import {
 	redeemDeviceCode,
 	requestDeviceCode,
 } from "./chatgpt.ts";
-import { keepingHeldModelsOffered, lockHeldModels, type ModelInUse } from "./held-models.ts";
+import {
+	holdingModel,
+	keepingHeldModelsOffered,
+	type ModelInUse,
+	withHeldModelsLocked,
+} from "./held-models.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./remote.ts";
@@ -270,12 +275,12 @@ export const make = Effect.gen(function* () {
 	 * can switch a model or a provider on.
 	 */
 	const adoptFirstModel = (workspaceId: string) =>
-		transaction(
+		withHeldModelsLocked(
+			workspaceId,
 			Effect.gen(function* () {
-				yield* lockHeldModels(workspaceId);
 				const model = yield* providers.ensureDefaultModel(workspaceId);
 				if (model !== undefined) {
-					yield* agents.setUnsetSystemAgentModels(workspaceId, model);
+					yield* agents.fillMissingSystemAgentModels(workspaceId, model);
 				}
 			}),
 		);
@@ -583,13 +588,7 @@ export const make = Effect.gen(function* () {
 				"setDefaultModel",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					yield* transaction(
-						Effect.gen(function* () {
-							yield* lockHeldModels(workspaceId);
-							yield* providers.requireEnabled(workspaceId, model);
-							yield* providers.setDefaultModel(workspaceId, model);
-						}),
-					);
+					yield* holdingModel(workspaceId, model, providers.setDefaultModel(workspaceId, model));
 					return yield* offeredModels(workspaceId);
 				}),
 			),

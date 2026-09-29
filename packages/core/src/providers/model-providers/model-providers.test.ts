@@ -685,7 +685,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await expect(refused).rejects.toMatchObject({
 				_tag: "ModelInUse",
 				modelId: "first",
-				holders: ["Compaction", "Facilitator", "Scribe"],
+				holders: { workspaceDefault: false, systemAgents: ["Compaction", "Facilitator", "Scribe"] },
 			});
 		});
 

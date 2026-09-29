@@ -148,11 +148,15 @@ export interface Interface {
 	) => Effect.Effect<void, ModelNotEnabled>;
 	/** The model the workspace's new agents start on, or nothing until it first offers one. */
 	readonly defaultModel: (workspaceId: string) => Effect.Effect<string | undefined>;
-	/** Makes `modelId`, which the caller has checked the workspace offers, the default. */
+	/**
+	 * Makes `modelId` the default. Only inside `holdingModel` from
+	 * `held-models.ts`, which checks the workspace offers it and keeps it so.
+	 */
 	readonly setDefaultModel: (workspaceId: string, modelId: string) => Effect.Effect<void>;
 	/**
 	 * The workspace's default, first making the model it has offered longest
-	 * the default if it has none yet. Nothing while it offers no model.
+	 * the default if it has none yet. Nothing while it offers no model. Only
+	 * inside `withHeldModelsLocked` from `held-models.ts`.
 	 */
 	readonly ensureDefaultModel: (workspaceId: string) => Effect.Effect<string | undefined>;
 }
@@ -236,14 +240,6 @@ export const make = Effect.gen(function* () {
 				),
 			} satisfies ProviderEndpoint;
 		});
-
-	const defaultModelOf = (workspaceId: string) =>
-		query((db) =>
-			db
-				.select({ modelId: workspaceDefaultModel.modelId })
-				.from(workspaceDefaultModel)
-				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
-		).pipe(Effect.map(([row]) => row?.modelId));
 
 	const isEnabled = (workspaceId: string, modelId: string) =>
 		query((db) =>
@@ -607,12 +603,9 @@ export const make = Effect.gen(function* () {
 					);
 					if (!first) return undefined;
 					yield* query((db) =>
-						db
-							.insert(workspaceDefaultModel)
-							.values({ workspaceId, modelId: first.modelId })
-							.onConflictDoNothing(),
+						db.insert(workspaceDefaultModel).values({ workspaceId, modelId: first.modelId }),
 					);
-					return yield* defaultModelOf(workspaceId);
+					return first.modelId;
 				}),
 			),
 
@@ -675,6 +668,15 @@ export class ModelNotEnabled
 		return UserMessage.of`This workspace does not offer that model`;
 	}
 }
+
+/** The model the workspace's new agents start on, or nothing until it first offers one. */
+export const defaultModelOf = (workspaceId: string) =>
+	query((db) =>
+		db
+			.select({ modelId: workspaceDefaultModel.modelId })
+			.from(workspaceDefaultModel)
+			.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
+	).pipe(Effect.map(([row]) => row?.modelId));
 
 /**
  * A model the workspace offers, in a query joining `provider_model` to

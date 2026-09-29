@@ -14,12 +14,11 @@ import {
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { lockHeldModels } from "../../providers/model-providers/held-models.ts";
+import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
-import { SYSTEM_AGENTS } from "../agents/system-agents.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**
@@ -52,8 +51,9 @@ export interface Interface {
 	>;
 	/**
 	 * Marks onboarding done for an actor who joined through `invitationId`,
-	 * pointing their Personal Assistant at the workspace's default model, if it
-	 * has one yet. Returns the workspace they joined.
+	 * pointing their Personal Assistant at the workspace's default model, or
+	 * another it offers while it does not offer that one. Returns the workspace
+	 * they joined.
 	 */
 	readonly completeAcceptedInvite: (input: {
 		invitationId: string;
@@ -120,22 +120,18 @@ export const make = Effect.gen(function* () {
 						if (!eligible) {
 							return yield* new NotReadyToFinish();
 						}
-						yield* lockHeldModels(resolved);
-						const { models } = yield* offeredModels(resolved);
 						const model = eligible.model;
-						if (model === null || !models.some((offered) => offered.modelId === model)) {
+						if (model === null) {
 							return yield* new NoModelChosen();
 						}
-						yield* modelProviders.setDefaultModel(resolved, model);
-						yield* Effect.forEach(
-							SYSTEM_AGENTS,
-							({ key }) =>
-								// A workspace made before a system agent existed may not have it.
-								agents
-									.setSystemAgentModel(resolved, key, model)
-									.pipe(Effect.catchTag("SystemAgentMissing", () => Effect.void)),
-							{ discard: true },
-						);
+						yield* holdingModel(
+							resolved,
+							model,
+							Effect.all([
+								modelProviders.setDefaultModel(resolved, model),
+								agents.setAllSystemAgentModels(resolved, model),
+							]),
+						).pipe(Effect.catchTag("ModelNotEnabled", () => Effect.fail(new NoModelChosen())));
 						yield* markCompleted(actor.userId);
 					}),
 				),
@@ -169,13 +165,13 @@ export const make = Effect.gen(function* () {
 							return yield* new InvitationNotAccepted();
 						}
 						const workspaceId = accepted.workspaceId;
-						const { defaultModel } = yield* offeredModels(workspaceId);
-						if (defaultModel) {
-							yield* personalPods.provisionWithModel({
-								workspaceId,
-								userId,
-								model: defaultModel,
-							});
+						const { models, defaultModel } = yield* offeredModels(workspaceId);
+						// The default goes unoffered while a failed test has its provider off.
+						const model = models.some((offered) => offered.modelId === defaultModel)
+							? defaultModel
+							: models[0]?.modelId;
+						if (model) {
+							yield* personalPods.provisionWithModel({ workspaceId, userId, model });
 						} else {
 							yield* personalPods.provision({ workspaceId, userId });
 						}

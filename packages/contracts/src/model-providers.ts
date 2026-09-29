@@ -343,15 +343,16 @@ export const workspaceModelSchema = Schema.Struct({
 export const workspaceModelsResponseSchema = Schema.Struct({
 	models: Schema.mutable(Schema.Array(workspaceModelSchema)),
 	/**
-	 * The model new agents start on, one of `models`. `null` only while the
-	 * workspace offers none; once it offers one it always has a default.
+	 * The model new agents start on. `null` only until the workspace first
+	 * offers a model; from then on it always has one. Usually one of `models`,
+	 * but not while a failed test has its provider switched off.
 	 */
-	defaultModel: Schema.NullOr(Schema.String),
+	defaultModel: Schema.NullOr(modelIdSchema),
 });
 
 /** Choosing the model a workspace's new agents start on. */
 export const defaultModelUpdateSchema = Schema.Struct({
-	model: Schema.String,
+	model: modelIdSchema,
 });
 export type DefaultModelUpdate = typeof defaultModelUpdateSchema.Type;
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;

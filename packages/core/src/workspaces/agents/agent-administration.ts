@@ -12,8 +12,8 @@ import { type AuthorizationDenied, ResourceHidden } from "../../authorization/ac
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
-import { serviceOperations, transaction } from "../../database/database.ts";
-import { lockHeldModels } from "../../providers/model-providers/held-models.ts";
+import { serviceOperations } from "../../database/database.ts";
+import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
@@ -169,14 +169,10 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"workspace.builtInAgents.configure",
 					);
-					// Held under the same lock as switching models off, so the model
-					// cannot stop being offered between the check and the write.
-					yield* transaction(
-						Effect.gen(function* () {
-							yield* lockHeldModels(workspaceId);
-							yield* modelProviders.requireEnabled(workspaceId, model);
-							yield* agents.setSystemAgentModel(workspaceId, key, model);
-						}),
+					yield* holdingModel(
+						workspaceId,
+						model,
+						agents.setSystemAgentModel(workspaceId, key, model),
 					);
 					const updated = (yield* systemAgents(workspaceId)).find(
 						(candidate) => candidate.key === key,
