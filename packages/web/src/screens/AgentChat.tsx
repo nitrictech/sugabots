@@ -28,6 +28,7 @@ import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { queuedBehindReply } from "./queued-messages.ts";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
@@ -74,6 +75,9 @@ export function AgentChat({
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const latestItemRevision = chatItemRevision(items.at(-1));
+	const queued = queuedBehindReply(
+		items.flatMap((item) => (item.kind === "message" ? [item.message] : [])),
+	);
 
 	useLayoutEffect(() => {
 		if (!chat.data || !details) return;
@@ -205,6 +209,7 @@ export function AgentChat({
 										onOpenCollaboration={openThread}
 										podId={pod.id}
 										canApproveToolCalls={details.capabilities?.approveToolCalls}
+										queued={queued}
 									/>
 								) : (
 									<ActivityLine

@@ -4,6 +4,7 @@ import type {
 	ChatMessageItem,
 	NewMessage,
 	SessionUser,
+	ThreadDetails,
 } from "@sugabots/contracts";
 import {
 	skipToken,
@@ -136,7 +137,9 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 					status: "complete",
 					parts: [{ type: "text", text: input.message }],
 					content: input.message,
-					createdAt: new Date().toISOString(),
+					createdAt: timestampAfter(
+						queries.getQueryData<ThreadDetails>(["thread", chat.mainThreadId])?.messages ?? [],
+					),
 				},
 			};
 			queries.setQueryData(["chat-optimistic", chat.id], (items: ChatMessageItem[] = []) => [
@@ -157,6 +160,16 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 			]);
 		},
 	});
+}
+
+/**
+ * A timestamp for a message being sent that sorts after every message shown:
+ * now, or a millisecond after the newest one if this browser's clock is behind
+ * the server's.
+ */
+function timestampAfter(messages: readonly { createdAt: string }[]): string {
+	const times = [Date.now(), ...messages.map(({ createdAt }) => Date.parse(createdAt) + 1)];
+	return new Date(Math.max(...times)).toISOString();
 }
 
 export function useOptimisticChatItems(chatId: string | undefined): ChatMessageItem[] {
