@@ -60,3 +60,31 @@ Summaries need a [behind-the-scenes
 model](/docs/models#behind-the-scenes-model).
 
 </Tip>
+
+## Long conversations
+
+A bot rereads its chat every time it replies, and it can only hold so much in
+mind at once. Think of it as the bot's **short-term memory**. When a chat gets
+long, Sugabots makes room by compacting what the bot rereads. You don't have to
+do anything, and nothing is deleted: everyone still sees the whole chat.
+
+<CompactionDemo />
+
+How it works:
+
+- **It starts early.** Once a chat fills most of the bot's short-term memory,
+  Sugabots starts compacting it, while there's still plenty of room to keep
+  chatting.
+- **It happens in the background.** Nobody waits for it, and nothing shows in
+  the chat.
+- **Recent messages stay whole.** The bot keeps rereading the latest messages
+  word for word. The ones before them become a summary of what was decided,
+  asked for and promised, what's still open, and key details like dates and
+  prices, along with who said each thing.
+- **The summary carries forward.** When the chat fills up again, the new summary
+  builds on the last one.
+- **The bot can look further back.** The summary can't hold everything. When the
+  bot needs a detail it doesn't have, it searches the earlier messages.
+
+To see how full a bot's short-term memory is, and when it was last compacted,
+open the chat's details panel.
