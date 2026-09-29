@@ -8,9 +8,10 @@ set them under `environment` in `compose.yml`.
 
 ## Database
 
-| Variable       | Default  | Description                   |
-| -------------- | -------- | ----------------------------- |
-| `DATABASE_URL` | Required | PostgreSQL connection string. |
+| Variable             | Default  | Description                                                                                                                                                   |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`       | Required | PostgreSQL connection string.                                                                                                                                 |
+| `DATABASE_POOL_SIZE` | `10`     | The most connections the server's main pool opens. Sign-in holds up to 2 more. Keep the total under the database's `max_connections`, less what its host reserves. |
 
 ## Server
 
