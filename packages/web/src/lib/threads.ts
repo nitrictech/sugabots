@@ -41,12 +41,18 @@ export function useThreadActivity(threadId: string | undefined) {
 	});
 }
 
-/** A thread and a page of its messages. The thread's events keep it current once loaded. */
+/**
+ * A thread and a page of its messages. The thread's events keep it current
+ * while it is on screen, and it is fetched again whenever it comes back.
+ */
 export function useThread(threadId: string | undefined) {
 	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
 	const query = useQuery<ThreadDetails>({
 		queryKey,
+		// Nothing hears the thread's events while it is off screen, and a new
+		// stream starts from now, so a cached copy may have missed a reply finishing.
+		refetchOnMount: "always",
 		queryFn: threadId
 			? async ({ signal }): Promise<ThreadDetails> => {
 					const latest = await Effect.runPromise(
