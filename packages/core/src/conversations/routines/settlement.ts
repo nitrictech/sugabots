@@ -18,6 +18,7 @@ import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../floor/facilitate.workflow.ts";
 import { workingThreadsOf } from "../threads/tree.ts";
 import { CollaborationRepository } from "../tools/collaborate/repository.ts";
+import { TurnQueries } from "../turns/queries.ts";
 import { Turns } from "../turns/turns.ts";
 import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
 import { RoutineRepository } from "./repository.ts";
@@ -294,7 +295,7 @@ const stillBusy = (work: readonly string[], ending: boolean) =>
 						where ${
 							ending
 								? laneBusy(sql`work.id`, [Facilitate._tag])
-								: sql`(${Turns.busyIn(sql`work.id`)} or ${laneBusy(sql`work.id`, [Facilitate._tag])})`
+								: sql`(${TurnQueries.busyIn(sql`work.id`)} or ${laneBusy(sql`work.id`, [Facilitate._tag])})`
 						}
 					)
 					or exists (

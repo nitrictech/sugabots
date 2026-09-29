@@ -12,7 +12,7 @@ import {
 } from "../../database/schema.ts";
 import { laneBusy } from "../../workflows/lanes.ts";
 import { crewOf } from "../threads/participants.ts";
-import { Turns } from "../turns/turns.ts";
+import { TurnQueries } from "../turns/queries.ts";
 import { Facilitate } from "./facilitate.workflow.ts";
 
 /**
@@ -195,4 +195,4 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
  * waiting to start, or the Facilitator is choosing who speaks.
  */
 export const respondingIn = (threadId: SQLWrapper) =>
-	sql<boolean>`(${Turns.busyIn(threadId)} or ${laneBusy(threadId, [Facilitate._tag])})`;
+	sql<boolean>`(${TurnQueries.busyIn(threadId)} or ${laneBusy(threadId, [Facilitate._tag])})`;

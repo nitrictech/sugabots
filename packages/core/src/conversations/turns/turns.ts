@@ -10,20 +10,18 @@
  * system agent's work as a turn. `Controls` is for people, and checks what
  * the current actor may do: cancelling a turn and deciding its tool approvals.
  *
- * This is the only file outside `turns/` may import.
+ * Outside `turns/`, import only this file, and `queries.ts` for conditions
+ * on turns inside another query.
  */
 export * as Turns from "./turns.ts";
 
 import type { ToolApprovalDecision } from "@sugabots/contracts";
-import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
-import { turn } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { laneBusy } from "../../workflows/lanes.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
 	makeControls,
@@ -32,13 +30,12 @@ import {
 	type ToolApprovalNotFound,
 } from "./controls.ts";
 import { TurnExecution } from "./execution.ts";
-import { ACTIVE_STATUSES } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { makeService } from "./service.ts";
 import { TurnSignals } from "./signals.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { turnStepsLayer } from "./turn.steps.ts";
-import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
+import { type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 
 export {
 	ToolApprovalConflict,
@@ -147,12 +144,3 @@ export const stepsLayer = turnStepsLayer.pipe(
  * Provided with the engine, so a test can stand in for it.
  */
 export const signalsLayer = TurnSignals.layer;
-
-/**
- * busyIn reports, as a condition for a query, whether an agent's turn in the
- * thread `threadId` is running or waiting to start.
- */
-export const busyIn = (threadId: SQLWrapper) => laneBusy(threadId, [Turn._tag]);
-
-/** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
-export const isActive = inArray(turn.status, [...ACTIVE_STATUSES]);
