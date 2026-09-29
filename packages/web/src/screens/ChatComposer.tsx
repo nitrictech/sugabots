@@ -230,13 +230,14 @@ function MentionMenu({
 }
 
 /**
- * The mention the cursor is in: an `@` where the API would read one, and the
- * handle characters typed after it. It ends past any handle characters after
- * the cursor, so choosing someone with the cursor inside a handle replaces all
- * of it.
+ * The mention the cursor is in: an `@` where the API would read one, and what
+ * has been typed after it on the same line. Spaces are allowed, so a person can
+ * type a name as it is written, but not straight after the `@`: in "meet @ noon"
+ * the `@` means "at". It ends past any handle characters after the cursor, so
+ * choosing someone with the cursor inside a handle replaces all of it.
  */
 function mentionBeingTyped(value: string, cursor: number) {
-	const typed = /@([a-z0-9-]*)$/i.exec(value.slice(0, cursor));
+	const typed = /@(?!\s)([^@\n]*)$/.exec(value.slice(0, cursor));
 	if (!typed || !canStartMention(value, typed.index)) return undefined;
 	const restOfHandle = /^[a-z0-9-]*/i.exec(value.slice(cursor))?.[0] ?? "";
 	return { start: typed.index, end: cursor + restOfHandle.length, query: typed[1] ?? "" };

@@ -105,8 +105,8 @@ export const LongDraft = meta.story({
 
 /**
  * SelectMention offers everyone on `@`, narrows the list by name as it is
- * typed, moves with the arrow keys, and writes the chosen handle on Enter
- * without sending the draft.
+ * typed, spaces included, moves with the arrow keys, and writes the chosen
+ * handle on Enter without sending the draft.
  */
 export const SelectMention = meta.story({
 	tags: ["ai-generated"],
@@ -126,6 +126,10 @@ export const SelectMention = meta.story({
 		await expect(input).toHaveValue("Ask @sam-rivera ");
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(args.onSubmit).not.toHaveBeenCalled();
+		// A name is matched as it is written, spaces and all.
+		await userEvent.clear(input);
+		await userEvent.type(input, "@Sam Ri");
+		await expect(canvas.getAllByRole("option")).toHaveLength(1);
 	},
 });
 
