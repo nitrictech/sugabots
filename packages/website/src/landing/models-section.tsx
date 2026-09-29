@@ -82,10 +82,11 @@ export function ModelsSection() {
 			title="The right brain for every bot."
 			description={
 				<>
-					Sign in with your <Emphasis tone="orange">ChatGPT</Emphasis> subscription, bring API keys
-					for <Emphasis tone="orange">Anthropic</Emphasis>,{" "}
-					<Emphasis tone="orange">Google</Emphasis> and more, or run local models with{" "}
-					<Emphasis tone="orange">Ollama</Emphasis>. Each agent can use a different model.
+					Sign in with your <Emphasis tone="orange">ChatGPT</Emphasis> or{" "}
+					<Emphasis tone="orange">SuperGrok</Emphasis> subscription, bring API keys for{" "}
+					<Emphasis tone="orange">Anthropic</Emphasis>, <Emphasis tone="orange">Google</Emphasis>{" "}
+					and more, or run local models with <Emphasis tone="orange">Ollama</Emphasis>. Each agent
+					can use a different model.
 				</>
 			}
 		>

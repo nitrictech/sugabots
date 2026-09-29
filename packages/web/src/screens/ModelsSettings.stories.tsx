@@ -136,6 +136,13 @@ const chatgptSignedIn: ModelProvider = {
 	modelCount: 1,
 	enabledModelCount: 1,
 };
+const supergrok = provider(6, "supergrok", "SuperGrok", [], {
+	baseUrl: "https://api.x.ai/v1",
+	active: false,
+	status: "signed_out",
+	hasApiKey: false,
+	apiKeyHint: null,
+});
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -291,7 +298,7 @@ export const ChatgptSignIn = meta.story({
 	render: () => <ProviderSettings providerId={chatgpt.id} />,
 	beforeEach({ msw }) {
 		msw.use(
-			http.post(`${API}/workspaces/:workspace/model-providers/:providerId/chatgpt-sign-in`, () =>
+			http.post(`${API}/workspaces/:workspace/model-providers/:providerId/sign-in`, () =>
 				HttpResponse.json({
 					verificationUrl: "https://auth.openai.com/codex/device",
 					userCode: "ABCD-1234",
@@ -317,6 +324,37 @@ export const ChatgptSignIn = meta.story({
 			"href",
 			"https://auth.openai.com/codex/device",
 		);
+	},
+});
+
+/** SuperGrok is signed in to at xAI, the same way, with xAI's terms in the warning. */
+export const SupergrokSignIn = meta.story({
+	parameters: { providers: [...providers, supergrok] },
+	render: () => <ProviderSettings providerId={supergrok.id} />,
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/workspaces/:workspace/model-providers/:providerId/sign-in`, () =>
+				HttpResponse.json({
+					verificationUrl: "https://accounts.x.ai/oauth2/device?user_code=GWJA-VZAE",
+					userCode: "GWJA-VZAE",
+					attempt: "sealed-attempt",
+					pollIntervalMs: 60_000,
+					expiresAt: "2026-09-01T00:30:00.000Z",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with xAI" }));
+		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		await expect(within(warning).getByText(/A SuperGrok plan is for one person/)).toBeVisible();
+		await expect(within(warning).getByRole("link", { name: "xAI's terms" })).toHaveAttribute(
+			"href",
+			"https://x.ai/legal/terms-of-service",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Sign in" }));
+		await expect(await canvas.findByText("GWJA-VZAE")).toBeVisible();
+		await expect(canvas.getByText(/Open xAI's sign-in page/)).toBeVisible();
 	},
 });
 

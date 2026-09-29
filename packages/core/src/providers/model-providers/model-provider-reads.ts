@@ -121,7 +121,7 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 		apiFormat: row.apiFormat,
 		active: row.active,
 		status:
-			presetSignsIn(row.preset) && row.chatgptTokensEncrypted === null
+			presetSignsIn(row.preset) && row.oauthTokensEncrypted === null
 				? "signed_out"
 				: configurationStatus({
 						missingKey: lacksCredential(row),
@@ -130,7 +130,7 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 					}),
 		hasApiKey: row.apiKeyEncrypted !== null,
 		apiKeyHint: apiKeyHint(row.apiKeyEncrypted),
-		signedIn: row.chatgptTokensEncrypted !== null,
+		signedIn: row.oauthTokensEncrypted !== null,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name, valueHint: "********" })),
 		modelCount: models.length,
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,

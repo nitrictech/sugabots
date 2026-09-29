@@ -64,7 +64,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 	const answers = [...responses];
 	const model = Models.make({
 		modelProviders: {
-			renewChatgptTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+			renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 			resolve: () =>
 				Effect.succeed({
 					providerId: PROVIDER_ID,

@@ -44,16 +44,16 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 			.handle("test", ({ params }) =>
 				providers.test(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
-			.handle("startChatgptSignIn", ({ params }) =>
-				providers.startChatgptSignIn(params).pipe(asSessionUser, asHttpError(providerErrors)),
+			.handle("startSignIn", ({ params }) =>
+				providers.startSignIn(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
-			.handle("completeChatgptSignIn", ({ params, payload }) =>
+			.handle("completeSignIn", ({ params, payload }) =>
 				providers
-					.completeChatgptSignIn({ ...params, attempt: payload.attempt })
+					.completeSignIn({ ...params, attempt: payload.attempt })
 					.pipe(asSessionUser, asHttpError(providerErrors)),
 			)
-			.handle("signOutChatgpt", ({ params }) =>
-				providers.signOutChatgpt(params).pipe(asSessionUser, asHttpError(providerErrors)),
+			.handle("signOut", ({ params }) =>
+				providers.signOut(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			)
 			.handle("fetchModels", ({ params }) =>
 				providers.fetchModels(params).pipe(asSessionUser, asHttpError(providerErrors)),
@@ -98,9 +98,9 @@ const providerErrors = {
 	ProviderModelNotFound: NotFound,
 	ProviderModelRemovalNotAllowed: BadRequest,
 	ModelDiscoveryFailed: BadRequest,
-	ChatgptSignInNotOffered: BadRequest,
-	ChatgptSignInAttemptInvalid: BadRequest,
-	ChatgptSignInFailed: BadRequest,
+	ProviderSignInNotOffered: BadRequest,
+	ProviderSignInAttemptInvalid: BadRequest,
+	ProviderSignInFailed: BadRequest,
 	ModelInUse: Conflict,
 	ModelNotEnabled: BadRequest,
 };

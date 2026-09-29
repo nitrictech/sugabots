@@ -86,21 +86,21 @@ export function useProviderActions() {
 			},
 			onSuccess: refresh,
 		}),
-		startChatgptSignIn: useMutation({
+		startSignIn: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
 				return Effect.runPromise(
-					client.api.modelProviders.startChatgptSignIn({
+					client.api.modelProviders.startSignIn({
 						params: { workspace: workspaceId, providerId },
 					}),
 				);
 			},
 		}),
-		completeChatgptSignIn: useMutation({
+		completeSignIn: useMutation({
 			mutationFn: ({ providerId, attempt }: { providerId: string; attempt: string }) => {
 				const workspaceId = requiredWorkspace();
 				return Effect.runPromise(
-					client.api.modelProviders.completeChatgptSignIn({
+					client.api.modelProviders.completeSignIn({
 						params: { workspace: workspaceId, providerId },
 						payload: { attempt },
 					}),
@@ -108,11 +108,11 @@ export function useProviderActions() {
 			},
 			onSuccess: (outcome) => (outcome.status === "signed_in" ? refresh() : undefined),
 		}),
-		signOutChatgpt: useMutation({
+		signOut: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspace();
 				return Effect.runPromise(
-					client.api.modelProviders.signOutChatgpt({
+					client.api.modelProviders.signOut({
 						params: { workspace: workspaceId, providerId },
 					}),
 				);

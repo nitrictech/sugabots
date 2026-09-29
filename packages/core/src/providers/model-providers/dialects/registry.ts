@@ -63,6 +63,7 @@ const MODELS_DEV_PROVIDER: Partial<Record<ProviderPresetId, string>> = {
 	gemini: "google",
 	groq: "groq",
 	xai: "xai",
+	supergrok: "xai",
 	mistral: "mistral",
 	deepseek: "deepseek",
 	together: "togetherai",

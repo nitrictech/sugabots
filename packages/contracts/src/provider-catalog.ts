@@ -12,6 +12,7 @@ export const providerPresetIdSchema = Schema.Literals([
 	"gemini",
 	"groq",
 	"xai",
+	"supergrok",
 	"mistral",
 	"deepseek",
 	"together",
@@ -55,7 +56,9 @@ export interface StarterModel {
  * with a fixed address that wants a key; a local one is something you run
  * yourself, so its address is the interesting field and a key is unusual.
  */
-export interface ProviderPreset {
+export type ProviderPreset = PresetDefaults & PresetCredential;
+
+interface PresetDefaults {
 	id: ProviderPresetId;
 	name: string;
 	baseUrl: string;
@@ -63,16 +66,28 @@ export interface ProviderPreset {
 	/** How the API reads this provider; see `ProviderDialectId`. */
 	dialect: ProviderDialectId;
 	hosting: "remote" | "local";
-	/**
-	 * What the provider needs before it answers: an API key, nothing (a key
-	 * is optional), or a person signing in with their ChatGPT subscription.
-	 */
-	credential: "api-key" | "optional" | "chatgpt-sign-in";
 	/** One line for the picker: what this is, or where the key comes from. */
 	hint: string;
 	/** Models worth offering before discovery has run, if the API lists none. */
 	models: StarterModel[];
 }
+
+/**
+ * What the provider needs before it answers: an API key, nothing (a key is
+ * optional), or a person signing in to `signIn` with their subscription.
+ */
+type PresetCredential =
+	| { credential: "api-key" | "optional" }
+	| { credential: "sign-in"; signIn: SignInServiceId };
+
+/** The services a person signs a provider in to with their subscription, in place of a key. */
+export type SignInServiceId = "chatgpt" | "xai";
+
+/** Each sign-in service as the sign-in button names it. */
+export const signInServiceNames = {
+	chatgpt: "ChatGPT",
+	xai: "xAI",
+} as const satisfies Record<SignInServiceId, string>;
 
 const local = (port: number) => `http://127.0.0.1:${port}${OPENAI_COMPATIBLE_PATH}`;
 
@@ -106,7 +121,8 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		apiFormat: "openai",
 		dialect: "chatgpt",
 		hosting: "remote",
-		credential: "chatgpt-sign-in",
+		credential: "sign-in",
+		signIn: "chatgpt",
 		hint: "GPT models on your ChatGPT Plus or Pro plan, signed in the way Codex CLI does. Unofficial.",
 		models: [],
 	},
@@ -152,6 +168,18 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		hosting: "remote",
 		credential: "api-key",
 		hint: "Grok models. Keys are issued at console.x.ai.",
+		models: [],
+	},
+	{
+		id: "supergrok",
+		name: "SuperGrok",
+		baseUrl: "https://api.x.ai/v1",
+		apiFormat: "openai",
+		dialect: "openai-compatible",
+		hosting: "remote",
+		credential: "sign-in",
+		signIn: "xai",
+		hint: "Grok models on your SuperGrok or X Premium+ plan, signed in the way Grok Build does. Unofficial.",
 		models: [],
 	},
 	{
@@ -281,7 +309,14 @@ export function presetRequiresApiKey(preset: ProviderPresetId | null): boolean {
 
 /** Whether a provider made from this preset is signed in to rather than given a key. */
 export function presetSignsIn(preset: ProviderPresetId | null): boolean {
-	return preset !== null && providerPreset(preset).credential === "chatgpt-sign-in";
+	return presetSignInService(preset) !== undefined;
+}
+
+/** The service a provider made from this preset is signed in to, if it is signed in to rather than given a key. */
+export function presetSignInService(preset: ProviderPresetId | null): SignInServiceId | undefined {
+	if (preset === null) return undefined;
+	const found = providerPreset(preset);
+	return found.credential === "sign-in" ? found.signIn : undefined;
 }
 
 /** Where a stock Ollama install serves its OpenAI-compatible API. */

@@ -31,7 +31,7 @@ export function requestCost(
 ): ModelRequests.Cost | undefined {
 	const preset = provider.preset ? providerPreset(provider.preset) : undefined;
 	if (preset?.hosting === "local") return { usd: FREE, source: "local" };
-	if (preset?.credential === "chatgpt-sign-in") return { usd: FREE, source: "subscription" };
+	if (preset?.credential === "sign-in") return { usd: FREE, source: "subscription" };
 
 	const reported = preset?.id === "openrouter" ? openRouterReportedCost(usage) : undefined;
 	if (reported !== undefined) return { usd: reported, source: "provider-reported" };
