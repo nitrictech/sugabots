@@ -41,6 +41,7 @@ import { loadFacilitatorScope } from "../floor/facilitator.ts";
 import { Summaries } from "../summaries/summaries.ts";
 import { summarise } from "../summaries/summary.steps.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ThreadView } from "../thread-view.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import {
 	modelPrompt,
@@ -53,7 +54,6 @@ import {
 	TurnRepository,
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
-import { ThreadView } from "./thread-view.ts";
 
 /** What these tests set the workspace's system agents up with. */
 const SYSTEM_AGENT_MODEL = "test-model";

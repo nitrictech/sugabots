@@ -17,19 +17,19 @@ import {
 	mayDecideApprovals,
 	ResourceHidden,
 	type ThreadStanding,
-} from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { Visibility } from "../../authorization/visibility.ts";
-import { type Executor, query, serviceOperations } from "../../database/database.ts";
-import type * as schema from "../../database/schema.ts";
-import { thread, threadCompaction, threadSummary, turn } from "../../database/schema.ts";
-import { isUuid } from "../../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { compactionLineTokens, contextWindowTokens } from "../compaction/window.ts";
-import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { respondingIn } from "../floor/floor.ts";
-import { routineExecutionIdOf, toRoutineExecution } from "../routines/execution.ts";
+} from "../authorization/access.ts";
+import { Authorization } from "../authorization/authorization.ts";
+import type { CurrentActor } from "../authorization/current-actor.ts";
+import { Visibility } from "../authorization/visibility.ts";
+import { type Executor, query, serviceOperations } from "../database/database.ts";
+import type * as schema from "../database/schema.ts";
+import { thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
+import { isUuid } from "../ids/ids.ts";
+import { type UserFacing, UserMessage } from "../user-message.ts";
+import { compactionLineTokens, contextWindowTokens } from "./compaction/window.ts";
+import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
+import { respondingIn } from "./floor/floor.ts";
+import { routineExecutionIdOf, toRoutineExecution } from "./routines/execution.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -38,7 +38,7 @@ import {
 	personColumns,
 	recentParticipantsOf,
 	toParticipant,
-} from "./participants.ts";
+} from "./threads/participants.ts";
 
 /**
  * What the thread screens show, of the threads the current actor can see: the

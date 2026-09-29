@@ -1,5 +1,5 @@
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
-import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
