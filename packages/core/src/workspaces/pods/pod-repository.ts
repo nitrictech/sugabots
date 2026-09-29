@@ -40,8 +40,6 @@ export interface Interface {
 		podId: string,
 		changes: PodUpdate,
 	) => Effect.Effect<schema.PodRow, PersonalPodFixed | PodGone | PodSlugTaken>;
-	/** Stops every pod in the workspace handing the floor to the Facilitator. */
-	readonly stopFacilitatorRouting: (workspaceId: string) => Effect.Effect<void>;
 	/** Removes a shared pod. One already gone counts as removed. */
 	readonly remove: (workspaceId: string, podId: string) => Effect.Effect<void, PersonalPodFixed>;
 	/** Adds a member of the pod's workspace. Adding somebody already in it changes nothing. */
@@ -196,17 +194,6 @@ export const make = Effect.gen(function* () {
 					}
 					return row;
 				}),
-			),
-
-		stopFacilitatorRouting: (workspaceId) =>
-			operation(
-				"stopFacilitatorRouting",
-				query((db) =>
-					db
-						.update(pod)
-						.set({ routing: { facilitator: false } })
-						.where(and(eq(pod.workspaceId, workspaceId), facilitatorRouting)),
-				),
 			),
 
 		remove: (workspaceId, podId) =>
@@ -372,6 +359,3 @@ export class PersonalPodFixed
 			: UserMessage.of`Personal pods cannot be deleted`;
 	}
 }
-
-/** Pods whose routing currently hands the floor to the Facilitator. */
-const facilitatorRouting = sql`${pod.routing} ->> 'facilitator' = 'true'`;

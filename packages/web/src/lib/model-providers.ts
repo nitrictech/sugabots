@@ -28,10 +28,13 @@ export function useModelProviders() {
 export function useProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
+	// The first model a workspace switches on becomes its default and every
+	// built-in agent's, so any of these changes can move those too.
 	const refresh = () =>
 		Promise.all([
 			queryClient.invalidateQueries({ queryKey: ["model-providers", workspaceId] }),
 			queryClient.invalidateQueries({ queryKey: ["models", workspaceId] }),
+			queryClient.invalidateQueries({ queryKey: ["built-in-agents", workspaceId] }),
 		]);
 	function requiredWorkspace() {
 		if (!workspaceId) throw new NotReadyError();
@@ -198,4 +201,22 @@ export function useProviderActions() {
 			onSuccess: refresh,
 		}),
 	};
+}
+
+/** Choosing the model the workspace's new bots start on. */
+export function useChooseDefaultModel() {
+	const workspaceId = useWorkspace().workspace?.id;
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (model: string) => {
+			if (!workspaceId) throw new NotReadyError();
+			return Effect.runPromise(
+				client.api.modelProviders.setDefaultModel({
+					params: { workspace: workspaceId },
+					payload: { model },
+				}),
+			);
+		},
+		onSuccess: (models) => queryClient.setQueryData(["models", workspaceId], models),
+	});
 }

@@ -15,7 +15,8 @@ import { PodRepository } from "./pod-repository.ts";
 export interface Interface {
 	/**
 	 * Makes `userId`'s Personal pod and its Personal Assistant, each only if it
-	 * is missing. A new assistant has no model until one is chosen for it.
+	 * is missing. A new assistant starts on the workspace's default model, or
+	 * on none while the workspace offers none.
 	 */
 	readonly provision: (input: {
 		workspaceId: string;
@@ -51,7 +52,7 @@ export const make = Effect.gen(function* () {
 				workspaceId,
 				podId: personal.id,
 				userId,
-				model,
+				model: model ?? (yield* modelProviders.defaultModel(workspaceId)),
 			});
 			return { personal, assistant };
 		});

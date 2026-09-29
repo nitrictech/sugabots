@@ -203,7 +203,7 @@ export const ChooseModel = meta.story({
 	beforeEach: ({ msw }) => {
 		const root = `${API}/workspaces/:workspace/model-providers`;
 		msw.use(
-			http.get(`${root}/models`, () => HttpResponse.json({ models: [] })),
+			http.get(`${root}/models`, () => HttpResponse.json({ models: [], defaultModel: null })),
 			http.get(root, () => HttpResponse.json([anthropic])),
 			http.post(root, () => HttpResponse.json(anthropic, { status: 201 })),
 			http.post(`${root}/:providerId/fetch-models`, () =>

@@ -10,7 +10,7 @@ import type {
 	ChatMessagesPage,
 	ChatPageQuery,
 } from "@sugabots/contracts";
-import { DEFAULT_CHAT_PAGE_LIMIT } from "@sugabots/contracts";
+import { DEFAULT_CHAT_PAGE_LIMIT, textWithoutNarration } from "@sugabots/contracts";
 import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
@@ -93,7 +93,7 @@ export const make = Effect.gen(function* () {
 								chatId: row.chatId,
 								lastMessage: last
 									? {
-											preview: previewOf(last.content),
+											preview: previewOf(textWithoutNarration(last.parts) || last.content),
 											authorUserId: last.authorUserId,
 											at: last.createdAt.toISOString(),
 										}
@@ -187,12 +187,21 @@ const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 	threadIds: readonly string[],
 ) {
 	if (threadIds.length === 0) {
-		return new Map<string, { content: string; authorUserId: string | null; createdAt: Date }>();
+		return new Map<
+			string,
+			{
+				content: string;
+				parts: schema.StoredMessagePart[];
+				authorUserId: string | null;
+				createdAt: Date;
+			}
+		>();
 	}
 	const rows = yield* db
 		.selectDistinctOn([message.threadId], {
 			threadId: message.threadId,
 			content: message.content,
+			parts: message.parts,
 			authorUserId: message.authorUserId,
 			createdAt: message.createdAt,
 		})

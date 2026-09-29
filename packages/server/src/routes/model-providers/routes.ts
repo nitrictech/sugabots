@@ -20,6 +20,11 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 					.listEnabledModels({ workspace: params.workspace })
 					.pipe(asSessionUser, asHttpError(providerErrors)),
 			)
+			.handle("setDefaultModel", ({ params, payload }) =>
+				providers
+					.setDefaultModel({ workspace: params.workspace, model: payload.model })
+					.pipe(asSessionUser, asHttpError(providerErrors)),
+			)
 			.handle("create", ({ params, payload }) =>
 				providers
 					.create({ workspace: params.workspace, provider: payload })
@@ -96,4 +101,6 @@ const providerErrors = {
 	ChatgptSignInNotOffered: BadRequest,
 	ChatgptSignInAttemptInvalid: BadRequest,
 	ChatgptSignInFailed: BadRequest,
+	ModelInUse: Conflict,
+	ModelNotEnabled: BadRequest,
 };

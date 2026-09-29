@@ -10,7 +10,7 @@ import {
 	providerModel,
 } from "../../database/schema.ts";
 import { apiKeyHint, configurationStatus } from "../tested-configuration.ts";
-import { lacksCredential, offeredIn } from "./model-provider-repository.ts";
+import { defaultModelOf, lacksCredential, offeredIn } from "./model-provider-repository.ts";
 
 /**
  * Every model provider in the workspace, each with its models: the defaults
@@ -72,17 +72,23 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 		return toProvider(row, models);
 	});
 
-/** The models the workspace offers for agents to run on. */
+/**
+ * The models the workspace offers for agents to run on, and its default, which
+ * it does not offer while a failed test has that model's provider off.
+ */
 export const offeredModels = (workspaceId: string) =>
-	query((db) =>
-		db
-			.select({ model: providerModel, provider: modelProvider })
-			.from(providerModel)
-			.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
-			.where(offeredIn(workspaceId)),
-	).pipe(
+	Effect.all([
+		query((db) =>
+			db
+				.select({ model: providerModel, provider: modelProvider })
+				.from(providerModel)
+				.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
+				.where(offeredIn(workspaceId)),
+		),
+		defaultModelOf(workspaceId),
+	]).pipe(
 		Effect.map(
-			(rows): WorkspaceModelsResponse => ({
+			([rows, defaultModel]): WorkspaceModelsResponse => ({
 				models: rows.map(({ model, provider }) => ({
 					providerId: provider.id,
 					providerName: provider.name,
@@ -91,6 +97,7 @@ export const offeredModels = (workspaceId: string) =>
 					modelId: model.modelId,
 					displayName: model.displayName,
 				})),
+				defaultModel: defaultModel ?? null,
 			}),
 		),
 	);

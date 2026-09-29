@@ -10,6 +10,7 @@ import {
 	providerModel,
 	user,
 	workspace,
+	workspaceDefaultModel,
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
@@ -134,8 +135,8 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					},
 					{
 						workspaceId,
-						// The workspace's Scribe, in no pod and with no model until an
-						// administrator chooses one on the Models page.
+						// The workspace's Scribe, in no pod and with no model until the
+						// workspace settles on one.
 						podId: null,
 						name: "Scribe",
 						handle: "scribe",
@@ -173,13 +174,20 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		expect(await isCompleted(adminId)).toBe(false);
 	});
 
-	it("leaves the Scribe unset, so nobody is given a model they were not shown", async () => {
+	it("makes the first bot's model the workspace's default and the Scribe's", async () => {
 		await complete(adminId, customAgentId);
 
 		const [scribe] = await onDatabase((db) =>
 			db.select({ model: agent.model }).from(agent).where(eq(agent.id, systemAgentId)),
 		);
-		expect(scribe?.model).toBeNull();
+		expect(scribe?.model).toBe("model");
+		const [chosen] = await onDatabase((db) =>
+			db
+				.select({ modelId: workspaceDefaultModel.modelId })
+				.from(workspaceDefaultModel)
+				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
+		);
+		expect(chosen?.modelId).toBe("model");
 	});
 
 	it("does not accept a system agent or a member who may not choose the workspace's models", async () => {
@@ -191,6 +199,10 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	});
 
 	it("completes an account from its accepted invitation", async () => {
+		// A workspace people are invited into has been set up, so it has a default.
+		await onDatabase((db) =>
+			db.insert(workspaceDefaultModel).values({ workspaceId, modelId: "model" }),
+		);
 		const [invitation] = await onDatabase((db) =>
 			db
 				.insert(workspaceInvite)

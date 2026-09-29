@@ -46,12 +46,10 @@ export function MessageMarkdown({
 const BREAK_LONG_WORDS = "break-words";
 
 /**
- * Puts a fenced block's lines within reach of a keyboard. Streamdown draws a
- * block wider than the bubble in a sideways scroller, which a mouse can drag
- * and nothing else can, so the tail of every long line is out of reach for
- * keyboard and screen reader users. Marking the block as a tab stop is what
- * makes the scroller operable; Streamdown forwards props from the `code`
- * element to the scroller itself, so this sets them there.
+ * rehypeFocusableCodeBlocks makes fenced code scrollers keyboard-focusable
+ * and labels them for assistive technology. Streamdown forwards these props
+ * from the `code` element to its scroller. A group provides a label without
+ * adding every code block in the conversation to landmark navigation.
  */
 const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 	visit(tree, "element", (node) => {
@@ -59,7 +57,7 @@ const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 		for (const child of node.children) {
 			if (child.type !== "element" || child.tagName !== "code") continue;
 			child.properties.tabIndex = 0;
-			child.properties.role = "region";
+			child.properties.role = "group";
 			child.properties.ariaLabel = "Code block";
 		}
 	});
@@ -75,13 +73,36 @@ const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks];
 /* Streamdown's own plugins give it tables and strikethrough; passing any replaces them. */
 const REMARK_PLUGINS: PluggableList = [...Object.values(defaultRemarkPlugins), remarkMentions];
 
-/* A copy button on code is worth its space in a bubble; table and image tooling is not. */
+/* A copy button on code is worth its space in a bubble; image tooling is not. */
 const CONTROLS = {
 	code: { copy: true, download: false },
-	table: false,
 	mermaid: false,
 	image: false,
 };
+
+/**
+ * ScrollingTable renders a table in a labelled, keyboard-focusable horizontal
+ * scroller. Streamdown puts table props on the table rather than its scroller,
+ * so a custom wrapper is needed to make the scroller focusable. A group keeps
+ * individual tables out of landmark navigation; the table retains its native
+ * semantics.
+ */
+function ScrollingTable({ children }: ExtraProps & { children?: ReactNode }) {
+	return (
+		<div className="my-4 rounded-lg border border-border p-2">
+			{/* biome-ignore lint/a11y/useSemanticElements: this group labels a table scroller, not form controls, so a fieldset is inappropriate. */}
+			<div
+				role="group"
+				aria-label="Table"
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: a table wider than the bubble scrolls, so the keyboard has to reach it too.
+				tabIndex={0}
+				className="focus-ring overflow-x-auto rounded-md border border-border bg-background"
+			>
+				<table className="w-full divide-y divide-border">{children}</table>
+			</div>
+		</div>
+	);
+}
 
 const COMPONENTS: Components = {
 	[MENTION_TAG]: MarkdownMention,
@@ -89,6 +110,7 @@ const COMPONENTS: Components = {
 	h1: heading("h1", "text-2xl"),
 	h2: heading("h2", "text-xl"),
 	h3: heading("h3", "text-lg"),
+	table: ScrollingTable,
 };
 
 function heading(tag: "h1" | "h2" | "h3", size: string) {

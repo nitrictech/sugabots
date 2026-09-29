@@ -242,6 +242,24 @@ export const messagePartSchema = Schema.Union([
 
 export type MessagePart = typeof messagePartSchema.Type;
 
+/**
+ * Whether the part at `index` is narration: text that comes straight before a
+ * tool call, such as "Let me check:", which a thread leaves out. Takes a
+ * message's parts as the API sends them or as they are stored.
+ */
+export function isNarration(parts: readonly { type: string }[], index: number): boolean {
+	return parts[index]?.type === "text" && parts[index + 1]?.type === "tool_call";
+}
+
+/** A message's text as a thread shows it: every text part but its narration. */
+export function textWithoutNarration<Part extends { type: string; text?: string }>(
+	parts: readonly Part[],
+): string {
+	return parts
+		.map((part, index) => (part.type === "text" && !isNarration(parts, index) ? part.text : ""))
+		.join("");
+}
+
 /** A part that sits in the reply's text at an offset: everything but text. */
 export type PlacedPart = Extract<MessagePart, { atOffset: number }>;
 

@@ -39,7 +39,11 @@ export function NewAgentDialog({
 	const podId = fixedPodId ?? chosenPodId ?? "";
 	const create = useCreateAgent(podId);
 	const models = useModels();
-	const model = models.data?.models[0]?.modelId;
+	const offered = models.data?.models ?? [];
+	// The default goes unoffered while a failed test has its provider off.
+	const model =
+		offered.find((candidate) => candidate.modelId === models.data?.defaultModel)?.modelId ??
+		offered[0]?.modelId;
 	const trimmedName = name.trim();
 	const chosenPod = pods.find((pod) => pod.id === podId);
 

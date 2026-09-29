@@ -5,6 +5,7 @@ import {
 	chatgptSignInCompletionSchema,
 	chatgptSignInOutcomeSchema,
 	chatgptSignInStartedSchema,
+	defaultModelUpdateSchema,
 	modelProviderSchema,
 	modelProviderUpdateSchema,
 	newModelProviderSchema,
@@ -41,6 +42,12 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: workspaceModelsResponseSchema,
 			error: refused,
 		}),
+		HttpApiEndpoint.put("setDefaultModel", `${root}/models/default`, {
+			params: workspace,
+			payload: defaultModelUpdateSchema,
+			success: workspaceModelsResponseSchema,
+			error: [BadRequest, ...refused],
+		}),
 		HttpApiEndpoint.post("create", root, {
 			params: workspace,
 			payload: newModelProviderSchema,
@@ -60,7 +67,7 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 		}),
 		HttpApiEndpoint.delete("remove", `${root}/:providerId`, {
 			params: provider,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
 			params: provider,
@@ -81,7 +88,7 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 		HttpApiEndpoint.delete("signOutChatgpt", `${root}/:providerId/chatgpt-sign-in`, {
 			params: provider,
 			success: modelProviderSchema,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("fetchModels", `${root}/:providerId/fetch-models`, {
 			params: provider,
@@ -98,17 +105,17 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			params: provider,
 			payload: bulkProviderModelUpdateSchema,
 			success: updatedCountSchema,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.patch("updateModel", `${root}/:providerId/models/:modelId`, {
 			params: model,
 			payload: providerModelUpdateSchema,
 			success: updatedCountSchema,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.delete("removeModel", `${root}/:providerId/models/:modelId`, {
 			params: model,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 	)
 	.middleware(Session) {}

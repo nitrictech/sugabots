@@ -234,9 +234,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/workspaces/:workspace/pods"), () => HttpResponse.json(pods)),
 		http.get(api("/workspaces/:workspace/agents"), () => HttpResponse.json(bots)),
-		http.get(api("/workspaces/:workspace/model-providers/models"), () =>
-			HttpResponse.json({ models: data.models ?? [storyModel] }),
-		),
+		http.get(api("/workspaces/:workspace/model-providers/models"), () => {
+			const models = data.models ?? [storyModel];
+			return HttpResponse.json({ models, defaultModel: models[0]?.modelId ?? null });
+		}),
 		http.get(api("/workspaces/:workspace/model-providers"), () =>
 			HttpResponse.json(data.providers ?? []),
 		),

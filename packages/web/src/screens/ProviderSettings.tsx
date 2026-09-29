@@ -26,7 +26,8 @@ import {
 	Wrench,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { useAgents, useModels } from "@/lib/agents.ts";
+import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
@@ -133,6 +134,38 @@ export function useBotsByModel(): (modelId: string) => Agent[] {
 		agents?.filter((agent) => agent.systemAgentKey === null && agent.model === modelId) ?? [];
 }
 
+/**
+ * What must keep running on each model id: new bots, which start on the
+ * workspace's default, and the system bots. The server refuses to switch such
+ * a model off, or its provider, until they are moved to another, so the page
+ * says so before anybody tries.
+ */
+export function useModelHolders(): (modelId: string) => ModelHolders | undefined {
+	const defaultModel = useModels().data?.defaultModel ?? null;
+	const systemAgents = useBuiltInAgents().data ?? [];
+	return (modelId) => {
+		const newBots = modelId === defaultModel;
+		const systemBots = systemAgents.some((agent) => agent.model === modelId);
+		return newBots || systemBots ? { newBots, systemBots } : undefined;
+	};
+}
+
+export interface ModelHolders {
+	newBots: boolean;
+	systemBots: boolean;
+}
+
+/** Why a model, or its provider, cannot be switched off. */
+function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
+	const holders =
+		newBots && systemBots
+			? "New bots and system agents use"
+			: newBots
+				? "New bots use"
+				: "System agents use";
+	return `${holders} ${subject}. Choose another model for them under Models → Default first.`;
+}
+
 export function modelName(model: Pick<ProviderModel, "displayName" | "modelId">): string {
 	return model.displayName ?? model.modelId;
 }
@@ -167,6 +200,9 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const disconnect = seeded ? actions.update : actions.remove;
 	const disconnectPending = disconnect.isPending || actions.signOutChatgpt.isPending;
 	const disconnectError = disconnect.error ?? actions.signOutChatgpt.error;
+	// Switching a provider off only stops what it offers; removing one deletes
+	// every model it lists, including one held while the provider is off.
+	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
 
 	async function confirmDisconnect() {
 		try {
@@ -224,7 +260,10 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			)}
 			<Connection provider={provider} local={preset?.hosting === "local"} />
 			<Models provider={provider} />
-			<SettingsDanger onClick={() => setDisconnecting(true)}>
+			<SettingsDanger
+				onClick={() => setDisconnecting(true)}
+				disabledReason={held && heldReason(held, "one of its models")}
+			>
 				Disconnect {provider.name}
 			</SettingsDanger>
 			<DeleteDialog
@@ -268,6 +307,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 	const custom = provider.preset === null;
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
+	const held = useHoldersOf(offeredModelsOf(provider));
 
 	return (
 		<SettingsGroup
@@ -330,7 +370,10 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 				</ConnectionRow>
 			)}
 			{presetSignsIn(provider.preset) ? (
-				<ChatgptSignInRow provider={provider} />
+				<ChatgptSignInRow
+					provider={provider}
+					signOutBlocked={held && heldReason(held, "one of its models")}
+				/>
 			) : (
 				<KeyRow provider={provider} optional={local || custom} />
 			)}
@@ -438,9 +481,29 @@ function EditableRow({
 	);
 }
 
+/**
+ * What must keep running on any of `models`, all of them together, or nothing
+ * when none is held.
+ */
+function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefined {
+	const holdersOf = useModelHolders();
+	const held = models.flatMap((model) => holdersOf(model.modelId) ?? []);
+	if (held.length === 0) return undefined;
+	return {
+		newBots: held.some((holders) => holders.newBots),
+		systemBots: held.some((holders) => holders.systemBots),
+	};
+}
+
+/** The models the provider offers agents: none while it is not connected. */
+function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
+	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
+}
+
 /** The key, shown only by its last few characters once saved; Replace swaps it for a new one. */
 function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boolean }) {
 	const actions = useProviderActions();
+	const held = useHoldersOf(offeredModelsOf(provider));
 	const [replacing, setReplacing] = useState(!provider.hasApiKey && !optional);
 	const [apiKey, setApiKey] = useState("");
 	const id = useId();
@@ -472,7 +535,8 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 								variant="ghost"
 								size="bare"
 								className="text-sm"
-								disabled={actions.update.isPending}
+								disabled={actions.update.isPending || held !== undefined}
+								title={held && heldReason(held, "one of its models")}
 								onClick={() =>
 									actions.update.mutate({ providerId: provider.id, json: { apiKey: null } })
 								}
@@ -621,6 +685,7 @@ const MAKER_NAMES: Record<string, string> = {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const botsOn = useBotsByModel();
+	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
 	const needle = useDeferredValue(search.trim().toLowerCase());
@@ -685,13 +750,14 @@ function Models({ provider }: { provider: ModelProvider }) {
 							? "Not used yet"
 							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
+					const held = model.enabled ? holdersOf(model.modelId) : undefined;
 					return (
 						<SettingsRow
 							key={model.id}
 							label={modelName(model)}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{who}
+									{held ? `${held.newBots ? "Default" : "System agents"} · ${who}` : who}
 									<CapabilityIcons model={model} />
 								</span>
 							}
@@ -701,7 +767,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 									{custom && <EditCapabilities provider={provider} model={model} />}
 									<Toggle
 										checked={model.enabled}
-										disabled={!provider.active || actions.setModel.isPending}
+										disabled={!provider.active || actions.setModel.isPending || held !== undefined}
+										tooltip={held && heldReason(held, "this model")}
 										label={`Bots can use ${modelName(model)}`}
 										onChange={(enabled) =>
 											actions.setModel.mutate({

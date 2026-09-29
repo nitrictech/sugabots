@@ -7,7 +7,7 @@ import {
 	type NewAgent,
 	type SystemAgentKey,
 } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, type SQL } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
@@ -66,12 +66,22 @@ export interface Interface {
 		workspaceId: string;
 		createdById: string;
 	}) => Effect.Effect<void>;
-	/** Points a system agent at a model, which is how it is set up, or at `null`, which turns it off. */
+	/** Points a system agent at a model. */
 	readonly setSystemAgentModel: (
 		workspaceId: string,
 		key: SystemAgentKey,
-		model: string | null,
+		model: string,
 	) => Effect.Effect<void, SystemAgentMissing>;
+	/** Points every system agent the workspace has at `model`. */
+	readonly setAllSystemAgentModels: (workspaceId: string, model: string) => Effect.Effect<void>;
+	/**
+	 * Points every system agent with no model at `model`: how they are set up
+	 * when the workspace first offers one. One already on a model keeps it.
+	 */
+	readonly fillMissingSystemAgentModels: (
+		workspaceId: string,
+		model: string,
+	) => Effect.Effect<void>;
 	/** The system agent and its model, or nothing when it is not set up. */
 	readonly runnableSystemAgent: (
 		workspaceId: string,
@@ -85,6 +95,14 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AgentRepository");
+
+	const setSystemAgentModels = (workspaceId: string, model: string, only?: SQL) =>
+		query((db) =>
+			db
+				.update(agent)
+				.set({ model })
+				.where(and(eq(agent.workspaceId, workspaceId), isNotNull(agent.systemAgentKey), only)),
+		).pipe(Effect.asVoid);
 
 	const isSystemAgent = (workspaceId: string, agentId: string) =>
 		query((db) =>
@@ -272,6 +290,15 @@ export const make = Effect.gen(function* () {
 						return yield* new SystemAgentMissing({ key });
 					}
 				}),
+			),
+
+		setAllSystemAgentModels: (workspaceId, model) =>
+			operation("setAllSystemAgentModels", setSystemAgentModels(workspaceId, model)),
+
+		fillMissingSystemAgentModels: (workspaceId, model) =>
+			operation(
+				"fillMissingSystemAgentModels",
+				setSystemAgentModels(workspaceId, model, isNull(agent.model)),
 			),
 
 		runnableSystemAgent: (workspaceId, key) =>

@@ -334,19 +334,28 @@ export function SettingsAddMark() {
 export function SettingsDanger({
 	children,
 	onClick,
+	disabledReason,
 }: {
 	children: ReactNode;
 	onClick: () => void;
+	/** Why it cannot be done yet, shown beneath it; the action is disabled while there is one. */
+	disabledReason?: string;
 }) {
 	return (
-		<div className="flex justify-center">
+		<div className="flex flex-col items-center gap-1">
 			<button
 				type="button"
 				onClick={onClick}
-				className="focus-ring rounded-md px-3 py-2 font-medium text-[14px] text-destructive-text transition-opacity hover:opacity-80"
+				disabled={disabledReason !== undefined}
+				className="focus-ring rounded-md px-3 py-2 font-medium text-[14px] text-destructive-text transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{children}
 			</button>
+			{disabledReason && (
+				<p className="m-0 max-w-sm px-4 text-center text-sm text-subtle-foreground">
+					{disabledReason}
+				</p>
+			)}
 		</div>
 	);
 }
