@@ -105,6 +105,117 @@ describe("the workspace choice", () => {
 		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
 	});
 
+	it("sets up a new workspace from the rail with the first run's steps", async () => {
+		client.api.workspaces.create.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+			return Effect.succeed(other);
+		});
+		const router = mount(linearPage);
+
+		const name = await startNewWorkspace(router);
+		expect((name as HTMLInputElement).value).toBe("");
+		fireEvent.change(name, { target: { value: " Nitric " } });
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		expect(client.api.workspaces.create).toHaveBeenCalledWith({
+			payload: expect.objectContaining({ name: "Nitric", slug: "nitric" }),
+		});
+		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
+		expect(router.state.location.search).toEqual({ workspace: "nitric" });
+	});
+
+	it("sets up every step of a workspace for somebody who deleted all of theirs", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
+		client.api.workspaces.create.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([other]));
+			return Effect.succeed(other);
+		});
+		const router = mount(linearPage);
+
+		const name = await screen.findByLabelText("Workspace name");
+		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding/new"));
+		// There is no workspace to go back to.
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+		fireEvent.change(name, { target: { value: "Nitric" } });
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		expect(router.state.location.pathname).toBe("/onboarding/new");
+		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+	});
+
+	it("picks setting up a new workspace back up after a reload", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		mount("/onboarding/new?workspace=nitric");
+
+		expect(await screen.findByRole("button", { name: "Cancel" })).toBeDefined();
+		await waitFor(() => expect(localStorage.getItem("sugabots-workspace")).toBe(other.id));
+		expect(screen.queryByRole("heading", { name: "Name your workspace" })).toBeNull();
+		expect(client.api.workspaces.create).not.toHaveBeenCalled();
+	});
+
+	it("keeps a workspace it did not make itself when cancelled", async () => {
+		// Setup reached again by its address may be for a workspace finished and shared since.
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		const router = mount("/onboarding/new?workspace=nitric");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding/new"));
+		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
+	});
+
+	it("asks before leaving a workspace made but not set up", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		const router = mount("/onboarding/new?workspace=nitric");
+		await screen.findByRole("button", { name: "Cancel" });
+
+		void router.navigate({ to: linearPage });
+		const dialog = await screen.findByRole("dialog", { name: "Leave setup?" });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave setup?" })).toBeNull());
+		expect(router.state.location.pathname).toBe("/onboarding/new");
+
+		void router.navigate({ to: linearPage });
+		fireEvent.click(
+			within(await screen.findByRole("dialog", { name: "Leave setup?" })).getByRole("button", {
+				name: "Leave",
+			}),
+		);
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
+	});
+
+	it("cancels back to the page it came from before making one", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		const router = mount(linearPage);
+
+		await startNewWorkspace(router);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		expect(client.api.workspaces.create).not.toHaveBeenCalled();
+	});
+
+	it("deletes the workspace it made when cancelled, and goes back to where it came from", async () => {
+		client.api.workspaces.create.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+			return Effect.succeed(other);
+		});
+		client.api.workspaces.delete.mockReturnValue(Effect.void);
+		const router = mount(linearPage);
+
+		fireEvent.change(await startNewWorkspace(router), { target: { value: "Nitric" } });
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+		await screen.findByRole("heading", { name: "Connect a model" });
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
+		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
+		expect(localStorage.getItem("sugabots-workspace")).toBe(workspace.id);
+	});
+
 	it("lets the owner delete a workspace, then opens another", async () => {
 		apiAnswers({ role: "owner" });
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
@@ -130,6 +241,30 @@ describe("the workspace choice", () => {
 		await screen.findByRole("heading", { name: workspace.name });
 		expect(screen.queryByRole("button", { name: "Delete workspace" })).toBeNull();
 	});
+
+	it("says so when the address is already taken, and stays on the step", async () => {
+		client.api.workspaces.create.mockReturnValue(
+			Effect.fail(new Conflict({ message: "already exists" })),
+		);
+		const router = mount(linearPage);
+
+		fireEvent.change(await startNewWorkspace(router), { target: { value: "Suga" } });
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+		expect(await screen.findByText("That workspace address is already taken.")).toBeDefined();
+		expect(screen.getByRole("heading", { name: "Name your workspace" })).toBeDefined();
+	});
+
+	async function startNewWorkspace(router: ReturnType<typeof mount>) {
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		fireEvent.click(
+			await within(rail).findByRole("button", { name: `Workspace: ${workspace.name}` }),
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: "New workspace" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding/new"));
+		await screen.findByRole("heading", { name: "Name your workspace" });
+		return screen.getByLabelText("Workspace name");
+	}
 });
 
 describe("the rail", () => {

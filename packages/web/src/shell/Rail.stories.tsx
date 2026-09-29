@@ -97,13 +97,17 @@ export const AllMenu = meta.story({
 	},
 });
 
-/** Only one workspace: the same tile, whose menu has it and its settings. */
+/** Only one workspace: the same tile, whose menu has it, a way to set up another, and its settings. */
 export const OneWorkspace = meta.story({
 	args: { workspace: suga, workspaces: [suga] },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Workspace: Suga" }));
 		await screen.findByRole("menu");
-		await expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+		await expect(screen.getAllByRole("menuitem")).toHaveLength(3);
+		await expect(screen.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
+			"href",
+			"/onboarding/new",
+		);
 		await expect(screen.getByRole("menuitem", { name: "Suga" })).toHaveAttribute(
 			"aria-current",
 			"page",

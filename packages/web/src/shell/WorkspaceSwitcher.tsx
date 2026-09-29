@@ -1,6 +1,6 @@
 import type { Workspace } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Check, Settings } from "lucide-react";
+import { Check, Plus, Settings } from "lucide-react";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace } from "@/lib/workspace.ts";
 import {
@@ -14,7 +14,8 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * The tile at the top of the rail naming the workspace being looked at. Its
- * menu opens any other one this person belongs to, and the workspace's settings.
+ * menu opens any other one this person belongs to, sets up a new one, and opens
+ * the workspace's settings.
  *
  * Choosing one goes to its address, which is what decides the workspace under
  * `/$workspace`; `chooseWorkspace` also makes it the one `/` opens next time.
@@ -62,6 +63,10 @@ export function WorkspaceSwitcher({
 						</DropdownMenuItem>
 					),
 				)}
+				<DropdownMenuItem render={<Link to="/onboarding/new" />}>
+					<Plus />
+					New workspace
+				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem
 					render={

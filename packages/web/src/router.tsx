@@ -1,3 +1,4 @@
+import type { Workspace } from "@sugabots/contracts";
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { useQuery } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
@@ -12,8 +13,9 @@ import {
 	useNavigate,
 	useParams,
 	useRouteContext,
+	useRouter,
 } from "@tanstack/react-router";
-import { type ComponentType, lazy, useEffect, useState } from "react";
+import { type ComponentType, lazy, useEffect, useRef, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
@@ -22,7 +24,12 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
-import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
+import {
+	chooseWorkspace,
+	useDeleteWorkspace,
+	useWorkspace,
+	useWorkspaces,
+} from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { ConversationList, type ListScope } from "@/shell/ConversationList.tsx";
@@ -304,12 +311,119 @@ function OnboardingRoute() {
 			/>
 		);
 	}
-	if (onboarding.data?.completed && workspace.workspace) {
-		return (
+	if (onboarding.data?.completed) {
+		// The first run is done once, so somebody who has deleted every workspace since sets up another.
+		return workspace.workspace ? (
 			<Navigate to="/$workspace/agents" params={{ workspace: workspace.workspace.slug }} replace />
+		) : (
+			<Navigate to="/onboarding/new" replace />
 		);
 	}
 	return <Onboarding session={session} />;
+}
+
+/**
+ * Setting up another workspace, with the same steps as the first. Under
+ * `/onboarding` because any new top-level path would hide a workspace whose
+ * address it is.
+ */
+interface NewWorkspaceSearch {
+	/** The workspace this has made, by its address, so a reload picks up where it got to. */
+	workspace?: string;
+}
+
+const newWorkspaceRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/onboarding/new",
+	validateSearch: (search: Record<string, unknown>): NewWorkspaceSearch => ({
+		workspace: typeof search.workspace === "string" ? search.workspace : undefined,
+	}),
+	beforeLoad: requireUser,
+	component: NewWorkspaceRoute,
+});
+
+function NewWorkspaceRoute() {
+	const session = newWorkspaceRoute.useRouteContext().session;
+	const { workspace: madeSlug } = newWorkspaceRoute.useSearch();
+	const { workspace, isPending, error, refetch } = useWorkspace();
+	const workspaces = useWorkspaces();
+
+	if (isPending) return <div className="h-full bg-list" />;
+	if (error) return <RouteLoadFailure title="Could not start setup" onRetry={refetch} />;
+	return (
+		<NewWorkspaceOnboarding
+			session={session}
+			cameFrom={workspace}
+			made={workspaces.data?.find((one) => one.slug === madeSlug)}
+			hasAnother={workspaces.data?.some((one) => one.slug !== madeSlug) ?? false}
+		/>
+	);
+}
+
+/**
+ * Making the workspace chooses it, and the steps after work in the one chosen,
+ * so a reload chooses it again. Cancel chooses again the one this was opened
+ * from and goes back to the page it was opened on.
+ *
+ * Cancel deletes only a workspace this page made. One the address names from
+ * before, as after a reload or on coming back to setup by Back, may have been
+ * finished and shared since, and stays.
+ */
+function NewWorkspaceOnboarding({
+	session,
+	cameFrom,
+	made,
+	hasAnother,
+}: {
+	session: Session;
+	cameFrom: Workspace | undefined;
+	made: Workspace | undefined;
+	/** Whether there is a workspace besides the one being made to go back to. */
+	hasAnother: boolean;
+}) {
+	const router = useRouter();
+	const [returnTo] = useState(cameFrom);
+	const chosen = useWorkspace().workspace;
+	const deleteWorkspace = useDeleteWorkspace();
+	const [leaving, setLeaving] = useState(false);
+	const madeHere = useRef<string>(undefined);
+	const choosingMade = !leaving && made !== undefined && chosen?.id !== made.id;
+
+	useEffect(() => {
+		if (choosingMade) chooseWorkspace(made.id);
+	}, [choosingMade, made]);
+
+	async function cancel() {
+		setLeaving(true);
+		// One that cannot be deleted now stays, for its settings to delete; leaving still goes ahead.
+		if (made && made.id === madeHere.current) {
+			await deleteWorkspace.mutateAsync(made.id).catch(() => undefined);
+		}
+		// After a reload the one this came from is not known, and deleting this one leaves another chosen.
+		if (returnTo && returnTo.id !== made?.id) chooseWorkspace(returnTo.id);
+		if (router.history.canGoBack()) router.history.back();
+		else void router.navigate({ to: "/" });
+	}
+
+	if (choosingMade) return <div className="h-full bg-list" />;
+	return (
+		<Onboarding
+			session={session}
+			newWorkspace={{
+				made,
+				onMade: (saved) => {
+					// Before the address names one, saving it was making it.
+					if (!made) madeHere.current = saved.id;
+					void router.navigate({
+						to: "/onboarding/new",
+						search: { workspace: saved.slug },
+						replace: true,
+					});
+				},
+				onCancel: hasAnother ? () => void cancel() : undefined,
+			}}
+		/>
+	);
 }
 
 /** The frame, for the workspace the address names. */
@@ -764,6 +878,7 @@ const routeTree = rootRoute.addChildren([
 	inviteRoute,
 	signInReturnRoute,
 	onboardingRoute,
+	newWorkspaceRoute,
 	shellRoute.addChildren([
 		workspaceIndexRoute,
 		settingsRoute,
