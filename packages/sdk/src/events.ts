@@ -40,6 +40,8 @@ export interface EventStream extends AsyncIterable<StreamEvent> {
 export interface EventsApi {
 	/** Threads, unread counts, agents and pods across one workspace. */
 	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
+	/** What only the signed-in person is told in one workspace, such as their notifications. */
+	member(workspaceId: string, options?: EventStreamOptions): EventStream;
 	/** One thread's messages, turns, tool calls and collaborations. */
 	thread(threadId: string, options?: EventStreamOptions): EventStream;
 }
@@ -69,6 +71,8 @@ export function createEventsApi({
 	return {
 		workspace: (workspaceId, options) =>
 			open(`/workspaces/${encodeURIComponent(workspaceId)}/events`, options),
+		member: (workspaceId, options) =>
+			open(`/workspaces/${encodeURIComponent(workspaceId)}/me/events`, options),
 		thread: (threadId, options) => open(`/threads/${encodeURIComponent(threadId)}/events`, options),
 	};
 }

@@ -272,6 +272,41 @@ export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")
 });
 
 /**
+ * The people who may take every one of `permissions` in the pod `podId`: its
+ * owner, for a Personal pod, or the members of a shared pod whose role grants
+ * them all. None when there is no such pod.
+ */
+export const podMembersWhoMay = Effect.fn("Access.podMembersWhoMay")(function* (
+	db: Executor,
+	podId: string,
+	permissions: readonly PodPermission[],
+) {
+	const [found] = yield* db.select().from(pod).where(eq(pod.id, podId)).limit(1);
+	if (!found) return [];
+	const inWorkspace = eq(workspaceMember.workspaceId, found.workspaceId);
+	const people =
+		found.kind === "personal" && found.ownerId
+			? yield* db
+					.select({ userId: workspaceMember.userId, role: workspaceMember.role })
+					.from(workspaceMember)
+					.where(and(inWorkspace, eq(workspaceMember.userId, found.ownerId)))
+			: yield* db
+					.select({ userId: workspaceMember.userId, role: workspaceMember.role })
+					.from(podMember)
+					.innerJoin(
+						workspaceMember,
+						and(inWorkspace, eq(workspaceMember.userId, podMember.userId)),
+					)
+					.where(eq(podMember.podId, podId));
+	return people
+		.filter(({ userId, role }) => {
+			const standing = podStanding(found, { userId, workspaceRole: role }, true);
+			return permissions.every((permission) => standing.may(permission));
+		})
+		.map(({ userId }) => userId);
+});
+
+/**
  * SQL for "`userId` reaches the pod `podId` names": what `mayInPod(actor,
  * "pod.read", …)` decides for one pod, written again as a `where` clause. A
  * Personal pod is reached by its owner and by nobody else, and a shared pod by

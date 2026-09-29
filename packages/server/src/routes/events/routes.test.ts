@@ -136,6 +136,7 @@ describe("authorisation", () => {
 		const { app } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.undefined,
+			member: () => Effect.undefined,
 			reachesPod: () => Effect.succeed(false),
 		});
 
@@ -152,6 +153,7 @@ describe("authorisation", () => {
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed("thread:root"),
+			member: () => Effect.undefined,
 			reachesPod: () => Effect.succeed(true),
 		});
 
@@ -266,6 +268,7 @@ describe("the stream", () => {
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
 			thread: () => Effect.succeed(channel),
+			member: () => Effect.undefined,
 			reachesPod: () => Effect.succeed(true),
 		});
 		const stream = await open(app, `/threads/${THREAD}/events`);

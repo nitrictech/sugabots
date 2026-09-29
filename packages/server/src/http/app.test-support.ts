@@ -13,6 +13,7 @@ import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Installation } from "@sugabots/core/installation/installation";
+import { Notifications } from "@sugabots/core/notifications/notifications";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
@@ -103,6 +104,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Routines.Service),
 	unimplemented(RoutineView.Service),
 	unimplemented(RoutineWebhooks.Service),
+	unimplemented(Notifications.Service),
 	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),

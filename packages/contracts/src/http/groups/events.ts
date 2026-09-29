@@ -6,7 +6,7 @@ import { Session } from "../middleware.ts";
 
 /**
  * Live updates as Server-Sent Events: one stream per open thread, one per
- * workspace. A client resumes with `Last-Event-ID` and misses nothing.
+ * workspace, and one per person in a workspace for what only they are told. A client resumes with `Last-Event-ID` and misses nothing.
  *
  * The body is a stream, not a value, so the SDK reads it with its own event
  * source rather than through the generated client.
@@ -16,6 +16,11 @@ const eventStream = Schema.String.pipe(HttpApiSchema.asText({ contentType: "text
 export class EventsApi extends HttpApiGroup.make("events")
 	.add(
 		HttpApiEndpoint.get("workspace", "/workspaces/:workspace/events", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: eventStream,
+			error: NotFound,
+		}),
+		HttpApiEndpoint.get("member", "/workspaces/:workspace/me/events", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: eventStream,
 			error: NotFound,

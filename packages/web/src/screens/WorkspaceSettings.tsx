@@ -24,6 +24,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
+import { NotificationSettings } from "./NotificationSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
@@ -91,6 +92,7 @@ export function WorkspaceSettings({
 				<>
 					{section === "general" && <GeneralSettings role={role} canDelete={may.deleteWorkspace} />}
 					{section === "profile" && <ProfileSettings />}
+					{section === "notifications" && <NotificationSettings />}
 					{section === "members" && (
 						<WorkspaceMembersSettings
 							workspaceId={workspace.id}

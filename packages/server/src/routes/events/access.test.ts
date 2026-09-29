@@ -28,13 +28,15 @@ function asSomebody(access: ChannelAccess.Interface, userId: string) {
 	return {
 		workspace: (id: string) => Effect.runPromise(access.workspace(id).pipe(asThem)),
 		thread: (id: string) => Effect.runPromise(access.thread(id).pipe(asThem)),
+		member: (id: string) => Effect.runPromise(access.member(id).pipe(asThem)),
 	};
 }
 
 it("denies event access when no access dependency is configured", async () => {
-	const { workspace, thread } = asSomebody(closedChannelAccess, crypto.randomUUID());
+	const { workspace, thread, member } = asSomebody(closedChannelAccess, crypto.randomUUID());
 
 	expect(await workspace("w1")).toBeUndefined();
+	expect(await member("w1")).toBeUndefined();
 	expect(await thread("c1")).toBeUndefined();
 });
 
@@ -179,6 +181,21 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		const { access, member } = await fixture();
 
 		expect(await access(member.id).workspace("not-a-uuid")).toBeUndefined();
+	});
+
+	it("gives a member their own channel in the workspace, and nobody else's", async () => {
+		const { access, member, administrator, space } = await fixture();
+
+		expect(await access(member.id).member(space.slug)).toBe(`member:${space.id}:${member.id}`);
+		expect(await access(administrator.id).member(space.id)).toBe(
+			`member:${space.id}:${administrator.id}`,
+		);
+	});
+
+	it("gives someone outside the workspace no member channel in it", async () => {
+		const { access, outsider, space } = await fixture();
+
+		expect(await access(outsider.id).member(space.id)).toBeUndefined();
 	});
 
 	it("gives a pod member the thread's channel", async () => {

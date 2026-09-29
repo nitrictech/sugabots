@@ -5,6 +5,7 @@ import { ConnectionsApi } from "./groups/connections.ts";
 import { EventsApi } from "./groups/events.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
+import { NotificationsApi } from "./groups/notifications.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
 import { PodsApi } from "./groups/pods.ts";
 import { RoutinesApi } from "./groups/routines.ts";
@@ -44,4 +45,5 @@ export class Api extends HttpApi.make("sugabots")
 	.add(ToolApprovalsApi)
 	.add(RoutinesApi)
 	.add(UsageApi)
+	.add(NotificationsApi)
 	.middleware(ValidateRequest) {}

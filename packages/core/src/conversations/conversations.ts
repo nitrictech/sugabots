@@ -3,6 +3,7 @@ export * as Conversations from "./conversations.ts";
 import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
+import { Notifications } from "../notifications/notifications.ts";
 import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
 import { Compactions } from "./compaction/compactions.ts";
@@ -35,6 +36,7 @@ const services = Layer.mergeAll(
 	Summaries.layer,
 	Compactions.layer,
 	RoutineSettlement.layer,
+	Notifications.layer,
 	ChatView.layer,
 	ThreadView.layer,
 	RoutineView.layer,
@@ -49,10 +51,11 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
 /**
  * The conversation services, with `ConversationEvents` handing what they
  * emit to its handlers, in order: the thread feed tells watching clients what
- * happened, routine settlement ends the runs that work finished,
- * collaborations whose collaborator stopped without answering fail, the floor
- * passes after each completed reply, and the reply asks for its thread's
- * summary and, past the compaction line, its compaction once it commits.
+ * happened, notifications tell the people it needs, routine settlement ends
+ * the runs that work finished, collaborations whose collaborator stopped
+ * without answering fail, the floor passes after each completed reply, and
+ * the reply asks for its thread's summary and, past the compaction line, its
+ * compaction once it commits.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
@@ -66,6 +69,7 @@ export const layer = Layer.effectContext(
 		);
 		const dispatch = DomainEvents.emitTo<ConversationEvent>([
 			ThreadFeed.handler(outbox),
+			Context.get(built, Notifications.Service).handler,
 			Context.get(built, RoutineSettlement.Service).handler,
 			Context.get(built, Collaborations.Service).handler,
 			Context.get(built, FloorControl.Service).handler,

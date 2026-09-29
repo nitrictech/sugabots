@@ -1,4 +1,5 @@
-import { threadChannel, workspaceChannel } from "@sugabots/contracts";
+import { memberChannel, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Effect } from "effect";
 import type { ChannelAccess } from "./access.ts";
 
@@ -6,6 +7,7 @@ import type { ChannelAccess } from "./access.ts";
 export const closedChannelAccess: ChannelAccess.Interface = {
 	workspace: () => Effect.undefined,
 	thread: () => Effect.undefined,
+	member: () => Effect.undefined,
 	reachesPod: () => Effect.succeed(false),
 };
 
@@ -13,5 +15,7 @@ export const closedChannelAccess: ChannelAccess.Interface = {
 export const openChannelAccess: ChannelAccess.Interface = {
 	workspace: (workspaceId) => Effect.succeed(workspaceChannel(workspaceId)),
 	thread: (threadId) => Effect.succeed(threadChannel(threadId)),
+	member: (workspaceId) =>
+		Effect.map(CurrentActor.Service, ({ userId }) => memberChannel(workspaceId, userId)),
 	reachesPod: () => Effect.succeed(true),
 };

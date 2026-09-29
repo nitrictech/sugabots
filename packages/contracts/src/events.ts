@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { customerThreadTypeSchema } from "./chats.ts";
+import { notificationSchema } from "./notifications.ts";
 import {
 	collaborationPartSchema,
 	messageSchema,
@@ -106,6 +107,8 @@ export const eventPayloadSchemas = {
 	}),
 	"agent.updated": nothing,
 	"pod.updated": nothing,
+	/** Somebody is told something, on their own member channel. */
+	"notification.created": Schema.Struct({ notification: notificationSchema }),
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -142,6 +145,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"collaboration.updated",
 	"agent.updated",
 	"pod.updated",
+	"notification.created",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
@@ -271,13 +275,26 @@ export const workspaceUpdateEventSchema = Schema.Union([
 
 export type WorkspaceUpdateEvent = typeof workspaceUpdateEventSchema.Type;
 
+/** Everything a member channel can carry. */
+export const memberUpdateEventSchema = Schema.Union([
+	withEnvelope("notification.created", P["notification.created"]),
+	withEnvelope("reset", P.reset.schema),
+]);
+
+export type MemberUpdateEvent = typeof memberUpdateEventSchema.Type;
+
 /**
- * A stream carries exactly one channel, and there are two kinds: a workspace,
- * and a thread. A thread's system agents work in child threads but publish on the
- * thread they act on, so a client watching a thread holds one connection.
+ * A stream carries exactly one channel, and there are three kinds: a
+ * workspace, a thread, and one person in a workspace. A thread's system agents
+ * work in child threads but publish on the thread they act on, so a client
+ * watching a thread holds one connection.
  */
-export type Channel = `workspace:${string}` | `thread:${string}`;
+export type Channel = `workspace:${string}` | `thread:${string}` | `member:${string}:${string}`;
 
 export const workspaceChannel = (workspaceId: string): Channel => `workspace:${workspaceId}`;
 
 export const threadChannel = (threadId: string): Channel => `thread:${threadId}`;
+
+/** What only the person `userId` hears in the workspace `workspaceId`, such as being told something. */
+export const memberChannel = (workspaceId: string, userId: string): Channel =>
+	`member:${workspaceId}:${userId}`;
