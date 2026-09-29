@@ -14,6 +14,7 @@ import { RoutineView } from "./routines/routine-view.ts";
 import { RoutineWebhooks } from "./routines/routine-webhooks.ts";
 import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
+import { RoutineWorkAdmission } from "./routines/work-admission.ts";
 import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 import { ThreadView } from "./thread-view.ts";
@@ -22,7 +23,8 @@ import { Collaborations } from "./tools/collaborate/collaborations.ts";
 import { Turns } from "./turns/turns.ts";
 
 /**
- * `Turns` is provided here, once, to all of these. The turn's own steps call
+ * `Turns` is provided here, once, to all of these, with routine runs deciding
+ * which threads take more work (see `WorkAdmission`). The turn's own steps call
  * back into collaborations and floor control, so a service providing it
  * itself would load it before it exists.
  */
@@ -41,7 +43,7 @@ const services = Layer.mergeAll(
 	FloorControl.layer,
 	// The Facilitator's workflow step brings the agent it picks into the thread.
 	ThreadRepository.layer,
-).pipe(Layer.provideMerge(Turns.layer));
+).pipe(Layer.provideMerge(Turns.layer), Layer.provideMerge(RoutineWorkAdmission.layer));
 
 /** Everything `layer` provides. */
 export type Services = Layer.Success<typeof services> | ConversationEvents.Service;
