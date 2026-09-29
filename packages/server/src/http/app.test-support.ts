@@ -7,7 +7,7 @@ import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-tri
 import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
 import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";

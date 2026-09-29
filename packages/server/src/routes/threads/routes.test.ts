@@ -2,7 +2,7 @@ import type { ThreadDetails } from "@sugabots/contracts";
 import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
