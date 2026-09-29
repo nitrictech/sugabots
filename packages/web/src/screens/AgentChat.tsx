@@ -163,6 +163,13 @@ export function AgentChat({
 			</EmptyState>
 		);
 
+	// Anyone but yourself; naming another bot here has this chat's bot ask it.
+	// The crew is the pod's agents, so leave out those who have joined.
+	const composerMentionable = [
+		...details.participants.filter((participant) => participant.id !== user.id),
+		...details.crew.filter((member) => !details.participants.some(({ id }) => id === member.id)),
+	];
+
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
 		<div className="flex min-h-0 flex-1 md:relative">
@@ -252,6 +259,7 @@ export function AgentChat({
 							submitDisabled={!draft.trim() || send.isPending}
 							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
 							className="w-full"
+							mentionable={composerMentionable}
 						/>
 					)}
 				</div>

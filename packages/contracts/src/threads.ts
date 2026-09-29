@@ -90,13 +90,30 @@ export type MessageAuthor = typeof messageAuthorSchema.Type;
 export const textPartSchema = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
 
 /**
- * The handles mentioned in a message, in order, without duplicates. A mention
- * is `@` at the start of a word followed by a handle; an email address is not
- * one, which is what the look-behind is for.
+ * What may not come just before a mention's `@`: a word character, so an email
+ * address is not a mention, and a `.` or `@`, so neither is a domain or `@@`.
  */
+const NOT_BEFORE_MENTION = /[\w.@]/;
+
+const MENTION = new RegExp(`(?<!${NOT_BEFORE_MENTION.source})@([a-z0-9]+(?:-[a-z0-9]+)*)`, "gi");
+
+/** Whether the `@` at `index` in `content` can start a mention, handle or not. */
+export function canStartMention(content: string, index: number): boolean {
+	return content[index] === "@" && !NOT_BEFORE_MENTION.test(content[index - 1] ?? "");
+}
+
+/**
+ * `content` split around its mentions: text at even indexes and, between them,
+ * each mentioned handle as written, without its `@`.
+ */
+export function splitAroundMentions(content: string): string[] {
+	return content.split(MENTION);
+}
+
+/** The handles mentioned in a message, in order, without duplicates. */
 export function mentionedHandles(content: string): string[] {
 	const found = new Set<string>();
-	for (const match of content.matchAll(/(?<![\w.@])@([a-z0-9]+(?:-[a-z0-9]+)*)/gi)) {
+	for (const match of content.matchAll(MENTION)) {
 		if (match[1]) found.add(match[1].toLowerCase());
 	}
 	return [...found];

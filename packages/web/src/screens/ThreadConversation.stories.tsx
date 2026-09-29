@@ -553,3 +553,41 @@ export const TypingWithTheBot = meta.story({
 		await expect(canvas.getAllByRole("status")).toHaveLength(1);
 	},
 });
+
+/**
+ * A mention names someone in their own colours: a bot on its tint, a person on
+ * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
+ * Linear Handler has not joined; it is named from the pod's crew. A handle in
+ * code, one that names nobody, and an email address stay plain text.
+ */
+export const Mentions = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person, jay, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000401",
+				person,
+				"@linear-handler is checkout on the board? cc @jay-park",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000402",
+				jay,
+				"Asking @issue-triager too, and mailing jay@example.com and @nobody.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000403",
+				host,
+				"I asked **@linear-handler**: checkout timeouts are on the board.\n\n- @sam-rivera owns it\n- `@issue-triager` in code is only a handle\n- ~~the retry fix~~ did not hold",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByText("@linear-handler", { selector: "span" })).toHaveLength(2);
+		await expect(canvas.getByText("@sam-rivera", { selector: "span" })).toBeInTheDocument();
+		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
+		// Mentions add to Streamdown's markdown rather than replacing it.
+		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
+		await expect(canvas.getByText(/jay@example\.com and @nobody\./)).toBeInTheDocument();
+	},
+});

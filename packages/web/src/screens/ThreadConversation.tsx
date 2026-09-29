@@ -15,6 +15,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
@@ -65,7 +66,10 @@ export function ThreadConversation({
 	messages: Message[];
 	host: AgentParticipant;
 	isRunning: boolean;
-	/** Everyone in the thread, which is how a collaboration's other bot is found. */
+	/**
+	 * Everyone in the thread and the pod's crew: how a collaboration's other bot
+	 * is found, and who a mention can name.
+	 */
 	participants: ThreadParticipant[];
 	user: SessionUser;
 	/**
@@ -227,6 +231,7 @@ export function ThreadConversation({
 										compact={compact}
 										arrivedLive={watchedWritten.has(message.id)}
 										queued={queued.has(message.id)}
+										mentionable={participants}
 									/>
 								</Fragment>
 							);
@@ -371,6 +376,7 @@ function MessageBubble({
 	arrivedLive,
 	compact,
 	queued,
+	mentionable,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
@@ -385,6 +391,8 @@ function MessageBubble({
 	compact: boolean;
 	/** Whether this message waits for the next reply, because one is still being written. */
 	queued: boolean;
+	/** Everyone a mention in the text could name. */
+	mentionable: ThreadParticipant[];
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
@@ -444,13 +452,15 @@ function MessageBubble({
 								style={{ ["--reveal-duration" as string]: `${revealDurationMs(text)}ms` }}
 							>
 								<div>
-									<MessageMarkdown text={text} />
+									<MessageMarkdown text={text} mentionable={mentionable} />
 								</div>
 							</div>
 						) : agent ? (
-							<MessageMarkdown text={text} />
+							<MessageMarkdown text={text} mentionable={mentionable} />
 						) : (
-							<p className="m-0 whitespace-pre-wrap break-words">{text}</p>
+							<p className="m-0 whitespace-pre-wrap break-words">
+								{textWithMentions(text, mentionable)}
+							</p>
 						)}
 					</div>
 					{/* The time shows only while the bubble is hovered or holds the focus. */}

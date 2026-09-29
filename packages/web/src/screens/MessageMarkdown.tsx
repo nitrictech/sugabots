@@ -1,8 +1,10 @@
+import type { ThreadParticipant } from "@sugabots/contracts";
 import type { Root } from "hast";
 import { createElement, type ReactNode } from "react";
-import { type Components, type ExtraProps, Streamdown } from "streamdown";
+import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
+import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
 
 /*
  * An agent's words as markdown. Streamdown is the AI SDK's renderer: it
@@ -11,17 +13,27 @@ import { visit } from "unist-util-visit";
  * it is finished, so none of its streaming behaviour is used.
  */
 
-export function MessageMarkdown({ text }: { text: string }) {
+export function MessageMarkdown({
+	text,
+	mentionable,
+}: {
+	text: string;
+	/** Everyone a mention in the text could name. */
+	mentionable: ThreadParticipant[];
+}) {
 	return (
-		<Streamdown
-			className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
-			rehypePlugins={REHYPE_PLUGINS}
-			components={COMPONENTS}
-			controls={CONTROLS}
-			isAnimating={false}
-		>
-			{text}
-		</Streamdown>
+		<MentionableContext value={mentionable}>
+			<Streamdown
+				className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
+				remarkPlugins={REMARK_PLUGINS}
+				rehypePlugins={REHYPE_PLUGINS}
+				components={COMPONENTS}
+				controls={CONTROLS}
+				isAnimating={false}
+			>
+				{text}
+			</Streamdown>
+		</MentionableContext>
 	);
 }
 
@@ -53,7 +65,15 @@ const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 	});
 };
 
+/*
+ * These replace Streamdown's own rehype plugins, its sanitiser among them, so
+ * nothing strips the `<mention>` elements `remarkMentions` adds. Streamdown's
+ * `allowedTags` only reaches the sanitiser when its own plugins are in use.
+ */
 const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks];
+
+/* Streamdown's own plugins give it tables and strikethrough; passing any replaces them. */
+const REMARK_PLUGINS: PluggableList = [...Object.values(defaultRemarkPlugins), remarkMentions];
 
 /* A copy button on code is worth its space in a bubble; table and image tooling is not. */
 const CONTROLS = {
@@ -64,6 +84,7 @@ const CONTROLS = {
 };
 
 const COMPONENTS: Components = {
+	[MENTION_TAG]: MarkdownMention,
 	// Streamdown's headings are sized for a page; a bubble is 520px wide.
 	h1: heading("h1", "text-2xl"),
 	h2: heading("h2", "text-xl"),
