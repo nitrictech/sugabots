@@ -2,6 +2,7 @@ import {
 	type Agent,
 	administersWorkspace,
 	DEFAULT_POD_ROUTING,
+	defaultNotificationDelivery,
 	type ModelProvider,
 	type Pod,
 	type PodPermissions,
@@ -314,6 +315,10 @@ export const facilitator = builtInAgents[1] as SystemAgent;
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.thread.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
+	client.events.member.mockImplementation(() => quietEventStream());
+	client.api.notifications.preferences.mockReturnValue(
+		Effect.succeed({ kinds: { approve: true }, delivery: defaultNotificationDelivery }),
+	);
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
 	client.api.workspaces.members.mockReturnValue(

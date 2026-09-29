@@ -5,6 +5,7 @@ import {
 	type NotificationPreferences,
 	type NotificationSubject,
 	streamEvent,
+	type UpdateNotificationDelivery,
 	type UpdateNotificationPreference,
 } from "@sugabots/contracts";
 import { and, asc, eq } from "drizzle-orm";
@@ -18,6 +19,7 @@ import type { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { PodAudience } from "../database/events/pod-audience.ts";
 import { agent, thread, toolCall, turn } from "../database/schema.ts";
+import { NotificationDeliveryRepository } from "./delivery-repository.ts";
 import { NotificationPreferenceRepository } from "./preference-repository.ts";
 import { NotificationRepository } from "./repository.ts";
 
@@ -30,11 +32,15 @@ import { NotificationRepository } from "./repository.ts";
  * notice that cannot be worked out or stored is logged and skipped.
  */
 export interface Interface {
-	/** Whether the current actor hears about each kind. */
+	/** What the current actor hears about, and how. */
 	readonly preferences: Effect.Effect<NotificationPreferences, never, CurrentActor.Service>;
-	/** Records whether the current actor hears about a kind, and returns every kind's. */
+	/** Records whether the current actor hears about a kind, and returns all their preferences. */
 	readonly setPreference: (
 		input: UpdateNotificationPreference,
+	) => Effect.Effect<NotificationPreferences, never, CurrentActor.Service>;
+	/** Records how the current actor is told, and returns all their preferences. */
+	readonly setDelivery: (
+		change: UpdateNotificationDelivery,
 	) => Effect.Effect<NotificationPreferences, never, CurrentActor.Service>;
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
@@ -48,6 +54,10 @@ export const make = Effect.gen(function* () {
 	const outbox = yield* EventOutbox.Service;
 	const notifications = yield* NotificationRepository.Service;
 	const preferences = yield* NotificationPreferenceRepository.Service;
+	const delivery = yield* NotificationDeliveryRepository.Service;
+
+	const preferencesOf = (userId: string) =>
+		Effect.all({ kinds: preferences.forUser(userId), delivery: delivery.forUser(userId) });
 
 	/** Tells the people `notice` is for who want to hear about its kind. */
 	const tell = (notice: Notice) =>
@@ -78,7 +88,7 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		preferences: operation(
 			"preferences",
-			Effect.flatMap(CurrentActor.Service, ({ userId }) => preferences.forUser(userId)),
+			Effect.flatMap(CurrentActor.Service, ({ userId }) => preferencesOf(userId)),
 		),
 
 		setPreference: ({ kind, enabled }) =>
@@ -87,7 +97,17 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					yield* preferences.set(userId, kind, enabled);
-					return yield* preferences.forUser(userId);
+					return yield* preferencesOf(userId);
+				}),
+			),
+
+		setDelivery: (change) =>
+			operation(
+				"setDelivery",
+				Effect.gen(function* () {
+					const { userId } = yield* CurrentActor.Service;
+					yield* delivery.set(userId, change);
+					return yield* preferencesOf(userId);
 				}),
 			),
 
@@ -111,7 +131,11 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([NotificationRepository.layer, NotificationPreferenceRepository.layer]),
+	Layer.provide([
+		NotificationRepository.layer,
+		NotificationPreferenceRepository.layer,
+		NotificationDeliveryRepository.layer,
+	]),
 );
 
 /** Something to tell `recipients` about, in a pod of the workspace `workspaceId`. */

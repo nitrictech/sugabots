@@ -11,6 +11,9 @@ export const notificationRoutes = HttpApiBuilder.group(ServerApi, "notifications
 			.handle("preferences", () => notifications.preferences.pipe(asSessionUser))
 			.handle("updatePreference", ({ payload }) =>
 				notifications.setPreference(payload).pipe(asSessionUser),
+			)
+			.handle("updateDelivery", ({ payload }) =>
+				notifications.setDelivery(payload).pipe(asSessionUser),
 			);
 	}),
 );

@@ -49,7 +49,34 @@ export const notificationSchema = Schema.Struct({
 export type Notification = typeof notificationSchema.Type;
 
 /** Whether the person hears about each kind. */
-export const notificationPreferencesSchema = Schema.Record(notificationKindSchema, Schema.Boolean);
+export const notificationKindPreferencesSchema = Schema.Record(
+	notificationKindSchema,
+	Schema.Boolean,
+);
+
+export type NotificationKindPreferences = typeof notificationKindPreferencesSchema.Type;
+
+/** How a person is told, in every workspace they belong to. */
+export const notificationDeliverySchema = Schema.Struct({
+	/** Shown by the browser while a Sugabots tab is open. */
+	desktop: Schema.Boolean,
+	/** No desktop notices on Saturday or Sunday, in the browser's time zone. */
+	quietOnWeekends: Schema.Boolean,
+});
+
+export type NotificationDelivery = typeof notificationDeliverySchema.Type;
+
+/** How a person who has chosen nothing is told. */
+export const defaultNotificationDelivery: NotificationDelivery = {
+	desktop: true,
+	quietOnWeekends: false,
+};
+
+/** What the person hears about, and how. */
+export const notificationPreferencesSchema = Schema.Struct({
+	kinds: notificationKindPreferencesSchema,
+	delivery: notificationDeliverySchema,
+});
 
 export type NotificationPreferences = typeof notificationPreferencesSchema.Type;
 
@@ -59,3 +86,11 @@ export const updateNotificationPreferenceSchema = Schema.Struct({
 });
 
 export type UpdateNotificationPreference = typeof updateNotificationPreferenceSchema.Type;
+
+/** The delivery settings to change; the rest stay as they are. */
+export const updateNotificationDeliverySchema = Schema.Struct({
+	desktop: Schema.optional(Schema.Boolean),
+	quietOnWeekends: Schema.optional(Schema.Boolean),
+});
+
+export type UpdateNotificationDelivery = typeof updateNotificationDeliverySchema.Type;

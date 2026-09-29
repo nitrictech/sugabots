@@ -1,4 +1,9 @@
-import { memberChannel, type NotificationKind } from "@sugabots/contracts";
+import {
+	defaultNotificationDelivery,
+	memberChannel,
+	type NotificationKind,
+	type UpdateNotificationDelivery,
+} from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -54,6 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 		runOnPostgres(notifications.preferences.pipe(as(userId)));
 	const setPreference = (userId: string, kind: NotificationKind, enabled: boolean) =>
 		runOnPostgres(notifications.setPreference({ kind, enabled }).pipe(as(userId)));
+	const setDelivery = (userId: string, change: UpdateNotificationDelivery) =>
+		runOnPostgres(notifications.setDelivery(change).pipe(as(userId)));
 
 	let workspaceId: string;
 	let podId: string;
@@ -264,10 +271,27 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", as
 	});
 
 	it("hears about every kind by default, and remembers a change", async () => {
-		expect(await preferencesOf(people.member)).toEqual({ approve: true });
+		expect((await preferencesOf(people.member)).kinds).toEqual({ approve: true });
 
-		expect(await setPreference(people.member, "approve", false)).toEqual({ approve: false });
-		expect(await preferencesOf(people.member)).toEqual({ approve: false });
-		expect(await preferencesOf(people.admin)).toEqual({ approve: true });
+		expect((await setPreference(people.member, "approve", false)).kinds).toEqual({
+			approve: false,
+		});
+		expect((await preferencesOf(people.member)).kinds).toEqual({ approve: false });
+		expect((await preferencesOf(people.admin)).kinds).toEqual({ approve: true });
+	});
+
+	it("is told the default way, and keeps each delivery setting changed", async () => {
+		expect((await preferencesOf(people.member)).delivery).toEqual(defaultNotificationDelivery);
+
+		await setDelivery(people.member, { desktop: false });
+		expect((await setDelivery(people.member, { quietOnWeekends: true })).delivery).toEqual({
+			desktop: false,
+			quietOnWeekends: true,
+		});
+		expect((await preferencesOf(people.member)).delivery).toEqual({
+			desktop: false,
+			quietOnWeekends: true,
+		});
+		expect((await preferencesOf(people.admin)).delivery).toEqual(defaultNotificationDelivery);
 	});
 });

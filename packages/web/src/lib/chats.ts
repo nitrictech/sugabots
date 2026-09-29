@@ -37,10 +37,17 @@ export function useChatList(pod: ChatListScope | undefined) {
 	});
 }
 
+/** The chat with `hostAgentId` in `podId`, as `useChat` keeps it. */
+export const chatKey = (
+	workspaceId: string | undefined,
+	podId: string | undefined,
+	hostAgentId: string,
+) => ["chat", workspaceId, podId, hostAgentId];
+
 export function useChat(podId: string | undefined, hostAgentId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: ["chat", workspaceId, podId, hostAgentId],
+		queryKey: chatKey(workspaceId, podId, hostAgentId),
 		queryFn:
 			workspaceId && podId
 				? ({ signal }) =>

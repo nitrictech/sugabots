@@ -9,6 +9,7 @@ import { shippedSourceFiles } from "../shipped-source.test-support.ts";
 const OWNERS: Record<string, string> = {
 	notification: "core/src/notifications/repository.ts",
 	notificationPreference: "core/src/notifications/preference-repository.ts",
+	notificationDelivery: "core/src/notifications/delivery-repository.ts",
 };
 
 const write = new RegExp(`\\.(insert|update|delete)\\((${Object.keys(OWNERS).join("|")})\\)`, "g");

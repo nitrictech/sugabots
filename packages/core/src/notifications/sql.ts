@@ -59,3 +59,22 @@ export const notificationPreference = pgTable(
 	},
 	(table) => [uniqueIndex("notification_preference_idx").on(table.userId, table.kind)],
 );
+
+/**
+ * How a person is told, in every workspace. Only a person who changed a
+ * setting has a row: no row means `defaultNotificationDelivery`.
+ */
+export const notificationDelivery = pgTable(
+	"notification_delivery",
+	{
+		id: primaryKey(),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		desktop: boolean("desktop").notNull(),
+		quietOnWeekends: boolean("quiet_on_weekends").notNull(),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [uniqueIndex("notification_delivery_user_idx").on(table.userId)],
+);

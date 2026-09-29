@@ -1,7 +1,9 @@
 import {
 	type Message,
 	type MessagePart,
+	memberUpdateEventSchema,
 	messagePartsFor,
+	type Notification,
 	type PersonParticipant,
 	type PlacedPart,
 	placedParts,
@@ -130,6 +132,31 @@ function withPersonTyping(typing: TypingPerson[], person: PersonParticipant): Ty
 	return current.some((entry) => entry.person.id === person.id)
 		? current.map((entry) => (entry.person.id === person.id ? { person, shownUntil } : entry))
 		: [...current, { person, shownUntil }];
+}
+
+/**
+ * Hands `onNotification` each notification the signed-in person is sent in
+ * the open workspace while this is mounted. Nothing is fetched afresh when the
+ * stream drops: a notice missed is only a notice not shown.
+ */
+export function useMemberEvents(onNotification: (notification: Notification) => void): void {
+	const workspaceId = useWorkspace().workspace?.id;
+	const latest = useRef(onNotification);
+	useEffect(() => {
+		latest.current = onNotification;
+	});
+
+	useEffect(() => {
+		if (!workspaceId) return;
+		const stream = client.events.member(workspaceId);
+		void consume(stream, (event) => {
+			const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
+			if (parsed._tag === "Success" && parsed.success.type === "notification.created") {
+				latest.current(parsed.success.notification);
+			}
+		}).catch(() => {});
+		return () => stream.close();
+	}, [workspaceId]);
 }
 
 export function useWorkspaceEvents(): void {

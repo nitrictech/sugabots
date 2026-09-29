@@ -2,7 +2,7 @@ export * as NotificationPreferenceRepository from "./preference-repository.ts";
 
 import {
 	type NotificationKind,
-	type NotificationPreferences,
+	type NotificationKindPreferences,
 	notificationKinds,
 } from "@sugabots/contracts";
 import { and, eq, inArray } from "drizzle-orm";
@@ -16,7 +16,7 @@ import { notificationPreference } from "../database/schema.ts";
  */
 export interface Interface {
 	/** Whether `userId` hears about each kind. */
-	readonly forUser: (userId: string) => Effect.Effect<NotificationPreferences>;
+	readonly forUser: (userId: string) => Effect.Effect<NotificationKindPreferences>;
 	/** Records whether `userId` hears about `kind`. */
 	readonly set: (userId: string, kind: NotificationKind, enabled: boolean) => Effect.Effect<void>;
 	/** Those of `userIds` who hear about `kind`, in the order given. */
@@ -52,7 +52,7 @@ export const make = Effect.gen(function* () {
 							kind,
 							chosen.get(kind as NotificationKind) ?? defaultOn,
 						]),
-					) as NotificationPreferences;
+					) as NotificationKindPreferences;
 				}),
 			),
 

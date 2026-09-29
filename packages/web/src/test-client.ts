@@ -111,6 +111,9 @@ export const client = {
 			thread: vi.fn(),
 			typing: vi.fn(),
 		},
+		notifications: {
+			preferences: vi.fn(),
+		},
 		threads: {
 			list: vi.fn(),
 			get: vi.fn(),
@@ -133,7 +136,7 @@ export const client = {
 			executions: vi.fn(),
 		},
 	},
-	events: { thread: vi.fn(), workspace: vi.fn() },
+	events: { thread: vi.fn(), workspace: vi.fn(), member: vi.fn() },
 	tokens: { get: vi.fn(), set: vi.fn() },
 	auth: {
 		signIn: vi.fn(),
