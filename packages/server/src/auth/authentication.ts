@@ -13,6 +13,7 @@ import { APIError } from "better-auth/api";
 import { bearer } from "better-auth/plugins/bearer";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
+import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
 /**
@@ -29,12 +30,36 @@ export interface Interface {
 	/** Answers a request to better-auth's own routes under `/api/auth`. */
 	readonly handler: (request: Request) => Effect.Effect<Response>;
 	/** Who holds the cookie or bearer token in `headers`, or `undefined` when nobody does. */
-	readonly identify: (headers: Headers) => Effect.Effect<SessionUser | undefined>;
+	readonly identify: (headers: Headers) => Effect.Effect<Identified | undefined>;
+}
+
+/** The holder of a request's credentials. */
+export interface Identified {
+	readonly user: SessionUser;
+	/**
+	 * Cookies better-auth set while checking the credentials, such as a renewed
+	 * session cache. They belong on the response, or the browser never gets them.
+	 */
+	readonly refreshedCookies: Cookies.Cookies;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/server/Authentication",
 ) {}
+
+/**
+ * The most connections better-auth's pool opens. Each is one fewer of the
+ * database's `max_connections` for the main pool, and the session cookie cache
+ * keeps most requests off it.
+ */
+const AUTH_POOL_SIZE = 2;
+
+/**
+ * How long a browser's session is taken from its signed cookie before the
+ * database is asked again. Signing out elsewhere or a revoked session takes
+ * this long to reach requests that carry the cookie.
+ */
+const SESSION_COOKIE_CACHE_SECONDS = 5 * 60;
 
 /** better-auth's drizzle adapter speaks only node-postgres, so it gets a pool of its own. */
 export const make = Effect.gen(function* () {
@@ -47,7 +72,7 @@ export const make = Effect.gen(function* () {
 	const pool = yield* Effect.acquireRelease(
 		Effect.map(
 			Config.Redacted("DATABASE_URL"),
-			(url) => new Pool({ connectionString: Redacted.value(url) }),
+			(url) => new Pool({ connectionString: Redacted.value(url), max: AUTH_POOL_SIZE }),
 		),
 		(pool) => Effect.promise(() => pool.end()),
 	);
@@ -111,6 +136,10 @@ export const make = Effect.gen(function* () {
 			},
 		},
 
+		session: {
+			cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_SECONDS },
+		},
+
 		plugins: [bearer()],
 	});
 
@@ -119,14 +148,17 @@ export const make = Effect.gen(function* () {
 			Effect.promise(() => auth.handler(request)).pipe(Effect.withSpan("Authentication.handler")),
 		identify: (headers) =>
 			Effect.map(
-				Effect.promise(() => auth.api.getSession({ headers })),
-				(result) =>
-					result
+				Effect.promise(() => auth.api.getSession({ headers, returnHeaders: true })),
+				({ headers: responseHeaders, response }): Identified | undefined =>
+					response
 						? {
-								id: result.user.id,
-								email: result.user.email,
-								name: result.user.name,
-								image: result.user.image ?? null,
+								user: {
+									id: response.user.id,
+									email: response.user.email,
+									name: response.user.name,
+									image: response.user.image ?? null,
+								},
+								refreshedCookies: Cookies.fromSetCookie(responseHeaders.getSetCookie()),
 							}
 						: undefined,
 			).pipe(Effect.withSpan("Authentication.identify")),

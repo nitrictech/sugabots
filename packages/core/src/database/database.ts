@@ -1,7 +1,17 @@
 import { PgClient } from "@effect/sql-pg";
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
 import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
-import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime, Option } from "effect";
+import {
+	Cause,
+	Config,
+	Context,
+	Effect,
+	Exit,
+	Layer,
+	type ManagedRuntime,
+	Option,
+	Schema,
+} from "effect";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import { relations } from "./relations.ts";
 
@@ -189,10 +199,21 @@ const runBeforeCommit = (open: Transaction["Service"]) =>
 		}
 	});
 
+/**
+ * The most connections the pool opens, from `DATABASE_POOL_SIZE`. With
+ * better-auth's pool, it is what this process can hold of the database's
+ * `max_connections`.
+ */
+const poolSize = Config.schema(
+	Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	"DATABASE_POOL_SIZE",
+).pipe(Config.withDefault(10));
+
 /** The connection pool at `DATABASE_URL`, closed when the layer's scope is. */
-export const clientLayer = PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }).pipe(
-	Layer.orDie,
-);
+export const clientLayer = PgClient.layerConfig({
+	url: Config.Redacted("DATABASE_URL"),
+	maxConnections: poolSize,
+}).pipe(Layer.orDie);
 
 /** Drizzle on whichever pool `PgClient` provides. */
 export const make = Effect.gen(function* () {
