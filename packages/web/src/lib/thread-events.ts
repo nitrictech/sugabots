@@ -14,6 +14,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
+import { refreshChatMarkers } from "@/lib/chats.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 export function useThreadEvents(threadId: string | undefined): void {
@@ -300,11 +301,15 @@ async function applyWorkspaceEvent(
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-messages", update.chatId] }),
 			queries.invalidateQueries({ queryKey: ["chat-history", update.chatId] }),
-			// A new message moves its chat up the list and changes its preview.
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			// A new message moves its chat up the list, changes its preview, and may leave it unread.
+			refreshChatMarkers(queries, workspaceId),
 		]);
 	} else if (update.type === "thread.changed") {
-		await queries.invalidateQueries({ queryKey: ["chat-history"] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["chat-history"] }),
+			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
+			refreshChatMarkers(queries, workspaceId),
+		]);
 	}
 }
 
