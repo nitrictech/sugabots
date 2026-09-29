@@ -22,7 +22,7 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Effect, Layer } from "effect";
-import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
 import { closedChannelAccess } from "../routes/events/access.test-support.ts";
 import { ChannelAccess } from "../routes/events/access.ts";
@@ -117,6 +117,6 @@ function identifyFromResolver(resolveUser: UserResolver) {
 	return (headers: Headers) =>
 		Effect.map(
 			Effect.promise(() => resolveUser(headers)),
-			(user) => user ?? undefined,
+			(user) => (user ? { user, refreshedCookies: Cookies.empty } : undefined),
 		);
 }

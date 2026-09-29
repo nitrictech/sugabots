@@ -7,7 +7,7 @@ import {
 } from "@sugabots/contracts/http";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Effect, Layer } from "effect";
-import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http";
+import { Cookies, HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
 import { Authentication } from "./authentication.ts";
 
@@ -79,7 +79,12 @@ export const sessionLayer = Layer.effect(
 					if (!holder) {
 						return yield* new Unauthorized({ message: "Invalid or expired session" });
 					}
-					return yield* Effect.provideService(httpEffect, CurrentUser, holder);
+					if (!Cookies.isEmpty(holder.refreshedCookies)) {
+						yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+							Effect.succeed(HttpServerResponse.mergeCookies(response, holder.refreshedCookies)),
+						);
+					}
+					return yield* Effect.provideService(httpEffect, CurrentUser, holder.user);
 				}),
 	),
 );

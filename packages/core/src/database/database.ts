@@ -1,7 +1,18 @@
 import { PgClient } from "@effect/sql-pg";
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core";
 import { type EffectPgDatabase, makeWithDefaults } from "drizzle-orm/effect-postgres";
-import { Cause, Config, Context, Effect, Exit, Layer, type ManagedRuntime, Option } from "effect";
+import {
+	Cause,
+	Config,
+	Context,
+	Effect,
+	Exit,
+	Layer,
+	type ManagedRuntime,
+	Option,
+	Schema,
+} from "effect";
+import type { SqlClient } from "effect/unstable/sql";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import { relations } from "./relations.ts";
 
@@ -189,10 +200,56 @@ const runBeforeCommit = (open: Transaction["Service"]) =>
 		}
 	});
 
+/** The most connections the main pool opens, from `DATABASE_POOL_SIZE`. */
+const poolSize = Config.schema(
+	Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	"DATABASE_POOL_SIZE",
+).pipe(Config.withDefault(10));
+
+/**
+ * A direct connection to Postgres, set when `DATABASE_URL` goes through a
+ * transaction pooler such as PgBouncer. Unset, `DATABASE_URL` is taken to be
+ * direct.
+ */
+const directUrl = Config.option(Config.Redacted("DATABASE_DIRECT_URL"));
+
 /** The connection pool at `DATABASE_URL`, closed when the layer's scope is. */
-export const clientLayer = PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }).pipe(
-	Layer.orDie,
-);
+export const clientLayer = PgClient.layerConfig({
+	url: Config.Redacted("DATABASE_URL"),
+	maxConnections: poolSize,
+	// A transaction pooler runs each statement on whichever backend is free, and
+	// one prepared on another backend has to be prepared again: a round trip.
+	prepare: Config.map(directUrl, Option.isNone),
+}).pipe(Layer.orDie);
+
+/**
+ * The most connections the direct pool opens. The workflow engine's host and
+ * shard locks and the event relay's `LISTEN` each hold one for the life of the
+ * process; the rest serve the engine's queries.
+ */
+const DIRECT_POOL_SIZE = 6;
+
+/** The main pool, passed through as the direct one when `DATABASE_URL` is direct. */
+const mainAsDirect = Layer.effectContext(Effect.context<PgClient.PgClient | SqlClient.SqlClient>());
+
+/**
+ * The pool for what needs one Postgres session across statements: session
+ * advisory locks and `LISTEN`, which a transaction pooler silently breaks. A
+ * pool of its own on `DATABASE_DIRECT_URL`, or the main pool without it. Keep
+ * it a constant, so everything provided with it shares one pool.
+ */
+export const directClientLayer: Layer.Layer<
+	PgClient.PgClient | SqlClient.SqlClient,
+	never,
+	PgClient.PgClient | SqlClient.SqlClient
+> = Layer.unwrap(
+	Effect.gen(function* () {
+		const url = yield* directUrl;
+		return Option.isSome(url)
+			? PgClient.layer({ url: url.value, maxConnections: DIRECT_POOL_SIZE })
+			: mainAsDirect;
+	}),
+).pipe(Layer.orDie);
 
 /** Drizzle on whichever pool `PgClient` provides. */
 export const make = Effect.gen(function* () {

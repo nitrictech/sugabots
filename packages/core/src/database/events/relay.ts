@@ -1,6 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
 import type { Channel, StreamEvent } from "@sugabots/contracts";
-import { Deferred, Duration, Effect, Fiber, Queue } from "effect";
+import { Data, Deferred, Duration, Effect, Fiber, Queue } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
@@ -38,6 +38,9 @@ const MAX_NOTICE_BYTES = 7_000;
 
 const RECONNECT_DELAY = Duration.seconds(1);
 
+/** How long listening waits to hear its own probe before calling the connection broken. */
+const PROBE_TIMEOUT = Duration.seconds(5);
+
 /** What travels in a notification. `event` is absent when it did not fit. */
 interface Notice {
 	from: string;
@@ -46,9 +49,28 @@ interface Notice {
 	event?: StreamEvent;
 }
 
+/** What a process sends itself once listening, to prove notices reach it. */
+interface Probe {
+	from: string;
+	probe: string;
+}
+
 /**
- * The relay over the process's own pool. Listening holds one of the pool's
- * connections for as long as it runs; broadcasting borrows one per notice.
+ * Listening started, but a notice this process sent never came back. Through
+ * a transaction pooler such as PgBouncer, `LISTEN` succeeds on a backend that
+ * then goes back to the pool, and nothing it hears reaches this process.
+ */
+export class NoticesNotHeard extends Data.TaggedError("NoticesNotHeard") {
+	override get message() {
+		return "The event relay's LISTEN hears nothing, as happens through a transaction pooler such as PgBouncer. Set DATABASE_DIRECT_URL to a direct connection to Postgres.";
+	}
+}
+
+/**
+ * The relay over the pool it is given, which must reach Postgres directly
+ * rather than through a transaction pooler. Listening holds one of the pool's
+ * connections for as long as it runs, and fails with `NoticesNotHeard` when
+ * that connection hears nothing; broadcasting borrows one per notice.
  * Its methods are promises because the bus is, so it keeps the context it
  * was built in to run on.
  */
@@ -80,8 +102,16 @@ export const postgresEventRelay = (
 			},
 
 			async listen(receive) {
+				const probe: Probe = { from: origin, probe: await runPromise(ids.random) };
+				const probeHeard = Deferred.makeUnsafe<void>();
+
 				async function deliverNotice(payload: string) {
-					const notice = JSON.parse(payload) as Notice;
+					const notice = JSON.parse(payload) as Notice | Probe;
+					if ("probe" in notice) {
+						if (notice.probe === probe.probe)
+							await runPromise(Deferred.succeed(probeHeard, undefined));
+						return;
+					}
 					if (notice.from === origin) return;
 					const event = notice.event ?? (await storedEvent(notice));
 					if (!event) return;
@@ -136,9 +166,18 @@ export const postgresEventRelay = (
 					),
 				);
 
+				const heardOwnProbe = client.notify(NOTIFY_CHANNEL, JSON.stringify(probe)).pipe(
+					Effect.andThen(Deferred.await(probeHeard)),
+					Effect.timeoutOrElse({
+						duration: PROBE_TIMEOUT,
+						orElse: () => Effect.fail(new NoticesNotHeard()),
+					}),
+				);
+
 				const fiber = Effect.runForkWith(context)(relaying);
 				try {
 					await runPromise(Deferred.await(listening));
+					await runPromise(heardOwnProbe);
 				} catch (cause) {
 					await runPromise(Fiber.interrupt(fiber));
 					throw cause;

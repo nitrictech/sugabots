@@ -10,7 +10,7 @@ import { ConnectionTools } from "@sugabots/core/conversations/tools/connections"
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
-import { layer as databaseLayer } from "@sugabots/core/database/database";
+import { layer as databaseLayer, directClientLayer } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
@@ -40,7 +40,7 @@ import { ChannelAccess } from "./routes/events/access.ts";
 import { Workflows } from "./workflows.ts";
 
 /**
- * What the process owns once and every service above builds on: the pool,
+ * What the process owns once and every service above builds on: the pools,
  * ids, the cipher, the installation's settings and egress policy, the durable
  * events and the bus that fans them out, and the workflow engine with its
  * lanes. A service's `layer` never provides these, so there is one of each
@@ -52,7 +52,12 @@ const Infrastructure = Layer.mergeAll(
 	EventOutbox.layer,
 	ConversationWorkflows.lanes,
 ).pipe(
-	Layer.provideMerge(Layer.mergeAll(Installation.layer, EventBus.layer, Workflows.engine)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			Installation.layer,
+			Layer.mergeAll(EventBus.layer, Workflows.engine).pipe(Layer.provide(directClientLayer)),
+		),
+	),
 	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
 	Layer.provideMerge(databaseLayer),
 );
