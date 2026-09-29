@@ -2,7 +2,7 @@ import type { SessionUser } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
-import { expect, type within } from "storybook/test";
+import { expect, fn, type within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { Session } from "@/lib/session.ts";
 import { personal } from "@/shell/story-fixtures.ts";
@@ -115,6 +115,27 @@ export const Workspace = meta.story({
 			"placeholder",
 			"e.g. Ryan's bots",
 		);
+	},
+});
+
+/** Naming another workspace, from a workspace already set up, which Cancel returns to. */
+export const AnotherWorkspace = meta.story({
+	args: { newWorkspace: { made: undefined, onMade: fn(), onCancel: fn() } },
+	render: (args) => (
+		<Preview stage="model">
+			<div className="h-screen">
+				<Onboarding {...args} />
+			</div>
+		</Preview>
+	),
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Name your workspace" }),
+		).toBeInTheDocument();
+		await expect(canvas.getByLabelText("Workspace name")).toHaveValue("");
+		await expect(canvas.queryByRole("button", { name: "Back" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+		await expect(args.newWorkspace?.onCancel).toHaveBeenCalled();
 	},
 });
 

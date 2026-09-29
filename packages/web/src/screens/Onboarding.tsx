@@ -10,10 +10,19 @@ import {
 	type ProviderPresetId,
 	providerPreset,
 	slugify,
+	type Workspace,
 } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, Search, X } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
+import {
+	type FormEvent,
+	type KeyboardEvent,
+	type ReactNode,
+	type RefObject,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import { useAgents, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
@@ -36,6 +45,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
+import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
 
 /*
@@ -43,6 +53,10 @@ import { ProviderTile } from "./ProviderSettings.tsx";
  * invite people, then meet the bot. Signing in comes before, on the login
  * page, which is the welcome. The first bot is the Personal pod's own, which
  * the workspace made with it, so making it here is giving it a face and a name.
+ *
+ * Another workspace goes through the same steps, and can be left part way.
+ * Until it is made, the one already chosen is the one to go back to, not the
+ * one being set up.
  */
 
 type Step = "workspace" | "model" | "bot" | "invite" | "ready";
@@ -50,8 +64,25 @@ type Step = "workspace" | "model" | "bot" | "invite" | "ready";
 /** The steps the dots count. Ready has none: there is nothing left to go back to. */
 const counted: readonly Step[] = ["workspace", "model", "bot", "invite"];
 
-export function Onboarding({ session }: { session: Session }) {
-	const { workspace } = useWorkspace();
+export function Onboarding({
+	session,
+	newWorkspace,
+}: {
+	session: Session;
+	/**
+	 * Sets up another workspace rather than the first: `made` once the first
+	 * step has made it, and chosen. `onMade` hears of it, and of its new
+	 * address if it is renamed. Without `onCancel` there is nowhere to go back to.
+	 */
+	newWorkspace?: {
+		made: Workspace | undefined;
+		onMade: (saved: { id: string; slug: string }) => void;
+		onCancel?: () => void;
+	};
+}) {
+	const chosenWorkspace = useWorkspace().workspace;
+	const workspace = newWorkspace ? newWorkspace.made : chosenWorkspace;
+	const cancelling = useRef(false);
 	const pods = usePods();
 	const models = useModels(Boolean(workspace));
 	const { agents, isPending: agentsPending, error: agentsError, refetch } = useAgents();
@@ -67,7 +98,10 @@ export function Onboarding({ session }: { session: Session }) {
 	// Coming back part way through picks up where the workspace says it got to.
 	const inferred: Step = !workspace ? "workspace" : botHasModel ? "bot" : "model";
 	const step = chosen ?? inferred;
-	const loading = Boolean(workspace) && (pods.isPending || models.isPending || agentsPending);
+	// Between making the workspace and the address saying so, there is none to set up yet.
+	const loading =
+		(!workspace && step !== "workspace") ||
+		(Boolean(workspace) && (pods.isPending || models.isPending || agentsPending));
 	const failure = pods.error ?? models.error ?? agentsError;
 	const index = counted.indexOf(step);
 	const back = index > 0 ? counted[index - 1] : undefined;
@@ -76,7 +110,18 @@ export function Onboarding({ session }: { session: Session }) {
 		<OnboardingFrame
 			current={index === -1 ? undefined : index}
 			onBack={back ? () => setChosen(back) : undefined}
+			onCancel={
+				newWorkspace?.onCancel && step !== "ready"
+					? () => {
+							cancelling.current = true;
+							newWorkspace.onCancel?.();
+						}
+					: undefined
+			}
 		>
+			{newWorkspace?.made && step !== "ready" && (
+				<LeavingSetupGuard workspaceName={newWorkspace.made.name} cancelling={cancelling} />
+			)}
 			{loading ? (
 				<p className="m-0 text-center text-muted-foreground">Loading your setup…</p>
 			) : failure ? (
@@ -93,7 +138,10 @@ export function Onboarding({ session }: { session: Session }) {
 				<WorkspaceStep
 					workspace={workspace}
 					firstName={session.user?.name.split(" ")[0]}
-					onContinue={() => setChosen("model")}
+					onContinue={(saved) => {
+						newWorkspace?.onMade(saved);
+						setChosen("model");
+					}}
 				/>
 			) : step === "model" ? (
 				<ModelStep bot={firstBot} onContinue={() => setChosen("bot")} />
@@ -110,14 +158,47 @@ export function Onboarding({ session }: { session: Session }) {
 	);
 }
 
+/**
+ * Asks before a link, Back or closing the tab leaves a workspace made but not
+ * set up. Cancel is let through: it deletes the workspace.
+ */
+function LeavingSetupGuard({
+	workspaceName,
+	cancelling,
+}: {
+	workspaceName: string;
+	cancelling: RefObject<boolean>;
+}) {
+	const blocker = useBlocker({
+		shouldBlockFn: ({ current, next }) => !cancelling.current && next.pathname !== current.pathname,
+		enableBeforeUnload: () => !cancelling.current,
+		withResolver: true,
+	});
+	return (
+		<DeleteDialog
+			open={blocker.status === "blocked"}
+			onOpenChange={(open) => {
+				if (!open) blocker.reset?.();
+			}}
+			title="Leave setup?"
+			description={`${workspaceName} has been made but isn't set up yet. It stays in your workspaces, where you can finish setting it up or delete it from its settings.`}
+			pending={false}
+			confirmLabel="Leave"
+			onDelete={() => blocker.proceed?.()}
+		/>
+	);
+}
+
 function OnboardingFrame({
 	current,
 	onBack,
+	onCancel,
 	children,
 }: {
 	/** Which counted step this is, for the dots; none on the last. */
 	current?: number;
 	onBack?: () => void;
+	onCancel?: () => void;
 	children: ReactNode;
 }) {
 	return (
@@ -153,6 +234,15 @@ function OnboardingFrame({
 							/>
 						))}
 					</ol>
+				)}
+				{onCancel && (
+					<button
+						type="button"
+						onClick={onCancel}
+						className="focus-ring col-start-3 justify-self-end rounded-md font-medium text-[14.5px] text-link"
+					>
+						Cancel
+					</button>
 				)}
 			</header>
 			<div className="grid flex-1 place-items-center px-4 py-10">
@@ -199,7 +289,8 @@ function WorkspaceStep({
 }: {
 	workspace?: { id: string; name: string; slug: string };
 	firstName?: string;
-	onContinue: () => void;
+	/** Given the workspace as it was saved. */
+	onContinue: (saved: { id: string; slug: string }) => void;
 }) {
 	const create = useCreateWorkspace();
 	const update = useUpdateWorkspace(workspace?.id);
@@ -210,17 +301,18 @@ function WorkspaceStep({
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!slugify(trimmed)) return;
+		const input = { name: trimmed, slug: slugify(trimmed) };
+		let saved: { id: string; slug: string };
 		try {
-			const input = { name: trimmed, slug: slugify(trimmed) };
-			if (workspace) {
-				if (trimmed !== workspace.name) await update.mutateAsync(input);
-			} else {
-				await create.mutateAsync(input);
-			}
+			saved = !workspace
+				? await create.mutateAsync(input)
+				: trimmed !== workspace.name
+					? await update.mutateAsync(input)
+					: workspace;
 		} catch {
 			return;
 		}
-		onContinue();
+		onContinue(saved);
 	}
 
 	return (
