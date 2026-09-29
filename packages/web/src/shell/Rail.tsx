@@ -7,7 +7,7 @@ import {
 	useRouteContext,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Lock, Plus } from "lucide-react";
+import { Plus, UserRound } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
@@ -117,7 +117,7 @@ export function RailView({
 	className?: string;
 }) {
 	const shared = pods.filter(({ pod }) => pod.kind === "shared");
-	const personal = pods.find(({ pod }) => pod.kind === "personal")?.pod;
+	const personal = pods.find(({ pod }) => pod.kind === "personal");
 	const mayAddBotFromAll = podsToAddBotsTo(shared.map(({ pod }) => pod)).length > 0;
 	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
 	const backToChat = useBackToHere("Chat");
@@ -185,13 +185,20 @@ export function RailView({
 				<>
 					<span aria-hidden className="h-[1.5px] w-7 shrink-0 rounded-full bg-border-strong" />
 					<RailItem
-						label={personal.name}
-						selected={selected === personal.slug}
-						pod={personal}
-						menu={podMenu(personal)}
+						label={personal.pod.name}
+						selected={selected === personal.pod.slug}
+						pod={personal.pod}
+						menu={podMenu(personal.pod)}
 					>
-						<span className="grid size-11 place-items-center rounded-tile bg-tile text-soft-foreground md:size-[46px]">
-							<Lock size={20} strokeWidth={2} />
+						{/* A pod like the others, with you on its corner: only you are in it. */}
+						<span className="relative">
+							<PodTile bots={personal.bots} color={personal.pod.color} size={46} />
+							<span
+								aria-hidden
+								className="absolute -right-[5px] -bottom-[5px] grid size-[22px] place-items-center rounded-full border-[2.5px] border-rail bg-tile text-soft-foreground"
+							>
+								<UserRound size={11} strokeWidth={2.6} />
+							</span>
 						</span>
 					</RailItem>
 				</>
