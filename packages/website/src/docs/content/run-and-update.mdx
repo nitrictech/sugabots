@@ -1,56 +1,72 @@
 ---
 title: Run, update, and reset
-description: Day-to-day commands for a local installation.
+description: Start, stop, update and reset a Docker Compose installation.
 ---
 
-## Run it again
+Run these commands from the folder that holds your `compose.yml`: the
+`sugabots` folder, if you followed the [Quickstart](/docs/quickstart).
 
-After the first [setup](/docs/quickstart):
+## Start and stop
 
 ```sh
+docker compose up -d    # start
+docker compose down     # stop
+```
+
+Stopping keeps your data. It lives in the `sugabots_postgres_data` Docker
+volume.
+
+## View the logs
+
+```sh
+docker compose logs -f sugabots
+```
+
+Until you [set up email](/docs/deploy-with-docker#email), this is also where
+emails such as verification links are printed.
+
+## Update
+
+Pull the latest image and restart:
+
+```sh
+docker compose pull
 docker compose up -d
-bun run db:migrate
-bun run dev
 ```
 
-Press `Ctrl-C` to stop the web app and API. Stop PostgreSQL separately with:
-
-```sh
-docker compose stop
-```
-
-## Update an installation
+Sugabots updates its database when it starts.
 
 <Tip>
 
-Back up your PostgreSQL volume and `.env` before updating an installation that
-contains data you care about.
+Before updating an installation with data you want to keep,
+[back it up](/docs/deploy-with-docker#backups).
 
 </Tip>
 
-Stop `bun run dev`, then run:
+## Reset
 
-```sh
-git pull --ff-only
-bun install
-docker compose up -d
-bun run db:migrate
-bun run dev
-```
-
-## Reset everything
-
-The following removes the database volume and all Sugabots data:
+To delete all data and start again with an empty installation:
 
 ```sh
 docker compose down -v
 docker compose up -d
-bun run db:migrate
 ```
 
 <Careful>
 
-Do not run `docker compose down -v` unless you intend to delete every account,
-workspace, conversation, and saved credential.
+`docker compose down -v` deletes the database volume: every account, workspace,
+conversation and saved API key. It can't be undone.
 
 </Careful>
+
+## Uninstall
+
+Delete the containers and data:
+
+```sh
+docker compose down -v
+```
+
+Then delete the folder.
+
+`.env` holds your keys, so keep a copy if you might restore a backup later.
