@@ -47,9 +47,9 @@ export interface Interface {
 		agentId: string,
 	) => Effect.Effect<void, SystemAgentImmutable>;
 	/**
-	 * The Personal pod's Personal Assistant, placed there on `model`, or else
-	 * {@link FALLBACK_ASSISTANT_MODEL}, if it is missing. One already there is
-	 * returned exactly as its owner left it.
+	 * The Personal pod's Personal Assistant, placed there on `model`, or with
+	 * no model, if it is missing. One already there is returned exactly as its
+	 * owner left it.
 	 */
 	readonly provisionPersonalAssistant: (input: {
 		workspaceId: string;
@@ -222,7 +222,7 @@ export const make = Effect.gen(function* () {
 								description: "Your private assistant.",
 								color: "sky",
 								face: "pill",
-								model: model ?? FALLBACK_ASSISTANT_MODEL,
+								model: model ?? null,
 								prompt: PERSONAL_ASSISTANT_PROMPT,
 							})
 							.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
@@ -286,12 +286,6 @@ export const layer = Layer.effect(Service, make);
 
 export const PERSONAL_ASSISTANT_PROMPT =
 	"You are Personal Assistant, the user's general-purpose assistant. Help them answer questions, think through problems, make plans, write, and complete tasks. Be clear, practical, and concise. Ask clarifying questions when important details are missing. Distinguish facts from assumptions and say when you are uncertain. Use available tools when they help, and report their results accurately.";
-
-/**
- * The model a Personal Assistant is given when its pod is provisioned without
- * one, which is the invitation path: somebody joining has no model to name yet.
- */
-export const FALLBACK_ASSISTANT_MODEL = "claude-sonnet-4-20250514";
 
 /** Another agent in the pod already has this name or handle. */
 export class AgentNameTaken

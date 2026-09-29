@@ -86,26 +86,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		hosting: "remote",
 		credential: "api-key",
 		hint: "Claude models. Keys are issued at console.anthropic.com.",
-		models: [
-			{
-				modelId: "claude-opus-4",
-				displayName: "Claude Opus 4.1",
-				capabilities: ["tools", "vision"],
-				contextLength: 200_000,
-			},
-			{
-				modelId: "claude-sonnet-4-20250514",
-				displayName: "Claude Sonnet 4",
-				capabilities: ["tools", "vision"],
-				contextLength: 200_000,
-			},
-			{
-				modelId: "claude-3-5-haiku-20241022",
-				displayName: "Claude 3.5 Haiku",
-				capabilities: ["tools", "vision"],
-				contextLength: 200_000,
-			},
-		],
+		models: [],
 	},
 	{
 		id: "openai",
@@ -116,26 +97,7 @@ export const providerCatalog: readonly ProviderPreset[] = [
 		hosting: "remote",
 		credential: "api-key",
 		hint: "GPT models. Keys are issued at platform.openai.com.",
-		models: [
-			{
-				modelId: "gpt-5",
-				displayName: "GPT-5",
-				capabilities: ["tools", "vision", "images"],
-				contextLength: 400_000,
-			},
-			{
-				modelId: "gpt-5-mini",
-				displayName: "GPT-5 mini",
-				capabilities: ["tools", "vision", "images"],
-				contextLength: 400_000,
-			},
-			{
-				modelId: "gpt-5-nano",
-				displayName: "GPT-5 nano",
-				capabilities: ["tools", "vision", "images"],
-				contextLength: 400_000,
-			},
-		],
+		models: [],
 	},
 	{
 		id: "chatgpt",

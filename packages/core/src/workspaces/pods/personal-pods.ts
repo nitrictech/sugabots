@@ -15,8 +15,7 @@ import { PodRepository } from "./pod-repository.ts";
 export interface Interface {
 	/**
 	 * Makes `userId`'s Personal pod and its Personal Assistant, each only if it
-	 * is missing. A new assistant runs on
-	 * {@link AgentRepository.FALLBACK_ASSISTANT_MODEL}.
+	 * is missing. A new assistant has no model until one is chosen for it.
 	 */
 	readonly provision: (input: {
 		workspaceId: string;

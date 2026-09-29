@@ -3,13 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import {
-	modelProvider,
-	providerModel,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -426,15 +420,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		const seeded = await list(fresh.id);
 		expect(seeded.map(({ preset }) => preset)).toEqual(
 			expect.arrayContaining(["openai", "ollama"]),
-		);
-		// A starter model the catalog has since renamed is brought back in line.
-		const starter = seeded.flatMap((provider) => provider.models)[0];
-		if (!starter) throw new Error("fixture: no starter models");
-		await onDatabase((db) =>
-			db
-				.update(providerModel)
-				.set({ displayName: "Out of date" })
-				.where(eq(providerModel.id, starter.id)),
 		);
 
 		await seedAll();
