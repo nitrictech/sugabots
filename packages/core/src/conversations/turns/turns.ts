@@ -21,7 +21,7 @@ import type { AuthorizationDenied, ResourceHidden } from "../../authorization/ac
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
-import { turn } from "../../database/schema.ts";
+import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { laneBusy } from "../../workflows/lanes.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
@@ -32,7 +32,6 @@ import {
 	type ToolApprovalNotFound,
 } from "./controls.ts";
 import { TurnExecution } from "./execution.ts";
-import { ACTIVE_STATUSES } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { makeService } from "./service.ts";
 import { TurnSignals } from "./signals.ts";
@@ -163,4 +162,4 @@ export const signalsLayer = TurnSignals.layer;
 export const busyIn = (threadId: SQLWrapper) => laneBusy(threadId, [Turn._tag]);
 
 /** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
-export const isActive = inArray(turn.status, [...ACTIVE_STATUSES]);
+export const isActive = inArray(turn.status, [...ACTIVE_TURN_STATUSES]);
