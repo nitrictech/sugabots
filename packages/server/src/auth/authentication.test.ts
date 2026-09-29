@@ -217,6 +217,52 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(invited.status).toBe(400);
 	});
 
+	it("resets a forgotten password from the emailed link, ending every session", async () => {
+		const email = `reset-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const before = await signUp("Rosa", email);
+		const redirectTo = `${ORIGIN}/reset-password`;
+
+		expect((await post(app, "/auth/request-password-reset", { email, redirectTo })).status).toBe(
+			200,
+		);
+		const link = sent
+			.findLast(
+				(message) =>
+					message.to[0].email === email && message.subject === "Reset your Sugabots password",
+			)
+			?.text?.match(/https?:\/\/\S+/)?.[0];
+		expect(link, "a reset link should have been sent").toBeTruthy();
+
+		const url = new URL(link as string);
+		const opened = await app.request(`${url.pathname}${url.search}`, {
+			headers: { origin: ORIGIN },
+		});
+		const landing = new URL(opened.headers.get("location") ?? "");
+		expect(`${landing.origin}${landing.pathname}`).toBe(redirectTo);
+		const token = landing.searchParams.get("token");
+		expect(token).toBeTruthy();
+
+		const newPassword = "a-new-horse-battery";
+		expect((await post(app, "/auth/reset-password", { token, newPassword })).status).toBe(200);
+
+		const signIn = (password: string) => post(app, "/auth/sign-in/email", { email, password });
+		expect((await me(before)).status).toBe(401);
+		expect((await signIn("correct-horse-battery")).status).toBe(401);
+		expect((await signIn(newPassword)).status).toBe(200);
+		expect((await post(app, "/auth/reset-password", { token, newPassword })).status).toBe(400);
+	});
+
+	it("answers a reset request for an unknown address as it does for a known one", async () => {
+		const sentBefore = sent.length;
+		const response = await post(app, "/auth/request-password-reset", {
+			email: `nobody-${crypto.randomUUID().slice(0, 8)}@example.com`,
+			redirectTo: `${ORIGIN}/reset-password`,
+		});
+
+		expect(response.status).toBe(200);
+		expect(sent.length).toBe(sentBefore);
+	});
+
 	it("rejects a token it never issued", async () => {
 		expect((await me("not-a-real-token")).status).toBe(401);
 	});

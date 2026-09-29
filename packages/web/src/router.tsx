@@ -22,6 +22,7 @@ import { signInFailureReason } from "@/lib/connections.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
+import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import type { Session } from "@/lib/session.ts";
 import {
@@ -39,6 +40,11 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
+const ResetPassword = lazyNamed(
+	// Only this export: the module's other screen would otherwise decide the props.
+	() => import("@/screens/ResetPassword.tsx").then(({ ResetPassword }) => ({ ResetPassword })),
+	"ResetPassword",
+);
 const Onboarding = lazyNamed(() => import("@/screens/Onboarding.tsx"), "Onboarding");
 /*
  * The settings sections are a chunk of their own; the window they open in is
@@ -80,6 +86,7 @@ function lazyNamed<Name extends string, Props>(
  *
  *   /                        opens the workspace last chosen
  *   /login
+ *   /reset-password           where a password reset email's link lands
  *   /invite/$id
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
@@ -147,6 +154,8 @@ function LandingRoute() {
 
 interface LoginSearch {
 	invite?: string;
+	/** Set on the way back from a password reset. */
+	passwordChanged?: boolean;
 	/** Where signing in interrupted, as a path in this app; anything else is dropped. */
 	returnTo?: string;
 }
@@ -156,6 +165,7 @@ const loginRoute = createRoute({
 	path: "/login",
 	validateSearch: (search: Record<string, unknown>): LoginSearch => ({
 		...validateInviteSearch(search),
+		passwordChanged: search.passwordChanged === true ? true : undefined,
 		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
 	}),
 	component: LoginRoute,
@@ -173,7 +183,7 @@ function isAppPath(value: unknown): value is string {
 
 function LoginRoute() {
 	const { session } = loginRoute.useRouteContext();
-	const { invite, returnTo = "/" } = loginRoute.useSearch();
+	const { invite, passwordChanged, returnTo = "/" } = loginRoute.useSearch();
 	const navigate = useNavigate();
 
 	if (session.user) {
@@ -187,6 +197,7 @@ function LoginRoute() {
 	return (
 		<Login
 			inviteId={invite}
+			passwordChanged={passwordChanged}
 			onSignedIn={async () => {
 				await session.refresh();
 				await navigate({
@@ -194,6 +205,39 @@ function LoginRoute() {
 					params: invite !== undefined ? { id: invite } : undefined,
 					replace: true,
 				});
+			}}
+		/>
+	);
+}
+
+interface ResetPasswordSearch {
+	/** From a link the API has checked; absent with `error` once it has expired or been used. */
+	token?: string;
+}
+
+const resetPasswordRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: RESET_PASSWORD_PATH,
+	validateSearch: (search: Record<string, unknown>): ResetPasswordSearch => ({
+		token: optionalString(search.token),
+	}),
+	component: ResetPasswordRoute,
+});
+
+function ResetPasswordRoute() {
+	const { session } = resetPasswordRoute.useRouteContext();
+	const { token } = resetPasswordRoute.useSearch();
+	const navigate = useNavigate();
+	const toLogin = (search: LoginSearch) => navigate({ to: "/login", search, replace: true });
+
+	return (
+		<ResetPassword
+			token={token}
+			onBack={() => toLogin({})}
+			onReset={async () => {
+				// The reset ended every session, this browser's included.
+				await session.refresh();
+				await toLogin({ passwordChanged: true });
 			}}
 		/>
 	);
@@ -841,6 +885,7 @@ function requireUser({
 const routeTree = rootRoute.addChildren([
 	indexRoute,
 	loginRoute,
+	resetPasswordRoute,
 	inviteRoute,
 	signInReturnRoute,
 	onboardingRoute,

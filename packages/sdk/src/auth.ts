@@ -47,6 +47,18 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 
 		signIn: (input: { email: string; password: string }) => orThrow(auth.signIn.email(input)),
 
+		/**
+		 * Emails a reset link to `email` if it has an account, and answers the
+		 * same either way. The link opens `redirectTo` with `?token=`, or with
+		 * `?error=INVALID_TOKEN` once it has been used or has expired.
+		 */
+		requestPasswordReset: (input: { email: string; redirectTo: string }) =>
+			orThrow(auth.requestPasswordReset(input)),
+
+		/** Sets a new password with the token from a reset link, and signs out every session. */
+		resetPassword: (input: { token: string; newPassword: string }) =>
+			orThrow(auth.resetPassword(input)),
+
 		async signOut(): Promise<void> {
 			try {
 				await orThrow(auth.signOut());
@@ -122,3 +134,8 @@ const emailUnverifiedCodes = new Set([
 	// Accepting an invitation.
 	"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
 ]);
+
+/** Whether a password reset was refused because its link has been used or has expired. */
+export function isResetLinkInvalid(failure: unknown): boolean {
+	return isApiFailure(failure) && failure.details === "INVALID_TOKEN";
+}

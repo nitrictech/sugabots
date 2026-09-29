@@ -5,7 +5,8 @@ import { Login } from "./Login.tsx";
 
 /*
  * Signing in, after the welcome (whose story is Views/Onboarding › Welcome):
- * the email form, making an account, and the page an unverified address gets.
+ * the email form, making an account, the page an unverified address gets, and
+ * the way into a password reset.
  */
 
 const auth = `${import.meta.env.VITE_API_URL}/auth`;
@@ -82,5 +83,27 @@ export const FromAnInvitation = meta.story({
 		await expect(canvas.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
 		await expect(canvas.getByText(/invited to a workspace/)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Back" })).toBeNull();
+	},
+});
+
+/** Forgot password? asks for the address, carrying over what was typed. */
+export const ForgotPassword = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Continue with email" }));
+		await userEvent.type(await canvas.findByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.click(canvas.getByRole("button", { name: "Forgot password?" }));
+		await expect(
+			await canvas.findByRole("heading", { name: "Reset your password" }),
+		).toBeInTheDocument();
+		await expect(canvas.getByLabelText("Email")).toHaveValue("ryan@nitric.io");
+	},
+});
+
+/** Back from a reset: straight to the form, saying the password changed. */
+export const AfterPasswordReset = meta.story({
+	args: { passwordChanged: true },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+		await expect(canvas.getByText(/password has been changed/)).toBeInTheDocument();
 	},
 });
