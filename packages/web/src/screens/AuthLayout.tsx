@@ -62,3 +62,26 @@ export function AuthLayout({
 		</div>
 	);
 }
+
+export const fieldClass =
+	"min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground";
+
+/** One labelled field in the form's card, as every form in the app lays them out. */
+export function FormRow({
+	id,
+	label,
+	children,
+}: {
+	id: string;
+	label: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className="flex items-center gap-3 border-border border-b px-4 py-3.5 last:border-b-0 focus-within:bg-panel">
+			<label htmlFor={id} className="w-[88px] shrink-0 text-[14px] text-muted-foreground">
+				{label}
+			</label>
+			{children}
+		</div>
+	);
+}

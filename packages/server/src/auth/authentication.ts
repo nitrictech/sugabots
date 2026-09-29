@@ -18,7 +18,8 @@ import { Pool } from "pg";
 
 /**
  * How the HTTP API proves who is calling: better-auth's users, credentials,
- * sessions and email verification, under its own routes at `/api/auth`.
+ * sessions, email verification and password resets, under its own routes at
+ * `/api/auth`.
  * Everything else in the API asks `identify` who holds the request's cookie or
  * bearer token. What the caller may then do is core's to decide.
  *
@@ -60,6 +61,9 @@ const AUTH_POOL_SIZE = 2;
  * this long to reach requests that carry the cookie.
  */
 const SESSION_COOKIE_CACHE_SECONDS = 5 * 60;
+
+/** How long a password reset link works. The email promises an hour. */
+const RESET_PASSWORD_LINK_SECONDS = 60 * 60;
 
 /** better-auth's drizzle adapter speaks only node-postgres, so it gets a pool of its own. */
 export const make = Effect.gen(function* () {
@@ -117,6 +121,17 @@ export const make = Effect.gen(function* () {
 		emailAndPassword: {
 			enabled: true,
 			requireEmailVerification: accounts.requireEmailVerification,
+			// Whoever knew the old password may still be signed in somewhere.
+			revokeSessionsOnPasswordReset: true,
+			resetPasswordTokenExpiresIn: RESET_PASSWORD_LINK_SECONDS,
+			sendResetPassword: async ({ user, url }) => {
+				await send({
+					from: sender,
+					to: [{ email: user.email, name: user.name }],
+					subject: "Reset your Sugabots password",
+					text: `Somebody asked to reset the password for ${user.email} on Sugabots. If it was you, choose a new one within the hour. If not, ignore this email and your password stays as it is.\n\nReset: ${url}`,
+				});
+			},
 		},
 		emailVerification: {
 			sendOnSignUp: true,

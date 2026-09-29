@@ -19,7 +19,7 @@ import { defaultTokenStore, type TokenStore } from "./tokens.ts";
  */
 
 export type { AuthApi } from "./auth.ts";
-export { isEmailUnverified } from "./auth.ts";
+export { isEmailUnverified, isResetLinkInvalid } from "./auth.ts";
 export { failureForStatus, isApiFailure } from "./errors.ts";
 export type { EventStream, EventStreamOptions, EventsApi } from "./events.ts";
 export {

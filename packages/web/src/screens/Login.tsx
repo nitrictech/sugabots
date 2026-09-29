@@ -1,9 +1,10 @@
 import type { AgentColor, AgentFace } from "@sugabots/contracts";
 import { isEmailUnverified } from "@sugabots/sdk";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { AuthLayout } from "@/screens/AuthLayout.tsx";
+import { AuthLayout, FormRow, fieldClass } from "@/screens/AuthLayout.tsx";
+import { ForgotPassword } from "@/screens/ResetPassword.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -20,14 +21,18 @@ import { Button } from "@/ui/button.tsx";
  */
 export function Login({
 	inviteId,
+	passwordChanged = false,
 	onSignedIn,
 }: {
 	inviteId?: string;
+	/** Arriving from a password reset, which says so above the form. */
+	passwordChanged?: boolean;
 	onSignedIn: () => Promise<void>;
 }) {
-	// An invitation link says why you are here, so it goes straight to the form.
-	const [welcomed, setWelcomed] = useState(inviteId !== undefined);
+	// An invitation link or a reset says why you are here, so it goes straight to the form.
+	const [welcomed, setWelcomed] = useState(inviteId !== undefined || passwordChanged);
 	const [isNew, setIsNew] = useState(false);
+	const [forgotPassword, setForgotPassword] = useState(false);
 	// The address of an account that exists but has not been proven. Only an
 	// installation that requires verification reaches this: it withholds the
 	// session at sign-up and refuses the sign-in until the link is used. Where
@@ -102,6 +107,10 @@ export function Login({
 		);
 	}
 
+	if (forgotPassword) {
+		return <ForgotPassword initialEmail={email} onBack={() => setForgotPassword(false)} />;
+	}
+
 	if (!welcomed) {
 		return <Welcome onContinue={() => setWelcomed(true)} />;
 	}
@@ -113,7 +122,9 @@ export function Login({
 			subtitle={
 				inviteId !== undefined
 					? "You have been invited to a workspace. Log in to accept it."
-					: undefined
+					: passwordChanged
+						? "Your password has been changed. Log in with the new one."
+						: undefined
 			}
 		>
 			<form onSubmit={submit} className="flex flex-col gap-3.5">
@@ -164,16 +175,26 @@ export function Login({
 				</Button>
 			</form>
 
-			<button
-				type="button"
-				onClick={() => setIsNew(!isNew)}
-				className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground"
-			>
-				{isNew ? "I already have an account" : "Create an account"}
-			</button>
+			<div className="flex justify-center gap-6">
+				{!isNew && (
+					<button
+						type="button"
+						onClick={() => setForgotPassword(true)}
+						className={secondaryActionClass}
+					>
+						Forgot password?
+					</button>
+				)}
+				<button type="button" onClick={() => setIsNew(!isNew)} className={secondaryActionClass}>
+					{isNew ? "I already have an account" : "Create an account"}
+				</button>
+			</div>
 		</AuthLayout>
 	);
 }
+
+const secondaryActionClass =
+	"focus-ring rounded-md px-1.5 py-1.5 font-medium text-[14px] text-muted-foreground";
 
 /** A bot of each colour, each with its own eyes and a little up or down, as the design lines them up. */
 const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
@@ -217,21 +238,6 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
 				</Button>
 			</div>
 		</main>
-	);
-}
-
-const fieldClass =
-	"min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground";
-
-/** One labelled field in the form's card, as every form in the app lays them out. */
-function FormRow({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-	return (
-		<div className="flex items-center gap-3 border-border border-b px-4 py-3.5 last:border-b-0 focus-within:bg-panel">
-			<label htmlFor={id} className="w-[88px] shrink-0 text-[14px] text-muted-foreground">
-				{label}
-			</label>
-			{children}
-		</div>
 	);
 }
 
