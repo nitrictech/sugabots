@@ -399,7 +399,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const steps = TurnSteps.of({
 			segment,
 			decide: (request, decided) =>
-				Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
+				Effect.asVoid(
+					Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
+				),
 			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
@@ -442,7 +444,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const workflowCall = () =>
 			pendingCall({ sdkToolCallId: "sdk-workflow", input: { title: "Workflow" } });
 
-		it("sends a decision to the workflow, which records it and runs on", async () => {
+		it("records a decision and sends it to the workflow, which runs on", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 
@@ -494,6 +496,28 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			await decide("allow_once");
 
 			await expect(decide("deny")).rejects.toBeInstanceOf(ToolApprovalConflict);
+		});
+
+		it("tells the thread's watchers of a decision before the workflow hears it", async () => {
+			const pending = workflowCall();
+			const signals = await parkInWorkflow(pending);
+			const unheard = TurnSignals.Service.of({ ...signals, decide: () => Effect.void });
+			delivered = [];
+
+			await onPostgresAs(memberId)(
+				Context.get(await conversationsForTests(bus, unheard), Turns.Controls),
+			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
+
+			expect(delivered.map(({ event }) => event)).toContainEqual(
+				expect.objectContaining({
+					type: "tool_call.updated",
+					toolCall: expect.objectContaining({
+						id: pending.id,
+						approval: expect.objectContaining({ status: "allowed" }),
+					}),
+				}),
+			);
+			expect(segment).toHaveBeenCalledTimes(1);
 		});
 
 		it("sends a cancel to the workflow, which records it and ends", async () => {

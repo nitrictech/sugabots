@@ -70,8 +70,9 @@ export const SegmentOutcome = Schema.Union([
 export type SegmentOutcome = typeof SegmentOutcome.Type;
 
 /**
- * A person's decision on one approval. Sending it is the decision: the
- * workflow records it, and the first decision sent is the one that stands.
+ * A person's decision on one approval, recorded as it is sent. The workflow
+ * records it again, which changes nothing unless the first recording was
+ * lost, and the first decision recorded is the one that stands.
  */
 export const approvalDecided = (approvalId: string) =>
 	DurableDeferred.make(`approval/${approvalId}`, { success: ApprovalDecision });

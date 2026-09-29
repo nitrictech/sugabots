@@ -104,7 +104,8 @@ export interface ControlsInterface {
 	readonly cancel: (turnId: string) => Effect.Effect<boolean, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Decides a tool call a turn is waiting on, as the actor, once they may.
-	 * The turn's workflow records the decision and runs what was allowed.
+	 * The decision is recorded, so the thread's watchers see it at once, and
+	 * sent to the turn's workflow, which runs what was allowed.
 	 */
 	readonly decide: (input: {
 		podId: string;

@@ -72,14 +72,15 @@ export interface Interface {
 		reply: { threadId: string; messageId: string; turnId: string },
 		approvals: readonly PendingToolApproval[],
 	) => Effect.Effect<void>;
-	/** Takes the decision on a pending call for `userId`. `false` when somebody already has. */
-	readonly claimDecision: (toolCallId: string, userId: string) => Effect.Effect<boolean>;
-	/** Records a decision on an approval in the thread. Does nothing once it is decided. */
+	/**
+	 * Records a decision on an approval in the thread. `false`, changing
+	 * nothing, once it is decided: the first decision recorded stands.
+	 */
 	readonly recordDecision: (input: {
 		threadId: string;
 		approvalId: string;
 		decision: ApprovalDecision;
-	}) => Effect.Effect<void>;
+	}) => Effect.Effect<boolean>;
 	/**
 	 * Starts an allowed call, if it is exactly the call that was approved, its
 	 * turn may still run tools, its connection is configured as it was when
@@ -237,18 +238,6 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		claimDecision: (toolCallId, userId) =>
-			operation(
-				"claimDecision",
-				transaction(
-					Effect.gen(function* () {
-						const row = yield* lockedCall(eq(toolCall.id, toolCallId));
-						if (!row) return false;
-						return (yield* apply(row, ToolCallEvent.Claim({ userId }))) !== undefined;
-					}),
-				),
-			),
-
 		recordDecision: (input) =>
 			operation(
 				"recordDecision",
@@ -257,9 +246,9 @@ export const make = Effect.gen(function* () {
 						const row = yield* lockedCall(
 							and(eq(toolCall.threadId, input.threadId), eq(toolCall.approvalId, input.approvalId)),
 						);
-						if (!row) return;
+						if (!row) return false;
 						const decided = yield* apply(row, ToolCallEvent.Decide({ decision: input.decision }));
-						if (!decided) return;
+						if (!decided) return false;
 						const [decider] = yield* query((db) =>
 							db
 								.select({ name: user.name })
@@ -270,6 +259,7 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ToolCallDecided(toolCallChange(decided, decider?.name ?? null)),
 						]);
+						return true;
 					}),
 				),
 			),

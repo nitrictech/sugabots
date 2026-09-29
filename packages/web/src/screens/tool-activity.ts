@@ -18,6 +18,15 @@ import {
 export const BUILT_IN_HANDLE = "";
 
 /**
+ * Whether the call is stopped until a person allows or denies it. An allowed
+ * call keeps `awaiting_approval` until its turn starts it, a moment later, but
+ * waits on nobody.
+ */
+export function awaitsApproval(call: ToolCallPart): boolean {
+	return call.status === "awaiting_approval" && call.approval?.status === "pending";
+}
+
+/**
  * Whether the part at `index` is narration: text that comes straight before a
  * tool call, which the thread leaves out.
  */

@@ -17,7 +17,7 @@ import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
-import { isNarration, splitToolKey } from "./tool-activity.ts";
+import { awaitsApproval, isNarration, splitToolKey } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -176,8 +176,7 @@ export function ThreadConversation({
 							}
 							if (segment.type === "tool_call") {
 								const call = segment.toolCall;
-								const pending =
-									call.status === "awaiting_approval" && call.approval?.status === "pending";
+								const pending = awaitsApproval(call);
 								// Only an agent calls tools; the check narrows the author for the card.
 								if (pending && message.author.kind === "agent") {
 									return (
@@ -265,7 +264,7 @@ function isTyping(message: Message): boolean {
 	// While a collaboration runs the bot is quiet in its own chat; the collaboration line says so.
 	if (waitingOn(message)) return false;
 	const awaitingApproval = message.parts.some(
-		(part) => part.type === "tool_call" && part.status === "awaiting_approval",
+		(part) => part.type === "tool_call" && awaitsApproval(part),
 	);
 	return message.status === "streaming" && !awaitingApproval;
 }
@@ -288,11 +287,6 @@ function collaborationState(collaboration: CollaborationPart): ActivityState {
 function waitingOn(message: Message): string | undefined {
 	const last = message.parts.at(-1);
 	return last?.type === "collaboration" ? last.agentName : undefined;
-}
-
-/** A call waiting for approval: the only one drawn among the bubbles, as its card. */
-function drawsInThread(call: ToolCallPart): boolean {
-	return call.status === "awaiting_approval" && call.approval?.status === "pending";
 }
 
 type Segment =
@@ -318,7 +312,8 @@ function segmentsOf(message: Message): Segment[] {
 			return;
 		}
 		if (part.type === "tool_call") {
-			if (drawsInThread(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
+			// A call waiting for approval is the only one drawn among the bubbles, as its card.
+			if (awaitsApproval(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
 			return;
 		}
 		const followed = index < message.parts.length - 1 && part.text.trim() !== "";

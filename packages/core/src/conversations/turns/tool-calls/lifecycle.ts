@@ -7,7 +7,7 @@ import type { UserMessage } from "../../../user-message.ts";
  *
  * A built-in tool's call opens `running` and closes `completed` or `failed`.
  * A connection tool's call is parked first, `awaiting_approval` with its
- * approval `pending`: a person claims and decides it, an allowed call then
+ * approval `pending`: a person decides it, an allowed call then
  * runs, and a denied one completes with the denial as its output. A call
  * still open when its turn ends fails, and a pending approval is denied.
  * `ToolCallRepository` loads a call, asks `transition` what the event makes of
@@ -20,7 +20,7 @@ export const UNFINISHED_STATUSES = [
 	"awaiting_approval",
 ] as const satisfies readonly ToolCallStatus[];
 
-/** A person's decision on one approval, as the turn's workflow receives and records it. */
+/** A person's decision on one approval, as it is recorded and sent to the turn's workflow. */
 export const ApprovalDecision = Schema.Struct({
 	decision: Schema.Literals(["allow_once", "deny"]),
 	userId: Schema.String,
@@ -38,7 +38,7 @@ export interface ToolCallState {
 	readonly status: ToolCallStatus;
 	/** `null` for a call that needed nobody's approval. */
 	readonly approvalStatus: ToolApprovalStatus | null;
-	/** Who claimed or made the decision. */
+	/** Who made the decision. */
 	readonly decidedById: string | null;
 	readonly output: JsonValue | null;
 	readonly error: UserMessage | null;
@@ -47,8 +47,6 @@ export interface ToolCallState {
 export type ToolCallEvent = Data.TaggedEnum<{
 	/** The tool returned, or threw. */
 	Close: { readonly outcome: { output: JsonValue } | { error: UserMessage } };
-	/** A person took the decision, so nobody else's is sent. */
-	Claim: { readonly userId: string };
 	/** The decision was recorded. */
 	Decide: { readonly decision: ApprovalDecision };
 	/** The allowed call began running. */
@@ -76,10 +74,6 @@ export function transition(state: ToolCallState, event: ToolCallEvent): Transiti
 					: { ...state, status: "completed", output: outcome.output, error: null },
 			);
 		},
-		Claim: ({ userId }) =>
-			awaitsDecision(state) && state.decidedById === null
-				? next({ ...state, decidedById: userId })
-				: refused("The call has already been decided"),
 		Decide: ({ decision }) => {
 			if (!awaitsDecision(state)) return refused("The call has already been decided");
 			if (decision.decision === "deny") {

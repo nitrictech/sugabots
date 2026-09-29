@@ -106,7 +106,7 @@ export const turnStepsLayer = Layer.effect(
 					}),
 				).pipe(Effect.provideContext(services)),
 			decide: (request, decided) =>
-				toolCalls.recordDecision({ threadId: request.threadId, ...decided }),
+				Effect.asVoid(toolCalls.recordDecision({ threadId: request.threadId, ...decided })),
 			cancelWaiting: (request) => turns.cancelWaiting(request),
 			announceReleased: (request) =>
 				transaction(emit([ConversationEvent.LaneReleased({ threadId: request.threadId })])).pipe(

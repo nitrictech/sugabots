@@ -46,8 +46,8 @@ export function ToolApprovalCard({
 	outgoing?: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
-	// The turn records the decision a moment after it is accepted, and this
-	// card goes once it has; until then the answer stays given.
+	// This goes when the thread's events say the call is decided, a moment
+	// after the decision is accepted; until then the answer stays given.
 	const sent = review.isPending || review.isSuccess;
 	const [requestOpen, setRequestOpen] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
@@ -126,8 +126,8 @@ export function PinnedApproval({
 	canApprove: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
-	// The turn records the decision a moment after it is accepted, and this
-	// card goes once it has; until then the answer stays given.
+	// This goes when the thread's events say the call is decided, a moment
+	// after the decision is accepted; until then the answer stays given.
 	const sent = review.isPending || review.isSuccess;
 	const label = stepLabel(call.tool, splitToolKey(call.tool).name);
 	if (!canApprove) {

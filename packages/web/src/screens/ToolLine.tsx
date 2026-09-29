@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import {
+	awaitsApproval,
 	BUILT_IN_HANDLE,
 	connectionLabel,
 	durationOf,
@@ -132,9 +133,11 @@ export function toolLineText(
 			),
 		]);
 	const denied = (call: ToolCallPart) => call.approval?.status === "denied";
-	const waiting = (call: ToolCallPart) =>
-		call.status === "awaiting_approval" && call.approval?.status === "pending";
-	const running = (call: ToolCallPart) => call.status === "running";
+	const waiting = awaitsApproval;
+	// An allowed call is as good as running: its turn starts it a moment later.
+	const running = (call: ToolCallPart) =>
+		call.status === "running" ||
+		(call.status === "awaiting_approval" && call.approval?.status === "allowed");
 	const finished = (call: ToolCallPart) =>
 		(call.status === "completed" || call.status === "failed") && !denied(call);
 
@@ -170,7 +173,10 @@ function resultOf(call: ToolCallPart): string {
 		return call.approval.decidedByName ? `Denied by ${call.approval.decidedByName}` : "Denied";
 	}
 	if (call.status === "failed") return call.error ?? "Failed";
-	if (call.status === "awaiting_approval") return "Waiting for approval";
+	if (awaitsApproval(call)) return "Waiting for approval";
+	if (call.status === "awaiting_approval") {
+		return call.approval?.decidedByName ? `Allowed by ${call.approval.decidedByName}` : "Allowed";
+	}
 	if (call.status === "running") return "Running";
 	return briefly(call.output);
 }
