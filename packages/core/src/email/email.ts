@@ -4,6 +4,7 @@ import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { Installation } from "../installation/installation.ts";
 import { fromConsole } from "./implementations/console.ts";
+import { fromResend } from "./implementations/resend.ts";
 import { fromWebhook, type WebhookConfig } from "./implementations/webhook.ts";
 
 export interface Interface {
@@ -22,6 +23,8 @@ export const make = Effect.gen(function* () {
 			return fromConsole;
 		case "webhook":
 			return yield* fromWebhook(yield* webhookConfig);
+		case "resend":
+			return yield* fromResend(yield* Config.Redacted("EMAIL_RESEND_API_KEY"));
 	}
 });
 
@@ -92,7 +95,7 @@ export const transactionalSender = Effect.gen(function* () {
 
 const DEVELOPMENT_TRANSACTIONAL_SENDER: Address = { email: "sugabots@localhost", name: "Sugabots" };
 
-const PROVIDERS = ["console", "webhook"] as const;
+const PROVIDERS = ["console", "webhook", "resend"] as const;
 
 /** The webhook's settings, `EMAIL_WEBHOOK_URL` and `EMAIL_WEBHOOK_TOKEN`. Production requires HTTPS. */
 const webhookConfig = Effect.gen(function* () {

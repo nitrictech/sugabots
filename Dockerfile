@@ -5,7 +5,7 @@
 # SUGABOTS_SKIP_MIGRATIONS=true. Sign-up is closed unless ALLOW_OPEN_SIGNUP=true:
 # the first account claims the installation and the rest arrive by invitation.
 # REQUIRE_EMAIL_VERIFICATION=true additionally withholds a session until the
-# address is proven, and then EMAIL_WEBHOOK_URL must be set.
+# address is proven, and then EMAIL_PROVIDER must name a service that sends mail.
 # Build from the repository root:
 #
 #   docker build -t sugabots .
