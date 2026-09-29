@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
+import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
 const host: Extract<ThreadParticipant, { kind: "agent" }> = {
@@ -172,6 +173,89 @@ export const Runs = meta.story({
 	},
 });
 
+const writingMessages = [
+	message(
+		"0199a3a0-0000-7000-8000-000000000221",
+		person,
+		"Billing timeouts are back on checkout. Can you check Sentry?",
+	),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000222", host, ""),
+		status: "streaming" as const,
+		parts: [],
+	},
+	message(
+		"0199a3a0-0000-7000-8000-000000000223",
+		jay,
+		"The Stripe webhook is failing too, might be the same thing.",
+	),
+	message("0199a3a0-0000-7000-8000-000000000224", jay, "Started around 9 this morning."),
+	message("0199a3a0-0000-7000-8000-000000000225", person, "Track both if nothing's open."),
+];
+
+/**
+ * Messages sent while the bot is still writing a reply wait for its next one,
+ * which answers them together. Each person's run says so once, so nobody
+ * wonders whether theirs was dropped.
+ */
+export const QueuedBehindAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person, jay],
+		messages: writingMessages,
+		queued: queuedBehindReply(writingMessages),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByRole("article", { name: "Jay Park, queued" })).toHaveLength(2);
+		await expect(canvas.getByRole("article", { name: "Sam Rivera, queued" })).toBeInTheDocument();
+		// The question the reply is answering is not waiting on anything.
+		const sams = canvas.getAllByRole("article", { name: /^Sam Rivera, / });
+		await expect(sams.filter((bubble) => !bubble.ariaLabel?.endsWith("queued"))).toHaveLength(1);
+		// Once for each person's run, under its last bubble.
+		const shown = canvas
+			.getAllByText("Queued")
+			.filter((note) => note.checkVisibility({ visibilityProperty: true }));
+		await expect(shown).toHaveLength(2);
+	},
+});
+
+/** How long the loop below stays on each state: writing, then landed. */
+const HAND_OFF_MS = 3_000;
+
+/** The reply the queued messages waited behind has landed, and the next one has started. */
+const handedOffMessages = [
+	...writingMessages.slice(0, 1),
+	message(
+		"0199a3a0-0000-7000-8000-000000000222",
+		host,
+		"Checkout timeouts are tracked as NIT-1902.",
+	),
+	...writingMessages.slice(2),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000226", host, ""),
+		status: "streaming" as const,
+		parts: [],
+	},
+];
+
+/** Waits behind a reply, then sees it land and the next one start, over and over. */
+function HandingOff(props: ComponentProps<typeof ThreadConversation>) {
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const next = setInterval(() => setTick((count) => count + 1), HAND_OFF_MS);
+		return () => clearInterval(next);
+	}, []);
+	const messages = tick % 2 === 1 ? handedOffMessages : writingMessages;
+	return <ThreadConversation {...props} messages={messages} queued={queuedBehindReply(messages)} />;
+}
+
+/** The bot takes the queued messages up: their notes fold away as it starts its next reply. */
+export const QueueHandOff = meta.story({
+	tags: ["ai-generated"],
+	args: { participants: [host, person, jay], messages: [] },
+	render: (args) => <HandingOff {...args} />,
+});
+
 /** A new day in the middle of a thread gets room above its separator, so it reads as a new stretch. */
 export const ANewDay = meta.story({
 	args: {
@@ -238,6 +322,43 @@ export const Mirrored = meta.story({
 	],
 	play: async ({ canvas }) => {
 		await expect(canvas.queryByText("Linear Handler")).toBeNull();
+	},
+});
+
+/**
+ * Failures in a collaboration's sidebar: the note under each bubble lines up with
+ * the bubble, clear of the smaller face, on whichever side the face is.
+ */
+export const FailedInTheSidebar = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		rightAgentId: host.id,
+		compact: true,
+		participants: [host, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000231",
+				host,
+				"Can you check whether the Stripe webhook is failing?",
+			),
+			{
+				...message("0199a3a0-0000-7000-8000-000000000232", other, "Checking the Stripe dashboard."),
+				status: "failed",
+				error: "The model provider did not answer.",
+			},
+			{
+				...message(
+					"0199a3a0-0000-7000-8000-000000000233",
+					host,
+					"Never mind, I'll open it myself.",
+				),
+				status: "cancelled",
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Reply failed.")).toBeInTheDocument();
+		await expect(canvas.getByText("Reply stopped")).toBeInTheDocument();
 	},
 });
 

@@ -486,6 +486,92 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
 	});
 
+	it("says a message waits behind the reply being written, until that reply is done", async () => {
+		const updates = controlledEventStream();
+		client.events.thread.mockReturnValue(updates.stream);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		const writing: Message = {
+			...agentMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fc",
+			status: "streaming",
+			content: "",
+			parts: [],
+			createdAt: "2026-09-18T09:20:00.000Z",
+		};
+		const followUp: Message = {
+			...mainMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fd",
+			author: {
+				kind: "person",
+				id: "0199a3a0-0000-7000-8000-0000000000fe",
+				name: "Jay Park",
+				handle: "jay-park",
+				image: null,
+			},
+			content: "Is the Stripe webhook part of it?",
+			parts: [{ type: "text", text: "Is the Stripe webhook part of it?" }],
+			createdAt: "2026-09-18T09:21:00.000Z",
+		};
+
+		updates.emit(streamEvent("message.created", { threadId: chat.mainThreadId, message: writing }));
+		updates.emit(
+			streamEvent("message.created", { threadId: chat.mainThreadId, message: followUp }),
+		);
+
+		await screen.findByRole("article", { name: "Jay Park, queued" });
+
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: chat.mainThreadId,
+				messageId: writing.id,
+				content: "Checkout timeouts are tracked.",
+				status: "complete",
+			}),
+		);
+
+		await screen.findByText("Checkout timeouts are tracked.");
+		expect(screen.queryByRole("article", { name: "Jay Park, queued" })).toBeNull();
+	});
+
+	it("queues a message being sent behind the reply, even when this browser's clock is behind", async () => {
+		// Before the reply below started, as the server's clock has it.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-18T09:00:00.000Z"));
+		try {
+			const updates = controlledEventStream();
+			client.events.thread.mockReturnValue(updates.stream);
+			const posting = pendingAnswer();
+			client.api.chats.send.mockReturnValue(posting.effect);
+			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+			const composer = await screen.findByLabelText(`Message ${linear.name}`);
+			await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+			updates.emit(
+				streamEvent("message.created", {
+					threadId: chat.mainThreadId,
+					message: {
+						...agentMessage,
+						id: "0199a3a0-0000-7000-8000-0000000000fc",
+						status: "streaming",
+						content: "",
+						parts: [],
+						createdAt: "2026-09-18T09:20:00.000Z",
+					},
+				}),
+			);
+			await screen.findByRole("status", { name: `${linear.name} is typing` });
+
+			fireEvent.change(composer, { target: { value: "Track both if nothing's open." } });
+			fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+			await screen.findByRole("article", { name: `${sam.name}, queued` });
+			posting.answer(Effect.succeed({ message: mainMessage, routing: { status: "routed" } }));
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("shows what the agent said before a collaboration while it waits on the answer", async () => {
 		// The lead-in used to wait for the whole reply, then land above the
 		// collaboration row and the typing line that had already been drawn.

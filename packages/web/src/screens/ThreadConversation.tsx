@@ -7,7 +7,7 @@ import type {
 	ToolCallPart,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Fragment, useRef } from "react";
+import { Fragment, type ReactNode, useRef } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -58,6 +58,7 @@ export function ThreadConversation({
 	canApproveToolCalls = false,
 	compact = false,
 	approvalsPinned = false,
+	queued = NONE_QUEUED,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -86,6 +87,12 @@ export function ThreadConversation({
 	 * since a collaboration has only its two bots and its header names them.
 	 */
 	compact?: boolean;
+	/**
+	 * People's messages that wait for the next reply, because one is still being
+	 * written: `queuedBehindReply` over the whole conversation, not only these
+	 * messages, since the reply may sit in an earlier run of them.
+	 */
+	queued?: ReadonlySet<string>;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -210,6 +217,7 @@ export function ThreadConversation({
 										isLast={isLast}
 										compact={compact}
 										arrivedLive={watchedWritten.has(message.id)}
+										queued={queued.has(message.id)}
 									/>
 								</Fragment>
 							);
@@ -246,6 +254,8 @@ function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySe
 	}
 	return seen.current;
 }
+
+const NONE_QUEUED: ReadonlySet<string> = new Set();
 
 /** How long a reply takes to grow to fit its words: longer for more of them, within bounds. */
 const REVEAL_MS = { minimum: 400, maximum: 700, perCharacter: 0.5 };
@@ -343,6 +353,7 @@ function MessageBubble({
 	isLast,
 	arrivedLive,
 	compact,
+	queued,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
@@ -355,13 +366,16 @@ function MessageBubble({
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
 	compact: boolean;
+	/** Whether this message waits for the next reply, because one is still being written. */
+	queued: boolean;
 }) {
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
 	}
 	const agent = message.author.kind === "agent" ? message.author : undefined;
 	const mine = !agent && outgoing;
-	const status = messageStatus(message);
+	const face = mine ? undefined : outgoing ? "right" : "left";
+	const status = messageStatus(message, { queued });
 	const bubble = cn(
 		compact
 			? "max-w-[380px] px-3.5 py-[9px] text-[14.5px]"
@@ -440,23 +454,66 @@ function MessageBubble({
 				</div>
 			</div>
 			{isLast && message.status === "failed" && (
-				<p className={cn("m-0 pt-1 text-destructive-text text-xs", !mine && "pl-[42px]")}>
+				<BubbleNote face={face} compact={compact} className="text-destructive-text">
 					<span className="font-semibold">Reply failed.</span>
 					{message.error && <span> {message.error}</span>}
-				</p>
+				</BubbleNote>
 			)}
 			{isLast && message.status === "cancelled" && (
-				<p
+				<BubbleNote face={face} compact={compact} className="font-semibold text-subtle-foreground">
+					Reply stopped
+				</BubbleNote>
+			)}
+			{/*
+			 * One note per person's run, under its last bubble. It stays in the page while
+			 * folded, so it can fold away when the bot takes the messages up.
+			 */}
+			{endsRun && message.author.kind === "person" && (
+				<div
 					className={cn(
-						"m-0 pt-1 font-semibold text-subtle-foreground text-xs",
-						!mine && "pl-[42px]",
+						"grid",
+						// Only folding is animated: a message waiting shows it at once.
+						queued
+							? "grid-rows-[1fr]"
+							: "invisible grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity,visibility] duration-300 ease-in motion-reduce:transition-none",
 					)}
 				>
-					Reply stopped
-				</p>
+					<div className="min-h-0 overflow-hidden">
+						<BubbleNote face={face} compact={compact} className="text-subtle-foreground">
+							Queued
+						</BubbleNote>
+					</div>
+				</div>
 			)}
 		</article>
 	);
+}
+
+/**
+ * Where a note under a bubble starts, so it lines up with the bubble rather than
+ * the face beside it: the face's width (34px, or 26px compact, in `MessageBubble`)
+ * and the `gap-2` between them. Change them together.
+ */
+const NOTE_INSET = {
+	left: { regular: "pl-[42px]", compact: "pl-[34px]" },
+	right: { regular: "pr-[42px]", compact: "pr-[34px]" },
+};
+
+/** A line under a bubble, such as why a reply failed, clear of the bubble's face if it has one. */
+function BubbleNote({
+	face,
+	compact,
+	className,
+	children,
+}: {
+	/** The side the bubble's face is on; your own bubbles have none. */
+	face: "left" | "right" | undefined;
+	compact: boolean;
+	className: string;
+	children: ReactNode;
+}) {
+	const inset = face && NOTE_INSET[face][compact ? "compact" : "regular"];
+	return <p className={cn("m-0 pt-1 text-xs", inset, className)}>{children}</p>;
 }
 
 function RoutineTriggerBubble({ message, text }: { message: Message; text: string }) {
@@ -567,7 +624,10 @@ function formatTime(createdAt: string): string {
 	return formatClockTime(new Date(createdAt));
 }
 
-function messageStatus(message: Message): string {
+function messageStatus(message: Message, { queued }: { queued: boolean }): string {
+	if (queued) {
+		return "queued";
+	}
 	if (message.status === "failed") {
 		return "failed";
 	}
