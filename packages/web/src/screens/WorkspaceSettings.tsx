@@ -1,8 +1,11 @@
 import { type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useState } from "react";
 import { client } from "@/api.ts";
+import { failureMessage } from "@/lib/failure.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
+	useDeleteWorkspace,
 	useWorkspace,
 	useWorkspaceMembers,
 	useWorkspacePermissions,
@@ -11,6 +14,7 @@ import {
 import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsDanger,
@@ -83,7 +87,7 @@ export function WorkspaceSettings({
 				<WorkspaceRoutinesSettings workspaceId={workspace.id} />
 			) : (
 				<>
-					{section === "general" && <GeneralSettings role={role} />}
+					{section === "general" && <GeneralSettings role={role} canDelete={may.deleteWorkspace} />}
 					{section === "profile" && <ProfileSettings />}
 					{section === "members" && (
 						<WorkspaceMembersSettings
@@ -123,11 +127,29 @@ export function WorkspaceSettings({
 	);
 }
 
-function GeneralSettings({ role }: { role: WorkspaceRole | undefined }) {
+function GeneralSettings({
+	role,
+	canDelete,
+}: {
+	role: WorkspaceRole | undefined;
+	canDelete: boolean;
+}) {
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const deleteWorkspace = useDeleteWorkspace();
+	const navigate = useNavigate();
 	if (!workspace) return null;
 	const people = members?.length;
+
+	async function confirmDelete(workspaceId: string) {
+		try {
+			await deleteWorkspace.mutateAsync(workspaceId);
+		} catch {
+			return;
+		}
+		await navigate({ to: "/", replace: true });
+	}
 
 	return (
 		<SettingsPage
@@ -158,6 +180,22 @@ function GeneralSettings({ role }: { role: WorkspaceRole | undefined }) {
 			<SettingsGroup label="Appearance">
 				<SettingsRow label="Theme" trailing={<ThemeChoice />} />
 			</SettingsGroup>
+			{canDelete && (
+				<>
+					<SettingsDanger onClick={() => setConfirmingDelete(true)}>
+						Delete workspace
+					</SettingsDanger>
+					<DeleteDialog
+						open={confirmingDelete}
+						onOpenChange={setConfirmingDelete}
+						title={`Delete ${workspace.name}?`}
+						description="Its pods, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
+						pending={deleteWorkspace.isPending}
+						error={deleteWorkspace.error ? failureMessage(deleteWorkspace.error) : undefined}
+						onDelete={() => confirmDelete(workspace.id)}
+					/>
+				</>
+			)}
 		</SettingsPage>
 	);
 }

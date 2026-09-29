@@ -1,4 +1,4 @@
-import { expect, within } from "storybook/test";
+import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { appHandlers, StoryApp, storyUser, storyWorkspace } from "../story-app.tsx";
 
@@ -31,6 +31,18 @@ export const General = meta.story({
 			"page",
 		);
 		await expect(await canvas.findByRole("group", { name: "Theme" })).toBeInTheDocument();
+	},
+});
+
+/** The owner deleting the workspace: a confirmation that says what goes with it. */
+export const DeleteWorkspace = meta.story({
+	render: () => <StoryApp path={settings} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Delete workspace" }, { timeout: 10_000 }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: /^Delete .+\?$/ });
+		await expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
 	},
 });
 

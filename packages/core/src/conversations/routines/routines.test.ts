@@ -21,6 +21,7 @@ import {
 	toolCall,
 	turn,
 	user,
+	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
 import {
@@ -81,6 +82,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
 		routines = routinesAs(userId);
 		view = onPostgresAs(userId)(Context.get(conversations, RoutineView.Service));
+	});
+
+	// A run's history holds its routine back from being deleted on its own, but
+	// not from going with its workspace.
+	it("goes, runs and all, with its workspace", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: `Doomed ${crypto.randomUUID()}`,
+				instructions: "Report.",
+				trigger: { kind: "webhook" },
+			},
+		);
+		await routines.run({ agentId, routineId: created.routine.id, requestId: crypto.randomUUID() });
+		const runsIn = () =>
+			onDatabase((db) =>
+				db.select().from(routineExecution).where(eq(routineExecution.workspaceId, workspaceId)),
+			);
+		expect(await runsIn()).toHaveLength(1);
+
+		await onDatabase((db) => db.delete(workspace).where(eq(workspace.id, workspaceId)));
+
+		expect(await runsIn()).toEqual([]);
 	});
 
 	it("lists the workspace's routines on bots in pods the person reaches, by name", async () => {

@@ -612,6 +612,23 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
+	it("lets only the owner delete a workspace, which takes it from every member", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		await join(workspace.id, ada.id, bob, "admin");
+
+		expect(await run(bob.id, (m) => m.delete({ workspace: workspace.id }))).toEqual({
+			failed: "ActionForbidden",
+		});
+		expect(await run(ada.id, (m) => m.delete({ workspace: workspace.slug }))).toBeUndefined();
+
+		expect(await run(ada.id, (m) => m.workspaces)).toEqual([]);
+		expect(await run(bob.id, (m) => m.workspaces)).toEqual([]);
+		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual({
+			failed: "ResourceHidden",
+		});
+	});
+
 	it("lets a workspace have only one owner", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");

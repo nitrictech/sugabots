@@ -104,6 +104,32 @@ describe("the workspace choice", () => {
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
 	});
+
+	it("lets the owner delete a workspace, then opens another", async () => {
+		apiAnswers({ role: "owner" });
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		client.api.workspaces.delete.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([other]));
+			return Effect.void;
+		});
+		const router = mount("/suga/settings");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Delete workspace" }));
+		const dialog = await screen.findByRole("dialog", { name: `Delete ${workspace.name}?` });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		expect(client.api.workspaces.delete).toHaveBeenCalledWith({
+			params: { workspace: workspace.id },
+		});
+	});
+
+	it("offers an admin no way to delete the workspace", async () => {
+		mount("/suga/settings");
+
+		await screen.findByRole("heading", { name: workspace.name });
+		expect(screen.queryByRole("button", { name: "Delete workspace" })).toBeNull();
+	});
 });
 
 describe("the rail", () => {

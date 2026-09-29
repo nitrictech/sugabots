@@ -399,6 +399,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				manageUsage: administersWorkspace(role),
 				manageAdmins: role === "owner",
 				transferOwnership: role === "owner",
+				deleteWorkspace: role === "owner",
 			},
 		}),
 	);
