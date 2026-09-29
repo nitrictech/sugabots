@@ -245,6 +245,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/routines"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
+		http.get(api("/workspaces/:workspace/chats/pod-markers"), () =>
+			HttpResponse.json({ pods: {} }),
+		),
+		http.post(api("/chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
 			const pod = new URL(request.url).searchParams.get("pod");
 			const items: ChatListItem[] = bots

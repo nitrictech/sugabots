@@ -2,7 +2,7 @@ import { builtInToolCatalog, CONNECTION_TOOL_SEPARATOR } from "@sugabots/contrac
 
 /**
  * What a tool call is called wherever it is shown: the tool line and approval
- * card in a thread.
+ * card in a thread, and a chat list row waiting on one.
  */
 
 /** Calls to the product's own tools sit under this handle, which no connection can take. */
@@ -44,6 +44,23 @@ export function splitToolKey(tool: string): { handle: string; name: string } {
 export function stepLabel(tool: string, name = splitToolKey(tool).name): string {
 	const builtIn = builtInToolCatalog.find((entry) => entry.key === tool);
 	return builtIn ? builtIn.name : wordsFromKey(name);
+}
+
+/** A tool as its approval card titles it: `List issues in Linear`, or a built-in tool's name alone. */
+export function toolTitle(tool: string): string {
+	const { handle, name } = splitToolKey(tool);
+	const label = stepLabel(tool, name);
+	return handle ? `${label} in ${connectionLabel(handle)}` : label;
+}
+
+/**
+ * What a chat waiting for approval of `tool` is doing: `Waiting to list issues
+ * in Linear`, or `Waiting to read web pages`. Tool names, built-in or
+ * connected, read as what the tool does, so they follow "to".
+ */
+export function waitingText(tool: string): string {
+	const title = toolTitle(tool);
+	return `Waiting to ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
 }
 
 /**

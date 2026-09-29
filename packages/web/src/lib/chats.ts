@@ -6,6 +6,7 @@ import type {
 	ThreadDetails,
 } from "@sugabots/contracts";
 import {
+	type QueryClient,
 	skipToken,
 	useInfiniteQuery,
 	useMutation,
@@ -13,6 +14,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
+import { useEffect } from "react";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -34,6 +36,63 @@ export function useChatList(pod: string | undefined) {
 						)
 				: skipToken,
 	});
+}
+
+/** How each pod stands for the rail: its unread chats, and whether any waits on the person. */
+export function usePodChatMarkers() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: ["chat-pod-markers", workspaceId],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.chats.podMarkers({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
+/**
+ * Records that the person has read the chat up to its newest message, and
+ * clears its dot and its count on the rail.
+ */
+export function useMarkChatRead(chatId: string | undefined) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: () =>
+			chatId
+				? Effect.runPromise(client.api.chats.markRead({ params: { chatId } }))
+				: Promise.resolve(),
+		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+	});
+}
+
+/**
+ * Marks the chat read while it is on screen: when it opens, when `newest`
+ * changes, and when its tab comes back into view. `newest` names the latest
+ * message and how it stands, so a reply streaming in marks it once it
+ * arrives and once it finishes, not at every word.
+ */
+export function useReadWhileShown(chatId: string | undefined, newest: string | undefined) {
+	const { mutate } = useMarkChatRead(chatId);
+	useEffect(() => {
+		if (!chatId || newest === undefined) return;
+		const markIfShown = () => {
+			if (document.visibilityState === "visible") mutate();
+		};
+		markIfShown();
+		document.addEventListener("visibilitychange", markIfShown);
+		return () => document.removeEventListener("visibilitychange", markIfShown);
+	}, [chatId, newest, mutate]);
+}
+
+/** Fetches again what shows which chats are unread or waiting: the lists and the rail. */
+export function refreshChatMarkers(queries: QueryClient, workspaceId: string | undefined) {
+	return Promise.all([
+		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+		queries.invalidateQueries({ queryKey: ["chat-pod-markers", workspaceId] }),
+	]);
 }
 
 export function useChat(podId: string | undefined, hostAgentId: string) {

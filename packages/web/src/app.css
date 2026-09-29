@@ -75,8 +75,15 @@
 	--ring: oklch(0.62 0.17 268);
 	--ring-halo: oklch(0.62 0.17 268 / 0.3);
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
+	/*
+	 * The unread dot on a chat's face, the count of unread chats on a pod's
+	 * rail tile, and the hand on either when a chat waits for your approval.
+	 */
+	--unread-dot: oklch(0.62 0.17 268);
+	--rail-count: oklch(0.56 0.17 268);
+	--approval-marker: oklch(0.56 0.17 268);
 
-	/* Red is only for needs-approval, errors and delete. */
+	/* Red is only for errors and delete. */
 	--destructive: #ef4444;
 	/*
 	 * Red text, such as Delete pod, and the wash behind it on hover. Light is a
@@ -136,6 +143,9 @@
 	--color-primary-hover: var(--primary-hover);
 	--color-primary-tint-border: var(--primary-tint-border);
 	--color-ring: var(--ring);
+	--color-unread-dot: var(--unread-dot);
+	--color-rail-count: var(--rail-count);
+	--color-approval-marker: var(--approval-marker);
 	--color-warning: var(--warning);
 	--color-destructive: var(--destructive);
 	--color-person-avatar: var(--person-avatar);
