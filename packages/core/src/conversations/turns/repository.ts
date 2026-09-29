@@ -24,7 +24,6 @@ import {
 import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
 import {
 	type Ended,
@@ -39,6 +38,7 @@ import {
 	transition,
 } from "./lifecycle.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
+import { WorkAdmission } from "./work-admission.ts";
 
 /**
  * The only writer of `turn`, and of a turn's reply message while the turn
@@ -58,7 +58,7 @@ export interface Interface {
 	 * Opens the turn an agent takes on a trigger message, with its reply: starts
 	 * it, or reopens it for another run. A turn that may not run again says
 	 * why, and how it ended if opening it ended it. A routine run that takes no
-	 * more work (see `routineAcceptsWork`) opens no turn, and ends the one it
+	 * more work (see `WorkAdmission`) opens no turn, and ends the one it
 	 * finds.
 	 */
 	readonly openReplyTurn: (
@@ -142,6 +142,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("TurnRepository");
 	const { emit } = yield* ConversationEvents.Service;
+	const admission = yield* WorkAdmission.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
 
 	/** Writes the state the lifecycle decided, plus what else the command records. */
@@ -330,7 +331,7 @@ export const make = Effect.gen(function* () {
 						never,
 						Database | Transaction
 					> {
-						const acceptsWork = yield* routineAcceptsWork(request.threadId);
+						const acceptsWork = yield* admission.admits(request.threadId);
 						const existing = yield* lockedTurn(onTrigger(request));
 						if (!acceptsWork) return yield* endForEndedRoutine(existing);
 						if (!existing) {
@@ -420,7 +421,7 @@ export const make = Effect.gen(function* () {
 				"suspend",
 				transaction(
 					Effect.gen(function* () {
-						if (!(yield* routineAcceptsWork(reply.threadId))) return false;
+						if (!(yield* admission.admits(reply.threadId))) return false;
 						const locked = yield* lockAndTransition(eq(turn.id, reply.turnId), TurnEvent.Suspend());
 						if (locked?.decided._tag !== "Next") return false;
 						yield* write(locked.id, locked.decided.state, { checkpoint });

@@ -7,13 +7,13 @@ import { afterCommit, query, serviceOperations, transaction } from "../../databa
 import { thread, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { findRoutineExecutionId } from "../routines/execution.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
 import { awaitsDecision } from "./tool-calls/lifecycle.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import type { Turns } from "./turns.ts";
+import { WorkAdmission } from "./work-admission.ts";
 
 /**
  * `Turns.Controls`: people cancelling a turn and deciding the tool calls it
@@ -27,6 +27,7 @@ export const makeControls = Effect.gen(function* () {
 	const turns = yield* TurnRepository.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
 	const signals = yield* TurnSignals.Service;
+	const admission = yield* WorkAdmission.Service;
 	return {
 		cancel: (turnId) =>
 			operation(
@@ -79,9 +80,7 @@ export const makeControls = Effect.gen(function* () {
 								.limit(1),
 						);
 						if (!approvalThread) return yield* new ToolApprovalNotFound();
-						const routineExecutionId = yield* query((db) =>
-							findRoutineExecutionId(db, approvalThread.id),
-						);
+						const forRoutine = yield* admission.forRoutine(approvalThread.id);
 						const [candidate] = yield* query((db) =>
 							db
 								.select({
@@ -107,7 +106,7 @@ export const makeControls = Effect.gen(function* () {
 							return yield* new ToolApprovalNotFound();
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
-						if (!mayDecideApprovals(decider, routineExecutionId !== undefined)) {
+						if (!mayDecideApprovals(decider, forRoutine)) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;

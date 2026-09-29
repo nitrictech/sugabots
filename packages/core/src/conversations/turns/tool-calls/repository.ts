@@ -23,9 +23,9 @@ import {
 import type { UserMessage } from "../../../user-message.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
-import { routineAcceptsWork } from "../../routines/execution.ts";
 import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
 import { mayRunTools } from "../lifecycle.ts";
+import { WorkAdmission } from "../work-admission.ts";
 import {
 	type ApprovalDecision,
 	isFinished,
@@ -85,7 +85,7 @@ export interface Interface {
 	 * Starts an allowed call, if it is exactly the call that was approved, its
 	 * turn may still run tools, its connection is configured as it was when
 	 * approved, and its routine run, if any, still takes work (see
-	 * `routineAcceptsWork`).
+	 * `WorkAdmission`).
 	 */
 	readonly beginExecution: (input: {
 		threadId: string;
@@ -118,6 +118,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ToolCallRepository");
 	const { emit } = yield* ConversationEvents.Service;
+	const admission = yield* WorkAdmission.Service;
 
 	/** Applies `event` to a locked call and writes the result. `undefined` when the lifecycle refuses. */
 	const apply = Effect.fn("ToolCallRepository.apply")(function* (
@@ -280,7 +281,7 @@ export const make = Effect.gen(function* () {
 				"beginExecution",
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<BeganExecution, never, Database | Transaction> {
-						if (!(yield* routineAcceptsWork(input.threadId))) {
+						if (!(yield* admission.admits(input.threadId))) {
 							return refusedExecution("The routine run takes no more work");
 						}
 						const [scope] = yield* query((db) =>

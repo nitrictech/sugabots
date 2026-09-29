@@ -53,6 +53,7 @@ export {
 	ToolApprovalNotFound,
 } from "./controls.ts";
 export type { Ended } from "./lifecycle.ts";
+export { WorkAdmission } from "./work-admission.ts";
 
 /** Which agent answers which message in which thread, and why it was asked. */
 export type Request = TurnRequest;
