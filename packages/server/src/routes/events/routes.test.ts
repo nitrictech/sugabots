@@ -438,3 +438,37 @@ describe("resuming", () => {
 		stream.close();
 	});
 });
+
+describe("typing", () => {
+	const typing = (app: TestApp) =>
+		app.request(`/threads/${THREAD}/typing`, {
+			method: "POST",
+			headers: { authorization: "Bearer good-token" },
+		});
+
+	it("tells the thread's watchers who is typing, without an id to resume from", async () => {
+		const { app } = server();
+		const stream = await open(app, `/threads/${THREAD}/events`);
+
+		expect((await typing(app)).status).toBe(204);
+
+		expect((await stream.take(1))[0]).toEqual({
+			event: "person.typing",
+			data: {
+				v: 1,
+				type: "person.typing",
+				threadId: THREAD,
+				person: { kind: "person", id: user.id, name: "Sam", handle: "sam", image: null },
+			},
+		});
+		stream.close();
+	});
+
+	it("answers 404 for a thread the caller cannot see, and tells nobody", async () => {
+		const { app, bus } = server({ ...openChannelAccess, thread: () => Effect.undefined });
+		const publish = vi.spyOn(bus, "publish");
+
+		expect((await typing(app)).status).toBe(404);
+		expect(publish).not.toHaveBeenCalled();
+	});
+});

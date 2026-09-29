@@ -1,5 +1,5 @@
-import type { Channel, StreamEvent } from "@sugabots/contracts";
-import { NotFound } from "@sugabots/contracts/http";
+import { type Channel, handleFromName, type StreamEvent, streamEvent } from "@sugabots/contracts";
+import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { PodAudience } from "@sugabots/core/database/events/pod-audience";
@@ -88,6 +88,26 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 			)
 			.handle("thread", ({ params, request }) =>
 				streamFor(request, () => access.thread(params.threadId)),
+			)
+			.handle("typing", ({ params }) =>
+				Effect.gen(function* () {
+					const channel = yield* access.thread(params.threadId);
+					if (!channel) {
+						return yield* new NotFound({ message: "No such thread" });
+					}
+					const user = yield* CurrentUser;
+					const typing = streamEvent("person.typing", {
+						threadId: params.threadId,
+						person: {
+							kind: "person",
+							id: user.id,
+							name: user.name,
+							handle: handleFromName(user.name),
+							image: user.image,
+						},
+					});
+					yield* Effect.promise(() => bus.publish(channel, typing));
+				}).pipe(asSessionUser),
 			);
 	}),
 );

@@ -18,6 +18,7 @@ import {
 	apiAnswers,
 	builtInAgents,
 	controlledEventStream,
+	jye,
 	linear,
 	mount,
 	pendingAnswer,
@@ -807,6 +808,92 @@ describe("ongoing agent Chat", () => {
 			expect(screen.queryByRole("complementary", { name: collaborationEntry.title })).toBeNull(),
 		);
 		expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${linear.handle}`);
+	});
+});
+
+describe("people typing in the Chat", () => {
+	const jyeInThread = {
+		kind: "person" as const,
+		id: jye.id,
+		name: jye.name,
+		handle: handleFromName(jye.name),
+		image: null,
+	};
+	const jyeTyping = streamEvent("person.typing", {
+		threadId: chat.mainThreadId,
+		person: jyeInThread,
+	});
+
+	async function watchMainThread() {
+		const updates = controlledEventStream();
+		client.events.thread.mockReturnValue(updates.stream);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		return updates;
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("shows someone else typing until their message arrives", async () => {
+		const updates = await watchMainThread();
+
+		updates.emit(jyeTyping);
+		await screen.findByRole("status", { name: "Jye is typing" });
+
+		updates.emit(
+			streamEvent("message.created", {
+				threadId: chat.mainThreadId,
+				message: {
+					...mainMessage,
+					id: "0199a3a0-0000-7000-8000-0000000000fc",
+					author: jyeInThread,
+					content: "Also, the deploy",
+					parts: [{ type: "text", text: "Also, the deploy" }],
+					createdAt: "2026-09-18T09:40:00.000Z",
+				},
+			}),
+		);
+		await screen.findByText("Also, the deploy");
+		expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull();
+	});
+
+	it("stops showing someone typing once they stop saying so", async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		const updates = await watchMainThread();
+
+		updates.emit(jyeTyping);
+		await screen.findByRole("status", { name: "Jye is typing" });
+
+		await vi.advanceTimersByTimeAsync(7_000);
+		await waitFor(() => expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull());
+	});
+
+	it("does not show you your own typing", async () => {
+		const updates = await watchMainThread();
+
+		updates.emit(streamEvent("person.typing", { threadId: chat.mainThreadId, person }));
+		updates.emit(jyeTyping);
+
+		await screen.findByRole("status", { name: "Jye is typing" });
+		expect(screen.queryByRole("status", { name: /Sam/ })).toBeNull();
+	});
+
+	it("tells the thread you are typing, once for a burst of keystrokes", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+
+		fireEvent.change(composer, { target: { value: "S" } });
+		fireEvent.change(composer, { target: { value: "Se" } });
+		fireEvent.change(composer, { target: { value: "Sen" } });
+
+		await waitFor(() =>
+			expect(client.api.events.typing).toHaveBeenCalledWith({
+				params: { threadId: chat.mainThreadId },
+			}),
+		);
+		expect(client.api.events.typing).toHaveBeenCalledTimes(1);
 	});
 });
 

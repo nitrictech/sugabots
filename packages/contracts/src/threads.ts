@@ -50,7 +50,7 @@ export const threadSchema = Schema.Struct({
 
 export type Thread = typeof threadSchema.Type;
 
-const personParticipantSchema = Schema.Struct({
+export const personParticipantSchema = Schema.Struct({
 	kind: Schema.Literal("person"),
 	id: uuidSchema,
 	name: Schema.String,
@@ -58,6 +58,8 @@ const personParticipantSchema = Schema.Struct({
 	handle: Schema.String,
 	image: Schema.NullOr(Schema.String),
 });
+
+export type PersonParticipant = typeof personParticipantSchema.Type;
 
 export const agentParticipantSchema = Schema.Struct({
 	kind: Schema.Literal("agent"),

@@ -281,6 +281,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 		http.get(api("/threads/:threadId/events"), quietStream),
+		http.post(api("/threads/:threadId/typing"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/threads/:threadId/activity"), ({ params }) => {
 			const bot = botForThread(String(params.threadId));
 			return bot

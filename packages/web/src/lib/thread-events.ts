@@ -2,6 +2,7 @@ import {
 	type Message,
 	type MessagePart,
 	messagePartsFor,
+	type PersonParticipant,
 	type PlacedPart,
 	placedParts,
 	type StreamEvent,
@@ -10,8 +11,8 @@ import {
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Schema } from "effect";
-import { useEffect } from "react";
+import { Effect, Schema } from "effect";
+import { useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
@@ -52,6 +53,84 @@ export function useThreadNotices(threadId: string | undefined): readonly ThreadN
 }
 
 const noticesKey = (threadId: string) => ["thread-notices", threadId] as const;
+
+/** How often a person still typing says so again. */
+const TYPING_SIGNAL_INTERVAL_MS = 3_000;
+
+/**
+ * How long a person is shown typing after they last said so. Long enough for
+ * the next signal to arrive late without them flickering out.
+ */
+const TYPING_SHOWN_FOR_MS = 2 * TYPING_SIGNAL_INTERVAL_MS;
+
+/** A person the thread's events said is typing, and until when they are shown. */
+interface TypingPerson {
+	person: PersonParticipant;
+	/** Epoch milliseconds. */
+	shownUntil: number;
+}
+
+const typingKey = (threadId: string) => ["thread-typing", threadId] as const;
+
+/**
+ * Tells the thread's other watchers the user is typing while `draft` has
+ * text, at most once per `TYPING_SIGNAL_INTERVAL_MS`. An emptied draft, as
+ * after sending, lets the next keystroke say so straight away.
+ */
+export function useTypingSignal(threadId: string | undefined, draft: string): void {
+	const lastSentAt = useRef(0);
+
+	useEffect(() => {
+		if (!threadId) return;
+		if (!draft.trim()) {
+			lastSentAt.current = 0;
+			return;
+		}
+		const now = Date.now();
+		if (now - lastSentAt.current < TYPING_SIGNAL_INTERVAL_MS) return;
+		lastSentAt.current = now;
+		// Best effort: a lost signal only means the dots show a moment late.
+		void Effect.runPromise(client.api.events.typing({ params: { threadId } })).catch(() => {});
+	}, [threadId, draft]);
+}
+
+/**
+ * The people typing in the thread, other than `userId`, in the order they
+ * started. Each drops out once their signals stop or their message arrives.
+ */
+export function usePeopleTyping(
+	threadId: string | undefined,
+	userId: string,
+): readonly PersonParticipant[] {
+	const typing =
+		useQuery({
+			queryKey: typingKey(threadId ?? ""),
+			queryFn: (): TypingPerson[] => [],
+			enabled: threadId !== undefined,
+			staleTime: Number.POSITIVE_INFINITY,
+		}).data ?? [];
+	const [now, setNow] = useState(Date.now);
+	const shown = typing.filter(({ person, shownUntil }) => person.id !== userId && shownUntil > now);
+	const nextExpiry = Math.min(...shown.map(({ shownUntil }) => shownUntil));
+
+	useEffect(() => {
+		if (!Number.isFinite(nextExpiry)) return;
+		const timer = setTimeout(() => setNow(Date.now()), nextExpiry - Date.now());
+		return () => clearTimeout(timer);
+	}, [nextExpiry]);
+
+	return shown.map(({ person }) => person);
+}
+
+/** `typing` with `person` shown for another `TYPING_SHOWN_FOR_MS`, and without anyone expired. */
+function withPersonTyping(typing: TypingPerson[], person: PersonParticipant): TypingPerson[] {
+	const now = Date.now();
+	const shownUntil = now + TYPING_SHOWN_FOR_MS;
+	const current = typing.filter((entry) => entry.shownUntil > now);
+	return current.some((entry) => entry.person.id === person.id)
+		? current.map((entry) => (entry.person.id === person.id ? { person, shownUntil } : entry))
+		: [...current, { person, shownUntil }];
+}
 
 export function useWorkspaceEvents(): void {
 	const queries = useQueryClient();
@@ -120,9 +199,23 @@ async function applyThreadEvent(
 		]);
 		return;
 	}
-	// A new message moves the thread on, past what its notices were about.
+	if (update.type === "person.typing") {
+		const { person } = update;
+		queries.setQueryData<TypingPerson[]>(typingKey(threadId), (typing = []) =>
+			withPersonTyping(typing, person),
+		);
+		return;
+	}
 	if (update.type === "message.created") {
+		// A new message moves the thread on, past what its notices were about.
 		queries.setQueryData<ThreadNotice[]>(noticesKey(threadId), []);
+		// And whoever wrote it has stopped typing it.
+		const { author } = update.message;
+		if (author.kind === "person") {
+			queries.setQueryData<TypingPerson[]>(typingKey(threadId), (typing) =>
+				typing?.filter((entry) => entry.person.id !== author.id),
+			);
+		}
 	}
 	await queries.cancelQueries({ queryKey: ["thread", threadId] });
 	if (!queries.getQueryData(["thread", threadId])) {

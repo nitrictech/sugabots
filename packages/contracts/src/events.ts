@@ -4,6 +4,7 @@ import {
 	collaborationPartSchema,
 	messageSchema,
 	messageStatusSchema,
+	personParticipantSchema,
 	toolCallPartSchema,
 } from "./threads.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -78,6 +79,13 @@ export const eventPayloadSchemas = {
 	 * written for people; it is not kept in the thread's history.
 	 */
 	"thread.notice": Schema.Struct({ threadId, notice: Schema.String }),
+	/**
+	 * `person` is writing in the thread's composer. Sent again every few
+	 * seconds while they keep typing, and never to say they stopped: a
+	 * watcher stops showing them when these stop coming, or when their
+	 * message arrives.
+	 */
+	"person.typing": Schema.Struct({ threadId, person: personParticipantSchema }),
 	"thread.created": Schema.Struct({ threadId }),
 	/**
 	 * Something about the thread no more specific event describes. On the
@@ -139,13 +147,15 @@ export const durableEventTypeSchema = Schema.Literals([
 export type DurableEventType = typeof durableEventTypeSchema.Type;
 
 /**
- * Progress within a state change. Sent to live subscribers only and carry no
- * `id`, which per the SSE spec means they do not advance the client's
- * last-event-id: a delta lost to a disconnect is recovered from the message row
- * a running turn saves every second, not from a replay.
+ * What only matters while it is happening: progress within a state change, or
+ * somebody typing. Sent to live subscribers only and carry no `id`, which per
+ * the SSE spec means they do not advance the client's last-event-id: a delta
+ * lost to a disconnect is recovered from the message row a running turn saves
+ * every second, not from a replay.
  */
 export const ephemeralEventTypeSchema = Schema.Literals([
 	"message.delta",
+	"person.typing",
 ] satisfies KnownEventType[]);
 
 export type EphemeralEventType = typeof ephemeralEventTypeSchema.Type;
@@ -244,6 +254,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("turn.completed", P["turn.completed"]),
 	withEnvelope("thread.changed", P["thread.changed"]),
 	withEnvelope("thread.notice", P["thread.notice"]),
+	withEnvelope("person.typing", P["person.typing"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),
 	withEnvelope("reset", P.reset.schema),

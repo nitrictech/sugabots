@@ -314,6 +314,7 @@ export const facilitator = builtInAgents[1] as SystemAgent;
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.thread.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
+	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
 	client.api.workspaces.members.mockReturnValue(
 		Effect.succeed([
