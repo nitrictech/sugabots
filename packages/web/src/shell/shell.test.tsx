@@ -117,7 +117,7 @@ describe("the workspace choice", () => {
 		fireEvent.change(name, { target: { value: " Nitric " } });
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(client.api.workspaces.create).toHaveBeenCalledWith({
 			payload: expect.objectContaining({ name: "Nitric", slug: "nitric" }),
 		});
@@ -140,7 +140,7 @@ describe("the workspace choice", () => {
 		fireEvent.change(name, { target: { value: "Nitric" } });
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(router.state.location.pathname).toBe("/onboarding/new");
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
 	});
@@ -208,7 +208,7 @@ describe("the workspace choice", () => {
 
 		fireEvent.change(await startNewWorkspace(router), { target: { value: "Nitric" } });
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-		await screen.findByRole("heading", { name: "Connect a model" });
+		await screen.findByRole("heading", { name: "Connect a provider" });
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
@@ -739,11 +739,11 @@ describe("routes", () => {
 		);
 		mount(linearPage);
 
-		expect(await screen.findByRole("heading", { name: "Connect a model" })).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 	});
 
-	it("connects the first provider by its key, then switches on the model chosen for the first bot", async () => {
+	it("adds the first provider from the Models picker, then switches on the model chosen for the first bot", async () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
@@ -763,11 +763,17 @@ describe("routes", () => {
 			})),
 		};
 		const [, large] = openrouter.models;
-		client.api.modelProviders.create.mockReturnValue(Effect.succeed(openrouter));
+		let listed: ModelProvider[] = [];
+		client.api.modelProviders.list.mockImplementation(() => Effect.sync(() => listed));
+		client.api.modelProviders.create.mockReturnValue(
+			Effect.sync(() => {
+				listed = [openrouter];
+				return openrouter;
+			}),
+		);
 		client.api.modelProviders.fetchModels.mockReturnValue(
 			Effect.succeed({ added: 2, updated: 0, unchanged: 0 }),
 		);
-		client.api.modelProviders.get.mockReturnValue(Effect.succeed(openrouter));
 		client.api.modelProviders.updateModel.mockReturnValue(
 			Effect.succeed({ ...(large as ProviderModel), enabled: true }),
 		);
@@ -776,9 +782,12 @@ describe("routes", () => {
 		);
 		mount(linearPage);
 
-		fireEvent.click(await screen.findByRole("radio", { name: /OpenRouter/ }));
-		fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-or-test" } });
-		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Choose a provider" }));
+		const picker = await screen.findByRole("dialog", { name: "Add provider" });
+		fireEvent.click(within(picker).getByRole("button", { name: /^OpenRouter/ }));
+		const step = await screen.findByRole("dialog", { name: "OpenRouter" });
+		fireEvent.change(within(step).getByLabelText("API key"), { target: { value: "sk-or-test" } });
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
 
 		expect(await screen.findByRole("heading", { name: "Choose a model" })).toBeDefined();
 		expect(client.api.modelProviders.create).toHaveBeenCalledWith({

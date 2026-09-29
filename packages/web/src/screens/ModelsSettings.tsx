@@ -318,9 +318,11 @@ function AddProviderSteps({
 			.filter((provider) => provider.preset !== null)
 			.map((provider) => [provider.preset as ProviderPresetId, provider]),
 	);
+	// Ollama is on in every workspace from the start, so being reachable is not
+	// enough to leave it out: it has to have listed models.
 	const available = providerCatalog.filter((preset) => {
 		const existing = byPreset.get(preset.id);
-		return !existing || !isConnected(existing);
+		return !existing || !isConnected(existing) || existing.modelCount === 0;
 	});
 
 	if (choice === "custom") {

@@ -56,7 +56,15 @@ const API = import.meta.env.VITE_API_URL;
 /** Where the workspace has got to: none yet, one with no model, or one with a model on. */
 type Stage = "new" | "no-model" | "model";
 
-function Preview({ stage, children }: { stage: Stage; children: ReactNode }) {
+function Preview({
+	stage,
+	providers = [],
+	children,
+}: {
+	stage: Stage;
+	providers?: readonly unknown[];
+	children: ReactNode;
+}) {
 	const [queryClient] = useState(() => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -67,7 +75,7 @@ function Preview({ stage, children }: { stage: Stage; children: ReactNode }) {
 		client.setQueryData(["models", WORKSPACE], {
 			models: stage === "model" ? [enabledModel] : [],
 		});
-		client.setQueryData(["model-providers", WORKSPACE], []);
+		client.setQueryData(["model-providers", WORKSPACE], providers);
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -139,7 +147,7 @@ export const AnotherWorkspace = meta.story({
 	},
 });
 
-/** Connecting a first model: four providers to pick from, and a key. It cannot be skipped. */
+/** Connecting a first provider, from the same picker as the Models settings. It cannot be skipped. */
 export const Model = meta.story({
 	render: (args) => (
 		<Preview stage="no-model">
@@ -150,9 +158,9 @@ export const Model = meta.story({
 	),
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Connect a model" }),
+			await canvas.findByRole("heading", { name: "Connect a provider" }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: /Anthropic/ })).toBeChecked();
+		await expect(canvas.getByRole("button", { name: "Choose a provider" })).toBeEnabled();
 		await expect(canvas.queryByRole("button", { name: "Skip for now" })).toBeNull();
 	},
 });
@@ -191,10 +199,10 @@ const anthropic = {
 	})),
 };
 
-/** After the key: the provider's models, and nothing chosen for you. */
+/** Coming back part way: a provider already connected, and its models once it is picked, with nothing chosen for you. */
 export const ChooseModel = meta.story({
 	render: (args) => (
-		<Preview stage="no-model">
+		<Preview stage="no-model" providers={[anthropic]}>
 			<div className="h-screen">
 				<Onboarding {...args} />
 			</div>
@@ -204,17 +212,10 @@ export const ChooseModel = meta.story({
 		const root = `${API}/workspaces/:workspace/model-providers`;
 		msw.use(
 			http.get(`${root}/models`, () => HttpResponse.json({ models: [], defaultModel: null })),
-			http.get(root, () => HttpResponse.json([anthropic])),
-			http.post(root, () => HttpResponse.json(anthropic, { status: 201 })),
-			http.post(`${root}/:providerId/fetch-models`, () =>
-				HttpResponse.json({ added: 0, updated: 3, unchanged: 0 }),
-			),
-			http.get(`${root}/:providerId`, () => HttpResponse.json(anthropic)),
 		);
 	},
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.type(await canvas.findByLabelText("API key"), "sk-ant-test");
-		await userEvent.click(canvas.getByRole("button", { name: "Continue" }));
+		await userEvent.click(await canvas.findByRole("button", { name: /^Anthropic/ }));
 		await expect(
 			await canvas.findByRole("heading", { name: "Choose a model" }),
 		).toBeInTheDocument();
