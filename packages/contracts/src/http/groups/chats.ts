@@ -8,6 +8,7 @@ import {
 	chatPageQuerySchema,
 	chatSchema,
 	getOrCreateChatSchema,
+	podChatMarkersSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
@@ -20,6 +21,11 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			params: { workspace: workspaceIdOrSlugSchema },
 			query: chatListQuerySchema,
 			success: chatListSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("podMarkers", "/workspaces/:workspace/chats/pod-markers", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: podChatMarkersSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {
@@ -38,6 +44,11 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			params: { chatId: Schema.String },
 			query: chatPageQuerySchema,
 			success: chatHistoryPageSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.post("markRead", "/chats/:chatId/read", {
+			params: { chatId: Schema.String },
+			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("send", "/chats/:chatId/messages", {

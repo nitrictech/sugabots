@@ -7,9 +7,10 @@ import {
 	useRouteContext,
 } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Lock, Plus } from "lucide-react";
+import { Hand, Lock, Plus } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
+import { usePodChatMarkers } from "@/lib/chats.ts";
 import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -34,6 +35,7 @@ type Making = { kind: "pod" } | { kind: "bot"; pod: Pod | undefined };
  */
 export function Rail() {
 	const { data: pods } = usePods();
+	const { data: markers } = usePodChatMarkers();
 	const { agents } = useAgents();
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
@@ -49,7 +51,12 @@ export function Rail() {
 	return (
 		<>
 			<RailView
-				pods={(pods ?? []).map((pod) => ({ pod, bots: crewIn(agents, pod) }))}
+				pods={(pods ?? []).map((pod) => ({
+					pod,
+					bots: crewIn(agents, pod),
+					unreadChats: markers?.pods[pod.id]?.unreadChats ?? 0,
+					needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
+				}))}
 				selected={selected}
 				workspace={workspace}
 				workspaces={workspaces ?? []}
@@ -98,8 +105,16 @@ export function RailView({
 	onNewBot,
 	className,
 }: {
-	/** Every pod the viewer reaches, shared and Personal, with its crew bots. */
-	pods: readonly { pod: Pod; bots: readonly Agent[] }[];
+	/**
+	 * Every pod the viewer reaches, shared and Personal, with its crew bots, how
+	 * many of its chats are unread, and whether any waits on the viewer.
+	 */
+	pods: readonly {
+		pod: Pod;
+		bots: readonly Agent[];
+		unreadChats?: number;
+		needsApproval?: boolean;
+	}[];
 	/** `all`, a pod's slug, `settings`, or undefined when none of them is open. */
 	selected: string | undefined;
 	/** The workspace being looked at. */
@@ -117,7 +132,8 @@ export function RailView({
 	className?: string;
 }) {
 	const shared = pods.filter(({ pod }) => pod.kind === "shared");
-	const personal = pods.find(({ pod }) => pod.kind === "personal")?.pod;
+	const personalEntry = pods.find(({ pod }) => pod.kind === "personal");
+	const personal = personalEntry?.pod;
 	const mayAddBotFromAll = podsToAddBotsTo(shared.map(({ pod }) => pod)).length > 0;
 	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
 	const backToChat = useBackToHere("Chat");
@@ -156,12 +172,14 @@ export function RailView({
 			<RailItem label="All" selected={selected === "all"} menu={allMenu}>
 				<AllPodsTile colors={shared.flatMap(({ pod }) => pod.color ?? [])} size={46} />
 			</RailItem>
-			{shared.map(({ pod, bots }) => (
+			{shared.map(({ pod, bots, unreadChats, needsApproval }) => (
 				<RailItem
 					key={pod.id}
 					label={pod.name}
 					selected={selected === pod.slug}
 					pod={pod}
+					unreadChats={unreadChats}
+					needsApproval={needsApproval}
 					menu={podMenu(pod)}
 				>
 					<PodTile bots={bots} color={pod.color} size={46} />
@@ -188,6 +206,8 @@ export function RailView({
 						label={personal.name}
 						selected={selected === personal.slug}
 						pod={personal}
+						unreadChats={personalEntry?.unreadChats}
+						needsApproval={personalEntry?.needsApproval}
 						menu={podMenu(personal)}
 					>
 						<span className="grid size-11 place-items-center rounded-tile bg-tile text-soft-foreground md:size-[46px]">
@@ -234,6 +254,13 @@ function useRailSelection(): string | undefined {
 	return undefined;
 }
 
+/** The most unread chats a tile counts; more shows as this with a plus. */
+const MAX_COUNTED = 99;
+
+function unreadChatsWords(count: number): string {
+	return count === 1 ? "1 unread chat" : `${count} unread chats`;
+}
+
 function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
 	return agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
 }
@@ -247,6 +274,8 @@ function RailItem({
 	label,
 	selected,
 	pod,
+	unreadChats = 0,
+	needsApproval = false,
 	menu,
 	children,
 }: {
@@ -254,12 +283,20 @@ function RailItem({
 	selected: boolean;
 	/** The pod it opens; All when there is none. */
 	pod?: Pod;
+	/** How many of the pod's chats are unread, counted on the tile. All has none. */
+	unreadChats?: number;
+	/** Whether a chat in the pod waits on the viewer, which the tile shows instead of the count. */
+	needsApproval?: boolean;
 	/** What right-clicking it offers; without it, the browser's own menu. */
 	menu?: ReactNode;
 	children: ReactElement;
 }) {
 	const props = {
-		"aria-label": label,
+		"aria-label": needsApproval
+			? `${label}, waiting for your approval`
+			: unreadChats > 0
+				? `${label}, ${unreadChatsWords(unreadChats)}`
+				: label,
 		"aria-current": selected ? ("page" as const) : undefined,
 		className:
 			"focus-ring relative flex shrink-0 items-center rounded-tile [&>span:last-child]:max-md:scale-[0.9565]",
@@ -267,6 +304,23 @@ function RailItem({
 	const content = (
 		<>
 			<SelectionBar selected={selected} className="-left-[10px] md:-left-[15px]" />
+			{needsApproval ? (
+				<span
+					aria-hidden
+					className="absolute -top-[5px] -right-[5px] z-10 grid size-[22px] place-items-center rounded-full bg-approval-marker text-white shadow-[0_0_0_3px_var(--rail)]"
+				>
+					<Hand size={13} strokeWidth={2.4} />
+				</span>
+			) : (
+				unreadChats > 0 && (
+					<span
+						aria-hidden
+						className="absolute -top-[5px] -right-[5px] z-10 grid h-[22px] min-w-[22px] place-items-center rounded-full bg-rail-count px-1.5 font-bold text-[11.5px] text-white leading-none shadow-[0_0_0_3px_var(--rail)]"
+					>
+						{unreadChats > MAX_COUNTED ? `${MAX_COUNTED}+` : unreadChats}
+					</span>
+				)
+			)}
 			{children}
 		</>
 	);

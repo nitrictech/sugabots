@@ -109,6 +109,8 @@ export const eventPayloadSchemas = {
 	"pod.updated": nothing,
 	/** Somebody is told something, on their own member channel. */
 	"notification.created": Schema.Struct({ notification: notificationSchema }),
+	/** The person read the chat, on their own member channel, so their other tabs stop showing it unread. */
+	"chat.read": Schema.Struct({ chatId: uuidSchema }),
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -146,6 +148,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"agent.updated",
 	"pod.updated",
 	"notification.created",
+	"chat.read",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
@@ -278,6 +281,7 @@ export type WorkspaceUpdateEvent = typeof workspaceUpdateEventSchema.Type;
 /** Everything a member channel can carry. */
 export const memberUpdateEventSchema = Schema.Union([
 	withEnvelope("notification.created", P["notification.created"]),
+	withEnvelope("chat.read", P["chat.read"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 

@@ -54,6 +54,29 @@ export const Default = meta.story({
 	},
 });
 
+/**
+ * Each pod with unread chats counts them on its tile, Personal included, past
+ * 99 as 99+. A pod with a chat waiting on you shows a waving hand instead. All has
+ * neither.
+ */
+export const UnreadCounts = meta.story({
+	args: {
+		pods: podsWithBots.map((entry, index) => ({
+			...entry,
+			unreadChats: [3, 2, 120, 1][index] ?? 0,
+			needsApproval: index === 1,
+		})),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: /, 3 unread chats$/ })).toBeVisible();
+		await expect(canvas.getByText("99+")).toBeVisible();
+		await expect(
+			canvas.getByRole("link", { name: "Engineering, waiting for your approval" }),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "All" })).toBeVisible();
+	},
+});
+
 /** All is the virtual pod chosen; its tile shows the first four pods' colours. */
 export const AllChosen = meta.story({ args: { selected: "all" } });
 

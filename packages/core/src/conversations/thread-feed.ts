@@ -27,8 +27,9 @@ export const handler =
  */
 function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 	return ConversationEvent.$match(event, {
-		MessagePosted: ({ threadId, message }) => [
+		MessagePosted: ({ threadId, workspaceId, podId, message }) => [
 			onThread(threadId, streamEvent("message.created", { threadId, message })),
+			listedThreadChanged(workspaceId, podId, threadId),
 		],
 		AgentsJoined: ({ threadId }) => [
 			onThread(threadId, streamEvent("thread.changed", { threadId })),
@@ -80,7 +81,10 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		LaneReleased: () => [],
 		FacilitationFailed: ({ threadId, userMessage }) => [notice(threadId, userMessage)],
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
-		ToolCallDecided: (change) => [toolCallEvent("tool_call.updated", change)],
+		ToolCallDecided: (change) => [
+			toolCallEvent("tool_call.updated", change),
+			listedThreadChanged(change.workspaceId, change.podId, change.threadId),
+		],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallFinished: (change) => [toolCallEvent("tool_call.completed", change)],
 		CollaborationOpened: (opened) => [

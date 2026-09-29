@@ -216,22 +216,60 @@ describe("the thread feed", () => {
 
 	it("tells the reply's thread how each tool call stands", () => {
 		const change = { threadId, messageId: "m1", toolCall };
+		const onThread = (type: string) => ({
+			channel: threadChannel(threadId),
+			event: expect.objectContaining({ type, threadId, messageId: "m1", toolCall }),
+		});
 
 		expect(
 			sent(
 				ConversationEvent.ToolCallStarted(change),
-				ConversationEvent.ToolCallDecided(change),
+				ConversationEvent.ToolCallDecided({ ...change, workspaceId, podId }),
 				ConversationEvent.ToolCallExecuting(change),
 				ConversationEvent.ToolCallFinished(change),
 			),
-		).toEqual(
-			["tool_call.started", "tool_call.updated", "tool_call.updated", "tool_call.completed"].map(
-				(type) => ({
-					channel: threadChannel(threadId),
-					event: expect.objectContaining({ type, threadId, messageId: "m1", toolCall }),
-				}),
-			),
+		).toEqual([
+			onThread("tool_call.started"),
+			onThread("tool_call.updated"),
+			// A decided call waits on nobody any more, which the lists show.
+			{
+				channel: workspaceChannel(workspaceId),
+				event: expect.objectContaining({ type: "thread.changed", threadId }),
+			},
+			onThread("tool_call.updated"),
+			onThread("tool_call.completed"),
+		]);
+	});
+
+	it("tells the lists of a posted message, as well as its thread", () => {
+		const posted = sent(
+			ConversationEvent.MessagePosted({
+				threadId,
+				workspaceId,
+				podId,
+				message: {
+					id: "m1",
+					threadId,
+					author: { kind: "person", id: "u1", name: "Sam", handle: "sam", image: null },
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Hi" }],
+					content: "Hi",
+					createdAt: new Date(0).toISOString(),
+				},
+			}),
 		);
+
+		expect(posted).toEqual([
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "message.created", threadId }),
+			},
+			{
+				channel: workspaceChannel(workspaceId),
+				event: expect.objectContaining({ type: "thread.changed", threadId }),
+			},
+		]);
 	});
 
 	it.each([

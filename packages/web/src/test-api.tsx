@@ -316,6 +316,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.events.thread.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
 	client.events.member.mockImplementation(() => quietEventStream());
+	client.api.chats.podMarkers.mockReturnValue(Effect.succeed({ pods: {} }));
+	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.preferences.mockReturnValue(
 		Effect.succeed({
 			kinds: { approve: true, dm: true, mention: true, routine: false, collab: false },
@@ -384,7 +386,13 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		return Effect.succeed({
 			items: agents
 				.filter((agent) => agent.systemAgentKey === null && inScope(agent))
-				.map((agent) => ({ agent, chatId: null, lastMessage: null })),
+				.map((agent) => ({
+					agent,
+					chatId: null,
+					lastMessage: null,
+					unread: false,
+					needsApproval: false,
+				})),
 		});
 	});
 	client.api.chats.getOrCreate.mockReturnValue(

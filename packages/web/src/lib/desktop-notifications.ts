@@ -14,7 +14,7 @@ import { useNotificationPreferences } from "@/lib/notifications.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useMemberEvents } from "@/lib/thread-events.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
-import { connectionLabel, splitToolKey, stepLabel } from "@/screens/tool-activity.ts";
+import { toolTitle } from "@/screens/tool-activity.ts";
 
 /** Whether this browser may show notices: the browser's own answer, or `unsupported` without the API. */
 export type DesktopPermission = NotificationPermission | "unsupported";
@@ -154,13 +154,6 @@ const ROUTINE_OUTCOME_WORDS: Record<RoutineSubject["outcome"], string> = {
 };
 
 type RoutineSubject = Extract<NotificationSubject, { kind: "routine" }>;
-
-/** A tool as its approval card titles it: `List issues in Linear`, or a built-in tool's name alone. */
-function toolTitle(tool: string): string {
-	const { handle, name } = splitToolKey(tool);
-	const label = stepLabel(tool, name);
-	return handle ? `${label} in ${connectionLabel(handle)}` : label;
-}
 
 /** The chat the address shows, read when asked because it is looked up only as a notice arrives. */
 function useShownChatId(): () => string | undefined {

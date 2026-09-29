@@ -16,6 +16,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
+import { refreshUnread } from "@/lib/chats.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 export function useThreadEvents(threadId: string | undefined): void {
@@ -135,11 +136,14 @@ function withPersonTyping(typing: TypingPerson[], person: PersonParticipant): Ty
 }
 
 /**
- * Hands `onNotification` each notification the signed-in person is sent in
- * the open workspace while this is mounted. Nothing is fetched afresh when the
- * stream drops: a notice missed is only a notice not shown.
+ * Follows what only the signed-in person hears in the open workspace while
+ * this is mounted: it hands `onNotification` each notification they are sent,
+ * and fetches the lists again when they read a chat in another tab. Nothing is
+ * fetched afresh for a notice missed while the stream was down: it is only a
+ * notice not shown.
  */
 export function useMemberEvents(onNotification: (notification: Notification) => void): void {
+	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	const latest = useRef(onNotification);
 	useEffect(() => {
@@ -149,14 +153,17 @@ export function useMemberEvents(onNotification: (notification: Notification) => 
 	useEffect(() => {
 		if (!workspaceId) return;
 		const stream = client.events.member(workspaceId);
-		void consume(stream, (event) => {
+		void consume(stream, async (event) => {
 			const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
-			if (parsed._tag === "Success" && parsed.success.type === "notification.created") {
-				latest.current(parsed.success.notification);
+			if (parsed._tag === "Failure") return;
+			const update = parsed.success;
+			if (update.type === "notification.created") latest.current(update.notification);
+			if (update.type === "chat.read" || update.type === "reset") {
+				await refreshUnread(queries, workspaceId);
 			}
 		}).catch(() => {});
 		return () => stream.close();
-	}, [workspaceId]);
+	}, [queries, workspaceId]);
 }
 
 export function useWorkspaceEvents(): void {
@@ -327,11 +334,15 @@ async function applyWorkspaceEvent(
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-messages", update.chatId] }),
 			queries.invalidateQueries({ queryKey: ["chat-history", update.chatId] }),
-			// A new message moves its chat up the list and changes its preview.
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			// A new message moves its chat up the list, changes its preview, and may leave it unread.
+			refreshUnread(queries, workspaceId),
 		]);
 	} else if (update.type === "thread.changed") {
-		await queries.invalidateQueries({ queryKey: ["chat-history"] });
+		await Promise.all([
+			queries.invalidateQueries({ queryKey: ["chat-history"] }),
+			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
+			refreshUnread(queries, workspaceId),
+		]);
 	}
 }
 

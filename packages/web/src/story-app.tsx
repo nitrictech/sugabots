@@ -245,6 +245,17 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/routines"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
+		http.get(api("/workspaces/:workspace/me/events"), quietStream),
+		http.get(api("/notifications/preferences"), () =>
+			HttpResponse.json({
+				kinds: { approve: true, dm: true, mention: true, routine: false, collab: false },
+				delivery: { desktop: false, quietOnWeekends: false },
+			}),
+		),
+		http.get(api("/workspaces/:workspace/chats/pod-markers"), () =>
+			HttpResponse.json({ pods: {} }),
+		),
+		http.post(api("/chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
 			const pod = new URL(request.url).searchParams.get("pod");
 			const shared = new Set(pods.filter((one) => one.kind === "shared").map((one) => one.id));
@@ -260,8 +271,11 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 									preview: last.content,
 									authorUserId: last.author.kind === "person" ? last.author.id : null,
 									at: last.createdAt,
+									waitingOn: null,
 								}
 							: null,
+						unread: false,
+						needsApproval: false,
 					};
 				});
 			return HttpResponse.json({ items });

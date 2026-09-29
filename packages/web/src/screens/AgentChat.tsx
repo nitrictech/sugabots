@@ -13,6 +13,7 @@ import {
 	useChatHistory,
 	useChatMessages,
 	useOptimisticChatItems,
+	useReadWhileShown,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
@@ -85,6 +86,11 @@ export function AgentChat({
 	const groups = chatGroupsOf(items);
 	const lastGroup = groups.at(-1);
 	const latestItemRevision = chatItemRevision(items.at(-1));
+	const newest = items.at(-1);
+	useReadWhileShown(
+		chat.data?.id,
+		newest?.kind === "message" ? `${newest.message.id}:${newest.message.status}` : newest?.id,
+	);
 	const queued = queuedBehindReply(
 		items.flatMap((item) => (item.kind === "message" ? [item.message] : [])),
 	);

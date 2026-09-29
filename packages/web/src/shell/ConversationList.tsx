@@ -1,7 +1,7 @@
 import type { Agent, ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, Search, Settings } from "lucide-react";
+import { Hand, Plus, Search, Settings } from "lucide-react";
 import { useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
@@ -10,6 +10,7 @@ import { formatListTime } from "@/lib/list-time.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
+import { waitingText } from "@/screens/tool-activity.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
@@ -289,6 +290,7 @@ function ConversationRow({
 		>
 			<span className="relative size-11 shrink-0">
 				<AgentAvatar color={agent.color} face={agent.face} size={44} />
+				<ChatMarker needsApproval={row.needsApproval} unread={row.unread} selected={selected} />
 				{inAll && (
 					<span className="absolute -right-[5px] -bottom-[5px]" title={pod.name}>
 						<PodTile
@@ -302,7 +304,12 @@ function ConversationRow({
 			</span>
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex items-baseline gap-2">
-					<span className="min-w-0 flex-1 truncate font-semibold text-[14.5px] text-foreground">
+					<span
+						className={cn(
+							"min-w-0 flex-1 truncate text-[14.5px] text-foreground",
+							row.unread ? "font-bold" : "font-semibold",
+						)}
+					>
 						{agent.name}
 					</span>
 					{lastMessage && (
@@ -318,12 +325,62 @@ function ConversationRow({
 						</time>
 					)}
 				</span>
-				<span className="truncate text-md text-muted-foreground">
-					{lastMessage ? `${row.fromYou ? "You: " : ""}${lastMessage.preview}` : "No messages yet"}
+				<span
+					className={cn(
+						"truncate text-md",
+						row.unread ? "font-medium text-foreground" : "text-muted-foreground",
+					)}
+				>
+					{lastMessage
+						? lastMessage.waitingOn
+							? waitingText(lastMessage.waitingOn)
+							: `${row.fromYou ? "You: " : ""}${lastMessage.preview}`
+						: "No messages yet"}
 				</span>
 			</span>
 		</Link>
 	);
+}
+
+/**
+ * What a chat's face says about it, top right: a waving hand when it waits
+ * for a decision the person may make, otherwise a dot when it is unread. Each
+ * sits in the row's colour so it stands off the face.
+ */
+function ChatMarker({
+	needsApproval,
+	unread,
+	selected,
+}: {
+	needsApproval: boolean;
+	unread: boolean;
+	/** Whether the row is the open chat, whose wash the ring matches. */
+	selected: boolean;
+}) {
+	const ring = selected
+		? "shadow-[0_0_0_2.5px_var(--row-selected)]"
+		: "shadow-[0_0_0_2.5px_var(--list)]";
+	if (needsApproval) {
+		return (
+			<span
+				className={cn(
+					"absolute -top-[3px] -right-[3px] grid size-[20px] place-items-center rounded-full bg-approval-marker text-white",
+					ring,
+				)}
+			>
+				<Hand aria-hidden size={12} strokeWidth={2.4} />
+				<span className="sr-only">Needs your approval</span>
+			</span>
+		);
+	}
+	if (unread) {
+		return (
+			<span className={cn("absolute top-0 right-0 size-3 rounded-full bg-unread-dot", ring)}>
+				<span className="sr-only">Unread</span>
+			</span>
+		);
+	}
+	return null;
 }
 
 function crewOf(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {

@@ -9,23 +9,38 @@ import type {
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
+	PodChatMarkers,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_PAGE_LIMIT, textWithoutNarration } from "@sugabots/contracts";
 import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import {
+	type AuthorizationDenied,
+	podMembersWhoMay,
+	ResourceHidden,
+} from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
-import { agent, chat, message, pod, turn } from "../../database/schema.ts";
+import {
+	agent,
+	chat,
+	message,
+	pod,
+	thread,
+	threadRead,
+	toolCall,
+	turn,
+} from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { respondingIn } from "../floor/floor.ts";
+import { findRoutineExecutionId } from "../routines/execution.ts";
 import {
 	agentColumns,
 	authorRow,
@@ -46,6 +61,13 @@ export interface Interface {
 		workspace: string;
 		pod: ChatListScope;
 	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * How each pod of the workspace the actor reaches stands for them, Personal
+	 * included: its unread chats, and whether any waits on their decision.
+	 */
+	readonly podMarkers: (
+		workspace: string,
+	) => Effect.Effect<PodChatMarkers, AuthorizationDenied, CurrentActor.Service>;
 	/** A page of the chat's main conversation, newest last. */
 	readonly messages: (
 		chatId: string,
@@ -64,6 +86,57 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatView");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
+
+	/** The rows a list shows: each bot, its chat, and how that chat stands for the actor. */
+	const listedChats = (listing: Listing) =>
+		Effect.gen(function* () {
+			const { userId } = yield* CurrentActor.Service;
+			const bots = yield* query((db) => listedBots(db, listing));
+			const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
+			const latest = yield* query((db) => latestMessages(db, threadIds));
+			// A reply is written at the time it began, so it counts as news only once it is done.
+			const latestFinished = yield* query((db) =>
+				latestMessages(db, threadIds, { finished: true }),
+			);
+			const readThrough = yield* query((db) => readPoints(db, userId, threadIds));
+			const waitingOn = yield* query((db) =>
+				toolsAwaitingApproval(
+					db,
+					[...latest.values()].map(({ id }) => id),
+				),
+			);
+			const awaiting = yield* chatsAwaitingDecisionBy(
+				userId,
+				bots.flatMap((row) => (row.chatId ? [row.chatId] : [])),
+			);
+			return bots.flatMap((row): ChatListItem[] => {
+				const crew = crewAgentRow(row.agent);
+				if (!crew) return [];
+				const last = row.mainThreadId ? latest.get(row.mainThreadId) : undefined;
+				const read = row.mainThreadId ? readThrough.get(row.mainThreadId) : undefined;
+				const news = row.mainThreadId ? latestFinished.get(row.mainThreadId) : undefined;
+				return [
+					{
+						agent: toAgent(crew),
+						chatId: row.chatId,
+						lastMessage: last
+							? {
+									preview: previewOf(textWithoutNarration(last.parts) || last.content),
+									authorUserId: last.authorUserId,
+									at: last.createdAt.toISOString(),
+									waitingOn: waitingOn.get(last.id) ?? null,
+								}
+							: null,
+						unread:
+							news !== undefined &&
+							news.authorUserId !== userId &&
+							(read === undefined || news.createdAt > read),
+						needsApproval: row.chatId !== null && awaiting.has(row.chatId),
+					},
+				];
+			});
+		});
+
 	return Service.of({
 		list: (input) =>
 			operation(
@@ -80,28 +153,31 @@ export const make = Effect.gen(function* () {
 						const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
 						if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
 					}
-					const bots = yield* query((db) => listedBots(db, listing));
-					const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
-					const latest = yield* query((db) => latestMessages(db, threadIds));
-					const items = bots.flatMap((row): ChatListItem[] => {
-						const crew = crewAgentRow(row.agent);
-						if (!crew) return [];
-						const last = row.mainThreadId ? latest.get(row.mainThreadId) : undefined;
-						return [
-							{
-								agent: toAgent(crew),
-								chatId: row.chatId,
-								lastMessage: last
-									? {
-											preview: previewOf(textWithoutNarration(last.parts) || last.content),
-											authorUserId: last.authorUserId,
-											at: last.createdAt.toISOString(),
-										}
-									: null,
-							},
-						];
-					});
+					const items = yield* listedChats(listing);
 					return { items: items.sort(byLatestMessage) };
+				}),
+			),
+
+		podMarkers: (workspace) =>
+			operation(
+				"podMarkers",
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+					const items = yield* listedChats({
+						workspaceId,
+						pod: "reachable",
+						reachesPod: yield* visibility.reachesPod,
+					});
+					const pods: Record<string, { unreadChats: number; needsApproval: boolean }> = {};
+					for (const { agent: bot, unread, needsApproval } of items) {
+						if (!unread && !needsApproval) continue;
+						const marked = pods[bot.podId] ?? { unreadChats: 0, needsApproval: false };
+						pods[bot.podId] = {
+							unreadChats: marked.unreadChats + (unread ? 1 : 0),
+							needsApproval: marked.needsApproval || needsApproval,
+						};
+					}
+					return { pods };
 				}),
 			),
 
@@ -149,10 +225,14 @@ export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") imp
 	}
 }
 
-/** Which bots a list covers, and `Visibility`'s rule for who is asking. */
+/**
+ * Which bots a list covers, and `Visibility`'s rule for who is asking.
+ * `reachable` is every pod the actor reaches, Personal included, as the rail
+ * counts them.
+ */
 interface Listing {
 	workspaceId: string;
-	pod: ChatListScope;
+	pod: ChatListScope | "reachable";
 	reachesPod: Visibility.ReachesPod;
 }
 
@@ -171,7 +251,12 @@ const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
 
 /** Every crew bot the list covers, with its chat in its pod when it has one. */
 const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
-	const scope = input.pod === "all" ? eq(pod.kind, "shared") : eq(pod.id, input.pod);
+	const scope =
+		input.pod === "reachable"
+			? undefined
+			: input.pod === "all"
+				? eq(pod.kind, "shared")
+				: eq(pod.id, input.pod);
 	return yield* db
 		.select({ agent, chatId: chat.id, mainThreadId: chat.mainThreadId })
 		.from(agent)
@@ -181,15 +266,20 @@ const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, inp
 		.orderBy(asc(agent.name));
 });
 
-/** The newest message with words in it on each thread, in one query. */
+/**
+ * The newest message with words in it on each thread, in one query. With
+ * `finished`, only one that is done: a reply still streaming is left out.
+ */
 const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 	db: Executor,
 	threadIds: readonly string[],
+	{ finished = false }: { finished?: boolean } = {},
 ) {
 	if (threadIds.length === 0) {
 		return new Map<
 			string,
 			{
+				id: string;
 				content: string;
 				parts: schema.StoredMessagePart[];
 				authorUserId: string | null;
@@ -200,15 +290,90 @@ const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 	const rows = yield* db
 		.selectDistinctOn([message.threadId], {
 			threadId: message.threadId,
+			id: message.id,
 			content: message.content,
 			parts: message.parts,
 			authorUserId: message.authorUserId,
 			createdAt: message.createdAt,
 		})
 		.from(message)
-		.where(and(inArray(message.threadId, [...threadIds]), ne(message.content, "")))
+		.where(
+			and(
+				inArray(message.threadId, [...threadIds]),
+				ne(message.content, ""),
+				finished ? ne(message.status, "streaming") : undefined,
+			),
+		)
 		.orderBy(message.threadId, desc(message.createdAt));
 	return new Map(rows.map((row) => [row.threadId, row]));
+});
+
+/** For each of `messageIds` with calls waiting for approval, the tool the first would run. */
+const toolsAwaitingApproval = Effect.fn("ChatView.toolsAwaitingApproval")(function* (
+	db: Executor,
+	messageIds: readonly string[],
+) {
+	if (messageIds.length === 0) return new Map<string, string>();
+	const rows = yield* db
+		.selectDistinctOn([toolCall.messageId], { messageId: toolCall.messageId, tool: toolCall.tool })
+		.from(toolCall)
+		.where(
+			and(inArray(toolCall.messageId, [...messageIds]), eq(toolCall.approvalStatus, "pending")),
+		)
+		.orderBy(toolCall.messageId, asc(toolCall.atOffset), asc(toolCall.id));
+	return new Map(rows.map((row) => [row.messageId, row.tool]));
+});
+
+/** How far `userId` has read each of the threads, for those they have opened. */
+const readPoints = Effect.fn("ChatView.readPoints")(function* (
+	db: Executor,
+	userId: string,
+	threadIds: readonly string[],
+) {
+	if (threadIds.length === 0) return new Map<string, Date>();
+	const rows = yield* db
+		.select({ threadId: threadRead.threadId, readThrough: threadRead.readThrough })
+		.from(threadRead)
+		.where(and(eq(threadRead.userId, userId), inArray(threadRead.threadId, [...threadIds])));
+	return new Map(rows.map((row) => [row.threadId, row.readThrough]));
+});
+
+/**
+ * Those of `chatIds` with a tool call waiting for a decision `userId` may
+ * make: the people an approval notification goes to, as `Notices` decides.
+ */
+const chatsAwaitingDecisionBy = Effect.fn("ChatView.chatsAwaitingDecisionBy")(function* (
+	userId: string,
+	chatIds: readonly string[],
+) {
+	if (chatIds.length === 0) return new Set<string>();
+	const pending = yield* query((db) =>
+		db
+			.selectDistinct({ chatId: thread.chatId, podId: thread.podId, threadId: thread.id })
+			.from(toolCall)
+			.innerJoin(turn, eq(turn.id, toolCall.turnId))
+			.innerJoin(thread, eq(thread.id, turn.threadId))
+			.where(and(inArray(thread.chatId, [...chatIds]), eq(toolCall.approvalStatus, "pending"))),
+	);
+	const deciders = new Map<string, readonly string[]>();
+	const awaiting = new Set<string>();
+	for (const { chatId, podId, threadId } of pending) {
+		if (!chatId || awaiting.has(chatId)) continue;
+		const inRoutine = (yield* query((db) => findRoutineExecutionId(db, threadId))) !== undefined;
+		const key = `${podId}:${inRoutine}`;
+		const may =
+			deciders.get(key) ??
+			(yield* query((db) =>
+				podMembersWhoMay(
+					db,
+					podId,
+					inRoutine ? ["approval.decide", "approval.routine.decide"] : ["approval.decide"],
+				),
+			));
+		deciders.set(key, may);
+		if (may.includes(userId)) awaiting.add(chatId);
+	}
+	return awaiting;
 });
 
 const PREVIEW_MAX_LENGTH = 140;

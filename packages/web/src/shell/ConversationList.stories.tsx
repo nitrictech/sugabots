@@ -24,7 +24,14 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: false,
-		lastMessage: { preview: "Needs your approval", authorUserId: null, at: minutesAgo(3) },
+		unread: true,
+		needsApproval: true,
+		lastMessage: {
+			preview: "I'll send the outreach emails now:",
+			authorUserId: null,
+			at: minutesAgo(3),
+			waitingOn: "gmail__send_email",
+		},
 	},
 	{
 		agent: accountManager,
@@ -32,10 +39,13 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: false,
+		unread: true,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Renewal notes for Halcyon are ready",
 			authorUserId: null,
 			at: daysAgo(1),
+			waitingOn: null,
 		},
 	},
 	{
@@ -44,10 +54,13 @@ const revenueRows: ConversationRowData[] = [
 		podBots: revenueBots,
 		chatId: null,
 		fromYou: true,
+		unread: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Go deeper on the fintech prospects from last week's list",
 			authorUserId: "0199a3a0-0000-7000-8000-000000000009",
 			at: daysAgo(3),
+			waitingOn: null,
 		},
 	},
 ];
@@ -60,10 +73,13 @@ const allRows: ConversationRowData[] = [
 		podBots: engineeringBots,
 		chatId: null,
 		fromYou: false,
+		unread: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Filed PLAT-482 for the timeout",
 			authorUserId: null,
 			at: minutesAgo(40),
+			waitingOn: null,
 		},
 	},
 	...revenueRows.slice(1),
@@ -99,6 +115,26 @@ export const Default = meta.story({
 		await expect(canvas.getByRole("link", { name: "Pod settings" })).toHaveAttribute(
 			"href",
 			expect.stringMatching(/\/settings\/pods\/revenue$/),
+		);
+	},
+});
+
+/**
+ * A chat waiting for your decision carries a waving hand on its face and says what
+ * it waits to do; one with something new a dot, with its name and preview
+ * brighter. The wave wins when both apply.
+ */
+export const UnreadAndWaiting = meta.story({
+	args: { selectedAgentId: leadResearcher.id },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).toHaveTextContent(
+			"Needs your approval",
+		);
+		await expect(canvas.getByText("Waiting to send email in Gmail")).toBeVisible();
+		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).not.toHaveTextContent("Unread");
+		await expect(canvas.getByRole("link", { name: /Account Manager/ })).toHaveTextContent("Unread");
+		await expect(canvas.getByRole("link", { name: /Lead Researcher/ })).not.toHaveTextContent(
+			"Unread",
 		);
 	},
 });

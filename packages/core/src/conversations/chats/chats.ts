@@ -1,6 +1,6 @@
 export * as Chats from "./chats.ts";
 
-import type { Chat, Message } from "@sugabots/contracts";
+import { type Chat, type Message, memberChannel, streamEvent } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
@@ -8,11 +8,13 @@ import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { EventOutbox } from "../../database/events/outbox.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, pod, user } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
+import { ThreadReadRepository } from "../threads/read-repository.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 
 /**
@@ -44,6 +46,11 @@ export interface Interface {
 		ResourceHidden | ThreadRepository.MessageIdConflict | ChatAgentHasNoModel,
 		CurrentActor.Service
 	>;
+	/**
+	 * Records that the actor has read the chat's main conversation up to its
+	 * newest message, and tells their other tabs so.
+	 */
+	readonly markRead: (chatId: string) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Chats") {}
@@ -54,6 +61,8 @@ export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const threads = yield* ThreadRepository.Service;
 	const floor = yield* FloorControl.Service;
+	const reads = yield* ThreadReadRepository.Service;
+	const outbox = yield* EventOutbox.Service;
 
 	return Service.of({
 		open: (input) =>
@@ -108,6 +117,24 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
+
+		markRead: (chatId) =>
+			operation(
+				"markRead",
+				transaction(
+					Effect.gen(function* () {
+						const visible = yield* visibility.chat(chatId);
+						const { userId } = yield* CurrentActor.Service;
+						if (!(yield* reads.markRead(userId, visible.mainThreadId))) return;
+						yield* outbox.publish([
+							{
+								channel: memberChannel(visible.workspaceId, userId),
+								event: streamEvent("chat.read", { chatId: visible.id }),
+							},
+						]);
+					}),
+				),
+			),
 	});
 });
 
@@ -118,6 +145,7 @@ export const layer = layerNoDeps.pipe(
 		Authorization.layer,
 		Visibility.layer,
 		ThreadRepository.layer,
+		ThreadReadRepository.layer,
 		FloorControl.layer,
 	]),
 );

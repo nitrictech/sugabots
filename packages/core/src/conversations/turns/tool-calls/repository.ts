@@ -256,8 +256,19 @@ export const make = Effect.gen(function* () {
 								.where(eq(user.id, input.decision.userId))
 								.limit(1),
 						);
+						const [placed] = yield* query((db) =>
+							db
+								.select({ workspaceId: thread.workspaceId, podId: thread.podId })
+								.from(thread)
+								.where(eq(thread.id, decided.threadId))
+								.limit(1),
+						);
+						if (!placed) return yield* Effect.die(new Error("A decided call's thread is missing"));
 						yield* emit([
-							ConversationEvent.ToolCallDecided(toolCallChange(decided, decider?.name ?? null)),
+							ConversationEvent.ToolCallDecided({
+								...toolCallChange(decided, decider?.name ?? null),
+								...placed,
+							}),
 						]);
 						return true;
 					}),

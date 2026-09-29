@@ -63,6 +63,19 @@ export function stepLabel(tool: string, name = splitToolKey(tool).name): string 
 	return builtIn ? builtIn.name : wordsFromKey(name);
 }
 
+/** A tool as its approval card titles it: `List issues in Linear`, or a built-in tool's name alone. */
+export function toolTitle(tool: string): string {
+	const { handle, name } = splitToolKey(tool);
+	const label = stepLabel(tool, name);
+	return handle ? `${label} in ${connectionLabel(handle)}` : label;
+}
+
+/** What a chat waiting for approval of `tool` is doing: `Waiting to list issues in Linear`. */
+export function waitingText(tool: string): string {
+	const title = toolTitle(tool);
+	return `Waiting to ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
+}
+
 /**
  * A machine key written out as words: `search_issues` as `Search issues`,
  * `sentry` as `Sentry`, a tool argument's `due_date` or `dueDate` as `Due date`.
