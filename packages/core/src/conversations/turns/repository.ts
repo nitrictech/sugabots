@@ -13,6 +13,7 @@ import {
 	writtenRow,
 } from "../../database/database.ts";
 import {
+	ACTIVE_TURN_STATUSES,
 	message,
 	type StoredMessagePart,
 	type TurnReason,
@@ -26,7 +27,6 @@ import { ConversationEvent } from "../events.ts";
 import { lockRoutineSettlementOf, routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
 import {
-	ACTIVE_STATUSES,
 	type Ended,
 	endedAs,
 	type FollowUp,
@@ -630,7 +630,10 @@ export const make = Effect.gen(function* () {
 				"abandon",
 				transaction(
 					Effect.gen(function* () {
-						const owned = and(eq(turn.owner, owner), inArray(turn.status, [...ACTIVE_STATUSES]));
+						const owned = and(
+							eq(turn.owner, owner),
+							inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
+						);
 						yield* lockRoutineSettlementOfTurn(owned);
 						const locked = yield* lockAndTransition(owned, TurnEvent.Abandon(outcome));
 						if (locked?.decided._tag !== "Next") return undefined;

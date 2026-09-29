@@ -285,6 +285,8 @@ describe("the thread feed", () => {
 					workspaceId,
 					podId,
 					recipientChatId,
+					collaboratorAgentId: "a1",
+					briefMessageId: "m2",
 				}),
 			),
 		).toEqual([

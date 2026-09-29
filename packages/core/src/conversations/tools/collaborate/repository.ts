@@ -11,11 +11,18 @@ import {
 	writtenRow,
 } from "../../../database/database.ts";
 import type * as schema from "../../../database/schema.ts";
-import { agent, chat, collaboration, message, thread, turn } from "../../../database/schema.ts";
+import {
+	ACTIVE_TURN_STATUSES,
+	agent,
+	chat,
+	collaboration,
+	message,
+	thread,
+	turn,
+} from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
 import { collaborationChange } from "../../threads/collaborations.ts";
-import { Turns } from "../../turns/turns.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -33,6 +40,7 @@ export interface Interface {
 		parentMessageId: string;
 		turnId: string;
 		childThreadId: string;
+		briefMessageId: string;
 		collaborator: { id: string; name: string };
 		brief: string;
 		/** How far into the asking reply's text the collaboration was made. */
@@ -121,6 +129,8 @@ export const make = Effect.gen(function* () {
 								workspaceId: address.workspaceId,
 								podId: address.podId,
 								recipientChatId: address.recipientChatId,
+								collaboratorAgentId: input.collaborator.id,
+								briefMessageId: input.briefMessageId,
 							}),
 						]);
 						return opened;
@@ -162,9 +172,11 @@ export const make = Effect.gen(function* () {
 						}
 						const updated = yield* writeStatus(current.row.id, { status: "answered", answer });
 						yield* emit([
-							ConversationEvent.CollaborationAnswered(
-								collaborationChange(updated, current.collaboratorName),
-							),
+							ConversationEvent.CollaborationAnswered({
+								...collaborationChange(updated, current.collaboratorName),
+								askingAgentId: current.askingAgentId,
+								askerMovedOn: current.row.status === "pending",
+							}),
 						]);
 						return {
 							collaboration: updated,
@@ -228,7 +240,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(turn.threadId, childThreadId),
 										eq(turn.agentId, collaboratorAgentId),
-										Turns.isActive,
+										inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
 									),
 								)
 								.limit(1),

@@ -124,11 +124,18 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly podId: string;
 		readonly recipientChatId: string | null;
+		readonly collaboratorAgentId: string;
+		/** The brief, the first message in the collaboration's thread. */
+		readonly briefMessageId: string;
 	};
 	/** The asking turn stopped waiting; the answer will resume it instead. */
 	CollaborationStoppedWaiting: CollaborationChange;
 	/** The collaborator's reply was recorded as the answer. */
-	CollaborationAnswered: CollaborationChange;
+	CollaborationAnswered: CollaborationChange & {
+		readonly askingAgentId: string;
+		/** The asking turn had stopped waiting, so nothing is reading the answer yet. */
+		readonly askerMovedOn: boolean;
+	};
 	/**
 	 * The collaboration ended unanswered: the routine run it worked for ended,
 	 * or the collaborator's turn ended without an answer.
