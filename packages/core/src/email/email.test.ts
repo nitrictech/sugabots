@@ -16,7 +16,9 @@ const webhook = {
 	EMAIL_WEBHOOK_URL: "https://mailer.example.com/sugabots",
 };
 
-async function sendWith(env: Record<string, string>, status = 204) {
+const resend = { EMAIL_PROVIDER: "resend", EMAIL_RESEND_API_KEY: "re_secret" };
+
+async function sendWith(env: Record<string, string>, status = 204, sent = message) {
 	const requests: HttpClientRequest.HttpClientRequest[] = [];
 	const http = HttpClient.make((request) =>
 		Effect.sync(() => {
@@ -25,7 +27,7 @@ async function sendWith(env: Record<string, string>, status = 204) {
 		}),
 	);
 	const exit = await Effect.runPromiseExit(
-		Effect.flatMap(Email.Service, (email) => email.send(message)).pipe(
+		Effect.flatMap(Email.Service, (email) => email.send(sent)).pipe(
 			Effect.provide(
 				Email.layerNoDeps.pipe(
 					Layer.provide([Layer.succeed(HttpClient.HttpClient, http), Installation.layer]),
@@ -80,7 +82,48 @@ describe("Email.layerNoDeps", () => {
 		});
 	});
 
+	it("sends the email to Resend with the API key", async () => {
+		const { exit, requests } = await sendWith(resend, 200);
+
+		expect(Exit.isSuccess(exit)).toBe(true);
+		expect(requests[0]?.url).toBe("https://api.resend.com/emails");
+		expect(requests[0]?.headers.authorization).toBe("Bearer re_secret");
+		expect(jsonBody(requests[0])).toEqual({
+			from: '"Sugabots" <sugabots@example.com>',
+			to: ["person@example.com"],
+			subject: "Invitation",
+			text: "Open this link",
+		});
+	});
+
+	it("gives Resend every recipient, keeping a name with a comma or quote whole", async () => {
+		const { requests } = await sendWith(resend, 200, {
+			...message,
+			from: { email: "sugabots@example.com", name: 'Sugabots, "Inc"' },
+			cc: [{ email: "lead@example.com", name: "Lead" }],
+			bcc: [{ email: "audit@example.com" }],
+			replyTo: { email: "support@example.com" },
+		});
+
+		expect(jsonBody(requests[0])).toMatchObject({
+			from: '"Sugabots, \\"Inc\\"" <sugabots@example.com>',
+			cc: ['"Lead" <lead@example.com>'],
+			bcc: ["audit@example.com"],
+			reply_to: "support@example.com",
+		});
+	});
+
+	it("fails with EmailDeliveryFailed when Resend rejects the email", async () => {
+		const { exit } = await sendWith(resend, 422);
+
+		expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toMatchObject({
+			_tag: "Some",
+			value: { _tag: "EmailDeliveryFailed", provider: "resend" },
+		});
+	});
+
 	it.each([
+		["Resend without EMAIL_RESEND_API_KEY", { EMAIL_PROVIDER: "resend" }, /EMAIL_RESEND_API_KEY/],
 		[
 			"an insecure webhook in production",
 			{ ...webhook, NODE_ENV: "production", EMAIL_WEBHOOK_URL: "http://mailer.example.com" },

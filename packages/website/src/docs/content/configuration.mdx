@@ -51,9 +51,10 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
 | Variable                   | Default                | Description                                                                                                                                                           |
 | -------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EMAIL_PROVIDER`           | `console`              | `console`, which prints each email to the server's log, or `webhook`.                                                                                                 |
+| `EMAIL_PROVIDER`           | `console`              | `console`, which prints each email to the server's log, `webhook` or `resend`.                                                                                        |
 | `EMAIL_WEBHOOK_URL`        | Required for `webhook` | Receives each email as JSON: `from`, `to`, `cc`, `bcc` and `replyTo` as `{email, name}` addresses, `subject`, and `text` and/or `html`. Must use HTTPS in production. |
 | `EMAIL_WEBHOOK_TOKEN`      | None                   | For `webhook`. Sent as a bearer token with each delivery.                                                                                                             |
+| `EMAIL_RESEND_API_KEY`     | Required for `resend`  | A [Resend API key](https://resend.com/api-keys) with permission to send.                                                                                              |
 | `EMAIL_TRANSACTIONAL_FROM` | Required in production | Sender of emails a user's own action triggers, such as verification and invitations, like `Sugabots <no-reply@example.com>`.                                          |
 
 ## Web app
