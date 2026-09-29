@@ -93,6 +93,20 @@ export const providerModel = pgTable(
 );
 
 /**
+ * The model a workspace's new agents start on, by the `model_id` agents name
+ * it by. A workspace has none until it first offers a model, and from then on
+ * always has one: `ModelProviderSetup` refuses any change that would stop
+ * offering it, deleting its row included, until another replaces it.
+ */
+export const workspaceDefaultModel = pgTable("workspace_default_model", {
+	workspaceId: uuid("workspace_id")
+		.primaryKey()
+		.references(() => workspace.id, { onDelete: "cascade" }),
+	modelId: text("model_id").notNull(),
+	updatedAt: updatedStamp("updated_at"),
+});
+
+/**
  * Where a workspace's `web_search` tool sends its queries: one search service,
  * from the search catalog, with the workspace's own key. One per workspace,
  * which the unique index on `workspace_id` says; setting another replaces it.

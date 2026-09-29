@@ -34,12 +34,22 @@ list** to fetch new ones, or **Add model** to type in a model ID.
 Each model also says what it can do, like tools, vision or reasoning. Bots use
 tools, so pick models that support them.
 
+## Default model
+
+New bots start on the workspace's default model, shown under **Default → New
+bots use**. Each bot can move to another model in its own settings.
+
 ## Behind-the-scenes model
 
 Sugabots also uses a model for its own work: summarising and titling
-conversations, and deciding which bot replies when nobody was addressed. It
-starts with none. An admin picks one under **Default → System agents use**. A
-fast, cheap model is best. Until then, chats have no summaries or titles.
+conversations, and deciding which bot replies when nobody was addressed. An
+admin picks it under **Default → System agents use**. A fast, cheap model is
+best.
+
+Both this and the default model start on the first model you switch on, which
+is the one you pick for your first bot. After that there is always one of each:
+a model either of them uses cannot be switched off, and its provider cannot be
+switched off or removed, until you choose another.
 
 ## Models on your own machine
 

@@ -14,7 +14,12 @@ import {
 	oncall,
 } from "@/shell/story-fixtures.ts";
 import { Dialog } from "@/ui/dialog.tsx";
-import { AddProviderDialog, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
+import {
+	AddProviderDialog,
+	DefaultModelSettings,
+	ModelsSettings,
+	SystemModelSettings,
+} from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
@@ -178,6 +183,21 @@ function Preview({
 		client.setQueryData(["model-providers", WORKSPACE], providers);
 		client.setQueryData(["agents", WORKSPACE], bots);
 		client.setQueryData(["built-in-agents", WORKSPACE], systemAgents);
+		client.setQueryData(["models", WORKSPACE], {
+			models: providers.flatMap((provider) =>
+				provider.models
+					.filter((model) => model.enabled)
+					.map((model) => ({
+						providerId: provider.id,
+						providerName: provider.name,
+						providerPreset: provider.preset,
+						providerActive: provider.active,
+						modelId: model.modelId,
+						displayName: model.displayName,
+					})),
+			),
+			defaultModel: "claude-sonnet",
+		});
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -202,10 +222,13 @@ const meta = preview.meta({
 	],
 });
 
-/** The system bots' model, then each provider with how many models are on and the bots using them. */
+/** The models new bots and the system bots use, then each provider with how many models are on and the bots using them. */
 export const Overview = meta.story({
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: /System agents use/ })).toHaveTextContent(
+		await expect(await canvas.findByRole("link", { name: /New bots use/ })).toHaveTextContent(
+			"Claude Sonnet",
+		);
+		await expect(canvas.getByRole("link", { name: /System agents use/ })).toHaveTextContent(
 			"Claude Haiku",
 		);
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent(
@@ -215,11 +238,23 @@ export const Overview = meta.story({
 	},
 });
 
-/** A provider with a few models: its key, which models are on (listed first), and who uses each. */
+/**
+ * A provider with a few models: its key, which models are on (listed first),
+ * and who uses each. Sonnet is the default and Haiku the system agents', so
+ * neither can be switched off, nor can the provider be disconnected.
+ */
 export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Sonnet" })).toBeDisabled();
+		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Haiku" })).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeDisabled();
+		await expect(
+			canvas.getByText(
+				"New bots and system agents use one of its models. Choose another model for them under Models → Default first.",
+			),
+		).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -228,7 +263,6 @@ export const Provider = meta.story({
 		await expect(
 			canvas.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-checked")),
 		).toEqual(["true", "true", "false"]);
-		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeInTheDocument();
 	},
 });
 
@@ -303,6 +337,16 @@ export const SystemAgents = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "System agents" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Opus" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
+	},
+});
+
+/** The model new bots start on, from the models that are switched on. */
+export const NewBots = meta.story({
+	render: () => <DefaultModelSettings />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "New bots" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Claude Sonnet" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},
 });

@@ -1,4 +1,5 @@
 import {
+	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderPreset,
 	type ProviderPresetId,
@@ -7,13 +8,18 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { useModels } from "@/lib/agents.ts";
 import {
 	BUILT_IN_AGENT_KEYS,
 	useBuiltInAgents,
 	useChooseBuiltInAgentModel,
 } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import {
+	useChooseDefaultModel,
+	useModelProviders,
+	useProviderActions,
+} from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -47,8 +53,9 @@ import {
 } from "./ProviderSettings.tsx";
 
 /**
- * What bots think with: the model the system bots use, then each connected
- * provider with how many of its models are switched on, and adding another.
+ * What bots think with: the models new bots and the system bots use, then each
+ * connected provider with how many of its models are switched on, and adding
+ * another.
  */
 export function ModelsSettings() {
 	const backToModels = useBackToHere("Models");
@@ -66,11 +73,10 @@ export function ModelsSettings() {
 			title="Models"
 			description="What your bots think with. Connect a provider, then pick which of its models bots can use."
 		>
-			{may.configureBuiltInAgents && (
-				<SettingsGroup label="Default">
-					<SystemModelRow providers={providers.data ?? []} />
-				</SettingsGroup>
-			)}
+			<SettingsGroup label="Default">
+				<DefaultModelRow providers={providers.data ?? []} />
+				{may.configureBuiltInAgents && <SystemModelRow providers={providers.data ?? []} />}
+			</SettingsGroup>
 			<SettingsGroup label="Providers">
 				{providers.error && (
 					<div className="px-4 py-3">
@@ -127,24 +133,58 @@ export function ModelsSettings() {
 	);
 }
 
+/** The model new bots start on. */
+function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] }) {
+	const backToModels = useBackToHere("Models");
+	const current = useModels().data?.defaultModel ?? null;
+	return (
+		<SettingsRow
+			label="New bots use"
+			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
+			chevron
+			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
+		/>
+	);
+}
+
 /** The Scribe's model stands for the system bots', since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
 	const backToModels = useBackToHere("Models");
 	const systemAgents = useBuiltInAgents();
 	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
-	const model = providers
-		.flatMap((provider) => provider.models)
-		.find((candidate) => candidate.modelId === current);
 	return (
 		<SettingsRow
 			label="System agents use"
-			trailing={
-				<SettingsValue>
-					{current === null ? "Not set" : model ? modelName(model) : current}
-				</SettingsValue>
-			}
+			trailing={<SettingsValue>{chosenModelName(providers, current)}</SettingsValue>}
 			chevron
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
+		/>
+	);
+}
+
+function chosenModelName(providers: readonly ModelProvider[], modelId: string | null) {
+	if (modelId === null) return "Not set";
+	const model = providers
+		.flatMap((provider) => provider.models)
+		.find((candidate) => candidate.modelId === modelId);
+	return model ? modelName(model) : modelId;
+}
+
+/**
+ * The model new bots start on. Switching it off or removing its provider is
+ * refused until another is chosen here, so once any model is on there is
+ * always one.
+ */
+export function DefaultModelSettings() {
+	const models = useModels();
+	const chooseDefault = useChooseDefaultModel();
+	return (
+		<ModelChoicePage
+			title="New bots"
+			description="The model a new bot starts on. Each bot can move to another model in its own settings."
+			current={models.data?.defaultModel ?? null}
+			pending={chooseDefault.isPending}
+			choose={(modelId) => chooseDefault.mutateAsync(modelId)}
 		/>
 	);
 }
@@ -155,38 +195,61 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
  * for every system bot at once.
  */
 export function SystemModelSettings() {
-	const providers = useModelProviders();
 	const systemAgents = useBuiltInAgents();
 	const summarise = useChooseBuiltInAgentModel("summarise");
 	const facilitate = useChooseBuiltInAgentModel("facilitate");
 	const compact = useChooseBuiltInAgentModel("compact");
 	const choosers = { summarise, facilitate, compact };
+	return (
+		<ModelChoicePage
+			title="System agents"
+			description="The model Sugabots uses behind the scenes: summaries, chat titles, routing collaborations and compacting long chats. A fast, cheap model works best."
+			current={systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null}
+			pending={summarise.isPending || facilitate.isPending || compact.isPending}
+			choose={(modelId) =>
+				Promise.all(BUILT_IN_AGENT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
+			}
+		/>
+	);
+}
+
+/** Picking one of the models that are switched on, grouped by provider. */
+function ModelChoicePage({
+	title,
+	description,
+	current,
+	pending,
+	choose,
+}: {
+	title: string;
+	description: string;
+	current: string | null;
+	pending: boolean;
+	choose: (modelId: string) => Promise<unknown>;
+}) {
+	const providers = useModelProviders();
 	const [error, setError] = useState<unknown>();
-	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
-	const pending = summarise.isPending || facilitate.isPending || compact.isPending;
 	const groups = (providers.data ?? [])
 		.filter((provider) => isConnected(provider))
 		.map((provider) => ({
 			provider,
-			models: provider.models.filter((model) => model.enabled),
+			models: provider.models.filter(
+				(model) => model.enabled && !effectiveCapabilities(model).includes("embeddings"),
+			),
 		}))
 		.filter((group) => group.models.length > 0);
 
-	async function choose(modelId: string) {
+	async function chooseModel(modelId: string) {
 		setError(undefined);
 		try {
-			await Promise.all(BUILT_IN_AGENT_KEYS.map((key) => choosers[key].mutateAsync(modelId)));
+			await choose(modelId);
 		} catch (cause) {
 			setError(cause);
 		}
 	}
 
 	return (
-		<SettingsPage
-			back={<BackToModels />}
-			title="System agents"
-			description="The model Sugabots uses behind the scenes: summaries, chat titles, routing collaborations and compacting long chats. A fast, cheap model works best."
-		>
+		<SettingsPage back={<BackToModels />} title={title} description={description}>
 			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			{groups.length === 0 && !providers.isPending && (
 				<SettingsGroup>
@@ -206,7 +269,7 @@ export function SystemModelSettings() {
 										<Check aria-hidden size={16} strokeWidth={2.6} className="shrink-0 text-link" />
 									)
 								}
-								onClick={pending || chosen ? undefined : () => void choose(model.modelId)}
+								onClick={pending || chosen ? undefined : () => void chooseModel(model.modelId)}
 								className={chosen ? "cursor-default" : undefined}
 							/>
 						);

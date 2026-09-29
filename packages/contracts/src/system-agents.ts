@@ -25,9 +25,10 @@ export const systemAgentSchema = Schema.Struct({
 	color: agentColorSchema,
 	face: agentFaceSchema,
 	/**
-	 * The model an administrator chose for it. `null` until one is chosen, and
-	 * until then the agent does not run: no summaries are written, and no pod
-	 * may hand the Facilitator the floor.
+	 * The model it runs on. `null` only while the workspace offers no model at
+	 * all, and until then the agent does not run: no summaries are written, and
+	 * no pod may hand the Facilitator the floor. The first model the workspace
+	 * offers becomes this one, and it cannot be cleared after that.
 	 */
 	model: Schema.NullOr(modelIdSchema),
 });
@@ -36,14 +37,11 @@ export type SystemAgent = typeof systemAgentSchema.Type;
 
 /**
  * Choosing the model a system agent runs on, which is the only thing about one
- * that anybody may change.
- *
- * `null` turns it off: it is the same state as one nobody has set up yet, so
- * there is one idea here rather than two, and every screen that explains an
- * agent that is not running already handles it.
+ * that anybody may change. There is no turning one off: the product relies on
+ * each of them running.
  */
 export const systemAgentUpdateSchema = Schema.Struct({
-	model: Schema.NullOr(modelIdSchema),
+	model: modelIdSchema,
 });
 
 export type SystemAgentUpdate = typeof systemAgentUpdateSchema.Type;

@@ -23,7 +23,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
+import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
@@ -39,7 +39,7 @@ export function WorkspaceSettings({
 	connectionSignInError,
 	selectedAgentTab,
 	selectedProviderId,
-	systemModel = false,
+	modelChoice,
 	selectedMemberId,
 }: {
 	section: WorkspaceSettingSection;
@@ -49,8 +49,8 @@ export function WorkspaceSettings({
 	selectedAgentTab?: "routines";
 	/** The provider open on the Models page. */
 	selectedProviderId?: string;
-	/** Whether the Models page shows the system bots' model instead. */
-	systemModel?: boolean;
+	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
+	modelChoice?: "default" | "system";
 	/** The membership open on the Members page. */
 	selectedMemberId?: string;
 }) {
@@ -65,8 +65,10 @@ export function WorkspaceSettings({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			{section === "providers" && may.manageProviders ? (
-				systemModel && may.configureBuiltInAgents ? (
+				modelChoice === "system" && may.configureBuiltInAgents ? (
 					<SystemModelSettings />
+				) : modelChoice === "default" ? (
+					<DefaultModelSettings />
 				) : selectedProviderId ? (
 					<ProviderSettings providerId={selectedProviderId} />
 				) : (

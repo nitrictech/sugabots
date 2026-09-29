@@ -747,7 +747,9 @@ describe("routes", () => {
 		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
-		client.api.modelProviders.listEnabledModels.mockReturnValue(Effect.succeed({ models: [] }));
+		client.api.modelProviders.listEnabledModels.mockReturnValue(
+			Effect.succeed({ models: [], defaultModel: null }),
+		);
 		const openrouter = {
 			...(modelProviders[0] as ModelProvider),
 			id: "0199a3a0-0000-7000-8000-0000000000c9",

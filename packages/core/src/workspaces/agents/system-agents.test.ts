@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { agent, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { agent, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -126,79 +126,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 			{ key: "compact", model: null },
 		]);
 	});
-
-	it("turns one off by taking its model away", async () => {
-		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
-		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
-
-		const turnedOff = await administration.setSystemAgentModel({
-			workspace: workspaceId,
-			key: "summarise",
-			model: null,
-		});
-
-		expect(turnedOff.model).toBeNull();
-	});
-
-	it("stops every pod routing through the Facilitator when it is turned off", async () => {
-		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
-		await agents.setSystemAgentModel(workspaceId, "facilitate", "chosen-model");
-		const routed = await placePod("routed", { facilitator: true });
-		const quiet = await placePod("quiet", { facilitator: false });
-
-		await administration.setSystemAgentModel({
-			workspace: workspaceId,
-			key: "facilitate",
-			model: null,
-		});
-
-		const after = await onDatabase((db) =>
-			db
-				.select({ slug: pod.slug, routing: pod.routing })
-				.from(pod)
-				.where(eq(pod.workspaceId, workspaceId))
-				.orderBy(pod.slug),
-		);
-		expect(after).toEqual([
-			{ slug: quiet.slug, routing: { facilitator: false } },
-			{ slug: routed.slug, routing: { facilitator: false } },
-		]);
-	});
-
-	it("leaves pod routing alone when the Scribe is turned off", async () => {
-		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
-		await agents.setSystemAgentModel(workspaceId, "summarise", "chosen-model");
-		await agents.setSystemAgentModel(workspaceId, "facilitate", "chosen-model");
-		const routed = await placePod("routed", { facilitator: true });
-
-		await administration.setSystemAgentModel({
-			workspace: workspaceId,
-			key: "summarise",
-			model: null,
-		});
-
-		const [after] = await onDatabase((db) =>
-			db.select({ routing: pod.routing }).from(pod).where(eq(pod.id, routed.id)),
-		);
-		expect(after?.routing).toEqual({ facilitator: true });
-	});
-
-	async function placePod(slug: string, routing: { facilitator: boolean }) {
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					kind: "shared",
-					name: slug,
-					slug: `${slug}-${crypto.randomUUID()}`,
-					routing,
-				})
-				.returning(),
-		);
-		if (!made) throw new Error("could not create the pod");
-		return made;
-	}
 
 	it("refuses a second Scribe in the same workspace", async () => {
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });

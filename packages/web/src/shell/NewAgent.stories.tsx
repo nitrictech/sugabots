@@ -32,6 +32,7 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 						},
 					]
 				: [],
+			defaultModel: models ? "claude-sonnet" : null,
 		});
 		return client;
 	});

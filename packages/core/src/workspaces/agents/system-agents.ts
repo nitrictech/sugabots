@@ -9,11 +9,12 @@ import { agent } from "../../database/schema.ts";
  * each, and every pod in it is served by them: they sit in no pod, and a pod has
  * nothing to place, configure or remove.
  *
- * One is born without a model and does not run until an administrator chooses
- * one. There is no default and no fallback: an unattended agent quietly running
- * on a model nobody picked is what this arrangement exists to prevent.
- * Compaction is the exception: it runs on the model of the bot it compacts
- * for, which somebody did pick, and on its own only for a bot with none.
+ * One is born without a model, since a new workspace offers none, and is given
+ * the first model somebody switches on, which is the one they pick while
+ * onboarding. From then on it always has one: an administrator can change it
+ * but not clear it, and the workspace cannot stop offering it until the agent
+ * is moved to another. Compaction runs on the model of the bot it compacts
+ * for, and on its own only for a bot with none.
  */
 
 export type { SystemAgentKey };

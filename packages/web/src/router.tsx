@@ -92,6 +92,7 @@ function lazyNamed<Name extends string, Props>(
  *   /$workspace/settings/pods/$pod   workspace pod detail
  *   /$workspace/settings/pods/$pod/agents/$agent   agent configuration
  *   /$workspace/settings/providers/$provider   one model provider
+ *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
  *
  * An agent's address names its pod, because a handle is unique only within
@@ -562,7 +563,19 @@ const settingsSystemModelRoute = createRoute({
 	loader: () => void WorkspaceSettings.preload(),
 	component: () => (
 		<SettingsLayout>
-			<WorkspaceSettings section="providers" systemModel />
+			<WorkspaceSettings section="providers" modelChoice="system" />
+		</SettingsLayout>
+	),
+});
+
+/** The model new bots start on. A fixed path, like the system bots' one. */
+const settingsDefaultModelRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/providers/default",
+	loader: () => void WorkspaceSettings.preload(),
+	component: () => (
+		<SettingsLayout>
+			<WorkspaceSettings section="providers" modelChoice="default" />
 		</SettingsLayout>
 	),
 });
@@ -887,6 +900,7 @@ const routeTree = rootRoute.addChildren([
 		settingsPodAgentRoute,
 		settingsPodRoute,
 		settingsSystemModelRoute,
+		settingsDefaultModelRoute,
 		settingsProviderRoute,
 		agentsRoute,
 		allRoute.addChildren([allIndexRoute, allAgentRoute]),
