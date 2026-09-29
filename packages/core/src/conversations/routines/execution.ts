@@ -51,13 +51,12 @@ export const findRoutineExecutionId = Effect.fn("RoutineExecution.findRoutineExe
  * answer read under it about whether the run still takes work stands until
  * the transaction ends.
  *
- * Lock order: a transaction that admits work into a run, or ends one of its
- * waiting turns, takes this lock before it locks the turn or tool call. Other
- * writers lock their rows first and reach this lock afterwards, when
- * settlement reacts to their events inside their transaction; so settlement
- * never waits for their rows, and skips the running turns, collaborations
- * and waiting lane requests another transaction holds. That transaction's own
- * events settle the run again.
+ * Lock order: only settlement, in a transaction of its own after the events
+ * that trigger it commit, and a transaction admitting work into the run
+ * (`routineAcceptsWork`) take this lock, both before any row they lock.
+ * Settlement skips the running turns, collaborations and waiting lane
+ * requests another transaction holds; that transaction's own events settle
+ * the run again.
  */
 export const lockRoutineSettlement = (executionId: string) =>
 	query((db) =>

@@ -11,7 +11,7 @@ import {
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
-import { routine, routineExecution, thread } from "../../database/schema.ts";
+import { routine, routineEndingRequest, routineExecution, thread } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -75,6 +75,13 @@ export interface Interface {
 	readonly start: (executionId: string) => Effect.Effect<schema.RoutineExecutionRow | undefined>;
 	/** Records how a running run is ending. */
 	readonly recordEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<void>;
+	/**
+	 * Records, without locking the run, that an event said it should end this
+	 * way. Settlement folds it in later (see `takeEndingRequests`).
+	 */
+	readonly requestEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<void>;
+	/** Removes and returns the run's ending requests, oldest first. */
+	readonly takeEndingRequests: (executionId: string) => Effect.Effect<ReadonlyArray<Turns.Ended>>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
 	 * was not running.
@@ -287,6 +294,39 @@ export const make = Effect.gen(function* () {
 							and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running")),
 						),
 				).pipe(Effect.asVoid),
+			),
+
+		requestEnding: (executionId, ending) =>
+			operation(
+				"requestEnding",
+				query((db) =>
+					db.insert(routineEndingRequest).values({
+						executionId,
+						state: ending.state,
+						error: ending.state === "failed" ? ending.error : null,
+					}),
+				).pipe(Effect.asVoid),
+			),
+
+		takeEndingRequests: (executionId) =>
+			operation(
+				"takeEndingRequests",
+				Effect.map(
+					query((db) =>
+						db
+							.delete(routineEndingRequest)
+							.where(eq(routineEndingRequest.executionId, executionId))
+							.returning(),
+					),
+					(rows): Turns.Ended[] =>
+						rows
+							.toSorted((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+							.map((row) =>
+								row.state === "failed"
+									? { state: "failed", error: row.error ?? UserMessage.of`The routine run failed` }
+									: { state: "cancelled" },
+							),
+				),
 			),
 
 		settle: (executionId, settled) =>

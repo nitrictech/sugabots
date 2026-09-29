@@ -7,7 +7,7 @@ import { afterCommit, query, serviceOperations, transaction } from "../../databa
 import { thread, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { lockRoutineSettlementOf } from "../routines/execution.ts";
+import { findRoutineExecutionId } from "../routines/execution.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -79,7 +79,9 @@ export const makeControls = Effect.gen(function* () {
 								.limit(1),
 						);
 						if (!approvalThread) return yield* new ToolApprovalNotFound();
-						const routineExecutionId = yield* lockRoutineSettlementOf(approvalThread.id);
+						const routineExecutionId = yield* query((db) =>
+							findRoutineExecutionId(db, approvalThread.id),
+						);
 						const [candidate] = yield* query((db) =>
 							db
 								.select({
@@ -98,8 +100,7 @@ export const makeControls = Effect.gen(function* () {
 									),
 								)
 								.limit(1)
-								// The call alone: whoever ends its turn locks the turn before the
-								// settlement lock this holds, so waiting on the turn could deadlock.
+								// The call alone: the turn is locked by whoever transitions it.
 								.for("update", { of: toolCall }),
 						);
 						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {

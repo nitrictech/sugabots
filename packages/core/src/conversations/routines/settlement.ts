@@ -2,7 +2,14 @@ export * as RoutineSettlement from "./settlement.ts";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
+import {
+	afterCommit,
+	batchedBeforeCommit,
+	Database,
+	query,
+	serviceOperations,
+	transaction,
+} from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import {
 	collaboration,
@@ -28,12 +35,14 @@ import { RoutineRuns } from "./runs.ts";
  * Settles routine runs: records how a run ended once nothing in its threads
  * is running, waiting or about to start.
  *
- * `handler` reacts to the conversation events that can end a run, inside the
- * transaction that emitted them. A turn or facilitation that failed for good,
- * or a turn that was cancelled, starts ending its run early: the rest of the
- * run's work is cancelled, and the run ends that way once what is still
- * running stops. Every later settlement of an ending run cancels whatever
- * work is left, since some may have been held by another transaction.
+ * `handler` reacts to the conversation events that can end a run. In the
+ * emitting transaction it only records how an event says the run should end,
+ * without locking the run; the run settles once that transaction commits, in
+ * its own. A turn or facilitation that failed for good, or a turn that was
+ * cancelled, starts ending its run early: the rest of its work is cancelled, and it ends that way once what is still running
+ * stops. Every later settlement of an ending run cancels whatever work is
+ * left, since some may have been held by another transaction. A settlement
+ * lost to a crash after commit is made by the run's workflow's next check.
  */
 export interface Interface {
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
@@ -84,7 +93,8 @@ export const make = Effect.gen(function* () {
 				if (!run) return;
 				const work = yield* workingThreads(run.threadId);
 				const wasEnding = endingOf(run);
-				const ending = endingAfter(wasEnding, outcome);
+				const requested = yield* routines.takeEndingRequests(run.id);
+				const ending = [...requested, outcome].reduce(endingAfter, wasEnding);
 				if (ending && ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
 				if (ending) yield* cancelWork(work);
 				if (ending && !wasEnding) {
@@ -103,13 +113,32 @@ export const make = Effect.gen(function* () {
 			}),
 		);
 
+	/**
+	 * Settles the runs of these threads once the transaction commits. Batched,
+	 * so it is registered after the thread feed's outbox, which the handlers
+	 * reach first: clients hear what a turn did before they hear its run settled.
+	 */
+	const settleAfterCommit = batchedBeforeCommit((threadIds: ReadonlyArray<string>) =>
+		Effect.flatMap(Database, (database) =>
+			afterCommit(
+				Effect.forEach(new Set(threadIds), (threadId) => settle(threadId), {
+					discard: true,
+				}).pipe(Effect.provideService(Database, database)),
+			),
+		),
+	);
+
 	return Service.of({
 		handler: (events) =>
-			Effect.forEach(
-				events.flatMap(settlementFor),
-				({ threadId, outcome }) => settle(threadId, outcome),
-				{ discard: true },
-			),
+			Effect.gen(function* () {
+				const settlements = events.flatMap(settlementFor);
+				for (const { threadId, outcome } of settlements) {
+					if (!outcome) continue;
+					const executionId = yield* query((db) => findRoutineExecutionId(db, threadId));
+					if (executionId) yield* routines.requestEnding(executionId, outcome);
+				}
+				yield* settleAfterCommit(settlements.map(({ threadId }) => threadId));
+			}),
 
 		settleRun: (run) =>
 			operation(

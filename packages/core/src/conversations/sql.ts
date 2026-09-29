@@ -256,6 +256,25 @@ export const routineExecution = pgTable(
 	],
 );
 
+/**
+ * How an event said a routine run should end, recorded in the emitting
+ * transaction and folded into the run when it next settles, in its own
+ * transaction. Inserted without locking the run, so emitters need no lock order.
+ */
+export const routineEndingRequest = pgTable(
+	"routine_ending_request",
+	{
+		id: primaryKey(),
+		executionId: uuid("execution_id")
+			.notNull()
+			.references(() => routineExecution.id, { onDelete: "cascade" }),
+		state: text("state").$type<"failed" | "cancelled">().notNull(),
+		error: text("error").$type<UserMessage>(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [index("routine_ending_request_execution_idx").on(table.executionId)],
+);
+
 export const threadParticipant = pgTable(
 	"thread_participant",
 	{
