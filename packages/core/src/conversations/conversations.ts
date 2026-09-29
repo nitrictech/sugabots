@@ -16,8 +16,8 @@ import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
 import { Summaries } from "./summaries/summaries.ts";
 import { ThreadFeed } from "./thread-feed.ts";
+import { ThreadView } from "./thread-view.ts";
 import { ThreadRepository } from "./threads/repository.ts";
-import { ThreadView } from "./threads/thread-view.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
 import { Turns } from "./turns/turns.ts";
 

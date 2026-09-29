@@ -24,7 +24,7 @@ import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
-import { ThreadView } from "../../threads/thread-view.ts";
+import { ThreadView } from "../../thread-view.ts";
 import {
 	modelPrompt,
 	prepareRunnable,

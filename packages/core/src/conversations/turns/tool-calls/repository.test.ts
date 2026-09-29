@@ -24,7 +24,7 @@ import { Lanes } from "../../../workflows/lanes.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
-import { ThreadView } from "../../threads/thread-view.ts";
+import { ThreadView } from "../../thread-view.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
 import { ToolApprovalConflict } from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";

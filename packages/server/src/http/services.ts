@@ -5,7 +5,7 @@ import type { ModelTrials } from "@sugabots/core/conversations/model-trials/mode
 import type { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
 import type { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
-import type { ThreadView } from "@sugabots/core/conversations/threads/thread-view";
+import type { ThreadView } from "@sugabots/core/conversations/thread-view";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
