@@ -24,7 +24,7 @@ import {
 import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { lockRoutineSettlementOf, routineAcceptsWork } from "../routines/execution.ts";
+import { routineAcceptsWork } from "../routines/execution.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
 import {
 	type Ended,
@@ -308,19 +308,6 @@ export const make = Effect.gen(function* () {
 				reason,
 				yield* endRun(existing.id, decided.state, ROUTINE_EXECUTION_ENDED),
 			);
-		});
-
-	/**
-	 * Holds the settlement lock of the routine run the turn found by
-	 * `condition` works for, if any, before the turn itself is locked (see
-	 * `lockRoutineSettlement`).
-	 */
-	const lockRoutineSettlementOfTurn = (condition: SQL | undefined) =>
-		Effect.gen(function* () {
-			const [found] = yield* query((db) =>
-				db.select({ threadId: turn.threadId }).from(turn).where(condition).limit(1),
-			);
-			if (found) yield* lockRoutineSettlementOf(found.threadId);
 		});
 
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
@@ -614,7 +601,6 @@ export const make = Effect.gen(function* () {
 				"cancelWaiting",
 				transaction(
 					Effect.gen(function* () {
-						yield* lockRoutineSettlementOfTurn(onTrigger(request));
 						const locked = yield* lockAndTransition(onTrigger(request), TurnEvent.CancelWaiting());
 						if (locked?.decided._tag !== "Next") return;
 						yield* write(locked.id, locked.decided.state);
@@ -634,7 +620,6 @@ export const make = Effect.gen(function* () {
 							eq(turn.owner, owner),
 							inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
 						);
-						yield* lockRoutineSettlementOfTurn(owned);
 						const locked = yield* lockAndTransition(owned, TurnEvent.Abandon(outcome));
 						if (locked?.decided._tag !== "Next") return undefined;
 						yield* write(locked.id, locked.decided.state);
@@ -658,9 +643,8 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						if (threadIds.length === 0) return [];
 						const under = inArray(turn.threadId, [...threadIds]);
-						// Whoever else locks a waiting turn takes the routine's settlement lock
-						// first, or emits nothing settlement reacts to, so waiting here cannot
-						// deadlock.
+						// Settlement runs in a transaction of its own, after its trigger
+						// commits, so whoever holds a waiting turn is not waiting on it.
 						const waiting = yield* query((db) =>
 							db
 								.select({ ...stateColumns, threadId: turn.threadId })
