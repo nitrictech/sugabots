@@ -97,13 +97,13 @@ function show(
 	over: { canApprove?: boolean; participants?: AgentParticipant[] } = {},
 ) {
 	const queryClient = createQueryClient();
-	const thread = (shown: Message[]) => (
+	const thread = (shown: Message[], participants = over.participants ?? [host]) => (
 		<QueryClientProvider client={queryClient}>
 			<ThreadConversation
 				messages={shown}
 				host={host}
 				isRunning={false}
-				participants={over.participants ?? [host]}
+				participants={participants}
 				user={user}
 				podId={POD}
 				onOpenCollaboration={() => undefined}
@@ -113,7 +113,10 @@ function show(
 		</QueryClientProvider>
 	);
 	const view = render(thread(messages));
-	return { update: (shown: Message[]) => view.rerender(thread(shown)) };
+	return {
+		update: (shown: Message[], participants?: AgentParticipant[]) =>
+			view.rerender(thread(shown, participants)),
+	};
 }
 
 beforeEach(() => {
@@ -153,6 +156,25 @@ describe("what people and bots write", () => {
 		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
 		expect(screen.getByText(asked)).toBeDefined();
+	});
+
+	it("marks a mention in a reply already shown, once it names someone", async () => {
+		const triager: AgentParticipant = {
+			kind: "agent",
+			id: "0199a3a0-0000-7000-8000-0000000000b5",
+			name: "Issue Triager",
+			handle: "issue-triager",
+			color: "orange",
+			face: "dot",
+		};
+		const answer = reply([{ type: "text", text: "I asked @issue-triager about it." }]);
+		const { update } = show([answer]);
+		await screen.findByText(/I asked/);
+		expect(screen.queryByText("@issue-triager")).toBeNull();
+
+		update([answer], [host, triager]);
+
+		expect(await screen.findByText("@issue-triager")).toBeDefined();
 	});
 });
 

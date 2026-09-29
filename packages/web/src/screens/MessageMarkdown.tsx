@@ -1,10 +1,10 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import type { Root } from "hast";
-import { createElement, type ReactNode, useMemo } from "react";
+import { createElement, type ReactNode } from "react";
 import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown } from "streamdown";
 import type { PluggableList, Plugin } from "unified";
 import { visit } from "unist-util-visit";
-import { MENTION_TAG, Mention, remarkMentions } from "./mentions.tsx";
+import { MarkdownMention, MENTION_TAG, MentionableContext, remarkMentions } from "./mentions.tsx";
 
 /*
  * An agent's words as markdown. Streamdown is the AI SDK's renderer: it
@@ -21,23 +21,19 @@ export function MessageMarkdown({
 	/** Everyone a mention in the text could name. */
 	mentionable: ThreadParticipant[];
 }) {
-	// Streamdown's own plugins give it tables and strikethrough; passing any replaces them.
-	const remarkPlugins = useMemo(
-		(): PluggableList => [...DEFAULT_REMARK_PLUGINS, [remarkMentions, mentionable]],
-		[mentionable],
-	);
-	const components = useMemo(() => componentsFor(mentionable), [mentionable]);
 	return (
-		<Streamdown
-			className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
-			remarkPlugins={remarkPlugins}
-			rehypePlugins={REHYPE_PLUGINS}
-			components={components}
-			controls={CONTROLS}
-			isAnimating={false}
-		>
-			{text}
-		</Streamdown>
+		<MentionableContext value={mentionable}>
+			<Streamdown
+				className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
+				remarkPlugins={REMARK_PLUGINS}
+				rehypePlugins={REHYPE_PLUGINS}
+				components={COMPONENTS}
+				controls={CONTROLS}
+				isAnimating={false}
+			>
+				{text}
+			</Streamdown>
+		</MentionableContext>
 	);
 }
 
@@ -76,7 +72,8 @@ const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
  */
 const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks];
 
-const DEFAULT_REMARK_PLUGINS = Object.values(defaultRemarkPlugins);
+/* Streamdown's own plugins give it tables and strikethrough; passing any replaces them. */
+const REMARK_PLUGINS: PluggableList = [...Object.values(defaultRemarkPlugins), remarkMentions];
 
 /* A copy button on code is worth its space in a bubble; table and image tooling is not. */
 const CONTROLS = {
@@ -86,18 +83,13 @@ const CONTROLS = {
 	image: false,
 };
 
-function componentsFor(mentionable: ThreadParticipant[]): Components {
-	return {
-		[MENTION_TAG]: ({ handle, children }) => {
-			const participant = mentionable.find((candidate) => candidate.handle === handle);
-			return participant ? <Mention participant={participant} /> : (children as ReactNode);
-		},
-		// Streamdown's headings are sized for a page; a bubble is 520px wide.
-		h1: heading("h1", "text-2xl"),
-		h2: heading("h2", "text-xl"),
-		h3: heading("h3", "text-lg"),
-	};
-}
+const COMPONENTS: Components = {
+	[MENTION_TAG]: MarkdownMention,
+	// Streamdown's headings are sized for a page; a bubble is 520px wide.
+	h1: heading("h1", "text-2xl"),
+	h2: heading("h2", "text-xl"),
+	h3: heading("h3", "text-lg"),
+};
 
 function heading(tag: "h1" | "h2" | "h3", size: string) {
 	return ({ children }: ExtraProps & { children?: unknown }) =>

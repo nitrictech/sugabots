@@ -7,7 +7,8 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
+import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
 
@@ -40,9 +41,16 @@ interface NamedMention extends MentionInText {
 
 function namedMentionsIn(content: string, mentionable: ThreadParticipant[]): NamedMention[] {
 	return mentionsIn(content).flatMap((mention) => {
-		const participant = mentionable.find((candidate) => candidate.handle === mention.handle);
+		const participant = participantWithHandle(mentionable, mention.handle);
 		return participant ? [{ ...mention, participant }] : [];
 	});
+}
+
+function participantWithHandle(
+	mentionable: ThreadParticipant[],
+	handle: string,
+): ThreadParticipant | undefined {
+	return mentionable.find((candidate) => candidate.handle === handle);
 }
 
 /**
@@ -80,18 +88,27 @@ export function textWithMentions(content: string, mentionable: ThreadParticipant
 	return [...rendered, content.slice(previousEnd)];
 }
 
-/** The element the remark plugin emits; the renderer maps it back to `Mention`. */
+/** The element the remark plugin emits; `MarkdownMention` draws it. */
 export const MENTION_TAG = "mention";
 
 /**
+ * Everyone a mention in the markdown below could name. Markdown reaches the
+ * list through context rather than through the renderer's props, because
+ * Streamdown redraws only when its text or styling changes: someone who
+ * becomes mentionable after a reply is drawn is still marked in it.
+ */
+export const MentionableContext = createContext<ThreadParticipant[]>([]);
+
+/**
  * Splits markdown text nodes around mentions, wrapping each in a `<mention>`
- * element that carries the handle. Code spans are their own node type, so a
+ * element that carries the handle, whether or not it names anyone; that is
+ * for `MarkdownMention` to say. Code spans are their own node type, so a
  * handle quoted in one is never matched.
  */
-export const remarkMentions: Plugin<[ThreadParticipant[]], Root> = (mentionable) => (tree) => {
+export const remarkMentions: Plugin<[], Root> = () => (tree) => {
 	visit(tree, "text", (node, index, parent) => {
 		if (!parent || index === undefined) return;
-		const mentions = namedMentionsIn(node.value, mentionable);
+		const mentions = mentionsIn(node.value);
 		if (mentions.length === 0) return;
 		const replacements: PhrasingContent[] = [];
 		let previousEnd = 0;
@@ -103,7 +120,7 @@ export const remarkMentions: Plugin<[ThreadParticipant[]], Root> = (mentionable)
 			replacements.push({
 				type: "text",
 				value: node.value.slice(mention.index, end),
-				data: { hName: MENTION_TAG, hProperties: { handle: mention.participant.handle } },
+				data: { hName: MENTION_TAG, hProperties: { handle: mention.handle } },
 			});
 			previousEnd = end;
 		}
@@ -114,3 +131,18 @@ export const remarkMentions: Plugin<[ThreadParticipant[]], Root> = (mentionable)
 		return index + replacements.length;
 	});
 };
+
+/**
+ * A `<mention>` from `remarkMentions`: a chip if it names someone in
+ * `MentionableContext`, else its text. Its props come from the markdown tree
+ * untyped, so the handle is checked rather than assumed.
+ */
+export function MarkdownMention({
+	handle,
+	children,
+}: ExtraProps & { handle?: unknown; children?: unknown }) {
+	const mentionable = useContext(MentionableContext);
+	const participant =
+		typeof handle === "string" ? participantWithHandle(mentionable, handle) : undefined;
+	return participant ? <Mention participant={participant} /> : (children as ReactNode);
+}
