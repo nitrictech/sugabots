@@ -43,19 +43,18 @@ const meta = preview.meta({
 	],
 });
 
-/** Default is a pod chosen: its bar on the left edge, All and the other pods beside it. */
+/** Default is a pod chosen: its bar on the left edge, the other pods beside it. */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: "Revenue" })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
-		await expect(canvas.getByRole("link", { name: "All" })).not.toHaveAttribute("aria-current");
+		await expect(canvas.getByRole("link", { name: "Engineering" })).not.toHaveAttribute(
+			"aria-current",
+		);
 	},
 });
-
-/** All is the virtual pod chosen; its tile shows the first four pods' colours. */
-export const AllChosen = meta.story({ args: { selected: "all" } });
 
 /** Personal is chosen, below the divider. */
 export const PersonalChosen = meta.story({ args: { selected: "personal" } });
@@ -82,18 +81,6 @@ export const PodMenu = meta.story({
 		await expect(args.onNewBot).toHaveBeenCalledWith(expect.objectContaining({ slug: "revenue" }));
 		// The menu stays mounted while its closing animation plays.
 		await waitFor(() => expect(menu).not.toBeInTheDocument());
-	},
-});
-
-/** Right-clicking All: a new bot in a pod chosen next, or a new pod. */
-export const AllMenu = meta.story({
-	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.pointer({
-			keys: "[MouseRight]",
-			target: canvas.getByRole("link", { name: "All" }),
-		});
-		await userEvent.click(await screen.findByRole("menuitem", { name: "New bot" }));
-		await expect(args.onNewBot).toHaveBeenCalledWith(undefined);
 	},
 });
 

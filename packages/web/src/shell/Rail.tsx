@@ -10,25 +10,25 @@ import { cn } from "cn";
 import { Plus, UserRound } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
-import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
+import { agentChatLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspacePermissions, useWorkspaces } from "@/lib/workspace.ts";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
-import { AllPodsTile, PodTile } from "@/shell/PodTile.tsx";
-import { AllPodsMenuItems, PodMenuItems } from "@/shell/RailMenus.tsx";
+import { PodTile } from "@/shell/PodTile.tsx";
+import { PodMenuItems } from "@/shell/RailMenus.tsx";
 import { WorkspaceSwitcher } from "@/shell/WorkspaceSwitcher.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/ui/dropdown-menu.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
-/** What the rail has open over it: a new pod, or a new bot in a pod or, from All, in one chosen. */
-type Making = { kind: "pod" } | { kind: "bot"; pod: Pod | undefined };
+/** What the rail has open over it: a new pod, or a new bot in a pod. */
+type Making = { kind: "pod" } | { kind: "bot"; pod: Pod };
 
 /**
- * The strip down the left edge: the workspace, All, each shared pod, a way to make one, then Personal, and you at the
+ * The strip down the left edge: the workspace, each shared pod, a way to make one, then Personal, and you at the
  * bottom. Choosing a pod scopes the conversation list
  * beside it.
  */
@@ -69,17 +69,11 @@ export function Rail() {
 			<Dialog open={making?.kind === "bot"} onOpenChange={(open) => !open && setMaking(undefined)}>
 				{making?.kind === "bot" && (
 					<NewAgentDialog
-						podId={making.pod?.id}
-						pods={podsToAddBotsTo(pods ?? [])}
-						onCreated={async (agent, chosen) => {
+						podId={making.pod.id}
+						pods={[making.pod]}
+						onCreated={async (agent) => {
 							setMaking(undefined);
-							const home = making.pod ?? chosen;
-							if (!home) return;
-							await navigate(
-								making.pod
-									? agentChatLink({ pod: home, agent })
-									: allAgentChatLink({ pod: home, agent }),
-							);
+							await navigate(agentChatLink({ pod: making.pod, agent }));
 						}}
 					/>
 				)}
@@ -100,7 +94,7 @@ export function RailView({
 }: {
 	/** Every pod the viewer reaches, shared and Personal, with its crew bots. */
 	pods: readonly { pod: Pod; bots: readonly Agent[] }[];
-	/** `all`, a pod's slug, `settings`, or undefined when none of them is open. */
+	/** A pod's slug, `settings`, or undefined when neither is open. */
 	selected: string | undefined;
 	/** The workspace being looked at. */
 	workspace?: Workspace;
@@ -109,16 +103,12 @@ export function RailView({
 	user?: { name: string; image?: string | null };
 	/** Absent when the viewer may not make a pod. */
 	onNewPod?: () => void;
-	/**
-	 * Opens a new bot in the pod whose menu it was chosen from, or in All's
-	 * with `undefined`. Offered only where the viewer may add a bot.
-	 */
-	onNewBot?: (pod: Pod | undefined) => void;
+	/** Opens a new bot in the pod whose menu it was chosen from. Offered only where the viewer may add a bot. */
+	onNewBot?: (pod: Pod) => void;
 	className?: string;
 }) {
 	const shared = pods.filter(({ pod }) => pod.kind === "shared");
 	const personal = pods.find(({ pod }) => pod.kind === "personal");
-	const mayAddBotFromAll = podsToAddBotsTo(shared.map(({ pod }) => pod)).length > 0;
 	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
 	const backToChat = useBackToHere("Chat");
 	const settingsBack = selected === "settings" ? undefined : backToChat;
@@ -129,11 +119,6 @@ export function RailView({
 			onNewBot={onNewBot && pod.permissions.createAgents ? () => onNewBot(pod) : undefined}
 		/>
 	);
-	const newBotFromAll = onNewBot && mayAddBotFromAll ? () => onNewBot(undefined) : undefined;
-	const allMenu =
-		newBotFromAll || onNewPod ? (
-			<AllPodsMenuItems onNewBot={newBotFromAll} onNewPod={onNewPod} />
-		) : undefined;
 
 	return (
 		<nav
@@ -153,9 +138,6 @@ export function RailView({
 					<span aria-hidden className="h-[1.5px] w-7 shrink-0 rounded-full bg-border-strong" />
 				</>
 			)}
-			<RailItem label="All" selected={selected === "all"} menu={allMenu}>
-				<AllPodsTile colors={shared.flatMap(({ pod }) => pod.color ?? [])} size={46} />
-			</RailItem>
 			{shared.map(({ pod, bots }) => (
 				<RailItem
 					key={pod.id}
@@ -231,11 +213,10 @@ export function RailView({
 	);
 }
 
-/** Which rail item the address is under: `all`, a pod's slug, or `settings`, which is you. */
+/** Which rail item the address is under: a pod's slug, or `settings`, which is you. */
 function useRailSelection(): string | undefined {
 	const matchRoute = useMatchRoute();
 	const { pod } = useParams({ strict: false });
-	if (matchRoute({ to: "/$workspace/all", fuzzy: true })) return "all";
 	if (matchRoute({ to: "/$workspace/pods/$pod", fuzzy: true })) return pod;
 	if (matchRoute({ to: "/$workspace/settings", fuzzy: true })) return "settings";
 	return undefined;
@@ -243,11 +224,6 @@ function useRailSelection(): string | undefined {
 
 function crewIn(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
 	return agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
-}
-
-/** The pods a new bot can go in: shared ones the viewer may add a bot to. */
-function podsToAddBotsTo(pods: readonly Pod[]): Pod[] {
-	return pods.filter((pod) => pod.kind === "shared" && pod.permissions.createAgents);
 }
 
 function RailItem({
@@ -259,8 +235,8 @@ function RailItem({
 }: {
 	label: string;
 	selected: boolean;
-	/** The pod it opens; All when there is none. */
-	pod?: Pod;
+	/** The pod it opens. */
+	pod: Pod;
 	/** What right-clicking it offers; without it, the browser's own menu. */
 	menu?: ReactNode;
 	children: ReactElement;
@@ -277,12 +253,8 @@ function RailItem({
 			{children}
 		</>
 	);
-	const link = pod ? (
+	const link = (
 		<Link {...podLink(pod)} {...props}>
-			{content}
-		</Link>
-	) : (
-		<Link {...allLink()} {...props}>
 			{content}
 		</Link>
 	);

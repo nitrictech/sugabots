@@ -31,16 +31,8 @@ export const chatSchema = Schema.Struct({
 
 export type Chat = typeof chatSchema.Type;
 
-/**
- * Which chats a list covers: one pod, or `all`, every shared pod the person
- * can reach. Personal is left out of `all` because it is private and has its
- * own place on the rail.
- */
-export const chatListScopeSchema = Schema.Union([uuidSchema, Schema.Literal("all")]);
-
-export type ChatListScope = typeof chatListScopeSchema.Type;
-
-export const chatListQuerySchema = Schema.Struct({ pod: chatListScopeSchema });
+/** The pod whose chats a list covers. */
+export const chatListQuerySchema = Schema.Struct({ pod: uuidSchema });
 
 /**
  * One row of the conversation list: a bot, since each bot has one chat in its

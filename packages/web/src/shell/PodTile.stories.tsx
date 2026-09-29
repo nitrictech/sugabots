@@ -1,7 +1,7 @@
 import type { BotLook } from "@sugabots/avatars";
 import { podColors } from "@sugabots/contracts";
 import preview from "#storybook/preview";
-import { AllPodsTile, PodTile, type PodTileSize } from "./PodTile.tsx";
+import { PodTile, type PodTileSize } from "./PodTile.tsx";
 
 const revenue: BotLook[] = [
 	{ color: "green", face: "pill" },
@@ -11,7 +11,7 @@ const revenue: BotLook[] = [
 	{ color: "rose", face: "square" },
 ];
 
-const sizes: PodTileSize[] = [88, 72, 46, 44, 36, 28, 20];
+const sizes: PodTileSize[] = [88, 72, 46, 44, 36, 28];
 
 const meta = preview.meta({
 	title: "Product/PodTile",
@@ -38,7 +38,7 @@ export const Empty = meta.story({
 	args: { bots: [] },
 });
 
-/** Neutral is the uncoloured tile that All and a Personal pod are drawn on. */
+/** Neutral is the uncoloured tile a Personal pod is drawn on. */
 export const Neutral = meta.story({
 	args: { color: null },
 });
@@ -58,18 +58,7 @@ export const Colours = meta.story({
 	),
 });
 
-/** AllPods is All on the rail with one to four pods: their colours, and faint squares where there is none. */
-export const AllPods = meta.story({
-	render: () => (
-		<div className="flex gap-3">
-			{[1, 2, 3, 4].map((count) => (
-				<AllPodsTile key={count} colors={podColors.slice(0, count)} size={46} />
-			))}
-		</div>
-	),
-});
-
-/** Sizes shows the tile at every size the design draws, from the dialog preview down to the chat-row badge. */
+/** Sizes shows the tile at every size the design draws, from the dialog preview down to the new-bot picker. */
 export const Sizes = meta.story({
 	render: () => (
 		<div className="flex items-end gap-4">

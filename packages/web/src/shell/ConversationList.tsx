@@ -1,119 +1,65 @@
-import type { Agent, ChatListItem, Pod } from "@sugabots/contracts";
+import type { ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Plus, Search, Settings } from "lucide-react";
 import { useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, allAgentChatLink, podLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
-import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
-import { NewPodDialog } from "@/shell/NewPod.tsx";
-import { PodTile } from "@/shell/PodTile.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
-/** What a list covers: every shared pod, or one pod. */
-export type ListScope = { kind: "all" } | { kind: "pod"; pod: Pod };
-
 /**
  * The column of conversations for the pod chosen on the rail: one row per bot,
- * newest message first, with a search over their names. In All, each row
- * carries its pod's badge, since the bots come from several.
+ * newest message first, with a search over their names.
  */
 export function ConversationList({
-	scope,
+	pod,
 	selectedAgentId,
 	className,
 }: {
-	scope: ListScope;
+	pod: Pod;
 	selectedAgentId?: string;
 	className?: string;
 }) {
-	const list = useChatList(scope.kind === "all" ? "all" : scope.pod.id);
+	const list = useChatList(pod.id);
 	const { session } = useRouteContext({ from: "__root__" });
-	const { data: pods } = usePods();
-	const { agents } = useAgents();
-	const may = useWorkspacePermissions();
-	const [creating, setCreating] = useState<"bot" | "pod">();
+	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();
-	const pod = scope.kind === "pod" ? scope.pod : undefined;
-	const shared = pods?.filter((one) => one.kind === "shared") ?? [];
-	// In All a new bot goes in whichever shared pod you pick, of those you may add to.
-	const podsToAddTo = (pod ? [pod] : shared).filter((one) => one.permissions.createAgents);
-	const newBot = podsToAddTo.length > 0 ? () => setCreating("bot") : undefined;
-	const emptyState: EmptyList =
-		scope.kind === "all" && shared.length === 0
-			? {
-					title: "No pods yet",
-					hint: may.createPods
-						? "A pod is where a team's bots live. Make one to start."
-						: "Ask a workspace admin to add you to a pod.",
-					action: may.createPods
-						? { label: "New pod", onClick: () => setCreating("pod") }
-						: undefined,
-				}
-			: {
-					title: scope.kind === "all" ? "No bots yet" : `No bots in ${scope.pod.name} yet`,
-					hint: newBot ? undefined : "Someone who runs this pod can add one.",
-					action: newBot ? { label: "New bot", onClick: newBot } : undefined,
-				};
-
-	const rows = (list.data?.items ?? []).flatMap((item): ConversationRowData[] => {
-		const home = pods?.find((one) => one.id === item.agent.podId);
-		if (!home) return [];
-		return [
-			{
-				...item,
-				pod: home,
-				podBots: crewOf(agents, home),
-				fromYou: item.lastMessage?.authorUserId === session.user?.id,
-			},
-		];
-	});
+	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
+	const emptyState: EmptyList = {
+		title: `No bots in ${pod.name} yet`,
+		hint: newBot ? undefined : "Someone who runs this pod can add one.",
+		action: newBot ? { label: "New bot", onClick: newBot } : undefined,
+	};
+	const rows = (list.data?.items ?? []).map(
+		(item): ConversationRowData => ({
+			...item,
+			fromYou: item.lastMessage?.authorUserId === session.user?.id,
+		}),
+	);
 
 	return (
 		<>
 			<ConversationListView
-				title={scope.kind === "all" ? "All" : scope.pod.name}
-				inAll={scope.kind === "all"}
+				pod={pod}
 				rows={rows}
 				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 				selectedAgentId={selectedAgentId}
 				onNewBot={newBot}
-				settingsFor={pod}
 				emptyState={emptyState}
 				className={className}
 			/>
-			<Dialog
-				open={creating === "bot"}
-				onOpenChange={(open) => setCreating(open ? "bot" : undefined)}
-			>
+			<Dialog open={creating} onOpenChange={setCreating}>
 				<NewAgentDialog
-					podId={pod?.id}
-					pods={podsToAddTo}
-					onCreated={async (agent, chosen) => {
-						setCreating(undefined);
-						const home = pod ?? chosen;
-						if (!home) return;
-						await navigate(
-							pod ? agentChatLink({ pod: home, agent }) : allAgentChatLink({ pod: home, agent }),
-						);
-					}}
-				/>
-			</Dialog>
-			<Dialog
-				open={creating === "pod"}
-				onOpenChange={(open) => setCreating(open ? "pod" : undefined)}
-			>
-				<NewPodDialog
-					onCreated={async (made) => {
-						setCreating(undefined);
-						await navigate(podLink(made));
+					podId={pod.id}
+					pods={[pod]}
+					onCreated={async (agent) => {
+						setCreating(false);
+						await navigate(agentChatLink({ pod, agent }));
 					}}
 				/>
 			</Dialog>
@@ -129,38 +75,31 @@ export interface EmptyList {
 	action?: { label: string; onClick: () => void };
 }
 
-/** A list row with what it needs resolved: the bot's pod, and whether you wrote the last message. */
+/** A list row with whether you wrote the last message resolved. */
 export interface ConversationRowData extends ChatListItem {
-	pod: Pod;
-	/** The pod's bots, for the badge a row carries in All. */
-	podBots: readonly Agent[];
 	fromYou: boolean;
 }
 
 export function ConversationListView({
-	title,
-	inAll,
+	pod,
 	rows,
 	status,
 	selectedAgentId,
 	onNewBot,
-	settingsFor,
 	emptyState,
 	className,
 }: {
-	title: string;
-	inAll: boolean;
+	pod: Pod;
 	rows: readonly ConversationRowData[];
 	status: "loading" | "ready" | "failed";
 	selectedAgentId?: string;
 	/** Absent when the viewer may not make a bot here. */
 	onNewBot?: () => void;
-	/** The pod whose settings the cog opens. Absent in All, which spans several. */
-	settingsFor?: Pod;
 	emptyState: EmptyList;
 	className?: string;
 }) {
 	const backToChat = useBackToHere("Chat");
+	const title = pod.name;
 	const [query, setQuery] = useState("");
 	const needle = query.trim().toLowerCase();
 	const shown = needle ? rows.filter((row) => row.agent.name.toLowerCase().includes(needle)) : rows;
@@ -190,18 +129,16 @@ export function ConversationListView({
 						</button>
 					</Tooltip>
 				)}
-				{settingsFor && (
-					<Tooltip label="Pod settings">
-						<Link
-							{...podSettingsLink(settingsFor)}
-							state={backToChat}
-							aria-label="Pod settings"
-							className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
-						>
-							<Settings size={17} strokeWidth={2.2} />
-						</Link>
-					</Tooltip>
-				)}
+				<Tooltip label="Pod settings">
+					<Link
+						{...podSettingsLink(pod)}
+						state={backToChat}
+						aria-label="Pod settings"
+						className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
+					>
+						<Settings size={17} strokeWidth={2.2} />
+					</Link>
+				</Tooltip>
 			</header>
 
 			{empty ? (
@@ -249,11 +186,7 @@ export function ConversationListView({
 						)}
 						{shown.map((row) => (
 							<li key={row.agent.id}>
-								<ConversationRow
-									row={row}
-									inAll={inAll}
-									selected={row.agent.id === selectedAgentId}
-								/>
+								<ConversationRow row={row} pod={pod} selected={row.agent.id === selectedAgentId} />
 							</li>
 						))}
 						{needle && status === "ready" && shown.length === 0 && (
@@ -268,38 +201,25 @@ export function ConversationListView({
 
 function ConversationRow({
 	row,
-	inAll,
+	pod,
 	selected,
 }: {
 	row: ConversationRowData;
-	inAll: boolean;
+	pod: Pod;
 	selected: boolean;
 }) {
-	const { agent, pod, lastMessage } = row;
-	const link = inAll ? allAgentChatLink({ pod, agent }) : agentChatLink({ pod, agent });
+	const { agent, lastMessage } = row;
 
 	return (
 		<Link
-			{...link}
+			{...agentChatLink({ pod, agent })}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex items-center gap-3 rounded-[14px] px-2.5 py-[9px] transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
-			<span className="relative size-11 shrink-0">
-				<AgentAvatar color={agent.color} face={agent.face} size={44} />
-				{inAll && (
-					<span className="absolute -right-[5px] -bottom-[5px]" title={pod.name}>
-						<PodTile
-							bots={row.podBots}
-							color={pod.color}
-							size={20}
-							className="border-[2.5px] border-list"
-						/>
-					</span>
-				)}
-			</span>
+			<AgentAvatar color={agent.color} face={agent.face} size={44} className="shrink-0" />
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex items-baseline gap-2">
 					<span className="min-w-0 flex-1 truncate font-semibold text-[14.5px] text-foreground">
@@ -324,8 +244,4 @@ function ConversationRow({
 			</span>
 		</Link>
 	);
-}
-
-function crewOf(agents: readonly Agent[] | undefined, pod: Pod): Agent[] {
-	return agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
 }

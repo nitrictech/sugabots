@@ -49,31 +49,3 @@ export function PodMenuItems({
 		</>
 	);
 }
-
-/** What right-clicking All offers: a new bot in a pod chosen next, and a new pod. */
-export function AllPodsMenuItems({
-	onNewBot,
-	onNewPod,
-}: {
-	/** Absent when the viewer may not add a bot to any pod. */
-	onNewBot?: () => void;
-	/** Absent when the viewer may not make a pod. */
-	onNewPod?: () => void;
-}) {
-	return (
-		<>
-			{onNewBot && (
-				<DropdownMenuItem onClick={onNewBot}>
-					<Plus />
-					New bot
-				</DropdownMenuItem>
-			)}
-			{onNewPod && (
-				<DropdownMenuItem onClick={onNewPod}>
-					<Plus />
-					New pod
-				</DropdownMenuItem>
-			)}
-		</>
-	);
-}

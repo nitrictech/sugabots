@@ -1,6 +1,5 @@
 import type {
 	Chat,
-	ChatListScope,
 	ChatMessageItem,
 	NewMessage,
 	SessionUser,
@@ -21,8 +20,8 @@ import { useWorkspace } from "@/lib/workspace.ts";
 const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
-/** The conversation list for a pod, or for `all` shared pods: one row per bot, newest first. */
-export function useChatList(pod: ChatListScope | undefined) {
+/** The conversation list for a pod, by its id: one row per bot, newest first. */
+export function useChatList(pod: string | undefined) {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["chat-list", workspaceId, pod],

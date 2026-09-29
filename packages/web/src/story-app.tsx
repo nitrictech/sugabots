@@ -247,9 +247,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/events"), quietStream),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
 			const pod = new URL(request.url).searchParams.get("pod");
-			const shared = new Set(pods.filter((one) => one.kind === "shared").map((one) => one.id));
 			const items: ChatListItem[] = bots
-				.filter((bot) => (pod === "all" ? shared.has(bot.podId) : bot.podId === pod))
+				.filter((bot) => bot.podId === pod)
 				.map((bot) => {
 					const last = messages[bot.id]?.at(-1);
 					return {

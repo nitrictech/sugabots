@@ -32,7 +32,6 @@ function tint(hue: number) {
  * padding around the 2×2 grid of faces, all in pixels.
  */
 const geometry = {
-	20: { radius: 7, gap: 1.5, padding: 3 },
 	28: { radius: 9, gap: 2, padding: 4 },
 	30: { radius: 9, gap: 2, padding: 4 },
 	36: { radius: 11, gap: 2, padding: 4 },
@@ -101,39 +100,6 @@ export function PodTile({
 						key={slot}
 						className={cn("rounded-full", palette === undefined && "bg-tile-empty")}
 						style={{ background: palette?.empty }}
-					/>
-				);
-			})}
-		</span>
-	);
-}
-
-/**
- * All, which gathers every pod: the first four pods' colours as squares on
- * the neutral tile. Squares rather than a pod's round faces, so it never reads
- * as one more pod; places with no pod are faint, so it keeps its shape as
- * pods are added.
- */
-export function AllPodsTile({ colors, size }: { colors: readonly PodColor[]; size: PodTileSize }) {
-	const { radius, gap, padding } = geometry[size];
-	// A third of the tile's corner: rounded, but square enough never to read as a bot's face.
-	const squareRadius = radius / 3;
-	return (
-		<span
-			aria-hidden
-			className="grid shrink-0 grid-cols-2 grid-rows-2 bg-tile"
-			style={{ width: size, height: size, borderRadius: radius, gap, padding }}
-		>
-			{SLOTS.map((slot, index) => {
-				const color = colors[index];
-				return (
-					<span
-						key={slot}
-						className={cn(color === undefined && "bg-tile-empty")}
-						style={{
-							borderRadius: squareRadius,
-							background: color === undefined ? undefined : podPalettes[color].swatch,
-						}}
 					/>
 				);
 			})}
