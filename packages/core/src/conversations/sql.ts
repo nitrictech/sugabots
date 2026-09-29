@@ -534,6 +534,31 @@ export const threadCompaction = pgTable("thread_compaction", {
 
 export type ThreadCompactionRow = typeof threadCompaction.$inferSelect;
 
+/**
+ * How far one person has read a thread: every message there up to
+ * `readThrough` has been on their screen. No row means they never opened it.
+ *
+ * A message is stamped when its transaction begins, so one that began before
+ * a read was recorded and committed after it counts as read. The window is a
+ * transaction long, and the next message moves the chat on.
+ */
+export const threadRead = pgTable(
+	"thread_read",
+	{
+		id: primaryKey(),
+		threadId: uuid("thread_id")
+			.notNull()
+			.references(() => thread.id, { onDelete: "cascade" }),
+		userId: uuid("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		readThrough: timestamp("read_through", { withTimezone: true }).notNull(),
+		createdAt: stamp("created_at"),
+		updatedAt: updatedStamp("updated_at"),
+	},
+	(table) => [uniqueIndex("thread_read_user_thread_idx").on(table.userId, table.threadId)],
+);
+
 export type ThreadRow = typeof thread.$inferSelect;
 export type ChatRow = typeof chat.$inferSelect;
 export type RoutineRow = typeof routine.$inferSelect;

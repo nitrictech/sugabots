@@ -373,7 +373,14 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		return Effect.succeed({
 			items: agents
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === query.pod)
-				.map((agent) => ({ agent, chatId: null, lastMessage: null })),
+				.map((agent) => ({
+					agent,
+					chatId: null,
+					lastMessage: null,
+					waitingOn: null,
+					unread: false,
+					needsApproval: false,
+				})),
 		});
 	});
 	client.api.chats.getOrCreate.mockReturnValue(

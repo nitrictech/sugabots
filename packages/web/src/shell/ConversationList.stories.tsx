@@ -11,12 +11,18 @@ const revenueRows: ConversationRowData[] = [
 		agent: growthDesk,
 		chatId: null,
 		fromYou: false,
+		waitingOn: null,
+		unread: false,
+		needsApproval: false,
 		lastMessage: { preview: "Needs your approval", authorUserId: null, at: minutesAgo(3) },
 	},
 	{
 		agent: accountManager,
 		chatId: null,
 		fromYou: false,
+		waitingOn: null,
+		unread: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Renewal notes for Halcyon are ready",
 			authorUserId: null,
@@ -27,6 +33,9 @@ const revenueRows: ConversationRowData[] = [
 		agent: leadResearcher,
 		chatId: null,
 		fromYou: true,
+		waitingOn: null,
+		unread: false,
+		needsApproval: false,
 		lastMessage: {
 			preview: "Go deeper on the fintech prospects from last week's list",
 			authorUserId: "0199a3a0-0000-7000-8000-000000000009",

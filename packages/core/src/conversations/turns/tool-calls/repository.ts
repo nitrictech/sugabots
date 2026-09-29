@@ -249,15 +249,26 @@ export const make = Effect.gen(function* () {
 						if (!row) return false;
 						const decided = yield* apply(row, ToolCallEvent.Decide({ decision: input.decision }));
 						if (!decided) return false;
-						const [decider] = yield* query((db) =>
+						// The decider is left-joined, as they may have left since deciding.
+						const [placed] = yield* query((db) =>
 							db
-								.select({ name: user.name })
-								.from(user)
-								.where(eq(user.id, input.decision.userId))
+								.select({
+									workspaceId: thread.workspaceId,
+									podId: thread.podId,
+									deciderName: user.name,
+								})
+								.from(thread)
+								.leftJoin(user, eq(user.id, input.decision.userId))
+								.where(eq(thread.id, decided.threadId))
 								.limit(1),
 						);
+						if (!placed) return yield* Effect.die(new Error("A decided call's thread is missing"));
 						yield* emit([
-							ConversationEvent.ToolCallDecided(toolCallChange(decided, decider?.name ?? null)),
+							ConversationEvent.ToolCallDecided({
+								...toolCallChange(decided, placed.deciderName),
+								workspaceId: placed.workspaceId,
+								podId: placed.podId,
+							}),
 						]);
 						return true;
 					}),
