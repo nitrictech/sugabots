@@ -2,6 +2,7 @@ import { botColorVariables } from "@sugabots/avatars";
 import type {
 	CollaborationPart,
 	Message,
+	PersonParticipant,
 	SessionUser,
 	ThreadParticipant,
 	ToolCallPart,
@@ -16,7 +17,7 @@ import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
-import { TypingIndicator } from "./TypingIndicator.tsx";
+import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 import { awaitsApproval, isNarration, splitToolKey } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
@@ -59,6 +60,7 @@ export function ThreadConversation({
 	compact = false,
 	approvalsPinned = false,
 	queued = NONE_QUEUED,
+	peopleTyping = [],
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -93,10 +95,17 @@ export function ThreadConversation({
 	 * messages, since the reply may sit in an earlier run of them.
 	 */
 	queued?: ReadonlySet<string>;
+	/**
+	 * Other people typing in the thread. They join a bot typing the last reply,
+	 * or are shown after the last message on their own.
+	 */
+	peopleTyping?: readonly PersonParticipant[];
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
 	const replyPending = isRunning && lastMessage?.author.kind === "person";
+	const lastReplyTyping =
+		lastMessage !== undefined && lastMessage.author.kind === "agent" && isTyping(lastMessage);
 	const looks = useConnectionLooks(podId);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	const breaks = messages.map(
@@ -222,11 +231,12 @@ export function ThreadConversation({
 								</Fragment>
 							);
 						})}
-						{message.author.kind === "agent" && isTyping(message) && nameOnce()}
 						{message.author.kind === "agent" && isTyping(message) && (
 							<TypingIndicator
 								key={`${message.id}-typing`}
-								agent={message.author}
+								typers={
+									message === lastMessage ? [message.author, ...peopleTyping] : [message.author]
+								}
 								outgoing={outgoing}
 								compact={compact}
 							/>
@@ -234,8 +244,15 @@ export function ThreadConversation({
 					</Fragment>
 				);
 			})}
-			{replyPending && (
-				<TypingIndicator agent={host} outgoing={host.id === rightAgentId} compact={compact} />
+			{replyPending ? (
+				<TypingIndicator
+					typers={[host, ...peopleTyping]}
+					outgoing={host.id === rightAgentId}
+					compact={compact}
+				/>
+			) : (
+				!lastReplyTyping &&
+				anyoneTyping(peopleTyping) && <TypingIndicator typers={peopleTyping} compact={compact} />
 			)}
 		</div>
 	);

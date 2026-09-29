@@ -18,7 +18,12 @@ import {
 import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
+import {
+	usePeopleTyping,
+	useThreadEvents,
+	useThreadNotices,
+	useTypingSignal,
+} from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -31,6 +36,7 @@ import { DetailsSidebar } from "./DetailsSidebar.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
+import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -61,6 +67,8 @@ export function AgentChat({
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
 	const [draft, setDraft] = useState("");
+	useTypingSignal(chat.data?.mainThreadId, draft);
+	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
 	const opener = useRef<HTMLElement | null>(null);
 	const previousThreadId = useRef<string | undefined>(undefined);
@@ -74,6 +82,8 @@ export function AgentChat({
 	const entries = history.entries;
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
+	const groups = chatGroupsOf(items);
+	const lastGroup = groups.at(-1);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const queued = queuedBehindReply(
 		items.flatMap((item) => (item.kind === "message" ? [item.message] : [])),
@@ -195,7 +205,7 @@ export function AgentChat({
 								</p>
 							</div>
 						)}
-						{chatGroupsOf(items).map((group) => (
+						{groups.map((group) => (
 							<Fragment key={group.key}>
 								{group.separated && <DaySeparator at={group.at} />}
 								{group.kind === "messages" ? (
@@ -210,6 +220,7 @@ export function AgentChat({
 										podId={pod.id}
 										canApproveToolCalls={details.capabilities?.approveToolCalls}
 										queued={queued}
+										peopleTyping={group === lastGroup ? peopleTyping : undefined}
 									/>
 								) : (
 									<ActivityLine
@@ -221,6 +232,9 @@ export function AgentChat({
 								)}
 							</Fragment>
 						))}
+						{lastGroup?.kind !== "messages" && anyoneTyping(peopleTyping) && (
+							<TypingIndicator typers={peopleTyping} />
+						)}
 						<ThreadNotices notices={notices} />
 					</div>
 				</div>

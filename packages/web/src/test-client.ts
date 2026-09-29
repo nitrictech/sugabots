@@ -105,6 +105,11 @@ export const client = {
 			history: vi.fn(),
 			send: vi.fn(),
 		},
+		events: {
+			workspace: vi.fn(),
+			thread: vi.fn(),
+			typing: vi.fn(),
+		},
 		threads: {
 			list: vi.fn(),
 			get: vi.fn(),

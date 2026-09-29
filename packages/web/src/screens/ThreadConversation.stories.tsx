@@ -513,3 +513,43 @@ export const AReplyArriving = meta.story({
 	args: { messages: [] },
 	render: (args) => <ArrivingReply {...args} />,
 });
+
+/** SomeoneTyping is another person writing in the composer after the thread's last message. */
+export const SomeoneTyping = meta.story({
+	args: {
+		participants: [host, person, jay],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000601",
+				host,
+				"Checkout timeouts are tracked as BILL-212, and Jay is on call.",
+			),
+		],
+		peopleTyping: [jay],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("status", { name: "Jay Park is typing" })).toBeVisible();
+	},
+});
+
+/** TypingWithTheBot is a person typing while the bot writes its reply: both faces share one line. */
+export const TypingWithTheBot = meta.story({
+	args: {
+		participants: [host, person, jay],
+		messages: [
+			message("0199a3a0-0000-7000-8000-000000000701", person, "Is checkout still timing out?"),
+			{
+				...message("0199a3a0-0000-7000-8000-000000000702", host, ""),
+				status: "streaming",
+				parts: [],
+			},
+		],
+		peopleTyping: [jay],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByRole("status", { name: "Issue Triager and Jay Park are typing" }),
+		).toBeVisible();
+		await expect(canvas.getAllByRole("status")).toHaveLength(1);
+	},
+});

@@ -25,5 +25,11 @@ export class EventsApi extends HttpApiGroup.make("events")
 			success: eventStream,
 			error: NotFound,
 		}),
+		/** Tells the thread's other watchers the caller is typing in it, as `person.typing`. */
+		HttpApiEndpoint.post("typing", "/threads/:threadId/typing", {
+			params: { threadId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: NotFound,
+		}),
 	)
 	.middleware(Session) {}
