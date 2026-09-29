@@ -73,8 +73,15 @@ export interface Interface {
 	 * running, and `undefined` once it has ended.
 	 */
 	readonly start: (executionId: string) => Effect.Effect<schema.RoutineExecutionRow | undefined>;
-	/** Records how a running run is ending. */
-	readonly recordEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<void>;
+	/**
+	 * Adds `ending` to how a running run is ending (see `endingAfter`), locking
+	 * the run until the transaction ends. `true` when this started the ending.
+	 *
+	 * Lock order: settlement writes the run only after it has cancelled the
+	 * run's work, so a transaction that ends a turn and then records the run's
+	 * ending never waits on a turn that settlement holds.
+	 */
+	readonly recordEnding: (executionId: string, ending: Turns.Ended) => Effect.Effect<boolean>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
 	 * was not running.
@@ -276,17 +283,29 @@ export const make = Effect.gen(function* () {
 		recordEnding: (executionId, ending) =>
 			operation(
 				"recordEnding",
-				query((db) =>
-					db
-						.update(routineExecution)
-						.set({
-							pendingTerminalState: ending.state,
-							pendingTerminalError: ending.state === "failed" ? ending.error : null,
-						})
-						.where(
-							and(eq(routineExecution.id, executionId), eq(routineExecution.state, "running")),
-						),
-				).pipe(Effect.asVoid),
+				Effect.gen(function* () {
+					const running = and(
+						eq(routineExecution.id, executionId),
+						eq(routineExecution.state, "running"),
+					);
+					const [run] = yield* query((db) =>
+						db.select().from(routineExecution).where(running).limit(1).for("update"),
+					);
+					if (!run) return false;
+					const was = endingOf(run);
+					const merged = endingAfter(was, ending);
+					if (merged === was) return false;
+					yield* query((db) =>
+						db
+							.update(routineExecution)
+							.set({
+								pendingTerminalState: merged?.state ?? null,
+								pendingTerminalError: merged?.state === "failed" ? merged.error : null,
+							})
+							.where(running),
+					);
+					return was === undefined;
+				}),
 			),
 
 		settle: (executionId, settled) =>
@@ -371,3 +390,30 @@ export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") imple
 		return UserMessage.of`A Routine with that name already exists`;
 	}
 }
+
+/**
+ * endingAfter returns how a run ends once `outcome` is added to `ending`, how
+ * it was already ending. A failure stands over a cancellation.
+ */
+export function endingAfter(
+	ending: Turns.Ended | undefined,
+	outcome: Turns.Ended | undefined,
+): Turns.Ended | undefined {
+	if (!outcome || ending?.state === "failed") return ending;
+	if (outcome.state === "cancelled" && ending?.state === "cancelled") return ending;
+	return outcome;
+}
+
+/** How the run is already ending, if something has started ending it. */
+export function endingOf(run: schema.RoutineExecutionRow): Turns.Ended | undefined {
+	if (run.pendingTerminalState === "cancelled") return { state: "cancelled" };
+	if (run.pendingTerminalState === "failed") {
+		// `pending_terminal_error` is nullable in the schema; a failure recorded
+		// without one reads as having stopped unexpectedly.
+		return { state: "failed", error: run.pendingTerminalError ?? RUN_STOPPED_UNEXPECTEDLY };
+	}
+	return undefined;
+}
+
+/** What people are told about a run whose workflow failed; the cause goes only to the logs. */
+export const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;

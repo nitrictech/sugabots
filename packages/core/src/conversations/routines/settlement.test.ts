@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { beforeCommit, type Database, query, transaction } from "../../database/database.ts";
@@ -579,6 +579,61 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 			state: "failed",
 			error: UserMessage.of`Model failed`,
 		});
+	});
+
+	it("lets a transaction holding a turn record the run's ending while settlement waits on that turn", async () => {
+		const fixture = await aRunWithCollaboration("waiting");
+		await onDatabase((db) =>
+			db.update(turn).set({ status: "waiting" }).where(eq(turn.id, fixture.askingTurn.id)),
+		);
+		let letGo: () => void = () => {};
+		const heldUntil = new Promise<void>((resolve) => {
+			letGo = resolve;
+		});
+		let held: (pid: number) => void = () => {};
+		const holderPid = new Promise<number>((resolve) => {
+			held = resolve;
+		});
+		const holder = runOnPostgres(
+			transaction(
+				Effect.gen(function* () {
+					yield* query((db) =>
+						db
+							.select({ id: turn.id })
+							.from(turn)
+							.where(eq(turn.id, fixture.askingTurn.id))
+							.for("update"),
+					);
+					const [backend] = yield* query((db) =>
+						db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
+					);
+					held(backend?.pid ?? 0);
+					yield* Effect.promise(() => heldUntil);
+					// Ends a turn in the run, as a turn writer holding its turn does.
+					yield* emit([ended(fixture.childThread.id, { state: "cancelled" })]);
+				}),
+			),
+		);
+		const pid = await holderPid;
+
+		const failing = settlement.failRun(fixture.run);
+		await vi.waitFor(async () => {
+			const blocked = await onDatabase((db) =>
+				db.execute<{ pid: number }>(
+					sql`select pid from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))`,
+					"objects",
+				),
+			);
+			expect(blocked.length).toBeGreaterThan(0);
+		});
+		letGo();
+		await Promise.all([holder, failing]);
+
+		expect(await executionOf(fixture.run.executionId)).toMatchObject({ state: "failed" });
+		const [asking] = await onDatabase((db) =>
+			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
+		);
+		expect(asking?.status).toBe("cancelled");
 	});
 
 	it("tells watching clients a turn completed before it tells them the run settled", async () => {
