@@ -17,6 +17,9 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.list({ workspace: params.workspace, pod: query.pod })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("podMarkers", ({ params }) =>
+				view.podMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("getOrCreate", ({ params, payload }) =>
 				chats
 					.open({ ...payload, workspace: params.workspace })
@@ -27,6 +30,9 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("history", ({ params, query }) =>
 				view.history(params.chatId, query).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("markRead", ({ params }) =>
+				chats.markRead(params.chatId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("send", ({ params, payload }) =>
 				chats

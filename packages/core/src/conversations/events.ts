@@ -17,7 +17,12 @@ import type { Turns } from "./turns/turns.ts";
  */
 export type ConversationEvent = Data.TaggedEnum<{
 	/** A person posted a message. */
-	MessagePosted: { readonly threadId: string; readonly message: Message };
+	MessagePosted: {
+		readonly threadId: string;
+		readonly workspaceId: string;
+		readonly podId: string;
+		readonly message: Message;
+	};
 	/** Agents were brought into the thread to answer in it. */
 	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };
 	/** An agent's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
@@ -105,8 +110,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 	FacilitationFailed: { readonly threadId: string; readonly userMessage: UserMessage };
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
-	/** A person allowed or denied a call. */
-	ToolCallDecided: ToolCallChange;
+	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */
+	ToolCallDecided: ToolCallChange & { readonly workspaceId: string; readonly podId: string };
 	/** An allowed call began running. */
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */

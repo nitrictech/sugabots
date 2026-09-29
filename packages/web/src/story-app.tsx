@@ -261,6 +261,9 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 									at: last.createdAt,
 								}
 							: null,
+						waitingOn: null,
+						unread: false,
+						needsApproval: false,
 					};
 				});
 			return HttpResponse.json({ items });

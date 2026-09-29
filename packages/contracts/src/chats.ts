@@ -50,9 +50,36 @@ export const chatListItemSchema = Schema.Struct({
 			at: isoTimestampSchema,
 		}),
 	),
+	/**
+	 * The tool the chat's newest reply waiting for approval would run first, or
+	 * null. Such a reply may have written nothing at all, so this stands in for
+	 * a preview.
+	 */
+	waitingOn: Schema.NullOr(Schema.String),
+	/** Somebody else finished a message after the person last read the chat. */
+	unread: Schema.Boolean,
+	/** A tool call in the chat is waiting for a decision the person may make. */
+	needsApproval: Schema.Boolean,
 });
 
 export type ChatListItem = typeof chatListItemSchema.Type;
+
+/**
+ * How each pod the person reaches stands for them, for the rail: how many of
+ * its chats are unread, and whether any waits for a decision they may make.
+ * Pods with neither are left out.
+ */
+export const podChatMarkersSchema = Schema.Struct({
+	pods: Schema.Record(
+		uuidSchema,
+		Schema.Struct({
+			unreadChats: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			needsApproval: Schema.Boolean,
+		}),
+	),
+});
+
+export type PodChatMarkers = typeof podChatMarkersSchema.Type;
 
 /** Most recent message first; bots nobody has messaged come last, by name. */
 export const chatListSchema = Schema.Struct({

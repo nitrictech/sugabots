@@ -197,9 +197,13 @@ export const make = Effect.gen(function* () {
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("message")));
 						const now = yield* DateTime.nowAsDate;
-						yield* query((db) =>
-							db.update(thread).set({ updatedAt: now }).where(eq(thread.id, input.threadId)),
-						);
+						const placed = yield* query((db) =>
+							db
+								.update(thread)
+								.set({ updatedAt: now })
+								.where(eq(thread.id, input.threadId))
+								.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
+						).pipe(Effect.flatMap(writtenRow("thread")));
 						yield* query((db) =>
 							db
 								.insert(threadParticipant)
@@ -214,6 +218,8 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.MessagePosted({
 								threadId: input.threadId,
+								workspaceId: placed.workspaceId,
+								podId: placed.podId,
 								message: toMessage(created, author),
 							}),
 						]);

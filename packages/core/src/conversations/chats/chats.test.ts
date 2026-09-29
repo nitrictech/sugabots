@@ -17,6 +17,7 @@ import {
 	routineExecution,
 	thread,
 	threadParticipant,
+	toolCall,
 	turn,
 	user,
 	workspace,
@@ -175,8 +176,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					authorUserId: userId,
 					at: expect.any(String),
 				},
+				waitingOn: null,
+				unread: false,
+				needsApproval: false,
 			},
-			{ agent: expect.objectContaining({ id: recipientAgentId }), chatId: null, lastMessage: null },
+			{
+				agent: expect.objectContaining({ id: recipientAgentId }),
+				chatId: null,
+				lastMessage: null,
+				waitingOn: null,
+				unread: false,
+				needsApproval: false,
+			},
 		]);
 	});
 
@@ -200,6 +211,146 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const list = await view.list({ workspace: workspaceId, pod: podId });
 
 		expect(list?.items[0]?.lastMessage?.preview).toBe("I'm still getting denied.");
+	});
+
+	describe("unread and waiting chats", () => {
+		/** The host writes `content` in its chat, `secondsLater` after now, and returns the message. */
+		const botWrites = async (threadId: string, content: string, secondsLater = 0) => {
+			const [written] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId,
+						authorAgentId: agentId,
+						kind: "text",
+						status: "complete",
+						parts: content ? [{ type: "text", text: content }] : [],
+						content,
+						createdAt: new Date(Date.now() + secondsLater * 1000),
+					})
+					.returning(),
+			);
+			if (!written) throw new Error("fixture");
+			return written;
+		};
+		const hostRow = async () =>
+			(await view.list({ workspace: workspaceId, pod: podId }))?.items.find(
+				(item) => item.agent.id === agentId,
+			);
+
+		it("marks a chat unread when a bot writes after the person last read it", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "Hi" });
+			expect(await hostRow()).toMatchObject({ unread: false });
+
+			await botWrites(current.mainThreadId, "Hello!", 1);
+			expect(await hostRow()).toMatchObject({ unread: true });
+
+			await chats.markRead(current.id);
+			expect(await hostRow()).toMatchObject({ unread: false });
+
+			await botWrites(current.mainThreadId, "One more thing", 2);
+			expect(await hostRow()).toMatchObject({ unread: true });
+		});
+
+		it("keeps a reply that finishes after the chat was read unread", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "Hey" });
+			const [reply] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: current.mainThreadId,
+						authorAgentId: agentId,
+						kind: "text",
+						status: "streaming",
+						parts: [],
+						content: "",
+						createdAt: new Date(Date.now() + 1000),
+					})
+					.returning({ id: message.id }),
+			);
+			if (!reply) throw new Error("fixture");
+
+			await chats.markRead(current.id);
+			await onDatabase((db) =>
+				db
+					.update(message)
+					.set({
+						status: "complete",
+						content: "Hi there",
+						parts: [{ type: "text", text: "Hi there" }],
+					})
+					.where(eq(message.id, reply.id)),
+			);
+
+			expect(await hostRow()).toMatchObject({ unread: true });
+		});
+
+		it("counts each pod's unread chats for the rail", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			expect(await view.podMarkers(workspaceId)).toEqual({ pods: {} });
+
+			await botWrites(current.mainThreadId, "Hello!");
+
+			expect(await view.podMarkers(workspaceId)).toEqual({
+				pods: { [podId]: { unreadChats: 1, needsApproval: false } },
+			});
+		});
+
+		it("marks a chat waiting on a tool call the person may decide", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "File it" });
+			// A reply that called a tool without writing a word first.
+			const trigger = await botWrites(current.mainThreadId, "", 1);
+			const [asked] = await onDatabase((db) =>
+				db
+					.insert(turn)
+					.values({
+						threadId: current.mainThreadId,
+						agentId,
+						triggerMessageId: trigger.id,
+						status: "waiting",
+						model: "test/model",
+						startedAt: new Date(),
+					})
+					.returning({ id: turn.id }),
+			);
+			if (!asked) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(toolCall).values({
+					threadId: current.mainThreadId,
+					messageId: trigger.id,
+					turnId: asked.id,
+					tool: "linear__create_issue",
+					approvalId: `approval-${crypto.randomUUID()}`,
+					approvalStatus: "pending",
+					status: "awaiting_approval",
+					input: {},
+					atOffset: 0,
+				}),
+			);
+
+			// A routine run elsewhere, so an approval outside any run must not be taken for one.
+			const elsewhere = await routines.create(
+				{ agentId: recipientAgentId },
+				{ name: "Elsewhere", instructions: "Run somewhere else.", trigger: { kind: "webhook" } },
+			);
+			await routines.run({
+				agentId: recipientAgentId,
+				routineId: elsewhere.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+
+			expect(await hostRow()).toMatchObject({
+				needsApproval: true,
+				waitingOn: "linear__create_issue",
+				lastMessage: { preview: "File it" },
+			});
+			expect(await view.podMarkers(workspaceId)).toEqual({
+				pods: { [podId]: { unreadChats: 0, needsApproval: true } },
+			});
+		});
 	});
 
 	it("lists a pod the person reaches, and hides one they cannot", async () => {
