@@ -1,4 +1,4 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Agent, Pod, Workspace } from "@sugabots/contracts";
 import {
 	Link,
 	useMatchRoute,
@@ -13,11 +13,12 @@ import { useAgents } from "@/lib/agents.ts";
 import { agentChatLink, allAgentChatLink, allLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useWorkspacePermissions } from "@/lib/workspace.ts";
+import { useWorkspace, useWorkspacePermissions, useWorkspaces } from "@/lib/workspace.ts";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { AllPodsTile, PodTile } from "@/shell/PodTile.tsx";
 import { AllPodsMenuItems, PodMenuItems } from "@/shell/RailMenus.tsx";
+import { WorkspaceSwitcher } from "@/shell/WorkspaceSwitcher.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/ui/dropdown-menu.tsx";
@@ -27,14 +28,16 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 type Making = { kind: "pod" } | { kind: "bot"; pod: Pod | undefined };
 
 /**
- * The strip down the left edge: All, each shared pod, a way to make one, then
- * Personal, and you at the bottom. Choosing a pod scopes the conversation list
+ * The strip down the left edge: the workspace, All, each shared pod, a way to make one, then Personal, and you at the
+ * bottom. Choosing a pod scopes the conversation list
  * beside it.
  */
 export function Rail() {
 	const { data: pods } = usePods();
 	const { agents } = useAgents();
 	const may = useWorkspacePermissions();
+	const { workspace } = useWorkspace();
+	const { data: workspaces } = useWorkspaces();
 	const { session } = useRouteContext({ from: "__root__" });
 	const [making, setMaking] = useState<Making>();
 	const navigate = useNavigate();
@@ -48,6 +51,8 @@ export function Rail() {
 			<RailView
 				pods={(pods ?? []).map((pod) => ({ pod, bots: crewIn(agents, pod) }))}
 				selected={selected}
+				workspace={workspace}
+				workspaces={workspaces ?? []}
 				className={covered ? "max-md:hidden" : undefined}
 				user={session.user ?? undefined}
 				onNewPod={may.createPods ? () => setMaking({ kind: "pod" }) : undefined}
@@ -86,6 +91,8 @@ export function Rail() {
 export function RailView({
 	pods,
 	selected,
+	workspace,
+	workspaces = [],
 	user,
 	onNewPod,
 	onNewBot,
@@ -95,6 +102,10 @@ export function RailView({
 	pods: readonly { pod: Pod; bots: readonly Agent[] }[];
 	/** `all`, a pod's slug, `settings`, or undefined when none of them is open. */
 	selected: string | undefined;
+	/** The workspace being looked at. */
+	workspace?: Workspace;
+	/** Every workspace the viewer belongs to, which the workspace's menu offers to switch to. */
+	workspaces?: readonly Workspace[];
 	user?: { name: string; image?: string | null };
 	/** Absent when the viewer may not make a pod. */
 	onNewPod?: () => void;
@@ -132,6 +143,16 @@ export function RailView({
 				className,
 			)}
 		>
+			{workspace && (
+				<>
+					<WorkspaceSwitcher
+						current={workspace}
+						workspaces={workspaces}
+						settingsBack={settingsBack}
+					/>
+					<span aria-hidden className="h-[1.5px] w-7 shrink-0 rounded-full bg-border-strong" />
+				</>
+			)}
 			<RailItem label="All" selected={selected === "all"} menu={allMenu}>
 				<AllPodsTile colors={shared.flatMap(({ pod }) => pod.color ?? [])} size={46} />
 			</RailItem>

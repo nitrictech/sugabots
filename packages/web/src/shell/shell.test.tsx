@@ -90,6 +90,20 @@ describe("the workspace choice", () => {
 
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
 	});
+
+	it("switches to another workspace from the rail and opens it next time", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
+		const router = mount(linearPage);
+
+		const rail = await screen.findByRole("navigation", { name: "Pods" });
+		fireEvent.click(
+			await within(rail).findByRole("button", { name: `Workspace: ${workspace.name}` }),
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: other.name }));
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		expect(localStorage.getItem("sugabots-workspace")).toBe(other.id);
+	});
 });
 
 describe("the rail", () => {

@@ -3,6 +3,25 @@ import preview from "#storybook/preview";
 import { RailView } from "./Rail.tsx";
 import { podsWithBots } from "./story-fixtures.ts";
 
+const suga = {
+	id: "0199a3a0-0000-7000-8000-000000000001",
+	name: "Suga",
+	slug: "suga",
+	timeZone: "UTC",
+};
+const nitric = {
+	id: "0199a3a0-0000-7000-8000-000000000002",
+	name: "Nitric",
+	slug: "nitric",
+	timeZone: "UTC",
+};
+const longName = {
+	id: "0199a3a0-0000-7000-8000-000000000003",
+	name: "The Extremely Thorough Research and Development Collective",
+	slug: "research",
+	timeZone: "UTC",
+};
+
 const meta = preview.meta({
 	title: "Product/Rail",
 	component: RailView,
@@ -75,5 +94,49 @@ export const AllMenu = meta.story({
 		});
 		await userEvent.click(await screen.findByRole("menuitem", { name: "New bot" }));
 		await expect(args.onNewBot).toHaveBeenCalledWith(undefined);
+	},
+});
+
+/** Only one workspace: the same tile, whose menu has it and its settings. */
+export const OneWorkspace = meta.story({
+	args: { workspace: suga, workspaces: [suga] },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Workspace: Suga" }));
+		await screen.findByRole("menu");
+		await expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+		await expect(screen.getByRole("menuitem", { name: "Suga" })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(screen.getByRole("menuitem", { name: "Workspace settings" })).toHaveAttribute(
+			"href",
+			"/suga/settings",
+		);
+	},
+});
+
+/** Several workspaces: the tile at the top names the current one and opens the others. */
+export const SwitchWorkspace = meta.story({
+	args: { workspace: suga, workspaces: [suga, nitric, longName] },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Workspace: Suga" }));
+		await screen.findByRole("menu");
+		await expect(screen.getByRole("menuitem", { name: "Suga" })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(screen.getByRole("menuitem", { name: "Nitric" })).toHaveAttribute(
+			"href",
+			"/nitric/agents",
+		);
+	},
+});
+
+/** A long workspace name is cut short in the menu rather than widening it. */
+export const LongWorkspaceName = meta.story({
+	args: { workspace: longName, workspaces: [suga, nitric, longName] },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /^Workspace:/ }));
+		await expect(await screen.findByRole("menuitem", { name: longName.name })).toBeVisible();
 	},
 });
