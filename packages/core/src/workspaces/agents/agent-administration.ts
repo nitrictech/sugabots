@@ -13,13 +13,12 @@ import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { serviceOperations, transaction } from "../../database/database.ts";
+import { lockHeldModels } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { PodRepository } from "../pods/pod-repository.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { systemAgents, visibleCrewAgents } from "./agent-reads.ts";
 import { AgentRepository } from "./agent-repository.ts";
-import { FACILITATE_SYSTEM_AGENT } from "./system-agents.ts";
 
 /**
  * A workspace's agents: the crew in its pods and the system agents it sets
@@ -68,18 +67,11 @@ export interface Interface {
 	readonly systemAgents: (input: {
 		workspace: string;
 	}) => Effect.Effect<SystemAgent[], AuthorizationDenied, CurrentActor.Service>;
-	/**
-	 * Points a system agent at a model, which is how it is set up, or at `null`,
-	 * which turns it off.
-	 *
-	 * Turning the Facilitator off also stops every pod routing through it, in
-	 * the same transaction: a pod pointed at an agent that cannot run would say
-	 * one thing and do another.
-	 */
+	/** Points a system agent at a model the workspace offers. */
 	readonly setSystemAgentModel: (input: {
 		workspace: string;
 		key: SystemAgentKey;
-		model: string | null;
+		model: string;
 	}) => Effect.Effect<
 		SystemAgent,
 		| AuthorizationDenied
@@ -98,7 +90,6 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	const agents = yield* AgentRepository.Service;
-	const pods = yield* PodRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
 
 	return Service.of({
@@ -178,15 +169,13 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"workspace.builtInAgents.configure",
 					);
-					if (model !== null) {
-						yield* modelProviders.requireEnabled(workspaceId, model);
-					}
+					// Held under the same lock as switching models off, so the model
+					// cannot stop being offered between the check and the write.
 					yield* transaction(
 						Effect.gen(function* () {
+							yield* lockHeldModels(workspaceId);
+							yield* modelProviders.requireEnabled(workspaceId, model);
 							yield* agents.setSystemAgentModel(workspaceId, key, model);
-							if (key === FACILITATE_SYSTEM_AGENT && model === null) {
-								yield* pods.stopFacilitatorRouting(workspaceId);
-							}
 						}),
 					);
 					const updated = (yield* systemAgents(workspaceId)).find(
@@ -208,7 +197,6 @@ export const layer = layerNoDeps.pipe(
 		Authorization.layer,
 		Visibility.layer,
 		AgentRepository.layer,
-		PodRepository.layer,
 		ModelProviderRepository.layer,
 	]),
 );

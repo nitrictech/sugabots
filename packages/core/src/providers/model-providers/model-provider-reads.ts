@@ -8,6 +8,7 @@ import {
 	modelProvider,
 	type ProviderModelRow,
 	providerModel,
+	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import { apiKeyHint, configurationStatus } from "../tested-configuration.ts";
 import { lacksCredential, offeredIn } from "./model-provider-repository.ts";
@@ -72,17 +73,25 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 		return toProvider(row, models);
 	});
 
-/** The models the workspace offers for agents to run on. */
+/** The models the workspace offers for agents to run on, and which of them new agents start on. */
 export const offeredModels = (workspaceId: string) =>
-	query((db) =>
-		db
-			.select({ model: providerModel, provider: modelProvider })
-			.from(providerModel)
-			.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
-			.where(offeredIn(workspaceId)),
-	).pipe(
+	Effect.all([
+		query((db) =>
+			db
+				.select({ model: providerModel, provider: modelProvider })
+				.from(providerModel)
+				.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
+				.where(offeredIn(workspaceId)),
+		),
+		query((db) =>
+			db
+				.select({ modelId: workspaceDefaultModel.modelId })
+				.from(workspaceDefaultModel)
+				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
+		),
+	]).pipe(
 		Effect.map(
-			(rows): WorkspaceModelsResponse => ({
+			([rows, [defaultRow]]): WorkspaceModelsResponse => ({
 				models: rows.map(({ model, provider }) => ({
 					providerId: provider.id,
 					providerName: provider.name,
@@ -91,6 +100,7 @@ export const offeredModels = (workspaceId: string) =>
 					modelId: model.modelId,
 					displayName: model.displayName,
 				})),
+				defaultModel: defaultRow?.modelId ?? null,
 			}),
 		),
 	);

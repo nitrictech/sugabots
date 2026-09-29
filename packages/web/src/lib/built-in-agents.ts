@@ -35,12 +35,12 @@ export function useBuiltInAgents() {
 	});
 }
 
-/** Choosing the model one runs on, or `null` to turn it off. */
+/** Choosing the model one runs on. */
 export function useChooseBuiltInAgentModel(key: SystemAgentKey) {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (model: string | null) => {
+		mutationFn: async (model: string) => {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
@@ -53,8 +53,7 @@ export function useChooseBuiltInAgentModel(key: SystemAgentKey) {
 		},
 		onSuccess: async () => {
 			// A pod's routing options read the Facilitator's model to decide
-			// whether they may be chosen, and turning the Facilitator off switches
-			// routing off in every pod using it, so pods go stale on this save too.
+			// whether they may be chosen, so pods go stale on this save too.
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["built-in-agents", workspaceId] }),
 				queryClient.invalidateQueries({ queryKey: ["pods", workspaceId] }),

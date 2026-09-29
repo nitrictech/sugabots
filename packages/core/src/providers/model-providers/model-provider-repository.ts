@@ -13,20 +13,26 @@ import {
 	providerPreset,
 	seededPresets,
 } from "@sugabots/contracts";
-import { and, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { type ModelProviderRow, modelProvider, providerModel } from "../../database/schema.ts";
+import {
+	type ModelProviderRow,
+	modelProvider,
+	providerModel,
+	workspaceDefaultModel,
+} from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import { ChatgptTokens } from "./chatgpt.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 
 /**
- * The only writer of `model_provider` and `provider_model`: a workspace's model
- * providers, their sealed credentials, and the models each offers.
+ * The only writer of `model_provider`, `provider_model` and
+ * `workspace_default_model`: a workspace's model providers, their sealed
+ * credentials, the models each offers, and which of those is the default.
  *
  * A provider is switched on only by a successful test of its current
  * configuration, through `recordTest`; `update` can only switch it off, and a
@@ -140,6 +146,15 @@ export interface Interface {
 		workspaceId: string,
 		modelId: string,
 	) => Effect.Effect<void, ModelNotEnabled>;
+	/** The model the workspace's new agents start on, or nothing until it first offers one. */
+	readonly defaultModel: (workspaceId: string) => Effect.Effect<string | undefined>;
+	/** Makes `modelId`, which the caller has checked the workspace offers, the default. */
+	readonly setDefaultModel: (workspaceId: string, modelId: string) => Effect.Effect<void>;
+	/**
+	 * The workspace's default, first making the model it has offered longest
+	 * the default if it has none yet. Nothing while it offers no model.
+	 */
+	readonly ensureDefaultModel: (workspaceId: string) => Effect.Effect<string | undefined>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -221,6 +236,14 @@ export const make = Effect.gen(function* () {
 				),
 			} satisfies ProviderEndpoint;
 		});
+
+	const defaultModelOf = (workspaceId: string) =>
+		query((db) =>
+			db
+				.select({ modelId: workspaceDefaultModel.modelId })
+				.from(workspaceDefaultModel)
+				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
+		).pipe(Effect.map(([row]) => row?.modelId));
 
 	const isEnabled = (workspaceId: string, modelId: string) =>
 		query((db) =>
@@ -551,6 +574,45 @@ export const make = Effect.gen(function* () {
 							.where(and(offeredIn(workspaceId), eq(providerModel.modelId, modelId))),
 					);
 					return row ? yield* endpoint(workspaceId, row.providerId) : undefined;
+				}),
+			),
+
+		defaultModel: (workspaceId) => operation("defaultModel", defaultModelOf(workspaceId)),
+
+		setDefaultModel: (workspaceId, modelId) =>
+			operation(
+				"setDefaultModel",
+				query((db) =>
+					db
+						.insert(workspaceDefaultModel)
+						.values({ workspaceId, modelId })
+						.onConflictDoUpdate({ target: workspaceDefaultModel.workspaceId, set: { modelId } }),
+				),
+			),
+
+		ensureDefaultModel: (workspaceId) =>
+			operation(
+				"ensureDefaultModel",
+				Effect.gen(function* () {
+					const current = yield* defaultModelOf(workspaceId);
+					if (current !== undefined) return current;
+					const [first] = yield* query((db) =>
+						db
+							.select({ modelId: providerModel.modelId })
+							.from(providerModel)
+							.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
+							.where(offeredIn(workspaceId))
+							.orderBy(asc(providerModel.createdAt), asc(providerModel.id))
+							.limit(1),
+					);
+					if (!first) return undefined;
+					yield* query((db) =>
+						db
+							.insert(workspaceDefaultModel)
+							.values({ workspaceId, modelId: first.modelId })
+							.onConflictDoNothing(),
+					);
+					return yield* defaultModelOf(workspaceId);
 				}),
 			),
 

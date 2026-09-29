@@ -17,8 +17,9 @@ import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
-import { serviceOperations } from "../../database/database.ts";
+import { serviceOperations, transaction } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Models } from "../models/models.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
@@ -29,6 +30,7 @@ import {
 	redeemDeviceCode,
 	requestDeviceCode,
 } from "./chatgpt.ts";
+import { keepingHeldModelsOffered, lockHeldModels, type ModelInUse } from "./held-models.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./remote.ts";
@@ -39,6 +41,12 @@ import { fetchProviderModels, type ModelDiscoveryFailed, testProvider } from "./
  * trying it before it is switched on. Configuring them takes the current
  * actor's `workspace.providers.manage`; seeing which models are offered takes
  * only `workspace.read`.
+ *
+ * The first model a workspace offers becomes its default and every system
+ * agent's. After that, a change that would stop it offering a model one of
+ * them runs on fails with `ModelInUse`, so a workspace never goes from some
+ * models back to none. A new key or sign-in is not refused: the provider is
+ * off only until it has been tried, which happens in the same request.
  */
 export interface Interface {
 	readonly list: (
@@ -76,14 +84,15 @@ export interface Interface {
 		| AuthorizationDenied
 		| ModelProviderNotFound
 		| UrlNotAllowed
-		| ProviderActivationRequiresCredential,
+		| ProviderActivationRequiresCredential
+		| ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly remove: (
 		input: InProvider,
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | ModelProviderRemovalNotAllowed,
+		AuthorizationDenied | ModelProviderRemovalNotAllowed | ModelInUse,
 		CurrentActor.Service
 	>;
 	/** Lists the provider's models, then asks an enabled one for a word, and records the result. */
@@ -122,7 +131,7 @@ export interface Interface {
 		input: InProvider,
 	) => Effect.Effect<
 		ModelProvider,
-		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered,
+		AuthorizationDenied | ModelProviderNotFound | ChatgptSignInNotOffered | ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly fetchModels: (
@@ -149,7 +158,7 @@ export interface Interface {
 		input: InProvider & { modelIds: string[]; enabled: boolean },
 	) => Effect.Effect<
 		number,
-		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireCredential,
+		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireCredential | ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly updateModel: (
@@ -160,14 +169,23 @@ export interface Interface {
 		| ModelProviderNotFound
 		| ProviderModelsRequireCredential
 		| FetchedModelCapabilitiesImmutable
-		| ProviderModelNotFound,
+		| ProviderModelNotFound
+		| ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly removeModel: (
 		input: InProvider & { modelId: string },
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | ProviderModelRemovalNotAllowed,
+		AuthorizationDenied | ProviderModelRemovalNotAllowed | ModelInUse,
+		CurrentActor.Service
+	>;
+	/** Makes `model`, which the workspace must offer, the one its new agents start on. */
+	readonly setDefaultModel: (
+		input: InWorkspace & { model: string },
+	) => Effect.Effect<
+		WorkspaceModelsResponse,
+		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
 		CurrentActor.Service
 	>;
 }
@@ -190,6 +208,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderSetup");
 	const authorization = yield* Authorization.Service;
 	const providers = yield* ModelProviderRepository.Service;
+	const agents = yield* AgentRepository.Service;
 	const egress = yield* Egress.Service;
 	const models = yield* Models.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
@@ -245,6 +264,22 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
+	/**
+	 * Gives a workspace that has started offering a model its default, and
+	 * every system agent without a model that default. Run after anything that
+	 * can switch a model or a provider on.
+	 */
+	const adoptFirstModel = (workspaceId: string) =>
+		transaction(
+			Effect.gen(function* () {
+				yield* lockHeldModels(workspaceId);
+				const model = yield* providers.ensureDefaultModel(workspaceId);
+				if (model !== undefined) {
+					yield* agents.setUnsetSystemAgentModels(workspaceId, model);
+				}
+			}),
+		);
+
 	/** Discovery whose failure is recorded on the provider and logged, rather than raised. */
 	const discoverModelsQuietly = (
 		workspaceId: string,
@@ -259,6 +294,7 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			yield* providers.saveChatgptSignIn(workspaceId, providerId, tokens);
 			yield* discoverModelsQuietly(workspaceId, providerId, true);
+			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
 		});
 
@@ -339,6 +375,7 @@ export const make = Effect.gen(function* () {
 					});
 					if (created.apiKeyEncrypted !== null) {
 						yield* discoverModelsQuietly(workspaceId, created.id, true);
+						yield* adoptFirstModel(workspaceId);
 					}
 					return yield* requireProvider(workspaceId, created.id);
 				}),
@@ -359,10 +396,13 @@ export const make = Effect.gen(function* () {
 						});
 					}
 					// Switching on is a test's to do, below, so it is not written here.
-					const updated = yield* providers.update(workspaceId, providerId, {
+					const write = providers.update(workspaceId, providerId, {
 						...changes,
 						active: changes.active === false ? false : undefined,
 					});
+					const updated = yield* changes.active === false
+						? keepingHeldModelsOffered(workspaceId, write)
+						: write;
 					if (!updated) {
 						return yield* new ModelProviderNotFound();
 					}
@@ -371,6 +411,7 @@ export const make = Effect.gen(function* () {
 					} else if (changes.active === true) {
 						yield* testProvider(providers, workspaceId, providerId, egress.providers);
 					}
+					yield* adoptFirstModel(workspaceId);
 					return yield* requireProvider(workspaceId, providerId);
 				}),
 			),
@@ -380,7 +421,11 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					if (!(yield* providers.remove(workspaceId, providerId))) {
+					const removed = yield* keepingHeldModelsOffered(
+						workspaceId,
+						providers.remove(workspaceId, providerId),
+					);
+					if (!removed) {
 						return yield* new ModelProviderRemovalNotAllowed();
 					}
 				}),
@@ -443,7 +488,10 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
 					yield* requireSignInProvider(workspaceId, providerId);
-					yield* providers.saveChatgptSignIn(workspaceId, providerId, null);
+					yield* keepingHeldModelsOffered(
+						workspaceId,
+						providers.saveChatgptSignIn(workspaceId, providerId, null),
+					);
 					return yield* requireProvider(workspaceId, providerId);
 				}),
 			),
@@ -483,7 +531,12 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
 					yield* requireConnectedProvider(workspaceId, providerId);
-					return yield* providers.setModelEnabled(workspaceId, providerId, modelIds, enabled);
+					const updated = yield* keepingHeldModelsOffered(
+						workspaceId,
+						providers.setModelEnabled(workspaceId, providerId, modelIds, enabled),
+					);
+					yield* adoptFirstModel(workspaceId);
+					return updated;
 				}),
 			),
 
@@ -497,10 +550,14 @@ export const make = Effect.gen(function* () {
 					if (changes.capabilities !== undefined && configured?.source === "fetched") {
 						return yield* new FetchedModelCapabilitiesImmutable();
 					}
-					const updated = yield* providers.updateModel(workspaceId, providerId, modelId, changes);
+					const updated = yield* keepingHeldModelsOffered(
+						workspaceId,
+						providers.updateModel(workspaceId, providerId, modelId, changes),
+					);
 					if (updated === 0) {
 						return yield* new ProviderModelNotFound();
 					}
+					yield* adoptFirstModel(workspaceId);
 					return updated;
 				}),
 			),
@@ -510,9 +567,29 @@ export const make = Effect.gen(function* () {
 				"removeModel",
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
-					if (!(yield* providers.removeModel(workspaceId, providerId, modelId))) {
+					const removed = yield* keepingHeldModelsOffered(
+						workspaceId,
+						providers.removeModel(workspaceId, providerId, modelId),
+					);
+					if (!removed) {
 						return yield* new ProviderModelRemovalNotAllowed();
 					}
+				}),
+			),
+
+		setDefaultModel: ({ workspace, model }) =>
+			operation(
+				"setDefaultModel",
+				Effect.gen(function* () {
+					const workspaceId = yield* managed(workspace);
+					yield* transaction(
+						Effect.gen(function* () {
+							yield* lockHeldModels(workspaceId);
+							yield* providers.requireEnabled(workspaceId, model);
+							yield* providers.setDefaultModel(workspaceId, model);
+						}),
+					);
+					return yield* offeredModels(workspaceId);
 				}),
 			),
 	});
@@ -521,7 +598,12 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderRepository.layer, Models.layer]),
+	Layer.provide([
+		Authorization.layer,
+		ModelProviderRepository.layer,
+		AgentRepository.layer,
+		Models.layer,
+	]),
 );
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */

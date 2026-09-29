@@ -415,6 +415,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				modelId,
 				displayName: null,
 			})),
+			defaultModel: MODELS[0] ?? null,
 		}),
 	);
 }

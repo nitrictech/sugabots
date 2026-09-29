@@ -39,7 +39,7 @@ export function NewAgentDialog({
 	const podId = fixedPodId ?? chosenPodId ?? "";
 	const create = useCreateAgent(podId);
 	const models = useModels();
-	const model = models.data?.models[0]?.modelId;
+	const model = models.data?.defaultModel ?? undefined;
 	const trimmedName = name.trim();
 	const chosenPod = pods.find((pod) => pod.id === podId);
 

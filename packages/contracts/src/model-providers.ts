@@ -342,7 +342,18 @@ export const workspaceModelSchema = Schema.Struct({
 
 export const workspaceModelsResponseSchema = Schema.Struct({
 	models: Schema.mutable(Schema.Array(workspaceModelSchema)),
+	/**
+	 * The model new agents start on, one of `models`. `null` only while the
+	 * workspace offers none; once it offers one it always has a default.
+	 */
+	defaultModel: Schema.NullOr(Schema.String),
 });
+
+/** Choosing the model a workspace's new agents start on. */
+export const defaultModelUpdateSchema = Schema.Struct({
+	model: Schema.String,
+});
+export type DefaultModelUpdate = typeof defaultModelUpdateSchema.Type;
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;
 
 export const chatgptSignInOutcomeSchema = Schema.Union([

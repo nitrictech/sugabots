@@ -7,7 +7,7 @@ import {
 	type NewAgent,
 	type SystemAgentKey,
 } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
@@ -66,12 +66,17 @@ export interface Interface {
 		workspaceId: string;
 		createdById: string;
 	}) => Effect.Effect<void>;
-	/** Points a system agent at a model, which is how it is set up, or at `null`, which turns it off. */
+	/** Points a system agent at a model. */
 	readonly setSystemAgentModel: (
 		workspaceId: string,
 		key: SystemAgentKey,
-		model: string | null,
+		model: string,
 	) => Effect.Effect<void, SystemAgentMissing>;
+	/**
+	 * Points every system agent with no model at `model`: how they are set up
+	 * when the workspace first offers one. One already on a model keeps it.
+	 */
+	readonly setUnsetSystemAgentModels: (workspaceId: string, model: string) => Effect.Effect<void>;
 	/** The system agent and its model, or nothing when it is not set up. */
 	readonly runnableSystemAgent: (
 		workspaceId: string,
@@ -272,6 +277,23 @@ export const make = Effect.gen(function* () {
 						return yield* new SystemAgentMissing({ key });
 					}
 				}),
+			),
+
+		setUnsetSystemAgentModels: (workspaceId, model) =>
+			operation(
+				"setUnsetSystemAgentModels",
+				query((db) =>
+					db
+						.update(agent)
+						.set({ model })
+						.where(
+							and(
+								eq(agent.workspaceId, workspaceId),
+								isNotNull(agent.systemAgentKey),
+								isNull(agent.model),
+							),
+						),
+				).pipe(Effect.asVoid),
 			),
 
 		runnableSystemAgent: (workspaceId, key) =>

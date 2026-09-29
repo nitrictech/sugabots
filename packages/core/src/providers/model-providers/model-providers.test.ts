@@ -1,9 +1,9 @@
 import type { NewModelProvider } from "@sugabots/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { agent, modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -11,8 +11,10 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
+import { ModelInUse } from "./held-models.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderRepository } from "./model-provider-repository.ts";
 import { ModelProviderSetup } from "./model-provider-setup.ts";
@@ -572,5 +574,145 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		]);
 		expect(synced).toEqual({ added: 1, updated: 0 });
 		expect((await view(providerId))?.models.map(({ modelId }) => modelId)).toEqual(["own-id"]);
+	});
+
+	describe("the default model and the system agents' models", () => {
+		const agentsOnPostgres = () => servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+
+		/** Adds models to the gateway by hand, switches it on, and returns their row ids by model id. */
+		const offerable = async (...modelIds: string[]) => {
+			await repository.addModels(
+				workspaceId,
+				providerId,
+				modelIds.map((modelId) => ({
+					modelId,
+					displayName: null,
+					capabilities: [],
+					contextLength: null,
+					source: "manual" as const,
+				})),
+			);
+			await switchOn(providerId);
+			const models = (await view(providerId))?.models ?? [];
+			return Object.fromEntries(models.map(({ modelId, id }) => [modelId, id]));
+		};
+
+		const answering = () => setupWith(() => Response.json({ data: [] }));
+
+		const systemAgentModels = () =>
+			onDatabase((db) =>
+				db
+					.select({ model: agent.model })
+					.from(agent)
+					.where(and(eq(agent.workspaceId, workspaceId), isNotNull(agent.systemAgentKey))),
+			).then((rows) => rows.map(({ model }) => model));
+
+		it("makes the first model switched on the default and every system agent's", async () => {
+			await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+			const ids = await offerable("first", "second");
+			const setup = await answering();
+
+			await setup.setModelsEnabled({
+				workspace: workspaceId,
+				providerId,
+				modelIds: [ids.first ?? ""],
+				enabled: true,
+			});
+			await setup.setModelsEnabled({
+				workspace: workspaceId,
+				providerId,
+				modelIds: [ids.second ?? ""],
+				enabled: true,
+			});
+
+			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
+				defaultModel: "first",
+			});
+			expect(await systemAgentModels()).toEqual(["first", "first", "first"]);
+		});
+
+		it("refuses to switch the default off until another model replaces it", async () => {
+			const ids = await offerable("first", "second");
+			const setup = await answering();
+			const enable = (modelId: string, enabled: boolean) =>
+				setup.setModelsEnabled({
+					workspace: workspaceId,
+					providerId,
+					modelIds: [ids[modelId] ?? ""],
+					enabled,
+				});
+			await enable("first", true);
+			await enable("second", true);
+
+			await expect(enable("first", false)).rejects.toBeInstanceOf(ModelInUse);
+			await expect(
+				setup.update({ workspace: workspaceId, providerId, changes: { active: false } }),
+			).rejects.toBeInstanceOf(ModelInUse);
+			expect(await view(providerId)).toMatchObject({ active: true });
+
+			await setup.setDefaultModel({ workspace: workspaceId, model: "second" });
+			await enable("first", false);
+			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
+				models: [{ modelId: "second" }],
+				defaultModel: "second",
+			});
+		});
+
+		it("refuses to switch off a model a system agent runs on", async () => {
+			await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+			const ids = await offerable("first", "second");
+			const setup = await answering();
+			for (const modelId of ["first", "second"]) {
+				await setup.setModelsEnabled({
+					workspace: workspaceId,
+					providerId,
+					modelIds: [ids[modelId] ?? ""],
+					enabled: true,
+				});
+			}
+			await setup.setDefaultModel({ workspace: workspaceId, model: "second" });
+
+			const refused = setup.setModelsEnabled({
+				workspace: workspaceId,
+				providerId,
+				modelIds: [ids.first ?? ""],
+				enabled: false,
+			});
+
+			await expect(refused).rejects.toMatchObject({
+				_tag: "ModelInUse",
+				modelId: "first",
+				holders: ["Compaction", "Facilitator", "Scribe"],
+			});
+		});
+
+		it("refuses to delete the default, even while its provider is off", async () => {
+			const ids = await offerable("first");
+			const setup = await answering();
+			await setup.setModelsEnabled({
+				workspace: workspaceId,
+				providerId,
+				modelIds: [ids.first ?? ""],
+				enabled: true,
+			});
+			// A failed test switches a provider off without asking anybody.
+			await onDatabase((db) =>
+				db.update(modelProvider).set({ active: false }).where(eq(modelProvider.id, providerId)),
+			);
+
+			await expect(
+				setup.removeModel({ workspace: workspaceId, providerId, modelId: ids.first ?? "" }),
+			).rejects.toBeInstanceOf(ModelInUse);
+			expect((await view(providerId))?.models.map(({ modelId }) => modelId)).toEqual(["first"]);
+		});
+
+		it("refuses a default the workspace does not offer", async () => {
+			await offerable("first");
+			const setup = await answering();
+
+			await expect(
+				setup.setDefaultModel({ workspace: workspaceId, model: "first" }),
+			).rejects.toMatchObject({ _tag: "ModelNotEnabled" });
+		});
 	});
 });

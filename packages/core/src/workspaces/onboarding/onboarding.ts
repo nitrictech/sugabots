@@ -14,9 +14,12 @@ import {
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
+import { lockHeldModels } from "../../providers/model-providers/held-models.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
-import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { AgentRepository } from "../agents/agent-repository.ts";
+import { SYSTEM_AGENTS } from "../agents/system-agents.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**
@@ -34,10 +37,9 @@ export interface Interface {
 	 * offers. Finishing settles the first agent and the model the workspace
 	 * runs it on, so it takes `workspace.providers.manage`.
 	 *
-	 * It does not choose a model for the Scribe. A model chosen here is for an
-	 * agent somebody talks to, and reusing it for an unattended summariser would
-	 * make a choice nobody was shown, which is why a system agent starts unset
-	 * and is set up on its own screen.
+	 * That model also becomes the workspace's default and every system agent's:
+	 * it is the one model the person setting the workspace up has chosen, and
+	 * the system agents have to run on something.
 	 */
 	readonly complete: (input: {
 		workspaceId: string;
@@ -50,8 +52,8 @@ export interface Interface {
 	>;
 	/**
 	 * Marks onboarding done for an actor who joined through `invitationId`,
-	 * pointing their Personal Assistant at a model the workspace offers, if it
-	 * offers any. Returns the workspace they joined.
+	 * pointing their Personal Assistant at the workspace's default model, if it
+	 * has one yet. Returns the workspace they joined.
 	 */
 	readonly completeAcceptedInvite: (input: {
 		invitationId: string;
@@ -68,6 +70,8 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Onboarding");
 	const authorization = yield* Authorization.Service;
 	const personalPods = yield* PersonalPods.Service;
+	const modelProviders = yield* ModelProviderRepository.Service;
+	const agents = yield* AgentRepository.Service;
 
 	return Service.of({
 		isCompleted: operation(
@@ -116,10 +120,22 @@ export const make = Effect.gen(function* () {
 						if (!eligible) {
 							return yield* new NotReadyToFinish();
 						}
+						yield* lockHeldModels(resolved);
 						const { models } = yield* offeredModels(resolved);
-						if (!models.some((offered) => offered.modelId === eligible.model)) {
+						const model = eligible.model;
+						if (model === null || !models.some((offered) => offered.modelId === model)) {
 							return yield* new NoModelChosen();
 						}
+						yield* modelProviders.setDefaultModel(resolved, model);
+						yield* Effect.forEach(
+							SYSTEM_AGENTS,
+							({ key }) =>
+								// A workspace made before a system agent existed may not have it.
+								agents
+									.setSystemAgentModel(resolved, key, model)
+									.pipe(Effect.catchTag("SystemAgentMissing", () => Effect.void)),
+							{ discard: true },
+						);
 						yield* markCompleted(actor.userId);
 					}),
 				),
@@ -153,12 +169,12 @@ export const make = Effect.gen(function* () {
 							return yield* new InvitationNotAccepted();
 						}
 						const workspaceId = accepted.workspaceId;
-						const [offered] = (yield* offeredModels(workspaceId)).models;
-						if (offered) {
+						const { defaultModel } = yield* offeredModels(workspaceId);
+						if (defaultModel) {
 							yield* personalPods.provisionWithModel({
 								workspaceId,
 								userId,
-								model: offered.modelId,
+								model: defaultModel,
 							});
 						} else {
 							yield* personalPods.provision({ workspaceId, userId });
@@ -173,7 +189,14 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, PersonalPods.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([
+		Authorization.layer,
+		PersonalPods.layer,
+		ModelProviderRepository.layer,
+		AgentRepository.layer,
+	]),
+);
 
 /** The pod and agent named are not ones this person may finish onboarding with. */
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
