@@ -14,6 +14,11 @@ import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { threadCompaction } from "../../database/schema.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
+import {
+	estimatedTokens,
+	loadContextWindow,
+	MAX_CONTEXT_WINDOW_TOKENS,
+} from "../context-window.ts";
 import type { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import {
@@ -22,14 +27,8 @@ import {
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
-import { loadContextWindow } from "./context-window.ts";
 import { CompactionRepository } from "./repository.ts";
-import {
-	estimatedTokens,
-	MAX_CONTEXT_WINDOW_TOKENS,
-	needsCompaction,
-	planCompaction,
-} from "./window.ts";
+import { needsCompaction, planCompaction } from "./window.ts";
 
 /**
  * Thread compaction, done by the `compact` system agent, Compaction.

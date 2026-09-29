@@ -13,8 +13,12 @@ import {
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
-import { loadContextWindow } from "../compaction/context-window.ts";
-import { estimatedTokens, historyLimitTokens, newestWithinLimit } from "../compaction/window.ts";
+import {
+	estimatedTokens,
+	historyLimitTokens,
+	loadContextWindow,
+	newestWithinLimit,
+} from "../context-window.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { messageTextWithPlacedParts } from "../threads/message-text.ts";

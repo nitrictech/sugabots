@@ -1,37 +1,15 @@
 /**
- * How much of a model's context window a thread may fill, and where the
- * Compaction agent cuts it when it gets long. Every limit is a share of the
- * window of the model reading the thread.
+ * Where the Compaction agent cuts a thread when it gets long. Every limit is
+ * a share of the window of the model reading the thread.
  */
 
-/**
- * The largest window any model is treated as having, and the window of a
- * model whose size is unknown. Models with more room still compact here:
- * answers degrade as the prompt grows long, and every token of it is paid for.
- */
-export const MAX_CONTEXT_WINDOW_TOKENS = 256_000;
-
-/** The window a model is treated as having, from the context length its provider reports. */
-export function contextWindowTokens(contextLength: number | null | undefined): number {
-	return contextLength
-		? Math.min(contextLength, MAX_CONTEXT_WINDOW_TOKENS)
-		: MAX_CONTEXT_WINDOW_TOKENS;
-}
+import { newestWithinLimit } from "../context-window.ts";
 
 /** Past this share of the window in a turn's prompt, the Compaction agent compacts the thread. */
 const COMPACTION_LINE_SHARE = 0.7;
 
 /** How much of the newest history the bot keeps reading word for word after compacting. */
 const KEPT_SHARE = 0.25;
-
-/**
- * The most history a turn is shown whether or not the thread has been
- * compacted, below the window so the system text, tools and reply still fit.
- * Compaction keeps a thread well under this; it is what stops a thread from
- * overflowing when there is no model to compact it with or compaction has
- * not caught up.
- */
-const HISTORY_LIMIT_SHARE = 0.9;
 
 /**
  * How much of its own window the model compacting a thread may be given to
@@ -45,48 +23,12 @@ export function compactionLineTokens(windowTokens: number): number {
 	return Math.floor(windowTokens * COMPACTION_LINE_SHARE);
 }
 
-/** The most history a turn reading with this window is shown. */
-export function historyLimitTokens(windowTokens: number): number {
-	return Math.floor(windowTokens * HISTORY_LIMIT_SHARE);
-}
-
-/**
- * A rough count, since there is no tokenizer for every provider. English
- * averages about four characters a token; the compaction line itself is
- * measured with the provider's own count.
- */
-const CHARACTERS_PER_TOKEN = 4;
-
-export function estimatedTokens(text: string): number {
-	return Math.ceil(text.length / CHARACTERS_PER_TOKEN);
-}
-
 /**
  * Whether a turn whose prompt measured `contextTokens`, read by a model with
  * this window, should have its thread compacted.
  */
 export function needsCompaction(contextTokens: number | undefined, windowTokens: number): boolean {
 	return contextTokens !== undefined && contextTokens >= compactionLineTokens(windowTokens);
-}
-
-/**
- * The newest items whose tokens add up to at most `limit`, oldest first. The
- * newest item is always included, however large.
- */
-export function newestWithinLimit<Item>(
-	items: readonly Item[],
-	tokensOf: (item: Item) => number,
-	limit: number,
-): Item[] {
-	let total = 0;
-	let start = items.length;
-	while (start > 0) {
-		const tokens = tokensOf(items[start - 1] as Item);
-		if (start < items.length && total + tokens > limit) break;
-		total += tokens;
-		start -= 1;
-	}
-	return items.slice(start);
 }
 
 export interface CompactionPlan<Message> {
