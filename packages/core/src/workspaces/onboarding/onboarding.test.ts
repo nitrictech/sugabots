@@ -199,6 +199,10 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	});
 
 	it("completes an account from its accepted invitation", async () => {
+		// A workspace people are invited into has been set up, so it has a default.
+		await onDatabase((db) =>
+			db.insert(workspaceDefaultModel).values({ workspaceId, modelId: "model" }),
+		);
 		const [invitation] = await onDatabase((db) =>
 			db
 				.insert(workspaceInvite)
