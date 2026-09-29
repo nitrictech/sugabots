@@ -33,7 +33,7 @@ interface Line {
  * it: the day as well as the time, since long chats span days. Everything
  * before it can be searched.
  */
-const KEPT_FROM = "Thu 15 May 2026, 18:30";
+const KEPT_FROM = "Thu 14 May 2026, 18:30 UTC";
 
 const lines: readonly Line[] = [
 	{
@@ -51,13 +51,13 @@ const lines: readonly Line[] = [
 	{
 		from: "dad",
 		time: "17:31",
-		text: "Friday the 16th to Monday works for me.",
+		text: "Friday the 15th to Monday works for me.",
 		band: "left-out",
 	},
 	{
 		from: "tripPlanner",
 		time: "17:33",
-		text: "Friday 16th to Monday 19th it is.",
+		text: "Friday 15th to Monday 18th it is.",
 		band: "left-out",
 	},
 	{ from: "you", time: "17:48", text: "Can you find flights Friday after 5?", band: "summarised" },
@@ -91,7 +91,7 @@ const lines: readonly Line[] = [
 ];
 
 const summary = [
-	"Decisions: On 15 May, Dad chose the 18:40 flight on Friday 16th, and Trip Planner held it for four.",
+	"Decisions: On 14 May, Dad chose the 18:40 flight on Friday 15th, and Trip Planner held it for four.",
 	"Key facts: €220 left in the pot.",
 	`This covers the chat up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
 ];
@@ -276,7 +276,7 @@ function BotView({ step }: { step: Step }) {
 			<PanelTitle>What Trip Planner reads</PanelTitle>
 			<ContextMeter used={step.contextUsed} />
 			<CompactionStatus state={step.compaction} />
-			<div className="flex h-72 flex-col gap-1.5 overflow-hidden">
+			<div className="flex min-h-72 flex-col gap-1.5">
 				<AnimatePresence initial={false} mode="popLayout">
 					{compacted && <SummaryHead key="summary" />}
 					{read.map((line) => (
@@ -336,7 +336,7 @@ function SearchedBack() {
 			className="mb-1.5 flex items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground"
 		>
 			<SearchIcon className="size-3.5" />
-			Searched earlier messages for “hotel budget”
+			Searched earlier messages for “hotel”
 		</motion.p>
 	);
 }
