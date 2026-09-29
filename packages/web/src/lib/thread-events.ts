@@ -73,15 +73,19 @@ interface TypingPerson {
 const typingKey = (threadId: string) => ["thread-typing", threadId] as const;
 
 /**
- * Tells the thread's other watchers the user is typing while `draft` has
- * text, at most once per `TYPING_SIGNAL_INTERVAL_MS`. An emptied draft, as
- * after sending, lets the next keystroke say so straight away.
+ * Tells the thread's other watchers the user is typing when `draft` changes
+ * to text, at most once per `TYPING_SIGNAL_INTERVAL_MS`. A draft kept from an
+ * earlier visit is not typing until it is edited. An emptied draft, as after
+ * sending, lets the next keystroke say so straight away.
  */
 export function useTypingSignal(threadId: string | undefined, draft: string): void {
 	const lastSentAt = useRef(0);
+	const previousDraft = useRef(draft);
 
 	useEffect(() => {
-		if (!threadId) return;
+		const edited = draft !== previousDraft.current;
+		previousDraft.current = draft;
+		if (!threadId || !edited) return;
 		if (!draft.trim()) {
 			lastSentAt.current = 0;
 			return;
