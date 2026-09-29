@@ -41,6 +41,14 @@ import { turnStepsLayer } from "./turn.steps.ts";
 import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 
 export {
+	contextWindowTokens,
+	estimatedTokens,
+	historyLimitTokens,
+	loadContextWindow,
+	MAX_CONTEXT_WINDOW_TOKENS,
+	newestWithinLimit,
+} from "./context-window.ts";
+export {
 	ToolApprovalConflict,
 	ToolApprovalForbidden,
 	ToolApprovalNotFound,

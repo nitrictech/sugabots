@@ -26,7 +26,7 @@ import type * as schema from "../database/schema.ts";
 import { thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
-import { compactionLineTokens, contextWindowTokens } from "./compaction/window.ts";
+import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
 import { respondingIn } from "./floor/floor.ts";
 import { routineExecutionIdOf, toRoutineExecution } from "./routines/execution.ts";
@@ -39,6 +39,7 @@ import {
 	recentParticipantsOf,
 	toParticipant,
 } from "./threads/participants.ts";
+import { Turns } from "./turns/turns.ts";
 
 /**
  * What the thread screens show, of the threads the current actor can see: the
@@ -259,7 +260,7 @@ interface Measurement {
 
 /** The context the thread's latest measured turn used, against the window that turn read with. */
 function toThreadContext(measured: Measurement, compactedAt: Date | null): ThreadContext {
-	const windowTokens = contextWindowTokens(measured.window);
+	const windowTokens = Turns.contextWindowTokens(measured.window);
 	return {
 		usedTokens: measured.tokens,
 		measuredAt: DateTime.formatIso(DateTime.makeUnsafe(measured.at)),
