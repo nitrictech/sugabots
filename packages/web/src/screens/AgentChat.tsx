@@ -7,7 +7,8 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef } from "react";
+import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
 	useChatHistory,
@@ -66,7 +67,7 @@ export function AgentChat({
 	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
 	useTypingSignal(chat.data?.mainThreadId, draft);
 	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);

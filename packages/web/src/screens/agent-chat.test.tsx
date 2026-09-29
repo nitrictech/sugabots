@@ -322,7 +322,16 @@ function chatAnswers() {
 	});
 }
 
+/** Goes to the Chat's bot's settings, which unmounts the Chat, and back to its composer. */
+async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLTextAreaElement> {
+	await router.navigate({ to: `/suga/settings/pods/suga-team/agents/${linear.handle}` });
+	await waitFor(() => expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull());
+	await router.navigate({ to: `/suga/pods/suga-team/agents/${linear.handle}` });
+	return (await screen.findByLabelText(`Message ${linear.name}`)) as HTMLTextAreaElement;
+}
+
 beforeEach(() => {
+	localStorage.clear();
 	apiAnswers();
 	chatAnswers();
 });
@@ -454,6 +463,32 @@ describe("ongoing agent Chat", () => {
 
 		await screen.findByText("Message not sent. Your draft is still here.");
 		expect(composer.value).toBe("Send the update");
+	});
+
+	it("keeps an unsent draft while you are elsewhere, with the cursor at its end", async () => {
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
+			target: { value: "Half a thought" },
+		});
+
+		const composer = await leaveAndReturn(router);
+		expect(composer.value).toBe("Half a thought");
+		expect(composer.selectionStart).toBe("Half a thought".length);
+	});
+
+	it("forgets the draft once it is sent", async () => {
+		client.api.chats.send.mockReturnValue(
+			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
+		);
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
+			target: { value: "Send the update" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalled());
+
+		const composer = await leaveAndReturn(router);
+		expect(composer.value).toBe("");
 	});
 
 	it("keeps following the latest message while the agent works, and when it answers", async () => {
@@ -881,6 +916,20 @@ describe("people typing in the Chat", () => {
 
 		await screen.findByRole("status", { name: "Jye is typing" });
 		expect(screen.queryByRole("status", { name: /Sam/ })).toBeNull();
+	});
+
+	it("does not say you are typing just because a draft was kept from before", async () => {
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		fireEvent.change(await screen.findByLabelText(`Message ${linear.name}`), {
+			target: { value: "Half a thought" },
+		});
+		await waitFor(() => expect(client.api.events.typing).toHaveBeenCalledTimes(1));
+		client.api.events.typing.mockClear();
+		client.events.thread.mockClear();
+
+		await leaveAndReturn(router);
+		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+		expect(client.api.events.typing).not.toHaveBeenCalled();
 	});
 
 	it("tells the thread you are typing, once for a burst of keystrokes", async () => {

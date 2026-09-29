@@ -50,6 +50,12 @@ export function ChatComposer({
 	const mentionMenuOpen = typing?.start !== dismissedMentionAt && matches.length > 0;
 	const selectedMention = Math.min(activeMention, matches.length - 1);
 
+	// A draft kept from an earlier visit is picked up at its end, not before its first word.
+	useEffect(() => {
+		const end = textarea.current?.value.length ?? 0;
+		textarea.current?.setSelectionRange(end, end);
+	}, []);
+
 	function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
 		if (mentionMenuOpen && !event.nativeEvent.isComposing) {
 			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
