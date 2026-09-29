@@ -170,7 +170,7 @@ const anthropic = {
 	})),
 };
 
-/** After the key: the provider's models, the catalog's picks first, and nothing chosen for you. */
+/** After the key: the provider's models, and nothing chosen for you. */
 export const ChooseModel = meta.story({
 	render: (args) => (
 		<Preview stage="no-model">
@@ -200,7 +200,7 @@ export const ChooseModel = meta.story({
 		const choices = canvas
 			.getAllByRole("radio")
 			.map((radio) => radio.closest("label")?.textContent);
-		await expect(choices).toEqual(["Claude Opus 4.1", "Claude Sonnet 4", "Claude 3.5 Haiku"]);
+		await expect(choices).toEqual(["Claude 3.5 Haiku", "Claude Opus 4.1", "Claude Sonnet 4"]);
 		await expect(canvas.getByRole("button", { name: "Continue" })).toBeDisabled();
 		await userEvent.click(canvas.getByRole("radio", { name: "Claude Sonnet 4" }));
 		await expect(canvas.getByRole("button", { name: "Continue" })).toBeEnabled();
