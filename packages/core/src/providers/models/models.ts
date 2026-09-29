@@ -18,6 +18,7 @@ import {
 	type ToolApprovalConfiguration,
 	type ToolApprovalRequestOutput,
 	type ToolModelMessage,
+	type ToolResultPart,
 	type ToolSet,
 } from "ai";
 import { Context, Data, Duration, Effect, Layer, Ref, Schedule, type Scope } from "effect";
@@ -52,7 +53,10 @@ export interface StreamRequest extends Prompt {
 	/** What the model may call. The SDK executes them as it streams. */
 	tools?: ToolSet;
 	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
-	/** How many model calls the response may take, counting one per round of tool calls. */
+	/**
+	 * How many model calls the response may take, counting one per round of
+	 * tool calls. The last is told to answer rather than call more tools.
+	 */
 	maxSteps: number;
 }
 
@@ -244,6 +248,13 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					return ledger.failed();
 				},
 				onAbort: () => ledger.aborted(),
+				// A response stopped by the step limit on a round of tool calls ends
+				// with nothing said, so the last round is told to answer. The note
+				// rides on the newest tool result, which no provider has cached yet:
+				// changing the tools or system text instead would cost the cache
+				// every earlier call built.
+				prepareStep: ({ stepNumber, messages }) =>
+					stepNumber === input.maxSteps - 1 ? { messages: withLastStepNote(messages) } : undefined,
 				stopWhen: stepCountIs(input.maxSteps),
 				maxRetries: 0,
 			});
@@ -307,6 +318,43 @@ export function fromStream(stream: Interface["stream"]): Interface {
 				}),
 			),
 	};
+}
+
+const LAST_STEP_NOTE =
+	"(This is your last step: you cannot call tools any more. Answer now from what you have found, and say what you could not check.)";
+
+/** `messages` with {@link LAST_STEP_NOTE} added to the newest tool result, if the last message has one. */
+function withLastStepNote(messages: ModelMessage[]): ModelMessage[] {
+	const last = messages.at(-1);
+	if (last?.role !== "tool") return messages;
+	const resultAt = last.content.findLastIndex((part) => part.type === "tool-result");
+	const result = last.content[resultAt];
+	if (result?.type !== "tool-result") return messages;
+	const content = last.content.with(resultAt, { ...result, output: noted(result.output) });
+	return [...messages.slice(0, -1), { ...last, content }];
+}
+
+/** A tool's output with {@link LAST_STEP_NOTE} after it, in the output's own form where it has room for text. */
+function noted(output: ToolResultPart["output"]): ToolResultPart["output"] {
+	switch (output.type) {
+		case "text":
+		case "error-text":
+			return { ...output, value: `${output.value}\n\n${LAST_STEP_NOTE}` };
+		case "json":
+			return { type: "text", value: `${JSON.stringify(output.value)}\n\n${LAST_STEP_NOTE}` };
+		case "error-json":
+			return {
+				type: "error-text",
+				value: `${JSON.stringify(output.value)}\n\n${LAST_STEP_NOTE}`,
+			};
+		case "content":
+			return { ...output, value: [...output.value, { type: "text", text: LAST_STEP_NOTE }] };
+		case "execution-denied":
+			return {
+				...output,
+				reason: output.reason ? `${output.reason}\n\n${LAST_STEP_NOTE}` : LAST_STEP_NOTE,
+			};
+	}
 }
 
 function languageModel(

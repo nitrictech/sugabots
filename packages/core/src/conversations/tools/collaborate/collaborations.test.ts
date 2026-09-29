@@ -443,7 +443,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
 				{ content: "", collaborations: [], toolCalls: [], acted: true },
-				UserMessage.of`The model could not be reached`,
+				{ userMessage: UserMessage.of`The model could not be reached`, mayRunAgain: true },
 			);
 
 			expect(willRetry).toBe(false);
@@ -457,7 +457,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
 				{ content: "", collaborations: [], toolCalls: [] },
-				UserMessage.of`The model could not be reached`,
+				{ userMessage: UserMessage.of`The model could not be reached`, mayRunAgain: true },
 			);
 
 			expect(willRetry).toBe(true);

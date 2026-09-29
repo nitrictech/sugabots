@@ -87,12 +87,13 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	/**
 	 * Records the run as failed, telling people `userMessage`, and returns
-	 * whether the turn runs again (see `runsAgainAfterFailure`).
+	 * whether the turn runs again: only if `mayRunAgain` and
+	 * `runsAgainAfterFailure` both allow it.
 	 */
 	readonly fail: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		userMessage: UserMessage,
+		failure: { userMessage: UserMessage; mayRunAgain: boolean },
 	) => Effect.Effect<boolean>;
 	/** Stops the run short, keeping the reply written so far. */
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
@@ -486,7 +487,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		fail: (reply, draft, userMessage) =>
+		fail: (reply, draft, { userMessage, mayRunAgain }) =>
 			operation(
 				"fail",
 				transaction(
@@ -496,7 +497,8 @@ export const make = Effect.gen(function* () {
 							TurnEvent.Fail({ userMessage }),
 						);
 						if (locked?.decided._tag !== "Next") return false;
-						const willRetry = runsAgainAfterFailure(locked.state, draft.acted ?? false);
+						const willRetry =
+							mayRunAgain && runsAgainAfterFailure(locked.state, draft.acted ?? false);
 						yield* writeReply(reply, draft, "failed");
 						yield* write(locked.id, locked.decided.state);
 						yield* toolCalls.abandonUnfinished([locked.id], userMessage);

@@ -57,6 +57,8 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
+/** How many model calls a turn may make, across its segments. */
+const TURN_MODEL_CALLS = 20;
 
 /**
  * The services a segment runs on: the conversation services, the model, the
@@ -155,7 +157,8 @@ type TurnFailure =
 	| ApprovedToolChanged
 	| TurnInterrupted
 	| TurnStoppedUnexpectedly
-	| ApprovalForUnknownTool;
+	| ApprovalForUnknownTool
+	| ReplyWithoutAnswer;
 
 class TurnCancelled extends Data.TaggedError("TurnCancelled") {
 	override get message() {
@@ -215,6 +218,16 @@ class ApprovalForUnknownTool
 	}
 }
 
+/** The model finished without writing anything or asking anyone. */
+class ReplyWithoutAnswer extends Data.TaggedError("ReplyWithoutAnswer") implements UserFacing {
+	override get message() {
+		return "Model finished without an answer";
+	}
+	get userMessage() {
+		return UserMessage.of`The reply stopped before answering.`;
+	}
+}
+
 /**
  * Streams the model's reply into the response message and records how it ended.
  *
@@ -238,11 +251,17 @@ const generateReply = (
 
 			/**
 			 * Logs the failure and records what people are told of it; the turn
-			 * runs again only while that is safe.
+			 * runs again only while that is safe. A reply without an answer does
+			 * not: running it again would repeat every tool call it made.
 			 */
 			const failed = (failure: TurnFailure) =>
 				logTurnFailure(prepared, failure.message).pipe(
-					Effect.andThen(turns.fail(replyTurn, draft, failure.userMessage)),
+					Effect.andThen(
+						turns.fail(replyTurn, draft, {
+							userMessage: failure.userMessage,
+							mayRunAgain: !(failure instanceof ReplyWithoutAnswer),
+						}),
+					),
 					Effect.map((willRetry) => (willRetry ? retry : finished)),
 				);
 
@@ -331,6 +350,7 @@ const streamReply = (
 	| TurnTimedOut
 	| ApprovedToolChanged
 	| ApprovalForUnknownTool
+	| ReplyWithoutAnswer
 	| TurnCancelled,
 	SegmentServices | Database
 > =>
@@ -453,7 +473,7 @@ const streamReply = (
 				continuationMessages: segmentMessages,
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
-				maxSteps: Math.max(1, 8 - (prepared.checkpoint?.modelCalls ?? 0)),
+				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
 			const consume = Effect.gen(function* () {
@@ -464,6 +484,10 @@ const streamReply = (
 				// so the first segment's prompt is the one measured.
 				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
 				if (finished.approvalRequests.length === 0) {
+					const { content, collaborations } = yield* Ref.get(reply);
+					if (content.trim() === "" && collaborations.length === 0) {
+						return yield* new ReplyWithoutAnswer();
+					}
 					return { kind: "completed" as const, contextTokens };
 				}
 				const atOffset = (yield* Ref.get(reply)).content.length;
