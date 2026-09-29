@@ -7,7 +7,8 @@ import {
 	type ModelProvider,
 	type Pod,
 	type ProviderModel,
-	type ProviderPresetId,
+	presetSignInService,
+	providerLacksCredential,
 	providerPreset,
 	slugify,
 	type Workspace,
@@ -29,10 +30,9 @@ import { useModelProviders } from "@/lib/model-providers.ts";
 import {
 	useChooseFirstModel,
 	useCompleteOnboarding,
-	useConnectFirstProvider,
+	useListFirstProviderModels,
 } from "@/lib/onboarding.ts";
 import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
-import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import type { Session } from "@/lib/session.ts";
 import {
 	useCreateWorkspace,
@@ -46,7 +46,11 @@ import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
+import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
+import { AddProviderDialog } from "./ModelsSettings.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
+import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
  * The first run: name the workspace, connect a model, make the first bot,
@@ -344,129 +348,79 @@ function WorkspaceStep({
 	);
 }
 
-/** The four the design offers first; the rest are a click away in settings. */
-const firstProviders: readonly { preset: ProviderPresetId; line: string }[] = [
-	{ preset: "anthropic", line: "Claude models" },
-	{ preset: "openai", line: "GPT models" },
-	{ preset: "openrouter", line: "Hundreds of models, one key" },
-	{ preset: "ollama", line: "Runs on your own machine" },
-];
-
-const KEY_PLACEHOLDERS: Partial<Record<ProviderPresetId, string>> = {
-	anthropic: "sk-ant-…",
-	openai: "sk-…",
-	openrouter: "sk-or-…",
-};
-
 /** Connecting a provider, then choosing which of its models the first bot runs on. */
 function ModelStep({ bot, onContinue }: { bot?: Agent; onContinue: () => void }) {
-	const [connected, setConnected] = useState<ModelProvider>();
+	const providers = useModelProviders().data ?? [];
+	// Read from the workspace's providers rather than kept, so a sign-in finished
+	// while choosing a model brings its models in.
+	const [connectedId, setConnectedId] = useState<string>();
+	const connected = providers.find((provider) => provider.id === connectedId);
 	return connected ? (
 		<ChooseModelStep
 			provider={connected}
 			bot={bot}
 			onChosen={onContinue}
-			onOtherProvider={() => setConnected(undefined)}
+			onOtherProvider={() => setConnectedId(undefined)}
 		/>
 	) : (
-		<ConnectProviderStep onConnected={setConnected} />
+		<ConnectProviderStep providers={providers} onConnected={setConnectedId} />
 	);
 }
 
-function ConnectProviderStep({ onConnected }: { onConnected: (provider: ModelProvider) => void }) {
-	const providers = useModelProviders();
-	const connect = useConnectFirstProvider();
-	const [chosen, setChosen] = useState<ProviderPresetId>("anthropic");
-	const [secret, setSecret] = useState("");
-	const group = useId();
-	const fieldId = useId();
-	const preset = providerPreset(chosen);
-	const local = preset.hosting === "local";
-	const existing = providers.data?.find((provider) => provider.preset === chosen);
-	// Ollama is on in every workspace from the start, so being reachable is not enough: it has to have listed models.
-	const alreadyConnected =
-		existing !== undefined && isConnected(existing) && existing.modelCount > 0;
-	const baseUrl = local ? parseProviderBaseUrl(secret || preset.baseUrl) : undefined;
-	const ready = alreadyConnected || (local ? baseUrl !== undefined : secret.trim() !== "");
-
-	async function submit(event: FormEvent) {
-		event.preventDefault();
-		if (!ready) return;
-		// Continuing with a connected provider as it is changes nothing but its model list.
-		const unchanged = alreadyConnected && !secret;
-		try {
-			onConnected(
-				await connect.mutateAsync({
-					preset,
-					existing,
-					apiKey: local || unchanged ? undefined : secret.trim(),
-					baseUrl: unchanged ? undefined : baseUrl,
-				}),
-			);
-		} catch {
-			return;
-		}
-	}
+/**
+ * Adding a provider the way the Models settings do. Coming back part way, one
+ * may already be connected with models to choose from; those are not offered
+ * again, so they are listed to continue with.
+ */
+function ConnectProviderStep({
+	providers,
+	onConnected,
+}: {
+	providers: readonly ModelProvider[];
+	onConnected: (providerId: string) => void;
+}) {
+	const listModels = useListFirstProviderModels();
+	const [adding, setAdding] = useState(false);
+	const connected = providers.filter(
+		(provider) => isConnected(provider) && provider.modelCount > 0,
+	);
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-[22px]">
-			<StepHeading title="Connect a model">
+		<div className="flex flex-col gap-[22px]">
+			<StepHeading title="Connect a provider">
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
 			</StepHeading>
-			<fieldset className="m-0 overflow-hidden rounded-panel border-0 bg-list p-0">
-				<legend className="sr-only">Provider</legend>
-				{firstProviders.map(({ preset: id, line }) => {
-					const name = providerPreset(id).name;
-					return (
-						<label
-							key={id}
-							className="flex cursor-pointer items-center gap-3 border-border border-b px-4 py-3 last:border-b-0 has-focus-visible:bg-panel hover:bg-panel"
-						>
-							<ProviderTile name={name} preset={id} />
-							<span className="flex min-w-0 flex-1 flex-col gap-px">
-								<span className="font-medium text-[14.5px] text-foreground">{name}</span>
-								<span className="text-muted-foreground text-sm">{line}</span>
-							</span>
-							<input
-								type="radio"
-								name={group}
-								checked={chosen === id}
-								onChange={() => {
-									setChosen(id);
-									setSecret("");
-								}}
-								className="size-5 shrink-0 accent-primary"
-							/>
-						</label>
-					);
-				})}
-			</fieldset>
-			<div className="flex items-center gap-3 rounded-2xl bg-list px-4 py-3.5">
-				<label htmlFor={fieldId} className="w-[70px] shrink-0 text-[14px] text-muted-foreground">
-					{local ? "Address" : "API key"}
-				</label>
-				<input
-					id={fieldId}
-					type={local ? "text" : "password"}
-					autoComplete="off"
-					value={secret}
-					onChange={(event) => setSecret(event.target.value)}
-					placeholder={
-						alreadyConnected
-							? "Connected"
-							: local
-								? "localhost:11434"
-								: (KEY_PLACEHOLDERS[chosen] ?? "Paste your key")
-					}
-					className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
-				/>
-			</div>
-			{connect.error && <Alert>{failureMessage(connect.error)}</Alert>}
-			<Button type="submit" size="lg" className="w-full" disabled={!ready || connect.isPending}>
-				{connect.isPending ? "Connecting…" : "Continue"}
+			{connected.length > 0 && (
+				<SettingsGroup label="Connected" headingLevel={2}>
+					{connected.map((provider) => (
+						<SettingsRow
+							key={provider.id}
+							icon={<ProviderTile name={provider.name} preset={provider.preset} />}
+							label={provider.name}
+							sub={`${provider.modelCount} models`}
+							chevron
+							onClick={() => onConnected(provider.id)}
+						/>
+					))}
+				</SettingsGroup>
+			)}
+			<Button size="lg" className="w-full" onClick={() => setAdding(true)}>
+				Choose a provider
 			</Button>
-		</form>
+			<Dialog open={adding} onOpenChange={setAdding}>
+				{adding && (
+					<AddProviderDialog
+						providers={providers}
+						done={() => setAdding(false)}
+						onAdded={async (provider) => {
+							await listModels(provider.id);
+							onConnected(provider.id);
+						}}
+					/>
+				)}
+			</Dialog>
+		</div>
 	);
 }
 
@@ -487,6 +441,10 @@ function ChooseModelStep({
 	onOtherProvider: () => void;
 }) {
 	const choose = useChooseFirstModel(bot?.id);
+	// A subscription provider is added before it is signed in to, and lists its models once it is.
+	const signInService = providerLacksCredential(provider)
+		? presetSignInService(provider.preset)
+		: undefined;
 	const [search, setSearch] = useState("");
 	const group = useId();
 	const starters = provider.preset
@@ -526,7 +484,11 @@ function ChooseModelStep({
 			<StepHeading title="Choose a model">
 				Your first bot thinks with this. You can switch on more of {provider.name}'s models later.
 			</StepHeading>
-			{choices.length === 0 ? (
+			{choices.length === 0 && signInService ? (
+				<div className="overflow-hidden rounded-panel bg-list">
+					<ProviderSignInRow provider={provider} service={signInService} />
+				</div>
+			) : choices.length === 0 ? (
 				<Alert>
 					{provider.name} lists no models yet. Check it has some, or use another provider.
 				</Alert>
