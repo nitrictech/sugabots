@@ -1,1 +1,0 @@
-ALTER TABLE "model_provider" RENAME COLUMN "chatgpt_tokens_encrypted" TO "oauth_tokens_encrypted";
