@@ -23,7 +23,7 @@ import {
 } from "../threads/system-agent-threads.ts";
 import { Turns } from "../turns/turns.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
-import { CompactionRepository } from "./repository.ts";
+import { makeRecords } from "./repository.ts";
 import { needsCompaction, planCompaction } from "./window.ts";
 
 /**
@@ -64,7 +64,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Compactions");
 	const lanes = yield* Lanes.Service;
 	const threads = yield* ThreadRepository.Service;
-	const compactions = yield* CompactionRepository.Service;
+	const compactions = yield* makeRecords;
 	return Service.of({
 		prepare: (request) =>
 			operation(
@@ -193,9 +193,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([ThreadRepository.layer, CompactionRepository.layer]),
-);
+export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
 
 /**
  * A compaction with nothing to do: its thread or source is gone, there is
