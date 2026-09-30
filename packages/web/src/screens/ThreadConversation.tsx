@@ -230,9 +230,7 @@ export function ThreadConversation({
 										outgoing={outgoing}
 										endsRun={isLast && !runContinues && !isTyping(message)}
 										isLast={isLast}
-										roomBelow={
-											isLast && !runContinues && !isTyping(message) && next !== undefined
-										}
+										roomBelow={isLast && !runContinues && !isTyping(message) && next !== undefined}
 										compact={compact}
 										arrivedLive={watchedWritten.has(message.id)}
 										queued={queued.has(message.id)}
