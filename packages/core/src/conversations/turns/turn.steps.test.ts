@@ -1,6 +1,6 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
-import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
@@ -24,9 +24,12 @@ import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { runSegment } from "./turn.steps.ts";
 
 /**
- * The repositories and models in these cases are fakes that never query, so
- * the database they run against is one nothing reaches. `repository.test.ts`
- * runs a segment against the real ones.
+ * What a segment does that a real database cannot produce or show: what the
+ * model is sent, a defect or a race forced from a fake, the flush and the
+ * cancellation poll on fake timers (which would also stop the database pool),
+ * and what reaches the repositories only as an argument. The repositories here
+ * are fakes that never query, so the database they run against is one nothing
+ * reaches. `turn.segment.test.ts` runs segments against the real ones.
  */
 const runWithServices: RunEffect = effectRunner(ManagedRuntime.make(noDatabase));
 
@@ -96,34 +99,6 @@ const replyTurn = replyTurnOf(prepared);
 const reply = (content: string) => ({ content, collaborations: [], toolCalls: [] });
 
 describe("runSegment", () => {
-	it("persists a streamed reply and publishes only ephemeral deltas", async () => {
-		const { execution, turns } = fakes();
-		const events = eventBus();
-		const model = Models.fromStream(() =>
-			Effect.sync(() => streamed(chunks("Release", " checked"), { contextTokens: 10 })),
-		);
-
-		await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model,
-				events,
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-			}),
-		);
-
-		expect(turns.complete).toHaveBeenCalledWith(replyTurn, reply("Release checked"), {
-			contextTokens: 10,
-			contextCapacity: 128_000,
-			readKeptFrom: null,
-			answeredCollaboration: false,
-		});
-		expect(turns.fail).not.toHaveBeenCalled();
-		expect(eventTypes(events)).toEqual(["message.delta", "message.delta"]);
-	});
-
 	it("completes the reply with where the compaction it read kept history from", async () => {
 		const { execution, turns } = fakes();
 		const keptFrom = new Date("2026-09-10T03:00:00.000Z");
@@ -152,84 +127,6 @@ describe("runSegment", () => {
 			replyTurn,
 			reply("Done"),
 			expect.objectContaining({ readKeptFrom: keptFrom.toISOString() }),
-		);
-	});
-
-	it("records a built-in tool's call where the reply made it", async () => {
-		const { execution, turns } = fakes();
-		const calls = toolCalls();
-		const toolContext = Context.Reference("test/turn-tool-context", {
-			defaultValue: () => "missing",
-		});
-		const openCall = toolCalls().open;
-		vi.mocked(calls.open).mockImplementation((input) =>
-			Effect.gen(function* () {
-				expect(yield* toolContext).toBe("turn-context");
-				return yield* openCall(input);
-			}),
-		);
-		vi.mocked(turns.saveReply).mockImplementation(() =>
-			Effect.gen(function* () {
-				expect(yield* toolContext).toBe("turn-context");
-			}),
-		);
-		const probe = tool({
-			description: "A tool that answers",
-			inputSchema: Schema.Struct({ q: Schema.String }).pipe(
-				Schema.toStandardSchemaV1,
-				Schema.toStandardJSONSchemaV1,
-			),
-			execute: async ({ q }) => ({ answer: `${q}!` }),
-		});
-		// Stands in for the SDK: says a few words, calls the tool as the SDK
-		// would, and carries on.
-		const model = Models.fromStream((input) =>
-			Effect.sync(() =>
-				streamed(
-					(async function* () {
-						yield "Looking. ";
-						const output = await input.tools?.probe?.execute?.(
-							{ q: "hi" } as never,
-							{ toolCallId: "sdk-1", messages: [] } as never,
-						);
-						yield `Found ${JSON.stringify(output)}.`;
-					})(),
-				),
-			),
-		);
-
-		await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model,
-				events: eventBus(),
-				collaborations: collaborations(),
-				toolCalls: calls,
-				builtInTools: { forWorkspace: () => Effect.succeed({ probe }) },
-			}).pipe(Effect.provideService(toolContext, "turn-context")),
-		);
-
-		expect(calls.open).toHaveBeenCalledWith({
-			threadId: run.request.threadId,
-			messageId: prepared.responseMessage.id,
-			turnId: prepared.turnId,
-			tool: "probe",
-			input: { q: "hi" },
-			atOffset: "Looking. ".length,
-			mutating: false,
-		});
-		expect(calls.close).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-0000000000aa", {
-			output: { answer: "hi!" },
-		});
-		expect(turns.complete).toHaveBeenCalledWith(
-			replyTurn,
-			{
-				content: 'Looking. Found {"answer":"hi!"}.',
-				collaborations: [],
-				toolCalls: [{ id: "0199a3a0-0000-7000-8000-0000000000aa", atOffset: "Looking. ".length }],
-			},
-			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 	});
 
@@ -308,28 +205,6 @@ describe("runSegment", () => {
 			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
 		expect(close).toHaveBeenCalledOnce();
-	});
-
-	it("parks a mutating call without executing it when approval is required", async () => {
-		const { execution, turns } = fakes();
-		const execute = vi.fn(async () => ({ removed: true }));
-
-		const outcome = await runWithServices(segmentAskingApproval({ execution, turns }, execute));
-
-		expect(execute).not.toHaveBeenCalled();
-		expect(turns.complete).not.toHaveBeenCalled();
-		expect(turns.suspend).toHaveBeenCalledWith(
-			replyTurn,
-			expect.objectContaining({
-				approvals: [expect.objectContaining({ approvalId: "approval-1" })],
-				reply: expect.objectContaining({
-					content: "I need approval.",
-					toolCalls: [expect.objectContaining({ atOffset: 16 })],
-				}),
-			}),
-			[expect.objectContaining({ approvalId: "approval-1", sdkToolCallId: "sdk-1" })],
-		);
-		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["approval-1"] });
 	});
 
 	it("cancels with the reply as it was when the turn may no longer park, placing no call it never recorded", async () => {
@@ -513,100 +388,6 @@ describe("runSegment", () => {
 
 		expect(outcome).toEqual({ _tag: "Finished" });
 		expect(turns.complete).not.toHaveBeenCalled();
-	});
-
-	it("fails the turn for good when its last run fails", async () => {
-		const { execution, turns } = fakes();
-		vi.mocked(turns.fail).mockReturnValueOnce(Effect.succeed(false));
-
-		const outcome = await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model: Models.fromStream(() =>
-					Effect.fail(
-						new Models.RequestFailed({ message: "provider down", reason: "unavailable" }),
-					),
-				),
-				events: eventBus(),
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-			}),
-		);
-
-		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(""), {
-			userMessage: "The model provider could not answer.",
-			mayRunAgain: true,
-		});
-	});
-
-	it("fails a reply the model finished without writing anything, without running it again", async () => {
-		const { execution, turns } = fakes();
-
-		await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model: Models.fromStream(() => Effect.sync(() => streamed(chunks(" \n")))),
-				events: eventBus(),
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-			}),
-		);
-
-		expect(turns.complete).not.toHaveBeenCalled();
-		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(" \n"), {
-			userMessage: "The reply stopped before answering.",
-			mayRunAgain: false,
-		});
-	});
-
-	it("keeps a turn successful when an ephemeral delta cannot be published", async () => {
-		const { execution, turns } = fakes();
-		const events = eventBus();
-		vi.mocked(events.publish).mockRejectedValueOnce(new Error("subscriber unavailable"));
-		await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model: scriptedModel("Done"),
-				events,
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-			}),
-		);
-
-		expect(turns.complete).toHaveBeenCalledOnce();
-		expect(turns.fail).not.toHaveBeenCalled();
-	});
-
-	it("marks a failed generation for retry without duplicating its response", async () => {
-		const { execution, turns } = fakes();
-		const model = Models.fromStream(() =>
-			Effect.fail(
-				new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
-			),
-		);
-		const events = eventBus();
-
-		const outcome = await runWithServices(
-			segmentWith({
-				execution,
-				turns,
-				model,
-				events,
-				collaborations: collaborations(),
-				toolCalls: toolCalls(),
-			}),
-		);
-
-		expect(outcome).toEqual({ _tag: "Retry" });
-		expect(turns.fail).toHaveBeenCalledWith(replyTurn, reply(""), {
-			userMessage: "The model provider could not answer.",
-			mayRunAgain: true,
-		});
-		expect(eventTypes(events)).toEqual([]);
 	});
 
 	it("flushes a short partial response after one second", async () => {
@@ -873,10 +654,6 @@ function requestCancellation(events: EventBus.Interface) {
 			turnId: prepared.turnId,
 		}),
 	);
-}
-
-function eventTypes(events: EventBus.Interface): string[] {
-	return vi.mocked(events.publish).mock.calls.map(([, event]) => event.type);
 }
 
 async function* delayedChunks(): AsyncIterable<string> {

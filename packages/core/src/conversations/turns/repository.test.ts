@@ -1,30 +1,22 @@
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { EventStore } from "../../database/events/store.ts";
-import { agent, message, turn } from "../../database/schema.ts";
+import { agent, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { Models } from "../../providers/models/models.ts";
-import { chunks, streamed } from "../../providers/models/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
-import { BuiltInTools } from "../tools/built-in.ts";
-import { ConnectionTools } from "../tools/connections.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { type TurnCheckpoint, TurnRepository } from "./repository.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { runSegment } from "./turn.steps.ts";
 
 /**
  * Turns against Postgres: how a turn opens again for another run, gives up,
- * parks for approvals and ends, as the repository writes and announces it,
- * and a whole segment run through the real repository.
+ * parks for approvals and ends, as the repository writes and announces it.
  */
 describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
@@ -259,64 +251,6 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			expect(await execution.prepare(unowned)).toMatchObject({ _tag: "NotRunnable" });
 			expect(deliveredEvents()).toContainEqual(
 				expect.objectContaining({ type: "thread.notice", threadId, notice: told }),
-			);
-		});
-	});
-
-	// Each case's turn is already prepared, so the segment opens it again for its own run.
-	describe("a segment", () => {
-		const events = EventBus.inProcess({ store: EventStore.inMemory() });
-		const segmentWith = (model: Models.Interface) =>
-			runOnPostgres(
-				runSegment(prepared.run).pipe(
-					Effect.provide(
-						Layer.mergeAll(
-							Layer.succeed(Models.Service, model),
-							Layer.succeed(EventBus.Service, events),
-							Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
-							Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
-						),
-					),
-					Effect.provideContext(conversations),
-				),
-			);
-
-		it("prepares, streams and completes the reply, and tells the thread", async () => {
-			const outcome = await segmentWith(
-				Models.fromStream(() =>
-					Effect.sync(() =>
-						streamed(chunks("Example Domain", " says hello."), { contextTokens: 12 }),
-					),
-				),
-			);
-
-			expect(outcome).toEqual({ _tag: "Finished" });
-			expect(await storedTurn()).toMatchObject({
-				status: "done",
-				contextTokens: 12,
-			});
-			const [reply] = await onDatabase((db) =>
-				db.select().from(message).where(eq(message.id, prepared.responseMessage.id)),
-			);
-			expect(reply).toMatchObject({ status: "complete", content: "Example Domain says hello." });
-			expect(deliveredEvents().map(({ type }) => type)).toEqual(
-				expect.arrayContaining(["turn.started", "message.completed", "turn.completed"]),
-			);
-		});
-
-		it("records a failed run, which the workflow runs again", async () => {
-			const outcome = await segmentWith(
-				Models.fromStream(() =>
-					Effect.fail(
-						new Models.RequestFailed({ message: "provider down", reason: "unavailable" }),
-					),
-				),
-			);
-
-			expect(outcome).toEqual({ _tag: "Retry" });
-			expect(await storedTurn()).toMatchObject({ status: "failed", error: providerDown });
-			expect(deliveredEvents()).toContainEqual(
-				expect.objectContaining({ type: "message.failed", willRetry: true, error: providerDown }),
 			);
 		});
 	});
