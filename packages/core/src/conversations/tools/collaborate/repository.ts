@@ -19,8 +19,8 @@ import {
 	turn,
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
-import { ConversationEvent } from "../../events.ts";
-import { collaborationChange } from "../../threads/collaboration-parts.ts";
+import { type CollaborationChange, ConversationEvent } from "../../events.ts";
+import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -309,3 +309,15 @@ const writeStatus = (
 	query((db) =>
 		db.update(collaboration).set(change).where(eq(collaboration.id, collaborationId)).returning(),
 	).pipe(Effect.flatMap(writtenRow("collaboration")));
+
+/** The collaboration as an event carries it once it has changed. */
+function collaborationChange(
+	row: schema.CollaborationRow,
+	collaboratorName: string,
+): CollaborationChange {
+	return {
+		parentThreadId: row.parentThreadId,
+		parentMessageId: row.parentMessageId,
+		collaboration: toCollaborationPart(row, collaboratorName),
+	};
+}
