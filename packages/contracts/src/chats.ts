@@ -5,11 +5,26 @@ import {
 	routineExecutionSummarySchema,
 	routineExecutionTriggerKindSchema,
 } from "./routines.ts";
-import { agentParticipantSchema, messageSchema, threadParticipantSchema } from "./threads.ts";
+import {
+	agentParticipantSchema,
+	messageSchema,
+	threadDetailsSchema,
+	threadParticipantSchema,
+} from "./threads.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 export const DEFAULT_CHAT_PAGE_LIMIT = 50;
+
+/** How many of a chat's items come with it when it is opened, and in each page after. */
+export const OPENED_CHAT_PAGE_LIMIT = 30;
+
+/**
+ * How many of its main thread's latest messages come with a chat when it is
+ * opened. Its history is in its pages; the thread only has to hold what its
+ * stream may still change — a reply being written and any queued behind it.
+ */
+export const OPENED_CHAT_THREAD_MESSAGES = 10;
 export const MAX_CHAT_PAGE_LIMIT = 100;
 
 export const chatPageQuerySchema = Schema.Struct({
@@ -141,6 +156,19 @@ export const chatMessagesPageSchema = Schema.Struct({
 });
 
 export type ChatMessagesPage = typeof chatMessagesPageSchema.Type;
+
+/**
+ * A chat as it is opened: the chat, its main thread with its latest
+ * `OPENED_CHAT_THREAD_MESSAGES` messages, and the first
+ * `OPENED_CHAT_PAGE_LIMIT` of its items, so a screen can draw it from one answer.
+ */
+export const openedChatSchema = Schema.Struct({
+	chat: chatSchema,
+	mainThread: threadDetailsSchema,
+	firstPage: chatMessagesPageSchema,
+});
+
+export type OpenedChat = typeof openedChatSchema.Type;
 
 export const chatHistoryEntrySchema = Schema.Struct({
 	threadId: uuidSchema,

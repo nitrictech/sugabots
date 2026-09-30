@@ -1,13 +1,16 @@
-import type {
-	Chat,
-	ChatList,
-	ChatMessageItem,
-	NewMessage,
-	PodChatMarkers,
-	SessionUser,
-	ThreadDetails,
+import {
+	type Chat,
+	type ChatList,
+	type ChatMessageItem,
+	type ChatMessagesPage,
+	type NewMessage,
+	OPENED_CHAT_PAGE_LIMIT,
+	type PodChatMarkers,
+	type SessionUser,
+	type ThreadDetails,
 } from "@sugabots/contracts";
 import {
+	type InfiniteData,
 	type QueryClient,
 	skipToken,
 	useInfiniteQuery,
@@ -21,7 +24,7 @@ import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
-const PAGE_SIZE = 30;
+const PAGE_SIZE = OPENED_CHAT_PAGE_LIMIT;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
 /** The conversation list for a pod, by its id: one row per bot, newest first. */
@@ -147,20 +150,39 @@ export function refreshChatMarkers(queries: QueryClient, workspaceId: string | u
 	]);
 }
 
+/**
+ * The chat between the person and a pod's bot, made the first time it is
+ * opened. Opening it also brings its main thread and first page, which go into
+ * their own queries, so the chat is drawn from this one round trip.
+ */
 export function useChat(podId: string | undefined, hostAgentId: string) {
+	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["chat", workspaceId, podId, hostAgentId],
 		queryFn:
 			workspaceId && podId
-				? ({ signal }) =>
-						Effect.runPromise(
+				? async ({ signal }) => {
+						const opened = await Effect.runPromise(
 							client.api.chats.getOrCreate({
 								params: { workspace: workspaceId },
 								payload: { podId, hostAgentId },
 							}),
 							{ signal },
-						)
+						);
+						queries.setQueryData<ThreadDetails>(
+							["thread", opened.chat.mainThreadId],
+							opened.mainThread,
+						);
+						queries.setQueryData<InfiniteData<ChatMessagesPage>>(
+							["chat-messages", opened.chat.id],
+							{
+								pages: [opened.firstPage],
+								pageParams: [undefined],
+							},
+						);
+						return opened.chat;
+					}
 				: skipToken,
 	});
 }

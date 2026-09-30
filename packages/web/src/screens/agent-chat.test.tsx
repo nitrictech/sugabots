@@ -4,6 +4,8 @@ import {
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	handleFromName,
 	type Message,
+	OPENED_CHAT_PAGE_LIMIT,
+	OPENED_CHAT_THREAD_MESSAGES,
 	type RoutineExecution,
 	streamEvent,
 	type ThreadActivity,
@@ -248,8 +250,28 @@ function details(
 	};
 }
 
+/**
+ * Opening the chat answers with it, its main thread and its first page, as the
+ * API composes them: from whatever the thread and messages mocks answer then.
+ */
+function openingAnswers() {
+	client.api.chats.getOrCreate.mockImplementation(() =>
+		Effect.all({
+			chat: Effect.succeed(chat),
+			mainThread: client.api.threads.get({
+				params: { threadId: chat.mainThreadId },
+				query: { limit: OPENED_CHAT_THREAD_MESSAGES },
+			}),
+			firstPage: client.api.chats.messages({
+				params: { chatId: chat.id },
+				query: { limit: OPENED_CHAT_PAGE_LIMIT },
+			}),
+		}),
+	);
+}
+
 function chatAnswers() {
-	client.api.chats.getOrCreate.mockReturnValue(Effect.succeed(chat));
+	openingAnswers();
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
 			items: [
@@ -392,8 +414,22 @@ describe("ongoing agent Chat", () => {
 		});
 	});
 
-	it("shows the chat's messages while its thread is still loading", async () => {
+	it("draws the chat from opening it, without asking for its thread or messages again", async () => {
+		client.api.chats.getOrCreate.mockReturnValue(
+			Effect.succeed({
+				chat,
+				mainThread: details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]),
+				firstPage: {
+					items: [
+						{ kind: "message", message: mainMessage },
+						{ kind: "message", message: agentMessage },
+					],
+					nextCursor: null,
+				},
+			}),
+		);
 		client.api.threads.get.mockReturnValue(Effect.never);
+		client.api.chats.messages.mockReturnValue(Effect.never);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();

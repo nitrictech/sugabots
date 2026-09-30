@@ -6,8 +6,8 @@ import {
 	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	chatSchema,
 	getOrCreateChatSchema,
+	openedChatSchema,
 	podChatMarkersSchema,
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
@@ -31,7 +31,7 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			payload: getOrCreateChatSchema,
-			success: chatSchema,
+			success: openedChatSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("messages", "/chats/:chatId/messages", {

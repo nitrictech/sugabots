@@ -211,6 +211,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const messages = data.messages ?? {};
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
 	const botForChat = (chatId: string) => bots.find((bot) => storyChatFor(bot).id === chatId);
+	const firstPageOf = (bot: Agent) => ({
+		items: (messages[bot.id] ?? []).map((message) => ({ kind: "message" as const, message })),
+		nextCursor: null,
+	});
 	const botForThread = (threadId: string) =>
 		bots.find((bot) => storyChatFor(bot).mainThreadId === threadId);
 
@@ -278,17 +282,17 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.post(api("/workspaces/:workspace/chats"), async ({ request }) => {
 			const body = (await request.json()) as { hostAgentId: string };
 			const bot = botById(body.hostAgentId);
-			return bot ? HttpResponse.json(storyChatFor(bot)) : new HttpResponse(null, { status: 404 });
+			return bot
+				? HttpResponse.json({
+						chat: storyChatFor(bot),
+						mainThread: storyChatDetails(bot, messages[bot.id]),
+						firstPage: firstPageOf(bot),
+					})
+				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/chats/:chatId/messages"), ({ params }) => {
 			const bot = botForChat(String(params.chatId));
-			return HttpResponse.json({
-				items: (bot ? (messages[bot.id] ?? []) : []).map((message) => ({
-					kind: "message",
-					message,
-				})),
-				nextCursor: null,
-			});
+			return HttpResponse.json(bot ? firstPageOf(bot) : { items: [], nextCursor: null });
 		}),
 		http.get(api("/chats/:chatId/history"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
