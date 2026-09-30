@@ -3,7 +3,7 @@ export * as ModelRequests from "./model-requests.ts";
 import type { RequestUsage, Usd } from "@sugabots/accounting";
 import type { ProviderPresetId } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { query, serviceOperations, writtenRow } from "../database/database.ts";
 import { modelRequest } from "./sql.ts";
 
@@ -19,13 +19,10 @@ export interface Interface {
 	readonly finish: (id: string, ending: Ending) => Effect.Effect<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/ModelRequests",
-) {}
-
+/** The ledger's writes, which `Models` builds for itself. */
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelRequests");
-	return Service.of({
+	return {
 		start: (request) =>
 			operation(
 				"start",
@@ -72,10 +69,8 @@ export const make = Effect.gen(function* () {
 						.where(eq(modelRequest.id, id)),
 				),
 			),
-	});
+	} satisfies Interface;
 });
-
-export const layer = Layer.effect(Service, make);
 
 /**
  * What a model request was made for, which is whose spend it is. System work

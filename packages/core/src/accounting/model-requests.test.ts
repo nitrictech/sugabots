@@ -3,7 +3,13 @@ import { Usd } from "@sugabots/accounting";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { modelRequest } from "../database/schema.ts";
-import { closeDatabase, onDatabase, type Promised, servedOnPostgres } from "../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../database/testing.ts";
 import { ModelRequests } from "./model-requests.ts";
 
 /**
@@ -15,7 +21,7 @@ import { ModelRequests } from "./model-requests.ts";
 describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", () => {
 	let requests: Promised<ModelRequests.Interface>;
 	beforeAll(async () => {
-		requests = await servedOnPostgres(ModelRequests.Service, ModelRequests.layer);
+		requests = onPostgres(await runOnPostgres(ModelRequests.make));
 	});
 	afterAll(closeDatabase);
 
