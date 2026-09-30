@@ -92,7 +92,11 @@ export const make = Effect.gen(function* () {
 						if (previous && previous.keptFrom.toISOString() !== request.readKeptFrom) {
 							return skipped("The turn was measured before the thread's latest compaction");
 						}
-						const transcript = yield* query((db) => loadTranscript(db, scope.threadId));
+						// Only what the last compaction kept can be summarised now (see
+						// `planCompaction`), so nothing before it is read.
+						const transcript = yield* query((db) =>
+							loadTranscript(db, scope.threadId, previous?.keptFrom),
+						);
 						const sourceIndex = transcript.findIndex((row) => row.id === request.sourceMessageId);
 						const history = transcript
 							.slice(0, sourceIndex + 1)
