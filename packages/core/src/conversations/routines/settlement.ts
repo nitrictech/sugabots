@@ -13,7 +13,7 @@ import {
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { collaboration, routineExecution, thread, turn } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
-import { dropWaiting, laneBusy } from "../../workflows/lanes.ts";
+import { Lanes, laneBusy } from "../../workflows/lanes.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../floor/facilitate.workflow.ts";
@@ -67,6 +67,7 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* Turns.Service;
 	const collaborations = yield* Collaborations.Service;
+	const lanes = yield* Lanes.Service;
 	const routines = yield* RoutineRepository.Service;
 	const runs = yield* RoutineRuns.Service;
 
@@ -79,7 +80,7 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			yield* turns.stopUnder(work);
 			yield* collaborations.failUnder(work);
-			yield* query((db) => db.execute(dropWaiting(threadIdsRelation(work), [Facilitate._tag])));
+			yield* lanes.dropWaiting(work, [Facilitate._tag]);
 		});
 
 	/**

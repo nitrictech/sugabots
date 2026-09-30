@@ -27,7 +27,12 @@ const runtime = ManagedRuntime.make(
 		Layer.provideMerge(
 			Layer.succeed(
 				Lanes.Service,
-				Lanes.Service.of({ admit: () => Effect.die("unused"), release, reconcile: Effect.void }),
+				Lanes.Service.of({
+					admit: () => Effect.die("unused"),
+					release,
+					dropWaiting: () => Effect.die("unused"),
+					reconcile: Effect.void,
+				}),
 			),
 		),
 		Layer.provideMerge(WorkflowEngine.layerMemory),
