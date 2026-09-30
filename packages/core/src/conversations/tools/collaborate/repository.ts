@@ -1,7 +1,5 @@
-export * as CollaborationRepository from "./repository.ts";
-
 import { and, eq, inArray, type SQL } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import {
 	type Database,
 	query,
@@ -22,7 +20,7 @@ import {
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent } from "../../events.ts";
-import { collaborationChange } from "../../threads/collaborations.ts";
+import { collaborationChange } from "../../threads/collaboration-parts.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -33,7 +31,7 @@ import { collaborationChange } from "../../threads/collaborations.ts";
  * collaborator's completing turn, so every transition locks the row and acts
  * on its current status, and announces what changed.
  */
-export interface Interface {
+export interface Records {
 	/** Records a collaboration whose thread `childThreadId` is open, `waiting`. */
 	readonly open: (input: {
 		parentThreadId: string;
@@ -75,15 +73,12 @@ export interface Interface {
 	}) => Effect.Effect<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/CollaborationRepository",
-) {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("CollaborationRepository");
+/** The collaboration table's writes, which `Collaborations` builds for itself. */
+export const makeRecords = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Records>("Collaborations");
 	const { emit } = yield* ConversationEvents.Service;
 
-	return Service.of({
+	return {
 		open: (input) =>
 			operation(
 				"open",
@@ -255,10 +250,8 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
-	});
+	} satisfies Records;
 });
-
-export const layer = Layer.effect(Service, make);
 
 /**
  * How the asking turn's wait for a collaboration ended: with the

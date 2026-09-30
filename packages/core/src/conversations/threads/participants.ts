@@ -5,7 +5,7 @@ import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, user } from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
-import { toCollaborationPart } from "./collaborations.ts";
+import { toCollaborationPart } from "./collaboration-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
 
