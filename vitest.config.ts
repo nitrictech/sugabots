@@ -56,12 +56,11 @@ export default defineConfig({
 					root: ".",
 					environment: "node",
 					include: ["packages/{core,server,workflow}/src/**/*.test.ts"],
-					// The store tests share one Postgres; files that clear or claim from
-					// shared tables, such as the routine queue, cannot run beside each other.
-					fileParallelism: false,
 					env: DATABASE_URL ? { DATABASE_URL } : {},
-					// Creates it, migrates it and empties it before the run.
+					// Creates it, migrates it and empties it before the run, as the
+					// template each worker copies into a database of its own.
 					globalSetup: ["packages/core/src/database/test-setup.ts"],
+					setupFiles: ["packages/core/src/database/test-worker-setup.ts"],
 				},
 			},
 			{

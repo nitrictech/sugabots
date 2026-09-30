@@ -43,6 +43,16 @@ export function testDatabaseUrl(env: {
 	return development ? withSuffix(development) : undefined;
 }
 
+/**
+ * The database of Vitest worker `poolId`: the test database's name with the
+ * worker's number on the end, so workers running at once never share rows.
+ */
+export function workerDatabaseUrl(testUrl: string, poolId: string): string {
+	const parsed = new URL(testUrl);
+	parsed.pathname = `${parsed.pathname}_${poolId}`;
+	return parsed.toString();
+}
+
 /** The same URL with `_test` on the end of the database name. */
 function withSuffix(url: string): string {
 	const parsed = new URL(url);
