@@ -9,7 +9,7 @@ import { siteLinks } from "@/site-links";
 export function SiteHeader() {
 	return (
 		<header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur-md">
-			<nav className="mx-auto flex max-w-3xl items-center gap-4 px-6 py-3 sm:gap-6">
+			<nav className="mx-auto flex max-w-3xl items-center gap-5 px-6 py-3 sm:gap-6">
 				<a href="#top" className="flex items-center gap-2 text-xl font-extrabold tracking-tight">
 					<SiteLogo className="size-8" />
 					Sugabots
@@ -25,7 +25,7 @@ export function SiteHeader() {
 				>
 					Docs
 				</a>
-				<div className="ml-auto flex gap-4 sm:gap-5">
+				<div className="ml-auto flex gap-5">
 					<a
 						href={siteLinks.github}
 						onClick={() => trackCallToActionClick("github", "header")}
