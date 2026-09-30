@@ -1,5 +1,5 @@
 import { HttpResponse, http } from "msw";
-import { expect, fn } from "storybook/test";
+import { expect, fn, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { Login } from "./Login.tsx";
 
@@ -114,7 +114,7 @@ export const FromAReferralLink = meta.story({
 		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
 		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse");
 		await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
-		await expect(args.onSignedIn).toHaveBeenCalled();
+		await waitFor(() => expect(args.onSignedIn).toHaveBeenCalled());
 	},
 });
 
