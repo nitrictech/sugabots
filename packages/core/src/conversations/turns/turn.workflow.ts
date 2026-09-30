@@ -5,8 +5,8 @@
  *
  * A turn runs in segments. Each segment streams the reply until it ends or
  * stops to wait for tool approvals; the workflow then waits, durably, for
- * people to decide them, records each decision, and runs the next segment
- * from the checkpoint.
+ * people to decide them, and runs the next segment from the checkpoint,
+ * which reads the decisions recorded as they were made.
  */
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, Duration, Effect, Schema } from "effect";
@@ -70,9 +70,8 @@ export const SegmentOutcome = Schema.Union([
 export type SegmentOutcome = typeof SegmentOutcome.Type;
 
 /**
- * A person's decision on one approval, recorded as it is sent. The workflow
- * records it again, which changes nothing unless the first recording was
- * lost, and the first decision recorded is the one that stands.
+ * A person's decision on one approval. It is sent in the transaction that
+ * records it (see `Turns.Controls`), so the two commit or roll back together.
  */
 export const approvalDecided = (approvalId: string) =>
 	DurableDeferred.make(`approval/${approvalId}`, { success: ApprovalDecision });
@@ -85,8 +84,6 @@ export class TurnSteps extends Context.Service<
 	{
 		/** Runs the turn from where it stands until it ends, waits for approvals, or fails and may run again. */
 		readonly segment: (request: TurnRequest) => Effect.Effect<SegmentOutcome>;
-		/** Records a decision on one of the turn's approvals. Recording one already decided does nothing. */
-		readonly decide: (request: TurnRequest, decided: DecidedApproval) => Effect.Effect<void>;
 		/** Records the waiting turn as cancelled. Does nothing if it is no longer waiting. */
 		readonly cancelWaiting: (request: TurnRequest) => Effect.Effect<void>;
 		/** Ends the turn as failed when its workflow fails. */
@@ -102,7 +99,6 @@ export class TurnSteps extends Context.Service<
 /** Each run of a segment is a separate activity, numbered from 0 within the execution. */
 const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
 	segment: { input: Schema.Int, success: SegmentOutcome },
-	decide: { input: DecidedApproval },
 	cancelWaiting: {},
 	abandon: {},
 	announceReleased: {},
@@ -123,7 +119,7 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 					yield* DurableClock.sleep({ name: `retry/${run}`, duration: RETRY_DELAY });
 					continue;
 				}
-				const cancelled = yield* waitForApprovals(request, run, outcome.approvals);
+				const cancelled = yield* waitForApprovals(run, outcome.approvals);
 				if (cancelled) return yield* turnActivities.activity("cancelWaiting", request);
 			}
 		}),
@@ -134,12 +130,11 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 const Awaited = Schema.Union([Schema.Literal("cancelled"), DecidedApproval]);
 
 /**
- * Records each decision as it arrives, in whatever order people make them, by
- * racing every approval still outstanding (and a cancel). The race's winner is
- * stored, so a replay takes the same path. Returns whether the turn was
- * cancelled instead.
+ * Waits for every approval still outstanding (or a cancel), in whatever order
+ * people decide them, by racing them. The race's winner is stored, so a replay
+ * takes the same path. Returns whether the turn was cancelled instead.
  */
-const waitForApprovals = (request: TurnRequest, run: number, approvals: ReadonlyArray<string>) =>
+const waitForApprovals = (run: number, approvals: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
 		let outstanding = approvals;
 		for (let round = 0; outstanding.length > 0; round++) {
@@ -158,7 +153,6 @@ const waitForApprovals = (request: TurnRequest, run: number, approvals: Readonly
 				],
 			});
 			if (next === "cancelled") return true;
-			yield* turnActivities.activity("decide", request, next);
 			outstanding = outstanding.filter((approvalId) => approvalId !== next.approvalId);
 		}
 		return false;

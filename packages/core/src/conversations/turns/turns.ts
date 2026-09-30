@@ -156,6 +156,9 @@ export const stepsLayer = turnStepsLayer.pipe(
  */
 export const signalsLayer = TurnSignals.layer;
 
+/** Re-sends cancels lost between their commit and their signal (see `resendLostCancels`). */
+export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
+
 /**
  * busyIn reports, as a condition for a query, whether an agent's turn in the
  * thread `threadId` is running or waiting to start.

@@ -4,7 +4,6 @@ import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Lanes } from "../../workflows/lanes.ts";
 import { TurnSignals } from "./signals.ts";
-import type { DecidedApproval } from "./tool-calls/lifecycle.ts";
 import {
 	type SegmentOutcome,
 	Turn,
@@ -17,7 +16,6 @@ import {
 const segment = vi.fn((_request: TurnRequest) =>
 	Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 );
-const decide = vi.fn((_request: TurnRequest, _decided: DecidedApproval) => Effect.void);
 const cancelWaiting = vi.fn((_request: TurnRequest) => Effect.void);
 const abandon = vi.fn((_request: TurnRequest) => Effect.void);
 const announceReleased = vi.fn((_request: TurnRequest) => Effect.void);
@@ -26,10 +24,7 @@ const release = vi.fn((_execution: { key: string; executionId: string }) => Effe
 const runtime = ManagedRuntime.make(
 	turnWorkflow.layer.pipe(
 		Layer.provideMerge(
-			Layer.succeed(
-				TurnSteps,
-				TurnSteps.of({ segment, decide, cancelWaiting, abandon, announceReleased }),
-			),
+			Layer.succeed(TurnSteps, TurnSteps.of({ segment, cancelWaiting, abandon, announceReleased })),
 		),
 		Layer.provideMerge(
 			Layer.succeed(
@@ -65,7 +60,7 @@ const untilSuspended = (executionId: string) =>
 
 describe("the turn workflow", () => {
 	beforeEach(() => {
-		for (const step of [segment, decide, cancelWaiting, abandon, announceReleased, release]) {
+		for (const step of [segment, cancelWaiting, abandon, announceReleased, release]) {
 			step.mockClear();
 		}
 	});
@@ -86,7 +81,7 @@ describe("the turn workflow", () => {
 		expect(abandon).not.toHaveBeenCalled();
 	});
 
-	it("keeps the lane while waiting for approvals, and records each decision as it arrives", async () => {
+	it("keeps the lane until every approval is decided, in whatever order", async () => {
 		segment.mockReturnValueOnce(
 			Effect.succeed({ _tag: "Suspended", approvals: ["first", "second"] }),
 		);
@@ -96,13 +91,10 @@ describe("the turn workflow", () => {
 		expect(release).not.toHaveBeenCalled();
 		expect(abandon).not.toHaveBeenCalled();
 
-		// The second approval is decided first, and recorded while the first still waits.
+		// The second approval is decided first; the first still waits.
 		const second = { decision: "deny", userId: "sam" } as const;
 		await runtime.runPromise(
 			signals.decide({ owner: executionId, approvalId: "second", decision: second }),
-		);
-		await vi.waitFor(() =>
-			expect(decide).toHaveBeenCalledWith(asked, { approvalId: "second", decision: second }),
 		);
 		await untilSuspended(executionId);
 		expect(release).not.toHaveBeenCalled();
@@ -115,7 +107,6 @@ describe("the turn workflow", () => {
 		await vi.waitFor(() =>
 			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),
 		);
-		expect(decide.mock.calls.map(([, decided]) => decided.approvalId)).toEqual(["second", "first"]);
 		expect(segment).toHaveBeenCalledTimes(2);
 		expect(announceReleased).toHaveBeenCalledWith(asked);
 	});
@@ -132,7 +123,6 @@ describe("the turn workflow", () => {
 			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),
 		);
 		expect(cancelWaiting).toHaveBeenCalledWith(asked);
-		expect(decide).not.toHaveBeenCalled();
 		expect(segment).toHaveBeenCalledTimes(1);
 	});
 

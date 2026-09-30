@@ -395,13 +395,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const segment = vi.fn((_request: TurnRequest) =>
 			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 		);
-		// Recording decisions and cancellations is real; the segments are not.
+		// Recording cancellations is real; the segments are not.
 		const steps = TurnSteps.of({
 			segment,
-			decide: (request, decided) =>
-				Effect.asVoid(
-					Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
-				),
 			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
@@ -535,6 +531,26 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				db.select().from(turn).where(eq(turn.id, prepared.turnId)),
 			);
 			expect(marked?.cancelRequested).toBe(true);
+			await vi.waitFor(async () => {
+				const [cancelled] = await onDatabase((db) =>
+					db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+				);
+				expect(cancelled?.status).toBe("cancelled");
+			});
+			expect(segment).toHaveBeenCalledTimes(1);
+		});
+
+		it("sends a cancel again when the first never reached the workflow", async () => {
+			const signals = await parkInWorkflow(workflowCall());
+			// Cancelled and committed, but the process stopped before the signal left.
+			await onDatabase((db) =>
+				db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId)),
+			);
+
+			await runOnPostgres(
+				Turns.resendLostCancels.pipe(Effect.provideService(TurnSignals.Service, signals)),
+			);
+
 			await vi.waitFor(async () => {
 				const [cancelled] = await onDatabase((db) =>
 					db.select().from(turn).where(eq(turn.id, prepared.turnId)),

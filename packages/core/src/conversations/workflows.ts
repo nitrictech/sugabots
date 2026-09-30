@@ -29,10 +29,11 @@ export const lanes = Lanes.layerFor(definitions);
 
 /**
  * The workflows in {@link all}, run by the engine, each over its steps, and
- * the repair of lanes a crash left behind.
+ * the repair of lanes and turn cancels a crash left behind.
  */
 export const layer = Layer.mergeAll(
 	Lanes.reconcileLayer,
+	Turns.cancelSweepLayer,
 	...all.map((workflow) => workflow.layer),
 ).pipe(
 	Layer.provide(

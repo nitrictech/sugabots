@@ -2,7 +2,15 @@ export * as WorkflowEngines from "./engine.ts";
 
 import { NodeCrypto } from "@effect/platform-node";
 import { Duration, Effect, Layer, Schedule } from "effect";
-import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
+import {
+	ClusterWorkflowEngine,
+	RunnerHealth,
+	Runners,
+	Sharding,
+	ShardingConfig,
+	SqlMessageStorage,
+	SqlRunnerStorage,
+} from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
 import { WorkflowEngine } from "effect/unstable/workflow";
 
@@ -18,16 +26,37 @@ export const memory: Layer.Layer<WorkflowEngine.WorkflowEngine> = WorkflowEngine
  * Effect's cluster engine inside this process, durable in the database behind
  * the `SqlClient` it is given (the app's). Only one process may run it, so it
  * first takes a lock that says so, and refuses to start without it.
+ *
+ * Its messages, signals included, are written through that `SqlClient`, so one
+ * sent inside the app's transaction commits or rolls back with it. The host
+ * and shard locks need one Postgres session across statements, which a
+ * transaction pooler does not keep, so they go through `sessions` when given.
  */
-export const singleRunnerWith = (options: {
+export const singleRunnerWith = <R = never, E = never>(options: {
 	/** How long to keep trying for the host lock before refusing to start. */
 	readonly hostLockWait: Duration.Duration;
-}) =>
-	ClusterWorkflowEngine.layer.pipe(
-		Layer.provide(SingleRunner.layer({ runnerStorage: "sql" })),
-		Layer.provide(NodeCrypto.layer),
-		Layer.provide(Layer.effectDiscard(holdHostLock(options.hostLockWait))),
+	/** A direct connection for the locks, when the given `SqlClient` goes through a pooler. */
+	readonly sessions?: Layer.Layer<SqlClient.SqlClient, E, R>;
+}) => {
+	const sessions: Layer.Layer<SqlClient.SqlClient, E, R | SqlClient.SqlClient> =
+		options.sessions ?? Layer.effect(SqlClient.SqlClient, SqlClient.SqlClient);
+	const sharding = Sharding.layer.pipe(
+		Layer.provideMerge(Runners.layerNoop),
+		Layer.provideMerge(SqlMessageStorage.layer),
+		Layer.provide([
+			Layer.orDie(SqlRunnerStorage.layer).pipe(Layer.provide(sessions)),
+			RunnerHealth.layerNoop,
+		]),
+		Layer.provide(ShardingConfig.layerFromEnv()),
 	);
+	return ClusterWorkflowEngine.layer.pipe(
+		Layer.provide(sharding),
+		Layer.provide(NodeCrypto.layer),
+		Layer.provide(
+			Layer.effectDiscard(holdHostLock(options.hostLockWait)).pipe(Layer.provide(sessions)),
+		),
+	);
+};
 
 /** The single runner, waiting up to 30 seconds for a predecessor to let go of the host lock. */
 export const singleRunner = singleRunnerWith({ hostLockWait: Duration.seconds(30) });
