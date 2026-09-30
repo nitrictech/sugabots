@@ -13,7 +13,6 @@ import { agent, pod, user } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
-import { ThreadReadRepository } from "../threads/read-repository.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 
 /**
@@ -57,7 +56,6 @@ export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const threads = yield* ThreadRepository.Service;
 	const floor = yield* FloorControl.Service;
-	const reads = yield* ThreadReadRepository.Service;
 
 	return Service.of({
 		open: (input) =>
@@ -120,7 +118,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const visible = yield* visibility.chat(chatId);
 						const { userId } = yield* CurrentActor.Service;
-						yield* reads.markRead(userId, visible.mainThreadId);
+						yield* threads.markRead(userId, visible.mainThreadId);
 					}),
 				),
 			),
@@ -134,7 +132,6 @@ export const layer = layerNoDeps.pipe(
 		Authorization.layer,
 		Visibility.layer,
 		ThreadRepository.layer,
-		ThreadReadRepository.layer,
 		FloorControl.layer,
 	]),
 );

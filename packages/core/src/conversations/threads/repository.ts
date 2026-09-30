@@ -1,19 +1,19 @@
 export * as ThreadRepository from "./repository.ts";
 
 import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, max, ne, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { chat, message, thread, threadParticipant } from "../../database/schema.ts";
+import { chat, message, thread, threadParticipant, threadRead } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { personAuthor, toMessage } from "./participants.ts";
 
 /**
- * The only writer of `thread`, `thread_participant` and `chat`, and of the
- * messages posted into threads. A turn's reply is the exception: it is
+ * The only writer of `thread`, `thread_participant`, `chat` and `thread_read`,
+ * and of the messages posted into threads. A turn's reply is the exception: it is
  * `TurnRepository`'s while the turn writes it.
  *
  * Commands take the ids and facts they write, and return rows. Whether
@@ -89,6 +89,12 @@ export interface Interface {
 		systemAgentKey: SystemAgentKey;
 		title: string;
 	}) => Effect.Effect<void>;
+	/**
+	 * Records that `userId` has read the thread `threadId` up to its newest
+	 * finished message. A reply still streaming is not yet read, so it is news
+	 * once it is done. Never moves anyone back.
+	 */
+	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -411,6 +417,33 @@ export const make = Effect.gen(function* () {
 							),
 					),
 				).pipe(Effect.asVoid),
+			),
+
+		markRead: (userId, threadId) =>
+			operation(
+				"markRead",
+				Effect.gen(function* () {
+					// The newest message's own time rather than this server's clock, so
+					// a message stamped later is never counted as read.
+					const [newest] = yield* query((db) =>
+						db
+							.select({ at: max(message.createdAt) })
+							.from(message)
+							.where(and(eq(message.threadId, threadId), ne(message.status, "streaming"))),
+					);
+					const readThrough = newest?.at;
+					if (!readThrough) return;
+					yield* query((db) =>
+						db
+							.insert(threadRead)
+							.values({ userId, threadId, readThrough })
+							.onConflictDoUpdate({
+								target: [threadRead.userId, threadRead.threadId],
+								set: { readThrough },
+								setWhere: lt(threadRead.readThrough, readThrough),
+							}),
+					);
+				}),
 			),
 	});
 });
