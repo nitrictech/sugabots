@@ -2,7 +2,6 @@ import type {
 	Connection,
 	Routine,
 	SessionUser,
-	SystemAgent,
 	ThreadActivity,
 	ThreadParticipant,
 } from "@sugabots/contracts";
@@ -54,15 +53,6 @@ const activity: ThreadActivity = {
 	},
 	recentParticipants: people,
 };
-
-const scribe: SystemAgent = {
-	key: "summarise",
-	name: "Scribe",
-	description: null,
-	color: "orange",
-	face: "arc",
-	model: "claude-sonnet-4-5",
-} as SystemAgent;
 
 function routine(id: string, name: string, expression: string): Routine {
 	return {
@@ -117,10 +107,10 @@ const meta = preview.meta({
 	component: DetailsSidebar,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { agent: growthDesk, pod: revenue, threadId, user, onClose: fn() },
+	args: { agent: growthDesk, pod: revenue, threadId, user, messageCount: 12, onClose: fn() },
 	decorators: [
 		function WithQueries(Story, context) {
-			const scribeHasModel = context.parameters.scribeHasModel !== false;
+			const summarised = context.parameters.summarised !== false;
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
@@ -130,12 +120,8 @@ const meta = preview.meta({
 					[{ id: WORKSPACE, name: "Nitric", slug: "nitric", timeZone: "UTC" }],
 				);
 				client.setQueryData(
-					["built-in-agents", WORKSPACE],
-					[scribeHasModel ? scribe : { ...scribe, model: null }],
-				);
-				client.setQueryData(
 					["thread-activity", threadId],
-					scribeHasModel ? activity : { ...activity, summary: null },
+					summarised ? activity : { ...activity, summary: null },
 				);
 				return client;
 			});
@@ -188,10 +174,19 @@ export const CloseOnAPhone = meta.story({
 	},
 });
 
-/** Before the Scribe has a model there is no summary, and it says so rather than staying blank. */
-export const ScribeNotSetUp = meta.story({
-	parameters: { scribeHasModel: false },
+/** A chat several messages in with no summary yet says where to look, rather than to keep waiting. */
+export const SummaryOverdue = meta.story({
+	parameters: { summarised: false },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/The Scribe writes these/)).toBeVisible();
+		await expect(canvas.getByText(/No summary yet/)).toBeVisible();
+	},
+});
+
+/** A new chat's summary is written after its first reply, so it only says one is coming. */
+export const SummaryComing = meta.story({
+	parameters: { summarised: false },
+	args: { messageCount: 1 },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("A summary will appear after the first reply.")).toBeVisible();
 	},
 });

@@ -10,7 +10,6 @@ import { connectionPresetFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Repeat, Settings } from "lucide-react";
 import { useState } from "react";
-import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
@@ -21,7 +20,6 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { ScribeNotSetUp } from "./BuiltInAgentSetup.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter } from "./ContextMeter.tsx";
 
@@ -41,17 +39,19 @@ export function DetailsSidebar({
 	pod,
 	threadId,
 	user,
+	messageCount,
 	onClose,
 }: {
 	agent: Agent;
 	pod: Pod;
 	threadId: string;
 	user: SessionUser;
+	/** How many messages the chat has shown, which says whether a summary is overdue. */
+	messageCount: number;
 	onClose: () => void;
 }) {
 	const backToChat = useBackToHere("Chat");
 	const activity = useThreadActivity(threadId).data;
-	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
 	return (
 		<ChatSidebar label="Details" onClose={onClose} closedFromHeader className="bg-list">
 			<div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-[18px] pb-6 md:pt-[22px]">
@@ -73,7 +73,7 @@ export function DetailsSidebar({
 						<span className="font-medium text-foreground text-sm">Settings</span>
 					</Link>
 				</div>
-				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
+				<Summary summary={activity?.summary} messageCount={messageCount} />
 				{activity?.context && (
 					<SidebarSection title="Short-term memory">
 						<ContextMeter context={activity.context} />
@@ -95,22 +95,20 @@ export function DetailsSidebar({
 	);
 }
 
+/**
+ * How many messages into a chat a missing summary is worth mentioning. A new
+ * chat's first summary is written after a reply, so a short wait is normal.
+ */
+const SUMMARY_OVERDUE_AFTER_MESSAGES = 6;
+
 function Summary({
 	summary,
-	scribeHasModel,
+	messageCount,
 }: {
 	summary: ThreadSummary | null | undefined;
-	/** `undefined` while the built-in agents load, so the unconfigured state is not flashed. */
-	scribeHasModel: boolean | undefined;
+	messageCount: number;
 }) {
 	const [open, setOpen] = useState(false);
-	if (scribeHasModel === false) {
-		return (
-			<SidebarSection title="Summary" className="px-3.5 py-3">
-				<ScribeNotSetUp />
-			</SidebarSection>
-		);
-	}
 	const text = summary?.content;
 	const folds = text !== undefined && text.length > SUMMARY_FOLDED_OVER;
 	return (
@@ -118,7 +116,10 @@ function Summary({
 			<p
 				className={`m-0 px-3.5 py-3 text-[14px] leading-normal ${text ? "text-foreground" : "text-muted-foreground"} ${folds && !open ? "line-clamp-3" : ""}`}
 			>
-				{text ?? "A summary will appear after the first reply."}
+				{text ??
+					(messageCount >= SUMMARY_OVERDUE_AFTER_MESSAGES
+						? "No summary yet. Check the system agents' model in Settings."
+						: "A summary will appear after the first reply.")}
 			</p>
 			{folds && <ShowMore open={open} onToggle={() => setOpen(!open)} />}
 		</SidebarSection>

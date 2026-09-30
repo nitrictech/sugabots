@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import {
 	agents,
 	apiAnswers,
-	builtInAgents,
 	controlledEventStream,
 	jye,
 	linear,
@@ -401,11 +400,14 @@ describe("ongoing agent Chat", () => {
 		expect(screen.getByText(agentMessage.content)).toBeDefined();
 	});
 
-	it("loads no models until somebody starts making a bot", async () => {
+	it("loads neither models nor system agents to show a chat", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		await screen.findByText(mainMessage.content);
+		fireEvent.click(screen.getByRole("button", { name: "Details" }));
+		await screen.findByRole("complementary", { name: "Details" });
 
 		expect(client.api.modelProviders.listEnabledModels).not.toHaveBeenCalled();
+		expect(client.api.systemAgents.list).not.toHaveBeenCalled();
 	});
 
 	it("clears an unread chat's dot and its pod's count without fetching them again", async () => {
@@ -1433,47 +1435,33 @@ describe("the Chat's summary", () => {
 		client.api.threads.activity.mockImplementation(() => Effect.sync(activity));
 	}
 
-	function scribeWithoutModel() {
-		client.api.systemAgents.list.mockReturnValue(
-			Effect.succeed(
-				builtInAgents.map((agent) =>
-					agent.key === "summarise" ? { ...agent, model: null } : agent,
-				),
-			),
-		);
-	}
-
 	async function openDetails() {
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 		return screen.findByRole("complementary", { name: "Details" });
 	}
 
-	it("says the Scribe has no model, and where to set it up", async () => {
-		scribeWithoutModel();
+	it("says where to look when a chat several messages in has no summary", async () => {
+		const messages = Array.from({ length: 6 }, (_, index) => ({
+			kind: "message" as const,
+			message: {
+				...mainMessage,
+				id: `0199a3a0-0000-7000-8000-00000000090${index}`,
+				content: `Message ${index}`,
+				parts: [{ type: "text" as const, text: `Message ${index}` }],
+				createdAt: `2026-09-18T09:0${index}:00.000Z`,
+			},
+		}));
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({ items: messages, nextCursor: null }),
+		);
 		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
 
-		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
-		expect(
-			within(sidebar).getByRole("link", { name: "Set up the Scribe" }).getAttribute("href"),
-		).toBe("/suga/settings/providers/system");
+		expect(await within(sidebar).findByText(/No summary yet/)).toBeDefined();
 	});
 
-	it("tells a member why there is no summary without a link they cannot follow", async () => {
-		apiAnswers({ role: "member" });
-		chatAnswers();
-		scribeWithoutModel();
-		answerChatActivity(() => ({ ...chatActivity, summary: null }));
-		mount(chatPage);
-		const sidebar = await openDetails();
-
-		expect(await within(sidebar).findByText(/The Scribe writes these/)).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
-	});
-
-	it("says nothing about setting the Scribe up before the built-in agents have loaded", async () => {
-		client.api.systemAgents.list.mockReturnValue(Effect.never);
+	it("only says a summary is coming in a chat just begun", async () => {
 		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
 		const sidebar = await openDetails();
@@ -1481,7 +1469,6 @@ describe("the Chat's summary", () => {
 		expect(
 			await within(sidebar).findByText("A summary will appear after the first reply."),
 		).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Set up the Scribe" })).toBeNull();
 	});
 
 	it("shows a new summary once the thread says it changed", async () => {

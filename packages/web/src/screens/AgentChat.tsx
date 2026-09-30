@@ -311,6 +311,7 @@ export function AgentChat({
 						pod={pod}
 						threadId={chat.data.mainThreadId}
 						user={user}
+						messageCount={items.filter((item) => item.kind === "message").length}
 						onClose={onDetailsClose}
 					/>
 				)
