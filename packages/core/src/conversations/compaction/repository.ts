@@ -1,6 +1,4 @@
-export * as CompactionRepository from "./repository.ts";
-
-import { Context, DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { threadCompaction } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -10,7 +8,7 @@ import { ConversationEvent } from "../events.ts";
  * The only writer of `thread_compaction`: what each thread's bots read in
  * place of its older messages, written by the Compaction agent.
  */
-export interface Interface {
+export interface Records {
 	/**
 	 * Replaces the thread's compaction, so its bots read `summary` and then
 	 * every message from `keptFrom` on, and announces it in the thread's workspace.
@@ -25,14 +23,11 @@ export interface Interface {
 	}) => Effect.Effect<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/CompactionRepository",
-) {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("CompactionRepository");
+/** The table's writes, which its module builds for itself. */
+export const makeRecords = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Records>("Compactions");
 	const { emit } = yield* ConversationEvents.Service;
-	return Service.of({
+	return {
 		save: (compaction) =>
 			operation(
 				"save",
@@ -63,7 +58,5 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
-	});
+	} satisfies Records;
 });
-
-export const layer = Layer.effect(Service, make);

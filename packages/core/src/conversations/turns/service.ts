@@ -1,7 +1,6 @@
-import { sql } from "drizzle-orm";
 import { Cause, Effect, Exit, Option } from "effect";
-import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
-import { dropWaiting, Lanes } from "../../workflows/lanes.ts";
+import { afterCommit, serviceOperations, transaction } from "../../database/database.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import { SYSTEM_TURN_INTERRUPTED, TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -59,17 +58,7 @@ export const makeService = Effect.gen(function* () {
 						yield* afterCommit(
 							Effect.forEach(stillWaiting, (owner) => signals.cancel(owner), { discard: true }),
 						);
-						yield* query((db) =>
-							db.execute(
-								dropWaiting(
-									sql`select unnest(array[${sql.join(
-										threadIds.map((id) => sql`${id}`),
-										sql`, `,
-									)}]::uuid[])`,
-									[Turn._tag],
-								),
-							),
-						);
+						yield* lanes.dropWaiting(threadIds, [Turn._tag]);
 					}),
 				),
 			),

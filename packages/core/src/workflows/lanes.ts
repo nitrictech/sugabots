@@ -36,6 +36,15 @@ export interface Interface {
 		readonly key: string;
 		readonly executionId: string;
 	}) => Effect.Effect<void>;
+	/**
+	 * Drops the requests waiting in lanes about any of `subjects` for
+	 * `workflows`, so they never start. What is already running is left alone,
+	 * and so is a request another transaction holds.
+	 */
+	readonly dropWaiting: (
+		subjects: ReadonlyArray<string>,
+		workflows: ReadonlyArray<string>,
+	) => Effect.Effect<void>;
 	/** Repairs lanes a crash left behind. Run periodically, by one process at a time. */
 	readonly reconcile: Effect.Effect<void>;
 }
@@ -81,17 +90,16 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 			)})
 	)`;
 
-/**
- * A statement dropping the requests waiting in lanes about any of `subjects`
- * (a subquery of ids) for `workflows`, so they never start. What is already
- * running is left alone, and so is a request another transaction holds.
- */
-export const dropWaiting = (subjects: SQLWrapper, workflows: ReadonlyArray<string>) =>
+/** The statement behind `Interface.dropWaiting`. */
+const dropWaitingStatement = (subjects: ReadonlyArray<string>, workflows: ReadonlyArray<string>) =>
 	sql`delete from ${laneRequest}
 		where ${laneRequest.id} in (
 			select waiting.id from ${laneRequest} waiting
 			join ${lane} on ${lane.key} = waiting.lane_key
-			where ${lane.subject} in (select (id)::text from (${subjects}) as subject(id))
+			where ${lane.subject} in (${sql.join(
+				subjects.map((subject) => sql`${subject}`),
+				sql`, `,
+			)})
 				and ${lane.workflow} in (${sql.join(
 					workflows.map((name) => sql`${name}`),
 					sql`, `,
@@ -314,7 +322,15 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			}
 		}).pipe(provide);
 
-		return Service.of({ admit, release, reconcile });
+		const dropWaiting: Interface["dropWaiting"] = (subjects, workflows) =>
+			subjects.length === 0
+				? Effect.void
+				: query((db) => db.execute(dropWaitingStatement(subjects, workflows))).pipe(
+						Effect.asVoid,
+						provide,
+					);
+
+		return Service.of({ admit, release, dropWaiting, reconcile });
 	});
 
 /** Lanes for `workflows`, as {@link make} builds them. */

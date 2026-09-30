@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent, message, thread, user } from "../../database/schema.ts";
@@ -63,13 +63,14 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 });
 
 /**
- * Every complete message in the thread, oldest first. A message with nothing
- * to read, such as a reply that only called tools that left no record, has no
- * `entry`.
+ * Every complete message in the thread, oldest first, or only those created
+ * at or after `from`. A message with nothing to read, such as a reply that only
+ * called tools that left no record, has no `entry`.
  */
 export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(function* (
 	db: Executor,
 	threadId: string,
+	from?: Date,
 ) {
 	const rows = yield* db
 		.select({
@@ -79,7 +80,13 @@ export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(fun
 		.from(message)
 		.leftJoin(user, eq(user.id, message.authorUserId))
 		.leftJoin(agent, eq(agent.id, message.authorAgentId))
-		.where(and(eq(message.threadId, threadId), eq(message.status, "complete")))
+		.where(
+			and(
+				eq(message.threadId, threadId),
+				eq(message.status, "complete"),
+				from ? gte(message.createdAt, from) : undefined,
+			),
+		)
 		.orderBy(asc(message.createdAt), asc(message.id));
 	const placed = yield* loadPlacedParts(
 		db,

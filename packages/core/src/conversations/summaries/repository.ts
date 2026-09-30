@@ -1,13 +1,11 @@
-export * as SummaryRepository from "./repository.ts";
-
-import { Context, DateTime, Effect, Layer } from "effect";
+import { DateTime, Effect } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { threadSummary } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 
 /** The only writer of `thread_summary`: each thread's latest summary, written by the Scribe. */
-export interface Interface {
+export interface Records {
 	/**
 	 * Replaces the thread's summary with one covering it up to
 	 * `sourceMessageId`, and announces it in the thread's workspace.
@@ -21,14 +19,11 @@ export interface Interface {
 	}) => Effect.Effect<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/SummaryRepository",
-) {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("SummaryRepository");
+/** The table's writes, which its module builds for itself. */
+export const makeRecords = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Records>("Summaries");
 	const { emit } = yield* ConversationEvents.Service;
-	return Service.of({
+	return {
 		save: (summary) =>
 			operation(
 				"save",
@@ -58,7 +53,5 @@ export const make = Effect.gen(function* () {
 					}),
 				),
 			),
-	});
+	} satisfies Records;
 });
-
-export const layer = Layer.effect(Service, make);

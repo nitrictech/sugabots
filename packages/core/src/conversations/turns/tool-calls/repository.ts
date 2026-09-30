@@ -22,8 +22,8 @@ import {
 } from "../../../database/schema.ts";
 import type { UserMessage } from "../../../user-message.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
-import { ConversationEvent } from "../../events.ts";
-import { toolCallChange, toToolCallPart } from "../../threads/tool-calls.ts";
+import { ConversationEvent, type ToolCallChange } from "../../events.ts";
+import { toToolCallPart } from "../../threads/tool-calls.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
 import {
@@ -465,4 +465,13 @@ function sameCallAsApproved(
 		row.remoteToolName === input.remoteToolName &&
 		isDeepStrictEqual(row.executionInput, executionJson(input.input))
 	);
+}
+
+/** The call as an event carries it once it has changed. */
+function toolCallChange(row: ToolCallRow, decidedByName: string | null = null): ToolCallChange {
+	return {
+		threadId: row.threadId,
+		messageId: row.messageId,
+		toolCall: toToolCallPart(row, decidedByName),
+	};
 }

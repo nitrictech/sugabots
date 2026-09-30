@@ -24,7 +24,7 @@ import {
 	loadTranscript,
 	type TranscriptEntry,
 } from "../threads/system-agent-threads.ts";
-import { SummaryRepository } from "./repository.ts";
+import { makeRecords } from "./repository.ts";
 import { admitSummary, type SummaryRequest } from "./summary.workflow.ts";
 
 /**
@@ -61,7 +61,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Summaries");
 	const lanes = yield* Lanes.Service;
 	const threads = yield* ThreadRepository.Service;
-	const summaries = yield* SummaryRepository.Service;
+	const summaries = yield* makeRecords;
 	return Service.of({
 		prepare: (request) =>
 			operation(
@@ -181,9 +181,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([ThreadRepository.layer, SummaryRepository.layer]),
-);
+export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
 

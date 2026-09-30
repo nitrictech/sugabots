@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { agent, collaboration } from "../../database/schema.ts";
-import type { CollaborationChange } from "../events.ts";
 
 /**
  * Reading collaborations back into the messages they belong to.
@@ -51,17 +50,5 @@ export function toCollaborationPart(
 		status: row.status,
 		answer: row.answer,
 		atOffset: row.atOffset,
-	};
-}
-
-/** The collaboration as an event carries it once it has changed. */
-export function collaborationChange(
-	row: schema.CollaborationRow,
-	collaboratorName: string,
-): CollaborationChange {
-	return {
-		parentThreadId: row.parentThreadId,
-		parentMessageId: row.parentMessageId,
-		collaboration: toCollaborationPart(row, collaboratorName),
 	};
 }

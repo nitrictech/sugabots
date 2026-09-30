@@ -37,6 +37,7 @@ const runtime = ManagedRuntime.make(
 				Lanes.Service.of({
 					admit: () => Effect.die("unused"),
 					release,
+					dropWaiting: () => Effect.die("unused"),
 					reconcile: Effect.void,
 				}),
 			),

@@ -3,7 +3,6 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { type ToolCallRow, toolCall, user } from "../../database/schema.ts";
-import type { ToolCallChange } from "../events.ts";
 
 /**
  * Reading tool calls back into the messages they belong to.
@@ -11,7 +10,7 @@ import type { ToolCallChange } from "../events.ts";
  * A message stores a tool call by id only (`StoredMessagePart`); what the tool
  * was given and what it returned live on the `tool_call` row. These two
  * functions put the row back into the part the API hands out. Writing tool
- * calls is `tools/calls/repository.ts`.
+ * calls is `turns/tool-calls/repository.ts`.
  */
 
 /** The tool calls made in each of these messages, keyed by message id. */
@@ -60,17 +59,5 @@ export function toToolCallPart(
 		atOffset: row.atOffset,
 		startedAt: row.startedAt.toISOString(),
 		finishedAt: row.finishedAt?.toISOString() ?? null,
-	};
-}
-
-/** The call as an event carries it once it has changed. */
-export function toolCallChange(
-	row: ToolCallRow,
-	decidedByName: string | null = null,
-): ToolCallChange {
-	return {
-		threadId: row.threadId,
-		messageId: row.messageId,
-		toolCall: toToolCallPart(row, decidedByName),
 	};
 }

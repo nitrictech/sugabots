@@ -415,6 +415,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 						Lanes.Service.of({
 							admit: () => Effect.die("unused"),
 							release: () => Effect.void,
+							dropWaiting: () => Effect.die("unused"),
 							reconcile: Effect.void,
 						}),
 					),
