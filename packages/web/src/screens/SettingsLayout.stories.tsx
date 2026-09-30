@@ -64,21 +64,19 @@ export const ProfileWithReferralLink = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.post(api("/referral-link/reset"), () =>
-				HttpResponse.json({ url: "https://sugabots.example/join?code=replaced" }),
+				HttpResponse.json({ url: "https://sugabots.example/join/9k2mx7qd4pw3h" }),
 			),
-			...appHandlers({ referralLink: "https://sugabots.example/join?code=original" }),
+			...appHandlers({ referralLink: "https://sugabots.example/join/k7x2p9qa4mz8c" }),
 		);
 	},
 	render: () => <StoryApp path={`${settings}/profile`} />,
 	play: async ({ canvas, userEvent }) => {
-		const group = await canvas.findByRole(
-			"region",
-			{ name: "Invite to Sugabots" },
-			{ timeout: 10_000 },
-		);
-		await expect(within(group).getByText(/code=original/)).toBeInTheDocument();
-		await userEvent.click(within(group).getByRole("button", { name: "Reset link" }));
-		await expect(await within(group).findByText(/code=replaced/)).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Share your invite link" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText(/join\/k7x2p9qa4m/)).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Reset link" }));
+		await expect(await canvas.findByText(/join\/9k2mx7qd4p/)).toBeInTheDocument();
 	},
 });
 

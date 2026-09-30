@@ -360,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		}
 
 		function codeIn(link: string | null): string {
-			const code = link === null ? null : new URL(link).searchParams.get("code");
+			const code = link === null ? null : new URL(link).pathname.split("/join/")[1];
 			expect(code, "the link should carry a code").toBeTruthy();
 			return code as string;
 		}
@@ -377,20 +377,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const link = await referralLinkOf(referral, ada.token);
 			const bobEmail = `bob-${unique}@example.com`;
 
-			expect(link).toMatch(new RegExp(`^${ORIGIN}/join\\?code=`));
+			expect(link).toMatch(new RegExp(`^${ORIGIN}/join/[0-9a-z]{13}$`));
 			expect(
 				(await signUpAt(referral, "Bob", bobEmail, { referralCode: codeIn(link) })).status,
 			).toBe(200);
 			expect(await referrerOf(bobEmail)).toEqual([{ referredBy: ada.id }]);
 		});
 
-		it("refuses somebody with no link, or a link it did not sign", async () => {
+		it("refuses somebody with no link, or a code nobody holds", async () => {
 			const unique = crypto.randomUUID().slice(0, 8);
 			await aMember(unique);
 
 			const withoutLink = await signUpAt(referral, "Eve", `eve-${unique}@example.com`);
 			const forged = await signUpAt(referral, "Eve", `eve-${unique}@example.com`, {
-				referralCode: "eyJhbGciOiJIUzI1NiJ9.eyJ2ZXJzaW9uIjowfQ.forged",
+				referralCode: "0000000000000",
 			});
 
 			expect(withoutLink.status).toBe(403);

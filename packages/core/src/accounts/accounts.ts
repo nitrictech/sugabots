@@ -1,9 +1,8 @@
 export * as Accounts from "./accounts.ts";
 
-import { hkdfSync } from "node:crypto";
-import { and, eq, gt, sql } from "drizzle-orm";
-import { Config, Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
-import { jwtVerify, SignJWT } from "jose";
+import { randomBytes } from "node:crypto";
+import { and, eq, gt } from "drizzle-orm";
+import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { Database, query } from "../database/database.ts";
 import { user, workspaceInvite } from "../database/schema.ts";
@@ -42,14 +41,7 @@ export const make = Effect.gen(function* () {
 	const requireEmailVerification = yield* Config.Boolean("REQUIRE_EMAIL_VERIFICATION").pipe(
 		Config.withDefault(false),
 	);
-	const referrals =
-		mode === "referral"
-			? referralLinks(
-					yield* Config.Redacted("BETTER_AUTH_SECRET"),
-					installation.webAppUrl,
-					installation.publicUrl,
-				)
-			: undefined;
+	const referrals = mode === "referral" ? referralLinks(installation.webAppUrl) : undefined;
 
 	return Service.of({
 		admit: ({ email, referralCode }) =>
@@ -109,7 +101,7 @@ export class ReferralLinkInvalid
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This referral link no longer works. Ask whoever sent it for a new one.`;
+		return UserMessage.of`This invite link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
 	}
 }
 
@@ -148,79 +140,63 @@ const hasPendingInvitation = (email: string) =>
 /** Where a referral link opens the web app. */
 const REFERRAL_LINK_PATH = "/join";
 
-/** Separates the referral links' key from the other keys drawn from the same secret. */
-const REFERRAL_KEY_INFO = "sugabots referral link";
+/** Crockford's base32, lowercased: no i, l, o or u, so a code read aloud or retyped survives. */
+const REFERRAL_CODE_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 
-const REFERRAL_KEY_BYTES = 32;
-
-const REFERRAL_ALGORITHM = "HS256";
+/** 65 bits: out of reach of guessing even without sign-up's rate limit, and still short enough to paste. */
+const REFERRAL_CODE_LENGTH = 13;
 
 /**
- * Referral links: a JWT naming the member who sent it and the version of their
- * link, signed with a key drawn from `secret`. With no issue time or expiry,
- * a member's link is the same every time it is asked for until they reset it.
- * `audience` keeps a link to one installation.
+ * Referral links: a random code kept on the member's row, made the first time
+ * they ask for their link. Resetting replaces it, so the old one finds nobody.
  */
-function referralLinks(secret: Redacted.Redacted, webAppUrl: string, audience: string) {
-	const key = new Uint8Array(
-		hkdfSync("sha256", Redacted.value(secret), "", REFERRAL_KEY_INFO, REFERRAL_KEY_BYTES),
-	);
+function referralLinks(webAppUrl: string) {
+	const linkTo = (code: string) => `${webAppUrl}${REFERRAL_LINK_PATH}/${code}`;
 
-	const sign = (userId: string, version: number) =>
-		Effect.promise(() =>
-			new SignJWT({ version })
-				.setProtectedHeader({ alg: REFERRAL_ALGORITHM })
-				.setSubject(userId)
-				.setAudience(audience)
-				.sign(key),
+	const replaceCode = (userId: string) =>
+		query((db) =>
+			db
+				.update(user)
+				.set({ referralCode: newReferralCode() })
+				.where(eq(user.id, userId))
+				.returning({ code: user.referralCode }),
 		).pipe(
-			Effect.map((code) => {
-				const link = new URL(`${webAppUrl}${REFERRAL_LINK_PATH}`);
-				link.searchParams.set("code", code);
-				return link.toString();
-			}),
-		);
-
-	/** Links are asked for by signed-in people, so a missing row is a defect rather than a refusal. */
-	const signExisting = (userId: string, member: { version: number } | undefined) =>
-		member ? sign(userId, member.version) : Effect.die(new Error(`No user ${userId}`));
-
-	const verified = (code: string) =>
-		Effect.tryPromise({
-			try: () => jwtVerify(code, key, { algorithms: [REFERRAL_ALGORITHM], audience }),
-			catch: () => new ReferralLinkInvalid(),
-		}).pipe(
-			Effect.flatMap(({ payload }) =>
-				typeof payload.sub === "string" && Number.isInteger(payload.version)
-					? Effect.succeed({ referrer: payload.sub, version: payload.version as number })
-					: Effect.fail(new ReferralLinkInvalid()),
+			Effect.flatMap(([member]) =>
+				// Links are asked for by signed-in people, so a missing row is a defect rather than a refusal.
+				member?.code
+					? Effect.succeed(linkTo(member.code))
+					: Effect.die(new Error(`No user ${userId}`)),
 			),
 		);
 
 	return {
 		linkFor: (userId: string) =>
 			query((db) =>
-				db.select({ version: user.referralLinkVersion }).from(user).where(eq(user.id, userId)),
-			).pipe(Effect.flatMap(([member]) => signExisting(userId, member))),
+				db.select({ code: user.referralCode }).from(user).where(eq(user.id, userId)),
+			).pipe(
+				Effect.flatMap(([member]) =>
+					member?.code ? Effect.succeed(linkTo(member.code)) : replaceCode(userId),
+				),
+			),
 
-		reset: (userId: string) =>
-			query((db) =>
-				db
-					.update(user)
-					.set({ referralLinkVersion: sql`${user.referralLinkVersion} + 1` })
-					.where(eq(user.id, userId))
-					.returning({ version: user.referralLinkVersion }),
-			).pipe(Effect.flatMap(([member]) => signExisting(userId, member))),
+		reset: replaceCode,
 
-		/** The member who sent `code`, while they still have an account and have not reset their link since. */
+		/** The member whose link carries `code`, while they still have an account and have not reset it since. */
 		referrerOf: (code: string) =>
-			Effect.gen(function* () {
-				const { referrer, version } = yield* verified(code);
-				const [current] = yield* query((db) =>
-					db.select({ version: user.referralLinkVersion }).from(user).where(eq(user.id, referrer)),
-				);
-				if (current?.version !== version) return yield* new ReferralLinkInvalid();
-				return referrer;
-			}),
+			query((db) =>
+				db.select({ id: user.id }).from(user).where(eq(user.referralCode, code.toLowerCase())),
+			).pipe(
+				Effect.flatMap(([referrer]) =>
+					referrer ? Effect.succeed(referrer.id) : Effect.fail(new ReferralLinkInvalid()),
+				),
+			),
 	};
+}
+
+function newReferralCode(): string {
+	return Array.from(
+		randomBytes(REFERRAL_CODE_LENGTH),
+		// 256 is a multiple of 32, so every letter is equally likely.
+		(byte) => REFERRAL_CODE_ALPHABET[byte % REFERRAL_CODE_ALPHABET.length],
+	).join("");
 }

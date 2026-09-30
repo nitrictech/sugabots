@@ -62,6 +62,11 @@ const AUTH_POOL_SIZE = 2;
  */
 const SESSION_COOKIE_CACHE_SECONDS = 5 * 60;
 
+/** Sign-up attempts one address may make per window, which an office sharing an address still fits in. */
+const SIGN_UP_ATTEMPTS_PER_WINDOW = 10;
+
+const SIGN_UP_WINDOW_SECONDS = 60 * 60;
+
 /** How long a password reset link works. The email promises an hour. */
 const RESET_PASSWORD_LINK_SECONDS = 60 * 60;
 
@@ -164,6 +169,15 @@ export const make = Effect.gen(function* () {
 
 		session: {
 			cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_SECONDS },
+		},
+
+		// better-auth limits requests only in production, and keeps count in memory.
+		// Its default for signing up is a few a second, which suits a mistyped
+		// password but would let a script try codes all day.
+		rateLimit: {
+			customRules: {
+				"/sign-up/email": { window: SIGN_UP_WINDOW_SECONDS, max: SIGN_UP_ATTEMPTS_PER_WINDOW },
+			},
 		},
 
 		plugins: [bearer()],

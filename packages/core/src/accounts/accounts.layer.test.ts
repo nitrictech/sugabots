@@ -34,10 +34,4 @@ describe("Accounts.layer", () => {
 
 		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(name);
 	});
-
-	it("refuses to start sign-up by referral without the secret its links are signed with", async () => {
-		const exit = await accountsFor({ SIGNUP_MODE: "referral" });
-
-		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch("BETTER_AUTH_SECRET");
-	});
 });

@@ -111,7 +111,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /                        opens the workspace last chosen
  *   /login
  *   /reset-password           where a password reset email's link lands
- *   /join                     where a referral link lands, with `?code=`
+ *   /join/$code               where a referral link lands
  *   /invite/$id
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
@@ -236,24 +236,17 @@ function LoginRoute() {
 	);
 }
 
-interface JoinSearch {
-	/** From a member's referral link; the API decides whether it still works. */
-	code?: string;
-}
-
+/** `$code` is from a member's referral link; the API decides whether it still works. */
 const joinRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	path: "/join",
-	validateSearch: (search: Record<string, unknown>): JoinSearch => ({
-		code: optionalString(search.code),
-	}),
+	path: "/join/$code",
 	component: JoinRoute,
 });
 
 /** Signing up from a referral link. Somebody already signed in has no use for it and goes home. */
 function JoinRoute() {
 	const { session } = joinRoute.useRouteContext();
-	const { code } = joinRoute.useSearch();
+	const { code } = joinRoute.useParams();
 	const navigate = useNavigate();
 
 	if (session.user) return <Navigate to="/" replace />;
