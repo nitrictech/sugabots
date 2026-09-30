@@ -196,6 +196,8 @@ export interface StoryAppData {
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	onboarded?: boolean;
+	/** The viewer's referral link, where the installation signs people up by referral. */
+	referralLink?: string;
 }
 
 /**
@@ -226,6 +228,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
 		http.get(api("/onboarding"), () => HttpResponse.json({ completed: data.onboarded ?? true })),
+		http.get(api("/referral-link"), () => HttpResponse.json({ url: data.referralLink ?? null })),
 		http.get(api("/workspaces/:workspace/me"), () =>
 			HttpResponse.json({
 				role: data.role ?? "owner",

@@ -15,6 +15,7 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
+import { unimplemented } from "../../testing.ts";
 import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";
@@ -34,10 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				Layer.provide([
 					testInfrastructure,
 					Installation.layer,
-					Layer.succeed(
-						Accounts.Service,
-						Accounts.Service.of({ admit: () => Effect.void, requireEmailVerification }),
-					),
+					unimplemented(Accounts.Service, { requireEmailVerification }),
 					Layer.succeed(
 						Email.Service,
 						Email.Service.of({

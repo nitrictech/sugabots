@@ -7,6 +7,7 @@ import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
 import { PodsApi } from "./groups/pods.ts";
+import { ReferralsApi } from "./groups/referrals.ts";
 import { RoutinesApi } from "./groups/routines.ts";
 import { SearchProvidersApi } from "./groups/search-providers.ts";
 import { SystemApi } from "./groups/system.ts";
@@ -44,4 +45,5 @@ export class Api extends HttpApi.make("sugabots")
 	.add(ToolApprovalsApi)
 	.add(RoutinesApi)
 	.add(UsageApi)
+	.add(ReferralsApi)
 	.middleware(ValidateRequest) {}

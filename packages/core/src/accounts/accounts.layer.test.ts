@@ -1,6 +1,7 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { noDatabase } from "../database/testing.ts";
+import { Installation } from "../installation/installation.ts";
 import { Accounts } from "./accounts.ts";
 
 function accountsFor(env: Record<string, string>) {
@@ -8,7 +9,7 @@ function accountsFor(env: Record<string, string>) {
 		Accounts.Service.pipe(
 			Effect.provide(
 				Accounts.layer.pipe(
-					Layer.provide(noDatabase),
+					Layer.provide([noDatabase, Installation.layer]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
 			),
@@ -25,12 +26,18 @@ describe("Accounts.layer", () => {
 		expect(Exit.isSuccess(on) && on.value.requireEmailVerification).toBe(true);
 	});
 
-	it.each(["ALLOW_OPEN_SIGNUP", "REQUIRE_EMAIL_VERIFICATION"])(
-		"refuses to start when %s is not a boolean",
-		async (name) => {
-			const exit = await accountsFor({ [name]: "maybe" });
+	it.each([
+		{ name: "SIGNUP_MODE", value: "friends" },
+		{ name: "REQUIRE_EMAIL_VERIFICATION", value: "maybe" },
+	])("refuses to start when $name is $value", async ({ name, value }) => {
+		const exit = await accountsFor({ [name]: value });
 
-			expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(name);
-		},
-	);
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(name);
+	});
+
+	it("refuses to start sign-up by referral without the secret its links are signed with", async () => {
+		const exit = await accountsFor({ SIGNUP_MODE: "referral" });
+
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch("BETTER_AUTH_SECRET");
+	});
 });

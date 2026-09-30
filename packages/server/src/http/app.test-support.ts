@@ -1,6 +1,7 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
+import { Accounts } from "@sugabots/core/accounts/accounts";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -85,6 +86,7 @@ export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Install
  * what it is about.
  */
 const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
+	unimplemented(Accounts.Service),
 	unimplemented(Membership.Service),
 	unimplemented(PodAdministration.Service),
 	unimplemented(AgentAdministration.Service),

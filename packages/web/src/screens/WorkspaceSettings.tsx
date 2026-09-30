@@ -3,6 +3,7 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -14,6 +15,7 @@ import {
 import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
@@ -235,7 +237,49 @@ function ProfileSettings() {
 				<SettingsRow label="Name" trailing={<SettingsValue>{user.name}</SettingsValue>} />
 				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
 			</SettingsGroup>
+			<ReferralLinkSettings />
 			<SettingsDanger onClick={() => void signOut()}>Sign out</SettingsDanger>
 		</SettingsPage>
+	);
+}
+
+/** The link that lets somebody new sign up, where the installation signs people up by referral. */
+function ReferralLinkSettings() {
+	const { data: link } = useReferralLink();
+	const reset = useResetReferralLink();
+	const [copied, setCopied] = useState(false);
+	if (!link) return null;
+
+	function copy(url: string) {
+		void navigator.clipboard
+			?.writeText(url)
+			.then(() => setCopied(true))
+			.catch(() => setCopied(false));
+	}
+
+	return (
+		<SettingsGroup
+			label="Invite to Sugabots"
+			note="Anyone with this link can make an account and set up a workspace of their own. Resetting it stops the old link working."
+		>
+			<SettingsRow
+				label="Your link"
+				sub={link}
+				trailing={
+					<Button variant="secondary" size="sm" onClick={() => copy(link)}>
+						{copied ? "Copied" : "Copy"}
+					</Button>
+				}
+			/>
+			<SettingsRow
+				label="Reset link"
+				onClick={() => {
+					setCopied(false);
+					reset.mutate();
+				}}
+				trailing={reset.isPending ? <SettingsValue>Resetting…</SettingsValue> : undefined}
+			/>
+			{reset.error && <Alert>{failureMessage(reset.error)}</Alert>}
+		</SettingsGroup>
 	);
 }

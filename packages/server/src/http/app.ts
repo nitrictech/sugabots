@@ -23,6 +23,7 @@ import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
 import { podRoutes } from "../routes/pods/routes.ts";
+import { referralRoutes } from "../routes/referrals/routes.ts";
 import { routineRoutes } from "../routes/routines/routes.ts";
 import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
 import { systemRoutes } from "../routes/system/routes.ts";
@@ -86,6 +87,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				toolApprovalRoutes,
 				threadRoutes,
 				usageRoutes,
+				referralRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),

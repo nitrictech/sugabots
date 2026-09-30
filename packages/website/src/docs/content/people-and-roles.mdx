@@ -8,9 +8,10 @@ what they can change, and pods decide what they can see.
 
 ## Who gets in
 
-The first person to sign up on an installation owns it, and becomes the owner of
-the workspace they create. After that, sign-up is by invitation only, unless the
-installation turns on [`ALLOW_OPEN_SIGNUP`](/docs/configuration#access).
+Whoever creates a workspace owns it. Anyone can sign up to a new installation, so
+its first account can be made. After that, sign-up is closed and people arrive
+by invitation, unless the installation sets
+[`SIGNUP_MODE`](/docs/configuration#access) to `referral` or `open`.
 
 To invite people, go to **Settings → Members** and choose **Invite people**.
 Type their email addresses, separated by commas, and pick a **Role**. Each person
@@ -22,6 +23,16 @@ Invites expire after two days. Anyone who joins gets their own
 [Personal pod](/docs/pods#your-personal-pod) straight away.
 
 </Tip>
+
+### Referral links
+
+On an installation whose `SIGNUP_MODE` is `referral`, everyone has a link that
+lets somebody new make an account. Find yours in **Settings → Profile** under
+**Invite to Sugabots**. Whoever signs up with it sets up a workspace of their own;
+it doesn't add them to yours.
+
+The link keeps working until you choose **Reset link**, which replaces it and
+stops the old one working.
 
 ## Roles
 

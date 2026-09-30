@@ -71,6 +71,7 @@
         "cron-parser": "^5.10.1",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
+        "jose": "^6.2.12",
         "linkedom": "^0.18.13",
         "turndown": "^7.2.4",
         "undici": "7.29.1",

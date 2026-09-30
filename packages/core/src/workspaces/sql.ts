@@ -20,6 +20,7 @@ import {
 	check,
 	foreignKey,
 	index,
+	integer,
 	jsonb,
 	pgTable,
 	text,
@@ -50,10 +51,19 @@ export const user = pgTable(
 		emailVerified: boolean("email_verified").notNull().default(false),
 		image: text("image"),
 		onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
+		/** Who sent the referral link this person signed up with. */
+		referredBy: uuid("referred_by").references((): AnyPgColumn => user.id, {
+			onDelete: "set null",
+		}),
+		/** Signed into this person's referral link. Resetting it bumps this, and older links stop working. */
+		referralLinkVersion: integer("referral_link_version").notNull().default(0),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [uniqueIndex("user_email_idx").on(table.email)],
+	(table) => [
+		uniqueIndex("user_email_idx").on(table.email),
+		index("user_referred_by_idx").on(table.referredBy),
+	],
 );
 
 /**

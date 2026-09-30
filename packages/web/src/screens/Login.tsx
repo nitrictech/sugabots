@@ -21,17 +21,23 @@ import { Button } from "@/ui/button.tsx";
  */
 export function Login({
 	inviteId,
+	referralCode,
 	passwordChanged = false,
 	onSignedIn,
 }: {
 	inviteId?: string;
+	/** The code from a referral link, which lets somebody new make an account. */
+	referralCode?: string;
 	/** Arriving from a password reset, which says so above the form. */
 	passwordChanged?: boolean;
 	onSignedIn: () => Promise<void>;
 }) {
-	// An invitation link or a reset says why you are here, so it goes straight to the form.
-	const [welcomed, setWelcomed] = useState(inviteId !== undefined || passwordChanged);
-	const [isNew, setIsNew] = useState(false);
+	// An invitation, referral or reset link says why you are here, so it goes straight to the form.
+	const [welcomed, setWelcomed] = useState(
+		inviteId !== undefined || referralCode !== undefined || passwordChanged,
+	);
+	// A referral link is for somebody without an account.
+	const [isNew, setIsNew] = useState(referralCode !== undefined);
 	const [forgotPassword, setForgotPassword] = useState(false);
 	// The address of an account that exists but has not been proven. Only an
 	// installation that requires verification reaches this: it withholds the
@@ -66,7 +72,13 @@ export function Login({
 	// other, and the server's message says what to do about it.
 	async function createAccount() {
 		const callbackURL = inviteId === undefined ? undefined : inviteLink(inviteId).toString();
-		const { token } = await client.auth.signUp({ name, email, password, callbackURL });
+		const { token } = await client.auth.signUp({
+			name,
+			email,
+			password,
+			callbackURL,
+			referralCode,
+		});
 		if (token === null) {
 			setUnverified(email);
 			return;
@@ -117,14 +129,18 @@ export function Login({
 
 	return (
 		<AuthLayout
-			onBack={inviteId === undefined ? () => setWelcomed(false) : undefined}
+			onBack={
+				inviteId === undefined && referralCode === undefined ? () => setWelcomed(false) : undefined
+			}
 			title={isNew ? "Create an account" : "Log in"}
 			subtitle={
 				inviteId !== undefined
 					? "You have been invited to a workspace. Log in to accept it."
-					: passwordChanged
-						? "Your password has been changed. Log in with the new one."
-						: undefined
+					: referralCode !== undefined && isNew
+						? "You have been invited to Sugabots. Make an account to set up your own workspace."
+						: passwordChanged
+							? "Your password has been changed. Log in with the new one."
+							: undefined
 			}
 		>
 			<form onSubmit={submit} className="flex flex-col gap-3.5">

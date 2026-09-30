@@ -99,20 +99,31 @@ export const make = Effect.gen(function* () {
 		// every other table's, so better-auth leaves the column alone.
 		advanced: { database: { generateId: false } },
 
+		user: {
+			additionalFields: {
+				// Set from the referral link the account signed up with, never by the caller.
+				referredBy: { type: "string", required: false, input: false },
+			},
+		},
+
 		databaseHooks: {
 			user: {
 				create: {
-					before: async (creating) => {
-						await run(
+					before: async (creating, context) => {
+						const { referredBy } = await run(
 							Effect.mapError(
-								accounts.admit(creating.email),
-								(closed) =>
+								accounts.admit({
+									email: creating.email,
+									referralCode: referralCodeIn(context?.body),
+								}),
+								(refused) =>
 									new APIError("FORBIDDEN", {
-										code: "SIGN_UP_CLOSED",
-										message: closed.userMessage,
+										code: refusalCodes[refused._tag],
+										message: refused.userMessage,
 									}),
 							),
 						);
+						return { data: { ...creating, referredBy } };
 					},
 				},
 			},
@@ -181,6 +192,18 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
+
+/** The codes a refused sign-up answers with, which clients tell apart. */
+const refusalCodes = {
+	SignUpClosed: "SIGN_UP_CLOSED",
+	ReferralLinkInvalid: "REFERRAL_LINK_INVALID",
+} as const;
+
+/** `referralCode` from a sign-up's body, which better-auth passes on without looking at it. */
+function referralCodeIn(body: unknown): string | undefined {
+	if (typeof body !== "object" || body === null || !("referralCode" in body)) return undefined;
+	return typeof body.referralCode === "string" ? body.referralCode : undefined;
+}
 
 export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
 	message: string;
