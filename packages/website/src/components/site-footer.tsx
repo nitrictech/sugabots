@@ -24,8 +24,11 @@ export function SiteFooter({ width = "narrow" }: { width?: keyof typeof footerWi
 					<SiteLogo className="size-6" />
 					Sugabots
 				</span>
-				<span className="flex-1 whitespace-nowrap">Open source, made by Nitric</span>
-				<div className="flex gap-5">
+				{/* On phones it takes a row of its own under the logo and links. */}
+				<span className="order-last basis-full whitespace-nowrap sm:order-none sm:flex-1 sm:basis-auto">
+					Open source, made by Nitric
+				</span>
+				<div className="ml-auto flex gap-5">
 					<a
 						href={siteLinks.docs}
 						onClick={() => trackCallToActionClick("docs", "footer")}
