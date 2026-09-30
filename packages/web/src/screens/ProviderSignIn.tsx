@@ -5,12 +5,13 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
-import { Check, Copy, ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
+import { ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
+import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
 import {
 	DialogForm,
@@ -18,7 +19,6 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
 import { ConnectionRow, valueText } from "./connection-row.tsx";
 
 /**
@@ -181,7 +181,6 @@ function SignInCode({
 	onFinished: (failure?: string) => void;
 }) {
 	const { mutateAsync: complete } = useProviderActions().completeSignIn;
-	const [copied, setCopied] = useState(false);
 	// Read through a ref so a parent re-render does not restart the polling.
 	const finished = useRef(onFinished);
 	finished.current = onFinished;
@@ -217,15 +216,7 @@ function SignInCode({
 					<code className="font-mono text-foreground text-xl tracking-widest">
 						{started.userCode}
 					</code>
-					<IconButton
-						label={copied ? "Copied" : "Copy code"}
-						onClick={() => {
-							void navigator.clipboard?.writeText(started.userCode);
-							setCopied(true);
-						}}
-					>
-						{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-					</IconButton>
+					<CopyIconButton label="Copy code" text={started.userCode} />
 				</span>
 				<a
 					href={started.verificationUrl}
