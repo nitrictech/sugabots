@@ -469,7 +469,7 @@ function MessageBubble({
 						compact ? "max-w-[calc(100%-40px)]" : "max-w-[calc(100%-60px)]",
 					)}
 				>
-					{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: only touch screens act on this; a keyboard shows the time by focusing the message. */}
+					{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a tap only puts on screen the time a screen reader already reads beside the bubble, so a keyboard has nothing to reach. */}
 					<div className={bubble} onClick={toggleTimeOnTouch}>
 						{agent && arrivedLive ? (
 							<div
@@ -488,17 +488,22 @@ function MessageBubble({
 							</p>
 						)}
 					</div>
-					{/* The time shows only while the bubble is hovered or holds the focus. */}
+					{/*
+					 * The time shows only while the bubble is hovered or holds the focus. A touch
+					 * screen cannot hover, so there it is left to screen readers and a tap shows it.
+					 */}
 					<div
 						className={cn(
-							"absolute top-1/2 -translate-y-1/2 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:hidden",
+							"absolute top-1/2 -translate-y-1/2 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
 							outgoing ? "right-[calc(100%+8px)]" : "left-[calc(100%+8px)]",
 						)}
 					>
 						<MessageTime createdAt={message.createdAt} />
 					</div>
+					{/* A screen reader has the time beside the bubble already; the tapped one would repeat it. */}
 					{timeFloats && timeShown !== undefined && (
 						<p
+							aria-hidden
 							className={cn(
 								"absolute top-full m-0 pt-0.5",
 								tappedTimeClass(timeShown),
@@ -512,7 +517,9 @@ function MessageBubble({
 			</div>
 			{!timeFloats && timeShown !== undefined && (
 				<BubbleNote face={face} compact={compact} className={tappedTimeClass(timeShown)}>
-					<MessageTime createdAt={message.createdAt} />
+					<span aria-hidden>
+						<MessageTime createdAt={message.createdAt} />
+					</span>
 				</BubbleNote>
 			)}
 			{isLast && message.status === "failed" && (
