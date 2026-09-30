@@ -26,17 +26,19 @@ export function useFollowContentGrowth(
  * Keeps what is at the foot of `viewport` at its foot when the viewport itself
  * changes height, as when a phone's keyboard opens under the composer: the
  * messages move up with the composer instead of sliding under it.
+ *
+ * Call it from the viewport's ref callback, which runs when the element mounts,
+ * and return what it returns so React stops watching when the element goes. An
+ * effect would either watch again on every render or, keyed to the ref, never
+ * see an element that mounts after the first render.
  */
-export function useKeepFootInView(viewport: RefObject<HTMLElement | null>) {
-	useEffect(() => {
-		const element = viewport.current;
-		if (!element || typeof ResizeObserver === "undefined") return;
-		let previousHeight = element.clientHeight;
-		const observer = new ResizeObserver(() => {
-			element.scrollTop += previousHeight - element.clientHeight;
-			previousHeight = element.clientHeight;
-		});
-		observer.observe(element);
-		return () => observer.disconnect();
+export function keepFootInView(viewport: HTMLElement): () => void {
+	if (typeof ResizeObserver === "undefined") return () => {};
+	let previousHeight = viewport.clientHeight;
+	const observer = new ResizeObserver(() => {
+		viewport.scrollTop += previousHeight - viewport.clientHeight;
+		previousHeight = viewport.clientHeight;
 	});
+	observer.observe(viewport);
+	return () => observer.disconnect();
 }

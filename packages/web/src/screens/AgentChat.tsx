@@ -7,7 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef } from "react";
+import { Fragment, useCallback, useLayoutEffect, useRef } from "react";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -17,7 +17,7 @@ import {
 	useReadWhileShown,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
-import { useFollowContentGrowth, useKeepFootInView } from "@/lib/follow-latest.ts";
+import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -117,7 +117,15 @@ export function AgentChat({
 	}, [latestItemRevision]);
 
 	useFollowContentGrowth(viewport, followingLatest);
-	useKeepFootInView(viewport);
+	const attachViewport = useCallback((element: HTMLDivElement | null) => {
+		viewport.current = element;
+		if (!element) return;
+		const stopKeepingFoot = keepFootInView(element);
+		return () => {
+			stopKeepingFoot();
+			viewport.current = null;
+		};
+	}, []);
 
 	async function submit() {
 		const message = draft.trim();
@@ -183,7 +191,7 @@ export function AgentChat({
 		<div className="flex min-h-0 flex-1 md:relative">
 			<div className="relative flex min-w-0 flex-1 flex-col">
 				<div
-					ref={viewport}
+					ref={attachViewport}
 					role="log"
 					aria-label="Chat messages"
 					onScroll={(event) => {

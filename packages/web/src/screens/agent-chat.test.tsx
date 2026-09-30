@@ -12,7 +12,7 @@ import {
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
 	agents,
 	apiAnswers,
@@ -330,6 +330,39 @@ async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLTex
 	return (await screen.findByLabelText(`Message ${linear.name}`)) as HTMLTextAreaElement;
 }
 
+/**
+ * A `ResizeObserver` for one test, which jsdom lacks: `of(element)` tells
+ * whatever is watching `element` that it changed size.
+ */
+function watchResizes() {
+	const watching = new Map<Element, ResizeObserverCallback>();
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			constructor(private readonly callback: ResizeObserverCallback) {}
+			observe(element: Element) {
+				watching.set(element, this.callback);
+			}
+			unobserve(element: Element) {
+				watching.delete(element);
+			}
+			disconnect() {
+				for (const [element, callback] of watching) {
+					if (callback === this.callback) watching.delete(element);
+				}
+			}
+		},
+	);
+	onTestFinished(() => {
+		vi.unstubAllGlobals();
+	});
+	return {
+		of(element: Element) {
+			watching.get(element)?.([], {} as ResizeObserver);
+		},
+	};
+}
+
 beforeEach(() => {
 	localStorage.clear();
 	apiAnswers();
@@ -559,6 +592,24 @@ describe("ongoing agent Chat", () => {
 
 		await screen.findByText("Checkout timeouts are tracked.");
 		expect(screen.queryByRole("status", { name: `${linear.name} is typing` })).toBeNull();
+	});
+
+	it("keeps the latest message in view when the chat gets shorter, as when a phone's keyboard opens", async () => {
+		const resizes = watchResizes();
+		let height = 600;
+		const heightOf = vi
+			.spyOn(HTMLElement.prototype, "clientHeight", "get")
+			.mockImplementation(() => height);
+		onTestFinished(() => heightOf.mockRestore());
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		// The chat loads after the first render, so the log is not there to watch until it has.
+		const messages = await screen.findByRole("log", { name: "Chat messages" });
+		messages.scrollTop = 800;
+
+		height = 300;
+		resizes.of(messages);
+
+		expect(messages.scrollTop).toBe(1_100);
 	});
 
 	it("says a message waits behind the reply being written, until that reply is done", async () => {
