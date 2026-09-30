@@ -390,10 +390,10 @@ export const layer = Layer.effect(
 	Effect.gen(function* () {
 		const modelProviders = yield* ModelProviderRepository.Service;
 		const egress = yield* Egress.Service;
-		const requests = yield* ModelRequests.Service;
+		const requests = yield* ModelRequests.make;
 		return make({ modelProviders, httpClients: egress.providers, requests, registry: modelsDev });
 	}),
-).pipe(Layer.provide(Layer.mergeAll(ModelProviderRepository.layer, ModelRequests.layer)));
+).pipe(Layer.provide(ModelProviderRepository.layer));
 
 function providerSaid(body: string | undefined): string | undefined {
 	if (!body) return undefined;
