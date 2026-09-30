@@ -1,7 +1,5 @@
 import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
-import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Redacted } from "effect";
@@ -18,7 +16,7 @@ const EXECUTION_ID = "0199a3a0-0000-7000-8000-000000000004";
 const THREAD_ID = "0199a3a0-0000-7000-8000-000000000005";
 
 function webhookApp() {
-	const accept = vi.fn<RoutineWebhooks.Interface["accept"]>(({ routineId, secret }) =>
+	const accept = vi.fn<Routines.WebhooksInterface["accept"]>(({ routineId, secret }) =>
 		Effect.succeed(
 			routineId === ROUTINE_ID && Redacted.value(secret) === "good-secret"
 				? { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }
@@ -26,7 +24,7 @@ function webhookApp() {
 		),
 	);
 	return {
-		app: createTestApp(unimplemented(RoutineWebhooks.Service, { accept })),
+		app: createTestApp(unimplemented(Routines.Webhooks, { accept })),
 		accept,
 	};
 }
@@ -130,9 +128,9 @@ describe("Routine webhooks", () => {
 	});
 });
 
-/** The app as Ada, with `routines` and `view` as the only routine methods it has. */
+/** The app as Ada, with `routines` and `view` as the only routine methods it has; both are `Routines.Service`. */
 function appAs(
-	services: { routines?: Partial<Routines.Interface>; view?: Partial<RoutineView.Interface> } = {},
+	services: { routines?: Partial<Routines.Interface>; view?: Partial<Routines.Interface> } = {},
 ) {
 	return createTestApp(
 		Layer.mergeAll(
@@ -142,8 +140,7 @@ function appAs(
 				email: "ada@example.com",
 				image: null,
 			})),
-			unimplemented(Routines.Service, services.routines),
-			unimplemented(RoutineView.Service, services.view),
+			unimplemented(Routines.Service, { ...services.routines, ...services.view }),
 		),
 	);
 }
@@ -219,9 +216,7 @@ describe("a Routine's runs", () => {
 
 describe("the workspace's routines", () => {
 	it("lists what the view finds in the workspace in the path", async () => {
-		const listInWorkspace = vi.fn<RoutineView.Interface["listInWorkspace"]>(() =>
-			Effect.succeed([]),
-		);
+		const listInWorkspace = vi.fn<Routines.Interface["listInWorkspace"]>(() => Effect.succeed([]));
 
 		const response = await appAs({ view: { listInWorkspace } }).request(
 			`/workspaces/${WORKSPACE_ID}/routines`,

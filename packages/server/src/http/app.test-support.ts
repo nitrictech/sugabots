@@ -4,8 +4,6 @@ import { Usage } from "@sugabots/core/accounting/usage";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
-import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
@@ -101,8 +99,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(ThreadView.Service),
 	unimplemented(Turns.Controls),
 	unimplemented(Routines.Service),
-	unimplemented(RoutineView.Service),
-	unimplemented(RoutineWebhooks.Service),
+	unimplemented(Routines.Webhooks),
 	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),

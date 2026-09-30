@@ -2,8 +2,6 @@ import type { Usage } from "@sugabots/core/accounting/usage";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import type { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
-import type { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/thread-view";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
@@ -20,7 +18,7 @@ import type { ChannelAccess } from "../routes/events/access.ts";
  * Everything the routes may ask core for. Each is a use case or a view whose
  * every method requires the current actor and authorizes them, or the event
  * streams' `ChannelAccess`, which does the same for a channel. The exception
- * is `RoutineWebhooks`, which nobody signs in to call: the routine's secret
+ * is `Routines.Webhooks`, which nobody signs in to call: the routine's secret
  * admits the run instead.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a
@@ -42,6 +40,5 @@ export type HttpServices =
 	| ThreadView.Service
 	| Turns.Controls
 	| Routines.Service
-	| RoutineView.Service
-	| RoutineWebhooks.Service
+	| Routines.Webhooks
 	| ChannelAccess.Service;

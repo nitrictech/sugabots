@@ -1,7 +1,5 @@
 import { MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
-import { RoutineView } from "@sugabots/core/conversations/routines/routine-view";
-import { RoutineWebhooks } from "@sugabots/core/conversations/routines/routine-webhooks";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { DateTime, Effect, Redacted, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -12,19 +10,18 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handlers) =>
 	Effect.gen(function* () {
 		const routines = yield* Routines.Service;
-		const view = yield* RoutineView.Service;
-		const webhooks = yield* RoutineWebhooks.Service;
+		const webhooks = yield* Routines.Webhooks;
 		return (
 			handlers
 				.handle("listInWorkspace", ({ params }) =>
-					view.listInWorkspace(params.workspace).pipe(
+					routines.listInWorkspace(params.workspace).pipe(
 						Effect.map((items) => ({ items })),
 						asSessionUser,
 						asHttpError(routineErrors),
 					),
 				)
 				.handle("list", ({ params }) =>
-					view.list(params).pipe(asSessionUser, asHttpError(routineErrors)),
+					routines.list(params).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("create", ({ params, payload }) =>
 					routines.create(params, payload).pipe(asSessionUser, asHttpError(routineErrors)),
@@ -37,7 +34,7 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 					),
 				)
 				.handle("get", ({ params }) =>
-					view.get(params).pipe(asSessionUser, asHttpError(routineErrors)),
+					routines.get(params).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
 					routines.update(params, payload).pipe(asSessionUser, asHttpError(routineErrors)),
@@ -58,7 +55,7 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 					),
 				)
 				.handle("executions", ({ params, query }) =>
-					view.listExecutions(params, query).pipe(asSessionUser, asHttpError(routineErrors)),
+					routines.listExecutions(params, query).pipe(asSessionUser, asHttpError(routineErrors)),
 				)
 				// Raw, so a body that is not JSON is refused with the reason rather
 				// than the generic unsupported-content-type answer.

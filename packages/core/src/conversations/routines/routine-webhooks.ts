@@ -1,49 +1,20 @@
-export * as RoutineWebhooks from "./routine-webhooks.ts";
-
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import type { AcceptedRoutineExecution, RoutineExecutionTrigger } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Effect, Redacted } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { routine } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { ThreadRepository } from "../threads/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
-import { RoutineRepository } from "./repository.ts";
-import type { RoutineTriggerConflict, RoutineTriggerRejected } from "./routine.ts";
+import type { Routines } from "./routines.ts";
 
-/**
- * Runs a webhook routine's caller asks for. Nobody signs in to call one: the
- * secret the routine was given is what admits the run, so this asks for no
- * actor, and is the one routine operation a route calls without one.
- */
-export interface Interface {
-	/**
-	 * Accepts a webhook's run, if `secret` is the routine's. `undefined` when
-	 * it is not, or there is no such enabled webhook routine: the caller is
-	 * told the same either way.
-	 */
-	readonly accept: (delivery: {
-		routineId: string;
-		secret: Redacted.Redacted<string>;
-		trigger: Extract<RoutineExecutionTrigger, { kind: "webhook" }>;
-	}) => Effect.Effect<
-		AcceptedRoutineExecution | undefined,
-		RoutineTriggerConflict | RoutineTriggerRejected
-	>;
-}
-
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/RoutineWebhooks",
-) {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("RoutineWebhooks");
+/** Runs a webhook routine's caller asks for: `Routines.Webhooks`. */
+export const makeWebhooks = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Routines.WebhooksInterface>("Routines.Webhooks");
 	const acceptTrigger = yield* makeAcceptTrigger;
 	// Checked against when there is no routine, so a missing one takes as long to refuse.
 	const dummyDigest = yield* hashSecret("not-a-routine-secret");
-	return Service.of({
+	return {
 		accept: ({ routineId, secret, trigger }) =>
 			operation(
 				"accept",
@@ -73,14 +44,8 @@ export const make = Effect.gen(function* () {
 					).pipe(Effect.catchTag("RoutineNotFound", () => Effect.undefined));
 				}),
 			),
-	});
+	} satisfies Routines.WebhooksInterface;
 });
-
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(
-	Layer.provide([RoutineRepository.layer, ThreadRepository.layer]),
-);
 
 const deriveKey = promisify(scrypt);
 

@@ -45,8 +45,6 @@ import { Turns } from "../turns/turns.ts";
 import { lockTriggers } from "./acceptance.ts";
 import { RoutineTriggerConflict } from "./routine.ts";
 import { RoutineRunner } from "./routine-runner.ts";
-import { InvalidRoutineExecutionCursor, RoutineView } from "./routine-view.ts";
-import { RoutineWebhooks } from "./routine-webhooks.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
@@ -59,8 +57,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	/** As the routines' owner, who administers their workspace. */
 	let routines: Promised<Routines.Interface>;
-	let view: Promised<RoutineView.Interface>;
-	const webhooks = onPostgres(Context.get(conversations, RoutineWebhooks.Service));
+	let view: Promised<Routines.Interface>;
+	const webhooks = onPostgres(Context.get(conversations, Routines.Webhooks));
 	const turns = onPostgres({ suspend: Context.get(conversations, TurnRepository.Service).suspend });
 	const execution = onPostgres({
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
@@ -81,7 +79,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 	beforeEach(async () => {
 		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
 		routines = routinesAs(userId);
-		view = onPostgresAs(userId)(Context.get(conversations, RoutineView.Service));
+		view = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	});
 
 	// A run's history holds its routine back from being deleted on its own, but
@@ -187,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await routines.remove({ agentId: helper.id, routineId: removed.routine.id });
 
 		const listed = await onPostgresAs(member.id)(
-			Context.get(conversations, RoutineView.Service),
+			Context.get(conversations, Routines.Service),
 		).listInWorkspace(workspaceId);
 
 		expect(listed.map((item) => item.routine.id)).toEqual([sooner.routine.id, later.routine.id]);
@@ -637,7 +635,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 					cursor: "not-a-cursor",
 				},
 			),
-		).rejects.toThrow(InvalidRoutineExecutionCursor);
+		).rejects.toThrow(Routines.InvalidRoutineExecutionCursor);
 	});
 
 	describe("who reaches a routine", () => {
@@ -670,7 +668,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			return routine;
 		};
 		const viewAs = (personId: string) =>
-			onPostgresAs(personId)(Context.get(conversations, RoutineView.Service));
+			onPostgresAs(personId)(Context.get(conversations, Routines.Service));
 
 		it("lets an administrator read a routine and its history in a pod they are not in", async () => {
 			const routine = await aRoutineWithARun();

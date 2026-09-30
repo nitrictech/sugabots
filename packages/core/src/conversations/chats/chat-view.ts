@@ -41,7 +41,7 @@ import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { respondingIn } from "../floor/floor.ts";
-import { routineExecutionIdOf } from "../routines/execution.ts";
+import { routineExecutionIdOf } from "../routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,
