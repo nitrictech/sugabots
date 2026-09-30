@@ -71,6 +71,8 @@ export default defineConfig({
 				resolve: {
 					alias: { "@": new URL("packages/web/src/", import.meta.url).pathname },
 				},
+				// What packages/web/vite.config.ts defines for a build.
+				define: { __BUILD_ID__: JSON.stringify("test") },
 				test: {
 					name: "web",
 					root: "packages/web",

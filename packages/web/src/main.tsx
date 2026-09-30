@@ -1,9 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { RouterProvider } from "@tanstack/react-router";
-import { StrictMode, useState } from "react";
+import { type ReactNode, StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { failureMessage } from "@/lib/failure.ts";
 import { createQueryClient } from "@/lib/query.ts";
+import { forgetSavedQueries, savedQueriesFor } from "@/lib/query-persistence.ts";
 import { type Session, useSession } from "@/lib/session.ts";
 import { createAppRouter } from "@/router.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -59,14 +61,56 @@ function App() {
 
 function SessionRouter({ session }: { session: Session }) {
 	const [queries] = useState(createQueryClient);
-
-	return (
-		<QueryClientProvider client={queries}>
-			<TooltipProvider>
-				<RouterProvider router={router} context={{ session }} />
-			</TooltipProvider>
-		</QueryClientProvider>
+	const app = (
+		<TooltipProvider>
+			<RouterProvider router={router} context={{ session }} />
+		</TooltipProvider>
 	);
+
+	return session.user ? (
+		<SavedQueries userId={session.user.id} client={queries}>
+			{app}
+		</SavedQueries>
+	) : (
+		<SignedOutQueries client={queries}>{app}</SignedOutQueries>
+	);
+}
+
+/**
+ * The signed-in person's queries, drawn from what their last visit saved while
+ * the API is asked again. Queries wait until the saved ones are back, so the
+ * saved answer is what they start from.
+ */
+function SavedQueries({
+	userId,
+	client,
+	children,
+}: {
+	userId: string;
+	client: ReturnType<typeof createQueryClient>;
+	children: ReactNode;
+}) {
+	const [{ persistOptions, saveWhileMounted }] = useState(() => savedQueriesFor(userId));
+	useEffect(saveWhileMounted, [saveWhileMounted]);
+	return (
+		<PersistQueryClientProvider client={client} persistOptions={persistOptions}>
+			{children}
+		</PersistQueryClientProvider>
+	);
+}
+
+/** Nobody is signed in, so nothing anybody saved is kept: it is their conversations. */
+function SignedOutQueries({
+	client,
+	children,
+}: {
+	client: ReturnType<typeof createQueryClient>;
+	children: ReactNode;
+}) {
+	useEffect(() => {
+		void forgetSavedQueries();
+	}, []);
+	return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
 /**

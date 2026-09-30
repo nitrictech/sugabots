@@ -21,6 +21,9 @@ export default defineConfig({
 			],
 		}),
 	],
+	// Names this build, so a cache saved by an earlier one is not read back as if
+	// its data were still the shape this one expects.
+	define: { __BUILD_ID__: JSON.stringify(new Date().toISOString()) },
 	// One .env for the whole workspace, next to compose.yml, rather than one per
 	// app. The API and the tests read the same file.
 	envDir: "../..",
