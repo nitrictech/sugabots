@@ -1,10 +1,9 @@
 import { motion } from "motion/react";
 import { trackCallToActionClick } from "@/analytics";
 import { BotAvatar } from "@/components/bot-avatar";
-import { JoinDiscordLink } from "@/components/join-discord-link";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { buttonVariants } from "@/components/ui/button";
-import { launched, siteLinks } from "@/site-links";
+import { siteLinks } from "@/site-links";
 
 export function GetStartedSection() {
 	return (
@@ -25,34 +24,26 @@ export function GetStartedSection() {
 					variants={riseIn}
 					className="text-5xl font-black leading-none tracking-tighter sm:text-6xl"
 				>
-					{launched ? "Start a pod." : "Releasing soon."}
+					Start a pod.
 				</motion.h2>
-				{launched && (
-					<motion.p variants={riseIn} className="max-w-md text-muted-foreground">
-						Set it up in a few minutes, invite your people, and add your first bot.
-					</motion.p>
-				)}
+				<motion.p variants={riseIn} className="max-w-md text-muted-foreground">
+					Set it up in a few minutes, invite your people, and add your first bot.
+				</motion.p>
 				<RevealItem className="flex flex-wrap justify-center gap-3">
-					{launched ? (
-						<>
-							<a
-								href={siteLinks.docs}
-								onClick={() => trackCallToActionClick("docs", "get_started_section")}
-								className={buttonVariants({ size: "lg" })}
-							>
-								Read the docs
-							</a>
-							<a
-								href={siteLinks.github}
-								onClick={() => trackCallToActionClick("github", "get_started_section")}
-								className={buttonVariants({ variant: "outline", size: "lg" })}
-							>
-								View on GitHub
-							</a>
-						</>
-					) : (
-						<JoinDiscordLink placement="get_started_section" size="lg" />
-					)}
+					<a
+						href={siteLinks.docs}
+						onClick={() => trackCallToActionClick("docs", "get_started_section")}
+						className={buttonVariants({ size: "lg" })}
+					>
+						Read the docs
+					</a>
+					<a
+						href={siteLinks.github}
+						onClick={() => trackCallToActionClick("github", "get_started_section")}
+						className={buttonVariants({ variant: "outline", size: "lg" })}
+					>
+						View on GitHub
+					</a>
 				</RevealItem>
 			</Reveal>
 		</section>
