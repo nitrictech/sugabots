@@ -1,4 +1,4 @@
-import type { ChatHistoryEntry, ThreadParticipant } from "@sugabots/contracts";
+import type { ChatActivityStatus, ChatHistoryEntry, ThreadParticipant } from "@sugabots/contracts";
 import { ChevronRight, Repeat } from "lucide-react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 
@@ -12,10 +12,10 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 /** How a collaboration or routine run stands, as its line says it. */
 export type ActivityState = "running" | "waiting_on_you" | "done" | "failed";
 
-/** A history entry's status in the terms of the line. */
-export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivityState {
-	if (entry?.status === "failed" || entry?.status === "cancelled") return "failed";
-	if (entry?.status === "completed") return "done";
+/** A collaboration or routine run's status in the terms of the line. */
+export function activityStateOf(status: ChatActivityStatus): ActivityState {
+	if (status === "failed" || status === "cancelled") return "failed";
+	if (status === "completed") return "done";
 	return "running";
 }
 

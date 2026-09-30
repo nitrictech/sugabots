@@ -517,6 +517,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				threadId: accepted.threadId,
 				routineName: "Overnight review",
 				triggerKind: "manual",
+				status: "queued",
 			}),
 		]);
 	});

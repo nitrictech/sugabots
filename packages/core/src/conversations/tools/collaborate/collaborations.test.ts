@@ -228,6 +228,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				kind: "collaboration",
 				threadId: opened.collaboration.threadId,
 				initiator: expect.objectContaining({ id: host.id }),
+				status: "running",
 			}),
 		]);
 		expect((await chatViewAs(memberId).history(helperChatId))?.items).toEqual([

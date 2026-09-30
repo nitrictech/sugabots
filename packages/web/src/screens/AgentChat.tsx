@@ -1,6 +1,5 @@
 import type {
 	Agent,
-	ChatHistoryEntry,
 	ChatMessageItem,
 	Pod,
 	SessionUser,
@@ -70,7 +69,8 @@ export function AgentChat({
 }) {
 	const chat = useChat(pod.id, agent.id);
 	const messages = useChatMessages(chat.data?.id);
-	const history = useChatHistory(chat.data?.id);
+	// Only the side panel lists the chat's other threads; each line in the chat carries how it stands.
+	const history = useChatHistory(threadId ? chat.data?.id : undefined);
 	const mainThread = useThread(chat.data?.mainThreadId, { recentMessages: LIVE_MESSAGES });
 	useThreadEvents(chat.data?.mainThreadId);
 	const notices = useThreadNotices(chat.data?.mainThreadId);
@@ -261,7 +261,6 @@ export function AgentChat({
 									<ActivityLine
 										item={group.item}
 										host={host}
-										entry={entries.find((entry) => entry.threadId === group.item.threadId)}
 										onOpen={() => openThread(group.item.threadId)}
 									/>
 								)}
@@ -326,15 +325,13 @@ type ChatActivityItem = Extract<ChatMessageItem, { kind: "collaboration" | "rout
 function ActivityLine({
 	item,
 	host,
-	entry,
 	onOpen,
 }: {
 	item: ChatActivityItem;
 	host: AgentParticipant;
-	entry: ChatHistoryEntry | undefined;
 	onOpen: () => void;
 }) {
-	const state = activityStateOf(entry);
+	const state = activityStateOf(item.status);
 	return item.kind === "routine" ? (
 		<ChatActivityRow type="routine" routineName={item.routineName} state={state} onOpen={onOpen} />
 	) : (

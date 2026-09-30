@@ -1,6 +1,10 @@
 import { Effect, Schema } from "effect";
 import { agentSchema } from "./agents.ts";
-import { routineExecutionSummarySchema, routineExecutionTriggerKindSchema } from "./routines.ts";
+import {
+	routineExecutionStateSchema,
+	routineExecutionSummarySchema,
+	routineExecutionTriggerKindSchema,
+} from "./routines.ts";
 import { agentParticipantSchema, messageSchema, threadParticipantSchema } from "./threads.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -97,6 +101,14 @@ export type GetOrCreateChat = typeof getOrCreateChatSchema.Type;
 
 export const customerThreadTypeSchema = Schema.Literals(["collaboration", "routine"]);
 
+/**
+ * How a collaboration or routine run in a chat stands. A run's own state is
+ * used as it is, so the two are one set; a collaboration uses some of them.
+ */
+export const chatActivityStatusSchema = routineExecutionStateSchema;
+
+export type ChatActivityStatus = typeof chatActivityStatusSchema.Type;
+
 export const chatMessageItemSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("message"),
@@ -107,6 +119,7 @@ export const chatMessageItemSchema = Schema.Union([
 		id: uuidSchema,
 		threadId: uuidSchema,
 		initiator: agentParticipantSchema,
+		status: chatActivityStatusSchema,
 		createdAt: isoTimestampSchema,
 	}),
 	Schema.Struct({
@@ -115,6 +128,7 @@ export const chatMessageItemSchema = Schema.Union([
 		threadId: uuidSchema,
 		routineName: Schema.String,
 		triggerKind: routineExecutionTriggerKindSchema,
+		status: chatActivityStatusSchema,
 		createdAt: isoTimestampSchema,
 	}),
 ]);
@@ -134,7 +148,7 @@ export const chatHistoryEntrySchema = Schema.Struct({
 	type: customerThreadTypeSchema,
 	title: Schema.String,
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),
-	status: Schema.Literals(["queued", "running", "completed", "failed", "cancelled"]),
+	status: chatActivityStatusSchema,
 	routineExecution: Schema.NullOr(routineExecutionSummarySchema),
 	latestActivityAt: isoTimestampSchema,
 });

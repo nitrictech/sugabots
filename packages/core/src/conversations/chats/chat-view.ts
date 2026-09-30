@@ -1,6 +1,7 @@
 export * as ChatView from "./chat-view.ts";
 
 import type {
+	ChatActivityStatus,
 	ChatHistoryEntry,
 	ChatHistoryPage,
 	ChatList,
@@ -11,7 +12,17 @@ import type {
 	PodChatMarkers,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_PAGE_LIMIT, messagePreview, textWithoutNarration } from "@sugabots/contracts";
-import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	type DBQueryConfig,
+	desc,
+	eq,
+	inArray,
+	ne,
+	type SQLWrapper,
+	sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, Effect, Layer } from "effect";
 import {
@@ -432,6 +443,10 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 				orderBy: { createdAt: "desc", id: "desc" },
 				...(before && { where: { RAW: (row) => earlierThan(row.createdAt, row.id, before) } }),
 				columns: { id: true, childThreadId: true, createdAt: true },
+				extras: {
+					running: (row) => respondingIn(sql`${row.childThreadId}`),
+					latestTurnStatus: (row) => latestTurnStatusOf(row.childThreadId),
+				},
 				with: {
 					parentMessage: {
 						columns: {},
@@ -449,6 +464,7 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 					routineName: true,
 					triggerKind: true,
 					acceptedAt: true,
+					state: true,
 				},
 			},
 		},
@@ -480,6 +496,7 @@ function toMainPage(row: MainPage, limit: number) {
 					id: made.id,
 					threadId: made.childThreadId,
 					initiator,
+					status: collaborationStatus(made),
 					createdAt: made.createdAt.toISOString(),
 				};
 			},
@@ -493,6 +510,7 @@ function toMainPage(row: MainPage, limit: number) {
 				threadId: execution.threadId,
 				routineName: execution.routineName,
 				triggerKind: execution.triggerKind,
+				status: execution.state,
 				createdAt: execution.acceptedAt.toISOString(),
 			}),
 		})),
@@ -534,12 +552,7 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 		},
 		extras: {
 			running: (row) => respondingIn(sql`${row.id}`),
-			latestTurnStatus: (row) => sql<schema.TurnRow["status"] | null>`(
-				select ${turn.status} from ${turn}
-				where ${turn.threadId} = ${row.id}
-				order by ${turn.startedAt} desc, ${turn.id} desc
-				limit 1
-			)`,
+			latestTurnStatus: (row) => latestTurnStatusOf(row.id),
 		},
 		with: {
 			participants: {
@@ -560,6 +573,26 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 });
 
 type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
+
+/** How the latest turn in the thread ended, or null before it has one. */
+const latestTurnStatusOf = (threadId: SQLWrapper) => sql<schema.TurnRow["status"] | null>`(
+	select ${turn.status} from ${turn}
+	where ${turn.threadId} = ${threadId}
+	order by ${turn.startedAt} desc, ${turn.id} desc
+	limit 1
+)`;
+
+/**
+ * How a collaboration stands, from its thread: running while a reply is being
+ * written in it, failed when its latest turn failed, and otherwise complete.
+ */
+function collaborationStatus(thread: {
+	running: boolean;
+	latestTurnStatus: schema.TurnRow["status"] | null;
+}): ChatActivityStatus {
+	if (thread.running) return "running";
+	return thread.latestTurnStatus === "failed" ? "failed" : "completed";
+}
 
 /** Both lists merged newest activity first, a thread in both counted once, cut to the page. */
 function toHistoryPage(row: HistoryRow, limit: number) {
@@ -586,13 +619,7 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 				participants: side.participants.map(({ user: person, agent: participant }) =>
 					toParticipant(authorRow(person, participant)),
 				),
-				status: execution
-					? execution.state
-					: side.running
-						? "running"
-						: side.latestTurnStatus === "failed"
-							? "failed"
-							: "completed",
+				status: execution ? execution.state : collaborationStatus(side),
 				routineExecution: execution
 					? {
 							executionId: execution.id,

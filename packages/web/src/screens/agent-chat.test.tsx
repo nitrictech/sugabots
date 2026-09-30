@@ -448,6 +448,7 @@ describe("ongoing agent Chat", () => {
 						threadId: routineId,
 						routineName: routineExecution.routineName,
 						triggerKind: "webhook",
+						status: "completed",
 						createdAt: routineExecution.acceptedAt,
 					},
 				],
@@ -839,6 +840,7 @@ describe("ongoing agent Chat", () => {
 						id: collaborationPart.id,
 						threadId: collaborationId,
 						initiator: collaborator,
+						status: "completed",
 						createdAt: collaborationRequest.createdAt,
 					},
 				],
@@ -868,6 +870,41 @@ describe("ongoing agent Chat", () => {
 
 		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
 		expect(within(panel).getByText(collaborationAnswer.content)).toBeDefined();
+	});
+
+	it("shows a collaboration it was asked into finish once its thread changes", async () => {
+		const workspace = controlledEventStream();
+		client.events.workspace.mockImplementation(() => workspace.stream);
+		let status: "running" | "completed" = "running";
+		client.api.chats.messages.mockImplementation(() =>
+			Effect.sync(() => ({
+				items: [
+					{
+						kind: "collaboration",
+						id: collaborationPart.id,
+						threadId: collaborationId,
+						initiator: collaborator,
+						status,
+						createdAt: collaborationRequest.createdAt,
+					},
+				],
+				nextCursor: null,
+			})),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByRole("button", {
+			name: `Open Collaboration: ${linear.name} is helping ${triager.name}`,
+		});
+
+		status = "completed";
+		workspace.emit(streamEvent("thread.changed", { threadId: collaborationId }));
+
+		expect(
+			await screen.findByRole("button", {
+				name: new RegExp(`^Open Collaboration: ${linear.name} helped ${triager.name}`),
+			}),
+		).toBeDefined();
+		expect(client.api.chats.history).not.toHaveBeenCalled();
 	});
 
 	it("opens a routine run's panel from the thread query", async () => {

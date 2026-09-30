@@ -1,4 +1,5 @@
 import {
+	type ChatMessagesPage,
 	type Message,
 	type MessagePart,
 	messagePartsFor,
@@ -10,7 +11,12 @@ import {
 	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
-import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	type InfiniteData,
+	type QueryClient,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
@@ -311,10 +317,29 @@ async function applyWorkspaceEvent(
 	} else if (update.type === "thread.changed") {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat-history"] }),
+			// A chat's line for a collaboration or routine run says how it stands.
+			queries.invalidateQueries({
+				queryKey: ["chat-messages"],
+				predicate: (query) =>
+					hasActivityIn(
+						queries.getQueryData<InfiniteData<ChatMessagesPage>>(query.queryKey),
+						update.threadId,
+					),
+			}),
 			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
 			refreshChatMarkers(queries, workspaceId),
 		]);
 	}
+}
+
+/** Whether a cached page of chat messages has a line for the thread's collaboration or run. */
+function hasActivityIn(
+	data: InfiniteData<ChatMessagesPage> | undefined,
+	threadId: string,
+): boolean {
+	return (data?.pages ?? []).some((page) =>
+		page.items.some((item) => item.kind !== "message" && item.threadId === threadId),
+	);
 }
 
 function updateThreadMessage(
