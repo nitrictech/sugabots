@@ -401,6 +401,13 @@ describe("ongoing agent Chat", () => {
 		expect(screen.getByText(agentMessage.content)).toBeDefined();
 	});
 
+	it("loads no models until somebody starts making a bot", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByText(mainMessage.content);
+
+		expect(client.api.modelProviders.listEnabledModels).not.toHaveBeenCalled();
+	});
+
 	it("shows Routine runs in the main Chat log", async () => {
 		client.api.chats.messages.mockReturnValue(
 			Effect.succeed({

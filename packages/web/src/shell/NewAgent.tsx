@@ -8,10 +8,11 @@ import { LookPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {
-	DialogForm,
 	DialogFormBody,
 	DialogFormFooter,
+	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { SettingsFieldLabel, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
@@ -19,8 +20,19 @@ import { SettingsFieldLabel, SettingsFieldRow, SettingsGroup } from "@/ui/settin
  * Making a bot: its face first, as it will look, then its name and the pod it
  * lives in. It runs on the workspace's first switched-on model until somebody
  * chooses another on its page, which is also where it is described.
+ *
+ * The frame renders the form only while the dialog is open, so the form's
+ * queries, such as the models it offers, wait until somebody opens it.
  */
-export function NewAgentDialog({
+export function NewAgentDialog(props: Parameters<typeof NewAgentForm>[0]) {
+	return (
+		<DialogFormFrame>
+			<NewAgentForm {...props} />
+		</DialogFormFrame>
+	);
+}
+
+function NewAgentForm({
 	podId: fixedPodId,
 	pods = [],
 	onCreated,
@@ -59,7 +71,7 @@ export function NewAgentDialog({
 	}
 
 	return (
-		<DialogForm onSubmit={submit}>
+		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader title="New bot" />
 
 			<DialogFormBody gap="compact">
@@ -111,7 +123,7 @@ export function NewAgentDialog({
 				action="Create"
 				actionDisabled={!trimmedName || !model || !podId || create.isPending}
 			/>
-		</DialogForm>
+		</DialogFormStep>
 	);
 }
 
