@@ -15,12 +15,12 @@ import {
 	useRouteContext,
 	useRouter,
 } from "@tanstack/react-router";
-import { type ComponentType, lazy, useEffect, useRef, useState } from "react";
+import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
 import { useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
@@ -58,22 +58,46 @@ const WorkspaceSettings = lazyNamed(
 
 /**
  * A screen's named export as a component that loads its module on first render,
- * with `preload` to start the load sooner. The load happens once and both share it.
+ * with `preload` to start the load sooner. Both share one load; a failed preload
+ * is forgotten, so opening the screen fetches again.
+ *
+ * Once the module is here, the screen renders without suspending: `lazy` alone
+ * would suspend once even then, and hold the screen behind React's 300ms reveal throttle.
  *
  * TanStack Router's `lazyRouteComponent` is not used because it calls `use()`
  * only while the module is still loading, and React 19.3 reports a render that
  * suspends on `use()` and then finishes without calling it as an error.
  */
-function lazyNamed<Name extends string, Props>(
+function lazyNamed<Name extends string, Props extends object>(
 	load: () => Promise<Record<Name, ComponentType<Props>>>,
 	name: Name,
 ) {
 	let loading: Promise<{ default: ComponentType<Props> }> | undefined;
-	const preload = () => {
-		loading ??= load().then((module) => ({ default: module[name] }));
+	let loaded: ComponentType<Props> | undefined;
+	const loadScreenModule = () => {
+		loading ??= load().then(
+			(module) => {
+				loaded = module[name];
+				return { default: loaded };
+			},
+			(error: unknown) => {
+				loading = undefined;
+				throw error;
+			},
+		);
 		return loading;
 	};
-	return Object.assign(lazy(preload), { preload });
+	const Lazy = lazy(loadScreenModule);
+	function Screen(props: Props) {
+		// Chosen once per mount: swapping `Lazy` for the loaded component would remount the screen.
+		const [Component] = useState<ComponentType<Props>>(() => loaded ?? Lazy);
+		return <Component {...props} />;
+	}
+	Screen.displayName = name;
+	const preload = () => {
+		loadScreenModule().catch(() => {});
+	};
+	return Object.assign(Screen, { preload });
 }
 
 /*
@@ -141,6 +165,7 @@ const indexRoute = createRoute({
 		}
 		requireUser(options);
 	},
+	loader: preloadChatScreenForWideLayout,
 	component: LandingRoute,
 });
 
@@ -546,7 +571,7 @@ const settingsSectionRoute = createRoute({
 const settingsMemberRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/members/$member",
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: SettingsMemberRoute,
 });
 
@@ -565,7 +590,7 @@ const settingsPodAgentRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
 		search.tab === "routines" ? { tab: "routines" } : {},
 	// The dialog waits for the rosters, so its code downloads alongside rather than after.
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: SettingsPodAgentRoute,
 });
 
@@ -577,7 +602,7 @@ const settingsPodRoute = createRoute({
 	}),
 	// A sign-in error shown for one pod must not follow you to the next.
 	remountDeps: ({ params }) => [params.workspace, params.pod],
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: SettingsPodRoute,
 });
 
@@ -585,7 +610,7 @@ const settingsPodRoute = createRoute({
 const settingsProviderRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/$provider",
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: SettingsProviderRoute,
 });
 
@@ -602,7 +627,7 @@ function SettingsProviderRoute() {
 const settingsSystemModelRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/system",
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: () => (
 		<SettingsLayout>
 			<WorkspaceSettings section="providers" modelChoice="system" />
@@ -614,7 +639,7 @@ const settingsSystemModelRoute = createRoute({
 const settingsDefaultModelRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/default",
-	loader: () => void WorkspaceSettings.preload(),
+	loader: () => WorkspaceSettings.preload(),
 	component: () => (
 		<SettingsLayout>
 			<WorkspaceSettings section="providers" modelChoice="default" />
@@ -694,6 +719,7 @@ function SettingsSectionRoute() {
 const agentsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/agents",
+	loader: preloadChatScreenForWideLayout,
 	component: AgentsRoute,
 });
 
@@ -745,6 +771,7 @@ function ConversationLayout({
 const podRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/pods/$pod",
+	loader: preloadChatScreenForWideLayout,
 	component: PodRoute,
 });
 
@@ -799,6 +826,14 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 	return <Navigate {...agentChatLink({ pod, agent: top.agent })} replace />;
 }
 
+/**
+ * Where a pod opens its top chat beside the list. On a phone, touching a chat's
+ * link preloads it instead, through `agentRoute`'s loader.
+ */
+function preloadChatScreenForWideLayout() {
+	if (matchesMedia(SIDE_BY_SIDE)) AgentPage.preload();
+}
+
 interface AgentSearch {
 	/** A collaboration or routine thread open beside the chat. */
 	thread?: string;
@@ -811,6 +846,7 @@ const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
 	validateSearch: validateAgentSearch,
+	loader: () => AgentPage.preload(),
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
 		const navigate = agentRoute.useNavigate();
@@ -853,13 +889,17 @@ function AgentChatRoute({
 	}
 	if (!user) return null;
 	return (
-		<AgentPage
-			agent={found.agent}
-			pod={found.pod}
-			user={user}
-			threadId={search.thread}
-			onThreadChange={(thread) => onSearchChange({ thread })}
-		/>
+		// The screen's code can arrive after its data. Without a boundary of its
+		// own, React would hide the rail and list with it while it loads.
+		<Suspense fallback={null}>
+			<AgentPage
+				agent={found.agent}
+				pod={found.pod}
+				user={user}
+				threadId={search.thread}
+				onThreadChange={(thread) => onSearchChange({ thread })}
+			/>
+		</Suspense>
 	);
 }
 
