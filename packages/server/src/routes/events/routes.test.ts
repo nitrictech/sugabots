@@ -263,17 +263,41 @@ describe("the stream", () => {
 
 	it.each(["revoked", "changed"])("ends when thread access is %s", async (change) => {
 		let channel: "thread:root" | "thread:other" | undefined = "thread:root";
-		const { app, bus } = server({
-			workspace: () => Effect.undefined,
-			thread: () => Effect.succeed(channel),
-			reachesPod: () => Effect.succeed(true),
-		});
+		const { app, bus } = server(
+			{
+				workspace: () => Effect.undefined,
+				thread: () => Effect.succeed(channel),
+				reachesPod: () => Effect.succeed(true),
+			},
+			{ recheck: 0 },
+		);
 		const stream = await open(app, `/threads/${THREAD}/events`);
 		await bus.publish("thread:root", rawEvent("message.created"));
 		await stream.take(1);
 		channel = change === "revoked" ? undefined : "thread:other";
 		await bus.publish("thread:root", rawEvent("message.created"));
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
+	});
+
+	it("asks about access again only once the recheck window has passed", async () => {
+		let asked = 0;
+		const { app, bus } = server({
+			workspace: () => Effect.undefined,
+			thread: () =>
+				Effect.sync(() => {
+					asked += 1;
+					return "thread:root" as const;
+				}),
+			reachesPod: () => Effect.succeed(true),
+		});
+		const stream = await open(app, `/threads/${THREAD}/events`);
+		for (let i = 0; i < 3; i++) {
+			await bus.publish("thread:root", rawEvent("message.delta"));
+		}
+		await stream.take(3);
+		// Once to open the stream, once for the first event.
+		expect(asked).toBe(2);
+		stream.close();
 	});
 
 	it("logs a subscription failure and ends after flushing queued events", async () => {
