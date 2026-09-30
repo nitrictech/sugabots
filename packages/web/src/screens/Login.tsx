@@ -215,7 +215,7 @@ const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
 function Welcome({ onContinue }: { onContinue: () => void }) {
 	return (
 		<main className="grid h-full place-items-center overflow-x-hidden bg-background px-4 text-foreground">
-			<div className="flex w-full max-w-[440px] flex-col items-center gap-[22px] text-center">
+			<div className="flex w-full min-w-0 max-w-[440px] flex-col items-center gap-[22px] text-center">
 				<div aria-hidden className="flex justify-center gap-3 pb-2">
 					{crowd.map(({ color, face, drop }) => (
 						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>

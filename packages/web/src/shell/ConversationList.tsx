@@ -110,7 +110,7 @@ export function ConversationListView({
 		<section
 			aria-label={title}
 			className={cn(
-				"flex min-h-0 w-full shrink-0 flex-col border-border border-r bg-list md:w-[280px] lg:w-80",
+				"flex min-h-0 min-w-0 flex-1 flex-col border-border border-r bg-list md:w-[280px] md:flex-none lg:w-80",
 				className,
 			)}
 		>

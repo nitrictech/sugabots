@@ -7,7 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef } from "react";
+import { Fragment, useCallback, useLayoutEffect, useRef } from "react";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -17,7 +17,7 @@ import {
 	useReadWhileShown,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
-import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
+import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -117,6 +117,15 @@ export function AgentChat({
 	}, [latestItemRevision]);
 
 	useFollowContentGrowth(viewport, followingLatest);
+	const attachViewport = useCallback((element: HTMLDivElement | null) => {
+		viewport.current = element;
+		if (!element) return;
+		const stopKeepingFoot = keepFootInView(element);
+		return () => {
+			stopKeepingFoot();
+			viewport.current = null;
+		};
+	}, []);
 
 	async function submit() {
 		const message = draft.trim();
@@ -182,7 +191,7 @@ export function AgentChat({
 		<div className="flex min-h-0 flex-1 md:relative">
 			<div className="relative flex min-w-0 flex-1 flex-col">
 				<div
-					ref={viewport}
+					ref={attachViewport}
 					role="log"
 					aria-label="Chat messages"
 					onScroll={(event) => {
@@ -190,7 +199,7 @@ export function AgentChat({
 						followingLatest.current =
 							element.scrollHeight - element.scrollTop - element.clientHeight < 48;
 					}}
-					className="min-h-0 flex-1 overflow-y-auto pt-[22px] pb-3"
+					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-[22px] pb-3"
 				>
 					{/* The same inset as the header and the composer, so the faces, the + and the header line up. */}
 					<div className="flex min-h-full w-full flex-col px-4 md:px-[22px]">

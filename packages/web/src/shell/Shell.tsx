@@ -2,14 +2,16 @@ import { Outlet } from "@tanstack/react-router";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 import { useWorkspaceEvents } from "@/lib/thread-events.ts";
+import { useVisibleHeight } from "@/lib/visible-height.ts";
 import { Rail } from "@/shell/Rail.tsx";
 
 /** The frame: the pod rail, then whatever the address shows beside it. */
 export function Shell() {
 	useWorkspaceEvents();
+	useVisibleHeight();
 
 	return (
-		<div className="flex h-dvh min-w-0 overflow-hidden bg-background">
+		<div className="flex h-[var(--visible-height,100dvh)] min-w-0 overflow-hidden bg-background">
 			<Rail />
 			<Outlet />
 		</div>
