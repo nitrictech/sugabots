@@ -22,7 +22,7 @@ const OWNERS: Record<string, readonly string[]> = {
 	routineExecution: ["core/src/conversations/routines/repository.ts"],
 	threadSummary: ["core/src/conversations/summaries/repository.ts"],
 	threadCompaction: ["core/src/conversations/compaction/repository.ts"],
-	threadRead: ["core/src/conversations/threads/read-repository.ts"],
+	threadRead: ["core/src/conversations/threads/repository.ts"],
 	turn: ["core/src/conversations/turns/repository.ts"],
 	toolCall: ["core/src/conversations/turns/tool-calls/repository.ts"],
 };
