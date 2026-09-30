@@ -65,26 +65,11 @@ export const makeControls = Effect.gen(function* () {
 						const decider = yield* authorization.pod(input.podId, "approval.decide");
 						const { pod } = decider;
 						if (!isUuid(input.toolCallId)) return yield* new ToolApprovalNotFound();
-						const [approvalThread] = yield* query((db) =>
-							db
-								.select({ id: thread.id })
-								.from(toolCall)
-								.innerJoin(thread, eq(thread.id, toolCall.threadId))
-								.where(
-									and(
-										eq(toolCall.id, input.toolCallId),
-										eq(thread.workspaceId, pod.workspaceId),
-										eq(thread.podId, pod.id),
-									),
-								)
-								.limit(1),
-						);
-						if (!approvalThread) return yield* new ToolApprovalNotFound();
-						const forRoutine = yield* admission.forRoutine(approvalThread.id);
 						const [candidate] = yield* query((db) =>
 							db
 								.select({
 									call: toolCall,
+									threadId: thread.id,
 									owner: turn.owner,
 									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 								})
@@ -106,6 +91,7 @@ export const makeControls = Effect.gen(function* () {
 							return yield* new ToolApprovalNotFound();
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
+						const forRoutine = yield* admission.forRoutine(candidate.threadId);
 						if (!mayDecideApprovals(decider, forRoutine)) {
 							return yield* new ToolApprovalForbidden();
 						}
@@ -118,7 +104,7 @@ export const makeControls = Effect.gen(function* () {
 						// stands, and the record is undone with this transaction if the
 						// send fails.
 						const recorded = yield* toolCalls.recordDecision({
-							threadId: approvalThread.id,
+							threadId: candidate.threadId,
 							approvalId,
 							decision,
 						});
