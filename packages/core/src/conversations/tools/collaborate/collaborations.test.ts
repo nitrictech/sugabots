@@ -1,6 +1,6 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
@@ -36,7 +36,6 @@ import {
 	waitingTurns,
 } from "../../turns/testing.ts";
 import { CollaborationRefused, Collaborations } from "./collaborations.ts";
-import { CollaborationRepository } from "./repository.ts";
 import { collaborateTool } from "./tool.ts";
 
 /**
@@ -47,17 +46,11 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	const conversations = await conversationsForTests(
 		EventBus.inProcess({ store: EventStore.inMemory() }),
 	);
-	const { open, collectAnswer, answer } = Context.get(conversations, Collaborations.Service);
-	const collaborations = onPostgres({ open, collectAnswer, answer });
-	// `Conversations.layer` does not expose the repository, so it is built over the same events.
-	const repository = onPostgres(
-		await runOnPostgres(
-			Effect.provide(
-				CollaborationRepository.Service,
-				CollaborationRepository.layer.pipe(Layer.provide(Layer.succeedContext(conversations))),
-			),
-		),
+	const { open, collectAnswer, answer, failUnder } = Context.get(
+		conversations,
+		Collaborations.Service,
 	);
+	const collaborations = onPostgres({ open, collectAnswer, answer, failUnder });
 	const threadsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 	const chatsAs = (userId: string) =>
@@ -503,7 +496,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			run: runOnPostgres,
 			replyLength: () => 0,
 			// The routine run it works for ends as soon as it is opened.
-			noteCollaboration: () => Effect.promise(() => repository.failUnder([rootThreadId])),
+			noteCollaboration: () => Effect.promise(() => collaborations.failUnder([rootThreadId])),
 			signal: new AbortController().signal,
 			wait: "50 millis",
 		});

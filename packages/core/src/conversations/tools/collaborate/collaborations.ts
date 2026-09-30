@@ -9,11 +9,11 @@ import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import type * as schema from "../../../database/schema.ts";
 import { agent, collaboration, thread } from "../../../database/schema.ts";
 import type { ConversationEvent } from "../../events.ts";
-import { toCollaborationPart } from "../../threads/collaborations.ts";
+import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
 import { crewOf } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
 import { lineageOf } from "../../threads/tree.ts";
-import { CollaborationRepository } from "./repository.ts";
+import { makeRecords, type WaitOutcome } from "./repository.ts";
 
 /**
  * Collaboration: one crew agent asking another for help.
@@ -70,6 +70,12 @@ export interface Interface {
 	 * one that never comes.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
+	/**
+	 * Fails the collaborations asked for in these threads that are still
+	 * waiting or pending, because the routine run they work for ended. One
+	 * another transaction holds is skipped: its holder is moving it on.
+	 */
+	readonly failUnder: (threadIds: readonly string[]) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -79,7 +85,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Collaborations");
 	const threads = yield* ThreadRepository.Service;
-	const repository = yield* CollaborationRepository.Service;
+	const repository = yield* makeRecords;
 
 	return Service.of({
 		open: ({ from, to, brief }) =>
@@ -161,14 +167,14 @@ export const make = Effect.gen(function* () {
 			Effect.forEach(events.flatMap(unansweredBy), (ended) => repository.failUnanswered(ended), {
 				discard: true,
 			}),
+
+		failUnder: repository.failUnder,
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([ThreadRepository.layer, CollaborationRepository.layer]),
-);
+export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
 
 /** The collaborator whose turn in a collaboration's thread the event ended without an answer. */
 function unansweredBy(
@@ -191,7 +197,7 @@ function unansweredBy(
 /** How deep collaboration may nest: a root thread, a child, and a grandchild. */
 const MAX_DEPTH = 2;
 
-export type WaitOutcome = CollaborationRepository.WaitOutcome;
+export type { WaitOutcome };
 
 export interface Opened {
 	collaboration: CollaborationPart;

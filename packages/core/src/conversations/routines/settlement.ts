@@ -18,7 +18,7 @@ import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../floor/facilitate.workflow.ts";
 import { workingThreadsOf } from "../threads/tree.ts";
-import { CollaborationRepository } from "../tools/collaborate/repository.ts";
+import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { Turns } from "../turns/turns.ts";
 import { findRoutineExecutionId, lockRoutineSettlement } from "./execution.ts";
 import {
@@ -66,7 +66,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("RoutineSettlement");
 	const { emit } = yield* ConversationEvents.Service;
 	const turns = yield* Turns.Service;
-	const collaborations = yield* CollaborationRepository.Service;
+	const collaborations = yield* Collaborations.Service;
 	const routines = yield* RoutineRepository.Service;
 	const runs = yield* RoutineRuns.Service;
 
@@ -201,7 +201,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([CollaborationRepository.layer, RoutineRepository.layer]),
+	Layer.provide([Collaborations.layer, RoutineRepository.layer]),
 );
 
 /** The thread an event may let a routine run settle in, and how the run ends if it ends it early. */

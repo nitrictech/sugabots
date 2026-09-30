@@ -1,7 +1,7 @@
 import type { CollaborationPart, ToolCallPart } from "@sugabots/contracts";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { loadCollaborationParts } from "./collaborations.ts";
+import { loadCollaborationParts } from "./collaboration-parts.ts";
 import { loadToolCallParts } from "./tool-calls.ts";
 
 /**
