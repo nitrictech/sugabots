@@ -3,7 +3,17 @@ import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { PodAudience } from "@sugabots/core/database/events/pod-audience";
-import { Context, Deferred, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
+import {
+	Clock,
+	Context,
+	Deferred,
+	Duration,
+	Effect,
+	Option,
+	Queue,
+	Schedule,
+	Stream,
+} from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -31,6 +41,12 @@ const PING = Duration.seconds(15);
  */
 const MAX_AGE = Duration.minutes(30);
 
+/**
+ * How long a stream trusts its last access check. A reply streams many events
+ * a second, and each check is a query; revoked access is noticed within this.
+ */
+const RECHECK = Duration.seconds(5);
+
 const STREAM_HEADERS = {
 	// Private workspace events must not be written to an intermediary cache.
 	"cache-control": "no-store",
@@ -40,15 +56,16 @@ const STREAM_HEADERS = {
 
 const STREAM_CONTENT_TYPE = "text/event-stream";
 
-/** How often a stream pings, and how long it lives. */
+/** How often a stream pings, how long it lives, and how long it trusts an access check. */
 export interface Timing {
 	readonly ping: Duration.Input;
 	readonly maxAge: Duration.Input;
+	readonly recheck: Duration.Input;
 }
 
 /** The streams' timing, which a test may shorten. */
 export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTiming", {
-	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE }),
+	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE, recheck: RECHECK }),
 });
 
 /** The workspace and thread streams, with authorization resolved before streaming. */
@@ -131,7 +148,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 	bus,
 	channel,
 	since,
-	timing: { ping, maxAge },
+	timing: { ping, maxAge, recheck },
 	stillAuthorized,
 	mayHear,
 }: {
@@ -140,9 +157,9 @@ const streamChannel = Effect.fnUntraced(function* ({
 	since: number | undefined;
 	timing: Timing;
 	/**
-	 * Re-asked before every event, as the actor the stream was opened for. It
-	 * is the only thing that notices access being revoked mid-stream, which is
-	 * why it is required.
+	 * Re-asked before an event once `recheck` has passed since it last said
+	 * yes, as the actor the stream was opened for. It is the only thing that
+	 * notices access being revoked mid-stream, which is why it is required.
 	 */
 	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
 	/**
@@ -153,6 +170,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 	mayHear: (podId: string) => Effect.Effect<boolean, never, CurrentActor.Service>;
 }) {
 	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
+	const recheckMillis = Duration.toMillis(Duration.fromInputUnsafe(recheck));
 	const ready = yield* Deferred.make<void>();
 	const runPromise = Effect.runPromiseWith(yield* Effect.context<CurrentActor.Service>());
 	// Each re-check is a trace of its own, linked to the stream's request. As a
@@ -188,14 +206,18 @@ const streamChannel = Effect.fnUntraced(function* ({
 				);
 
 				void (async () => {
+					let authorizedUntil = Number.NEGATIVE_INFINITY;
 					try {
 						for await (const delivery of bus.subscribe(channel, {
 							since,
 							signal: leaving.signal,
 						})) {
-							if (!(await stillAuthorizedFor(delivery)) || leaving.signal.aborted) {
-								break;
+							const now = await runPromise(Clock.currentTimeMillis);
+							if (now >= authorizedUntil) {
+								if (!(await stillAuthorizedFor(delivery))) break;
+								authorizedUntil = now + recheckMillis;
 							}
+							if (leaving.signal.aborted) break;
 							const audience = PodAudience.audienceOf(delivery.event);
 							if (audience.podId !== undefined && !(await runPromise(mayHear(audience.podId)))) {
 								continue;
