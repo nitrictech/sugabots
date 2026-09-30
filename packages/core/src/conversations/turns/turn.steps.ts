@@ -83,7 +83,6 @@ export const turnStepsLayer = Layer.effect(
 	Effect.gen(function* () {
 		const services = yield* Effect.context<SegmentServices | Database>();
 		const turns = yield* TurnRepository.Service;
-		const toolCalls = yield* ToolCallRepository.Service;
 		const { emit } = yield* ConversationEvents.Service;
 		return TurnSteps.of({
 			segment: (request) =>
@@ -107,8 +106,6 @@ export const turnStepsLayer = Layer.effect(
 						]);
 					}),
 				).pipe(Effect.provideContext(services)),
-			decide: (request, decided) =>
-				Effect.asVoid(toolCalls.recordDecision({ threadId: request.threadId, ...decided })),
 			cancelWaiting: (request) => turns.cancelWaiting(request),
 			announceReleased: (request) =>
 				transaction(emit([ConversationEvent.LaneReleased({ threadId: request.threadId })])).pipe(

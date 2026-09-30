@@ -395,13 +395,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const segment = vi.fn((_request: TurnRequest) =>
 			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 		);
-		// Recording decisions and cancellations is real; the segments are not.
+		// Recording cancellations is real; the segments are not.
 		const steps = TurnSteps.of({
 			segment,
-			decide: (request, decided) =>
-				Effect.asVoid(
-					Effect.promise(() => calls.recordDecision({ threadId: request.threadId, ...decided })),
-				),
 			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,

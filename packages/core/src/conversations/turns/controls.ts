@@ -98,11 +98,10 @@ export const makeControls = Effect.gen(function* () {
 						const approvalId = candidate.call.approvalId;
 						const decision = { decision: input.decision, userId: decider.actor.userId };
 						if (!candidate.owner) return yield* new ToolApprovalNotFound();
-						// Recorded here, so everyone watching the thread sees it decided as
-						// this commits rather than once the workflow wakes; the workflow's
-						// own recording then changes nothing. The first decision recorded
-						// stands, and the record is undone with this transaction if the
-						// send fails.
+						// Recorded and sent in one transaction: the engine writes the signal
+						// through the same connection, so both commit or neither does, and
+						// everyone watching the thread sees it decided as this commits. The
+						// first decision recorded stands.
 						const recorded = yield* toolCalls.recordDecision({
 							threadId: candidate.threadId,
 							approvalId,
