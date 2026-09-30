@@ -1,5 +1,6 @@
 import { PlayIcon } from "lucide-react";
 import { useState } from "react";
+import { trackVideoPlay } from "@/analytics";
 import { MotionCard, Reveal, riseIn } from "@/components/reveal";
 
 const YOUTUBE_VIDEO_ID = "faNgsMcrnnU";
@@ -32,7 +33,10 @@ export function ExplainerVideo() {
 				) : (
 					<button
 						type="button"
-						onClick={() => setPlaying(true)}
+						onClick={() => {
+							trackVideoPlay();
+							setPlaying(true);
+						}}
 						aria-label={`Watch video: ${TITLE}`}
 						className="group absolute inset-0 cursor-pointer outline-none"
 					>

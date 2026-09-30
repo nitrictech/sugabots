@@ -41,3 +41,9 @@ export function trackCallToActionClick(cta: CallToAction, placement: CallToActio
 	if (!posthog.__loaded) return;
 	posthog.capture("website:cta_clicked", { cta, placement });
 }
+
+/** Counts a press of play on the landing page's film, when analytics is running. */
+export function trackVideoPlay() {
+	if (!posthog.__loaded) return;
+	posthog.capture("website:video_played");
+}
