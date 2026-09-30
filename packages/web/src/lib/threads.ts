@@ -45,7 +45,15 @@ export function useThreadActivity(threadId: string | undefined) {
  * A thread and a page of its messages. The thread's events keep it current
  * while it is on screen, and it is fetched again whenever it comes back.
  */
-export function useThread(threadId: string | undefined) {
+/**
+ * A thread and its latest `recentMessages` messages, kept current by its events.
+ * A screen that pages its history some other way asks for fewer, as long as
+ * that still covers every message the stream may yet change.
+ */
+export function useThread(
+	threadId: string | undefined,
+	{ recentMessages = DEFAULT_THREAD_HISTORY_LIMIT }: { recentMessages?: number } = {},
+) {
 	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
 	const query = useQuery<ThreadDetails>({
@@ -58,7 +66,7 @@ export function useThread(threadId: string | undefined) {
 					const latest = await Effect.runPromise(
 						client.api.threads.get({
 							params: { threadId },
-							query: { limit: DEFAULT_THREAD_HISTORY_LIMIT },
+							query: { limit: recentMessages },
 						}),
 						{ signal },
 					);

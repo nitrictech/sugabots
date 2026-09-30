@@ -42,6 +42,14 @@ import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
+/**
+ * How many of the main thread's latest messages to fetch with it. The chat's
+ * history comes from its own pages; the thread only has to hold the messages
+ * its stream may still change — a reply being written and any queued behind it
+ * — and a turn's end refetches it anyway.
+ */
+const LIVE_MESSAGES = 10;
+
 export function AgentChat({
 	agent,
 	pod,
@@ -63,7 +71,7 @@ export function AgentChat({
 	const chat = useChat(pod.id, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
-	const mainThread = useThread(chat.data?.mainThreadId);
+	const mainThread = useThread(chat.data?.mainThreadId, { recentMessages: LIVE_MESSAGES });
 	useThreadEvents(chat.data?.mainThreadId);
 	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
