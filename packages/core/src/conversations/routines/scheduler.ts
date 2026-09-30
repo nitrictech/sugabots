@@ -1,5 +1,3 @@
-export * as RoutineScheduler from "./scheduler.ts";
-
 import { Duration, Effect, Layer } from "effect";
 import { RoutineRunner } from "./routine-runner.ts";
 

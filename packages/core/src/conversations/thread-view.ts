@@ -29,7 +29,7 @@ import { type UserFacing, UserMessage } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
 import { respondingIn } from "./floor/floor.ts";
-import { routineExecutionIdOf, toRoutineExecution } from "./routines/execution.ts";
+import { routineExecutionIdOf, toRoutineExecution } from "./routines/routines.ts";
 import {
 	agentColumns,
 	authorRow,

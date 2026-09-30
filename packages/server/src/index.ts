@@ -3,8 +3,8 @@ import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
+import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { RoutineScheduler } from "@sugabots/core/conversations/routines/scheduler";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
@@ -97,7 +97,7 @@ const ConversationServices = Conversations.layer.pipe(
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
-	RoutineScheduler.layer,
+	Routines.schedulerLayer,
 	EventPruning.layer,
 	PresetSeeding.layer,
 );

@@ -10,8 +10,6 @@ import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
-import { RoutineView } from "./routines/routine-view.ts";
-import { RoutineWebhooks } from "./routines/routine-webhooks.ts";
 import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
 import { RoutineWorkAdmission } from "./routines/work-admission.ts";
@@ -32,14 +30,13 @@ const services = Layer.mergeAll(
 	Chats.layer,
 	Collaborations.layer,
 	Routines.layer,
-	RoutineWebhooks.layer,
+	Routines.webhooksLayer,
 	RoutineRunner.layer,
 	Summaries.layer,
 	Compactions.layer,
 	RoutineSettlement.layer,
 	ChatView.layer,
 	ThreadView.layer,
-	RoutineView.layer,
 	FloorControl.layer,
 	// The Facilitator's workflow step brings the agent it picks into the thread.
 	ThreadRepository.layer,
@@ -74,6 +71,8 @@ export const layer = Layer.effectContext(
 			Context.get(built, Summaries.Service).handler,
 			Context.get(built, Compactions.Service).handler,
 		]);
+		// Internals included: the workflows' steps and the routine scheduler read
+		// them from here. Routes cannot, as `HttpServices` admits only public tags.
 		return Context.add(built, ConversationEvents.Service, events);
 	}),
 );

@@ -1,17 +1,8 @@
-export * as RoutineView from "./routine-view.ts";
-
-import type {
-	Routine,
-	RoutineExecutionPage,
-	RoutineExecutionPageQuery,
-	WorkspaceRoutine,
-} from "@sugabots/contracts";
+import type { WorkspaceRoutine } from "@sugabots/contracts";
 import { DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT } from "@sugabots/contracts";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { agent, pod, routine, routineExecution } from "../../database/schema.ts";
@@ -20,49 +11,16 @@ import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { crewOf } from "../threads/participants.ts";
 import { toRoutineExecution } from "./execution.ts";
-import { inScope, type OnAgent, RoutineNotFound, scopeOf, toRoutine } from "./routine.ts";
+import { inScope, RoutineNotFound, scopeOf, toRoutine } from "./routine.ts";
+import type { Routines } from "./routines.ts";
 
-/**
- * What the routine screens show, of the routines the current actor may read:
- * the routines, and each one's runs.
- */
-export interface Interface {
-	/**
-	 * Every routine on a crew agent in a pod the actor reaches, in a workspace
-	 * named by its id or its slug, by name, with its agent and pod.
-	 */
-	readonly listInWorkspace: (
-		workspace: string,
-	) => Effect.Effect<WorkspaceRoutine[], AuthorizationDenied, CurrentActor.Service>;
-	/** The agent's routines, by name. */
-	readonly list: (owner: {
-		agentId: string;
-	}) => Effect.Effect<Routine[], AuthorizationDenied, CurrentActor.Service>;
-	readonly get: (
-		routine: OnAgent,
-	) => Effect.Effect<Routine, AuthorizationDenied | RoutineNotFound, CurrentActor.Service>;
-	/**
-	 * A page of the routine's runs, newest first. A removed routine keeps its
-	 * history, so this finds it as long as it was ever defined.
-	 */
-	readonly listExecutions: (
-		routine: OnAgent,
-		page?: RoutineExecutionPageQuery,
-	) => Effect.Effect<
-		RoutineExecutionPage,
-		AuthorizationDenied | RoutineNotFound | InvalidRoutineExecutionCursor,
-		CurrentActor.Service
-	>;
-}
-
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/RoutineView") {}
-
-export const make = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Interface>("RoutineView");
+/** What the routine screens show: the view half of `Routines.Service`. */
+export const makeView = Effect.gen(function* () {
+	const operation = yield* serviceOperations<ViewMethods>("Routines");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 
-	return Service.of({
+	return {
 		listInWorkspace: (workspace) =>
 			operation(
 				"listInWorkspace",
@@ -174,12 +132,10 @@ export const make = Effect.gen(function* () {
 					};
 				}),
 			),
-	});
+	} satisfies ViewMethods;
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
+type ViewMethods = Pick<Routines.Interface, "listInWorkspace" | "list" | "get" | "listExecutions">;
 
 export class InvalidRoutineExecutionCursor
 	extends Data.TaggedError("InvalidRoutineExecutionCursor")

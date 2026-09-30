@@ -7,7 +7,7 @@ import { compactionWorkflow } from "./compaction/compaction.workflow.ts";
 import { facilitateWorkflow } from "./floor/facilitate.workflow.ts";
 import { facilitateStepsLayer } from "./floor/facilitator.ts";
 import { routineWorkflow } from "./routines/routine.workflow.ts";
-import { routineStepsLayer } from "./routines/steps.ts";
+import { Routines } from "./routines/routines.ts";
 import { summaryStepsLayer } from "./summaries/summary.steps.ts";
 import { summaryWorkflow } from "./summaries/summary.workflow.ts";
 import { Turns } from "./turns/turns.ts";
@@ -41,7 +41,7 @@ export const layer = Layer.mergeAll(
 			compactionStepsLayer,
 			Turns.stepsLayer,
 			facilitateStepsLayer,
-			routineStepsLayer,
+			Routines.stepsLayer,
 		),
 	),
 );
