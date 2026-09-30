@@ -13,8 +13,13 @@ import { createStore, del, get, keys, set } from "idb-keyval";
  * what it expects of the data may have changed.
  */
 
-/** The first part of every query key saved, by what it holds: what the shell and a chat draw. */
+/**
+ * The first part of every query key saved, by what it holds: what the shell and
+ * a chat draw. `onboarding` is among them because the shell waits on it before
+ * drawing anything, and it only ever goes from unfinished to finished.
+ */
 const SAVED = new Set([
+	"onboarding",
 	"workspaces",
 	"workspace-standing",
 	"pods",
