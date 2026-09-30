@@ -1,12 +1,15 @@
 export * as Workflows from "./workflows.ts";
 
+import { directClientLayer } from "@sugabots/core/database/database";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
-import { Config, Effect, Layer } from "effect";
+import { Config, Duration, Effect, Layer } from "effect";
 
 /**
  * Which engine runs workflows, from `WORKFLOW_ENGINE`:
  * - `single-runner` (the default): embedded in this server, on its Postgres.
- *   One server process only.
+ *   One server process only. Its messages go through the main pool, so a
+ *   signal sent in a transaction commits with it; its locks go through the
+ *   direct connection.
  * - `memory`: nothing survives. For tests.
  */
 const kind = Config.Literals(["single-runner", "memory"], "WORKFLOW_ENGINE").pipe(
@@ -19,7 +22,10 @@ export const engine = Layer.unwrap(
 			case "memory":
 				return WorkflowEngines.memory;
 			case "single-runner":
-				return WorkflowEngines.singleRunner;
+				return WorkflowEngines.singleRunnerWith({
+					hostLockWait: Duration.seconds(30),
+					sessions: directClientLayer,
+				});
 		}
 	}),
 );

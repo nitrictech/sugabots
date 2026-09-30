@@ -237,9 +237,9 @@ const probe = Layer.succeed(Probe, {
 		}),
 });
 
-const Go = DurableDeferred.make("go", { success: Schema.String });
+export const Go = DurableDeferred.make("go", { success: Schema.String });
 
-const Suspending = Workflow.make("conformance/suspending", {
+export const Suspending = Workflow.make("conformance/suspending", {
 	payload: { key: Schema.String },
 	success: Schema.String,
 	idempotencyKey: (payload) => payload.key,
@@ -278,7 +278,7 @@ const Second = DurableDeferred.make("second", { success: Schema.String });
 const racingToken = (deferred: typeof First, executionId: string) =>
 	DurableDeferred.tokenFromExecutionId(deferred, { workflow: Racing, executionId });
 
-const goToken = (executionId: string, workflow: Workflows = Suspending) =>
+export const goToken = (executionId: string, workflow: Workflows = Suspending) =>
 	DurableDeferred.tokenFromExecutionId(Go, { workflow, executionId });
 
 type Workflows = typeof Suspending | typeof Racing | typeof Waiting | typeof Inputs;
@@ -378,9 +378,10 @@ const workflows = Layer.mergeAll(
 	),
 ).pipe(Layer.provide(probe));
 
-function start(engine: Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>) {
+/** A harness over `engine`, whose other services (`R`) the effects it runs may use too. */
+export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngine | R, unknown>) {
 	const runtime = ManagedRuntime.make(workflows.pipe(Layer.provideMerge(engine)));
-	const run = <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>) =>
+	const run = <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine | R>) =>
 		runtime.runPromise(effect);
 	const retried = <A>(attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>) =>
 		run(

@@ -55,7 +55,8 @@ const Infrastructure = Layer.mergeAll(
 	Layer.provideMerge(
 		Layer.mergeAll(
 			Installation.layer,
-			Layer.mergeAll(EventBus.layer, Workflows.engine).pipe(Layer.provide(directClientLayer)),
+			EventBus.layer.pipe(Layer.provide(directClientLayer)),
+			Workflows.engine,
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
