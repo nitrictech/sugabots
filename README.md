@@ -199,3 +199,25 @@ serves its own copy at its own address.
 ## Contributing
 
 To work on Sugabots, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+The software source code in this repository is licensed under the
+[MIT License](LICENSE.md) unless otherwise stated. See the asset exceptions below
+and the package-level licensing notices.
+
+Sugabots is a product of Nitric Group Inc.
+
+The Sugabots name, logo, brand identity, and supplied brand assets (including
+illustrations and avatars) are not licensed under the MIT License. See the notices for
+[logos and avatars](packages/avatars/README.md) and
+[website brand and marketing assets](packages/website/README.md).
+
+The avatar geometry, colour definitions, and rendering code remain MIT licensed.
+
+Forks and derivative products may use the MIT-licensed software, but should use
+their own name and branding. Unofficial forks and derivative products must not
+imply affiliation with, endorsement by, or maintenance by Nitric Group Inc. or Sugabots.
+
+Third-party materials retain their respective licenses and notices, including
+the [provider logos](packages/provider-logos/README.md).
