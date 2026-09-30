@@ -9,7 +9,7 @@ import type {
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
 import { client } from "@/test-client.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
@@ -156,6 +156,21 @@ describe("what people and bots write", () => {
 		expect((await screen.findByText("Tim's bill")).getAttribute("data-streamdown")).toBe("strong");
 		expect(screen.getByText("Look up plans").tagName).toBe("LI");
 		expect(screen.getByText(asked)).toBeDefined();
+	});
+
+	it("copies a reply as the bot wrote it, Markdown and all", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		onTestFinished(() => {
+			Reflect.deleteProperty(navigator, "clipboard");
+		});
+		const answered = "**Tim's bill** is high.\n\n- Look up plans";
+		show([reply([{ type: "text", text: answered }])]);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Copy message" }));
+
+		expect(writeText).toHaveBeenCalledWith(answered);
+		expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
 	});
 
 	it("marks a mention in a reply already shown, once it names someone", async () => {

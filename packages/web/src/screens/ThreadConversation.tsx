@@ -15,6 +15,7 @@ import { formatClockTime } from "@/lib/list-time.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
@@ -489,16 +490,20 @@ function MessageBubble({
 						)}
 					</div>
 					{/*
-					 * The time shows only while the bubble is hovered or holds the focus. A touch
-					 * screen cannot hover, so there it is left to screen readers and a tap shows it.
+					 * The time and the copy button show only while the bubble is hovered or holds
+					 * the focus, and take no clicks while hidden. A touch screen cannot hover, so
+					 * there they are left to screen readers and a tap shows the time.
 					 */}
 					<div
 						className={cn(
-							"absolute top-1/2 -translate-y-1/2 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
-							outgoing ? "right-[calc(100%+8px)]" : "left-[calc(100%+8px)]",
+							"pointer-events-none absolute bottom-0 flex flex-col gap-0.5 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
+							// Stacked, so both fit the narrow margin a bubble leaves beside it, and at the
+							// bottom, where a long reply ends and the eye already is.
+							outgoing ? "right-[calc(100%+8px)] items-end" : "left-[calc(100%+8px)] items-start",
 						)}
 					>
 						<MessageTime createdAt={message.createdAt} />
+						{text && <CopyIconButton label="Copy message" text={text} side="top" />}
 					</div>
 					{/* A screen reader has the time beside the bubble already; the tapped one would repeat it. */}
 					{timeFloats && timeShown !== undefined && (
