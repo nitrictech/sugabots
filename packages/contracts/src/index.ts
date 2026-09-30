@@ -15,6 +15,7 @@ export * from "./model-trials.ts";
 export * from "./onboarding.ts";
 export * from "./pods.ts";
 export * from "./provider-catalog.ts";
+export * from "./referrals.ts";
 export * from "./routines.ts";
 export * from "./search-providers.ts";
 export * from "./system-agents.ts";

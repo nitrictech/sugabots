@@ -1,3 +1,4 @@
+import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { appHandlers, StoryApp, storyUser, storyWorkspace } from "../story-app.tsx";
@@ -9,6 +10,7 @@ import { appHandlers, StoryApp, storyUser, storyWorkspace } from "../story-app.t
  */
 
 const settings = `/${storyWorkspace.slug}/settings`;
+const api = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 const TABLET = { viewport: { value: "ipad11p", isRotated: false } };
 
@@ -54,6 +56,27 @@ export const Profile = meta.story({
 			await canvas.findByRole("heading", { name: storyUser.name }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+	},
+});
+
+/** Profile where sign-up is by referral: your link to copy, and resetting it. */
+export const ProfileWithReferralLink = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(api("/referral-link/reset"), () =>
+				HttpResponse.json({ url: "https://sugabots.example/join/9k2mx7qd4pw3h" }),
+			),
+			...appHandlers({ referralLink: "https://sugabots.example/join/k7x2p9qa4mz8c" }),
+		);
+	},
+	render: () => <StoryApp path={`${settings}/profile`} />,
+	play: async ({ canvas, userEvent }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Share your invite link" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText(/join\/k7x2p9qa4m/)).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Reset link" }));
+		await expect(await canvas.findByText(/join\/9k2mx7qd4p/)).toBeInTheDocument();
 	},
 });
 

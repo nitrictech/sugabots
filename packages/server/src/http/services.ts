@@ -1,4 +1,5 @@
 import type { Usage } from "@sugabots/core/accounting/usage";
+import type { Accounts } from "@sugabots/core/accounts/accounts";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -19,13 +20,15 @@ import type { ChannelAccess } from "../routes/events/access.ts";
  * every method requires the current actor and authorizes them, or the event
  * streams' `ChannelAccess`, which does the same for a channel. The exception
  * is `Routines.Webhooks`, which nobody signs in to call: the routine's secret
- * admits the run instead.
+ * admits the run instead. `Accounts` is here for the referral link; its
+ * `admit` is better-auth's, for somebody who has no account yet.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a
  * repository, a workflow's steps or a service that acts for nobody, such as
  * `TurnExecution` or `PersonalPods`, does not compile.
  */
 export type HttpServices =
+	| Accounts.Service
 	| Membership.Service
 	| Onboarding.Service
 	| PodAdministration.Service

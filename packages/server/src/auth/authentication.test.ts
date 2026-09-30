@@ -38,16 +38,15 @@ afterAll(async () => {
 	await closeDatabase();
 });
 
-/** The real `Authentication` and `Membership` behind the test app, keeping sent emails in `sent`. */
+/** The real `Authentication`, `Membership` and `Accounts` behind the test app, keeping sent emails in `sent`. */
 async function appWith(
-	policy: { ALLOW_OPEN_SIGNUP: "true" | "false"; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
+	policy: { SIGNUP_MODE: Accounts.SignUpMode; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
 	sent: Email.Message[],
 ) {
 	const runtime = ManagedRuntime.make(
 		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
+			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
-				Installation.layer,
-				Accounts.layer,
 				Layer.succeed(
 					Email.Service,
 					Email.Service.of({
@@ -58,6 +57,7 @@ async function appWith(
 					}),
 				),
 			]),
+			Layer.provide(Installation.layer),
 			Layer.provide(testInfrastructure),
 			Layer.provide(
 				ConfigProvider.layer(
@@ -77,13 +77,18 @@ async function appWith(
 	);
 	closers.push(() => runtime.dispose());
 	const services = await runtime.runPromise(
-		Effect.all({ authentication: Authentication.Service, membership: Membership.Service }),
+		Effect.all({
+			authentication: Authentication.Service,
+			membership: Membership.Service,
+			accounts: Accounts.Service,
+		}),
 	);
 	return atServerRoot(
 		createTestApp(
 			Layer.mergeAll(
 				Layer.succeed(Authentication.Service, services.authentication),
 				Layer.succeed(Membership.Service, services.membership),
+				Layer.succeed(Accounts.Service, services.accounts),
 				installationWithWebAppAt(ORIGIN),
 			),
 		),
@@ -104,8 +109,13 @@ function post(app: App, path: string, body: unknown, token?: string) {
 	});
 }
 
-function signUpAt(app: App, name: string, email: string) {
-	return post(app, "/auth/sign-up/email", { name, email, password: "correct-horse-battery" });
+function signUpAt(app: App, name: string, email: string, extra: Record<string, unknown> = {}) {
+	return post(app, "/auth/sign-up/email", {
+		name,
+		email,
+		password: "correct-horse-battery",
+		...extra,
+	});
 }
 
 /** A workspace made by the holder of `token`. */
@@ -123,7 +133,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	const sent: Email.Message[] = [];
 	let app: App;
 	beforeAll(async () => {
-		app = await appWith({ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" }, sent);
+		app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent);
 	});
 
 	/** Signs somebody up and returns the bearer token they were given. */
@@ -276,8 +286,8 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 	let closed: App;
 	beforeAll(async () => {
 		[open, closed] = await Promise.all([
-			appWith({ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
-			appWith({ ALLOW_OPEN_SIGNUP: "false", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+			appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+			appWith({ SIGNUP_MODE: "closed", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
 		]);
 	});
 
@@ -319,12 +329,126 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 });
 
 describe.skipIf(!process.env.DATABASE_URL)(
+	"an installation that signs people up by referral",
+	() => {
+		const sent: Email.Message[] = [];
+		// The same database under both policies, so there is always somebody to
+		// refer from and the installation is never empty.
+		let open: App;
+		let referral: App;
+		beforeAll(async () => {
+			[open, referral] = await Promise.all([
+				appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+				appWith({ SIGNUP_MODE: "referral", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+			]);
+		});
+
+		/** A member of the referral installation, and the bearer token they were given. */
+		async function aMember(unique: string): Promise<{ id: string; token: string }> {
+			const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
+			expect(response.status).toBe(200);
+			const { user } = (await response.json()) as { user: { id: string } };
+			return { id: user.id, token: response.headers.get("set-auth-token") as string };
+		}
+
+		async function referralLinkOf(app: App, token: string): Promise<string | null> {
+			const response = await app.request(`${API_BASE_PATH}/referral-link`, {
+				headers: { authorization: `Bearer ${token}` },
+			});
+			expect(response.status).toBe(200);
+			return ((await response.json()) as { url: string | null }).url;
+		}
+
+		function codeIn(link: string | null): string {
+			const code = link === null ? null : new URL(link).pathname.split("/join/")[1];
+			expect(code, "the link should carry a code").toBeTruthy();
+			return code as string;
+		}
+
+		function referrerOf(email: string) {
+			return onDatabase((db) =>
+				db.select({ referredBy: user.referredBy }).from(user).where(eq(user.email, email)),
+			);
+		}
+
+		it("admits somebody holding a member's link, and records who sent it", async () => {
+			const unique = crypto.randomUUID().slice(0, 8);
+			const ada = await aMember(unique);
+			const link = await referralLinkOf(referral, ada.token);
+			const bobEmail = `bob-${unique}@example.com`;
+
+			expect(link).toMatch(new RegExp(`^${ORIGIN}/join/[0-9a-z]{13}$`));
+			expect(
+				(await signUpAt(referral, "Bob", bobEmail, { referralCode: codeIn(link) })).status,
+			).toBe(200);
+			expect(await referrerOf(bobEmail)).toEqual([{ referredBy: ada.id }]);
+		});
+
+		it("refuses somebody with no link, or a code nobody holds", async () => {
+			const unique = crypto.randomUUID().slice(0, 8);
+			await aMember(unique);
+
+			const withoutLink = await signUpAt(referral, "Eve", `eve-${unique}@example.com`);
+			const forged = await signUpAt(referral, "Eve", `eve-${unique}@example.com`, {
+				referralCode: "0000000000000",
+			});
+
+			expect(withoutLink.status).toBe(403);
+			expect(await withoutLink.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
+			expect(forged.status).toBe(403);
+			expect(await forged.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
+			expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
+		});
+
+		it("stops a link working once its member resets it, and admits with the new one", async () => {
+			const unique = crypto.randomUUID().slice(0, 8);
+			const ada = await aMember(unique);
+			const oldCode = codeIn(await referralLinkOf(referral, ada.token));
+
+			const reset = await post(referral, "/referral-link/reset", {}, ada.token);
+			const newCode = codeIn(((await reset.json()) as { url: string }).url);
+
+			expect(reset.status).toBe(200);
+			expect(codeIn(await referralLinkOf(referral, ada.token))).toBe(newCode);
+			const stale = await signUpAt(referral, "Bob", `bob-${unique}@example.com`, {
+				referralCode: oldCode,
+			});
+			expect(stale.status).toBe(403);
+			expect(await stale.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
+			expect(
+				(await signUpAt(referral, "Bob", `bob-${unique}@example.com`, { referralCode: newCode }))
+					.status,
+			).toBe(200);
+		});
+
+		it("does not let somebody signing up say who referred them", async () => {
+			const unique = crypto.randomUUID().slice(0, 8);
+			const ada = await aMember(unique);
+
+			const response = await signUpAt(open, "Eve", `eve-${unique}@example.com`, {
+				referredBy: ada.id,
+			});
+
+			expect(response.status).toBe(400);
+			expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
+		});
+
+		it("offers no link where sign-up is not by referral", async () => {
+			const ada = await aMember(crypto.randomUUID().slice(0, 8));
+
+			expect(await referralLinkOf(open, ada.token)).toBeNull();
+			expect((await post(open, "/referral-link/reset", {}, ada.token)).status).toBe(404);
+		});
+	},
+);
+
+describe.skipIf(!process.env.DATABASE_URL)(
 	"an installation that requires email verification",
 	() => {
 		const sent: Email.Message[] = [];
 		let app: App;
 		beforeAll(async () => {
-			app = await appWith({ ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "true" }, sent);
+			app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "true" }, sent);
 		});
 
 		it("withholds a session until the address is proven, then admits", async () => {

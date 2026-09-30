@@ -2,6 +2,7 @@ import { Accounts } from "@sugabots/core/accounts/accounts";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
+import { unimplemented } from "@sugabots/core/testing";
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { Authentication } from "./authentication.ts";
@@ -28,10 +29,7 @@ async function startup(env: Record<string, string>) {
 						noDatabase,
 						Installation.layer,
 						Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
-						Layer.succeed(
-							Accounts.Service,
-							Accounts.Service.of({ admit: () => Effect.void, requireEmailVerification: false }),
-						),
+						unimplemented(Accounts.Service, { requireEmailVerification: false }),
 					]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),

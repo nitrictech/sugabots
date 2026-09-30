@@ -143,7 +143,7 @@ const seedAccounts = Accounts.layer.pipe(
 	Layer.provide(
 		ConfigProvider.layer(
 			ConfigProvider.fromEnv({
-				env: { ALLOW_OPEN_SIGNUP: "true", REQUIRE_EMAIL_VERIFICATION: "false" },
+				env: { SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" },
 			}),
 		),
 	),
@@ -163,10 +163,9 @@ seed.pipe(
 				Layer.mergeAll(
 					Ids.layer,
 					Credentials.layer,
-					Installation.layer,
 					seedAccounts,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
-				).pipe(Layer.provideMerge(databaseLayer)),
+				).pipe(Layer.provideMerge(Installation.layer), Layer.provideMerge(databaseLayer)),
 			),
 		),
 	),

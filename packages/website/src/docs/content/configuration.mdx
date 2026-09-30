@@ -35,10 +35,10 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
 ## Access
 
-| Variable                     | Default | Description                                                                                                                                                  |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ALLOW_OPEN_SIGNUP`          | `false` | Whether anybody may create an account. Off, the first person to arrive owns the installation, and after that the only way in is an invitation from a member. |
-| `REQUIRE_EMAIL_VERIFICATION` | `false` | Whether a new account must open a link in its inbox before it gets a session. With the console email provider, the link is printed to the server's console.  |
+| Variable                     | Default  | Description                                                                                                                                                                                                                                                                    |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SIGNUP_MODE`                | `closed` | Who may create an account. `closed`: nobody signs themselves up; people arrive by invitation to a workspace, except the first account on a new installation. `referral`: also anybody with a member's [referral link](/docs/people-and-roles#referral-links). `open`: anybody. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false`  | Whether a new account must open a link in its inbox before it gets a session. With the console email provider, the link is printed to the server's console.                                                                                                                    |
 
 ## Network
 

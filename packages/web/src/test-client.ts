@@ -55,6 +55,10 @@ export const client = {
 			removeMember: vi.fn(),
 			leave: vi.fn(),
 		},
+		referrals: {
+			link: vi.fn(),
+			resetLink: vi.fn(),
+		},
 		onboarding: {
 			status: vi.fn(),
 			complete: vi.fn(),

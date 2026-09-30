@@ -1,8 +1,10 @@
 import { type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { useState } from "react";
+import { Check, Copy, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -14,6 +16,7 @@ import {
 import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
@@ -235,7 +238,82 @@ function ProfileSettings() {
 				<SettingsRow label="Name" trailing={<SettingsValue>{user.name}</SettingsValue>} />
 				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
 			</SettingsGroup>
+			<ReferralLinkSettings />
 			<SettingsDanger onClick={() => void signOut()}>Sign out</SettingsDanger>
 		</SettingsPage>
 	);
+}
+
+/** How long Copied shows before the button reads Copy link again. */
+const COPIED_FEEDBACK_MS = 2000;
+
+/** The link that lets somebody new sign up, where the installation signs people up by referral. */
+function ReferralLinkSettings() {
+	const { data: link } = useReferralLink();
+	const reset = useResetReferralLink();
+	const [copied, setCopied] = useState(false);
+	useEffect(() => {
+		if (!copied) return;
+		const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+		return () => clearTimeout(timer);
+	}, [copied]);
+	if (!link) return null;
+
+	function copy(url: string) {
+		void navigator.clipboard
+			?.writeText(url)
+			.then(() => setCopied(true))
+			.catch(() => setCopied(false));
+	}
+
+	return (
+		<SettingsGroup
+			className="flex flex-col gap-3 p-4"
+			note={
+				<span className="flex items-center justify-between gap-3">
+					<span>
+						{reset.error ? failureMessage(reset.error) : "Shared it somewhere you shouldn't have?"}
+					</span>
+					<Button
+						variant="ghost"
+						size="bare"
+						disabled={reset.isPending}
+						onClick={() => {
+							setCopied(false);
+							reset.mutate();
+						}}
+						className="rounded-md px-1 py-0.5 text-sm"
+					>
+						<RotateCcw aria-hidden />
+						{reset.isPending ? "Resetting…" : "Reset link"}
+					</Button>
+				</span>
+			}
+		>
+			<div className="flex flex-col gap-1">
+				<h3 className="m-0 font-semibold text-[15px] text-foreground">Share your invite link</h3>
+				<p className="m-0 text-muted-foreground text-sm">
+					Anyone with it can sign up and get a workspace of their own.
+				</p>
+			</div>
+			<div className="flex min-w-0 items-center gap-3 rounded-[12px] bg-background py-1.5 pr-1.5 pl-3.5">
+				<span className="min-w-0 flex-1 truncate font-mono text-[14px] text-foreground">
+					{withoutScheme(link)}
+				</span>
+				<Button
+					size="sm"
+					onClick={() => copy(link)}
+					className="bg-link text-background hover:bg-link hover:opacity-90"
+				>
+					{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+					{copied ? "Copied" : "Copy"}
+				</Button>
+			</div>
+		</SettingsGroup>
+	);
+}
+
+/** A link as people read it: `sugabots.app/join/…`, since every one starts with https://. */
+function withoutScheme(url: string): string {
+	return url.replace(/^https?:\/\//, "");
 }

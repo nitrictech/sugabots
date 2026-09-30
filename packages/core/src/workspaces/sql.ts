@@ -50,10 +50,20 @@ export const user = pgTable(
 		emailVerified: boolean("email_verified").notNull().default(false),
 		image: text("image"),
 		onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
+		/** Who sent the referral link this person signed up with. */
+		referredBy: uuid("referred_by").references((): AnyPgColumn => user.id, {
+			onDelete: "set null",
+		}),
+		/** The code in this person's referral link, made when they first ask for it and replaced when they reset it. */
+		referralCode: text("referral_code"),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [uniqueIndex("user_email_idx").on(table.email)],
+	(table) => [
+		uniqueIndex("user_email_idx").on(table.email),
+		uniqueIndex("user_referral_code_idx").on(table.referralCode),
+		index("user_referred_by_idx").on(table.referredBy),
+	],
 );
 
 /**

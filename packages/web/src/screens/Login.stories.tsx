@@ -86,6 +86,38 @@ export const FromAnInvitation = meta.story({
 	},
 });
 
+/** From a referral link: straight to making an account, which sends the link's code. */
+export const FromAReferralLink = meta.story({
+	args: { referralCode: "referral-code" },
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${auth}/sign-up/email`, async ({ request }) => {
+				const body = (await request.json()) as { referralCode?: string };
+				return body.referralCode === "referral-code"
+					? HttpResponse.json({
+							token: "session-token",
+							user: {
+								id: "0199a3a0-0000-7000-8000-000000000009",
+								name: "Ryan Eyes",
+								email: "ryan@nitric.io",
+							},
+						})
+					: HttpResponse.json({ code: "SIGN_UP_CLOSED", message: "Closed" }, { status: 403 });
+			}),
+		);
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByRole("heading", { name: "Create an account" })).toBeInTheDocument();
+		await expect(canvas.getByText(/invited to Sugabots/)).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Back" })).toBeNull();
+		await userEvent.type(canvas.getByLabelText("Name"), "Ryan Eyes");
+		await userEvent.type(canvas.getByLabelText("Email"), "ryan@nitric.io");
+		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse");
+		await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
+		await expect(args.onSignedIn).toHaveBeenCalled();
+	},
+});
+
 /** Forgot password? asks for the address, carrying over what was typed. */
 export const ForgotPassword = meta.story({
 	play: async ({ canvas, userEvent }) => {

@@ -42,8 +42,14 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 	});
 
 	return {
-		signUp: (input: { name: string; email: string; password: string; callbackURL?: string }) =>
-			orThrow(auth.signUp.email(input)),
+		/** `referralCode` is the `code` of the referral link somebody signed up from. */
+		signUp: (input: {
+			name: string;
+			email: string;
+			password: string;
+			callbackURL?: string;
+			referralCode?: string;
+		}) => orThrow(auth.signUp.email(input)),
 
 		signIn: (input: { email: string; password: string }) => orThrow(auth.signIn.email(input)),
 
