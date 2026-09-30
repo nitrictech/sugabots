@@ -221,6 +221,7 @@ export function ThreadConversation({
 								return null;
 							}
 							const isLast = position === lastBubble;
+							const endsRun = isLast && !runContinues && !isTyping(message);
 							return (
 								<Fragment key={segment.key}>
 									{nameOnce()}
@@ -228,9 +229,10 @@ export function ThreadConversation({
 										message={message}
 										text={segment.text}
 										outgoing={outgoing}
-										endsRun={isLast && !runContinues && !isTyping(message)}
+										endsRun={endsRun}
 										isLast={isLast}
-										roomBelow={isLast && !runContinues && !isTyping(message) && next !== undefined}
+										// A collaboration or approval card drawn after the bubble takes that space.
+										roomBelow={endsRun && next !== undefined && position === segments.length - 1}
 										compact={compact}
 										arrivedLive={watchedWritten.has(message.id)}
 										queued={queued.has(message.id)}
