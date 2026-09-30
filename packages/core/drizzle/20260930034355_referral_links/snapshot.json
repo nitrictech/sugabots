@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "50e248a3-d900-484b-a99e-e3b2c75c72fe",
+  "id": "f93c8e68-b946-45f8-badf-b1bb496b67f7",
   "prevIds": [
     "e08f57e4-0fbe-4fa9-a500-76b7137b31b6"
   ],
@@ -4093,14 +4093,14 @@
       "table": "user"
     },
     {
-      "type": "integer",
+      "type": "text",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
-      "default": "0",
+      "default": null,
       "generated": null,
       "identity": null,
-      "name": "referral_link_version",
+      "name": "referral_code",
       "entityType": "columns",
       "schema": "public",
       "table": "user"
@@ -6190,6 +6190,27 @@
       "method": "btree",
       "concurrently": false,
       "name": "user_email_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "user"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "referral_code",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "user_referral_code_idx",
       "entityType": "indexes",
       "schema": "public",
       "table": "user"
