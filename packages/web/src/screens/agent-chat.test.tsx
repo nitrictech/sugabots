@@ -393,6 +393,14 @@ describe("ongoing agent Chat", () => {
 		});
 	});
 
+	it("shows the chat's messages while its thread is still loading", async () => {
+		client.api.threads.get.mockReturnValue(Effect.never);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+
+		expect(await screen.findByText(mainMessage.content)).toBeDefined();
+		expect(screen.getByText(agentMessage.content)).toBeDefined();
+	});
+
 	it("shows Routine runs in the main Chat log", async () => {
 		client.api.chats.messages.mockReturnValue(
 			Effect.succeed({

@@ -77,10 +77,15 @@ export function AgentChat({
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
 	const details = mainThread.data;
-	const host = details?.participants.find(
-		(participant): participant is AgentParticipant =>
-			participant.kind === "agent" && participant.id === agent.id,
-	);
+	// Drawn from the agent the page already has, so the messages need not wait for the thread.
+	const host: AgentParticipant = {
+		kind: "agent",
+		id: agent.id,
+		name: agent.name,
+		handle: agent.handle,
+		color: agent.color,
+		face: agent.face,
+	};
 	const entries = history.entries;
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
@@ -97,13 +102,13 @@ export function AgentChat({
 	);
 
 	useLayoutEffect(() => {
-		if (!chat.data || !details) return;
+		if (!chat.data) return;
 		if (threadId && !previousThreadId.current) {
 			opener.current = document.activeElement as HTMLElement;
 		}
 		if (!threadId && previousThreadId.current) requestAnimationFrame(() => opener.current?.focus());
 		previousThreadId.current = threadId;
-	}, [chat.data, details, threadId]);
+	}, [chat.data, threadId]);
 
 	useLayoutEffect(() => {
 		if (
@@ -172,19 +177,18 @@ export function AgentChat({
 				The API did not answer. Reload this page to try again.
 			</EmptyState>
 		);
-	if (!details || !host)
-		return mainThread.isPending ? null : (
-			<EmptyState title="Could not load this chat">
-				The chat is missing its main conversation.
-			</EmptyState>
-		);
 
 	// Anyone but yourself; naming another bot here has this chat's bot ask it.
 	// The crew is the pod's agents, so leave out those who have joined.
-	const composerMentionable = [
-		...details.participants.filter((participant) => participant.id !== user.id),
-		...details.crew.filter((member) => !details.participants.some(({ id }) => id === member.id)),
-	];
+	const composerMentionable = details
+		? [
+				...details.participants.filter((participant) => participant.id !== user.id),
+				...details.crew.filter(
+					(member) => !details.participants.some(({ id }) => id === member.id),
+				),
+			]
+		: [];
+	const participants = details ? [...details.participants, ...details.crew] : [host];
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -203,7 +207,7 @@ export function AgentChat({
 				>
 					{/* The same inset as the header and the composer, so the faces, the + and the header line up. */}
 					<div className="flex min-h-full w-full flex-col px-4 md:px-[22px]">
-						{messages.isError && (
+						{(messages.isError || mainThread.isError) && (
 							<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
 						)}
 						{messages.hasNextPage && (
@@ -217,7 +221,7 @@ export function AgentChat({
 								{messages.isFetchingNextPage ? "Loading…" : "Load older messages"}
 							</Button>
 						)}
-						{items.length === 0 && (
+						{items.length === 0 && !messages.isPending && (
 							<div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-6 text-center">
 								<AgentAvatar color={agent.color} face={agent.face} size={88} />
 								<h2 className="m-0 pt-1.5 font-bold text-[20px] text-foreground">
@@ -236,12 +240,12 @@ export function AgentChat({
 										messages={group.messages}
 										host={host}
 										isRunning={false}
-										participants={[...details.participants, ...details.crew]}
+										participants={participants}
 										user={user}
 										dividers={false}
 										onOpenCollaboration={openThread}
 										podId={pod.id}
-										canApproveToolCalls={details.capabilities?.approveToolCalls}
+										canApproveToolCalls={details?.capabilities?.approveToolCalls}
 										queued={queued}
 										peopleTyping={group === lastGroup ? peopleTyping : undefined}
 									/>
@@ -297,7 +301,7 @@ export function AgentChat({
 					<DetailsSidebar
 						agent={agent}
 						pod={pod}
-						threadId={details.thread.id}
+						threadId={chat.data.mainThreadId}
 						user={user}
 						onClose={onDetailsClose}
 					/>
