@@ -181,7 +181,7 @@ function CompactSettingsList() {
 	return (
 		<nav
 			aria-label="Settings sections"
-			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-[620px] md:px-8 md:pt-9 lg:hidden"
+			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-[620px] *:shrink-0 md:px-8 md:pt-9 lg:hidden"
 		>
 			<div className="flex items-center">
 				<h1 className="m-0 flex-1 font-extrabold text-[30px] text-foreground tracking-[-0.02em]">

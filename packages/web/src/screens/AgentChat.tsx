@@ -17,7 +17,7 @@ import {
 	useReadWhileShown,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
-import { useFollowContentGrowth } from "@/lib/follow-latest.ts";
+import { useFollowContentGrowth, useKeepFootInView } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -117,6 +117,7 @@ export function AgentChat({
 	}, [latestItemRevision]);
 
 	useFollowContentGrowth(viewport, followingLatest);
+	useKeepFootInView(viewport);
 
 	async function submit() {
 		const message = draft.trim();
@@ -190,7 +191,7 @@ export function AgentChat({
 						followingLatest.current =
 							element.scrollHeight - element.scrollTop - element.clientHeight < 48;
 					}}
-					className="min-h-0 flex-1 overflow-y-auto pt-[22px] pb-3"
+					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-[22px] pb-3"
 				>
 					{/* The same inset as the header and the composer, so the faces, the + and the header line up. */}
 					<div className="flex min-h-full w-full flex-col px-4 md:px-[22px]">

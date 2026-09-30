@@ -21,3 +21,22 @@ export function useFollowContentGrowth(
 		return () => observer.disconnect();
 	});
 }
+
+/**
+ * Keeps what is at the foot of `viewport` at its foot when the viewport itself
+ * changes height, as when a phone's keyboard opens under the composer: the
+ * messages move up with the composer instead of sliding under it.
+ */
+export function useKeepFootInView(viewport: RefObject<HTMLElement | null>) {
+	useEffect(() => {
+		const element = viewport.current;
+		if (!element || typeof ResizeObserver === "undefined") return;
+		let previousHeight = element.clientHeight;
+		const observer = new ResizeObserver(() => {
+			element.scrollTop += previousHeight - element.clientHeight;
+			previousHeight = element.clientHeight;
+		});
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
+}

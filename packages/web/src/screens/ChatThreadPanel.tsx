@@ -177,7 +177,7 @@ export function ChatThreadPanel({
 						aria-label="Thread messages"
 						// biome-ignore lint/a11y/noNoninteractiveTabindex: a thread longer than the sheet scrolls, so the keyboard has to reach it too.
 						tabIndex={0}
-						className="focus-ring min-h-0 flex-1 overflow-y-auto px-3.5 pt-1 pb-4"
+						className="focus-ring min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3.5 pt-1 pb-4"
 					>
 						{query.loadOlderError && (
 							<p role="alert" className="m-0 pb-3 text-destructive-text text-sm">

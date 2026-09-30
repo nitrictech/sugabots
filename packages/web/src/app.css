@@ -247,6 +247,19 @@
 }
 
 /*
+ * iOS Safari zooms the page into any field whose text is under 16px when it is
+ * focused, and stays zoomed. Outside a layer, so it wins over each field's own
+ * size; touch screens only, so a desktop keeps the design's sizes.
+ */
+@media (pointer: coarse) {
+	input,
+	textarea,
+	select {
+		font-size: 16px;
+	}
+}
+
+/*
  * `focus-ring-within` is for a control made of several elements — the composer
  * is a textarea and buttons inside one bordered box — where the box should
  * light up rather than the part that happens to hold the caret.

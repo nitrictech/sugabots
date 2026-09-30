@@ -9,7 +9,7 @@ import {
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Fragment, type ReactNode, useRef } from "react";
+import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
@@ -230,6 +230,9 @@ export function ThreadConversation({
 										outgoing={outgoing}
 										endsRun={isLast && !runContinues && !isTyping(message)}
 										isLast={isLast}
+										roomBelow={
+											isLast && !runContinues && !isTyping(message) && next !== undefined
+										}
 										compact={compact}
 										arrivedLive={watchedWritten.has(message.id)}
 										queued={queued.has(message.id)}
@@ -375,6 +378,7 @@ function MessageBubble({
 	outgoing,
 	endsRun,
 	isLast,
+	roomBelow,
 	arrivedLive,
 	compact,
 	queued,
@@ -388,6 +392,11 @@ function MessageBubble({
 	endsRun: boolean;
 	/** Whether this is the message's last bubble, where a failure shows. */
 	isLast: boolean;
+	/**
+	 * Whether another run follows, so the space that separates runs is under
+	 * this bubble and a tapped time can sit in it without moving anything.
+	 */
+	roomBelow: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
 	compact: boolean;
@@ -396,6 +405,8 @@ function MessageBubble({
 	/** Everyone a mention in the text could name. */
 	mentionable: ThreadParticipant[];
 }) {
+	// Unset until the first tap, so a screen that hovers never has the time twice.
+	const [timeShown, setTimeShown] = useState<boolean>();
 	if (message.author.kind === "routine_trigger") {
 		return <RoutineTriggerBubble message={message} text={text} />;
 	}
@@ -403,6 +414,17 @@ function MessageBubble({
 	const mine = !agent && outgoing;
 	const face = mine ? undefined : outgoing ? "right" : "left";
 	const status = messageStatus(message, { queued });
+	// Anything else under the bubble has the space itself, so the time goes in line after it.
+	const timeFloats =
+		roomBelow && !queued && message.status !== "failed" && message.status !== "cancelled";
+
+	// A tap is a touch screen's hover: it shows the time, under the bubble, where the screen has room.
+	function toggleTimeOnTouch(event: MouseEvent) {
+		if (!window.matchMedia(NO_HOVER).matches) return;
+		if (event.target instanceof Element && event.target.closest("a, button")) return;
+		setTimeShown((shown) => !shown);
+	}
+
 	const bubble = cn(
 		compact
 			? "max-w-[380px] px-3.5 py-[9px] text-[14.5px]"
@@ -447,7 +469,8 @@ function MessageBubble({
 						compact ? "max-w-[calc(100%-40px)]" : "max-w-[calc(100%-60px)]",
 					)}
 				>
-					<div className={bubble}>
+					{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: only touch screens act on this; a keyboard shows the time by focusing the message. */}
+					<div className={bubble} onClick={toggleTimeOnTouch}>
 						{agent && arrivedLive ? (
 							<div
 								className="reply-grow"
@@ -468,20 +491,30 @@ function MessageBubble({
 					{/* The time shows only while the bubble is hovered or holds the focus. */}
 					<div
 						className={cn(
-							"absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
+							"absolute top-1/2 -translate-y-1/2 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:hidden",
 							outgoing ? "right-[calc(100%+8px)]" : "left-[calc(100%+8px)]",
 						)}
 					>
-						<time
-							dateTime={message.createdAt}
-							title={formatFullTimestamp(message.createdAt)}
-							className="whitespace-nowrap text-subtle-foreground text-xs"
-						>
-							{formatTime(message.createdAt)}
-						</time>
+						<MessageTime createdAt={message.createdAt} />
 					</div>
+					{timeFloats && timeShown !== undefined && (
+						<p
+							className={cn(
+								"absolute top-full m-0 pt-0.5",
+								tappedTimeClass(timeShown),
+								outgoing ? "right-0" : "left-0",
+							)}
+						>
+							<MessageTime createdAt={message.createdAt} />
+						</p>
+					)}
 				</div>
 			</div>
+			{!timeFloats && timeShown !== undefined && (
+				<BubbleNote face={face} compact={compact} className={tappedTimeClass(timeShown)}>
+					<MessageTime createdAt={message.createdAt} />
+				</BubbleNote>
+			)}
 			{isLast && message.status === "failed" && (
 				<BubbleNote face={face} compact={compact} className="text-destructive-text">
 					<span className="font-semibold">Reply failed.</span>
@@ -515,6 +548,29 @@ function MessageBubble({
 				</div>
 			)}
 		</article>
+	);
+}
+
+/** Screens that cannot hover, which is to say touch screens. */
+const NO_HOVER = "(hover: none)";
+
+/**
+ * A time shown by a tap: one line tall, so it fits the space between runs, and
+ * faded in and out rather than unfolding. `transition-discrete` holds off
+ * removing it until it has faded out.
+ */
+function tappedTimeClass(shown: boolean): string {
+	return cn(
+		"text-subtle-foreground text-xs leading-none transition-[opacity,display] transition-discrete duration-200 ease-out starting:opacity-0 motion-reduce:transition-none",
+		shown ? "opacity-100" : "hidden opacity-0",
+	);
+}
+
+function MessageTime({ createdAt }: { createdAt: string }) {
+	return (
+		<time dateTime={createdAt} title={formatFullTimestamp(createdAt)} className="whitespace-nowrap">
+			{formatTime(createdAt)}
+		</time>
 	);
 }
 
