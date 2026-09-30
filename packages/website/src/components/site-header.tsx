@@ -1,7 +1,7 @@
 import { trackCallToActionClick } from "@/analytics";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
-import { launched, siteLinks } from "@/site-links";
+import { siteLinks } from "@/site-links";
 
 export function SiteHeader() {
 	return (
@@ -12,42 +12,28 @@ export function SiteHeader() {
 					Sugabots
 				</a>
 				<div className="flex flex-1 gap-5">
-					{launched && (
-						<>
-							<a
-								href={siteLinks.docs}
-								onClick={() => trackCallToActionClick("docs", "header")}
-								className={buttonVariants({ variant: "nav", size: "inline" })}
-							>
-								Docs
-							</a>
-							<a
-								href={siteLinks.github}
-								onClick={() => trackCallToActionClick("github", "header")}
-								className={buttonVariants({ variant: "nav", size: "inline" })}
-							>
-								GitHub
-							</a>
-						</>
-					)}
+					<a
+						href={siteLinks.github}
+						onClick={() => trackCallToActionClick("github", "header")}
+						className={buttonVariants({ variant: "nav", size: "inline" })}
+					>
+						GitHub
+					</a>
+					<a
+						href={siteLinks.docs}
+						onClick={() => trackCallToActionClick("docs", "header")}
+						className={buttonVariants({ variant: "nav", size: "inline" })}
+					>
+						Docs
+					</a>
 				</div>
-				{launched ? (
-					<a
-						href={siteLinks.getStarted}
-						onClick={() => trackCallToActionClick("get_started", "header")}
-						className={buttonVariants()}
-					>
-						Get started
-					</a>
-				) : (
-					<a
-						href={siteLinks.discord}
-						onClick={() => trackCallToActionClick("discord", "header")}
-						className={buttonVariants()}
-					>
-						Join Discord
-					</a>
-				)}
+				<a
+					href={siteLinks.getStarted}
+					onClick={() => trackCallToActionClick("get_started", "header")}
+					className={buttonVariants()}
+				>
+					Get started
+				</a>
 			</nav>
 		</header>
 	);

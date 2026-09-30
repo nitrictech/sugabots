@@ -3,7 +3,7 @@ import { trackCallToActionClick } from "@/analytics";
 import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
 import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
-import { launched, siteLinks } from "@/site-links";
+import { siteLinks } from "@/site-links";
 
 /** The footer's content width, matched to the page above it. */
 const footerWidth = {
@@ -26,25 +26,21 @@ export function SiteFooter({ width = "narrow" }: { width?: keyof typeof footerWi
 				</span>
 				<span className="flex-1 whitespace-nowrap">Open source, made by Nitric</span>
 				<div className="flex gap-5">
-					{launched && (
-						<>
-							<a
-								href={siteLinks.docs}
-								onClick={() => trackCallToActionClick("docs", "footer")}
-								className={buttonVariants({ variant: "nav", size: "inline" })}
-							>
-								Docs
-							</a>
-							<a
-								href={siteLinks.github}
-								onClick={() => trackCallToActionClick("github", "footer")}
-								aria-label="GitHub"
-								className={buttonVariants({ variant: "nav", size: "inline" })}
-							>
-								<GitHubIcon className="size-5" />
-							</a>
-						</>
-					)}
+					<a
+						href={siteLinks.docs}
+						onClick={() => trackCallToActionClick("docs", "footer")}
+						className={buttonVariants({ variant: "nav", size: "inline" })}
+					>
+						Docs
+					</a>
+					<a
+						href={siteLinks.github}
+						onClick={() => trackCallToActionClick("github", "footer")}
+						aria-label="GitHub"
+						className={buttonVariants({ variant: "nav", size: "inline" })}
+					>
+						<GitHubIcon className="size-5" />
+					</a>
 					<a
 						href={siteLinks.discord}
 						onClick={() => trackCallToActionClick("discord", "footer")}
