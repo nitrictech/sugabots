@@ -408,6 +408,34 @@ describe("ongoing agent Chat", () => {
 		expect(client.api.modelProviders.listEnabledModels).not.toHaveBeenCalled();
 	});
 
+	it("clears an unread chat's dot and its pod's count without fetching them again", async () => {
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{
+						agent: linear,
+						chatId: chat.id,
+						lastMessage: null,
+						waitingOn: null,
+						unread: true,
+						needsApproval: false,
+					},
+				],
+			}),
+		);
+		client.api.chats.podMarkers.mockReturnValue(
+			Effect.succeed({ pods: { [linear.podId]: { unreadChats: 1, needsApproval: false } } }),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByText(mainMessage.content);
+
+		await waitFor(() => expect(screen.queryByText("Unread")).toBeNull());
+		expect(screen.queryByRole("link", { name: /1 unread chat$/ })).toBeNull();
+		expect(client.api.chats.markRead).toHaveBeenCalled();
+		expect(client.api.chats.list).toHaveBeenCalledTimes(1);
+		expect(client.api.chats.podMarkers).toHaveBeenCalledTimes(1);
+	});
+
 	it("shows Routine runs in the main Chat log", async () => {
 		client.api.chats.messages.mockReturnValue(
 			Effect.succeed({

@@ -1,7 +1,9 @@
 import type {
 	Chat,
+	ChatList,
 	ChatMessageItem,
 	NewMessage,
+	PodChatMarkers,
 	SessionUser,
 	ThreadDetails,
 } from "@sugabots/contracts";
@@ -64,8 +66,58 @@ export function useMarkChatRead(chatId: string | undefined) {
 			chatId
 				? Effect.runPromise(client.api.chats.markRead({ params: { chatId } }))
 				: Promise.resolve(),
-		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+		onSuccess: async () => {
+			if (chatId && markReadInCache(queries, workspaceId, chatId)) return;
+			await refreshChatMarkers(queries, workspaceId);
+		},
 	});
+}
+
+/**
+ * Clears the chat's dot in the cached lists and takes it off its pod's count on
+ * the rail: what fetching them again would show, without the round trips.
+ * Returns false when no cached list holds the chat, so which pod it is in, and
+ * whether it was unread, is not known here.
+ */
+function markReadInCache(
+	queries: QueryClient,
+	workspaceId: string | undefined,
+	chatId: string,
+): boolean {
+	const listed = queries
+		.getQueriesData<ChatList>({ queryKey: ["chat-list", workspaceId] })
+		.flatMap(([key, list]) => {
+			const item = list?.items.find((entry) => entry.chatId === chatId);
+			return list && item ? [{ key, list, item }] : [];
+		});
+	const unread = listed.find(({ item }) => item.unread);
+	if (listed.length === 0) return false;
+	if (!unread) return true;
+	for (const { key, list } of listed) {
+		queries.setQueryData<ChatList>(key, {
+			items: list.items.map((entry) =>
+				entry.chatId === chatId ? { ...entry, unread: false } : entry,
+			),
+		});
+	}
+	queries.setQueryData<PodChatMarkers>(["chat-pod-markers", workspaceId], (markers) =>
+		markers ? withOneFewerUnread(markers, unread.item.agent.podId) : markers,
+	);
+	return true;
+}
+
+/** The markers with one fewer unread chat in `podId`, leaving out a pod with nothing left to mark. */
+function withOneFewerUnread(markers: PodChatMarkers, podId: string): PodChatMarkers {
+	const marker = markers.pods[podId];
+	if (!marker) return markers;
+	const { [podId]: _, ...others } = markers.pods;
+	const unreadChats = Math.max(0, marker.unreadChats - 1);
+	return {
+		pods:
+			unreadChats === 0 && !marker.needsApproval
+				? others
+				: { ...others, [podId]: { ...marker, unreadChats } },
+	};
 }
 
 /**
