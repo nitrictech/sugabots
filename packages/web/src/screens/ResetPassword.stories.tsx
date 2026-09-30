@@ -1,5 +1,5 @@
 import { HttpResponse, http } from "msw";
-import { expect, fn } from "storybook/test";
+import { expect, fn, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { ResetPassword } from "./ResetPassword.tsx";
 
@@ -39,7 +39,7 @@ export const ChooseNewPassword = meta.story({
 		).toBeInTheDocument();
 		await userEvent.type(canvas.getByLabelText("Password"), "correct-horse-battery");
 		await userEvent.click(canvas.getByRole("button", { name: "Change password" }));
-		await expect(args.onReset).toHaveBeenCalled();
+		await waitFor(() => expect(args.onReset).toHaveBeenCalled());
 	},
 });
 
