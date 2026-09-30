@@ -225,7 +225,8 @@ export const clientLayer = PgClient.layerConfig({
 /**
  * The most connections the direct pool opens. The workflow engine's host and
  * shard locks and the event relay's `LISTEN` each hold one for the life of the
- * process; the rest serve the engine's queries.
+ * process; the rest serve the engine's runner bookkeeping. Its messages go
+ * through the main pool, inside the app's transactions.
  */
 const DIRECT_POOL_SIZE = 6;
 
