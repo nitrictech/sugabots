@@ -2,6 +2,7 @@
 	"name": "@sugabots/website",
 	"version": "0.0.0",
 	"private": true,
+	"license": "SEE LICENSE IN README.md",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
