@@ -25,6 +25,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 	};
 	/** Agents were brought into the thread to answer in it. */
 	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };
+	/**
+	 * An agent's turn was asked for while it was already answering in the
+	 * thread, so it waits to start, and will read what was posted meanwhile.
+	 */
+	TurnQueued: { readonly threadId: string };
 	/** An agent's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
 	TurnStarted: {
 		readonly threadId: string;

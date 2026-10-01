@@ -192,6 +192,8 @@ const writingMessages = [
 	message("0199a3a0-0000-7000-8000-000000000224", jay, "Started around 9 this morning."),
 	message("0199a3a0-0000-7000-8000-000000000225", person, "Track both if nothing's open."),
 ];
+/** Jay's first message, sent while the reply was being written, asked for the turn that waits. */
+const waitingFrom = "0199a3a0-0000-7000-8000-000000000223";
 
 /**
  * Messages sent while the bot is still writing a reply wait for its next one,
@@ -203,7 +205,7 @@ export const QueuedBehindAReply = meta.story({
 	args: {
 		participants: [host, person, jay],
 		messages: writingMessages,
-		queued: queuedBehindReply(writingMessages),
+		queued: queuedBehindReply(writingMessages, waitingFrom),
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getAllByRole("article", { name: "Jay Park, queued" })).toHaveLength(2);
@@ -245,8 +247,11 @@ function HandingOff(props: ComponentProps<typeof ThreadConversation>) {
 		const next = setInterval(() => setTick((count) => count + 1), HAND_OFF_MS);
 		return () => clearInterval(next);
 	}, []);
-	const messages = tick % 2 === 1 ? handedOffMessages : writingMessages;
-	return <ThreadConversation {...props} messages={messages} queued={queuedBehindReply(messages)} />;
+	const handedOff = tick % 2 === 1;
+	// Once the next reply has started, nothing waits for it.
+	const messages = handedOff ? handedOffMessages : writingMessages;
+	const queued = queuedBehindReply(messages, handedOff ? null : waitingFrom);
+	return <ThreadConversation {...props} messages={messages} queued={queued} />;
 }
 
 /** The bot takes the queued messages up: their notes fold away as it starts its next reply. */

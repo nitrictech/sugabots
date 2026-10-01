@@ -161,6 +161,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		participants: [person, bot],
 		crew: [bot],
 		olderMessagesCursor: null,
+		queuedFrom: null,
 		messages,
 	};
 }

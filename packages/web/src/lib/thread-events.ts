@@ -229,6 +229,8 @@ async function applyThreadEvent(
 	}
 	if (
 		update.type === "reset" ||
+		// A turn starting takes up the messages that waited for it.
+		update.type === "turn.started" ||
 		update.type === "turn.completed" ||
 		update.type === "thread.changed"
 	) {

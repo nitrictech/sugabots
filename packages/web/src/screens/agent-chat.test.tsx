@@ -246,6 +246,7 @@ function details(
 		crew: [host, collaborator],
 		messages,
 		olderMessagesCursor: null,
+		queuedFrom: null,
 	};
 }
 
@@ -612,12 +613,7 @@ describe("ongoing agent Chat", () => {
 		expect(messages.scrollTop).toBe(1_100);
 	});
 
-	it("says a message waits behind the reply being written, until that reply is done", async () => {
-		const updates = controlledEventStream();
-		client.events.thread.mockReturnValue(updates.stream);
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-		await screen.findByRole("log", { name: "Chat messages" });
-		await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+	describe("messages waiting for the next reply", () => {
 		const writing: Message = {
 			...agentMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fc",
@@ -640,62 +636,57 @@ describe("ongoing agent Chat", () => {
 			parts: [{ type: "text", text: "Is the Stripe webhook part of it?" }],
 			createdAt: "2026-09-18T09:21:00.000Z",
 		};
-
-		updates.emit(streamEvent("message.created", { threadId: chat.mainThreadId, message: writing }));
-		updates.emit(
-			streamEvent("message.created", { threadId: chat.mainThreadId, message: followUp }),
-		);
-
-		await screen.findByRole("article", { name: "Jay Park, queued" });
-
-		updates.emit(
-			streamEvent("message.completed", {
-				threadId: chat.mainThreadId,
-				messageId: writing.id,
-				content: "Checkout timeouts are tracked.",
-				status: "complete",
-			}),
-		);
-
-		await screen.findByText("Checkout timeouts are tracked.");
-		expect(screen.queryByRole("article", { name: "Jay Park, queued" })).toBeNull();
-	});
-
-	it("queues a message being sent behind the reply, even when this browser's clock is behind", async () => {
-		// Before the reply below started, as the server's clock has it.
-		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-09-18T09:00:00.000Z"));
-		try {
-			const updates = controlledEventStream();
-			client.events.thread.mockReturnValue(updates.stream);
-			const posting = pendingAnswer();
-			client.api.chats.send.mockReturnValue(posting.effect);
-			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
-			const composer = await screen.findByLabelText(`Message ${linear.name}`);
-			await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
-			updates.emit(
-				streamEvent("message.created", {
-					threadId: chat.mainThreadId,
-					message: {
-						...agentMessage,
-						id: "0199a3a0-0000-7000-8000-0000000000fc",
-						status: "streaming",
-						content: "",
-						parts: [],
-						createdAt: "2026-09-18T09:20:00.000Z",
-					},
+		/** The main thread as the server has it, with `queuedFrom` the message a waiting turn was asked for. */
+		const serverHas = (queuedFrom: string | null) =>
+			client.api.threads.get.mockReturnValue(
+				Effect.succeed({
+					...details(chat.mainThreadId, "Chat", "chat", [mainMessage, writing, followUp]),
+					queuedFrom,
 				}),
 			);
-			await screen.findByRole("status", { name: `${linear.name} is typing` });
 
-			fireEvent.change(composer, { target: { value: "Track both if nothing's open." } });
-			fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-			await screen.findByRole("article", { name: `${sam.name}, queued` });
-			posting.answer(Effect.succeed({ message: mainMessage, routing: { status: "routed" } }));
-		} finally {
-			vi.useRealTimers();
+		async function watchWhileReplying() {
+			const updates = controlledEventStream();
+			client.events.thread.mockReturnValue(updates.stream);
+			serverHas(null);
+			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+			await screen.findByRole("log", { name: "Chat messages" });
+			await waitFor(() => expect(client.events.thread).toHaveBeenCalledWith(chat.mainThreadId));
+			updates.emit(
+				streamEvent("message.created", { threadId: chat.mainThreadId, message: writing }),
+			);
+			updates.emit(
+				streamEvent("message.created", { threadId: chat.mainThreadId, message: followUp }),
+			);
+			await screen.findByText("Is the Stripe webhook part of it?");
+			return updates;
 		}
+
+		it("says a message waits for the next reply, until that reply starts", async () => {
+			const updates = await watchWhileReplying();
+
+			serverHas(followUp.id);
+			updates.emit(streamEvent("thread.changed", { threadId: chat.mainThreadId }));
+			await screen.findByRole("article", { name: "Jay Park, queued" });
+
+			serverHas(null);
+			updates.emit(
+				streamEvent("turn.started", {
+					threadId: chat.mainThreadId,
+					turnId: "0199a3a0-0000-7000-8000-0000000000ff",
+					agentId: linear.id,
+				}),
+			);
+			await waitFor(() =>
+				expect(screen.queryByRole("article", { name: "Jay Park, queued" })).toBeNull(),
+			);
+		});
+
+		it("does not say a message waits when the server queued no reply for it", async () => {
+			await watchWhileReplying();
+
+			expect(screen.queryByRole("article", { name: "Jay Park, queued" })).toBeNull();
+		});
 	});
 
 	it("shows what the agent said before a collaboration while it waits on the answer", async () => {

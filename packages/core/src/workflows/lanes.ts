@@ -90,6 +90,19 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 			)})
 	)`;
 
+/**
+ * The payload of the request that has waited longest in a lane about
+ * `subject` running `workflow`, as a value for a query; null when none waits.
+ */
+export const oldestWaiting = (subject: SQLWrapper, workflow: string) =>
+	sql<unknown>`(
+		select waiting.payload from ${laneRequest} waiting
+		join ${lane} on ${lane.key} = waiting.lane_key
+		where ${lane.subject} = (${subject})::text and ${lane.workflow} = ${workflow}
+		order by waiting.created_at, waiting.id
+		limit 1
+	)`;
+
 /** The statement behind `Interface.dropWaiting`. */
 const dropWaitingStatement = (subjects: ReadonlyArray<string>, workflows: ReadonlyArray<string>) =>
 	sql`delete from ${laneRequest}

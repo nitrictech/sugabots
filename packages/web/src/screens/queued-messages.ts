@@ -1,20 +1,23 @@
 import type { Message } from "@sugabots/contracts";
 
 /**
- * The ids of people's messages that wait for the agent's next reply. A turn
- * reads the thread once, as its reply starts, so whatever is posted while that
- * reply is still being written waits behind it, and the next turn answers all
- * of it together.
+ * The ids of people's messages that wait for an agent's next reply: from
+ * `queuedFrom`, the message a waiting turn was first asked for, onwards. That
+ * turn reads them all once it starts, so they are answered together. The
+ * server decides what waits, so a message that asked for no reply, posted
+ * before it, does not.
  */
-export function queuedBehindReply(messages: readonly Message[]): ReadonlySet<string> {
+export function queuedBehindReply(
+	messages: readonly Message[],
+	queuedFrom: string | null,
+): ReadonlySet<string> {
+	if (queuedFrom === null) return new Set();
 	const posted = messages.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
-	const writing = posted.findLastIndex(
-		(message) => message.author.kind === "agent" && message.status === "streaming",
-	);
-	if (writing === -1) return new Set();
+	const first = posted.findIndex((message) => message.id === queuedFrom);
+	if (first === -1) return new Set();
 	return new Set(
 		posted
-			.slice(writing + 1)
+			.slice(first)
 			.filter((message) => message.author.kind === "person")
 			.map((message) => message.id),
 	);

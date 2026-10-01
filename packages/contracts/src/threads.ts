@@ -374,6 +374,12 @@ export const threadDetailsSchema = Schema.Struct({
 	crew: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),
+	/**
+	 * The message an agent's turn waiting to start was first asked for, while
+	 * the agent was still answering. That message, and everything posted after
+	 * it, waits for that turn. Null when no turn waits.
+	 */
+	queuedFrom: Schema.NullOr(uuidSchema),
 });
 
 export type ThreadDetails = typeof threadDetailsSchema.Type;

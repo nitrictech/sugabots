@@ -27,6 +27,7 @@ import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../d
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ThreadView } from "../thread-view.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
@@ -462,6 +463,33 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.where(like(laneRequest.laneKey, `turn:${current.mainThreadId}:%`)),
 			),
 		).toHaveLength(0);
+	});
+
+	it("says which messages wait for the agent's next turn, and announces when one starts waiting", async () => {
+		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const post = (content: string) =>
+			chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content });
+		const changesAnnounced = async () =>
+			(
+				await onDatabase((db) =>
+					db
+						.select({ type: event.type })
+						.from(event)
+						.where(eq(event.channel, threadChannel(current.mainThreadId))),
+				)
+			).filter(({ type }) => type === "thread.changed").length;
+
+		await post("Is checkout timing out?");
+		expect((await threads.get(current.mainThreadId)).queuedFrom).toBeNull();
+		const changedBefore = await changesAnnounced();
+
+		const followUp = await post("The Stripe webhook too?");
+		await post("Started around 9.");
+
+		expect((await threads.get(current.mainThreadId)).queuedFrom).toBe(followUp.id);
+		// Once, when the turn started waiting; the next message joins it.
+		expect((await changesAnnounced()) - changedBefore).toBe(1);
 	});
 
 	it("announces a person's message before the agent it brings into the thread", async () => {
