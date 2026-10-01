@@ -289,6 +289,32 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(await hostRow()).toMatchObject({ unread: true });
 		});
 
+		it("shows how far the person has read, and announces it only when they read further", async () => {
+			const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const reply = await botWrites(current.mainThreadId, "Hello!", 1);
+			const readsAnnounced = async () =>
+				(
+					await onDatabase((db) =>
+						db
+							.select({ type: event.type })
+							.from(event)
+							.where(eq(event.channel, threadChannel(current.mainThreadId))),
+					)
+				).filter(({ type }) => type === "thread.read").length;
+
+			await chats.markRead(current.id);
+			await chats.markRead(current.id);
+
+			expect((await threads.get(current.mainThreadId)).reads).toEqual([
+				{
+					person: expect.objectContaining({ kind: "person", id: userId }),
+					readThrough: reply.createdAt.toISOString(),
+				},
+			]);
+			expect(await readsAnnounced()).toBe(1);
+		});
+
 		it("counts each pod's unread chats for the rail", async () => {
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			expect(await view.podMarkers(workspaceId)).toEqual({ pods: {} });

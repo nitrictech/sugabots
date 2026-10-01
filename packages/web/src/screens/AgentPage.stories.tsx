@@ -249,6 +249,7 @@ const collaboration: ThreadDetails = {
 	crew: [asker, asked],
 	olderMessagesCursor: null,
 	queuedSince: null,
+	reads: [],
 	messages: [
 		collabMessage(
 			"93",

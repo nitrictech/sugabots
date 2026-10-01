@@ -247,6 +247,7 @@ function details(
 		messages,
 		olderMessagesCursor: null,
 		queuedSince: null,
+		reads: [],
 	};
 }
 

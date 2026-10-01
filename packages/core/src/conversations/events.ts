@@ -1,4 +1,9 @@
-import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
+import type {
+	CollaborationPart,
+	Message,
+	PersonParticipant,
+	ToolCallPart,
+} from "@sugabots/contracts";
 import { Data } from "effect";
 import type { UserMessage } from "../user-message.ts";
 import type { TurnReason } from "./sql.ts";
@@ -146,6 +151,12 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * or the collaborator's turn ended without an answer.
 	 */
 	CollaborationFailed: CollaborationChange;
+	/** `person` read further into the thread: every message created up to `readThrough`. */
+	ThreadRead: {
+		readonly threadId: string;
+		readonly person: PersonParticipant;
+		readonly readThrough: Date;
+	};
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: {
 		readonly workspaceId: string;

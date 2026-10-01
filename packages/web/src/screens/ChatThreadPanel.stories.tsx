@@ -70,6 +70,7 @@ const collaboration: ThreadDetails = {
 	crew: [asker, answerer],
 	olderMessagesCursor: null,
 	queuedSince: null,
+	reads: [],
 	messages: [
 		message(
 			"1",

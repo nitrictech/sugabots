@@ -38,6 +38,7 @@ import {
 	personColumns,
 	recentParticipantsOf,
 	toParticipant,
+	toPerson,
 } from "./threads/participants.ts";
 import { Turns } from "./turns/turns.ts";
 
@@ -190,6 +191,10 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 				orderBy: { createdAt: "asc", id: "asc" },
 				with: { user: personColumns, agent: agentColumns },
 			},
+			reads: {
+				columns: { readThrough: true },
+				with: { user: personColumns },
+			},
 			routineExecution: true,
 			messages: {
 				// One more than the page, so an older page is known to exist without a count.
@@ -237,6 +242,10 @@ function toThreadDetails(
 				? encodeCursor({ at: oldest.createdAt, id: oldest.id })
 				: null,
 		queuedSince: row.queuedSince,
+		reads: row.reads.map((read) => ({
+			person: toPerson(read.user),
+			readThrough: read.readThrough.toISOString(),
+		})),
 	};
 }
 
