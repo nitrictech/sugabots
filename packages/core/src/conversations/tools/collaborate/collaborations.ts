@@ -121,9 +121,9 @@ export const make = Effect.gen(function* () {
 								reason: `${collaborator.name} is already waiting on this thread; answer it yourself`,
 							});
 						}
-						if (yield* hasCollaborated(from.turnId)) {
+						if (yield* hasAskedThisTurn(from.turnId, collaborator.id)) {
 							return yield* new CollaborationRefused({
-								reason: "Only one collaboration per turn; use what you were told",
+								reason: `You have already asked ${collaborator.name} this turn; use what you were told`,
 							});
 						}
 
@@ -245,13 +245,23 @@ const hostsAboveOf = (threadId: string) =>
 		(rows) => rows.map((row) => row.host_agent_id),
 	);
 
-const hasCollaborated = (turnId: string) =>
+/**
+ * Whether the turn already asked this collaborator. A turn may ask several
+ * crew agents, but asking one twice only repeats a brief it could have
+ * written once.
+ */
+const hasAskedThisTurn = (turnId: string, collaboratorId: string) =>
 	Effect.map(
 		query((db) =>
 			db
 				.select({ id: collaboration.id })
 				.from(collaboration)
-				.where(eq(collaboration.turnId, turnId))
+				.where(
+					and(
+						eq(collaboration.turnId, turnId),
+						eq(collaboration.collaboratorAgentId, collaboratorId),
+					),
+				)
 				.limit(1),
 		),
 		([existing]) => existing !== undefined,

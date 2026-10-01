@@ -64,6 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	let memberId: string;
 	let host: { id: string; name: string };
 	let helper: { id: string; name: string };
+	let checker: { id: string; name: string };
 	let rootThreadId: string;
 	let hostChatId: string;
 	let helperChatId: string;
@@ -134,13 +135,25 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 						model: "m",
 						createdById: memberId,
 					},
+					{
+						workspaceId,
+						podId,
+						name: `Checker ${suffix}`,
+						handle: handleFromName(`Checker ${suffix}`),
+						description: "Checks things.",
+						color: "rose",
+						face: "dot",
+						model: "m",
+						createdById: memberId,
+					},
 				])
 				.returning({ id: agent.id, name: agent.name }),
 		);
-		const [hostRow, helperRow] = crew;
-		if (!hostRow || !helperRow) throw new Error("fixture");
+		const [hostRow, helperRow, checkerRow] = crew;
+		if (!hostRow || !helperRow || !checkerRow) throw new Error("fixture");
 		host = hostRow;
 		helper = helperRow;
+		checker = checkerRow;
 		const opened = await chatsAs(memberId).open({
 			workspace: workspaceId,
 			podId,
@@ -282,11 +295,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		expect(rows).toHaveLength(0);
 	});
 
-	it("allows one collaboration per turn, and never back up the chain", async () => {
+	it("asks each crew agent at most once per turn, and never back up the chain", async () => {
 		const first = await collaborations.open({ from: from(), to: helper.name, brief: "One" });
+		const second = await collaborations.open({ from: from(), to: checker.name, brief: "Two" });
+		expect(second.collaboration.threadId).not.toBe(first.collaboration.threadId);
 		await expect(
-			collaborations.open({ from: from(), to: helper.name, brief: "Two" }),
-		).rejects.toThrow(/one collaboration per turn/i);
+			collaborations.open({ from: from(), to: helper.name, brief: "Again" }),
+		).rejects.toThrow(/already asked .* this turn/);
 
 		// The helper, in its child thread, may not ask the host back: the host is
 		// the one waiting on it.
