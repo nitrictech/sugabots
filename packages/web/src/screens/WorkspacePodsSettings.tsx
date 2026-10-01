@@ -1,7 +1,13 @@
-import { type Agent, type Pod, type PodMember, workspaceRoleLabel } from "@sugabots/contracts";
+import {
+	type Agent,
+	POD_NAME_MAX_LENGTH,
+	type Pod,
+	type PodMember,
+	workspaceRoleLabel,
+} from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
-import { type ReactNode, useDeferredValue, useId, useState } from "react";
+import { type ReactNode, useDeferredValue, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
@@ -41,6 +47,7 @@ import {
 	SettingsListColumn,
 	SettingsListDetail,
 	SettingsListRow,
+	SettingsNameRow,
 	SettingsPage,
 	SettingsRow,
 	SettingsValue,
@@ -177,7 +184,9 @@ function PodDetails({
 	connectionSignInError?: string;
 }) {
 	const may = pod.permissions;
-	const update = useUpdatePod(pod.id);
+	// Two mutations, so a failed rename is said under the name and a failed recolour above the page.
+	const rename = useUpdatePod(pod.id);
+	const recolour = useUpdatePod(pod.id);
 	const members = usePodMembers(pod.id);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeletePod();
@@ -205,13 +214,15 @@ function PodDetails({
 			title={pod.name}
 			description={shared ? counts.join(", ") : "Only you can see this pod and its bots."}
 		>
-			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
+			{recolour.error && <Alert>{failureMessage(recolour.error)}</Alert>}
 			{may.rename && (
 				<SettingsGroup label="Pod">
-					<NameRow
+					<SettingsNameRow
 						name={pod.name}
-						savePending={update.isPending}
-						onCommit={(name) => update.mutateAsync({ name })}
+						maxLength={POD_NAME_MAX_LENGTH}
+						savePending={rename.isPending}
+						error={rename.error ? failureMessage(rename.error) : undefined}
+						onCommit={(name) => rename.mutateAsync({ name })}
 					/>
 				</SettingsGroup>
 			)}
@@ -220,7 +231,7 @@ function PodDetails({
 					<SettingsControlRow label="Colour">
 						<PodColourPicker
 							value={pod.color}
-							onChange={(color) => void update.mutateAsync({ color }).catch(() => {})}
+							onChange={(color) => void recolour.mutateAsync({ color }).catch(() => {})}
 						/>
 					</SettingsControlRow>
 				</SettingsGroup>
@@ -246,46 +257,6 @@ function PodDetails({
 				onDelete={deletePod}
 			/>
 		</SettingsPage>
-	);
-}
-
-/** The pod's name, which saves when you leave it. */
-function NameRow({
-	name,
-	savePending,
-	onCommit,
-}: {
-	name: string;
-	savePending: boolean;
-	onCommit: (name: string) => Promise<unknown>;
-}) {
-	const [draft, setDraft] = useState(name);
-	const id = useId();
-
-	function commit() {
-		const next = draft.trim();
-		if (savePending || next === name || next === "") {
-			setDraft(name);
-			return;
-		}
-		void onCommit(next).catch(() => setDraft(name));
-	}
-
-	return (
-		<SettingsControlRow label="Name" htmlFor={id}>
-			<input
-				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				onBlur={commit}
-				onKeyDown={(event) => {
-					if (event.key === "Enter") event.currentTarget.blur();
-					if (event.key === "Escape") setDraft(name);
-				}}
-				maxLength={64}
-				className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
-			/>
-		</SettingsControlRow>
 	);
 }
 

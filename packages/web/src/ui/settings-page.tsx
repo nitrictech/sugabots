@@ -1,7 +1,8 @@
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import { type ReactNode, useId, useState } from "react";
+import { Alert } from "@/ui/alert.tsx";
 
 /*
  * The pieces a settings page is made of, as the design draws them: a centred
@@ -231,6 +232,60 @@ export function SettingsFieldRow({
 				)}
 			/>
 		</SettingsControlRow>
+	);
+}
+
+/**
+ * A name, edited in place, which saves trimmed when you leave it or press
+ * Enter. Escape, or leaving it blank or unchanged, puts the name back; so does
+ * a save that fails, and `error` says why under it.
+ */
+export function SettingsNameRow({
+	name,
+	maxLength,
+	savePending,
+	error,
+	onCommit,
+}: {
+	name: string;
+	maxLength: number;
+	savePending: boolean;
+	error: string | undefined;
+	onCommit: (name: string) => Promise<unknown>;
+}) {
+	const [draft, setDraft] = useState(name);
+	const id = useId();
+
+	function commit() {
+		const next = draft.trim();
+		if (savePending || next === name || next === "") {
+			setDraft(name);
+			return;
+		}
+		setDraft(next);
+		void onCommit(next).catch(() => setDraft(name));
+	}
+
+	return (
+		<>
+			<SettingsControlRow label="Name" htmlFor={id}>
+				<input
+					id={id}
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					onBlur={commit}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") event.currentTarget.blur();
+						if (event.key === "Escape") setDraft(name);
+					}}
+					maxLength={maxLength}
+					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+				/>
+			</SettingsControlRow>
+			{error && (
+				<Alert className="border-border border-b px-4 py-2.5 last:border-b-0">{error}</Alert>
+			)}
+		</>
 	);
 }
 
