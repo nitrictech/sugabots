@@ -27,8 +27,9 @@ import { DetailTooltip } from "@/ui/tooltip.tsx";
  * with the buttons on a row beneath it. The send button takes the accent once
  * there is something to send. Typing `@` offers everyone in `mentionable` whose
  * name or handle matches what follows it; choosing one writes their handle into
- * the draft. With `peopleOnly`, a toggle beside the +, or Tab, switches between
- * writing to the bot and writing to the other people only.
+ * the draft. With `peopleOnly`, Tab or the switch before the send button moves
+ * between writing to the bot, the default, and writing to the other people
+ * only, which a chip beside the + shows.
  */
 export function ChatComposer({
 	label,
@@ -59,7 +60,7 @@ export function ChatComposer({
 		on: boolean;
 		onChange: (on: boolean) => void;
 		/** The bot that replies unless the message is for people only. */
-		agent: Pick<AgentParticipant, "name" | "color" | "face">;
+		agent: Pick<AgentParticipant, "name">;
 	};
 }) {
 	const id = useId();
@@ -148,19 +149,26 @@ export function ChatComposer({
 				ref={pill}
 				className={cn(
 					"focus-ring-within grid items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
-					peopleOnly
+					peopleOnly?.on
 						? cn(
 								"grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]",
 								stacked
-									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._hint_send']"
-									: "[grid-template-areas:'attach_audience_draft_hint_send']",
+									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._switch_send']"
+									: "[grid-template-areas:'attach_audience_draft_switch_send']",
 							)
-						: cn(
-								"grid-cols-[auto_minmax(0,1fr)_auto]",
-								stacked
-									? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
-									: "[grid-template-areas:'attach_draft_send']",
-							),
+						: peopleOnly
+							? cn(
+									"grid-cols-[auto_minmax(0,1fr)_auto_auto]",
+									stacked
+										? "[grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']"
+										: "[grid-template-areas:'attach_draft_switch_send']",
+								)
+							: cn(
+									"grid-cols-[auto_minmax(0,1fr)_auto]",
+									stacked
+										? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
+										: "[grid-template-areas:'attach_draft_send']",
+								),
 				)}
 			>
 				{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
@@ -172,8 +180,11 @@ export function ChatComposer({
 				>
 					<Plus strokeWidth={2.2} />
 				</IconButton>
-				{peopleOnly && (
-					<AudienceToggle {...peopleOnly} onToggle={() => peopleOnly.onChange(!peopleOnly.on)} />
+				{peopleOnly?.on && (
+					<PeopleOnlyChip
+						agent={peopleOnly.agent}
+						onSwitchBack={() => peopleOnly.onChange(false)}
+					/>
 				)}
 				<label htmlFor={id} className="sr-only">
 					{label}
@@ -208,16 +219,7 @@ export function ChatComposer({
 					)}
 				/>
 				{peopleOnly && (
-					// A touch screen has no Tab key; the toggle is how it switches.
-					<span
-						aria-hidden
-						className="mb-2 flex shrink-0 items-center gap-1.5 whitespace-nowrap text-subtle-foreground text-xs [grid-area:hint] max-sm:hidden [@media(hover:none)]:hidden"
-					>
-						<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground">
-							Tab
-						</kbd>
-						{peopleOnly.on ? "back to bots" : "people only"}
-					</span>
+					<AudienceSwitch {...peopleOnly} onToggle={() => peopleOnly.onChange(!peopleOnly.on)} />
 				)}
 				<button
 					type="submit"
@@ -295,16 +297,48 @@ function wrapsPastOneLine(textarea: HTMLTextAreaElement): boolean {
 }
 
 /**
- * Who the message is for, beside the +: the bot's face while it
- * replies, and a "People only" chip while it only reads along.
+ * Shown beside the + while the message is for people only. Clicking it goes
+ * back to writing to the bot.
  */
-function AudienceToggle({
+function PeopleOnlyChip({
+	agent,
+	onSwitchBack,
+}: {
+	agent: Pick<AgentParticipant, "name">;
+	onSwitchBack: () => void;
+}) {
+	return (
+		<DetailTooltip
+			title="People only"
+			description={`${agent.name} reads along but won't reply. Tab or click to switch back.`}
+			side="top"
+			align="start"
+		>
+			<button
+				type="button"
+				aria-label="Back to bots"
+				onClick={onSwitchBack}
+				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors [grid-area:audience] hover:bg-hover"
+			>
+				<UsersRound size={15} strokeWidth={2.2} />
+				People only
+			</button>
+		</DetailTooltip>
+	);
+}
+
+/**
+ * Switches who the message is for, before the send button: named for Tab,
+ * which does the same from the draft. A touch screen has no Tab key, so there
+ * it shows the words alone.
+ */
+function AudienceSwitch({
 	on,
 	agent,
 	onToggle,
 }: {
 	on: boolean;
-	agent: Pick<AgentParticipant, "name" | "color" | "face">;
+	agent: Pick<AgentParticipant, "name">;
 	onToggle: () => void;
 }) {
 	return (
@@ -312,32 +346,23 @@ function AudienceToggle({
 			title={on ? "People only" : `${agent.name} replies`}
 			description={
 				on
-					? `${agent.name} reads along but won't reply. Tab to switch back.`
+					? `${agent.name} reads along but won't reply. Tab or click to switch back.`
 					: "Tab or click to message people only."
 			}
 			side="top"
-			align="start"
+			align="end"
 		>
 			<button
 				type="button"
 				aria-pressed={on}
 				aria-label="People only"
 				onClick={onToggle}
-				className={cn(
-					"focus-ring mb-0.5 flex h-8 shrink-0 items-center rounded-full transition-colors [grid-area:audience]",
-					on
-						? "gap-1.5 border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm hover:bg-hover"
-						: "w-8 justify-center hover:bg-hover",
-				)}
+				className="focus-ring mb-1.5 flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs transition-colors [grid-area:switch] hover:text-muted-foreground"
 			>
-				{on ? (
-					<>
-						<UsersRound size={15} strokeWidth={2.2} />
-						People only
-					</>
-				) : (
-					<AgentAvatar color={agent.color} face={agent.face} size={22} />
-				)}
+				<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground [@media(hover:none)]:hidden">
+					Tab
+				</kbd>
+				{on ? "back to bots" : "people only"}
 			</button>
 		</DetailTooltip>
 	);

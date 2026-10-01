@@ -352,8 +352,8 @@ export const SendFailed = meta.story({
 const growthDesk = { name: "Growth Desk", color: "green", face: "arc" } as const;
 
 /**
- * WithPeople is a thread with someone else in it: the bot's face starts the
- * pill, and Tab switches to people only and back. Tab picks a mention instead
+ * WithPeople is a thread with someone else in it: Tab, or the switch before
+ * the send button, moves to people only and back. Tab picks a mention instead
  * while the mention list is open.
  */
 export const WithPeople = meta.story({
@@ -379,11 +379,18 @@ export const WithPeople = meta.story({
 	},
 });
 
-/** PeopleOnly writes to the other people: the bot reads along but won't reply. */
+/**
+ * PeopleOnly writes to the other people, which a chip beside the + shows: the
+ * bot reads along but won't reply. Clicking the chip goes back to the bot.
+ */
 export const PeopleOnly = meta.story({
 	args: {
 		label: "Message Jay and Maya",
 		placeholder: "Message Jay and Maya",
 		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Back to bots" }));
+		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
 	},
 });
