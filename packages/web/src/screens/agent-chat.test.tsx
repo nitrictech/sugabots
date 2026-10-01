@@ -989,6 +989,7 @@ describe("people typing in the Chat", () => {
 				threadId: chat.mainThreadId,
 				person: jyeInThread,
 				readThrough: agentMessage.createdAt,
+				readAt: "2026-09-18T09:30:00.000Z",
 			}),
 		);
 

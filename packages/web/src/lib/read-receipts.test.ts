@@ -44,7 +44,11 @@ function faces(
 ) {
 	const receipts = readReceipts({
 		messages,
-		reads: reads.map(({ person: reader, minute }) => ({ person: reader, readThrough: at(minute) })),
+		reads: reads.map(({ person: reader, minute }) => ({
+			person: reader,
+			readThrough: at(minute),
+			readAt: at(minute),
+		})),
 		bots,
 		userId: you.id,
 	});
@@ -62,6 +66,17 @@ describe("read receipts", () => {
 				{ person: sam, minute: 3 },
 			]),
 		).toEqual([["Tom"], [], ["Sam"]]);
+	});
+
+	it("says when someone read, not when the message they read up to was sent", () => {
+		const message = said(growthDesk, 1);
+		const receipts = readReceipts({
+			messages: [message],
+			reads: [{ person: tom, readThrough: at(1), readAt: at(40) }],
+			bots: [],
+			userId: you.id,
+		});
+		expect(receipts.get(message.id)).toEqual([{ reader: tom, readAt: at(40) }]);
 	});
 
 	it("never shows you your own face", () => {

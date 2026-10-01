@@ -50,14 +50,14 @@ export function readReceipts({
 	const byWhenRead = [...reads].sort(
 		(left, right) => Date.parse(left.readThrough) - Date.parse(right.readThrough),
 	);
-	for (const { person, readThrough } of byWhenRead) {
+	for (const { person, readThrough, readAt } of byWhenRead) {
 		if (person.id === userId) continue;
 		const readUpTo = Date.parse(readThrough);
 		const lastRead = messages.findLast(
 			// A reply still being written is not read until it is finished.
 			(message) => message.status !== "streaming" && Date.parse(message.createdAt) <= readUpTo,
 		);
-		if (lastRead) place(lastRead, { reader: person, readAt: readThrough });
+		if (lastRead) place(lastRead, { reader: person, readAt });
 	}
 	return receipts;
 }

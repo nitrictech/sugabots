@@ -248,9 +248,9 @@ async function applyThreadEvent(
 		return;
 	}
 	if (update.type === "thread.read") {
-		const { person, readThrough } = update;
+		const { person, readThrough, readAt } = update;
 		queries.setQueryData<ThreadDetails>(["thread", threadId], (details) =>
-			details ? withRead(details, { person, readThrough }) : details,
+			details ? withRead(details, { person, readThrough, readAt }) : details,
 		);
 		return;
 	}

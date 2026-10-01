@@ -712,14 +712,14 @@ const readThread = [
 const readsOfThread = readReceipts({
 	messages: readThread,
 	reads: [
-		{ person: readers.tom, readThrough: minute(1) },
-		{ person: readers.sora, readThrough: minute(2) },
-		{ person: readers.lena, readThrough: minute(3) },
-		{ person: readers.mika, readThrough: minute(4) },
-		{ person: jay, readThrough: minute(4) },
-		{ person: readers.pat, readThrough: minute(4) },
+		{ person: readers.tom, readThrough: minute(1), readAt: minute(1) },
+		{ person: readers.sora, readThrough: minute(2), readAt: minute(2) },
+		{ person: readers.lena, readThrough: minute(3), readAt: minute(3) },
+		{ person: readers.mika, readThrough: minute(4), readAt: minute(4) },
+		{ person: jay, readThrough: minute(4), readAt: minute(4) },
+		{ person: readers.pat, readThrough: minute(4), readAt: minute(4) },
 		// Your own read is never shown.
-		{ person, readThrough: minute(4) },
+		{ person, readThrough: minute(4), readAt: minute(4) },
 	],
 	bots: [host],
 	userId: user.id,
@@ -764,6 +764,7 @@ export const ReadReceiptsOnAPhone = meta.story({
 			reads: Array.from({ length: 18 }, (_, index) => ({
 				person: reader(String(10 + index), `Reader ${String.fromCharCode(65 + index)}`),
 				readThrough: minute(4),
+				readAt: minute(4),
 			})),
 			bots: [host],
 			userId: user.id,
@@ -781,7 +782,7 @@ function CatchingUp(args: ComponentProps<typeof ThreadConversation>) {
 	}, []);
 	const receipts = readReceipts({
 		messages: readThread,
-		reads: [{ person: readers.tom, readThrough: minute(readUpTo) }],
+		reads: [{ person: readers.tom, readThrough: minute(readUpTo), readAt: minute(readUpTo) }],
 		bots: [host],
 		userId: user.id,
 	});
