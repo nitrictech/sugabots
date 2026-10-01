@@ -9,7 +9,6 @@ import {
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { UsersRound } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
@@ -18,7 +17,6 @@ import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
@@ -548,16 +546,6 @@ function MessageBubble({
 			{isLast && message.status === "cancelled" && (
 				<BubbleNote face={face} compact={compact} className="font-semibold text-subtle-foreground">
 					Reply stopped
-				</BubbleNote>
-			)}
-			{isLast && message.peopleOnly && (
-				<BubbleNote face={face} compact={compact} className="text-subtle-foreground">
-					<Tooltip label="People only: the bots read it, but none replies." side="bottom">
-						<span className="inline-flex">
-							<UsersRound aria-hidden size={14} strokeWidth={2.2} />
-							<span className="sr-only">People only</span>
-						</span>
-					</Tooltip>
 				</BubbleNote>
 			)}
 			{/*

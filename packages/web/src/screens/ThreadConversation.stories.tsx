@@ -243,14 +243,14 @@ const peopleOnlyMessages = [
 	},
 ];
 
-/** PeopleOnly marks a message written for the people alone: the bot reads it but doesn't reply. */
+/** PeopleOnly is a message written for the people alone: the bot reads it but doesn't reply. */
 export const PeopleOnly = meta.story({
 	args: {
 		participants: [host, person, jay],
 		messages: peopleOnlyMessages,
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("People only")).toBeInTheDocument();
+		await expect(canvas.getByText(/Sam, can you read these/)).toBeInTheDocument();
 	},
 });
 
