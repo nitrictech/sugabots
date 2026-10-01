@@ -399,8 +399,8 @@ export const PeopleOnly = meta.story({
 
 /**
  * PeopleOnlyOnATablet has no room for the chip or the words, as on a phone: a
- * people icon before the send button switches, tinted while the message is for
- * people only.
+ * people icon before the send button switches, on a solid disc while the
+ * message is for people only.
  */
 export const PeopleOnlyOnATablet = meta.story({
 	args: {

@@ -332,8 +332,8 @@ function PeopleOnlyChip({
  * Switches who the message is for, before the send button: named for Tab,
  * which does the same from the draft. A touch screen has no Tab key, so there
  * it shows the words alone. Below a wide screen, on a tablet or a phone, it
- * is a people icon instead, tinted with the accent while the message is for
- * people only.
+ * is a people icon instead, on a solid disc in the text colour while the
+ * message is for people only, so it is never taken for the send button.
  */
 function AudienceSwitch({
 	on,
@@ -365,7 +365,7 @@ function AudienceSwitch({
 					"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground",
 					"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0",
 					on
-						? "max-xl:bg-primary/15 max-xl:text-link"
+						? "max-xl:bg-foreground max-xl:text-background"
 						: "max-xl:text-muted-foreground max-xl:hover:bg-hover",
 				)}
 			>
