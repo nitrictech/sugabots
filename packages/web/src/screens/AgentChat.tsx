@@ -19,6 +19,7 @@ import {
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
+import { readReceipts } from "@/lib/read-receipts.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	usePeopleTyping,
@@ -92,10 +93,17 @@ export function AgentChat({
 		chat.data?.id,
 		newest?.kind === "message" ? `${newest.message.id}:${newest.message.status}` : newest?.id,
 	);
-	const queued = queuedBehindReply(
-		items.flatMap((item) => (item.kind === "message" ? [item.message] : [])),
-		details?.queuedSince ?? null,
-	);
+	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
+	const receipts = readReceipts({
+		messages: shownMessages,
+		reads: details?.reads ?? [],
+		bots:
+			details?.participants.filter(
+				(participant): participant is AgentParticipant => participant.kind === "agent",
+			) ?? [],
+		userId: user.id,
+	});
 
 	useLayoutEffect(() => {
 		if (!chat.data || !details) return;
@@ -245,6 +253,7 @@ export function AgentChat({
 										canApproveToolCalls={details.capabilities?.approveToolCalls}
 										queued={queued}
 										peopleTyping={group === lastGroup ? peopleTyping : undefined}
+										receipts={receipts}
 									/>
 								) : (
 									<ActivityLine

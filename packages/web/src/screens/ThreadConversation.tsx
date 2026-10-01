@@ -12,6 +12,7 @@ import { cn } from "cn";
 import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
+import type { Receipt } from "@/lib/read-receipts.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -19,6 +20,7 @@ import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
+import { ReadReceipts } from "./ReadReceipts.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
@@ -65,6 +67,7 @@ export function ThreadConversation({
 	approvalsPinned = false,
 	queued = NONE_QUEUED,
 	peopleTyping = [],
+	receipts,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -107,6 +110,8 @@ export function ThreadConversation({
 	 * or are shown after the last message on their own.
 	 */
 	peopleTyping?: readonly PersonParticipant[];
+	/** Whose faces sit under each message, by message id, for a thread that keeps reads. */
+	receipts?: ReadonlyMap<string, readonly Receipt[]>;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -242,6 +247,11 @@ export function ThreadConversation({
 								</Fragment>
 							);
 						})}
+						<ReadReceipts
+							receipts={receipts?.get(message.id) ?? []}
+							// A row too wide wraps within the bubbles, clear of the faces beside them.
+							className={NOTE_INSET.left[compact ? "compact" : "regular"]}
+						/>
 						{message.author.kind === "agent" && isTyping(message) && (
 							<TypingIndicator
 								key={`${message.id}-typing`}

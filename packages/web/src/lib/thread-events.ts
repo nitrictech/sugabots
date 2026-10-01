@@ -7,6 +7,7 @@ import {
 	placedParts,
 	type StreamEvent,
 	type ThreadDetails,
+	type ThreadRead,
 	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
@@ -246,6 +247,13 @@ async function applyThreadEvent(
 		);
 		return;
 	}
+	if (update.type === "thread.read") {
+		const { person, readThrough } = update;
+		queries.setQueryData<ThreadDetails>(["thread", threadId], (details) =>
+			details ? withRead(details, { person, readThrough }) : details,
+		);
+		return;
+	}
 
 	let messageId: string;
 	let applyMessage: (message: Message) => Message;
@@ -353,4 +361,14 @@ function withPlacedPart(message: Message, part: PlacedPart): Message {
 /** The parts drawn afresh from the text and what was placed in it. */
 function rebuiltParts(_message: Message, content: string, placed: PlacedPart[]): MessagePart[] {
 	return messagePartsFor(content, placed);
+}
+
+/** `details` with `read` in place of what it had of the same person, unless it had them further on. */
+function withRead(details: ThreadDetails, read: ThreadRead): ThreadDetails {
+	const previous = details.reads.find(({ person }) => person.id === read.person.id);
+	if (previous && Date.parse(previous.readThrough) >= Date.parse(read.readThrough)) return details;
+	return {
+		...details,
+		reads: [...details.reads.filter(({ person }) => person.id !== read.person.id), read],
+	};
 }

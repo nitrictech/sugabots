@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
+import { readReceipts } from "@/lib/read-receipts.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
@@ -655,4 +656,140 @@ export const Mentions = meta.story({
 		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
 		await expect(canvas.getByText(/jay@example\.com and @nobody\./)).toBeInTheDocument();
 	},
+});
+
+const reader = (id: string, name: string): Extract<ThreadParticipant, { kind: "person" }> => ({
+	kind: "person",
+	id: `0199a3a0-0000-7000-8000-0000000009${id}`,
+	name,
+	handle: name.toLowerCase().replace(" ", "-"),
+	image: null,
+});
+const readers = {
+	tom: reader("01", "Tom Ortiz"),
+	sora: reader("02", "Sora Reyes"),
+	lena: reader("03", "Lena Nakamura"),
+	mika: reader("04", "Mika Kim"),
+	pat: reader("05", "Pat Adams"),
+};
+const minute = (at: number) => `2026-10-01T01:${String(at).padStart(2, "0")}:00.000Z`;
+
+/** The design's eight-person thread: who has read how far, by when they last read. */
+const readThread = [
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000a01",
+			host,
+			"Drafts for both Northwind replies are ready. Three lines each.",
+		),
+		createdAt: minute(1),
+	},
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000a02",
+			jay,
+			"Can someone sanity-check them before they go?",
+		),
+		createdAt: minute(2),
+	},
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000a03",
+			person,
+			"On it. The first one is the tricky one.",
+		),
+		createdAt: minute(3),
+	},
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000a04",
+			person,
+			"Dana hates anything that sounds like a template.",
+		),
+		createdAt: minute(4),
+	},
+];
+const readsOfThread = readReceipts({
+	messages: readThread,
+	reads: [
+		{ person: readers.tom, readThrough: minute(1) },
+		{ person: readers.sora, readThrough: minute(2) },
+		{ person: readers.lena, readThrough: minute(3) },
+		{ person: readers.mika, readThrough: minute(4) },
+		{ person: jay, readThrough: minute(4) },
+		{ person: readers.pat, readThrough: minute(4) },
+		// Your own read is never shown.
+		{ person, readThrough: minute(4) },
+	],
+	bots: [host],
+	userId: user.id,
+});
+
+/**
+ * ReadReceipts puts each reader's face at the right edge under the last
+ * message they have read. Tom stopped at the drafts, Sora at Jay's question
+ * and Lena at your first message. The bot, which has not replied since, is
+ * first in the bottom row. Jay shows only there, past his own message, and
+ * you never see your own face.
+ */
+export const ReadReceipts = meta.story({
+	args: {
+		participants: [host, person, jay, ...Object.values(readers)],
+		messages: readThread,
+		receipts: readsOfThread,
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Read by Tom Ortiz")).toBeInTheDocument();
+		await expect(canvas.getByText("Read by Sora Reyes")).toBeInTheDocument();
+		await expect(canvas.getByText("Read by Lena Nakamura")).toBeInTheDocument();
+		await expect(
+			canvas.getByText("Read by Issue Triager, Mika Kim, Jay Park, and Pat Adams"),
+		).toBeInTheDocument();
+		await expect(canvas.queryByText(/Sam Rivera/)).toBeNull();
+	},
+});
+
+/** ReadReceiptsInLight is the same thread in the light theme. */
+export const ReadReceiptsInLight = meta.story({
+	...ReadReceipts.input,
+	globals: { theme: "light" },
+});
+
+/** ReadReceiptsOnAPhone wraps a row too wide for the bubble column onto a second line, still at the right. */
+export const ReadReceiptsOnAPhone = meta.story({
+	args: {
+		...ReadReceipts.input.args,
+		receipts: readReceipts({
+			messages: readThread,
+			reads: Array.from({ length: 18 }, (_, index) => ({
+				person: reader(String(10 + index), `Reader ${String.fromCharCode(65 + index)}`),
+				readThrough: minute(4),
+			})),
+			bots: [host],
+			userId: user.id,
+		}),
+	},
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+});
+
+/** Tom reading a message further every second and a half, from the first message to the last. */
+function CatchingUp(args: ComponentProps<typeof ThreadConversation>) {
+	const [readUpTo, setReadUpTo] = useState(1);
+	useEffect(() => {
+		const timer = setInterval(() => setReadUpTo((at) => (at % readThread.length) + 1), 1_500);
+		return () => clearInterval(timer);
+	}, []);
+	const receipts = readReceipts({
+		messages: readThread,
+		reads: [{ person: readers.tom, readThrough: minute(readUpTo) }],
+		bots: [host],
+		userId: user.id,
+	});
+	return <ThreadConversation {...args} receipts={receipts} />;
+}
+
+/** ReadReceiptsCatchingUp fades Tom's face in under each message he reads. */
+export const ReadReceiptsCatchingUp = meta.story({
+	args: { participants: [host, person, jay, readers.tom], messages: readThread },
+	render: (args) => <CatchingUp {...args} />,
 });

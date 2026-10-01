@@ -979,6 +979,22 @@ describe("people typing in the Chat", () => {
 		await waitFor(() => expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull());
 	});
 
+	it("shows someone under the message they have read up to as soon as they read it", async () => {
+		const updates = await watchMainThread();
+		await screen.findByText("Checking ownership.");
+		expect(screen.queryByText("Read by Jye")).toBeNull();
+
+		updates.emit(
+			streamEvent("thread.read", {
+				threadId: chat.mainThreadId,
+				person: jyeInThread,
+				readThrough: agentMessage.createdAt,
+			}),
+		);
+
+		await screen.findByText("Read by Jye");
+	});
+
 	it("does not show you your own typing", async () => {
 		const updates = await watchMainThread();
 
