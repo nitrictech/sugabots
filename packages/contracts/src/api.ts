@@ -19,6 +19,13 @@ export const sessionUserSchema = Schema.Struct({
 
 export type SessionUser = typeof sessionUserSchema.Type;
 
+export const USER_NAME_MAX_LENGTH = 100;
+
+export const userNameSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(USER_NAME_MAX_LENGTH),
+);
+
 export const workspaceMembershipSchema = Schema.Struct({
 	role: workspaceRoleSchema,
 });

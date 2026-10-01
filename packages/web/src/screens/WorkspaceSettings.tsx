@@ -1,10 +1,11 @@
-import { type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
+import { USER_NAME_MAX_LENGTH, type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
+import { useUpdateName } from "@/lib/session.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -20,6 +21,7 @@ import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
+	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
@@ -219,6 +221,7 @@ function ThemeChoice() {
 function ProfileSettings() {
 	const { session } = useRouteContext({ from: "__root__" });
 	const navigate = useNavigate();
+	const updateName = useUpdateName();
 	const user = session.user;
 	if (!user) return null;
 
@@ -235,12 +238,69 @@ function ProfileSettings() {
 			description={user.email}
 		>
 			<SettingsGroup label="Account">
-				<SettingsRow label="Name" trailing={<SettingsValue>{user.name}</SettingsValue>} />
+				<NameRow
+					name={user.name}
+					savePending={updateName.isPending}
+					error={updateName.error ? failureMessage(updateName.error) : undefined}
+					onCommit={(name) => updateName.mutateAsync(name)}
+				/>
 				<SettingsRow label="Email" trailing={<SettingsValue>{user.email}</SettingsValue>} />
 			</SettingsGroup>
 			<ReferralLinkSettings />
 			<SettingsDanger onClick={() => void signOut()}>Sign out</SettingsDanger>
 		</SettingsPage>
+	);
+}
+
+/**
+ * Your name, edited in place, which saves trimmed when you leave it or press
+ * Enter. Escape, or leaving it blank or unchanged, puts the name back; so does
+ * a save that fails, and `error` says why under it.
+ */
+function NameRow({
+	name,
+	savePending,
+	error,
+	onCommit,
+}: {
+	name: string;
+	savePending: boolean;
+	error: string | undefined;
+	onCommit: (name: string) => Promise<unknown>;
+}) {
+	const [draft, setDraft] = useState(name);
+	const id = useId();
+
+	function commit() {
+		const next = draft.trim();
+		if (savePending || next === name || next === "") {
+			setDraft(name);
+			return;
+		}
+		setDraft(next);
+		void onCommit(next).catch(() => setDraft(name));
+	}
+
+	return (
+		<>
+			<SettingsControlRow label="Name" htmlFor={id}>
+				<input
+					id={id}
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					onBlur={commit}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") event.currentTarget.blur();
+						if (event.key === "Escape") setDraft(name);
+					}}
+					maxLength={USER_NAME_MAX_LENGTH}
+					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+				/>
+			</SettingsControlRow>
+			{error && (
+				<Alert className="border-border border-b px-4 py-2.5 last:border-b-0">{error}</Alert>
+			)}
+		</>
 	);
 }
 
