@@ -1,4 +1,10 @@
-import type { AgentColor, Message, MessagePart, ThreadParticipant } from "@sugabots/contracts";
+import type {
+	AgentColor,
+	Message,
+	MessagePart,
+	PersonParticipant,
+	ThreadParticipant,
+} from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
 import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
@@ -43,13 +49,7 @@ export interface ParticipantRow {
 
 export function toParticipant(row: ParticipantRow): ThreadParticipant {
 	if (row.userId && row.userName) {
-		return {
-			kind: "person",
-			id: row.userId,
-			name: row.userName,
-			handle: handleFromName(row.userName),
-			image: row.userImage,
-		};
+		return toPerson({ id: row.userId, name: row.userName, image: row.userImage });
 	}
 	if (row.agentId && row.agentName && row.agentHandle && row.agentColor !== null && row.agentFace) {
 		return {
@@ -118,6 +118,21 @@ export function toMessage(
 
 /** A person's columns, for a relational query that names who wrote or joined. */
 export const personColumns = { columns: { id: true, name: true, image: true } } as const;
+
+/** A person read with {@link personColumns}, as the API shows them. */
+export function toPerson(row: {
+	id: string;
+	name: string;
+	image: string | null;
+}): PersonParticipant {
+	return {
+		kind: "person",
+		id: row.id,
+		name: row.name,
+		handle: handleFromName(row.name),
+		image: row.image,
+	};
+}
 
 /** An agent's columns, for a relational query that names who wrote or joined. */
 export const agentColumns = {

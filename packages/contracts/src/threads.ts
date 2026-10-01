@@ -357,6 +357,19 @@ export const threadSummarySchema = Schema.Struct({
 
 export type ThreadSummary = typeof threadSummarySchema.Type;
 
+/**
+ * How far a person has read a thread: every message created at or before
+ * `readThrough`, as of `readAt`. Recorded only for a Chat's main thread.
+ */
+export const threadReadSchema = Schema.Struct({
+	person: personParticipantSchema,
+	readThrough: isoTimestampSchema,
+	/** When they last read further. */
+	readAt: isoTimestampSchema,
+});
+
+export type ThreadRead = typeof threadReadSchema.Type;
+
 /** A conversation as it is read: the thread, a page of its messages, and who is in it. */
 export const threadDetailsSchema = Schema.Struct({
 	thread: threadSchema,
@@ -380,6 +393,8 @@ export const threadDetailsSchema = Schema.Struct({
 	 * asked for it on, waits for that turn. Null when no turn waits.
 	 */
 	queuedSince: Schema.NullOr(isoTimestampSchema),
+	/** How far each person who has opened the thread has read it, the caller included. */
+	reads: Schema.mutable(Schema.Array(threadReadSchema)),
 });
 
 export type ThreadDetails = typeof threadDetailsSchema.Type;

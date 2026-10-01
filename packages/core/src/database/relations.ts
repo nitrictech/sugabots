@@ -11,6 +11,7 @@ export const relations = defineRelations(schema, (r) => ({
 		pod: r.one.pod({ from: r.thread.podId, to: r.pod.id, optional: false }),
 		messages: r.many.message({ from: r.thread.id, to: r.message.threadId }),
 		participants: r.many.threadParticipant({ from: r.thread.id, to: r.threadParticipant.threadId }),
+		reads: r.many.threadRead({ from: r.thread.id, to: r.threadRead.threadId }),
 		routineExecution: r.one.routineExecution({
 			from: r.thread.id,
 			to: r.routineExecution.threadId,
@@ -47,6 +48,9 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.message.id,
 			to: r.collaboration.parentMessageId,
 		}),
+	},
+	threadRead: {
+		user: r.one.user({ from: r.threadRead.userId, to: r.user.id, optional: false }),
 	},
 	threadParticipant: {
 		user: r.one.user({ from: r.threadParticipant.userId, to: r.user.id }),

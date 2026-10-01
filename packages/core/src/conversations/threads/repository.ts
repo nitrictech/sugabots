@@ -9,7 +9,7 @@ import { chat, message, thread, threadParticipant, threadRead } from "../../data
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { personAuthor, toMessage } from "./participants.ts";
+import { personAuthor, personColumns, toMessage, toPerson } from "./participants.ts";
 
 /**
  * The only writer of `thread`, `thread_participant`, `chat` and `thread_read`,
@@ -91,8 +91,9 @@ export interface Interface {
 	}) => Effect.Effect<void>;
 	/**
 	 * Records that `userId` has read the thread `threadId` up to its newest
-	 * finished message. A reply still streaming is not yet read, so it is news
-	 * once it is done. Never moves anyone back.
+	 * finished message, and tells the thread's watchers when that moved them
+	 * on. A reply still streaming is not yet read, so it is news once it is
+	 * done. Never moves anyone back.
 	 */
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 }
@@ -422,28 +423,44 @@ export const make = Effect.gen(function* () {
 		markRead: (userId, threadId) =>
 			operation(
 				"markRead",
-				Effect.gen(function* () {
-					// The newest message's own time rather than this server's clock, so
-					// a message stamped later is never counted as read.
-					const [newest] = yield* query((db) =>
-						db
-							.select({ at: max(message.createdAt) })
-							.from(message)
-							.where(and(eq(message.threadId, threadId), ne(message.status, "streaming"))),
-					);
-					const readThrough = newest?.at;
-					if (!readThrough) return;
-					yield* query((db) =>
-						db
-							.insert(threadRead)
-							.values({ userId, threadId, readThrough })
-							.onConflictDoUpdate({
-								target: [threadRead.userId, threadRead.threadId],
-								set: { readThrough },
-								setWhere: lt(threadRead.readThrough, readThrough),
+				transaction(
+					Effect.gen(function* () {
+						// The newest message's own time rather than this server's clock, so
+						// a message stamped later is never counted as read.
+						const [newest] = yield* query((db) =>
+							db
+								.select({ at: max(message.createdAt) })
+								.from(message)
+								.where(and(eq(message.threadId, threadId), ne(message.status, "streaming"))),
+						);
+						const readThrough = newest?.at;
+						if (!readThrough) return;
+						const [moved] = yield* query((db) =>
+							db
+								.insert(threadRead)
+								.values({ userId, threadId, readThrough })
+								.onConflictDoUpdate({
+									target: [threadRead.userId, threadRead.threadId],
+									set: { readThrough },
+									setWhere: lt(threadRead.readThrough, readThrough),
+								})
+								.returning({ readThrough: threadRead.readThrough, readAt: threadRead.updatedAt }),
+						);
+						if (!moved) return;
+						const reader = yield* query((db) =>
+							db.query.user.findFirst({ where: { id: userId }, ...personColumns }),
+						);
+						if (!reader) return;
+						yield* emit([
+							ConversationEvent.ThreadRead({
+								threadId,
+								person: toPerson(reader),
+								readThrough: moved.readThrough,
+								readAt: moved.readAt,
 							}),
-					);
-				}),
+						]);
+					}),
+				),
 			),
 	});
 });

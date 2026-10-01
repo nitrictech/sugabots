@@ -5,6 +5,7 @@ import {
 	messageSchema,
 	messageStatusSchema,
 	personParticipantSchema,
+	threadReadSchema,
 	toolCallPartSchema,
 } from "./threads.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -86,6 +87,8 @@ export const eventPayloadSchemas = {
 	 * message arrives.
 	 */
 	"person.typing": Schema.Struct({ threadId, person: personParticipantSchema }),
+	/** Someone read further into the thread. A read never moves anyone back. */
+	"thread.read": Schema.Struct({ threadId, ...threadReadSchema.fields }),
 	"thread.created": Schema.Struct({ threadId }),
 	/**
 	 * Something about the thread no more specific event describes. On the
@@ -136,6 +139,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"turn.cancel_requested",
 	"turn.completed",
 	"thread.notice",
+	"thread.read",
 	"thread.created",
 	"thread.changed",
 	"chat.thread_changed",
@@ -254,6 +258,7 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("turn.completed", P["turn.completed"]),
 	withEnvelope("thread.changed", P["thread.changed"]),
 	withEnvelope("thread.notice", P["thread.notice"]),
+	withEnvelope("thread.read", P["thread.read"]),
 	withEnvelope("person.typing", P["person.typing"]),
 	withEnvelope("chat.thread_changed", P["chat.thread_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),

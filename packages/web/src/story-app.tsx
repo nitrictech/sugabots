@@ -162,6 +162,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		crew: [bot],
 		olderMessagesCursor: null,
 		queuedSince: null,
+		reads: [],
 		messages,
 	};
 }
