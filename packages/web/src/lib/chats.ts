@@ -1,9 +1,10 @@
-import type {
-	Chat,
-	ChatMessageItem,
-	NewMessage,
-	SessionUser,
-	ThreadDetails,
+import {
+	type Chat,
+	type ChatMessageItem,
+	handleFromName,
+	type NewMessage,
+	type SessionUser,
+	type ThreadDetails,
 } from "@sugabots/contracts";
 import {
 	type QueryClient,
@@ -185,10 +186,7 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 						kind: "person",
 						id: user.id,
 						name: user.name,
-						handle: user.name
-							.toLocaleLowerCase()
-							.replace(/[^a-z0-9]+/g, "-")
-							.replace(/(^-|-$)/g, ""),
+						handle: handleFromName(user.name),
 						image: user.image,
 					},
 					kind: "text",
