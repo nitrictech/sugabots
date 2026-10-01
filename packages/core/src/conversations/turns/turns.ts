@@ -15,7 +15,7 @@
 export * as Turns from "./turns.ts";
 
 import type { ToolApprovalDecision } from "@sugabots/contracts";
-import { inArray, type SQLWrapper, sql } from "drizzle-orm";
+import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -23,7 +23,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { laneBusy, oldestWaiting } from "../../workflows/lanes.ts";
+import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
 	makeControls,
@@ -166,12 +166,12 @@ export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
 export const busyIn = (threadId: SQLWrapper) => laneBusy(threadId, [Turn._tag]);
 
 /**
- * The message a turn waiting to start in the thread `threadId` was first asked
- * for, as a value for a query; null when none waits. That turn reads it and
- * everything posted after it once it starts.
+ * When a turn in the thread `threadId` started waiting to start, as a value
+ * for a query; null when none waits. It is asked for in the transaction that
+ * posts the message asking, so that message has the same time, and the turn
+ * reads it and everything posted after it once it starts.
  */
-export const waitingFrom = (threadId: SQLWrapper) =>
-	sql<string | null>`(${oldestWaiting(threadId, Turn._tag)} ->> 'triggerMessageId')`;
+export const queuedSince = (threadId: SQLWrapper) => waitingSince(threadId, Turn._tag);
 
 /** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
 export const isActive = inArray(turn.status, [...ACTIVE_TURN_STATUSES]);

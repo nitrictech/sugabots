@@ -171,7 +171,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 		where: { id: threadId },
 		extras: {
 			running: (row) => respondingIn(sql`${row.id}`),
-			queuedFrom: (row) => Turns.waitingFrom(sql`${row.id}`),
+			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
 			routineExecutionId: (row) => routineExecutionIdOf(row.id),
 		},
 		with: {
@@ -236,7 +236,7 @@ function toThreadDetails(
 			row.messages.length > limit && oldest
 				? encodeCursor({ at: oldest.createdAt, id: oldest.id })
 				: null,
-		queuedFrom: row.queuedFrom,
+		queuedSince: row.queuedSince,
 	};
 }
 

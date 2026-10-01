@@ -246,7 +246,7 @@ function details(
 		crew: [host, collaborator],
 		messages,
 		olderMessagesCursor: null,
-		queuedFrom: null,
+		queuedSince: null,
 	};
 }
 
@@ -636,12 +636,12 @@ describe("ongoing agent Chat", () => {
 			parts: [{ type: "text", text: "Is the Stripe webhook part of it?" }],
 			createdAt: "2026-09-18T09:21:00.000Z",
 		};
-		/** The main thread as the server has it, with `queuedFrom` the message a waiting turn was asked for. */
-		const serverHas = (queuedFrom: string | null) =>
+		/** The main thread as the server has it, with `queuedSince` when a turn started waiting. */
+		const serverHas = (queuedSince: string | null) =>
 			client.api.threads.get.mockReturnValue(
 				Effect.succeed({
 					...details(chat.mainThreadId, "Chat", "chat", [mainMessage, writing, followUp]),
-					queuedFrom,
+					queuedSince,
 				}),
 			);
 
@@ -665,7 +665,7 @@ describe("ongoing agent Chat", () => {
 		it("says a message waits for the next reply, until that reply starts", async () => {
 			const updates = await watchWhileReplying();
 
-			serverHas(followUp.id);
+			serverHas(followUp.createdAt);
 			updates.emit(streamEvent("thread.changed", { threadId: chat.mainThreadId }));
 			await screen.findByRole("article", { name: "Jay Park, queued" });
 

@@ -173,6 +173,11 @@ export const Runs = meta.story({
 	},
 });
 
+/** A minute apart, from the first message of the queue stories. */
+function minuteOfQueue(position: number): string {
+	return new Date(Date.parse("2026-09-22T04:30:00.000Z") + position * 60_000).toISOString();
+}
+
 const writingMessages = [
 	message(
 		"0199a3a0-0000-7000-8000-000000000221",
@@ -191,9 +196,9 @@ const writingMessages = [
 	),
 	message("0199a3a0-0000-7000-8000-000000000224", jay, "Started around 9 this morning."),
 	message("0199a3a0-0000-7000-8000-000000000225", person, "Track both if nothing's open."),
-];
+].map((written, position) => ({ ...written, createdAt: minuteOfQueue(position) }));
 /** Jay's first message, sent while the reply was being written, asked for the turn that waits. */
-const waitingFrom = "0199a3a0-0000-7000-8000-000000000223";
+const queuedSince = minuteOfQueue(2);
 
 /**
  * Messages sent while the bot is still writing a reply wait for its next one,
@@ -205,7 +210,7 @@ export const QueuedBehindAReply = meta.story({
 	args: {
 		participants: [host, person, jay],
 		messages: writingMessages,
-		queued: queuedBehindReply(writingMessages, waitingFrom),
+		queued: queuedBehindReply(writingMessages, queuedSince),
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getAllByRole("article", { name: "Jay Park, queued" })).toHaveLength(2);
@@ -227,16 +232,20 @@ const HAND_OFF_MS = 3_000;
 /** The reply the queued messages waited behind has landed, and the next one has started. */
 const handedOffMessages = [
 	...writingMessages.slice(0, 1),
-	message(
-		"0199a3a0-0000-7000-8000-000000000222",
-		host,
-		"Checkout timeouts are tracked as NIT-1902.",
-	),
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000222",
+			host,
+			"Checkout timeouts are tracked as NIT-1902.",
+		),
+		createdAt: minuteOfQueue(1),
+	},
 	...writingMessages.slice(2),
 	{
 		...message("0199a3a0-0000-7000-8000-000000000226", host, ""),
 		status: "streaming" as const,
 		parts: [],
+		createdAt: minuteOfQueue(5),
 	},
 ];
 
@@ -250,7 +259,7 @@ function HandingOff(props: ComponentProps<typeof ThreadConversation>) {
 	const handedOff = tick % 2 === 1;
 	// Once the next reply has started, nothing waits for it.
 	const messages = handedOff ? handedOffMessages : writingMessages;
-	const queued = queuedBehindReply(messages, handedOff ? null : waitingFrom);
+	const queued = queuedBehindReply(messages, handedOff ? null : queuedSince);
 	return <ThreadConversation {...props} messages={messages} queued={queued} />;
 }
 

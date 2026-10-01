@@ -248,7 +248,7 @@ const collaboration: ThreadDetails = {
 	participants: [asked, asker],
 	crew: [asker, asked],
 	olderMessagesCursor: null,
-	queuedFrom: null,
+	queuedSince: null,
 	messages: [
 		collabMessage(
 			"93",
