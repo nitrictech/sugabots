@@ -1,16 +1,28 @@
 import { canStartMention, type ThreadParticipant } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ArrowUp, Plus } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+	type KeyboardEvent,
+	type ReactNode,
+	type RefObject,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
- * Where a message is written: a + for attachments, then a pill that grows with
- * its text and sends on Enter (Shift+Enter for a new line). The send button
- * takes the accent once there is something to send. Typing `@` offers everyone
- * in `mentionable` whose name or handle matches what follows it; choosing one
- * writes their handle into the draft.
+ * Where a message is written: a pill that grows with its text and sends on
+ * Enter (Shift+Enter for a new line). A one-line draft sits between the + for
+ * attachments and the send button; a longer one takes the pill's full width,
+ * with the buttons on a row beneath it. The send button takes the accent once
+ * there is something to send. Typing `@` offers everyone in `mentionable` whose
+ * name or handle matches what follows it; choosing one writes their handle into
+ * the draft.
  */
 export function ChatComposer({
 	label,
@@ -49,6 +61,8 @@ export function ChatComposer({
 		: [];
 	const mentionMenuOpen = typing?.start !== dismissedMentionAt && matches.length > 0;
 	const selectedMention = Math.min(activeMention, matches.length - 1);
+	const pill = useRef<HTMLDivElement>(null);
+	const stacked = useStackedDraft(pill, textarea, value);
 
 	// A draft kept from an earlier visit is picked up at its end, not before its first word.
 	useEffect(() => {
@@ -110,63 +124,129 @@ export function ChatComposer({
 					onChoose={insertMention}
 				/>
 			)}
-			<div className="flex items-end gap-2.5">
-				<button
-					type="button"
-					disabled
-					aria-label="Add attachment"
-					title="Attachments are not available yet"
-					className="grid size-[38px] shrink-0 place-items-center rounded-full bg-chip text-soft-foreground disabled:cursor-not-allowed"
+			<div
+				ref={pill}
+				className={cn(
+					"focus-ring-within grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
+					stacked
+						? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
+						: "[grid-template-areas:'attach_draft_send']",
+				)}
+			>
+				{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
+				<IconButton
+					label="Attach files (coming soon)"
+					side="top"
+					aria-disabled
+					className="mb-0.5 size-8 [grid-area:attach] aria-disabled:cursor-default aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground [&_svg]:size-4.5"
 				>
-					<Plus size={18} strokeWidth={2.2} />
+					<Plus strokeWidth={2.2} />
+				</IconButton>
+				<label htmlFor={id} className="sr-only">
+					{label}
+				</label>
+				<textarea
+					ref={textarea}
+					id={id}
+					value={value}
+					onChange={(event) => {
+						onValueChange(event.target.value);
+						setCursor(event.target.selectionStart);
+						setActiveMention(0);
+						setDismissedMentionAt(undefined);
+					}}
+					onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
+					onFocus={() => setDismissedMentionAt(undefined)}
+					onBlur={() => setDismissedMentionAt(typing?.start)}
+					onKeyDown={handleKeyDown}
+					aria-autocomplete="list"
+					aria-controls={mentionMenuOpen ? mentionListId : undefined}
+					aria-activedescendant={
+						mentionMenuOpen ? `${mentionListId}-${selectedMention}` : undefined
+					}
+					placeholder={placeholder}
+					maxLength={20_000}
+					rows={1}
+					required
+					className={cn(
+						"field-sizing-content block max-h-40 min-h-9 min-w-0 resize-none bg-transparent py-[7px] text-foreground text-lg leading-[22px] outline-none [grid-area:draft] placeholder:text-subtle-foreground",
+						// In line with the + below it.
+						stacked && "px-1.75",
+					)}
+				/>
+				<button
+					type="submit"
+					aria-label={submitLabel}
+					disabled={submitDisabled}
+					className={cn(
+						"focus-ring mb-0.5 grid size-8 place-items-center rounded-full text-white transition-colors [grid-area:send]",
+						value.trim() ? "bg-switch-on hover:bg-primary" : "bg-border-strong",
+					)}
+				>
+					<ArrowUp size={16} strokeWidth={2.6} />
 				</button>
-				<div className="focus-ring-within flex min-w-0 flex-1 items-end gap-2 rounded-composer border border-border-strong bg-panel py-1 pr-[5px] pl-4">
-					<label htmlFor={id} className="sr-only">
-						{label}
-					</label>
-					<textarea
-						ref={textarea}
-						id={id}
-						value={value}
-						onChange={(event) => {
-							onValueChange(event.target.value);
-							setCursor(event.target.selectionStart);
-							setActiveMention(0);
-							setDismissedMentionAt(undefined);
-						}}
-						onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
-						onFocus={() => setDismissedMentionAt(undefined)}
-						onBlur={() => setDismissedMentionAt(typing?.start)}
-						onKeyDown={handleKeyDown}
-						aria-autocomplete="list"
-						aria-controls={mentionMenuOpen ? mentionListId : undefined}
-						aria-activedescendant={
-							mentionMenuOpen ? `${mentionListId}-${selectedMention}` : undefined
-						}
-						placeholder={placeholder}
-						maxLength={20_000}
-						rows={1}
-						required
-						className="field-sizing-content block max-h-40 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-[7px] text-foreground text-lg leading-[22px] outline-none placeholder:text-subtle-foreground"
-					/>
-					<button
-						type="submit"
-						aria-label={submitLabel}
-						disabled={submitDisabled}
-						className={cn(
-							"focus-ring mb-0.5 grid size-8 shrink-0 place-items-center rounded-full text-white transition-colors",
-							value.trim() ? "bg-switch-on hover:bg-primary" : "bg-border-strong",
-						)}
-					>
-						<ArrowUp size={16} strokeWidth={2.6} />
-					</button>
-				</div>
 			</div>
-			<div aria-live="polite" className="pl-12 text-destructive-text text-sm empty:hidden">
+			<div aria-live="polite" className="pl-3 text-destructive-text text-sm empty:hidden">
 				{error}
 			</div>
 		</form>
 	);
+}
+
+/**
+ * Whether the draft takes the pill's full width above the buttons: once it has
+ * a line break or wraps beside them. An empty draft never does, even when its
+ * placeholder wraps. Measuring while stacked would read the wider row and flip
+ * straight back, so a stacked draft stays stacked until it gets shorter or the
+ * pill changes width, and is then measured inline again. Typing re-measures
+ * before paint, so the layout never visibly flickers.
+ */
+function useStackedDraft(
+	pill: RefObject<HTMLElement | null>,
+	textarea: RefObject<HTMLTextAreaElement | null>,
+	value: string,
+): boolean {
+	/** The pill's width as last observed; a change measures the draft again. */
+	const [observedPillWidth, setObservedPillWidth] = useState<number>();
+	const [stackedAt, setStackedAt] = useState<{ draftLength: number; pillWidth: number }>();
+
+	useEffect(() => {
+		const element = pill.current;
+		if (!element) return;
+		const observer = new ResizeObserver(() => setObservedPillWidth(element.clientWidth));
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, [pill]);
+
+	useLayoutEffect(() => {
+		const pillElement = pill.current;
+		const draft = textarea.current;
+		if (!pillElement || !draft) return;
+		if (!stackedAt) {
+			const outgrowsRow = value !== "" && (value.includes("\n") || wrapsPastOneLine(draft));
+			if (!outgrowsRow) return;
+			// The observed width, as that is what it is compared with below. The observer's
+			// update can lag the DOM, so a live width would never match and the layout would
+			// flip between stacked and inline forever.
+			const pillWidth = observedPillWidth ?? pillElement.clientWidth;
+			setStackedAt({ draftLength: value.length, pillWidth });
+			return;
+		}
+		const resized = observedPillWidth !== undefined && observedPillWidth !== stackedAt.pillWidth;
+		const mightFitInline = value.length < stackedAt.draftLength || resized;
+		if (!value.includes("\n") && mightFitInline) setStackedAt(undefined);
+	}, [pill, textarea, value, observedPillWidth, stackedAt]);
+
+	return stackedAt !== undefined;
+}
+
+function wrapsPastOneLine(textarea: HTMLTextAreaElement): boolean {
+	const style = getComputedStyle(textarea);
+	const oneLine =
+		Number.parseFloat(style.lineHeight) +
+		Number.parseFloat(style.paddingTop) +
+		Number.parseFloat(style.paddingBottom);
+	return textarea.scrollHeight > oneLine;
 }
 
 /**
