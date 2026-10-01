@@ -1,6 +1,6 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { useEffect, useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fireEvent, fn, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { ChatComposer } from "./ChatComposer.tsx";
 
@@ -70,10 +70,56 @@ const meta = preview.meta({
 	},
 });
 
-/** Empty is the composer before anything is typed: the send button stays grey. */
-export const Empty = meta.story({});
+/**
+ * `stacked`: the draft is above both buttons, using the composer's full width.
+ * `inline`: the draft sits between them.
+ */
+function expectLayout(
+	canvas: { getByRole: typeof screen.getByRole },
+	layout: "stacked" | "inline",
+) {
+	const draft = canvas
+		.getByRole("textbox", { name: "Message Growth Desk" })
+		.getBoundingClientRect();
+	const attach = canvas
+		.getByRole("button", { name: "Attach files (coming soon)" })
+		.getBoundingClientRect();
+	return expect(draft.bottom <= attach.top ? "stacked" : "inline").toBe(layout);
+}
 
-/** Draft grows to fit a multi-line message instead of scrolling it out of sight. */
+/** Empty is the composer before anything is typed: the send button stays grey. */
+export const Empty = meta.story({
+	play: async ({ canvas }) => {
+		await expectLayout(canvas, "inline");
+	},
+});
+
+/**
+ * LongPlaceholder keeps an empty draft between the buttons even when its
+ * placeholder wraps, as a long pod name does on a phone.
+ */
+export const LongPlaceholder = meta.story({
+	tags: ["ai-generated"],
+	args: { placeholder: "Message Customer Success Escalations Team" },
+	decorators: [
+		(Story) => (
+			<div style={{ width: 360 }}>
+				<Story />
+			</div>
+		),
+	],
+	play: async ({ canvas }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const lineHeight = Number.parseFloat(getComputedStyle(input).lineHeight);
+		await expect(input.scrollHeight).toBeGreaterThanOrEqual(2 * lineHeight);
+		await expectLayout(canvas, "inline");
+	},
+});
+
+/**
+ * Draft grows to fit a multi-line message instead of scrolling it out of sight,
+ * taking the composer's full width with the buttons beneath it.
+ */
 export const Draft = meta.story({
 	args: {
 		value: "Please summarise the customer feedback.\nHighlight anything we should act on today.",
@@ -81,6 +127,71 @@ export const Draft = meta.story({
 	play: async ({ canvas }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await expect(input.scrollHeight).toBe(input.clientHeight);
+		await expectLayout(canvas, "stacked");
+	},
+});
+
+/**
+ * WrapToFullWidth moves a line too long for the row beside the buttons above
+ * them, and back beside them once the draft is short again.
+ */
+export const WrapToFullWidth = meta.story({
+	tags: ["ai-generated"],
+	play: async ({ canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		await userEvent.type(input, "Short line");
+		await expectLayout(canvas, "inline");
+		await userEvent.paste(" that keeps going".repeat(40));
+		await expectLayout(canvas, "stacked");
+		await expect(input).toHaveFocus();
+		await userEvent.clear(input);
+		await userEvent.type(input, "Short again");
+		await expectLayout(canvas, "inline");
+	},
+});
+
+/**
+ * ResizeToFit measures again when the composer changes width: a line that fits
+ * beside the buttons moves above them when the window narrows, and back again
+ * when it widens.
+ */
+export const ResizeToFit = meta.story({
+	tags: ["ai-generated"],
+	args: { value: "Please summarise the customer feedback from today." },
+	play: async ({ canvas, canvasElement }) => {
+		try {
+			canvasElement.style.width = "720px";
+			await waitFor(() => expectLayout(canvas, "inline"));
+			canvasElement.style.width = "360px";
+			await waitFor(() => expectLayout(canvas, "stacked"));
+			canvasElement.style.width = "720px";
+			await waitFor(() => expectLayout(canvas, "inline"));
+		} finally {
+			canvasElement.style.width = "";
+		}
+	},
+});
+
+/**
+ * NarrowWhileTyping settles when the draft wraps in the same moment the
+ * composer narrows, before the resize has been reported.
+ */
+export const NarrowWhileTyping = meta.story({
+	tags: ["ai-generated"],
+	play: async ({ canvas, canvasElement }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		try {
+			canvasElement.style.width = "720px";
+			await waitFor(() => expectLayout(canvas, "inline"));
+			canvasElement.style.width = "360px";
+			fireEvent.change(input, {
+				target: { value: "Please summarise the customer feedback from today." },
+			});
+			await waitFor(() => expectLayout(canvas, "stacked"));
+			await expect(input).toBeInTheDocument();
+		} finally {
+			canvasElement.style.width = "";
+		}
 	},
 });
 
@@ -175,6 +286,24 @@ export const EditMention = meta.story({
 		await expect(canvas.getByRole("listbox")).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(input).toHaveValue("@sam-rivera hello");
+	},
+});
+
+/**
+ * AttachmentsComingSoon keeps the unfinished + reachable by keyboard and
+ * pointer, announced as unavailable, so its tooltip can say why.
+ */
+export const AttachmentsComingSoon = meta.story({
+	tags: ["ai-generated"],
+	play: async ({ canvas, userEvent }) => {
+		const attach = canvas.getByRole("button", { name: "Attach files (coming soon)" });
+		await expect(attach).toHaveAttribute("aria-disabled", "true");
+		await userEvent.tab();
+		await expect(attach).toHaveFocus();
+		await userEvent.hover(attach);
+		await expect(
+			await screen.findByText("Attach files (coming soon)", { selector: "div" }),
+		).toBeVisible();
 	},
 });
 
