@@ -444,7 +444,7 @@ export const make = Effect.gen(function* () {
 									set: { readThrough },
 									setWhere: lt(threadRead.readThrough, readThrough),
 								})
-								.returning({ readThrough: threadRead.readThrough }),
+								.returning({ readThrough: threadRead.readThrough, readAt: threadRead.updatedAt }),
 						);
 						if (!moved) return;
 						const reader = yield* query((db) =>
@@ -456,6 +456,7 @@ export const make = Effect.gen(function* () {
 								threadId,
 								person: toPerson(reader),
 								readThrough: moved.readThrough,
+								readAt: moved.readAt,
 							}),
 						]);
 					}),

@@ -117,10 +117,15 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
 		CollaborationFailed: (change) => [collaborationUpdated(change)],
-		ThreadRead: ({ threadId, person, readThrough }) => [
+		ThreadRead: ({ threadId, person, readThrough, readAt }) => [
 			onThread(
 				threadId,
-				streamEvent("thread.read", { threadId, person, readThrough: readThrough.toISOString() }),
+				streamEvent("thread.read", {
+					threadId,
+					person,
+					readThrough: readThrough.toISOString(),
+					readAt: readAt.toISOString(),
+				}),
 			),
 		],
 		ThreadSummarised: ({ workspaceId, podId, threadId }) =>

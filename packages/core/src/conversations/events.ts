@@ -151,11 +151,12 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * or the collaborator's turn ended without an answer.
 	 */
 	CollaborationFailed: CollaborationChange;
-	/** `person` read further into the thread: every message created up to `readThrough`. */
+	/** `person` read further into the thread, at `readAt`: every message created up to `readThrough`. */
 	ThreadRead: {
 		readonly threadId: string;
 		readonly person: PersonParticipant;
 		readonly readThrough: Date;
+		readonly readAt: Date;
 	};
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: {

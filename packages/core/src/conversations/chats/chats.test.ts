@@ -306,13 +306,20 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await chats.markRead(current.id);
 			await chats.markRead(current.id);
 
-			expect((await threads.get(current.mainThreadId)).reads).toEqual([
-				{
-					person: expect.objectContaining({ kind: "person", id: userId }),
-					readThrough: reply.createdAt.toISOString(),
-				},
-			]);
+			const [read] = (await threads.get(current.mainThreadId)).reads;
+			expect(read).toEqual({
+				person: expect.objectContaining({ kind: "person", id: userId }),
+				readThrough: reply.createdAt.toISOString(),
+				readAt: expect.any(String),
+			});
 			expect(await readsAnnounced()).toBe(1);
+			// When they read it, not when it was sent: the reply is stamped a second from now.
+			expect(Date.parse(read?.readAt ?? "")).toBeLessThan(reply.createdAt.getTime());
+
+			await botWrites(current.mainThreadId, "One more thing", 2);
+			await chats.markRead(current.id);
+			const [readAgain] = (await threads.get(current.mainThreadId)).reads;
+			expect(Date.parse(readAgain?.readAt ?? "")).toBeGreaterThan(Date.parse(read?.readAt ?? ""));
 		});
 
 		it("counts each pod's unread chats for the rail", async () => {

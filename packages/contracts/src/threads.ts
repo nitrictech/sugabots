@@ -359,11 +359,13 @@ export type ThreadSummary = typeof threadSummarySchema.Type;
 
 /**
  * How far a person has read a thread: every message created at or before
- * `readThrough`. Recorded only for a Chat's main thread.
+ * `readThrough`, as of `readAt`. Recorded only for a Chat's main thread.
  */
 export const threadReadSchema = Schema.Struct({
 	person: personParticipantSchema,
 	readThrough: isoTimestampSchema,
+	/** When they last read further. */
+	readAt: isoTimestampSchema,
 });
 
 export type ThreadRead = typeof threadReadSchema.Type;

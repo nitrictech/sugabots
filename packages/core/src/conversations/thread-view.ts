@@ -192,7 +192,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 				with: { user: personColumns, agent: agentColumns },
 			},
 			reads: {
-				columns: { readThrough: true },
+				columns: { readThrough: true, updatedAt: true },
 				with: { user: personColumns },
 			},
 			routineExecution: true,
@@ -245,6 +245,8 @@ function toThreadDetails(
 		reads: row.reads.map((read) => ({
 			person: toPerson(read.user),
 			readThrough: read.readThrough.toISOString(),
+			// Written whenever they read further, so when they last did.
+			readAt: read.updatedAt.toISOString(),
 		})),
 	};
 }
