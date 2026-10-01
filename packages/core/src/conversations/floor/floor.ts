@@ -22,7 +22,8 @@ import { Facilitate } from "./facilitate.workflow.ts";
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
  * applies it, and asks for the turns. Precedence, top wins:
  *
- * 1. A person mentioning only people: nobody. They are talking to each other.
+ * 1. A person writing for people only, or mentioning only people: nobody.
+ *    They are talking to each other.
  * 2. A person writing in a chat: the chat's agent, whichever agents they
  *    mention. A chat is a conversation with one agent, so another agent the
  *    person names is reached by that agent collaborating, not by joining.
@@ -44,7 +45,11 @@ export interface FloorInput {
 	routing: PodRouting;
 	threadType: ThreadType;
 	author:
-		| { kind: "person" }
+		| {
+				kind: "person";
+				/** Written for the other people, so no bot replies. */
+				peopleOnly: boolean;
+		  }
 		| {
 				kind: "agent";
 				agentId: string;
@@ -76,7 +81,7 @@ export function decideFloor(input: FloorInput): FloorDecision {
 	if (input.author.kind === "person") {
 		const mentioned = mentionedHandles(input.content);
 		const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
-		if (mentioned.length > 0 && mentionedAgents.length === 0) {
+		if (input.author.peopleOnly || (mentioned.length > 0 && mentionedAgents.length === 0)) {
 			return { kind: "nobody", why: "people-addressed" };
 		}
 		if (input.threadType === "chat") {

@@ -39,6 +39,8 @@ export interface Interface {
 		chatId: string;
 		messageId: string;
 		content: string;
+		/** Written for the other people, so no bot replies. Off unless set. */
+		peopleOnly?: boolean;
 	}) => Effect.Effect<
 		Message,
 		ResourceHidden | ThreadRepository.MessageIdConflict | ChatAgentHasNoModel,
@@ -93,6 +95,7 @@ export const make = Effect.gen(function* () {
 							threadId: visible.mainThreadId,
 							author: sender,
 							content: input.content,
+							peopleOnly: input.peopleOnly ?? false,
 						});
 						if (posted._tag === "AlreadyPosted") return toMessage(posted.message, author);
 						// Checked once the message is known to be new, so sending it again
@@ -104,7 +107,7 @@ export const make = Effect.gen(function* () {
 							id: posted.message.id,
 							threadId: visible.mainThreadId,
 							content: posted.message.content,
-							author: { kind: "person" },
+							author: { kind: "person", peopleOnly: input.peopleOnly ?? false },
 						});
 						return toMessage(posted.message, author);
 					}),

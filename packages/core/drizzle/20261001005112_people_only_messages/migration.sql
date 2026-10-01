@@ -1,0 +1,1 @@
+ALTER TABLE "message" ADD COLUMN "people_only" boolean DEFAULT false NOT NULL;

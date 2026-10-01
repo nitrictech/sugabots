@@ -43,6 +43,8 @@ export interface Interface {
 		threadId: string;
 		author: { id: string; name: string; image: string | null };
 		content: string;
+		/** Written for the other people, so no bot replies. */
+		peopleOnly: boolean;
 	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict>;
 	/** Brings agents into the thread, announcing the ones who were not there yet. */
 	readonly addAgents: (threadId: string, agentIds: readonly string[]) => Effect.Effect<void>;
@@ -183,7 +185,8 @@ export const make = Effect.gen(function* () {
 							if (
 								existing.threadId !== input.threadId ||
 								existing.authorUserId !== input.author.id ||
-								existing.content !== input.content
+								existing.content !== input.content ||
+								existing.peopleOnly !== input.peopleOnly
 							) {
 								return yield* new MessageIdConflict();
 							}
@@ -200,6 +203,7 @@ export const make = Effect.gen(function* () {
 									status: "complete",
 									parts: [{ type: "text", text: input.content }],
 									content: input.content,
+									peopleOnly: input.peopleOnly,
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("message")));

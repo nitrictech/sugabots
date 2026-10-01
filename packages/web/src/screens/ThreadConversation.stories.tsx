@@ -227,6 +227,33 @@ export const QueuedBehindAReply = meta.story({
 	},
 });
 
+const peopleOnlyMessages = [
+	message(
+		"0199a3a0-0000-7000-8000-000000000231",
+		host,
+		"Drafts for both Northwind replies are ready. Three lines each.",
+	),
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000232",
+			jay,
+			"Sam, can you read these before they go? You know Dana better than I do.",
+		),
+		peopleOnly: true as const,
+	},
+];
+
+/** PeopleOnly marks a message written for the people alone: the bot reads it but doesn't reply. */
+export const PeopleOnly = meta.story({
+	args: {
+		participants: [host, person, jay],
+		messages: peopleOnlyMessages,
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("People only")).toBeInTheDocument();
+	},
+});
+
 /** How long the loop below stays on each state: writing, then landed. */
 const HAND_OFF_MS = 3_000;
 

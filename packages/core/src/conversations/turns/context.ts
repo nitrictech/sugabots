@@ -42,6 +42,7 @@ export function modelPrompt(context: TurnContext, environment: TurnEnvironment):
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
+		"A message marked (to people only) was written for the other people, not for agents: read it as context, and never answer it unless someone asks you to later.",
 		context.thread.parentThreadId
 			? "Another agent opened this thread to ask you for help. Its first message is their brief; your reply is returned to them when your turn ends, so make it stand alone."
 			: undefined,
@@ -124,9 +125,11 @@ function authoredMessage(
 		};
 	}
 	const agentMarker = message.author.kind === "agent" ? " (agent)" : "";
+	// The person wrote it for the other people, so no agent was asked; it is context only.
+	const peopleOnlyMarker = message.peopleOnly ? " (to people only)" : "";
 	return {
 		role: "user",
-		content: `${message.author.name} (@${message.author.handle})${agentMarker}: ${message.content}`,
+		content: `${message.author.name} (@${message.author.handle})${agentMarker}${peopleOnlyMarker}: ${message.content}`,
 	};
 }
 

@@ -7,7 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useCallback, useLayoutEffect, useRef } from "react";
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -70,6 +70,7 @@ export function AgentChat({
 	const optimistic = useOptimisticChatItems(chat.data?.id);
 	const send = useSendChatMessage(chat.data, user);
 	const [draft, setDraft] = useChatDraft(user.id, pod.id, agent.id);
+	const [peopleOnly, setPeopleOnly] = useState(false);
 	useTypingSignal(chat.data?.mainThreadId, draft);
 	const peopleTyping = usePeopleTyping(chat.data?.mainThreadId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
@@ -140,15 +141,24 @@ export function AgentChat({
 		const message = draft.trim();
 		if (!message || send.isPending) return;
 		const submitted = draft;
+		const submittedPeopleOnly = peopleOnly;
 		setDraft("");
+		// Each message starts out for the bot, so a forgotten toggle never leaves it out for long.
+		setPeopleOnly(false);
 		followingLatest.current = true;
 		try {
-			const sent = send.mutateAsync({ id: crypto.randomUUID(), message });
+			const sent = send.mutateAsync({
+				id: crypto.randomUUID(),
+				message,
+				peopleOnly: submittedPeopleOnly,
+			});
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
 		} catch {
 			setDraft((current) => (current === "" ? submitted : current));
+			// Sending it again must not reach the bot when it was written for people only.
+			setPeopleOnly(submittedPeopleOnly);
 		}
 	}
 
@@ -194,6 +204,13 @@ export function AgentChat({
 		...details.participants.filter((participant) => participant.id !== user.id),
 		...details.crew.filter((member) => !details.participants.some(({ id }) => id === member.id)),
 	];
+	const otherPeople = details.participants.filter(
+		(participant) => participant.kind === "person" && participant.id !== user.id,
+	);
+	const writingToPeople = peopleOnly && otherPeople.length > 0;
+	const composerLabel = writingToPeople
+		? `Message ${new Intl.ListFormat("en", { type: "conjunction" }).format(otherPeople.map(({ name }) => name))}`
+		: `Message ${agent.name}`;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -276,8 +293,8 @@ export function AgentChat({
 						<AgentNotSetUp agent={agent} pod={pod} />
 					) : (
 						<ChatComposer
-							label={`Message ${agent.name}`}
-							placeholder={`Message ${agent.name}`}
+							label={composerLabel}
+							placeholder={composerLabel}
 							value={draft}
 							onValueChange={setDraft}
 							onSubmit={submit}
@@ -286,6 +303,11 @@ export function AgentChat({
 							error={send.isError ? "Message not sent. Your draft is still here." : undefined}
 							className="w-full"
 							mentionable={composerMentionable}
+							peopleOnly={
+								otherPeople.length > 0
+									? { on: writingToPeople, onChange: setPeopleOnly, agent: host }
+									: undefined
+							}
 						/>
 					)}
 				</div>

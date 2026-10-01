@@ -56,9 +56,21 @@ const meta = preview.meta({
 	render: function Composer(args) {
 		const [value, setValue] = useState(args.value);
 		useEffect(() => setValue(args.value), [args.value]);
+		const [peopleOnly, setPeopleOnly] = useState(args.peopleOnly?.on ?? false);
+		useEffect(() => setPeopleOnly(args.peopleOnly?.on ?? false), [args.peopleOnly?.on]);
 		return (
 			<ChatComposer
 				{...args}
+				peopleOnly={
+					args.peopleOnly && {
+						...args.peopleOnly,
+						on: peopleOnly,
+						onChange: (on) => {
+							setPeopleOnly(on);
+							args.peopleOnly?.onChange(on);
+						},
+					}
+				}
 				value={value}
 				onValueChange={(next) => {
 					setValue(next);
@@ -335,4 +347,43 @@ export const Sending = meta.story({
 /** SendFailed preserves the draft and exposes the error beside the retry action. */
 export const SendFailed = meta.story({
 	args: { value: "Please summarise the feedback.", error: "Could not send. Try again." },
+});
+
+const growthDesk = { name: "Growth Desk", color: "green", face: "arc" } as const;
+
+/**
+ * WithPeople is a thread with someone else in it: the bot's face starts the
+ * pill, and Tab switches to people only and back. Tab picks a mention instead
+ * while the mention list is open.
+ */
+export const WithPeople = meta.story({
+	args: { peopleOnly: { on: false, onChange: fn(), agent: growthDesk } },
+	play: async ({ canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const toggle = canvas.getByRole("button", { name: "People only" });
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await userEvent.click(input);
+		await userEvent.keyboard("{Tab}");
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		await expect(input).toHaveFocus();
+		await userEvent.keyboard("{Tab}");
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+		await userEvent.type(input, "@sam");
+		await userEvent.keyboard("{Tab}");
+		await expect(input).toHaveValue("@sam-rivera ");
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+		await userEvent.click(toggle);
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+	},
+});
+
+/** PeopleOnly writes to the other people: the bot reads along but won't reply. */
+export const PeopleOnly = meta.story({
+	args: {
+		label: "Message Jay and Maya",
+		placeholder: "Message Jay and Maya",
+		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
+	},
 });

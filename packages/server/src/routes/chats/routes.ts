@@ -36,7 +36,12 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("send", ({ params, payload }) =>
 				chats
-					.post({ chatId: params.chatId, messageId: payload.id, content: payload.message })
+					.post({
+						chatId: params.chatId,
+						messageId: payload.id,
+						content: payload.message,
+						peopleOnly: payload.peopleOnly,
+					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			);
 	}),

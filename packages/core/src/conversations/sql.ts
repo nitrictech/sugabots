@@ -364,6 +364,8 @@ export const message = pgTable(
 		parts: jsonb("parts").$type<StoredMessagePart[]>().notNull(),
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
+		// A person's message for the other people: the bots read it, but none replies.
+		peopleOnly: boolean("people_only").notNull().default(false),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},

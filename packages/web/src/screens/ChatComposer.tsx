@@ -1,6 +1,10 @@
-import { canStartMention, type ThreadParticipant } from "@sugabots/contracts";
+import {
+	type AgentParticipant,
+	canStartMention,
+	type ThreadParticipant,
+} from "@sugabots/contracts";
 import { cn } from "cn";
-import { ArrowUp, Plus } from "lucide-react";
+import { ArrowUp, Plus, UsersRound } from "lucide-react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
@@ -14,6 +18,7 @@ import {
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Where a message is written: a pill that grows with its text and sends on
@@ -22,7 +27,8 @@ import { IconButton } from "@/ui/icon-button.tsx";
  * with the buttons on a row beneath it. The send button takes the accent once
  * there is something to send. Typing `@` offers everyone in `mentionable` whose
  * name or handle matches what follows it; choosing one writes their handle into
- * the draft.
+ * the draft. With `peopleOnly`, a toggle beside the +, or Tab, switches between
+ * writing to the bot and writing to the other people only.
  */
 export function ChatComposer({
 	label,
@@ -35,6 +41,7 @@ export function ChatComposer({
 	error,
 	className,
 	mentionable,
+	peopleOnly,
 }: {
 	label: string;
 	placeholder: string;
@@ -47,6 +54,13 @@ export function ChatComposer({
 	className?: string;
 	/** Who the draft can mention. */
 	mentionable: ThreadParticipant[];
+	/** Offered when other people are in the thread, to write to them without the bot replying. */
+	peopleOnly?: {
+		on: boolean;
+		onChange: (on: boolean) => void;
+		/** The bot that replies unless the message is for people only. */
+		agent: Pick<AgentParticipant, "name" | "color" | "face">;
+	};
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -91,6 +105,12 @@ export function ChatComposer({
 				return;
 			}
 		}
+		// Shift+Tab still moves the focus back.
+		if (peopleOnly && event.key === "Tab" && !event.shiftKey && !event.nativeEvent.isComposing) {
+			event.preventDefault();
+			peopleOnly.onChange(!peopleOnly.on);
+			return;
+		}
 		if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
 		event.preventDefault();
 		event.currentTarget.form?.requestSubmit();
@@ -127,10 +147,20 @@ export function ChatComposer({
 			<div
 				ref={pill}
 				className={cn(
-					"focus-ring-within grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
-					stacked
-						? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
-						: "[grid-template-areas:'attach_draft_send']",
+					"focus-ring-within grid items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
+					peopleOnly
+						? cn(
+								"grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]",
+								stacked
+									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._hint_send']"
+									: "[grid-template-areas:'attach_audience_draft_hint_send']",
+							)
+						: cn(
+								"grid-cols-[auto_minmax(0,1fr)_auto]",
+								stacked
+									? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
+									: "[grid-template-areas:'attach_draft_send']",
+							),
 				)}
 			>
 				{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
@@ -142,6 +172,9 @@ export function ChatComposer({
 				>
 					<Plus strokeWidth={2.2} />
 				</IconButton>
+				{peopleOnly && (
+					<AudienceToggle {...peopleOnly} onToggle={() => peopleOnly.onChange(!peopleOnly.on)} />
+				)}
 				<label htmlFor={id} className="sr-only">
 					{label}
 				</label>
@@ -174,6 +207,18 @@ export function ChatComposer({
 						stacked && "px-1.75",
 					)}
 				/>
+				{peopleOnly && (
+					// A touch screen has no Tab key; the toggle is how it switches.
+					<span
+						aria-hidden
+						className="mb-2 flex shrink-0 items-center gap-1.5 whitespace-nowrap text-subtle-foreground text-xs [grid-area:hint] max-sm:hidden [@media(hover:none)]:hidden"
+					>
+						<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground">
+							Tab
+						</kbd>
+						{peopleOnly.on ? "back to bots" : "people only"}
+					</span>
+				)}
 				<button
 					type="submit"
 					aria-label={submitLabel}
@@ -247,6 +292,57 @@ function wrapsPastOneLine(textarea: HTMLTextAreaElement): boolean {
 		Number.parseFloat(style.paddingTop) +
 		Number.parseFloat(style.paddingBottom);
 	return textarea.scrollHeight > oneLine;
+}
+
+/**
+ * Who the message is for, beside the +: the bot's face while it
+ * replies, and a "People only" chip while it only reads along.
+ */
+function AudienceToggle({
+	on,
+	agent,
+	onToggle,
+}: {
+	on: boolean;
+	agent: Pick<AgentParticipant, "name" | "color" | "face">;
+	onToggle: () => void;
+}) {
+	const label = on ? (
+		<>
+			<span className="block font-semibold">People only</span>
+			{agent.name} reads along but won't reply. Tab to switch back.
+		</>
+	) : (
+		<>
+			<span className="block font-semibold">{agent.name} replies</span>
+			Tab or click to message people only.
+		</>
+	);
+	return (
+		<Tooltip label={label} side="top">
+			<button
+				type="button"
+				aria-pressed={on}
+				aria-label="People only"
+				onClick={onToggle}
+				className={cn(
+					"focus-ring mb-0.5 flex h-8 shrink-0 items-center rounded-full transition-colors [grid-area:audience]",
+					on
+						? "gap-1.5 border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm hover:bg-hover"
+						: "w-8 justify-center hover:bg-hover",
+				)}
+			>
+				{on ? (
+					<>
+						<UsersRound size={15} strokeWidth={2.2} />
+						People only
+					</>
+				) : (
+					<AgentAvatar color={agent.color} face={agent.face} size={22} />
+				)}
+			</button>
+		</Tooltip>
+	);
 }
 
 /**

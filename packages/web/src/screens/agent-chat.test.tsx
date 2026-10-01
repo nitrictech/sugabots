@@ -435,7 +435,7 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() =>
 			expect(client.api.chats.send).toHaveBeenCalledWith({
 				params: { chatId: chat.id },
-				payload: { id: expect.any(String), message: "Send the update" },
+				payload: { id: expect.any(String), message: "Send the update", peopleOnly: false },
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));

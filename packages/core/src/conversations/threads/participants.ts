@@ -112,6 +112,7 @@ export function toMessage(
 		parts,
 		content: row.content,
 		...(row.status === "failed" && error ? { error } : {}),
+		...(row.peopleOnly ? { peopleOnly: true } : {}),
 		createdAt: row.createdAt.toISOString(),
 	};
 }

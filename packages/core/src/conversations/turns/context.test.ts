@@ -35,6 +35,19 @@ describe("modelPrompt", () => {
 		expect(prompt.system).not.toContain("Sam (@sam, person)");
 	});
 
+	it("keeps a message written for people only, marked as not addressed to agents", () => {
+		const aside = context();
+		const [first] = aside.messages;
+		if (!first) throw new Error("The fixture has no messages");
+		aside.messages = [{ ...first, peopleOnly: true }];
+		const prompt = modelPrompt(aside, environment());
+		expect(prompt.messages[0]).toEqual({
+			role: "user",
+			content: "Sam (@sam) (to people only): Check the release",
+		});
+		expect(prompt.system).toContain("A message marked (to people only)");
+	});
+
 	it("lists potential collaborators, and tells one why its thread exists", () => {
 		const asking = context();
 		asking.crew = [
