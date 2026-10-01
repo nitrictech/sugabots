@@ -335,10 +335,17 @@ function withContent(message: Message, content: string): Message {
 	return { ...message, content, parts: rebuiltParts(message, content, placedParts(message)) };
 }
 
-/** The message with one collaboration or tool call added or brought up to date. */
+/**
+ * The message with one collaboration or tool call added or brought up to date.
+ * An update keeps the part's place: parts made at the same offset, like
+ * parallel collaborations, stay in the order they were made.
+ */
 function withPlacedPart(message: Message, part: PlacedPart): Message {
-	const others = placedParts(message).filter((made) => made.id !== part.id);
-	return { ...message, parts: rebuiltParts(message, message.content, [...others, part]) };
+	const placed = placedParts(message);
+	const updated = placed.some((made) => made.id === part.id)
+		? placed.map((made) => (made.id === part.id ? part : made))
+		: [...placed, part];
+	return { ...message, parts: rebuiltParts(message, message.content, updated) };
 }
 
 /** The parts drawn afresh from the text and what was placed in it. */
