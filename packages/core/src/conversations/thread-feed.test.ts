@@ -197,6 +197,11 @@ describe("the thread feed", () => {
 				ConversationEvent.FacilitationFailed({ threadId, userMessage: noChoice }),
 			),
 		).toEqual([
+			// Nothing waits for the turn any more.
+			{
+				channel: threadChannel(threadId),
+				event: expect.objectContaining({ type: "thread.changed", threadId }),
+			},
 			{
 				channel: threadChannel(threadId),
 				event: expect.objectContaining({ type: "thread.notice", threadId, notice: noModel }),

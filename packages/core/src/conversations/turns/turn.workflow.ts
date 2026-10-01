@@ -41,19 +41,18 @@ export const turnLane = (request: Pick<TurnRequest, "threadId" | "agentId">) =>
 	`turn:${request.threadId}:${request.agentId}`;
 
 /**
- * Asks for the turn in its lane, joining the caller's transaction. A turn
- * already asked for is kept: it will read every message posted since.
+ * Asks for the turn in its lane, joining the caller's transaction, and says
+ * whether it started or waits. A turn already asked for is kept: it will read
+ * every message posted since.
  */
 export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
-	lanes
-		.admit({
-			key: turnLane(request),
-			subject: request.threadId,
-			workflow: Turn,
-			payload: request,
-			whenBusy: "coalesce",
-		})
-		.pipe(Effect.asVoid);
+	lanes.admit({
+		key: turnLane(request),
+		subject: request.threadId,
+		workflow: Turn,
+		payload: request,
+		whenBusy: "coalesce",
+	});
 
 /**
  * How a segment ended: the turn is over, it waits for approvals, or it failed

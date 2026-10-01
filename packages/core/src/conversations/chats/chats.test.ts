@@ -27,7 +27,9 @@ import { closeDatabase, onDatabase, type Promised, runOnPostgres } from "../../d
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Routines } from "../routines/routines.ts";
 import { conversationsForTests } from "../testing.ts";
+import { ThreadView } from "../thread-view.ts";
 import { queueFacilitationForTests, runningTurns } from "../turns/testing.ts";
+import { Turns } from "../turns/turns.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
 
@@ -462,6 +464,64 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.where(like(laneRequest.laneKey, `turn:${current.mainThreadId}:%`)),
 			),
 		).toHaveLength(0);
+	});
+
+	it("says which messages wait for the agent's next turn, and announces when one starts waiting", async () => {
+		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const post = (content: string) =>
+			chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content });
+		const changesAnnounced = async () =>
+			(
+				await onDatabase((db) =>
+					db
+						.select({ type: event.type })
+						.from(event)
+						.where(eq(event.channel, threadChannel(current.mainThreadId))),
+				)
+			).filter(({ type }) => type === "thread.changed").length;
+
+		await post("Is checkout timing out?");
+		expect((await threads.get(current.mainThreadId)).queuedSince).toBeNull();
+		const changedBefore = await changesAnnounced();
+
+		const followUp = await post("The Stripe webhook too?");
+		await post("Started around 9.");
+
+		expect((await threads.get(current.mainThreadId)).queuedSince).toBe(followUp.createdAt);
+		// Once, when the turn started waiting; the next message joins it.
+		expect((await changesAnnounced()) - changedBefore).toBe(1);
+	});
+
+	it("queues nothing posted before a turn resumed from an earlier reply starts waiting", async () => {
+		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+		const turns = Context.get(conversations, Turns.Service);
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const asked = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Who owns checkout?",
+		});
+
+		// A collaboration answered after the agent moved on resumes it from the
+		// reply that opened it, which is long since answered.
+		await runOnPostgres(
+			turns.ask({
+				threadId: current.mainThreadId,
+				agentId,
+				triggerMessageId: asked.id,
+				reason: "resume",
+			}),
+		);
+		const later = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "And billing?",
+		});
+
+		const { queuedSince } = await threads.get(current.mainThreadId);
+		expect(Date.parse(queuedSince ?? "")).toBeGreaterThan(Date.parse(asked.createdAt));
+		expect(Date.parse(queuedSince ?? "")).toBeLessThanOrEqual(Date.parse(later.createdAt));
 	});
 
 	it("announces a person's message before the agent it brings into the thread", async () => {

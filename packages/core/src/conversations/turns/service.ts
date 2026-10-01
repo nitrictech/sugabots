@@ -1,6 +1,8 @@
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterCommit, serviceOperations, transaction } from "../../database/database.ts";
 import { Lanes } from "../../workflows/lanes.ts";
+import { ConversationEvents } from "../conversation-events.ts";
+import { ConversationEvent } from "../events.ts";
 import { SYSTEM_TURN_INTERRUPTED, TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -13,6 +15,7 @@ export const makeService = Effect.gen(function* () {
 	const lanes = yield* Lanes.Service;
 	const turns = yield* TurnRepository.Service;
 	const signals = yield* TurnSignals.Service;
+	const { emit } = yield* ConversationEvents.Service;
 
 	const recordSystemTurn: Turns.Interface["recordSystemTurn"] = (systemTurn, work) =>
 		Effect.gen(function* () {
@@ -45,7 +48,18 @@ export const makeService = Effect.gen(function* () {
 		});
 
 	return {
-		ask: (request) => operation("ask", admitTurn(lanes, request)),
+		ask: (request) =>
+			operation(
+				"ask",
+				transaction(
+					Effect.gen(function* () {
+						const admission = yield* admitTurn(lanes, request);
+						if (admission === "waiting") {
+							yield* emit([ConversationEvent.TurnQueued({ threadId: request.threadId })]);
+						}
+					}),
+				),
+			),
 		stopUnder: (threadIds) =>
 			operation(
 				"stopUnder",

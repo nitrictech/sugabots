@@ -23,7 +23,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { laneBusy } from "../../workflows/lanes.ts";
+import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
 	makeControls,
@@ -164,6 +164,14 @@ export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
  * thread `threadId` is running or waiting to start.
  */
 export const busyIn = (threadId: SQLWrapper) => laneBusy(threadId, [Turn._tag]);
+
+/**
+ * When a turn in the thread `threadId` started waiting to start, as a value
+ * for a query; null when none waits. It is asked for in the transaction that
+ * posts the message asking, so that message has the same time, and the turn
+ * reads it and everything posted after it once it starts.
+ */
+export const queuedSince = (threadId: SQLWrapper) => waitingSince(threadId, Turn._tag);
 
 /** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
 export const isActive = inArray(turn.status, [...ACTIVE_TURN_STATUSES]);

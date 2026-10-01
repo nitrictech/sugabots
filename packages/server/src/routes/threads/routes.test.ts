@@ -59,6 +59,7 @@ const details: ThreadDetails = {
 		},
 	],
 	olderMessagesCursor: null,
+	queuedSince: null,
 	messages: [
 		{
 			id: "0199a3a0-0000-7000-8000-000000000007",

@@ -90,6 +90,19 @@ export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) 
 			)})
 	)`;
 
+/**
+ * When the request that has waited longest in a lane about `subject` running
+ * `workflow` was made, as an ISO timestamp to the millisecond, for a query;
+ * null when none waits.
+ */
+export const waitingSince = (subject: SQLWrapper, workflow: string) =>
+	sql<string | null>`(
+		select to_char(min(waiting.created_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+		from ${laneRequest} waiting
+		join ${lane} on ${lane.key} = waiting.lane_key
+		where ${lane.subject} = (${subject})::text and ${lane.workflow} = ${workflow}
+	)`;
+
 /** The statement behind `Interface.dropWaiting`. */
 const dropWaitingStatement = (subjects: ReadonlyArray<string>, workflows: ReadonlyArray<string>) =>
 	sql`delete from ${laneRequest}

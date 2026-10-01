@@ -94,6 +94,7 @@ export function AgentChat({
 	);
 	const queued = queuedBehindReply(
 		items.flatMap((item) => (item.kind === "message" ? [item.message] : [])),
+		details?.queuedSince ?? null,
 	);
 
 	useLayoutEffect(() => {

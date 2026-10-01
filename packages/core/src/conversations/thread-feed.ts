@@ -71,12 +71,20 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			onThread(threadId, streamEvent("turn.completed", { threadId, turnId, status: "cancelled" })),
 			listedThreadChanged(workspaceId, podId, threadId),
 		],
+		TurnQueued: ({ threadId }) => [onThread(threadId, streamEvent("thread.changed", { threadId }))],
 		TurnCancelRequested: ({ threadId, turnId }) => [
 			onThread(threadId, streamEvent("turn.cancel_requested", { threadId, turnId })),
 		],
-		// Nobody is shown a turn given up as cancelled: it was not wanted any more.
+		// A turn that could not open leaves nothing waiting for it, so the thread is
+		// fetched again. Nobody is shown one given up as cancelled: it was not wanted
+		// any more, and the routine run it was dropped with says what changed.
 		TurnAbandoned: ({ threadId, outcome }) =>
-			outcome.state === "failed" ? [notice(threadId, outcome.error)] : [],
+			outcome.state === "failed"
+				? [
+						onThread(threadId, streamEvent("thread.changed", { threadId })),
+						notice(threadId, outcome.error),
+					]
+				: [],
 		// Watchers see nothing new in this; only routine settlement reacts to it.
 		LaneReleased: () => [],
 		FacilitationFailed: ({ threadId, userMessage }) => [notice(threadId, userMessage)],
