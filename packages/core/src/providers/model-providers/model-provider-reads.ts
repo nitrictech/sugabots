@@ -9,7 +9,7 @@ import {
 	type ProviderModelRow,
 	providerModel,
 } from "../../database/schema.ts";
-import { apiKeyHint, configurationStatus } from "../tested-configuration.ts";
+import { configurationStatus } from "../tested-configuration.ts";
 import { defaultModelOf, lacksCredential, offeredIn } from "./model-provider-repository.ts";
 
 /**
@@ -129,9 +129,8 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 						lastTestError: row.lastTestError,
 					}),
 		hasApiKey: row.apiKeyEncrypted !== null,
-		apiKeyHint: apiKeyHint(row.apiKeyEncrypted),
 		signedIn: row.oauthTokensEncrypted !== null,
-		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name, valueHint: "********" })),
+		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
 		modelCount: models.length,
 		enabledModelCount: models.filter(({ enabled }) => enabled).length,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,

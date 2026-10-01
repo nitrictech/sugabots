@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
-import { apiKeyHint, configurationStatus } from "../tested-configuration.ts";
+import { configurationStatus } from "../tested-configuration.ts";
 
 /** The workspace's search provider, or nothing when it has none. */
 export const searchProviderOf = (workspaceId: string) =>
@@ -27,7 +27,6 @@ export function toSearchProvider(row: SearchProviderRow): SearchProvider {
 			lastTestError: row.lastTestError,
 		}),
 		hasApiKey: row.apiKeyEncrypted !== null,
-		apiKeyHint: apiKeyHint(row.apiKeyEncrypted),
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		createdAt: row.createdAt.toISOString(),

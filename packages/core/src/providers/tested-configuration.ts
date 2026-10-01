@@ -33,14 +33,6 @@ export function configurationStatus(row: {
 	return row.lastTestError === null ? "connected" : "error";
 }
 
-/**
- * What is shown of a stored key: nothing, since a key is never shown again
- * once saved, so the hint only says whether there is one.
- */
-export function apiKeyHint(apiKeyEncrypted: string | null): string | null {
-	return apiKeyEncrypted === null ? null : "";
-}
-
 /** Fails with {@link UrlNotAllowed} unless the egress policy lets a provider or connection use `url`. */
 export const requireAllowedUrl = (egress: Egress.Interface, url: string) =>
 	Effect.mapError(egress.validateProviderUrl(url), (refusal) => new UrlNotAllowed({ refusal }));

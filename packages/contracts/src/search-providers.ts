@@ -84,7 +84,6 @@ export const searchProviderSchema = Schema.Struct({
 	enabled: Schema.Boolean,
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,
-	apiKeyHint: Schema.NullOr(Schema.String),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,

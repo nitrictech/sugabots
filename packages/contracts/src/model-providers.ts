@@ -196,12 +196,9 @@ export const modelProviderSchema = Schema.Struct({
 	active: Schema.Boolean,
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,
-	apiKeyHint: Schema.NullOr(Schema.String),
 	/** For a provider signed in to rather than given a key (ChatGPT, SuperGrok), whether somebody has. */
 	signedIn: Schema.Boolean,
-	customHeaders: Schema.mutable(
-		Schema.Array(Schema.Struct({ name: Schema.String, valueHint: Schema.String })),
-	),
+	customHeaders: Schema.mutable(Schema.Array(Schema.Struct({ name: Schema.String }))),
 	modelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),

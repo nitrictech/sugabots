@@ -176,7 +176,6 @@ const anthropic = {
 	active: true,
 	status: "connected",
 	hasApiKey: true,
-	apiKeyHint: "abcd",
 	signedIn: false,
 	customHeaders: [],
 	modelCount: 3,

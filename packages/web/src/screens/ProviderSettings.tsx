@@ -57,7 +57,7 @@ import {
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { ConnectionRow, valueText } from "./connection-row.tsx";
+import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
@@ -503,7 +503,7 @@ function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return isConnected(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
 
-/** The key, shown only by its last few characters once saved; Replace swaps it for a new one. */
+/** The key, masked once saved; Replace swaps it for a new one. */
 function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boolean }) {
 	const actions = useProviderActions();
 	const held = useHoldersOf(offeredModelsOf(provider));
@@ -558,9 +558,7 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 					</span>
 				}
 			>
-				<span className={valueText}>
-					{provider.hasApiKey ? `••••••${provider.apiKeyHint ?? ""}` : "None"}
-				</span>
+				<span className={valueText}>{provider.hasApiKey ? savedKeyMask : "None"}</span>
 			</ConnectionRow>
 		);
 	}

@@ -18,7 +18,6 @@ const brave: SearchProvider = {
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	apiKeyHint: null,
 	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
@@ -27,7 +26,6 @@ const keyed: SearchProvider = {
 	...brave,
 	status: "untested",
 	hasApiKey: true,
-	apiKeyHint: "…8f2a",
 };
 const exa: SearchProvider = {
 	...brave,
@@ -116,7 +114,7 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
 		expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: "brave-key" } });
-		expect(await screen.findByText("…8f2a")).toBeDefined();
+		expect(await screen.findByText("••••••••")).toBeDefined();
 
 		const power = await searchSwitch();
 		await waitFor(() => expect(power).toHaveProperty("disabled", false));
@@ -124,15 +122,6 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledTimes(2));
 		expect(route.update.mock.calls[1]?.[0]).toMatchObject({ payload: { enabled: true } });
-	});
-
-	it("shows a saved key as hidden when the API gives no hint of it", async () => {
-		route.get.mockReturnValue(Effect.succeed({ provider: { ...keyed, apiKeyHint: "" } }));
-		mount("/suga/settings/search");
-		await searchSwitch();
-		openAdvanced();
-
-		expect(await screen.findByText("••••••••")).toBeDefined();
 	});
 
 	it("removes a saved key after asking", async () => {
