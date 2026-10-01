@@ -389,6 +389,8 @@ export const PeopleOnly = meta.story({
 		placeholder: "Message people in Product",
 		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
 	},
+	// The chip shows on a wide screen only.
+	globals: { viewport: { value: "desktop", isRotated: false } },
 	play: async ({ args, canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Back to bots" }));
 		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
@@ -396,21 +398,22 @@ export const PeopleOnly = meta.story({
 });
 
 /**
- * PeopleOnlyOnAPhone has no room for the chip or the words: a people icon
- * before the send button switches, tinted while the message is for people only.
+ * PeopleOnlyOnATablet has no room for the chip or the words, as on a phone: a
+ * people icon before the send button switches, tinted while the message is for
+ * people only.
  */
-export const PeopleOnlyOnAPhone = meta.story({
+export const PeopleOnlyOnATablet = meta.story({
 	args: {
 		label: "Message Growth Desk",
 		placeholder: "Message Growth Desk",
 		peopleOnly: { on: false, onChange: fn(), agent: growthDesk },
 	},
-	globals: { viewport: { value: "iphone12", isRotated: false } },
+	globals: { viewport: { value: "ipad11p", isRotated: false } },
 	play: async ({ canvas, userEvent }) => {
 		const toggle = canvas.getByRole("button", { name: "People only" });
 		await userEvent.click(toggle);
 		await expect(toggle).toHaveAttribute("aria-pressed", "true");
-		// The chip beside the + is left out on a phone.
+		// The chip beside the + is left out below a wide screen.
 		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
 	},
 });

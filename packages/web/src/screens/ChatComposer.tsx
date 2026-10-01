@@ -151,11 +151,11 @@ export function ChatComposer({
 					"focus-ring-within grid items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
 					peopleOnly?.on
 						? cn(
-								// A phone has no room for the chip; its switch shows the mode instead.
-								"grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] max-sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]",
+								// Below a wide screen there is no room for the chip; the switch shows the mode instead.
+								"grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] max-xl:grid-cols-[auto_minmax(0,1fr)_auto_auto]",
 								stacked
-									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._switch_send'] max-sm:[grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']"
-									: "[grid-template-areas:'attach_audience_draft_switch_send'] max-sm:[grid-template-areas:'attach_draft_switch_send']",
+									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._switch_send'] max-xl:[grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']"
+									: "[grid-template-areas:'attach_audience_draft_switch_send'] max-xl:[grid-template-areas:'attach_draft_switch_send']",
 							)
 						: peopleOnly
 							? cn(
@@ -319,7 +319,7 @@ function PeopleOnlyChip({
 				type="button"
 				aria-label="Back to bots"
 				onClick={onSwitchBack}
-				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors [grid-area:audience] hover:bg-hover max-sm:hidden"
+				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors [grid-area:audience] hover:bg-hover max-xl:hidden"
 			>
 				<UsersRound size={15} strokeWidth={2.2} />
 				People only
@@ -331,8 +331,9 @@ function PeopleOnlyChip({
 /**
  * Switches who the message is for, before the send button: named for Tab,
  * which does the same from the draft. A touch screen has no Tab key, so there
- * it shows the words alone, and a phone, with no room for them, shows a
- * people icon tinted with the accent while the message is for people only.
+ * it shows the words alone. Below a wide screen, on a tablet or a phone, it
+ * is a people icon instead, tinted with the accent while the message is for
+ * people only.
  */
 function AudienceSwitch({
 	on,
@@ -362,19 +363,19 @@ function AudienceSwitch({
 				className={cn(
 					"focus-ring flex shrink-0 items-center transition-colors [grid-area:switch]",
 					"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground",
-					"max-sm:mb-0.5 max-sm:size-8 max-sm:justify-center max-sm:rounded-full max-sm:p-0",
+					"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0",
 					on
-						? "max-sm:bg-primary/15 max-sm:text-link"
-						: "max-sm:text-muted-foreground max-sm:hover:bg-hover",
+						? "max-xl:bg-primary/15 max-xl:text-link"
+						: "max-xl:text-muted-foreground max-xl:hover:bg-hover",
 				)}
 			>
-				<span className="flex items-center gap-1.5 max-sm:hidden">
+				<span className="flex items-center gap-1.5 max-xl:hidden">
 					<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground [@media(hover:none)]:hidden">
 						Tab
 					</kbd>
 					{on ? "back to bots" : "people only"}
 				</span>
-				<UsersRound aria-hidden size={18} strokeWidth={2.2} className="sm:hidden" />
+				<UsersRound aria-hidden size={18} strokeWidth={2.2} className="xl:hidden" />
 			</button>
 		</DetailTooltip>
 	);
