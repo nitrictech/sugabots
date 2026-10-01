@@ -18,7 +18,7 @@ import {
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
+import { DetailTooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Where a message is written: a pill that grows with its text and sends on
@@ -307,19 +307,17 @@ function AudienceToggle({
 	agent: Pick<AgentParticipant, "name" | "color" | "face">;
 	onToggle: () => void;
 }) {
-	const label = on ? (
-		<>
-			<span className="block font-semibold">People only</span>
-			{agent.name} reads along but won't reply. Tab to switch back.
-		</>
-	) : (
-		<>
-			<span className="block font-semibold">{agent.name} replies</span>
-			Tab or click to message people only.
-		</>
-	);
 	return (
-		<Tooltip label={label} side="top">
+		<DetailTooltip
+			title={on ? "People only" : `${agent.name} replies`}
+			description={
+				on
+					? `${agent.name} reads along but won't reply. Tab to switch back.`
+					: "Tab or click to message people only."
+			}
+			side="top"
+			align="start"
+		>
 			<button
 				type="button"
 				aria-pressed={on}
@@ -341,7 +339,7 @@ function AudienceToggle({
 					<AgentAvatar color={agent.color} face={agent.face} size={22} />
 				)}
 			</button>
-		</Tooltip>
+		</DetailTooltip>
 	);
 }
 

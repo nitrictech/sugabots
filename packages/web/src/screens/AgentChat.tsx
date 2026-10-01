@@ -141,24 +141,19 @@ export function AgentChat({
 		const message = draft.trim();
 		if (!message || send.isPending) return;
 		const submitted = draft;
-		const submittedPeopleOnly = peopleOnly;
 		setDraft("");
-		// Each message starts out for the bot, so a forgotten toggle never leaves it out for long.
-		setPeopleOnly(false);
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
 				id: crypto.randomUUID(),
 				message,
-				peopleOnly: submittedPeopleOnly,
+				peopleOnly: writingToPeople,
 			});
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
 		} catch {
 			setDraft((current) => (current === "" ? submitted : current));
-			// Sending it again must not reach the bot when it was written for people only.
-			setPeopleOnly(submittedPeopleOnly);
 		}
 	}
 
