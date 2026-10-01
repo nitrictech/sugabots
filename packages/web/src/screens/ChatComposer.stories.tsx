@@ -394,3 +394,23 @@ export const PeopleOnly = meta.story({
 		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
 	},
 });
+
+/**
+ * PeopleOnlyOnAPhone has no room for the chip or the words: a people icon
+ * before the send button switches, tinted while the message is for people only.
+ */
+export const PeopleOnlyOnAPhone = meta.story({
+	args: {
+		label: "Message Growth Desk",
+		placeholder: "Message Growth Desk",
+		peopleOnly: { on: false, onChange: fn(), agent: growthDesk },
+	},
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	play: async ({ canvas, userEvent }) => {
+		const toggle = canvas.getByRole("button", { name: "People only" });
+		await userEvent.click(toggle);
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		// The chip beside the + is left out on a phone.
+		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
+	},
+});
