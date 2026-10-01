@@ -1,0 +1,19 @@
+name: Set up
+description: Bun and Node at the project's versions, and the workspace's dependencies installed.
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: "1.4.2"
+
+    # Bun installs and runs the scripts; Node runs tsc, Vitest and packages/server,
+    # and the server relies on unflagged type stripping. Pin it.
+    - uses: actions/setup-node@v6
+      with:
+        node-version-file: .nvmrc
+
+    - name: Install
+      shell: bash
+      run: bun install --frozen-lockfile

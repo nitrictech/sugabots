@@ -9,9 +9,27 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Each check is a job of its own so they run side by side, and a failure names
+# the check that failed.
 jobs:
-  check:
-    name: Lint, typecheck, test
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: bun run lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: bun run typecheck
+
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     # The migrations run against this, and the API's tests then query it, so a
@@ -36,28 +54,33 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.2"
-
-      # Bun installs and runs the scripts; Node runs tsc, Vitest and packages/server,
-      # and the server relies on unflagged type stripping. Pin it.
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install
-        run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
 
       - name: Migrate
         run: bun run db:migrate
 
-      - name: Check
-        run: bun run check
+      - name: Test
+        run: bun run test
 
-      - name: Build
-        run: bun run build
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - run: bun run build
+
+  # The check the main branch's ruleset requires, under the name it had when
+  # these ran as one job. `always()` so that it fails, rather than being
+  # skipped, when a job it needs fails: a skipped required check passes.
+  checks:
+    name: Lint, typecheck, test
+    if: always()
+    needs: [lint, typecheck, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
 
   storybook:
     name: Storybook
@@ -66,20 +89,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.2"
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install
-        run: bun install --frozen-lockfile
-
+      # The stories run headless, which needs only Chromium's headless shell.
       - name: Install Chromium
-        run: bun run --cwd packages/web playwright install --with-deps chromium
+        run: bun run --cwd packages/web playwright install --with-deps --only-shell chromium
 
       - name: Test stories
         run: bun run test:storybook
