@@ -13,11 +13,11 @@ import type {
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, type RequestHandler } from "msw";
 import { useEffect, useState } from "react";
 import { createQueryClient } from "@/lib/query.ts";
-import { createAppRouter } from "@/router.tsx";
+import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { podsWithBots } from "@/shell/story-fixtures.ts";
 
 /*
@@ -333,13 +333,11 @@ export function StoryApp({ path, user = storyUser }: { path: string; user?: Sess
 		createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) }),
 	);
 	useEffect(() => () => queryClient.clear(), [queryClient]);
+	const session = { user, error: undefined, refresh: async () => {} };
 	return (
 		<QueryClientProvider client={queryClient}>
 			<div className="h-screen">
-				<RouterProvider
-					router={router}
-					context={{ session: { user, error: undefined, refresh: async () => {} } }}
-				/>
+				<AppRouterProvider router={router} session={session} />
 			</div>
 		</QueryClientProvider>
 	);

@@ -2,7 +2,7 @@ import { InternalServerError, Unauthorized } from "@sugabots/contracts/http";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Data, Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useSession } from "@/lib/session.ts";
+import { useSessionFromApi } from "@/lib/session.ts";
 import { sam } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 it("keeps an authenticated user during a transient refresh failure", async () => {
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.user).toEqual(sam));
 	client.api.me.mockReturnValue(Effect.fail(new InternalServerError({ message: "Unavailable" })));
 
@@ -36,7 +36,7 @@ it("can retry an initial transient session failure", async () => {
 	client.api.me
 		.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: "Unavailable" })))
 		.mockReturnValueOnce(Effect.succeed(sam));
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.error).toMatchObject({ _tag: "InternalServerError" }));
 
 	await act(async () => {
@@ -49,7 +49,7 @@ it("can retry an initial transient session failure", async () => {
 
 it("discovers a cookie session without checking for a local token", async () => {
 	client.tokens.get.mockReturnValue(undefined);
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 
 	await waitFor(() => expect(result.current.user).toEqual(sam));
 
@@ -58,7 +58,7 @@ it("discovers a cookie session without checking for a local token", async () => 
 
 it("clears authentication when the API rejects the session", async () => {
 	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: "Expired" })));
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 
 	await waitFor(() => expect(result.current.user).toBeNull());
 
@@ -73,7 +73,7 @@ it("rides out the API restarting, without showing a dead end first", async () =>
 		.mockReturnValueOnce(Effect.fail(new Unreachable()))
 		.mockReturnValue(Effect.succeed(sam));
 
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 
 	await waitFor(() => expect(result.current.user).toEqual(sam), { timeout: 3_000 });
 	expect(result.current.error).toBeUndefined();
@@ -83,7 +83,7 @@ it("rides out the API restarting, without showing a dead end first", async () =>
 it("says so once the API has stopped answering for good", async () => {
 	client.api.me.mockReturnValue(Effect.fail(new Unreachable()));
 
-	const { result } = renderHook(useSession);
+	const { result } = renderHook(useSessionFromApi);
 
 	await waitFor(() => expect(result.current.error).toBeInstanceOf(Unreachable), {
 		timeout: 15_000,

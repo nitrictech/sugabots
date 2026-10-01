@@ -1,5 +1,5 @@
 import { type Agent, type Pod, type PodMember, workspaceRoleLabel } from "@sugabots/contracts";
-import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
 import { type ReactNode, useDeferredValue, useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
@@ -13,6 +13,7 @@ import {
 	usePods,
 	useUpdatePod,
 } from "@/lib/pods.ts";
+import { useSession } from "@/lib/session.ts";
 import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -340,7 +341,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 	const leave = useLeavePod(pod.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<PodMember>();
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const inPod = new Set(members.data?.map((member) => member.userId));
 	const roleOf = (userId: string) =>
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;

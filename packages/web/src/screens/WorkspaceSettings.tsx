@@ -1,11 +1,11 @@
 import { USER_NAME_MAX_LENGTH, type WorkspaceRole, workspaceRoleLabel } from "@sugabots/contracts";
-import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
-import { useUpdateName } from "@/lib/session.ts";
+import { useSession, useUpdateName } from "@/lib/session.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -60,7 +60,7 @@ export function WorkspaceSettings({
 	selectedMemberId?: string;
 }) {
 	const { workspace, isPending } = useWorkspace();
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const may = useWorkspacePermissions();
 	const role = useWorkspaceRole();
 
@@ -219,7 +219,7 @@ function ThemeChoice() {
 }
 
 function ProfileSettings() {
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const navigate = useNavigate();
 	const updateName = useUpdateName();
 	const user = session.user;
