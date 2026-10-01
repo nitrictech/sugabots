@@ -458,7 +458,7 @@ describe("ongoing agent Chat", () => {
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
-		const composer = await screen.findByLabelText(`Message ${jye.name}`);
+		const composer = await screen.findByLabelText("Message Suga-Team");
 		fireEvent.change(composer, { target: { value: "Just between us" } });
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 

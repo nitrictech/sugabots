@@ -203,9 +203,8 @@ export function AgentChat({
 		(participant) => participant.kind === "person" && participant.id !== user.id,
 	);
 	const writingToPeople = peopleOnly && otherPeople.length > 0;
-	const composerLabel = writingToPeople
-		? `Message ${new Intl.ListFormat("en", { type: "conjunction" }).format(otherPeople.map(({ name }) => name))}`
-		: `Message ${agent.name}`;
+	// Written for the people here rather than the bot: named by their pod, however many they are.
+	const composerLabel = `Message ${writingToPeople ? pod.name : agent.name}`;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
