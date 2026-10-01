@@ -16,6 +16,7 @@ import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { savedKeyMask } from "./connection-row.tsx";
 
 /*
  * The workspace's web search settings: a switch for whether bots may use the
@@ -215,7 +216,6 @@ function ProviderSettings({
 				label="API key"
 				secret
 				saved={hasKey ? "" : undefined}
-				savedDisplay={hasKey ? provider?.apiKeyHint || "••••••••" : undefined}
 				placeholder="Paste your key"
 				disabled={pending}
 				onSave={(apiKey) => onConfigure({ apiKey })}
@@ -250,13 +250,12 @@ function ProviderSettings({
 
 /**
  * A row that takes a value typed in place: a server's address, or a key. It
- * saves on Enter or when you leave it, and a secret shows only its hint once
+ * saves on Enter or when you leave it, and a secret shows only a mask once
  * saved, with Replace and Remove beside it.
  */
 function TextEntryRow({
 	label,
 	saved,
-	savedDisplay,
 	placeholder,
 	secret = false,
 	disabled,
@@ -266,8 +265,6 @@ function TextEntryRow({
 	label: string;
 	/** The stored value, or `undefined` when there is none. A secret's is never sent, so it is "". */
 	saved: string | undefined;
-	/** What stands for a stored secret, such as its last characters. */
-	savedDisplay?: string;
 	placeholder: string;
 	secret?: boolean;
 	disabled: boolean;
@@ -277,7 +274,7 @@ function TextEntryRow({
 	const id = useId();
 	const [replacing, setReplacing] = useState(false);
 	const [draft, setDraft] = useState(secret ? "" : (saved ?? ""));
-	const showingSecret = secret && savedDisplay !== undefined && !replacing;
+	const showingSecret = secret && saved !== undefined && !replacing;
 
 	function commit() {
 		const value = draft.trim();
@@ -304,7 +301,7 @@ function TextEntryRow({
 						id={id}
 						className="min-w-0 flex-1 truncate font-mono text-[13.5px] text-muted-foreground"
 					>
-						{savedDisplay}
+						{savedKeyMask}
 					</span>
 					<button
 						type="button"

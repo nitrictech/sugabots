@@ -67,7 +67,6 @@ function provider(
 		active: true,
 		status: "connected",
 		hasApiKey: true,
-		apiKeyHint: "4f2a",
 		signedIn: false,
 		customHeaders: [],
 		modelCount: models.length,
@@ -94,7 +93,7 @@ const ollama = provider(
 	"ollama",
 	"Ollama",
 	[model("qwen3.5:4b", "Qwen 3.5 4B", true), model("llama3.2", null, false)],
-	{ baseUrl: "http://127.0.0.1:11434/v1", hasApiKey: false, apiKeyHint: null },
+	{ baseUrl: "http://127.0.0.1:11434/v1", hasApiKey: false },
 );
 const makers = [
 	"meta-llama",
@@ -125,7 +124,6 @@ const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	active: false,
 	status: "signed_out",
 	hasApiKey: false,
-	apiKeyHint: null,
 });
 const chatgptSignedIn: ModelProvider = {
 	...chatgpt,
@@ -141,7 +139,6 @@ const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	active: false,
 	status: "signed_out",
 	hasApiKey: false,
-	apiKeyHint: null,
 });
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 

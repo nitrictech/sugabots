@@ -1285,7 +1285,6 @@ describe("workspace settings", () => {
 		name: "Ollama",
 		baseUrl: "http://127.0.0.1:11434/v1",
 		hasApiKey: false,
-		apiKeyHint: null as string | null,
 		status: "untested" as const,
 		models: [],
 		modelCount: 0,
@@ -1341,7 +1340,7 @@ describe("workspace settings", () => {
 	});
 
 	it("removes a key that was set, rather than only replacing it", async () => {
-		mountOllama({ ...ollama, hasApiKey: true, apiKeyHint: "1234" });
+		mountOllama({ ...ollama, hasApiKey: true });
 
 		fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -1361,7 +1360,6 @@ describe("workspace settings", () => {
 			name: "Local gateway",
 			baseUrl: "http://localhost:11434/v1",
 			hasApiKey: false,
-			apiKeyHint: null,
 			status: "missing_key" as const,
 			models: [],
 			modelCount: 0,
@@ -1431,7 +1429,7 @@ describe("workspace settings", () => {
 
 	it("reconnects a starting provider that was disconnected, rather than making another", async () => {
 		client.api.modelProviders.list.mockReturnValue(
-			Effect.succeed([{ ...openai, active: false, hasApiKey: false, apiKeyHint: null }, anthropic]),
+			Effect.succeed([{ ...openai, active: false, hasApiKey: false }, anthropic]),
 		);
 		client.api.modelProviders.update.mockReturnValue(Effect.succeed(openai));
 		mount("/suga/settings/providers");

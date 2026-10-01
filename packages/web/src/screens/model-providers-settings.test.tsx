@@ -17,17 +17,17 @@ const [openai] = modelProviders;
 if (!openai) throw new Error("fixture");
 
 describe("a provider's API key", () => {
-	it("is shown only by its last characters, and replaced without being shown", async () => {
+	it("is masked, and replaced without being shown", async () => {
 		mount(`/suga/settings/providers/${openai.id}`);
 
-		expect(await screen.findByText(`••••••${openai.apiKeyHint}`)).toBeDefined();
+		expect(await screen.findByText("••••••••")).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 		const field = screen.getByLabelText("OpenAI API key") as HTMLInputElement;
 		expect(field.type).toBe("password");
 		expect(field.value).toBe("");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(screen.getByText(`••••••${openai.apiKeyHint}`)).toBeDefined();
+		expect(screen.getByText("••••••••")).toBeDefined();
 	});
 });
 

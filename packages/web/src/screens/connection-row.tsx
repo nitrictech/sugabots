@@ -20,3 +20,6 @@ export function ConnectionRow({
 }
 
 export const valueText = "block truncate font-mono text-[13.5px] text-foreground";
+
+/** What stands for a saved key, which the API never sends back. */
+export const savedKeyMask = "••••••••";

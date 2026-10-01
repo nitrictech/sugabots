@@ -24,7 +24,6 @@ const brave: SearchProvider = {
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	apiKeyHint: null,
 	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
@@ -129,7 +128,7 @@ export const NeedsKey = meta.story({
 	},
 });
 
-/** A saved key shows only its hint, with Replace and Remove beside it. */
+/** A saved key shows only a mask, with Replace and Remove beside it. */
 export const KeySaved = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -138,13 +137,12 @@ export const KeySaved = meta.story({
 				enabled: true,
 				status: "untested",
 				hasApiKey: true,
-				apiKeyHint: "…8f2a",
 			}),
 		);
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Show advanced" }));
-		await expect(canvas.getByText("…8f2a")).toBeInTheDocument();
+		await expect(canvas.getByText("••••••••")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Replace" })).toBeInTheDocument();
 	},
 });
