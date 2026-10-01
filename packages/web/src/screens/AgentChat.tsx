@@ -204,7 +204,7 @@ export function AgentChat({
 	);
 	const writingToPeople = peopleOnly && otherPeople.length > 0;
 	// Written for the people here rather than the bot: named by their pod, however many they are.
-	const composerLabel = `Message ${writingToPeople ? pod.name : agent.name}`;
+	const composerLabel = writingToPeople ? `Message people in ${pod.name}` : `Message ${agent.name}`;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.

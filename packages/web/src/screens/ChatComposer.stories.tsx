@@ -385,8 +385,8 @@ export const WithPeople = meta.story({
  */
 export const PeopleOnly = meta.story({
 	args: {
-		label: "Message Product",
-		placeholder: "Message Product",
+		label: "Message people in Product",
+		placeholder: "Message people in Product",
 		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
 	},
 	play: async ({ args, canvas, userEvent }) => {
