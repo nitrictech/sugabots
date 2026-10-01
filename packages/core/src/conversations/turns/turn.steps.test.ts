@@ -2,6 +2,7 @@ import { streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { Artifacts } from "../../artifacts/artifacts.ts";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -347,7 +348,9 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(offered).toEqual([["other"]]);
+		expect(offered).toHaveLength(1);
+		expect(offered[0]).toContain("other");
+		expect(offered[0]).not.toContain("probe");
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
@@ -523,6 +526,7 @@ function segmentWith(given: Given) {
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
+				unimplemented(Artifacts.Authoring, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {

@@ -10,6 +10,7 @@ import {
 	Navigate,
 	Outlet,
 	redirect,
+	useMatchRoute,
 	useNavigate,
 	useParams,
 	useRouteContext,
@@ -32,6 +33,7 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import { ArtifactPage, ArtifactsPage } from "@/screens/Artifacts.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { ConversationList } from "@/shell/ConversationList.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
@@ -771,26 +773,33 @@ function AgentsRoute() {
 	return <Navigate {...podLink(first)} replace />;
 }
 
-/** A conversation list beside the thread it opens. */
+/** A conversation list beside the thread, or the artifacts, it opens. */
 function ConversationLayout({
 	pod,
 	selectedAgentId,
+	artifactsOpen,
 	children,
 }: {
 	pod: Pod;
 	selectedAgentId: string | undefined;
+	artifactsOpen: boolean;
 	children: React.ReactNode;
 }) {
-	// On a phone the list and the thread take turns: a chosen chat covers the list.
-	const chatOpen = selectedAgentId !== undefined;
+	// On a phone the list and what it opens take turns: a chosen chat, or the
+	// artifacts, cover the list.
+	const detailOpen = selectedAgentId !== undefined || artifactsOpen;
 	return (
 		<>
 			<ConversationList
 				pod={pod}
 				selectedAgentId={selectedAgentId}
-				className={chatOpen ? "max-md:hidden" : undefined}
+				className={detailOpen ? "max-md:hidden" : undefined}
 			/>
-			<Panes className={chatOpen ? undefined : "max-md:hidden"}>{children}</Panes>
+			{artifactsOpen ? (
+				children
+			) : (
+				<Panes className={detailOpen ? undefined : "max-md:hidden"}>{children}</Panes>
+			)}
 		</>
 	);
 }
@@ -805,6 +814,8 @@ const podRoute = createRoute({
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const { agent: handle } = useParams({ strict: false });
+	const matchRoute = useMatchRoute();
+	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const { data: pods, isPending, error } = usePods();
 	const { found } = usePodAgent(podSlug, handle ?? "");
 	const pod = findPod(pods, podSlug);
@@ -821,7 +832,7 @@ function PodRoute() {
 		);
 	}
 	return (
-		<ConversationLayout pod={pod} selectedAgentId={found?.agent.id}>
+		<ConversationLayout pod={pod} selectedAgentId={found?.agent.id} artifactsOpen={artifactsOpen}>
 			<Outlet />
 		</ConversationLayout>
 	);
@@ -860,6 +871,37 @@ function OpenTopChat({ pod }: { pod: Pod }) {
 function preloadChatScreenForWideLayout() {
 	if (matchesMedia(SIDE_BY_SIDE)) AgentPage.preload();
 }
+
+const artifactsRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/artifacts",
+	component: () => {
+		const pod = findPod(usePods().data, artifactsRoute.useParams().pod);
+		return pod ? <ArtifactsPage pod={pod} /> : null;
+	},
+});
+
+interface ArtifactSearch {
+	/** An earlier version to show; the current one when absent. */
+	version?: number;
+}
+
+const validateArtifactSearch = (search: Record<string, unknown>): ArtifactSearch =>
+	typeof search.version === "number" && Number.isInteger(search.version) && search.version > 0
+		? { version: search.version }
+		: {};
+
+const artifactRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/artifacts/$artifact",
+	validateSearch: validateArtifactSearch,
+	component: () => {
+		const { pod: podSlug, artifact } = artifactRoute.useParams();
+		const { version } = artifactRoute.useSearch();
+		const pod = findPod(usePods().data, podSlug);
+		return pod ? <ArtifactPage pod={pod} artifactId={artifact} version={version} /> : null;
+	},
+});
 
 interface AgentSearch {
 	/** A collaboration or routine thread open beside the chat. */
@@ -969,7 +1011,7 @@ const routeTree = rootRoute.addChildren([
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
 		agentsRoute,
-		podRoute.addChildren([podIndexRoute, agentRoute]),
+		podRoute.addChildren([podIndexRoute, agentRoute, artifactsRoute, artifactRoute]),
 	]),
 ]);
 

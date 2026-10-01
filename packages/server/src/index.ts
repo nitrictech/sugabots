@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
@@ -71,7 +72,7 @@ const Integrations = Layer.mergeAll(
 	ConnectionTools.layer,
 );
 
-/** Accounts, members, pods, agents and the providers they use, and trying a model. */
+/** Accounts, members, pods, agents, their artifacts and the providers they use, and trying a model. */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
 	Onboarding.layer,
@@ -80,6 +81,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	ModelProviderSetup.layer,
 	SearchProviderSetup.layer,
 	ConnectionSetup.layer,
+	Artifacts.layer,
 	ModelTrials.layer,
 	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));

@@ -8,7 +8,7 @@ import { linkOptions } from "@tanstack/react-router";
  * an address by hand and the address can change here alone. Each result spreads
  * into a `Link` or goes to `navigate` from a page under `/$workspace`.
  *
- * Only pod and agent addresses, whose slugs and handles are easy to swap for
+ * Only pod, agent and artifact addresses, whose slugs and handles are easy to swap for
  * ids. Pages outside a workspace (onboarding, the OAuth return) name one
  * themselves, and links by fixed key or thread id are written in place.
  */
@@ -45,5 +45,23 @@ export function agentSettingsLink({ pod, agent }: AgentInPod) {
 		from: "/$workspace",
 		to: "./settings/pods/$pod/agents/$agent",
 		params: { pod: pod.slug, agent: agent.handle },
+	});
+}
+
+/** A pod's artifacts. */
+export function artifactsLink(pod: Pod) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts",
+		params: { pod: pod.slug },
+	});
+}
+
+export function artifactLink(pod: Pod, artifactId: string, search: { version?: number } = {}) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts/$artifact",
+		params: { pod: pod.slug, artifact: artifactId },
+		search,
 	});
 }

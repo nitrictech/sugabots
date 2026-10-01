@@ -39,6 +39,7 @@ export function ChatThreadPanel({
 	user,
 	onClose,
 	onOpenThread,
+	onOpenArtifact,
 }: {
 	chatId: string;
 	/** The bot whose chat this opened from, which a collaboration draws on the right. */
@@ -49,6 +50,7 @@ export function ChatThreadPanel({
 	user: SessionUser;
 	onClose: () => void;
 	onOpenThread: (threadId: string) => void;
+	onOpenArtifact?: (artifactId: string) => void;
 }) {
 	const query = useThread(threadId);
 	useThreadEvents(threadId);
@@ -217,6 +219,7 @@ export function ChatThreadPanel({
 							user={user}
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
 							onOpenCollaboration={onOpenThread}
+							onOpenArtifact={onOpenArtifact}
 							podId={details.thread.podId}
 							canApproveToolCalls={details.capabilities?.approveToolCalls}
 							compact

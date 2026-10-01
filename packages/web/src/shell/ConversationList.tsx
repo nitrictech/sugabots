@@ -1,10 +1,10 @@
 import type { ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Hand, Plus, Search, Settings } from "lucide-react";
+import { Hand, Library, Plus, Search, Settings } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, artifactsLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { waitingText } from "@/lib/tool-names.ts";
@@ -130,6 +130,15 @@ export function ConversationListView({
 						</button>
 					</Tooltip>
 				)}
+				<Tooltip label="Artifacts">
+					<Link
+						{...artifactsLink(pod)}
+						aria-label="Artifacts"
+						className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
+					>
+						<Library size={17} strokeWidth={2.2} />
+					</Link>
+				</Tooltip>
 				<Tooltip label="Pod settings">
 					<Link
 						{...podSettingsLink(pod)}

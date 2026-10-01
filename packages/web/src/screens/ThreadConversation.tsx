@@ -16,6 +16,7 @@ import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
+import { ArtifactCards } from "./ArtifactCards.tsx";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
@@ -59,6 +60,7 @@ export function ThreadConversation({
 	rightAgentId,
 	dividers = true,
 	onOpenCollaboration,
+	onOpenArtifact,
 	podId,
 	canApproveToolCalls = false,
 	compact = false,
@@ -87,6 +89,8 @@ export function ThreadConversation({
 	dividers?: boolean;
 	/** Opens a collaboration from its line, in the sidebar beside this conversation. */
 	onOpenCollaboration: (threadId: string) => void;
+	/** Opens an artifact a reply wrote, from its card. Without it, no cards are drawn. */
+	onOpenArtifact?: (artifactId: string) => void;
 	podId: string;
 	canApproveToolCalls?: boolean;
 	/** Whether, on a phone, the caller pins Allow and Deny below the thread instead of on each card. */
@@ -164,19 +168,16 @@ export function ThreadConversation({
 						{startsRun && <span aria-hidden className="h-2.5" />}
 						{message.author.kind === "agent" && calls.length > 0 && nameOnce()}
 						{message.author.kind === "agent" && (
-							<ToolLine
-								calls={calls}
-								looks={looks}
-								className={
-									compact
-										? outgoing
-											? "items-end pr-[34px]"
-											: "pl-[34px]"
-										: outgoing
-											? "items-end pr-[50px]"
-											: "pl-[50px]"
-								}
-							/>
+							<>
+								<ToolLine calls={calls} looks={looks} className={besideFace(compact, outgoing)} />
+								{onOpenArtifact && (
+									<ArtifactCards
+										calls={calls}
+										onOpen={onOpenArtifact}
+										className={besideFace(compact, outgoing)}
+									/>
+								)}
+							</>
 						)}
 						{segments.map((segment, position) => {
 							if (segment.type === "collaboration") {
@@ -732,4 +733,10 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 		return "stopped";
 	}
 	return formatTime(message.createdAt);
+}
+
+/** Where what sits above a bot's bubble lines up: past the face, on the bubble's side. */
+function besideFace(compact: boolean, outgoing: boolean): string {
+	if (compact) return outgoing ? "items-end pr-[34px]" : "pl-[34px]";
+	return outgoing ? "items-end pr-[50px]" : "pl-[50px]";
 }
