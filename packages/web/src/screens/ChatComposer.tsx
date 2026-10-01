@@ -149,44 +149,26 @@ export function ChatComposer({
 				ref={pill}
 				className={cn(
 					"focus-ring-within grid items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
-					peopleOnly?.on
-						? cn(
-								// Below a wide screen there is no room for the chip; the switch shows the mode instead.
-								"grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] max-xl:grid-cols-[auto_minmax(0,1fr)_auto_auto]",
-								stacked
-									? "[grid-template-areas:'draft_draft_draft_draft_draft'_'attach_audience_._switch_send'] max-xl:[grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']"
-									: "[grid-template-areas:'attach_audience_draft_switch_send'] max-xl:[grid-template-areas:'attach_draft_switch_send']",
-							)
-						: peopleOnly
-							? cn(
-									"grid-cols-[auto_minmax(0,1fr)_auto_auto]",
-									stacked
-										? "[grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']"
-										: "[grid-template-areas:'attach_draft_switch_send']",
-								)
-							: cn(
-									"grid-cols-[auto_minmax(0,1fr)_auto]",
-									stacked
-										? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
-										: "[grid-template-areas:'attach_draft_send']",
-								),
+					PILL_LAYOUTS[peopleOnly ? "withSwitch" : "plain"][stacked ? "stacked" : "inline"],
 				)}
 			>
-				{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
-				<IconButton
-					label="Attach files (coming soon)"
-					side="top"
-					aria-disabled
-					className="mb-0.5 size-8 [grid-area:attach] aria-disabled:cursor-default aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground [&_svg]:size-4.5"
-				>
-					<Plus strokeWidth={2.2} />
-				</IconButton>
-				{peopleOnly?.on && (
-					<PeopleOnlyChip
-						agent={peopleOnly.agent}
-						onSwitchBack={() => peopleOnly.onChange(false)}
-					/>
-				)}
+				<div className="flex items-end gap-2 [grid-area:attach]">
+					{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
+					<IconButton
+						label="Attach files (coming soon)"
+						side="top"
+						aria-disabled
+						className="mb-0.5 size-8 aria-disabled:cursor-default aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground [&_svg]:size-4.5"
+					>
+						<Plus strokeWidth={2.2} />
+					</IconButton>
+					{peopleOnly?.on && (
+						<PeopleOnlyChip
+							agent={peopleOnly.agent}
+							onSwitchBack={() => peopleOnly.onChange(false)}
+						/>
+					)}
+				</div>
 				<label htmlFor={id} className="sr-only">
 					{label}
 				</label>
@@ -298,8 +280,36 @@ function wrapsPastOneLine(textarea: HTMLTextAreaElement): boolean {
 }
 
 /**
- * Shown beside the + while the message is for people only. Clicking it goes
- * back to writing to the bot.
+ * Where the pill's parts sit, with or without the people-only switch: on one
+ * row, or with a long draft taking the full width above the buttons.
+ */
+const PILL_LAYOUTS = {
+	plain: {
+		inline: "grid-cols-[auto_minmax(0,1fr)_auto] [grid-template-areas:'attach_draft_send']",
+		stacked:
+			"grid-cols-[auto_minmax(0,1fr)_auto] [grid-template-areas:'draft_draft_draft'_'attach_._send']",
+	},
+	withSwitch: {
+		inline:
+			"grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'attach_draft_switch_send']",
+		stacked:
+			"grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']",
+	},
+};
+
+/** The switch on a wide screen: words, named for Tab. */
+const SWITCH_AS_WORDS =
+	"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground";
+/** Below a wide screen: a round icon button the size of the send button. */
+const SWITCH_AS_ICON =
+	"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0";
+/** A solid disc in the text colour, so it is never taken for the send button. */
+const SWITCH_ICON_ON = "max-xl:bg-foreground max-xl:text-background";
+const SWITCH_ICON_OFF = "max-xl:text-muted-foreground max-xl:hover:bg-hover";
+
+/**
+ * Shown beside the + while the message is for people only, on a wide screen;
+ * below one the switch shows it. Clicking it goes back to writing to the bot.
  */
 function PeopleOnlyChip({
 	agent,
@@ -319,7 +329,7 @@ function PeopleOnlyChip({
 				type="button"
 				aria-label="Back to bots"
 				onClick={onSwitchBack}
-				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors [grid-area:audience] hover:bg-hover max-xl:hidden"
+				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors hover:bg-hover max-xl:hidden"
 			>
 				<UsersRound size={15} strokeWidth={2.2} />
 				People only
@@ -362,11 +372,9 @@ function AudienceSwitch({
 				onClick={onToggle}
 				className={cn(
 					"focus-ring flex shrink-0 items-center transition-colors [grid-area:switch]",
-					"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground",
-					"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0",
-					on
-						? "max-xl:bg-foreground max-xl:text-background"
-						: "max-xl:text-muted-foreground max-xl:hover:bg-hover",
+					SWITCH_AS_WORDS,
+					SWITCH_AS_ICON,
+					on ? SWITCH_ICON_ON : SWITCH_ICON_OFF,
 				)}
 			>
 				<span className="flex items-center gap-1.5 max-xl:hidden">
