@@ -95,7 +95,6 @@ export const make = Effect.gen(function* () {
 							threadId: visible.mainThreadId,
 							author: sender,
 							content: input.content,
-							peopleOnly: input.peopleOnly ?? false,
 						});
 						if (posted._tag === "AlreadyPosted") return toMessage(posted.message, author);
 						// Checked once the message is known to be new, so sending it again

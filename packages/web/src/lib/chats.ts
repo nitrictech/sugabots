@@ -195,7 +195,6 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 					status: "complete",
 					parts: [{ type: "text", text: input.message }],
 					content: input.message,
-					...(input.peopleOnly ? { peopleOnly: true } : {}),
 					createdAt: timestampAfter(
 						queries.getQueryData<ThreadDetails>(["thread", chat.mainThreadId])?.messages ?? [],
 					),
