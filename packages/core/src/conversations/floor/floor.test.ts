@@ -15,7 +15,7 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
 		routing: { facilitator: true },
 		threadType: "chat",
-		author: { kind: "person" },
+		author: { kind: "person", peopleOnly: false },
 		content: "Hello",
 		hostAgentId: host,
 		crew: [
@@ -73,6 +73,17 @@ describe("a person's message", () => {
 			kind: "nobody",
 			why: "people-addressed",
 		});
+	});
+
+	it("goes to nobody when written for people only, even with an agent mentioned", () => {
+		expect(
+			decideFloor(
+				input({
+					author: { kind: "person", peopleOnly: true },
+					content: "Should we let @reviewer take this?",
+				}),
+			),
+		).toEqual({ kind: "nobody", why: "people-addressed" });
 	});
 
 	it("does not let the facilitator introduce a speaker in a chat", () => {

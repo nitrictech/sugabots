@@ -56,9 +56,21 @@ const meta = preview.meta({
 	render: function Composer(args) {
 		const [value, setValue] = useState(args.value);
 		useEffect(() => setValue(args.value), [args.value]);
+		const [peopleOnly, setPeopleOnly] = useState(args.peopleOnly?.on ?? false);
+		useEffect(() => setPeopleOnly(args.peopleOnly?.on ?? false), [args.peopleOnly?.on]);
 		return (
 			<ChatComposer
 				{...args}
+				peopleOnly={
+					args.peopleOnly && {
+						...args.peopleOnly,
+						on: peopleOnly,
+						onChange: (on) => {
+							setPeopleOnly(on);
+							args.peopleOnly?.onChange(on);
+						},
+					}
+				}
 				value={value}
 				onValueChange={(next) => {
 					setValue(next);
@@ -335,4 +347,73 @@ export const Sending = meta.story({
 /** SendFailed preserves the draft and exposes the error beside the retry action. */
 export const SendFailed = meta.story({
 	args: { value: "Please summarise the feedback.", error: "Could not send. Try again." },
+});
+
+const growthDesk = { name: "Growth Desk", color: "green", face: "arc" } as const;
+
+/**
+ * WithPeople is a thread with someone else in it: Tab, or the switch before
+ * the send button, moves to people only and back. Tab picks a mention instead
+ * while the mention list is open.
+ */
+export const WithPeople = meta.story({
+	args: { peopleOnly: { on: false, onChange: fn(), agent: growthDesk } },
+	play: async ({ canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const toggle = canvas.getByRole("button", { name: "People only" });
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await userEvent.click(input);
+		await userEvent.keyboard("{Tab}");
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		await expect(input).toHaveFocus();
+		await userEvent.keyboard("{Tab}");
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+		await userEvent.type(input, "@sam");
+		await userEvent.keyboard("{Tab}");
+		await expect(input).toHaveValue("@sam-rivera ");
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+		await userEvent.click(toggle);
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+	},
+});
+
+/**
+ * PeopleOnly writes to the other people, which a chip beside the + shows: the
+ * bot reads along but won't reply. Clicking the chip goes back to the bot.
+ */
+export const PeopleOnly = meta.story({
+	args: {
+		label: "Message people in Product",
+		placeholder: "Message people in Product",
+		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
+	},
+	// The chip shows on a wide screen only.
+	globals: { viewport: { value: "desktop", isRotated: false } },
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Back to bots" }));
+		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
+	},
+});
+
+/**
+ * PeopleOnlyOnATablet has no room for the chip or the words, as on a phone: a
+ * people icon before the send button switches, on a solid disc while the
+ * message is for people only.
+ */
+export const PeopleOnlyOnATablet = meta.story({
+	args: {
+		label: "Message Growth Desk",
+		placeholder: "Message Growth Desk",
+		peopleOnly: { on: false, onChange: fn(), agent: growthDesk },
+	},
+	globals: { viewport: { value: "ipad11p", isRotated: false } },
+	play: async ({ canvas, userEvent }) => {
+		const toggle = canvas.getByRole("button", { name: "People only" });
+		await userEvent.click(toggle);
+		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		// The chip beside the + is left out below a wide screen.
+		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
+	},
 });

@@ -44,7 +44,17 @@ export default definePreview({
 	parameters: {
 		layout: "padded",
 		backgrounds: { disable: true },
-		viewport: { options: INITIAL_VIEWPORTS },
+		viewport: {
+			options: {
+				...INITIAL_VIEWPORTS,
+				// The devices above stop short of the app's widest layout, which starts at 1280px.
+				desktop: {
+					name: "Desktop",
+					styles: { width: "1440px", height: "900px" },
+					type: "desktop",
+				},
+			},
+		},
 		a11y: { test: "error" },
 		options: { storySort: { order: ["Controls", "Patterns", "Product", "Views"] } },
 	},

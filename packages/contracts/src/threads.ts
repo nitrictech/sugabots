@@ -431,6 +431,8 @@ export type ThreadActivity = typeof threadActivitySchema.Type;
 export const newMessageSchema = Schema.Struct({
 	id: uuidSchema,
 	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
+	/** For the people in the thread only: the bots read it, but none replies. */
+	peopleOnly: Schema.optional(Schema.Boolean),
 });
 
 export type NewMessage = typeof newMessageSchema.Type;

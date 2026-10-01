@@ -2,7 +2,7 @@ import { Info } from "lucide-react";
 import { expect, screen } from "storybook/test";
 import preview from "#storybook/preview";
 import { IconButton } from "./icon-button.tsx";
-import { Tooltip } from "./tooltip.tsx";
+import { DetailTooltip, Tooltip } from "./tooltip.tsx";
 
 const meta = preview.meta({
 	title: "Controls/Tooltip",
@@ -33,5 +33,31 @@ export const Right = meta.story({
 	args: { defaultOpen: true, side: "right", label: "Revenue" },
 	play: async () => {
 		await expect(await screen.findByText("Revenue")).toBeInTheDocument();
+	},
+});
+
+/**
+ * A title and how to change it, lined up with the start of its control, as
+ * the composer's people-only toggle explains itself.
+ */
+export const Detail = meta.story({
+	render: () => (
+		<div style={{ padding: 48, paddingTop: 96 }}>
+			<DetailTooltip
+				defaultOpen
+				side="top"
+				align="start"
+				title="Growth Desk replies"
+				description="Tab or click to message people only."
+			>
+				<IconButton label="People only">
+					<Info />
+				</IconButton>
+			</DetailTooltip>
+		</div>
+	),
+	play: async () => {
+		await expect(await screen.findByText("Growth Desk replies")).toBeInTheDocument();
+		await expect(screen.getByText("Tab or click to message people only.")).toBeInTheDocument();
 	},
 });

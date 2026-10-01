@@ -1,6 +1,10 @@
-import { canStartMention, type ThreadParticipant } from "@sugabots/contracts";
+import {
+	type AgentParticipant,
+	canStartMention,
+	type ThreadParticipant,
+} from "@sugabots/contracts";
 import { cn } from "cn";
-import { ArrowUp, Plus } from "lucide-react";
+import { ArrowUp, Plus, UsersRound } from "lucide-react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
@@ -14,6 +18,7 @@ import {
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { DetailTooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Where a message is written: a pill that grows with its text and sends on
@@ -22,7 +27,9 @@ import { IconButton } from "@/ui/icon-button.tsx";
  * with the buttons on a row beneath it. The send button takes the accent once
  * there is something to send. Typing `@` offers everyone in `mentionable` whose
  * name or handle matches what follows it; choosing one writes their handle into
- * the draft.
+ * the draft. With `peopleOnly`, Tab or the switch before the send button moves
+ * between writing to the bot, the default, and writing to the other people
+ * only, which a chip beside the + shows.
  */
 export function ChatComposer({
 	label,
@@ -35,6 +42,7 @@ export function ChatComposer({
 	error,
 	className,
 	mentionable,
+	peopleOnly,
 }: {
 	label: string;
 	placeholder: string;
@@ -47,6 +55,13 @@ export function ChatComposer({
 	className?: string;
 	/** Who the draft can mention. */
 	mentionable: ThreadParticipant[];
+	/** Offered when other people are in the thread, to write to them without the bot replying. */
+	peopleOnly?: {
+		on: boolean;
+		onChange: (on: boolean) => void;
+		/** The bot that replies unless the message is for people only. */
+		agent: Pick<AgentParticipant, "name">;
+	};
 }) {
 	const id = useId();
 	const mentionListId = `${id}-mentions`;
@@ -91,6 +106,12 @@ export function ChatComposer({
 				return;
 			}
 		}
+		// Shift+Tab still moves the focus back.
+		if (peopleOnly && event.key === "Tab" && !event.shiftKey && !event.nativeEvent.isComposing) {
+			event.preventDefault();
+			peopleOnly.onChange(!peopleOnly.on);
+			return;
+		}
 		if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
 		event.preventDefault();
 		event.currentTarget.form?.requestSubmit();
@@ -127,21 +148,27 @@ export function ChatComposer({
 			<div
 				ref={pill}
 				className={cn(
-					"focus-ring-within grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
-					stacked
-						? "[grid-template-areas:'draft_draft_draft'_'attach_._send']"
-						: "[grid-template-areas:'attach_draft_send']",
+					"focus-ring-within grid items-end gap-x-2 rounded-composer border border-border-strong bg-panel px-1.25 py-1",
+					PILL_LAYOUTS[peopleOnly ? "withSwitch" : "plain"][stacked ? "stacked" : "inline"],
 				)}
 			>
-				{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
-				<IconButton
-					label="Attach files (coming soon)"
-					side="top"
-					aria-disabled
-					className="mb-0.5 size-8 [grid-area:attach] aria-disabled:cursor-default aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground [&_svg]:size-4.5"
-				>
-					<Plus strokeWidth={2.2} />
-				</IconButton>
+				<div className="flex items-end gap-2 [grid-area:attach]">
+					{/* Not `disabled`: a disabled button gets no hover or focus, so its tooltip would never open. */}
+					<IconButton
+						label="Attach files (coming soon)"
+						side="top"
+						aria-disabled
+						className="mb-0.5 size-8 aria-disabled:cursor-default aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground [&_svg]:size-4.5"
+					>
+						<Plus strokeWidth={2.2} />
+					</IconButton>
+					{peopleOnly?.on && (
+						<PeopleOnlyChip
+							agent={peopleOnly.agent}
+							onSwitchBack={() => peopleOnly.onChange(false)}
+						/>
+					)}
+				</div>
 				<label htmlFor={id} className="sr-only">
 					{label}
 				</label>
@@ -174,6 +201,9 @@ export function ChatComposer({
 						stacked && "px-1.75",
 					)}
 				/>
+				{peopleOnly && (
+					<AudienceSwitch {...peopleOnly} onToggle={() => peopleOnly.onChange(!peopleOnly.on)} />
+				)}
 				<button
 					type="submit"
 					aria-label={submitLabel}
@@ -247,6 +277,116 @@ function wrapsPastOneLine(textarea: HTMLTextAreaElement): boolean {
 		Number.parseFloat(style.paddingTop) +
 		Number.parseFloat(style.paddingBottom);
 	return textarea.scrollHeight > oneLine;
+}
+
+/**
+ * Where the pill's parts sit, with or without the people-only switch: on one
+ * row, or with a long draft taking the full width above the buttons.
+ */
+const PILL_LAYOUTS = {
+	plain: {
+		inline: "grid-cols-[auto_minmax(0,1fr)_auto] [grid-template-areas:'attach_draft_send']",
+		stacked:
+			"grid-cols-[auto_minmax(0,1fr)_auto] [grid-template-areas:'draft_draft_draft'_'attach_._send']",
+	},
+	withSwitch: {
+		inline:
+			"grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'attach_draft_switch_send']",
+		stacked:
+			"grid-cols-[auto_minmax(0,1fr)_auto_auto] [grid-template-areas:'draft_draft_draft_draft'_'attach_._switch_send']",
+	},
+};
+
+/** The switch on a wide screen: words, named for Tab. */
+const SWITCH_AS_WORDS =
+	"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground";
+/** Below a wide screen: a round icon button the size of the send button. */
+const SWITCH_AS_ICON =
+	"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0";
+/** A solid disc in the text colour, so it is never taken for the send button. */
+const SWITCH_ICON_ON = "max-xl:bg-foreground max-xl:text-background";
+const SWITCH_ICON_OFF = "max-xl:text-muted-foreground max-xl:hover:bg-hover";
+
+/**
+ * Shown beside the + while the message is for people only, on a wide screen;
+ * below one the switch shows it. Clicking it goes back to writing to the bot.
+ */
+function PeopleOnlyChip({
+	agent,
+	onSwitchBack,
+}: {
+	agent: Pick<AgentParticipant, "name">;
+	onSwitchBack: () => void;
+}) {
+	return (
+		<DetailTooltip
+			title="People only"
+			description={`${agent.name} reads along but won't reply. Tab or click to switch back.`}
+			side="top"
+			align="start"
+		>
+			<button
+				type="button"
+				aria-label="Back to bots"
+				onClick={onSwitchBack}
+				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors hover:bg-hover max-xl:hidden"
+			>
+				<UsersRound size={15} strokeWidth={2.2} />
+				People only
+			</button>
+		</DetailTooltip>
+	);
+}
+
+/**
+ * Switches who the message is for, before the send button: named for Tab,
+ * which does the same from the draft. A touch screen has no Tab key, so there
+ * it shows the words alone. Below a wide screen, on a tablet or a phone, it
+ * is a people icon instead, on a solid disc in the text colour while the
+ * message is for people only, so it is never taken for the send button.
+ */
+function AudienceSwitch({
+	on,
+	agent,
+	onToggle,
+}: {
+	on: boolean;
+	agent: Pick<AgentParticipant, "name">;
+	onToggle: () => void;
+}) {
+	return (
+		<DetailTooltip
+			title={on ? "People only" : `${agent.name} replies`}
+			description={
+				on
+					? `${agent.name} reads along but won't reply. Tab or click to switch back.`
+					: "Tab or click to message people only."
+			}
+			side="top"
+			align="end"
+		>
+			<button
+				type="button"
+				aria-pressed={on}
+				aria-label="People only"
+				onClick={onToggle}
+				className={cn(
+					"focus-ring flex shrink-0 items-center transition-colors [grid-area:switch]",
+					SWITCH_AS_WORDS,
+					SWITCH_AS_ICON,
+					on ? SWITCH_ICON_ON : SWITCH_ICON_OFF,
+				)}
+			>
+				<span className="flex items-center gap-1.5 max-xl:hidden">
+					<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground [@media(hover:none)]:hidden">
+						Tab
+					</kbd>
+					{on ? "back to bots" : "people only"}
+				</span>
+				<UsersRound aria-hidden size={18} strokeWidth={2.2} className="xl:hidden" />
+			</button>
+		</DetailTooltip>
+	);
 }
 
 /**
