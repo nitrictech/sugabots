@@ -309,12 +309,12 @@ describe("the rail", () => {
 		expect(within(dialog).queryByRole("button", { name: /^Pod:/ })).toBeNull();
 	});
 
-	it("opens settings from your avatar", async () => {
+	it("opens your profile from your avatar", async () => {
 		mount(linearPage);
 
 		const rail = await screen.findByRole("navigation", { name: "Pods" });
 		expect(within(rail).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
-			"/suga/settings",
+			"/suga/settings/profile",
 		);
 	});
 });
