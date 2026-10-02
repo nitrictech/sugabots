@@ -121,12 +121,13 @@ export function testProvider(
 		);
 		const error = outcome._tag === "Failure" ? describe(outcome.failure) : undefined;
 
-		// A test is recorded either way: its result is the point.
+		// A test is recorded either way, and only recorded: switching the provider
+		// on or off is the person's to do.
 		yield* providers.recordTest(
 			workspaceId,
 			providerId,
 			connection.configurationUpdatedAt,
-			error === undefined ? { activateOnSuccess: true } : { error },
+			error === undefined ? { activateOnSuccess: false } : { error },
 		);
 		const latencyMs = (yield* Clock.currentTimeMillis) - started;
 		return { reachable: error === undefined, latencyMs, error };

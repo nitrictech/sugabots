@@ -195,11 +195,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	);
 
 	it.each([
-		{ httpStatus: 200, reachable: true, active: true, connectionStatus: "connected" },
-		{ httpStatus: 503, reachable: false, active: false, connectionStatus: "error" },
+		{ httpStatus: 200, reachable: true, connectionStatus: "connected" },
+		{ httpStatus: 503, reachable: false, connectionStatus: "error" },
 	])(
-		"enables a local provider only after a successful connection test: $httpStatus",
-		async ({ httpStatus, reachable, active, connectionStatus }) => {
+		"records a local provider's connection test without switching it on: $httpStatus",
+		async ({ httpStatus, reachable, connectionStatus }) => {
 			const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
 			if (!ollama) throw new Error("fixture");
 			expect(ollama).toMatchObject({ active: false, hasApiKey: false });
@@ -209,37 +209,35 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 			expect(result.reachable).toBe(reachable);
 			expect(await view(ollama.id)).toMatchObject({
-				active,
+				active: false,
 				status: connectionStatus,
 			});
 		},
 	);
 
-	it("re-enables a configured provider when testing its connection", async () => {
-		await repository.update(workspaceId, providerId, { active: false });
-		const setup = await setupWith(() => Response.json({ data: [] }));
-
-		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
-			reachable: true,
-		});
-		expect(await view(providerId)).toMatchObject({ active: true });
-	});
-
-	it("disables an enabled provider when its key is rejected during a connection test", async () => {
+	it("keeps a provider on when its connection test fails, and records why", async () => {
 		await switchOn(providerId);
 		const setup = await setupWith(() => new Response(null, { status: 401 }));
 
 		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
 			reachable: false,
 		});
-		expect(await view(providerId)).toMatchObject({
-			active: false,
-			status: "error",
-		});
+		expect(await view(providerId)).toMatchObject({ active: true, status: "error" });
 	});
 
-	it("does not allow manual activation to bypass a rejected key", async () => {
-		const setup = await setupWith(() => new Response(null, { status: 401 }));
+	it("leaves a provider off after a connection test succeeds", async () => {
+		const setup = await setupWith(() => Response.json({ data: [] }));
+
+		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
+			reachable: true,
+		});
+		expect(await view(providerId)).toMatchObject({ active: false });
+	});
+
+	it("switches a provider on without asking it anything", async () => {
+		const setup = await setupWith(() => {
+			throw new Error("Switching a provider on sent a request");
+		});
 
 		const saved = await setup.update({
 			workspace: workspaceId,
@@ -247,37 +245,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			changes: { active: true },
 		});
 
-		expect(saved).toMatchObject({ active: false, status: "error" });
-	});
-
-	it("disables a provider whose enabled model refuses to answer after its model listing succeeds", async () => {
-		await repository.addModels(workspaceId, providerId, [
-			{
-				modelId: "test-model",
-				displayName: null,
-				capabilities: [],
-				contextLength: null,
-				source: "manual",
-			},
-		]);
-		const [configured] = (await view(providerId))?.models ?? [];
-		if (!configured) throw new Error("fixture");
-		await repository.setModelEnabled(workspaceId, providerId, [configured.id], true);
-		// The listing answers; asking the model refuses the key.
-		const setup = await setupWith((url) =>
-			url.endsWith("/chat/completions")
-				? Response.json({ error: { message: "API key rejected" } }, { status: 401 })
-				: Response.json({ data: [] }),
-		);
-
-		expect(await setup.test({ workspace: workspaceId, providerId })).toMatchObject({
-			reachable: false,
-		});
-		expect(await view(providerId)).toMatchObject({
-			active: false,
-			status: "error",
-			lastTestError: "test-model: The model provider refused the request. Check its API key.",
-		});
+		expect(saved).toMatchObject({ active: true });
 	});
 
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
@@ -374,10 +342,12 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		});
 	});
 
-	it("switches a keyless local provider on once a test of it succeeds", async () => {
+	it("switches a keyless local provider on", async () => {
 		const ollama = (await list(workspaceId)).find(({ preset }) => preset === "ollama");
 		if (!ollama) throw new Error("fixture");
-		const setup = await setupWith(() => Response.json({ models: [] }));
+		const setup = await setupWith(() => {
+			throw new Error("Switching a provider on sent a request");
+		});
 
 		const saved = await setup.update({
 			workspace: workspaceId,
@@ -385,7 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			changes: { active: true },
 		});
 
-		expect(saved).toMatchObject({ active: true, status: "connected" });
+		expect(saved).toMatchObject({ active: true });
 	});
 
 	it("refuses to switch on a custom provider that has no key", async () => {

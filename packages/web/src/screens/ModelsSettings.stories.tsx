@@ -254,6 +254,10 @@ export const Provider = meta.story({
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Sonnet" })).toBeDisabled();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Haiku" })).toBeDisabled();
 		await expect(canvas.getByRole("button", { name: "Disconnect Anthropic" })).toBeDisabled();
+		await expect(canvas.getByRole("switch", { name: "Use Anthropic" })).toBeDisabled();
+		await expect(
+			canvas.getByText(/^Anthropic can't be turned off while it's in use\./),
+		).toBeInTheDocument();
 		await expect(
 			canvas.getByText(
 				"New bots and system agents use one of its models. Choose another model for them under Models → Default first.",
@@ -265,7 +269,9 @@ export const Provider = meta.story({
 			"false",
 		);
 		await expect(
-			canvas.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-checked")),
+			canvas
+				.getAllByRole("switch", { name: /^Bots can use / })
+				.map((toggle) => toggle.getAttribute("aria-checked")),
 		).toEqual(["true", "true", "false"]);
 	},
 });
@@ -277,7 +283,7 @@ export const LargeCatalog = meta.story({
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
-		await expect(canvas.getAllByRole("switch")).toHaveLength(4);
+		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);
 	},
 });
 

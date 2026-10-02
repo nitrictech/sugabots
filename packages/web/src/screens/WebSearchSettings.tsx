@@ -8,10 +8,10 @@ import {
 	searchProviderPreset,
 } from "@sugabots/contracts";
 import { Check } from "lucide-react";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provider.ts";
-import { Alert } from "@/ui/alert.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
@@ -358,13 +358,17 @@ function keyHint(preset: SearchProviderPresetId): string {
 function testStanding(
 	provider: SearchProvider | null,
 	latest: SearchProviderTestResult | undefined,
-): string | undefined {
+): ReactNode {
 	if (latest) {
-		return latest.reachable
-			? `Search works: ${latest.results ?? 0} results in ${latest.latencyMs} ms.`
-			: (latest.error ?? "The search did not work.");
+		return latest.reachable ? (
+			<Success>Search works</Success>
+		) : (
+			<Alert>{latest.error ?? "The search did not work."}</Alert>
+		);
 	}
 	if (provider?.status === "connected") return "The last test search worked.";
-	if (provider?.status === "error") return provider.lastTestError ?? "The last test search failed.";
+	if (provider?.status === "error") {
+		return <Alert>{provider.lastTestError ?? "The last test search failed."}</Alert>;
+	}
 	return undefined;
 }

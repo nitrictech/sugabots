@@ -31,6 +31,23 @@ describe("a provider's API key", () => {
 	});
 });
 
+describe("switching a provider on", () => {
+	it("switches it on and nothing else", async () => {
+		const off = { ...openai, active: false };
+		const providers = client.api.modelProviders;
+		providers.list.mockReturnValue(Effect.succeed([off]));
+		providers.update.mockReturnValue(Effect.succeed({ ...off, active: true }));
+		mount(`/suga/settings/providers/${openai.id}`);
+
+		fireEvent.click(await screen.findByRole("switch", { name: `Use ${openai.name}` }));
+
+		await waitFor(() =>
+			expect(providers.update.mock.calls[0]?.[0]).toMatchObject({ payload: { active: true } }),
+		);
+		expect(providers.test).not.toHaveBeenCalled();
+	});
+});
+
 describe("a model's capabilities", () => {
 	/** A server the workspace added itself, whose models' capabilities are set here. */
 	const gateway = {

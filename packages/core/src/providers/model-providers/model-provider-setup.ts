@@ -26,7 +26,6 @@ import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
-import { Models } from "../models/models.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
@@ -105,7 +104,7 @@ export interface Interface {
 		AuthorizationDenied | ModelProviderRemovalNotAllowed | ModelInUse,
 		CurrentActor.Service
 	>;
-	/** Lists the provider's models, then asks an enabled one for a word, and records the result. */
+	/** Lists the provider's models, which costs nothing, and records whether that worked. */
 	readonly test: (
 		input: InProvider,
 	) => Effect.Effect<
@@ -220,7 +219,6 @@ export const make = Effect.gen(function* () {
 	const providers = yield* ModelProviderRepository.Service;
 	const agents = yield* AgentRepository.Service;
 	const egress = yield* Egress.Service;
-	const models = yield* Models.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
 	const cipher = yield* Credentials.Service;
 
@@ -313,45 +311,6 @@ export const make = Effect.gen(function* () {
 			return yield* requireProvider(workspaceId, providerId);
 		});
 
-	const tryAnEnabledModel = (workspaceId: string, providerId: string, listed: TestOutcome) =>
-		Effect.gen(function* () {
-			const provider = yield* requireProvider(workspaceId, providerId);
-			const enabled = provider.models.find((candidate) => candidate.enabled);
-			if (!provider.active || !enabled) return listed;
-
-			const endpoint = yield* providers.endpoint(workspaceId, providerId);
-			const started = yield* Clock.currentTimeMillis;
-			// Listing a provider's models cannot tell that a model is gated behind
-			// a setting on the provider's side, that a key has no credit, or that
-			// the model refuses the request shape. Asking it something can.
-			const answered = yield* models
-				.answer({
-					workspaceId,
-					model: enabled.modelId,
-					system: "Answer with the single word OK.",
-					messages: [{ role: "user", content: "OK?" }],
-					activity: { purpose: "provider-check" },
-					maxCharacters: 200,
-					timeout: "30 seconds",
-				})
-				.pipe(Effect.result);
-			const latencyMs = listed.latencyMs + ((yield* Clock.currentTimeMillis) - started);
-			if (answered._tag === "Success") {
-				return { ...listed, latencyMs };
-			}
-
-			yield* Effect.logWarning("Trying a model provider's model failed", answered.failure.message);
-			// A model id is the provider's own name for the model, shown to the
-			// administrator who enabled it.
-			const error = UserMessage.of`${UserMessage.unchecked(enabled.modelId)}: ${answered.failure.userMessage}`;
-			if (endpoint) {
-				yield* providers.recordTest(workspaceId, providerId, endpoint.configurationUpdatedAt, {
-					error,
-				});
-			}
-			return { reachable: false, latencyMs, error };
-		});
-
 	return Service.of({
 		list: ({ workspace }) => operation("list", Effect.flatMap(managed(workspace), providersIn)),
 
@@ -410,11 +369,7 @@ export const make = Effect.gen(function* () {
 							missing: missingCredential(current.preset),
 						});
 					}
-					// Switching on is a test's to do, below, so it is not written here.
-					const write = providers.update(workspaceId, providerId, {
-						...changes,
-						active: changes.active === false ? false : undefined,
-					});
+					const write = providers.update(workspaceId, providerId, changes);
 					// Switching it off and taking its key away both stop it answering. A
 					// new key does only until it is tried, just below.
 					const takesAway = changes.active === false || changes.apiKey === null;
@@ -424,8 +379,6 @@ export const make = Effect.gen(function* () {
 					}
 					if (changes.apiKey) {
 						yield* discoverModelsQuietly(workspaceId, providerId, changes.active !== false);
-					} else if (changes.active === true) {
-						yield* testProvider(providers, workspaceId, providerId, egress.providers);
 					}
 					yield* adoptFirstModel(workspaceId);
 					return yield* requireProvider(workspaceId, providerId);
@@ -453,9 +406,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
-					const listed = yield* testProvider(providers, workspaceId, providerId, egress.providers);
-					if (!listed.reachable) return listed;
-					return yield* tryAnEnabledModel(workspaceId, providerId, listed);
+					return yield* testProvider(providers, workspaceId, providerId, egress.providers);
 				}),
 			),
 
@@ -608,12 +559,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([
-		Authorization.layer,
-		ModelProviderRepository.layer,
-		AgentRepository.layer,
-		Models.layer,
-	]),
+	Layer.provide([Authorization.layer, ModelProviderRepository.layer, AgentRepository.layer]),
 );
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */

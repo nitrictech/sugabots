@@ -34,7 +34,7 @@ import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts"
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
-import { Alert } from "@/ui/alert.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -204,6 +204,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	// Switching a provider off only stops what it offers; removing one deletes
 	// every model it lists, including one held while the provider is off.
 	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
+	const heldOn = useHoldersOf(offeredModelsOf(provider));
+	const cannotTurnOff = provider.active && heldOn !== undefined;
 
 	async function confirmDisconnect() {
 		try {
@@ -235,30 +237,31 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			hero={<ProviderTile name={provider.name} preset={provider.preset} size={72} />}
 			title={provider.name}
 		>
-			{!provider.active && (
-				<SettingsGroup
-					note={
-						actions.update.error
+			<SettingsGroup
+				note={
+					cannotTurnOff
+						? `${provider.name} can't be turned off while it's in use. ${heldReason(heldOn, "one of its models")}`
+						: actions.update.error
 							? failureMessage(actions.update.error)
-							: "Bots can't use its models while it is off."
+							: provider.active
+								? "Bots can use the models you switch on below."
+								: "Bots can't use its models while it's off."
+				}
+			>
+				<SettingsRow
+					label={provider.active ? "On" : "Off"}
+					trailing={
+						<Toggle
+							checked={provider.active}
+							disabled={cannotTurnOff || actions.update.isPending}
+							label={`Use ${provider.name}`}
+							onChange={(active) =>
+								actions.update.mutate({ providerId: provider.id, json: { active } })
+							}
+						/>
 					}
-				>
-					<SettingsRow
-						label="Turned off"
-						trailing={
-							<Button
-								size="sm"
-								disabled={actions.update.isPending}
-								onClick={() =>
-									actions.update.mutate({ providerId: provider.id, json: { active: true } })
-								}
-							>
-								Turn on
-							</Button>
-						}
-					/>
-				</SettingsGroup>
-			)}
+				/>
+			</SettingsGroup>
 			<Connection provider={provider} local={preset?.hosting === "local"} />
 			<Models provider={provider} />
 			<SettingsDanger
@@ -325,13 +328,9 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 						{actions.test.isPending && <RefreshCw className="animate-spin" />}
 						Test connection
 					</Button>
-					{tested?.reachable && <span>Connected in {tested.latencyMs} ms.</span>}
-					{!tested && provider.lastTestError && (
-						<span className="text-destructive-text">{provider.lastTestError}</span>
-					)}
-					{tested && !tested.reachable && (
-						<span className="text-destructive-text">{tested.error ?? "It did not answer."}</span>
-					)}
+					{tested?.reachable && <Success>Connection successful</Success>}
+					{!tested && provider.lastTestError && <Alert>{provider.lastTestError}</Alert>}
+					{tested && !tested.reachable && <Alert>{tested.error ?? "It did not answer."}</Alert>}
 				</span>
 			}
 		>
