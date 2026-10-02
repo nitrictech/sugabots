@@ -13,7 +13,7 @@ import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
-import { Alert } from "@/ui/alert.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -155,7 +155,7 @@ function ConnectionRow({
 		? failureMessage(error)
 		: checked
 			? checked.reachable
-				? `Found ${checked.tools ?? 0} actions in ${checked.latencyMs} ms.`
+				? "Connection successful"
 				: (checked.error ?? "The server did not answer.")
 			: lineFor(connection);
 
@@ -303,24 +303,7 @@ function ConnectionDialog({
 								{connection.url}
 							</span>
 						</div>
-						<SettingsGroup
-							label="Connection"
-							note={
-								failure && (
-									<>
-										{failure}{" "}
-										<a
-											href={TROUBLESHOOTING_URL}
-											target="_blank"
-											rel="noreferrer"
-											className="focus-ring rounded-sm font-medium text-link"
-										>
-											How to fix this
-										</a>
-									</>
-								)
-							}
-						>
+						<SettingsGroup label="Connection">
 							{oauth ? (
 								<SettingsRow
 									label="Sign-in"
@@ -389,13 +372,7 @@ function ConnectionDialog({
 							)}
 							<SettingsRow
 								label="Check connection"
-								sub={
-									failure
-										? "The last check failed."
-										: checked
-											? `Found ${checked.tools ?? 0} actions in ${checked.latencyMs} ms.`
-											: "Ask the server what it can do."
-								}
+								sub="Make sure Sugabots can reach the server and sign in to it."
 								trailing={
 									<Button
 										size="sm"
@@ -408,6 +385,20 @@ function ConnectionDialog({
 								}
 							/>
 						</SettingsGroup>
+						{failure && (
+							<Alert>
+								{failure}{" "}
+								<a
+									href={TROUBLESHOOTING_URL}
+									target="_blank"
+									rel="noreferrer"
+									className="focus-ring rounded-sm font-medium text-link"
+								>
+									How to fix this
+								</a>
+							</Alert>
+						)}
+						{checked?.reachable && <Success>Connection successful</Success>}
 						{error && <Alert>{failureMessage(error)}</Alert>}
 						{connection.tools.length > 8 && (
 							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
@@ -794,9 +785,7 @@ function ByUrlStep({
 				{error && <Alert>{failureMessage(error)}</Alert>}
 				{tested &&
 					(tested.reachable ? (
-						<p className="m-0 px-1 text-sm text-subtle-foreground">
-							Found {tested.tools ?? 0} actions in {tested.latencyMs} ms.
-						</p>
+						<Success>Connection successful</Success>
 					) : (
 						<Alert>{tested.error ?? "The server did not answer."}</Alert>
 					))}

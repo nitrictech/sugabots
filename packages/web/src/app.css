@@ -92,6 +92,8 @@
 	--destructive-text: light-dark(#c42d45, #f47a8a);
 	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
+	/* Green text for something that worked. Both pass AA on a panel. */
+	--success-text: light-dark(#1a7f37, #4ade80);
 
 	/* A person with no photo: initials on a grey disc. */
 	--person-avatar: light-dark(#dcdee3, #3a3d45);
@@ -147,6 +149,7 @@
 	--color-rail-count: var(--rail-count);
 	--color-approval-marker: var(--approval-marker);
 	--color-warning: var(--warning);
+	--color-success-text: var(--success-text);
 	--color-destructive: var(--destructive);
 	--color-person-avatar: var(--person-avatar);
 	--color-person-avatar-foreground: var(--person-avatar-foreground);

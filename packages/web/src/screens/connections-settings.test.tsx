@@ -186,7 +186,7 @@ describe("the Connections settings", () => {
 		fireEvent.change(within(step).getByLabelText("Access token"), { target: { value: "abc123" } });
 		fireEvent.click(within(step).getByRole("button", { name: "Test" }));
 
-		expect(await within(step).findByText("Found 3 actions in 40 ms.")).toBeDefined();
+		expect(await within(step).findByText("Connection successful")).toBeDefined();
 		expect(route.testUnsaved.mock.calls[0]?.[0]).toMatchObject({
 			payload: {
 				url: "https://wiki.example.com/mcp",
@@ -318,7 +318,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
 		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Check" }));
-		expect(await within(dialog).findByText(/Found 2 actions in 12 ms/)).toBeDefined();
+		expect(await within(dialog).findByText("Connection successful")).toBeDefined();
 
 		fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
 		fireEvent.change(within(dialog).getByLabelText("Wiki secret"), {
