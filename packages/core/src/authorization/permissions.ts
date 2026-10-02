@@ -235,6 +235,11 @@ export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts)
 	return pod.isMember && grants.pod.has(permission);
 }
 
+/** The roles holding a workspace permission. */
+export function rolesGrantedInWorkspace(permission: WorkspacePermission): WorkspaceRole[] {
+	return WORKSPACE_ROLES.filter((role) => WORKSPACE_GRANTS[role].has(permission));
+}
+
 /**
  * The roles holding a pod permission in the shared pods they are members of,
  * for the queries that filter by the stored role rather than asking about one
