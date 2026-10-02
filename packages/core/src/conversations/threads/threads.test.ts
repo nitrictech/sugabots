@@ -987,6 +987,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			now: new Date(),
 			builtInTools: [],
 			connectionTools: undefined,
+			sandbox: undefined,
 		});
 		expect(prompt.messages[0]?.content).toContain("The family is planning a trip.");
 		await turnRecords.complete(

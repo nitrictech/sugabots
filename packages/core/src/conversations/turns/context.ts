@@ -24,6 +24,7 @@ export interface TurnEnvironment {
 	/** The built-in tools on offer this turn, by key, so the agent is told it has them. */
 	builtInTools: readonly string[];
 	connectionTools: string | undefined;
+	sandbox: string | undefined;
 }
 
 /**
@@ -168,6 +169,7 @@ function environmentInstruction(environment: TurnEnvironment): string[] {
 		todayInstruction(environment.now),
 		builtInToolsInstruction(environment.builtInTools),
 		environment.connectionTools,
+		environment.sandbox,
 	].filter((section): section is string => section !== undefined);
 }
 

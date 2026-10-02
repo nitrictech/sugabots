@@ -15,6 +15,7 @@ import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { SandboxTools } from "../tools/sandbox.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -83,6 +84,7 @@ const prepared: PreparedTurn = {
 			prompt: "",
 			disabledTools: [],
 			interviewing: false,
+			usesSandbox: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },
@@ -567,6 +569,7 @@ function segmentWith(given: Given) {
 				Layer.succeed(Models.Service, given.model),
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
+				Layer.succeed(SandboxTools.Service, SandboxTools.none),
 				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),

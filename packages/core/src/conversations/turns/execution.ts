@@ -191,6 +191,7 @@ export const make = Effect.gen(function* () {
 									model,
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
+									usesSandbox: speaker.usesSandbox,
 									podId: loaded.podId,
 									interviewing,
 								},
@@ -285,6 +286,8 @@ export interface TurnContext {
 		prompt: string;
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];
+		/** Whether an admin let this agent use its pod's sandbox. */
+		usesSandbox: boolean;
 		podId: string;
 		/**
 		 * Whether the agent still has `INTERVIEW_PROMPT` and this turn answers
@@ -375,6 +378,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							prompt: true,
 							disabledTools: true,
 							createdById: true,
+							usesSandbox: true,
 						},
 						orderBy: { name: "asc" },
 					},

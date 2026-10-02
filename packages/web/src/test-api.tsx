@@ -76,6 +76,7 @@ const ADMIN_IN_POD: PodPermissions = {
 	updateAgents: true,
 	deleteAgents: true,
 	manageConnections: true,
+	manageSandbox: true,
 	manageRoutines: true,
 	runRoutines: true,
 };
@@ -89,6 +90,7 @@ const MEMBER_IN_POD: PodPermissions = {
 	leave: true,
 	deleteAgents: false,
 	manageConnections: false,
+	manageSandbox: false,
 	manageRoutines: false,
 	runRoutines: false,
 };
@@ -230,6 +232,7 @@ export const agents: Agent[] = [
 		model: MODELS[1] as string,
 		prompt: "",
 		disabledTools: [],
+		usesSandbox: false,
 		podId: pods[1]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -245,6 +248,7 @@ export const agents: Agent[] = [
 		model: MODELS[0] as string,
 		prompt: "",
 		disabledTools: [],
+		usesSandbox: false,
 		podId: pods[0]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -260,6 +264,7 @@ export const agents: Agent[] = [
 		model: MODELS[0] as string,
 		prompt: "Be brief.",
 		disabledTools: [],
+		usesSandbox: false,
 		podId: pods[0]?.id as string,
 		createdAt: "2026-09-10T00:00:00.000Z",
 	},
@@ -281,6 +286,7 @@ export const personalAssistant: Agent = {
 	model: MODELS[1] as string,
 	prompt: "",
 	disabledTools: [],
+	usesSandbox: false,
 	podId: personalPod.id,
 	createdAt: "2026-09-10T00:00:00.000Z",
 };

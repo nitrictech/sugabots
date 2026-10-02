@@ -30,6 +30,12 @@ export const workspaceSettingGroups = [
 		sections: [
 			{ id: "providers", label: "Models", path: "/settings/providers", needs: "manageProviders" },
 			{ id: "search", label: "Web search", path: "/settings/search", needs: "manageProviders" },
+			{
+				id: "sandboxes",
+				label: "Sandboxes",
+				path: "/settings/sandboxes",
+				needs: "manageProviders",
+			},
 		],
 	},
 	{
