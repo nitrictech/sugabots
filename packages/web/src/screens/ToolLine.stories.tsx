@@ -147,3 +147,18 @@ export const AFailedCall = meta.story({
 		await expect(canvas.getByText("Rate limited")).toBeVisible();
 	},
 });
+
+/** Browser calls read as one app, the agent's browser, each step named by what it does. */
+export const Browser = meta.story({
+	args: {
+		calls: [
+			call("browser_navigate", { output: { text: "Page title: Northwind pricing" } }),
+			call("browser_click", { output: { text: "Clicked Plans" } }),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /Used Browser for/ }));
+		await expect(canvas.getByText("Navigate")).toBeVisible();
+		await expect(canvas.getByText("Click")).toBeVisible();
+	},
+});

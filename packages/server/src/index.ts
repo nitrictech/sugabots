@@ -5,6 +5,7 @@ import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
+import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
 import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
@@ -74,6 +75,7 @@ const Integrations = Layer.mergeAll(
 	Models.layer,
 	BuiltInTools.layer,
 	SandboxTools.layer,
+	DesktopViewer.layer,
 	ConnectionTools.layer,
 );
 

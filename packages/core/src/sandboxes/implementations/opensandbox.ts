@@ -196,6 +196,17 @@ export const fromOpenSandbox = (
 				),
 			downloadFile,
 			uploadFile: (path, content) => uploadFile(path, content).pipe(Effect.asVoid),
+			endpoint: (port) =>
+				Effect.tryPromise({
+					try: async () => {
+						const endpoint = await sandbox.getEndpoint(port);
+						const url = endpoint.endpoint.includes("://")
+							? endpoint.endpoint
+							: `${connection.baseUrl.startsWith("https:") ? "https" : "http"}://${endpoint.endpoint}`;
+						return { url: url.replace(/\/$/, ""), headers: { ...endpoint.headers } };
+					},
+					catch: unavailable,
+				}),
 			setAllowedHosts: (hosts) =>
 				Effect.tryPromise({
 					try: async () => {

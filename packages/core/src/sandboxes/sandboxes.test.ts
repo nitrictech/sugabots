@@ -213,6 +213,25 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 		});
 
 		it(
+			"reaches a port inside the sandbox",
+			async () => {
+				await run(
+					sandbox.exec(
+						"echo reached > reached.txt && (nohup python3 -m http.server 9001 >/dev/null 2>&1 &) && sleep 2",
+						EXEC,
+					),
+				);
+				const endpoint = await run(sandbox.endpoint(9001));
+
+				const response = await fetch(`${endpoint.url}/reached.txt`, { headers: endpoint.headers });
+
+				expect(response.status).toBe(200);
+				expect((await response.text()).trim()).toBe("reached");
+			},
+			SLOW,
+		);
+
+		it(
 			"reports whether it runs, and the image it was made from",
 			async () => {
 				const made = await run(Effect.flatMap(provider, (p) => p.create(SPEC)));

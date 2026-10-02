@@ -77,6 +77,7 @@ const ADMIN_IN_POD: PodPermissions = {
 	deleteAgents: true,
 	manageConnections: true,
 	manageSandbox: true,
+	useDesktops: true,
 	manageRoutines: true,
 	runRoutines: true,
 };

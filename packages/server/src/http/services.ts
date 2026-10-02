@@ -5,6 +5,7 @@ import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import type { Routines } from "@sugabots/core/conversations/routines/routines";
 import type { ThreadView } from "@sugabots/core/conversations/thread-view";
+import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
 import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
 import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
@@ -40,6 +41,7 @@ export type HttpServices =
 	| SearchProviderSetup.Service
 	| SandboxProviderSetup.Service
 	| SandboxNetwork.Service
+	| DesktopViewer.Service
 	| PodSandboxSetup.Service
 	| ConnectionSetup.Service
 	| ModelTrials.Service
