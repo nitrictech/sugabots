@@ -34,8 +34,11 @@ Choose **Something else**, then **Connect by URL**, and fill in:
 - **Name**: what it's called in Sugabots.
 - **Address**: the server's URL. Sugabots connects to remote servers over
   Streamable HTTP. It doesn't run servers itself.
-- **Header** and **Secret**: an optional key sent with each request, in the
-  `Authorization` header unless you name another.
+- **Sign in with**: how Sugabots proves itself to the server.
+  - **Token**: an access token, sent as `Authorization: Bearer <token>`. Leave
+    it empty if the server needs none.
+  - **Sign in**: the server's own sign-in, which you complete next.
+  - **Header**: a secret sent exactly as typed, in the header you name.
 - **Approval**: **Ask** or **Allow**. New connections start on Ask. Once it's
   added, you can also set it to **Off**.
 

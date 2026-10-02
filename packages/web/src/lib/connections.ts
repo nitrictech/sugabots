@@ -124,6 +124,14 @@ export function useConnectionActions(podId: string) {
 	};
 }
 
+/**
+ * bearerAuthorization returns `token` as an `Authorization` header value:
+ * `Bearer <token>`, trimmed, with no doubled `Bearer ` when `token` already has one.
+ */
+export function bearerAuthorization(token: string): string {
+	return `Bearer ${token.trim().replace(/^bearer\s+/i, "")}`;
+}
+
 /** Leaving the page, behind one seam so a test can watch it. */
 export const browser = { go: (url: string) => window.location.assign(url) };
 

@@ -148,11 +148,19 @@ describe("the Connections settings", () => {
 		fireEvent.change(within(step).getByLabelText("Address"), {
 			target: { value: "https://wiki.example.com/mcp" },
 		});
+		fireEvent.change(within(step).getByLabelText("Access token"), {
+			target: { value: " Bearer abc123 " },
+		});
 		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
 
 		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
 		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
-			payload: { name: "Wiki", url: "https://wiki.example.com/mcp", secretHeader: "Authorization" },
+			payload: {
+				name: "Wiki",
+				url: "https://wiki.example.com/mcp",
+				secretHeader: "Authorization",
+				secret: "Bearer abc123",
+			},
 		});
 		// A server added by address starts at Allow; the dialog asks first unless told otherwise.
 		await waitFor(() =>
@@ -162,6 +170,31 @@ describe("the Connections settings", () => {
 			}),
 		);
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+	});
+
+	it("adds a server by address through its own sign-in", async () => {
+		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.succeed({ connectionId: wiki.id, authorizationUrl: "https://wiki.example/authorize" }),
+		);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
+		fireEvent.click(within(step).getByRole("button", { name: "Sign in" }));
+
+		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example/authorize"));
+		expect(route.connectFromCatalog.mock.calls[0]?.[0]).toMatchObject({
+			payload: { name: "Wiki", url: "https://wiki.example.com/mcp" },
+		});
+		expect(route.create).not.toHaveBeenCalled();
 	});
 
 	it("opens a connection to show its tools, grouped by whether they ask first", async () => {
