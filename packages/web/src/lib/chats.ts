@@ -1,5 +1,6 @@
 import {
 	type Chat,
+	type ChatList,
 	type ChatMessageItem,
 	handleFromName,
 	type NewMessage,
@@ -7,6 +8,7 @@ import {
 	type ThreadDetails,
 } from "@sugabots/contracts";
 import {
+	infiniteQueryOptions,
 	type QueryClient,
 	queryOptions,
 	skipToken,
@@ -18,8 +20,11 @@ import {
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { client } from "@/api.ts";
+import { agentsQuery, findPodAgent } from "@/lib/agents.ts";
 import { NotReadyError } from "@/lib/failure.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import { podsQuery } from "@/lib/pods.ts";
+import { threadQuery } from "@/lib/threads.ts";
+import { useWorkspace, workspacesQuery } from "@/lib/workspace.ts";
 
 const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
@@ -111,12 +116,12 @@ export function useChat(podId: string | undefined, hostAgentId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: ["chat", workspaceId, podId, hostAgentId],
+		queryKey: chatKey(workspaceId, podId, hostAgentId),
 		queryFn:
 			workspaceId && podId
 				? async ({ signal }) => {
 						const list = await queries.ensureQueryData(chatListQuery(workspaceId, podId));
-						const listed = list.items.find((item) => item.agent.id === hostAgentId)?.chat;
+						const listed = listedChat(list, hostAgentId);
 						return (
 							listed ??
 							Effect.runPromise(
@@ -132,8 +137,50 @@ export function useChat(podId: string | undefined, hostAgentId: string) {
 	});
 }
 
-export function useChatMessages(chatId: string | undefined) {
-	const query = useInfiniteQuery({
+/** The chat with `hostAgentId` in a pod's conversation list, when the list has it. */
+function listedChat(list: ChatList, hostAgentId: string): Chat | undefined {
+	return list.items.find((item) => item.agent.id === hostAgentId)?.chat ?? undefined;
+}
+
+function chatKey(workspaceId: string | undefined, podId: string | undefined, hostAgentId: string) {
+	return ["chat", workspaceId, podId, hostAgentId] as const;
+}
+
+/**
+ * Starts loading the chat an address names, as for a link the pointer is on,
+ * so it is on screen when the click lands. It works from what the cache holds
+ * already, the workspaces, their rosters and the pod's conversation list, and
+ * does nothing without them: a preload should not add requests of its own to
+ * find its way, nor open a chat nobody has.
+ */
+export function prefetchChat(
+	queries: QueryClient,
+	address: { workspace: string; pod: string; agent: string },
+): void {
+	const workspace = queries
+		.getQueryData(workspacesQuery.queryKey)
+		?.find((one) => one.slug === address.workspace);
+	if (!workspace) return;
+	const found = findPodAgent(
+		queries.getQueryData(podsQuery(workspace.id).queryKey),
+		queries.getQueryData(agentsQuery(workspace.id).queryKey),
+		address.pod,
+		address.agent,
+	);
+	if (!found) return;
+	const list = queries.getQueryData(chatListQuery(workspace.id, found.pod.id).queryKey);
+	const chat = list && listedChat(list, found.agent.id);
+	if (!chat) return;
+	const key = chatKey(workspace.id, found.pod.id, found.agent.id);
+	if (!queries.getQueryData(key)) queries.setQueryData(key, chat);
+	void queries.prefetchInfiniteQuery(chatMessagesQuery(chat.id));
+	void queries.prefetchInfiniteQuery(chatHistoryQuery(chat.id));
+	void queries.prefetchQuery(threadQuery(chat.mainThreadId));
+}
+
+/** The chat's main conversation, a page at a time, newest page first. */
+function chatMessagesQuery(chatId: string | undefined) {
+	return infiniteQueryOptions({
 		queryKey: ["chat-messages", chatId],
 		queryFn: chatId
 			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
@@ -148,15 +195,11 @@ export function useChatMessages(chatId: string | undefined) {
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (page) => page?.nextCursor ?? undefined,
 	});
-	const items = query.data?.pages
-		.slice()
-		.reverse()
-		.flatMap((page) => page?.items ?? []);
-	return { ...query, items: items ?? [] };
 }
 
-export function useChatHistory(chatId: string | undefined) {
-	const query = useInfiniteQuery({
+/** The chat's side threads, a page at a time, newest activity first. */
+function chatHistoryQuery(chatId: string | undefined) {
+	return infiniteQueryOptions({
 		queryKey: ["chat-history", chatId],
 		refetchInterval: (current) =>
 			current.state.data?.pages.some((page) =>
@@ -177,6 +220,19 @@ export function useChatHistory(chatId: string | undefined) {
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (page) => page?.nextCursor ?? undefined,
 	});
+}
+
+export function useChatMessages(chatId: string | undefined) {
+	const query = useInfiniteQuery(chatMessagesQuery(chatId));
+	const items = query.data?.pages
+		.slice()
+		.reverse()
+		.flatMap((page) => page?.items ?? []);
+	return { ...query, items: items ?? [] };
+}
+
+export function useChatHistory(chatId: string | undefined) {
+	const query = useInfiniteQuery(chatHistoryQuery(chatId));
 	return {
 		...query,
 		entries: query.data?.pages.flatMap((page) => page?.items ?? []) ?? [],

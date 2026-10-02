@@ -360,6 +360,42 @@ describe("the conversation list", () => {
 		});
 	});
 
+	it("loads a chat while the pointer is on its row, and opens none for a bot without one", async () => {
+		const linearChat = {
+			id: "0199a3a0-0000-7000-8000-0000000000c1",
+			workspaceId: workspace.id,
+			podId: linear.podId,
+			hostAgentId: linear.id,
+			mainThreadId: "0199a3a0-0000-7000-8000-0000000000c2",
+			createdAt: "2026-09-18T08:00:00.000Z",
+			updatedAt: "2026-09-18T08:00:00.000Z",
+		};
+		const unread = { lastMessage: null, waitingOn: null, unread: false, needsApproval: false };
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{ agent: linear, chat: linearChat, ...unread },
+					{ agent: triager, chat: null, ...unread },
+				],
+			}),
+		);
+		mount("/suga/pods/suga-team");
+		const list = await screen.findByRole("region", { name: "Suga-Team" });
+
+		fireEvent.mouseEnter(await within(list).findByRole("link", { name: /Linear Handler/ }));
+		fireEvent.mouseEnter(within(list).getByRole("link", { name: /Issue Triager/ }));
+
+		await waitFor(() =>
+			expect(client.api.chats.messages).toHaveBeenCalledWith(
+				expect.objectContaining({ params: { chatId: linearChat.id } }),
+			),
+		);
+		expect(client.api.threads.get).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { threadId: linearChat.mainThreadId } }),
+		);
+		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
+	});
+
 	it("finds a bot by name", async () => {
 		mount("/suga/pods/suga-team");
 

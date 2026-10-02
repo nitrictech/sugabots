@@ -79,10 +79,10 @@ export function useDeleteWorkspace() {
 		mutationFn: (workspaceId: string) =>
 			Effect.runPromise(client.api.workspaces.delete({ params: { workspace: workspaceId } })),
 		onSuccess: async (_, workspaceId) => {
-			queries.setQueryData<readonly Workspace[]>(["workspaces"], (workspaces) =>
+			queries.setQueryData(workspacesQuery.queryKey, (workspaces) =>
 				workspaces?.filter((workspace) => workspace.id !== workspaceId),
 			);
-			await queries.invalidateQueries({ queryKey: ["workspaces"] });
+			await queries.invalidateQueries({ queryKey: workspacesQuery.queryKey });
 		},
 	});
 }
