@@ -259,6 +259,7 @@ function ConnectionDialog({
 	const oauth = connection.auth === "oauth";
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
+	const checkFailed = checked ? !checked.reachable : connection.status === "error";
 	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
 	const matches = (tool: ConnectionTool) =>
 		needle === "" ||
@@ -294,7 +295,21 @@ function ConnectionDialog({
 								{connection.url}
 							</span>
 						</div>
-						<SettingsGroup label="Connection">
+						<SettingsGroup
+							label="Connection"
+							note={
+								checkFailed && (
+									<a
+										href={TROUBLESHOOTING_URL}
+										target="_blank"
+										rel="noreferrer"
+										className="focus-ring rounded-sm font-medium text-link"
+									>
+										How to fix this
+									</a>
+								)
+							}
+						>
 							{oauth ? (
 								<SettingsRow
 									label="Sign-in"
@@ -436,6 +451,9 @@ function ConnectionDialog({
 		</DialogFormFrame>
 	);
 }
+
+/** The docs on fixing a connection whose check failed. */
+const TROUBLESHOOTING_URL = "https://sugabots.ai/docs/connections#troubleshooting";
 
 type Choice = ConnectionPreset | "custom";
 

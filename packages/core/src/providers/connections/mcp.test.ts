@@ -74,7 +74,11 @@ describe("listing a server's tools", () => {
 	it("reports a refused secret as a sentence", async () => {
 		const found = await listServerTools({ url, headers: { "x-fixture-key": "nope" } }, fetch);
 
-		expect(found).toMatchObject({ ok: false, reason: "The server answered HTTP 401" });
+		expect(found).toMatchObject({
+			ok: false,
+			reason:
+				"The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)",
+		});
 	});
 
 	it("reports a server that is not there in its own words, keeping the network's for the logs", async () => {
@@ -84,6 +88,10 @@ describe("listing a server's tools", () => {
 			2_000,
 		);
 
-		expect(found).toMatchObject({ ok: false, reason: "The server could not be reached" });
+		expect(found).toMatchObject({
+			ok: false,
+			reason:
+				"The server could not be reached. Check the address and port, and that the server is running",
+		});
 	});
 });

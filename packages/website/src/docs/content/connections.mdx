@@ -54,3 +54,34 @@ Bots in the pod lose its tools straight away. Adding it again means signing in
 or entering its details again.
 
 </Careful>
+
+## Troubleshooting
+
+When a check fails, the connection's page says why. Find the message below.
+
+**The server didn't accept the access token or secret.** The token may have
+expired, been revoked, or lost a character when it was copied. Make a new one
+where the server issues them and **Replace** it. In the `Authorization` header,
+most servers expect the value to be `Bearer` followed by the token.
+
+**The server needs an access token or a sign-in.** Nothing was sent, but the
+server wants a credential. Add an access token, or remove the connection and
+add it again with its sign-in.
+
+**Sign in again to reconnect.** The sign-in expired or was revoked. Choose
+**Sign in again**.
+
+**The server refused access.** The credential works, but isn't allowed to do
+this. Check what the token, or the account you signed in with, can reach.
+
+**Nothing answers as an MCP server at that address.** The address may be the
+server's website rather than its MCP endpoint, or have the wrong path. MCP
+addresses often end in `/mcp`.
+
+**The server could not be reached.** Check the address and port, that the
+server is running, and that it can be reached from wherever Sugabots runs.
+`localhost` means the machine running Sugabots.
+
+**That address is not allowed.** The installation won't connect to plain HTTP
+or local network addresses unless it's set up to. Whoever runs Sugabots can
+allow them in the [network settings](/docs/configuration#network).
