@@ -427,13 +427,14 @@ function closedWithLayer<A extends { close(): Promise<void> }>(create: () => A) 
 }
 
 const UNSAFE_WORKSPACE_URLS = "ALLOW_UNSAFE_WORKSPACE_URLS";
-/** `UNSAFE_WORKSPACE_URLS`'s name from when it was documented for model providers alone. */
+/** The deprecated name for `UNSAFE_WORKSPACE_URLS`, still read so existing installations keep working. */
 const DEPRECATED_UNSAFE_WORKSPACE_URLS = "ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK";
 
 /**
- * Whether workspaces may give plain-HTTP and local-network addresses: the setting,
- * else its deprecated name, else `defaultValue`. Logs a warning when the
- * deprecated name is set, even if the new one overrides it.
+ * unsafeWorkspaceUrls reads whether workspaces may give plain-HTTP and
+ * local-network addresses: `UNSAFE_WORKSPACE_URLS` if set, else
+ * `DEPRECATED_UNSAFE_WORKSPACE_URLS`, else `defaultValue`. It logs a warning
+ * whenever `DEPRECATED_UNSAFE_WORKSPACE_URLS` is set.
  */
 function unsafeWorkspaceUrls(defaultValue: boolean) {
 	return Effect.gen(function* () {
