@@ -373,9 +373,6 @@ function languageModel(
 			fetch,
 		})(modelId);
 	}
-	// Gemini needs the thought signatures from its earlier tool calls sent back
-	// with their results, or it can answer with nothing at all. OpenRouter
-	// returns them as `reasoning_details`, which only its own client sends back.
 	if (connection.preset === "openrouter") {
 		return createOpenRouter({
 			apiKey: connection.apiKey ?? "",
