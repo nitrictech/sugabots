@@ -189,6 +189,24 @@ describe("a failed model request", () => {
 		});
 	});
 
+	it.each([
+		[400, false],
+		[404, false],
+		[408, true],
+		[429, true],
+		[503, true],
+	])("tries a request the provider answered with %i again: %s", (statusCode, mayRetry) => {
+		const failed = new APICallError({
+			message: "Failed",
+			url: "https://models.example/v1/chat/completions",
+			requestBodyValues: {},
+			statusCode,
+			responseBody: "{}",
+		});
+
+		expect(Models.RequestFailed.fromCause(failed).mayRetry).toBe(mayRetry);
+	});
+
 	it("logs the SDK's message when the body says nothing readable", () => {
 		const opaque = new APICallError({
 			message: "Bad Gateway",

@@ -163,8 +163,9 @@ export class RequestFailed
 	}
 
 	/**
-	 * Whether the same request may work if sent again: the provider was busy or
-	 * failed. A refusal, such as a rejected key or no credit, would only be refused again.
+	 * Whether the same request may work if sent again: the provider was busy,
+	 * timed out or failed. A refusal, such as a rejected key, no credit or a
+	 * request it couldn't accept, would only be refused again.
 	 */
 	get mayRetry(): boolean {
 		return this.reason === "rateLimited" || this.reason === "unavailable";
@@ -183,6 +184,8 @@ function reasonFor(status: number | undefined, body: string | undefined): Reques
 		return "outOfCredit";
 	}
 	if (status === 429) return "rateLimited";
+	// A timed-out request may go through next time; any other 4xx is a problem with the request itself.
+	if (status !== undefined && status >= 400 && status < 500 && status !== 408) return "refused";
 	return "unavailable";
 }
 
@@ -191,6 +194,7 @@ type RequestFailure =
 	| "signInFailed"
 	| "rejected"
 	| "outOfCredit"
+	| "refused"
 	| "rateLimited"
 	| "unavailable";
 
@@ -199,6 +203,7 @@ const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
 	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
 	outOfCredit: UserMessage.of`The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
+	refused: UserMessage.of`The model provider couldn't accept this request.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
 };
