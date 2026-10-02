@@ -57,6 +57,7 @@ import {
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ConnectionPage } from "./ConnectionPage.tsx";
 import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
+import { PodSandboxSettings } from "./PodSandboxSettings.tsx";
 
 /**
  * Every pod you reach, beside the open one: its bots, its people and the
@@ -275,6 +276,7 @@ function PodDetails({
 				canManage={may.manageConnections}
 				signInError={connectionSignInError}
 			/>
+			<PodSandboxSettings podId={pod.id} canManageNetwork={may.manageSandbox} />
 			<PodBots pod={pod} bots={bots} />
 			{shared && <Members pod={pod} canManageMembers={may.manageMembers} />}
 			{shared && may.rename && (

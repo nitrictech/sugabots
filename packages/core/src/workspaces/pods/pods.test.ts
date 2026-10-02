@@ -502,6 +502,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				updateAgents: true,
 				deleteAgents: false,
 				manageConnections: false,
+				manageSandbox: false,
 			});
 		});
 
@@ -540,6 +541,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(personal.permissions).toMatchObject({
 				createAgents: true,
 				manageConnections: true,
+				manageSandbox: true,
 				manageRoutines: true,
 			});
 		});

@@ -157,6 +157,7 @@ export const AsAMember = meta.story({
 				rename: false,
 				manageMembers: false,
 				manageConnections: false,
+				manageSandbox: false,
 				deleteAgents: false,
 				changeRouting: false,
 				leave: pod.kind === "shared",

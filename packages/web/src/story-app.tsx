@@ -317,6 +317,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/pods/:podId/connections"), () => HttpResponse.json([])),
+		// No sandboxes in the example workspace, so the pod's Sandbox section stays hidden.
+		http.get(api("/pods/:podId/sandbox"), () =>
+			HttpResponse.json({ sandbox: { kind: "none" }, providerEnabled: false, canManage: false }),
+		),
 		http.get(api("/pods/:podId/members"), () =>
 			HttpResponse.json([
 				{
