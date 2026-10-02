@@ -2,24 +2,29 @@ export * as ConnectionRepository from "./connection-repository.ts";
 
 import type { ConnectionTool, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
-import { query, queryCatching, serviceOperations } from "../../database/database.ts";
+import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import type { OAuthRecord } from "./oauth.ts";
+import { toolAccessOf } from "./tool-access.ts";
 
 /**
  * The only writer of `connection`: the MCP servers a pod's agents may use, and
  * their sealed secrets and OAuth records.
  *
- * A name, and the handle made from it, is unique per pod. `access` is not
- * checked by `target`: a connection that is off can still be tested before it
- * is turned on.
+ * A name, and the handle made from it, is unique per pod. `target` does not
+ * look at what the pod's bots may do with the tools: a connection whose tools
+ * are all off can still be tested.
+ *
+ * What a person chooses for a tool is not a change of configuration: it
+ * leaves `configurationRevision`, and the approvals made under it, alone.
+ * An approved call to a tool turned off since is refused when it would run.
  */
 export interface Interface {
 	readonly create: (
@@ -33,7 +38,7 @@ export interface Interface {
 		podId: string,
 		connectionId: string,
 		changes: ConnectionUpdate,
-	) => Effect.Effect<ConnectionRow | undefined, ConnectionNameTaken>;
+	) => Effect.Effect<ConnectionRow | undefined, ConnectionNameTaken | UnknownConnectionTool>;
 	readonly remove: (
 		workspaceId: string,
 		podId: string,
@@ -54,7 +59,11 @@ export interface Interface {
 		podId: string,
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
-	/** The ones a turn may use: a connection that is off offers nothing. */
+	/**
+	 * The ones a turn may use. A connection still waiting on its sign-in offers
+	 * nothing, and neither does one whose every listed tool is off, so a turn
+	 * does not reach its server at all.
+	 */
 	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<ConnectionTarget[]>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
@@ -101,7 +110,7 @@ export const make = Effect.gen(function* () {
 			url: row.url,
 			auth: row.authKind,
 			headers,
-			access: row.access,
+			toolAccess: row.toolAccess,
 			configurationUpdatedAt: row.updatedAt,
 			configurationRevision: row.configurationRevision,
 		};
@@ -119,8 +128,6 @@ export const make = Effect.gen(function* () {
 						authKind: oauth ? ("oauth" as const) : ("header" as const),
 						secretHeader: oauth ? null : (input.secretHeader ?? null),
 						secretEncrypted: !oauth && input.secret ? cipher.encrypt(input.secret) : null,
-						// Nothing can be asked of a server before it is signed in to.
-						access: oauth ? ("off" as const) : ("allow" as const),
 					};
 					const [inserted] = yield* queryCatching(
 						(db) =>
@@ -146,47 +153,63 @@ export const make = Effect.gen(function* () {
 		update: (workspaceId, podId, connectionId, changes) =>
 			operation(
 				"update",
-				Effect.gen(function* () {
-					const connectionChanged =
-						changes.url !== undefined ||
-						changes.secretHeader !== undefined ||
-						changes.secret !== undefined;
-					const configurationChanged =
-						changes.name !== undefined || connectionChanged || changes.access !== undefined;
-					const [row] = yield* queryCatching(
-						(db) =>
-							db
-								.update(connection)
-								.set({
-									name: changes.name,
-									handle: changes.name === undefined ? undefined : handleFromName(changes.name),
-									url: changes.url,
-									secretHeader: changes.secretHeader,
-									secretEncrypted:
-										changes.secret === undefined
-											? undefined
-											: changes.secret === null
-												? null
-												: cipher.encrypt(changes.secret),
-									access: changes.access,
-									configurationRevision: configurationChanged
-										? sql`${connection.configurationRevision} + 1`
-										: undefined,
-									lastTestedAt: connectionChanged ? null : undefined,
-									lastTestError: connectionChanged ? null : undefined,
-								})
-								.where(
-									and(
-										eq(connection.id, connectionId),
-										eq(connection.workspaceId, workspaceId),
-										eq(connection.podId, podId),
-									),
-								)
-								.returning(),
-						(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
-					);
-					return row;
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const inPod = and(
+							eq(connection.id, connectionId),
+							eq(connection.workspaceId, workspaceId),
+							eq(connection.podId, podId),
+						);
+						const connectionChanged =
+							changes.url !== undefined ||
+							changes.secretHeader !== undefined ||
+							changes.secret !== undefined;
+						const configurationChanged = changes.name !== undefined || connectionChanged;
+						if (changes.toolAccess) {
+							const [current] = yield* query((db) =>
+								db
+									.select({ tools: connection.tools })
+									.from(connection)
+									.where(inPod)
+									.limit(1)
+									.for("update"),
+							);
+							if (!current) return undefined;
+							const listed = new Set(current.tools.map((tool) => tool.name));
+							const unknown = Object.keys(changes.toolAccess).filter((name) => !listed.has(name));
+							if (unknown.length > 0) return yield* new UnknownConnectionTool({ names: unknown });
+						}
+						const [row] = yield* queryCatching(
+							(db) =>
+								db
+									.update(connection)
+									.set({
+										name: changes.name,
+										handle: changes.name === undefined ? undefined : handleFromName(changes.name),
+										url: changes.url,
+										secretHeader: changes.secretHeader,
+										secretEncrypted:
+											changes.secret === undefined
+												? undefined
+												: changes.secret === null
+													? null
+													: cipher.encrypt(changes.secret),
+										toolAccess: changes.toolAccess
+											? sql`${connection.toolAccess} || ${JSON.stringify(changes.toolAccess)}::jsonb`
+											: undefined,
+										configurationRevision: configurationChanged
+											? sql`${connection.configurationRevision} + 1`
+											: undefined,
+										lastTestedAt: connectionChanged ? null : undefined,
+										lastTestError: connectionChanged ? null : undefined,
+									})
+									.where(inPod)
+									.returning(),
+							(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
+						);
+						return row;
+					}),
+				),
 			),
 
 		remove: (workspaceId, podId, connectionId) =>
@@ -255,15 +278,15 @@ export const make = Effect.gen(function* () {
 					db
 						.select()
 						.from(connection)
-						.where(
-							and(
-								eq(connection.workspaceId, workspaceId),
-								eq(connection.podId, podId),
-								ne(connection.access, "off"),
-							),
-						)
+						.where(and(eq(connection.workspaceId, workspaceId), eq(connection.podId, podId)))
 						.orderBy(asc(connection.createdAt)),
-				).pipe(Effect.map((rows) => rows.map(toTarget))),
+				).pipe(
+					Effect.map((rows) =>
+						rows
+							.filter((row) => isSignedIn(row, cipher) && !everyToolOff(row))
+							.map((row) => toTarget(row)),
+					),
+				),
 			),
 
 		oauthRecord: (workspaceId, connectionId) =>
@@ -327,6 +350,31 @@ export class ConnectionNameTaken
 	get userMessage() {
 		return UserMessage.of`A connection with that name already exists in this pod`;
 	}
+}
+
+export class UnknownConnectionTool
+	extends Data.TaggedError("UnknownConnectionTool")<{ names: string[] }>
+	implements UserFacing
+{
+	override get message() {
+		return `The connection does not list ${this.names.join(", ")}`;
+	}
+
+	get userMessage() {
+		return UserMessage.of`The connection no longer lists some of those tools. Check the connection to refresh them.`;
+	}
+}
+
+/** Whether the server listed tools when last asked and every one of them is off. */
+function everyToolOff(row: ConnectionRow): boolean {
+	return (
+		row.tools.length > 0 && row.tools.every((tool) => toolAccessOf(row.toolAccess, tool) === "off")
+	);
+}
+
+/** Whether calls to the connection's server can be made: always for a secret, after its sign-in for OAuth. */
+export function isSignedIn(row: ConnectionRow, cipher: Credentials.Interface): boolean {
+	return row.authKind === "header" || unsealOauthRecord(row, cipher)?.tokens !== undefined;
 }
 
 /** What the OAuth client has learnt and been issued for the connection, unsealed. */

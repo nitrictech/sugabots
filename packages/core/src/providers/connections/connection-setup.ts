@@ -64,7 +64,8 @@ export interface Interface {
 		| AuthorizationDenied
 		| ConnectionNotFound
 		| UrlNotAllowed
-		| ConnectionRepository.ConnectionNameTaken,
+		| ConnectionRepository.ConnectionNameTaken
+		| ConnectionRepository.UnknownConnectionTool,
 		CurrentActor.Service
 	>;
 	readonly remove: (
@@ -402,12 +403,6 @@ export const make = Effect.gen(function* () {
 						return { failure: "not_completed" as const, pod };
 					}
 
-					// Signed in for the first time, it is turned on; a setting somebody chose stays.
-					if (found.access === "off") {
-						yield* connections
-							.update(owner.workspaceId, owner.podId, owner.connectionId, { access: "allow" })
-							.pipe(Effect.catchTag("ConnectionNameTaken", () => Effect.void));
-					}
 					yield* discoverQuietly(at);
 					return { pod };
 				}),

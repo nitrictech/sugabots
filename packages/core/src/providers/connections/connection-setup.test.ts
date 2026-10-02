@@ -296,7 +296,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 	});
 
 	describe("finishing a sign-in", () => {
-		it("turns the connection on, learns its tools, and names the pod", async () => {
+		it("learns the connection's tools and names the pod", async () => {
 			const setup = await setupWith();
 			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-ok");
 
@@ -306,7 +306,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 			expect(outcome).toEqual({ pod: { workspaceId, podId } });
 			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
-				access: "allow",
 				tools: [{ name: "lookup" }],
 			});
 		});
@@ -332,7 +331,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				await setup.completeOAuth({ callback: { code: "the-code", state: "state-other" } }),
 			).toEqual({ failure: "not_allowed" });
 			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
-				access: "off",
+				signedIn: false,
+				tools: [],
 			});
 		});
 

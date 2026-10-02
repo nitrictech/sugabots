@@ -2,6 +2,7 @@ import {
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionPreset,
+	type ConnectionToolWithAccess,
 	connectionCatalog,
 	connectionPresetFor,
 	type Pod,
@@ -37,19 +38,20 @@ import {
 
 /*
  * The apps a pod's bots can reach, as one group on the pod's page: each with
- * Allow, Ask or Off for what its bots may do there, and whatever it needs (a
+ * Allow, Ask or Off for every one of its tools, and whatever it needs (a
  * sign-in, a reconnect) on its line. A row opens the connection's own page:
- * its address, its tools and removing it. Adding one is a dialog: the app,
- * then its sign-in and one approval control, or any other server by its address.
+ * its address, its tools and removing it. Adding one is a dialog: the app and
+ * its sign-in, or any other server by its address. Each tool the server lists
+ * starts at its default.
  */
 
-const accessLabel: Record<ConnectionAccess, string> = { allow: "Allow", ask: "Ask", off: "Off" };
+const accessLabel: Record<ConnectionAccess | "custom", string> = {
+	allow: "Allow",
+	ask: "Ask",
+	off: "Off",
+	custom: "Custom",
+};
 const accessOptions = (["allow", "ask", "off"] as const).map((value) => ({
-	value,
-	label: accessLabel[value],
-}));
-/** For an app being added, which is added to be used. */
-const addingOptions = (["allow", "ask"] as const).map((value) => ({
 	value,
 	label: accessLabel[value],
 }));
@@ -108,6 +110,15 @@ function lineFor(connection: Connection): string {
 	return count === 0 ? "No actions found yet" : `${count} ${count === 1 ? "action" : "actions"}`;
 }
 
+/** What a connection's tools amount to, as one setting: the one they share, `custom` when they differ, or nothing without tools. */
+function accessSettingOf(
+	tools: readonly Pick<ConnectionToolWithAccess, "access">[],
+): ConnectionAccess | "custom" | undefined {
+	const [first, ...rest] = tools;
+	if (!first) return undefined;
+	return rest.every((tool) => tool.access === first.access) ? first.access : "custom";
+}
+
 function ConnectionRow({
 	connection,
 	pod,
@@ -132,6 +143,7 @@ function ConnectionRow({
 			? actions.signIn.mutate({ connectionId: connection.id })
 			: void navigate(page);
 	const line = error ? failureMessage(error) : lineFor(connection);
+	const access = accessSettingOf(connection.tools);
 
 	return (
 		<article
@@ -162,19 +174,28 @@ function ConnectionRow({
 						{needsSignIn ? "Sign in" : connection.auth === "oauth" ? "Reconnect" : "Fix"}
 					</Button>
 				)}
-				{canManage ? (
-					<SegmentedControl
-						label={`What bots may do with ${connection.name}`}
-						options={accessOptions}
-						value={connection.access}
-						onChange={(access) => {
-							if (!pending)
-								actions.update.mutate({ connectionId: connection.id, json: { access } });
-						}}
-					/>
-				) : (
-					<SettingsValue>{accessLabel[connection.access]}</SettingsValue>
-				)}
+				{/* With no tools found yet, there is nothing to set. */}
+				{access &&
+					(canManage ? (
+						<SegmentedControl
+							label={`What bots may do with ${connection.name}`}
+							options={accessOptions}
+							value={access === "custom" ? undefined : access}
+							onChange={(chosen) => {
+								if (!pending)
+									actions.update.mutate({
+										connectionId: connection.id,
+										json: {
+											toolAccess: Object.fromEntries(
+												connection.tools.map((tool) => [tool.name, chosen]),
+											),
+										},
+									});
+							}}
+						/>
+					) : (
+						<SettingsValue>{accessLabel[access]}</SettingsValue>
+					))}
 				{/* The name's link is the one in the tab order; this is a larger target beside the control. */}
 				<Link {...page} tabIndex={-1} aria-hidden className="grid place-items-center">
 					<ChevronRight size={16} strokeWidth={2.4} className="shrink-0 text-subtle-foreground" />
@@ -192,7 +213,7 @@ const signInMethodNote: Record<SignInMethod, string> = {
 
 type Choice = ConnectionPreset | "custom";
 
-/** Adding a connection: which app, then its sign-in or address and one approval control. */
+/** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
 	podId,
 	podName,
@@ -293,10 +314,8 @@ function AppList({
 }
 
 /**
- * A catalog app: what it is, and whether its bots ask first. Connecting makes
- * it and leaves for its sign-in, which brings the browser back to this pod.
- * Off is not offered here: an app is added to be used, and finishing its
- * sign-in switches an Off one on.
+ * A catalog app: what it is. Connecting makes it and leaves for its sign-in,
+ * which brings the browser back to this pod.
  */
 function AppStep({
 	podId,
@@ -308,12 +327,11 @@ function AppStep({
 	onBack: () => void;
 }) {
 	const actions = useConnectionActions(podId);
-	const [access, setAccess] = useState<"allow" | "ask">("ask");
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		try {
-			await actions.connect.mutateAsync({ name: preset.name, url: preset.url, access });
+			await actions.connect.mutateAsync({ name: preset.name, url: preset.url });
 		} catch {
 			return;
 		}
@@ -331,19 +349,6 @@ function AppStep({
 					<ConnectionMark presetId={preset.id} name={preset.name} />
 					<span className="text-[13.5px] text-muted-foreground">{preset.description}</span>
 				</div>
-				<SettingsGroup>
-					<SettingsRow
-						label="Approval"
-						trailing={
-							<SegmentedControl
-								label={`What bots may do with ${preset.name}`}
-								options={addingOptions}
-								value={access}
-								onChange={setAccess}
-							/>
-						}
-					/>
-				</SettingsGroup>
 				{actions.connect.error && <Alert>{failureMessage(actions.connect.error)}</Alert>}
 				<Button
 					type="submit"
@@ -389,7 +394,6 @@ function ByUrlStep({
 	const [method, setMethod] = useState<SignInMethod>("token");
 	const [secretHeader, setSecretHeader] = useState("");
 	const [secret, setSecret] = useState("");
-	const [access, setAccess] = useState<ConnectionAccess>("ask");
 	// What the last Test or Add found. Changing how to reach the server makes it out of date.
 	const [outcome, setOutcome] = useState<{ ok: true } | { ok: false; message: string }>();
 	const clearingOutcome =
@@ -399,7 +403,7 @@ function ByUrlStep({
 			setOutcome(undefined);
 		};
 	const ready = name.trim() !== "" && url.trim() !== "";
-	const pending = actions.create.isPending || actions.update.isPending || actions.connect.isPending;
+	const pending = actions.create.isPending || actions.connect.isPending;
 	const server: UnsavedConnection =
 		method === "token"
 			? {
@@ -428,14 +432,10 @@ function ByUrlStep({
 		if (!ready) return;
 		try {
 			if (method === "oauth") {
-				await actions.connect.mutateAsync({ name, url, access: access === "off" ? "ask" : access });
+				await actions.connect.mutateAsync({ name, url });
 				return;
 			}
-			const made = await actions.create.mutateAsync({ name, ...server });
-			// A server added by its address starts at Allow.
-			if (access !== "allow") {
-				await actions.update.mutateAsync({ connectionId: made.id, json: { access } });
-			}
+			await actions.create.mutateAsync({ name, ...server });
 		} catch (failure) {
 			setOutcome({ ok: false, message: failureMessage(failure) });
 			return;
@@ -503,19 +503,6 @@ function ByUrlStep({
 							/>
 						</>
 					)}
-				</SettingsGroup>
-				<SettingsGroup>
-					<SettingsRow
-						label="Approval"
-						trailing={
-							<SegmentedControl
-								label="What bots may do with it"
-								options={method === "oauth" ? addingOptions : accessOptions}
-								value={method === "oauth" && access === "off" ? "ask" : access}
-								onChange={setAccess}
-							/>
-						}
-					/>
 				</SettingsGroup>
 				{outcome &&
 					(outcome.ok ? (

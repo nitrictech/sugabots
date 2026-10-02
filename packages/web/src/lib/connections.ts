@@ -1,6 +1,7 @@
 import type {
-	ConnectionAccess,
+	Connection,
 	ConnectionSignInFailure,
+	ConnectionToolWithAccess,
 	ConnectionUpdate,
 	NewConnection,
 	UnsavedConnection,
@@ -10,6 +11,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo } from "react";
 import { client } from "@/api.ts";
+
+/** The connection's tools its pod's bots can use: every one not set to off. */
+export function usableTools(connection: Connection): ConnectionToolWithAccess[] {
+	return connection.tools.filter((tool) => tool.access !== "off");
+}
 
 export function useConnections(podId: string) {
 	return useQuery({
@@ -80,29 +86,14 @@ export function useConnectionActions(podId: string) {
 		}),
 		/**
 		 * From the catalog: makes the connection and leaves for its sign-in, as one
-		 * step. A new signed-in connection starts at Allow once its sign-in
-		 * finishes, which only turns an Off one on, so Ask is set before leaving.
+		 * step. Its tools are learnt once the sign-in finishes, each starting at
+		 * its default.
 		 */
 		connect: useMutation({
-			mutationFn: async ({
-				access,
-				...json
-			}: {
-				name: string;
-				url: string;
-				access: Exclude<ConnectionAccess, "off">;
-			}) => {
+			mutationFn: async (json: { name: string; url: string }) => {
 				const result = await Effect.runPromise(
 					connections.connectFromCatalog({ params: { podId }, payload: json }),
 				);
-				if (access === "ask") {
-					await Effect.runPromise(
-						connections.update({
-							params: { podId, connectionId: result.connectionId },
-							payload: { access },
-						}),
-					);
-				}
 				browser.go(result.authorizationUrl);
 				return result;
 			},

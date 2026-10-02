@@ -2,7 +2,7 @@ export * as ToolCallRepository from "./repository.ts";
 
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
-import { and, eq, inArray, ne, type SQL } from "drizzle-orm";
+import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -301,14 +301,13 @@ export const make = Effect.gen(function* () {
 						if (!scope || !mayRunTools(scope)) return refusedExecution("The turn is not running");
 						const [approvedConnection] = yield* query((db) =>
 							db
-								.select({ id: connection.id })
+								.select({ toolAccess: connection.toolAccess })
 								.from(connection)
 								.where(
 									and(
 										eq(connection.id, input.connectionId),
 										eq(connection.workspaceId, scope.workspaceId),
 										eq(connection.podId, scope.podId),
-										ne(connection.access, "off"),
 										eq(connection.configurationRevision, input.connectionRevision),
 									),
 								)
@@ -317,6 +316,11 @@ export const make = Effect.gen(function* () {
 						);
 						if (!approvedConnection) {
 							return refusedExecution("The connection's configuration changed after approval");
+						}
+						// Choosing what bots may do with a tool leaves the revision alone, so
+						// a tool somebody turned off after the approval is caught here.
+						if (approvedConnection.toolAccess[input.remoteToolName] === "off") {
+							return refusedExecution("The tool was turned off after approval");
 						}
 						const row = yield* lockedCall(
 							and(

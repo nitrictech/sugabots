@@ -1,4 +1,4 @@
-import type { Connection } from "@sugabots/contracts";
+import type { Connection, ConnectionAccess } from "@sugabots/contracts";
 import { BadRequest } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -24,7 +24,6 @@ const wiki: Connection = {
 	signedIn: true,
 	secretHeader: "authorization",
 	hasSecret: false,
-	access: "off",
 	status: "connected",
 	tools: [
 		{
@@ -32,13 +31,26 @@ const wiki: Connection = {
 			description: "Search the wiki for pages.",
 			readOnly: true,
 			destructive: null,
+			access: "off",
 		},
-		{ name: "wipe", description: "Removes it all.", readOnly: false, destructive: true },
+		{
+			name: "wipe",
+			description: "Removes it all.",
+			readOnly: false,
+			destructive: true,
+			access: "off",
+		},
 	],
 	lastTestedAt: "2026-09-14T00:00:01.000Z",
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
+
+/** The Wiki with every one of its tools set to `access`. */
+const wikiAt = (access: ConnectionAccess): Connection => ({
+	...wiki,
+	tools: wiki.tools.map((tool) => ({ ...tool, access })),
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -66,7 +78,7 @@ async function openAdd() {
 }
 
 describe("the Connections settings", () => {
-	it("connects a catalog app by signing in, asking first unless told otherwise", async () => {
+	it("connects a catalog app by signing in, leaving its tools to start at their defaults", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		route.list.mockReturnValue(Effect.succeed([]));
 		route.connectFromCatalog.mockReturnValue(
@@ -75,17 +87,13 @@ describe("the Connections settings", () => {
 				authorizationUrl: "https://notion.example/authorize?state=s-1",
 			}),
 		);
-		route.update.mockReturnValue(Effect.succeed({ ...wiki, access: "ask" }));
 		mount(page);
 		await showConnections();
 
 		const list = await openAdd();
 		fireEvent.click(within(list).getByRole("button", { name: /^Notion/ }));
 		const step = await screen.findByRole("dialog", { name: "Notion" });
-		expect((within(step).getByRole("radio", { name: "Ask" }) as HTMLInputElement).checked).toBe(
-			true,
-		);
-		expect(within(step).queryByRole("radio", { name: "Off" })).toBeNull();
+		expect(within(step).queryByRole("radio")).toBeNull();
 		fireEvent.click(within(step).getByRole("button", { name: /Connect Notion/ }));
 
 		await waitFor(() =>
@@ -94,32 +102,8 @@ describe("the Connections settings", () => {
 		expect(route.connectFromCatalog.mock.calls[0]?.[0]).toMatchObject({
 			payload: { name: "Notion", url: "https://mcp.notion.com/mcp" },
 		});
-		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-			params: { podId: pod.id, connectionId: "0199a3a0-0000-7000-8000-0000000000f2" },
-			payload: { access: "ask" },
-		});
-		expect(route.create).not.toHaveBeenCalled();
-	});
-
-	it("leaves a catalog app to start at Allow when that is chosen", async () => {
-		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.list.mockReturnValue(Effect.succeed([]));
-		route.connectFromCatalog.mockReturnValue(
-			Effect.succeed({
-				connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
-				authorizationUrl: "https://notion.example/authorize",
-			}),
-		);
-		mount(page);
-		await showConnections();
-
-		fireEvent.click(within(await openAdd()).getByRole("button", { name: /^Notion/ }));
-		const step = await screen.findByRole("dialog", { name: "Notion" });
-		fireEvent.click(within(step).getByRole("radio", { name: "Allow" }));
-		fireEvent.click(within(step).getByRole("button", { name: /Connect Notion/ }));
-
-		await waitFor(() => expect(go).toHaveBeenCalled());
 		expect(route.update).not.toHaveBeenCalled();
+		expect(route.create).not.toHaveBeenCalled();
 	});
 
 	it("offers to sign in a connection whose sign-in never finished", async () => {
@@ -140,13 +124,12 @@ describe("the Connections settings", () => {
 		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example/authorize"));
 	});
 
-	it("adds any other server by name and address, with its approval", async () => {
+	it("adds any other server by name and address", async () => {
 		route.list.mockReturnValue(Effect.succeed([]));
 		route.create.mockImplementation(() => {
 			route.list.mockReturnValue(Effect.succeed([wiki]));
 			return Effect.succeed(wiki);
 		});
-		route.update.mockReturnValue(Effect.succeed({ ...wiki, access: "ask" }));
 		mount(page);
 		await showConnections();
 
@@ -170,14 +153,8 @@ describe("the Connections settings", () => {
 				secret: "Bearer abc123",
 			},
 		});
-		// A server added by address starts at Allow; the dialog asks first unless told otherwise.
-		await waitFor(() =>
-			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				params: { podId: pod.id, connectionId: wiki.id },
-				payload: { access: "ask" },
-			}),
-		);
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+		expect(route.update).not.toHaveBeenCalled();
 	});
 
 	it("tests a server by address before adding it", async () => {
@@ -254,7 +231,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("opens a connection on its own page, its tools all running freely when it allows them", async () => {
-		route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "allow" }]));
+		route.list.mockReturnValue(Effect.succeed([wikiAt("allow")]));
 		const router = mount(page);
 		await showConnections();
 
@@ -273,7 +250,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("puts every tool under Asks first when the connection asks", async () => {
-		route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "ask" }]));
+		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
 		mount(wikiPage);
 		await openedWiki();
 
@@ -283,11 +260,77 @@ describe("the Connections settings", () => {
 		).toBeDefined();
 	});
 
+	it("groups a connection's tools by how each runs", async () => {
+		const [search, wipe] = wiki.tools;
+		if (!search || !wipe) throw new Error("fixture");
+		route.list.mockReturnValue(
+			Effect.succeed([
+				{
+					...wiki,
+					tools: [
+						{ ...search, access: "allow" as const },
+						{ ...wipe, access: "off" as const },
+					],
+				},
+			]),
+		);
+		mount(wikiPage);
+		await openedWiki();
+
+		expect(screen.queryByRole("heading", { name: "Asks first" })).toBeNull();
+		expect(
+			within(screen.getByRole("region", { name: "Runs freely" })).getByText("Search pages"),
+		).toBeDefined();
+		expect(within(screen.getByRole("region", { name: "Off" })).getByText("Wipe")).toBeDefined();
+	});
+
+	it("shows no one setting for a connection whose tools differ, and sets them all from it", async () => {
+		const [search, wipe] = wiki.tools;
+		if (!search || !wipe) throw new Error("fixture");
+		route.list.mockReturnValue(
+			Effect.succeed([
+				{
+					...wiki,
+					tools: [
+						{ ...search, access: "allow" as const },
+						{ ...wipe, access: "off" as const },
+					],
+				},
+			]),
+		);
+		route.update.mockReturnValue(Effect.succeed(wikiAt("ask")));
+		mount(page);
+		await showConnections();
+
+		const access = await screen.findByRole("group", { name: "What bots may do with Wiki" });
+		expect(
+			within(access)
+				.getAllByRole("radio")
+				.some((one) => (one as HTMLInputElement).checked),
+		).toBe(false);
+		fireEvent.click(within(access).getByRole("radio", { name: "Ask" }));
+
+		await waitFor(() =>
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { toolAccess: { search_pages: "ask", wipe: "ask" } },
+			}),
+		);
+	});
+
+	it("offers nothing to set for a connection with no tools found yet", async () => {
+		route.list.mockReturnValue(Effect.succeed([{ ...wiki, tools: [] }]));
+		mount(page);
+		await showConnections();
+
+		await screen.findByRole("article", { name: "Wiki" });
+		expect(screen.queryByRole("group", { name: "What bots may do with Wiki" })).toBeNull();
+	});
+
 	it("sets what the pod's bots may do with a connection", async () => {
 		route.list.mockReturnValue(Effect.succeed([wiki]));
 		route.update.mockImplementation(() => {
-			route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "ask" }]));
-			return Effect.succeed({ ...wiki, access: "ask" });
+			route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+			return Effect.succeed(wikiAt("ask"));
 		});
 		mount(page);
 		await showConnections();
@@ -301,7 +344,7 @@ describe("the Connections settings", () => {
 		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
 		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
 			params: { podId: pod.id, connectionId: wiki.id },
-			payload: { access: "ask" },
+			payload: { toolAccess: { search_pages: "ask", wipe: "ask" } },
 		});
 		await waitFor(() =>
 			expect((within(access).getByRole("radio", { name: "Ask" }) as HTMLInputElement).checked).toBe(
@@ -312,8 +355,7 @@ describe("the Connections settings", () => {
 
 	it("takes a failing connection with no token to where one can be added", async () => {
 		const failing = {
-			...wiki,
-			access: "allow" as const,
+			...wikiAt("allow"),
 			status: "error" as const,
 			lastTestError: "The server needs an access token or a sign-in (HTTP 401)",
 			secretHeader: null,

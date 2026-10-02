@@ -9,6 +9,7 @@ import { ConnectionSignIn } from "../../providers/connections/connection-sign-in
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
 import { connectServer, type ServerSession } from "../../providers/connections/mcp.ts";
 import type { OAuthProviders } from "../../providers/connections/oauth.ts";
+import { toolAccessOf } from "../../providers/connections/tool-access.ts";
 import {
 	Egress,
 	type EgressHttpClient,
@@ -22,9 +23,10 @@ import {
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
  * carries whether it may change something, which decides how a failed turn
- * after it is treated, and whether a person must allow each call first: always
- * for a tool that may change something, and for every tool of a connection
- * set to `ask`.
+ * after it is treated, and whether a person must allow each call first: for a
+ * tool set to `ask`. A tool set to `off` is left out. A tool nobody has chosen
+ * for is treated as `toolAccessOf` says. A connection whose every tool is off
+ * is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
@@ -116,11 +118,12 @@ export function from({
 		try {
 			const tools: Record<string, OfferedTool> = {};
 			for (const { described, tool } of await session.tools()) {
-				const mutating = connectionToolMutating(described);
+				const access = toolAccessOf(target.toolAccess, described);
+				if (access === "off") continue;
 				tools[connectionToolKey(target.handle, described.name)] = {
 					tool,
-					mutating,
-					requiresApproval: target.access === "ask",
+					mutating: connectionToolMutating(described),
+					requiresApproval: access === "ask",
 					connectionId: target.connectionId,
 					connectionRevision: target.configurationRevision,
 					remoteToolName: described.name,

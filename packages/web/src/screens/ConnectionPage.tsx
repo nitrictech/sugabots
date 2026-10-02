@@ -1,5 +1,6 @@
 import {
 	type Connection,
+	type ConnectionAccess,
 	type ConnectionTool,
 	connectionPresetFor,
 	type Pod,
@@ -252,15 +253,19 @@ function SecretRows({
 	);
 }
 
-/** How a tool runs under the connection's access: straight away, after a yes, or not at all. */
+/** The connection's tools by how each runs: after a yes, straight away, or not at all. */
 function toolGroups(
 	connection: Connection,
 ): { label: string; note?: string; tools: ConnectionTool[] }[] {
-	const tools = connection.tools;
-	if (connection.access === "off") {
-		return [{ label: "Tools", note: "Off, so bots in this pod can't use these.", tools }];
-	}
-	return [{ label: connection.access === "ask" ? "Asks first" : "Runs freely", tools }];
+	const groups: { access: ConnectionAccess; label: string; note?: string }[] = [
+		{ access: "ask", label: "Asks first" },
+		{ access: "allow", label: "Runs freely" },
+		{ access: "off", label: "Off", note: "Bots in this pod can't use these." },
+	];
+	return groups.map(({ access, ...group }) => ({
+		...group,
+		tools: connection.tools.filter((tool) => tool.access === access),
+	}));
 }
 
 /**

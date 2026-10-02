@@ -45,7 +45,6 @@ const wiki: Connection = {
 	signedIn: true,
 	secretHeader: null,
 	hasSecret: false,
-	access: "allow",
 	status: "connected",
 	tools: [],
 	lastTestedAt: null,

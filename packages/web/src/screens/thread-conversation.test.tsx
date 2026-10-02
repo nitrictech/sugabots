@@ -83,7 +83,6 @@ function connection(handle: string, name: string, url: string): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		access: "allow",
 		status: "connected",
 		tools: [],
 		lastTestedAt: null,

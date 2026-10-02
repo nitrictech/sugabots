@@ -92,13 +92,20 @@ function connection(id: string, name: string, url: string): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		access: "allow",
 		status: "connected",
-		tools: [],
+		tools: [
+			{
+				name: "search",
+				description: "Search",
+				readOnly: true,
+				destructive: false,
+				access: "allow",
+			},
+		],
 		lastTestedAt: null,
 		lastTestError: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
-	} as Connection;
+	};
 }
 
 const connections = [

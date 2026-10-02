@@ -162,11 +162,18 @@ export const connection = pgTable(
 		oauthEncrypted: text("oauth_encrypted"),
 		/** The `state` of a sign-in under way, so the callback can find its connection. */
 		oauthState: text("oauth_state"),
-		/** What the pod's bots may do with its tools; see `connectionAccesses`. */
-		access: text("access").$type<ConnectionAccess>().notNull().default("allow"),
 		/** Incremented whenever the configured target or availability changes. */
 		configurationRevision: integer("configuration_revision").notNull().default(1),
+		/** The tools the server listed when last asked, as it described them. */
 		tools: jsonb("tools").$type<ConnectionTool[]>().notNull().default([]),
+		/**
+		 * What somebody chose for the pod's bots to do with each tool, by the
+		 * server's name for it; see `connectionAccesses`. A tool with no choice
+		 * gets its default from how the server describes it now. A choice is kept
+		 * while the server stops listing its tool, so a tool turned off stays off
+		 * when the server lists it again.
+		 */
+		toolAccess: jsonb("tool_access").$type<ToolAccess>().notNull().default({}),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
@@ -188,6 +195,9 @@ export const connection = pgTable(
 );
 
 export type ConnectionRow = typeof connection.$inferSelect;
+
+/** What somebody chose for the pod's bots to do with each of a connection's tools, by the server's name for it. */
+export type ToolAccess = Record<string, ConnectionAccess>;
 
 export type ModelProviderRow = typeof modelProvider.$inferSelect;
 export type ProviderModelRow = typeof providerModel.$inferSelect;
