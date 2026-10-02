@@ -8,6 +8,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -145,7 +146,7 @@ export function AgentChat({
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
-				id: crypto.randomUUID(),
+				id: uuidv4(),
 				message,
 				peopleOnly: writingToPeople,
 			});
