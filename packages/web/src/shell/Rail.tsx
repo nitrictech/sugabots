@@ -205,7 +205,8 @@ export function RailView({
 				<Tooltip label="Settings" side="right">
 					<Link
 						from="/$workspace"
-						to="./settings"
+						to="./settings/$section"
+						params={{ section: "profile" }}
 						aria-label="Settings"
 						aria-current={selected === "settings" ? "page" : undefined}
 						className="focus-ring relative flex shrink-0 items-center rounded-full"
