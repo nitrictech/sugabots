@@ -185,7 +185,7 @@ describe("a failed model request", () => {
 		expect(Models.RequestFailed.fromCause(refused)).toMatchObject({
 			reason: "outOfCredit",
 			userMessage:
-				"The model provider wants payment before it will answer. The account or this bot's API key may be out of credit, or its plan may have lapsed. A workspace admin can check with the provider.",
+				"The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.",
 		});
 	});
 
