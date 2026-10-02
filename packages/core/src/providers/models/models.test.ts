@@ -166,18 +166,27 @@ describe("a failed model request", () => {
 		expect(failure.userMessage).toBe("The model provider refused the request. Check its API key.");
 	});
 
-	it("says plainly when a provider wants more credit", () => {
+	it.each([
+		["a 402", 402, { error: { message: "Insufficient balance" } }],
+		[
+			"an exhausted quota",
+			429,
+			{ error: { message: "Quota exceeded", code: "insufficient_quota" } },
+		],
+	])("says plainly when a provider wants payment, for %s", (_, statusCode, body) => {
 		const refused = new APICallError({
-			message: "Payment Required",
+			message: "Refused",
 			url: "https://models.example/v1/chat/completions",
 			requestBodyValues: {},
-			statusCode: 402,
-			responseBody: JSON.stringify({ error: { message: "Insufficient credit" } }),
+			statusCode,
+			responseBody: JSON.stringify(body),
 		});
 
-		expect(Models.RequestFailed.fromCause(refused).userMessage).toBe(
-			"The model provider says the account or this bot's API key doesn't have enough credit for this request. A workspace admin can add credit or raise the key's spending limit.",
-		);
+		expect(Models.RequestFailed.fromCause(refused)).toMatchObject({
+			reason: "outOfCredit",
+			userMessage:
+				"The model provider wants payment before it will answer. The account or this bot's API key may be out of credit, or its plan may have lapsed. A workspace admin can check with the provider.",
+		});
 	});
 
 	it("logs the SDK's message when the body says nothing readable", () => {

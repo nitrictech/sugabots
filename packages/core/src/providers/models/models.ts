@@ -157,14 +157,7 @@ export class RequestFailed
 		const said = providerSaid(cause.responseBody) ?? cause.message;
 		return new RequestFailed({
 			message: `${status ? `Provider returned ${status}` : "Provider refused"}: ${said}`,
-			reason:
-				status === 401 || status === 403
-					? "rejected"
-					: status === 402
-						? "outOfCredit"
-						: status === 429
-							? "rateLimited"
-							: "unavailable",
+			reason: reasonFor(status, cause.responseBody),
 			cause,
 		});
 	}
@@ -172,6 +165,17 @@ export class RequestFailed
 	get userMessage() {
 		return REQUEST_USER_MESSAGES[this.reason];
 	}
+}
+
+/** reasonFor names why a provider answered a request with `status` and `body`. */
+function reasonFor(status: number | undefined, body: string | undefined): RequestFailure {
+	if (status === 401 || status === 403) return "rejected";
+	// OpenAI, and the servers that copy its errors, report an exhausted quota as a 429.
+	if (status === 402 || (status === 429 && errorCode(body) === "insufficient_quota")) {
+		return "outOfCredit";
+	}
+	if (status === 429) return "rateLimited";
+	return "unavailable";
 }
 
 type RequestFailure =
@@ -186,7 +190,7 @@ const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
 	noProvider: UserMessage.of`No active provider offers this model.`,
 	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
-	outOfCredit: UserMessage.of`The model provider says the account or this bot's API key doesn't have enough credit for this request. A workspace admin can add credit or raise the key's spending limit.`,
+	outOfCredit: UserMessage.of`The model provider wants payment before it will answer. The account or this bot's API key may be out of credit, or its plan may have lapsed. A workspace admin can check with the provider.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
 };
@@ -429,6 +433,18 @@ export const layer = Layer.effect(
 		return make({ modelProviders, httpClients: egress.providers, requests, registry: modelsDev });
 	}),
 ).pipe(Layer.provide(ModelProviderRepository.layer));
+
+/** errorCode returns the `code`, else the `type`, of the error in an OpenAI-style error `body`. */
+function errorCode(body: string | undefined): string | undefined {
+	if (!body) return undefined;
+	try {
+		const { error } = JSON.parse(body) as { error?: { code?: unknown; type?: unknown } };
+		const code = error?.code ?? error?.type;
+		return typeof code === "string" ? code : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 function providerSaid(body: string | undefined): string | undefined {
 	if (!body) return undefined;
