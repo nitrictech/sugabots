@@ -6,7 +6,13 @@ import {
 	type WorkspacePermissions,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
@@ -27,11 +33,13 @@ import { client } from "@/api.ts";
 const KEY = "sugabots-workspace";
 
 /** Every workspace this person belongs to, in the order the API lists them. */
+export const workspacesQuery = queryOptions({
+	queryKey: ["workspaces"],
+	queryFn: ({ signal }) => Effect.runPromise(client.api.workspaces.list(), { signal }),
+});
+
 export function useWorkspaces() {
-	return useQuery({
-		queryKey: ["workspaces"],
-		queryFn: ({ signal }) => Effect.runPromise(client.api.workspaces.list(), { signal }),
-	});
+	return useQuery(workspacesQuery);
 }
 
 /** The people in a workspace. Asks for nobody's roster until there is a workspace. */

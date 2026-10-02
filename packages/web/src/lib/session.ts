@@ -1,4 +1,4 @@
-import type { SessionUser } from "@sugabots/contracts";
+import type { Me, SessionUser } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
@@ -18,6 +18,8 @@ import { client } from "@/api.ts";
 export interface Session {
 	/** `undefined` before `/me` succeeds, `null` when signed out. */
 	user: SessionUser | null | undefined;
+	/** What `/me` answered beside `user`, for the session's query cache to start from. */
+	me?: Me;
 	/** Set once the API has stopped answering for long enough to be worth saying. */
 	error: unknown;
 	/** Re-ask the API. Called after signing in, out, or accepting an invitation. */
@@ -42,6 +44,7 @@ const unreachable = (failure: unknown) => !isApiFailure(failure);
 
 export function useSessionFromApi(): Session {
 	const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+	const [me, setMe] = useState<Me>();
 	const [error, setError] = useState<unknown>();
 	const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const live = useRef(true);
@@ -57,9 +60,10 @@ export function useSessionFromApi(): Session {
 	const ask = useCallback(async (attempt: number): Promise<void> => {
 		clearTimeout(retry.current);
 		try {
-			const who = await Effect.runPromise(client.api.me());
+			const answer = await Effect.runPromise(client.api.me());
 			if (!live.current) return;
-			setUser(who);
+			setMe(answer);
+			setUser(answer.user);
 			setError(undefined);
 		} catch (failure) {
 			if (!live.current) return;
@@ -88,7 +92,7 @@ export function useSessionFromApi(): Session {
 		void refresh().catch(() => {});
 	}, [refresh]);
 
-	return { user, error, refresh };
+	return { user, me, error, refresh };
 }
 
 /**

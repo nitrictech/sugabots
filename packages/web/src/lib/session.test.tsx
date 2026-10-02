@@ -10,8 +10,10 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 class Unreachable extends Data.TaggedError("Unreachable") {}
 
+const meAsSam = { user: sam, onboarding: { completed: true }, workspaces: [] };
+
 beforeEach(() => {
-	client.api.me.mockReturnValue(Effect.succeed(sam));
+	client.api.me.mockReturnValue(Effect.succeed(meAsSam));
 });
 
 afterEach(() => {
@@ -35,7 +37,7 @@ it("keeps an authenticated user during a transient refresh failure", async () =>
 it("can retry an initial transient session failure", async () => {
 	client.api.me
 		.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: "Unavailable" })))
-		.mockReturnValueOnce(Effect.succeed(sam));
+		.mockReturnValueOnce(Effect.succeed(meAsSam));
 	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.error).toMatchObject({ _tag: "InternalServerError" }));
 
@@ -71,7 +73,7 @@ it("rides out the API restarting, without showing a dead end first", async () =>
 	client.api.me
 		.mockReturnValueOnce(Effect.fail(new Unreachable()))
 		.mockReturnValueOnce(Effect.fail(new Unreachable()))
-		.mockReturnValue(Effect.succeed(sam));
+		.mockReturnValue(Effect.succeed(meAsSam));
 
 	const { result } = renderHook(useSessionFromApi);
 
