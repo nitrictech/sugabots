@@ -94,15 +94,14 @@ function toolsFor(...targets: ConnectionTarget[]) {
 }
 
 describe("a turn's connection tools", () => {
-	it("runs read-only tools straight away and asks before a tool that changes things", async () => {
+	it("runs every tool of a connection set to allow straight away, changes included", async () => {
 		const offered = toolsFor(target());
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: false });
-			// No hints at all is taken to change things, as the spec has it.
-			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: true });
+			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: false });
 			const result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, {
 				toolCallId: "1",
 				messages: [],

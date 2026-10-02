@@ -24,17 +24,15 @@ type ToolChoice = keyof typeof tools;
 
 type Outcome = "not-offered" | "waits" | "runs";
 
-/** What happens to a tool call, by the connection's setting and whether the tool changes anything. */
-function outcomeOf(setting: ApprovalSetting, tool: ToolChoice): Outcome {
+function outcomeOf(setting: ApprovalSetting): Outcome {
 	if (setting === "off") return "not-offered";
-	if (setting === "allow" && !tools[tool].changes) return "runs";
-	return "waits";
+	return setting === "allow" ? "runs" : "waits";
 }
 
 const outcomeText: Record<Outcome, string> = {
 	"not-offered": "The bot isn't offered this connection's tools at all.",
 	waits: "The call waits in the chat until someone who's allowed to answer it does.",
-	runs: "Read-only, and the connection allows it, so it runs straight away.",
+	runs: "The connection allows it, so it runs straight away.",
 };
 
 type Decision = "pending" | "allowed" | "denied";
@@ -80,7 +78,7 @@ export function ApprovalPlayground() {
 	const [setting, setSetting] = useState<ApprovalSetting>("allow");
 	const [tool, setTool] = useState<ToolChoice>("change");
 	const [decision, setDecision] = useState<Decision>("pending");
-	const outcome = outcomeOf(setting, tool);
+	const outcome = outcomeOf(setting);
 	const bot = cast.inboxSorter;
 	const toolLabels = { read: tools.read.label, change: tools.change.label };
 

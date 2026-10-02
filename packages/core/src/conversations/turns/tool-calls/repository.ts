@@ -324,7 +324,6 @@ export const make = Effect.gen(function* () {
 								eq(toolCall.sdkToolCallId, input.sdkToolCallId),
 							),
 						);
-						// Every call to a connection's tool was parked for a person to allow first.
 						if (!row) return refusedExecution("The call has no approval record");
 						if (!sameCallAsApproved(row, input)) {
 							return refusedExecution(

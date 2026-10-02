@@ -246,7 +246,7 @@ describe("the Connections settings", () => {
 		expect(route.create).not.toHaveBeenCalled();
 	});
 
-	it("opens a connection to show its tools, grouped by whether they ask first", async () => {
+	it("opens a connection to show its tools, all running freely when it allows them", async () => {
 		route.list.mockReturnValue(Effect.succeed([{ ...wiki, access: "allow" }]));
 		mount(page);
 		await showConnections();
@@ -254,10 +254,10 @@ describe("the Connections settings", () => {
 		expect(screen.queryByText("Search pages")).toBeNull();
 		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
 		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
-		const asks = within(dialog).getByRole("heading", { name: "Asks first" }).closest("section");
+		expect(within(dialog).queryByRole("heading", { name: "Asks first" })).toBeNull();
 		const free = within(dialog).getByRole("heading", { name: "Runs freely" }).closest("section");
-		if (!asks || !free) throw new Error("tool groups not found");
-		expect(within(asks).getByText("Wipe")).toBeDefined();
+		if (!free) throw new Error("tool group not found");
+		expect(within(free).getByText("Wipe")).toBeDefined();
 		expect(within(free).getByText("Search pages")).toBeDefined();
 		expect(within(free).getByText("Search the wiki for pages.")).toBeDefined();
 	});

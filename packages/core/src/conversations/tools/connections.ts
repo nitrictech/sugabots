@@ -120,7 +120,7 @@ export function from({
 				tools[connectionToolKey(target.handle, described.name)] = {
 					tool,
 					mutating,
-					requiresApproval: mutating || target.access === "ask",
+					requiresApproval: target.access === "ask",
 					connectionId: target.connectionId,
 					connectionRevision: target.configurationRevision,
 					remoteToolName: described.name,
