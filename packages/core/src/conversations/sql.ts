@@ -278,6 +278,7 @@ export const threadParticipant = pgTable(
 		uniqueIndex("thread_participant_agent_idx")
 			.on(table.threadId, table.agentId)
 			.where(sql`${table.agentId} is not null`),
+		index("thread_participant_thread_idx").on(table.threadId),
 	],
 );
 
@@ -503,6 +504,9 @@ export const toolCall = pgTable(
 		index("tool_call_turn_idx").on(table.turnId),
 		uniqueIndex("tool_call_sdk_call_idx").on(table.turnId, table.sdkToolCallId),
 		uniqueIndex("tool_call_approval_idx").on(table.approvalId),
+		// Finds a thread's calls by approval status, and the calls ON DELETE CASCADE
+		// removes with a thread: an index of pending calls alone could not serve the second.
+		index("tool_call_thread_approval_status_idx").on(table.threadId, table.approvalStatus),
 	],
 );
 
@@ -559,7 +563,10 @@ export const threadRead = pgTable(
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [uniqueIndex("thread_read_user_thread_idx").on(table.userId, table.threadId)],
+	(table) => [
+		uniqueIndex("thread_read_user_thread_idx").on(table.userId, table.threadId),
+		index("thread_read_thread_idx").on(table.threadId),
+	],
 );
 
 export type ThreadRow = typeof thread.$inferSelect;

@@ -257,10 +257,10 @@ function toThreadDetails(
  * Compaction agent's are in child threads.
  */
 const latestMeasurementOf = (threadId: SQLWrapper) => sql<Measurement | null>`(
-	select json_build_object('tokens', ${turn.contextTokens}, 'window', ${turn.contextCapacity}, 'at', coalesce(${turn.finishedAt}, ${turn.createdAt}))
+	select json_build_object('tokens', ${turn.contextTokens}, 'window', ${turn.contextCapacity}, 'at', coalesce(${turn.finishedAt}, ${turn.startedAt}))
 	from ${turn}
 	where ${turn.threadId} = ${threadId} and ${turn.contextTokens} is not null
-	order by ${turn.createdAt} desc
+	order by ${turn.startedAt} desc, ${turn.id} desc
 	limit 1
 )`;
 
