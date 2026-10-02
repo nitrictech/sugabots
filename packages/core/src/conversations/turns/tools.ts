@@ -108,6 +108,28 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			? recorded(key, tool, { ...recording, mutating: key !== READ_FILE_TOOL })
 			: refused(key, tool, NO_SANDBOX, recording);
 	}
+	// What a request does once allowed changes something, so a turn that fails
+	// afterwards is not run again.
+	for (const [key, request] of Object.entries(deps.sandbox.requests)) {
+		if (!deps.sandbox.usable) {
+			tools[key] = refused(key, request.tool, NO_SANDBOX, recording);
+			continue;
+		}
+		const asked = recorded(key, request.tool, {
+			...recording,
+			mutating: true,
+			approval: { approvals: deps.approvals, binding: { kind: "built-in" } },
+		});
+		// A refused call was never put to anyone, so it has no approval to run under.
+		tools[key] = {
+			...asked,
+			execute: (input, options) => {
+				const reason = request.refusal(input);
+				const call = reason ? refused(key, request.tool, reason, recording) : asked;
+				return call.execute?.(input, options);
+			},
+		};
+	}
 	const connectionTools: Record<string, Tool> = {};
 	for (const [key, offered] of Object.entries(deps.connections)) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
@@ -122,12 +144,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			mutating: offered.mutating || approvalBound,
 			...(offered.access === "ask" || approvalBound
 				? {
-						approval: {
-							approvals: deps.approvals,
-							connectionId: offered.connectionId,
-							connectionRevision: offered.connectionRevision,
-							remoteToolName: offered.remoteToolName,
-						},
+						approval: { approvals: deps.approvals, binding: bindingOf(offered) },
 					}
 				: {}),
 		});
@@ -172,4 +189,14 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		signal: deps.signal,
 	});
 	return tools;
+}
+
+/** What a call to a connection's tool is approved against: the connection as it is configured now. */
+export function bindingOf(offered: OfferedTool): ToolCallRepository.ApprovalBinding {
+	return {
+		kind: "connection",
+		connectionId: offered.connectionId,
+		connectionRevision: offered.connectionRevision,
+		remoteToolName: offered.remoteToolName,
+	};
 }

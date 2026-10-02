@@ -14,6 +14,7 @@ import type {
 	ChatMessagesPage,
 	ChatPageQuery,
 	PodChatMarkers,
+	ToolApprovalDeciders,
 } from "@sugabots/contracts";
 import {
 	DEFAULT_CHAT_PAGE_LIMIT,
@@ -81,6 +82,7 @@ import {
 	toParticipant,
 } from "../threads/participants.ts";
 import { toToolCallPart } from "../threads/tool-calls.ts";
+import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
 import { toChat } from "./chat.ts";
 
 /**
@@ -777,22 +779,29 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 			standing,
 		]),
 	);
-	const mayDecide = (podId: string, inRoutine: boolean) => {
+	const mayDecide = (podId: string, inRoutine: boolean, deciders: ToolApprovalDeciders = "pod") => {
 		const standing = standings.get(podId);
-		return standing !== undefined && mayDecideApprovals(standing, inRoutine);
+		return standing !== undefined && mayDecideApprovals(standing, inRoutine, deciders);
 	};
 	const podIds = [...standings.keys()];
 	const decidablePods: DecidablePods = {
 		outsideRoutines: podIds.filter((podId) => mayDecide(podId, false)),
 		inRoutines: podIds.filter((podId) => mayDecide(podId, true)),
+		// Wherever they were raised: see `mayDecideApprovals`.
+		sandboxRequests: podIds.filter((podId) => mayDecide(podId, false, "sandbox-managers")),
 	};
 	return { podIds, mayDecide, decidablePods };
 });
 
-/** The pods where a person may decide approvals, those raised while a routine runs apart. */
+/**
+ * The pods where a person may decide approvals, those raised while a routine
+ * runs apart, and requests to change the pod's sandbox, which its sandbox
+ * managers decide (see `decidersOf`).
+ */
 interface DecidablePods {
 	outsideRoutines: readonly string[];
 	inRoutines: readonly string[];
+	sandboxRequests: readonly string[];
 }
 
 /** The tool calls waiting on a decision in `pods`, oldest first, each with the bot that asked and its chat. */
@@ -801,16 +810,20 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 	pods: DecidablePods,
 ) {
 	const asking = alias(thread, "asking_thread");
+	const sandboxRequest = inArray(toolCall.tool, [...SANDBOX_REQUEST_TOOLS]);
 	const decidable: SQL[] = [];
 	if (pods.outsideRoutines.length > 0) {
 		decidable.push(
-			sql`${inArray(asking.podId, [...pods.outsideRoutines])} and ${isNull(routineExecutionIdOf(asking.id))}`,
+			sql`not ${sandboxRequest} and ${inArray(asking.podId, [...pods.outsideRoutines])} and ${isNull(routineExecutionIdOf(asking.id))}`,
 		);
 	}
 	if (pods.inRoutines.length > 0) {
 		decidable.push(
-			sql`${inArray(asking.podId, [...pods.inRoutines])} and ${isNotNull(routineExecutionIdOf(asking.id))}`,
+			sql`not ${sandboxRequest} and ${inArray(asking.podId, [...pods.inRoutines])} and ${isNotNull(routineExecutionIdOf(asking.id))}`,
 		);
+	}
+	if (pods.sandboxRequests.length > 0) {
+		decidable.push(sql`${sandboxRequest} and ${inArray(asking.podId, [...pods.sandboxRequests])}`);
 	}
 	if (decidable.length === 0) return [];
 	return yield* selectApprovals(db, asking)
@@ -917,6 +930,7 @@ const chatsAwaitingDecisionBy = Effect.fn("ChatView.chatsAwaitingDecisionBy")(fu
 			chatId: asking.chatId,
 			podId: asking.podId,
 			routineExecutionId: routineExecutionIdOf(asking.id),
+			tool: toolCall.tool,
 		})
 		.from(toolCall)
 		.innerJoin(asking, eq(asking.id, toolCall.threadId))
@@ -924,8 +938,8 @@ const chatsAwaitingDecisionBy = Effect.fn("ChatView.chatsAwaitingDecisionBy")(fu
 	if (pending.length === 0) return new Set<string>();
 	const { mayDecide } = yield* approvalDecidersIn(db, workspaceId, userId);
 	return new Set(
-		pending.flatMap(({ chatId, podId, routineExecutionId }) =>
-			chatId && mayDecide(podId, routineExecutionId !== null) ? [chatId] : [],
+		pending.flatMap(({ chatId, podId, routineExecutionId, tool }) =>
+			chatId && mayDecide(podId, routineExecutionId !== null, decidersOf(tool)) ? [chatId] : [],
 		),
 	);
 });

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ActionForbidden, ResourceHidden } from "../../../authorization/access.ts";
+import { ResourceHidden } from "../../../authorization/access.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
 	connection,
@@ -26,7 +26,7 @@ import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../thread-view.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { ToolApprovalConflict } from "../controls.ts";
+import { ToolApprovalConflict, ToolApprovalForbidden } from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
 import { type TurnCheckpoint, TurnRepository } from "../repository.ts";
 import { TurnSignals } from "../signals.ts";
@@ -40,6 +40,7 @@ import {
 } from "../turn.workflow.ts";
 import { Turns } from "../turns.ts";
 import {
+	type ApprovalBinding,
 	boundedJson,
 	MAX_STORED_JSON_CHARACTERS,
 	type PendingToolApproval,
@@ -126,12 +127,17 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		sdkToolCallId: "sdk-create-1",
 		tool: "linear__create_issue",
 		input: { title: "Fix mobile navigation" },
-		connectionId,
-		connectionRevision: 1,
-		remoteToolName: "create_issue",
+		binding: connectionBinding("create_issue"),
 		mutating: true,
 		atOffset: 0,
 		...overrides,
+	});
+
+	const connectionBinding = (remoteToolName: string): ApprovalBinding => ({
+		kind: "connection",
+		connectionId,
+		connectionRevision: 1,
+		remoteToolName,
 	});
 
 	/** Parks `pending` as the turn's one approval. */
@@ -140,13 +146,15 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			replyTurnOf(prepared),
 			checkpoint({
 				approvals: [
-					{
-						approvalId: pending.approvalId,
-						tool: pending.tool,
-						connectionId,
-						connectionRevision: 1,
-						remoteToolName: pending.remoteToolName,
-					},
+					pending.binding.kind === "connection"
+						? {
+								approvalId: pending.approvalId,
+								tool: pending.tool,
+								connectionId: pending.binding.connectionId,
+								connectionRevision: pending.binding.connectionRevision,
+								remoteToolName: pending.binding.remoteToolName,
+							}
+						: { approvalId: pending.approvalId, tool: pending.tool, builtIn: true as const },
 				],
 				reply: {
 					content: "",
@@ -170,9 +178,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			tool: pending.tool,
 			input: pending.input,
 			atOffset: pending.atOffset,
-			connectionId,
-			connectionRevision: 1,
-			remoteToolName: pending.remoteToolName,
+			binding: pending.binding,
 		};
 	}
 
@@ -266,7 +272,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				sdkToolCallId: "sdk-read",
 				tool: "linear__list_issues",
 				input: {},
-				remoteToolName: "list_issues",
+				binding: connectionBinding("list_issues"),
 				mutating: false,
 			}),
 		);
@@ -281,6 +287,27 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				.where(eq(turn.id, prepared.turnId)),
 		);
 		expect(resumed?.mutationStarted).toBe(false);
+	});
+
+	it("starts an allowed call to a built-in tool, which no connection's settings bind", async () => {
+		const execution = await allowAndResume(
+			pendingCall({
+				sdkToolCallId: "sdk-built-in",
+				tool: "request_network_access",
+				input: { host: "api.example.com" },
+				binding: { kind: "built-in" },
+			}),
+		);
+		await onDatabase((db) =>
+			db
+				.update(connection)
+				.set({ toolAccess: { create_issue: "off" } })
+				.where(eq(connection.id, connectionId)),
+		);
+
+		const running = await approvals.beginExecution(execution);
+
+		expect(running.status).toBe("running");
 	});
 
 	it("refuses an allowed call after the reviewed connection configuration changes", async () => {
@@ -345,7 +372,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		await expect(
 			approvalsAs(viewer.id).decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
-		).rejects.toBeInstanceOf(ActionForbidden);
+		).rejects.toBeInstanceOf(ToolApprovalForbidden);
 		const [undecided] = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
 		);

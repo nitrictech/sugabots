@@ -230,7 +230,12 @@ function toThreadDetails(
 		// What this person may do with the approvals this thread raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: mayDecideApprovals(standing, row.routineExecutionId !== null),
+			approveToolCalls: mayDecideApprovals(standing, row.routineExecutionId !== null, "pod"),
+			approveSandboxRequests: mayDecideApprovals(
+				standing,
+				row.routineExecutionId !== null,
+				"sandbox-managers",
+			),
 		},
 		routineExecution: row.routineExecution ? toRoutineExecution(row.routineExecution) : null,
 		participants: row.participants.map(({ user: person, agent: participant }) =>

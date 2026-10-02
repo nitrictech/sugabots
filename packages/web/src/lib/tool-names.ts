@@ -8,6 +8,9 @@ import { builtInToolCatalog, CONNECTION_TOOL_SEPARATOR } from "@sugabots/contrac
 /** Calls to the product's own tools sit under this handle, which no connection can take. */
 export const BUILT_IN_HANDLE = "";
 
+/** The built-in tool an agent asks with for its sandbox to reach another host. */
+export const NETWORK_REQUEST_TOOL = "request_network_access";
+
 /**
  * What a connection is called wherever one of its tools is shown. A handle with
  * no connection behind it any more is written out rather than shown raw, so a

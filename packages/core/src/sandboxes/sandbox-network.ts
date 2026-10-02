@@ -6,11 +6,13 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
-import { query, serviceOperations } from "../database/database.ts";
+import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
 	sandboxAllowedHost,
 	sandboxBlockedHost,
 	sandboxPodAllowedHost,
+	thread,
+	toolCall,
 	user,
 } from "../database/schema.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
@@ -69,7 +71,25 @@ export interface Interface {
 		podId: string;
 		host: string;
 	}) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The workspace's block that keeps `host` out of its sandboxes, if any, so
+	 * a request for it is refused without asking anyone.
+	 */
+	readonly blockOn: (workspaceId: string, host: string) => Effect.Effect<string | undefined>;
+	/**
+	 * Adds `host` to the pod of the turn whose call `sdkToolCallId` asked for
+	 * it, if a person allowed that call and the workspace hasn't blocked the
+	 * host since.
+	 */
+	readonly grantRequest: (input: {
+		turnId: string;
+		sdkToolCallId: string;
+		host: string;
+	}) => Effect.Effect<Grant>;
 }
+
+/** What became of an allowed request: added, refused by a block, or never allowed. */
+export type Grant = { kind: "added" } | { kind: "blocked"; by: string } | { kind: "not-allowed" };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/SandboxNetwork",
@@ -275,6 +295,41 @@ export const make = Effect.gen(function* () {
 					);
 					if (removed.length > 0) yield* podSandboxes.applyAllowedHosts(pod);
 					return yield* podSettingsOf(pod);
+				}),
+			),
+
+		blockOn: (workspaceId, host) => operation("blockOn", blockFor(workspaceId, host)),
+
+		grantRequest: ({ turnId, sdkToolCallId, host }) =>
+			operation(
+				"grantRequest",
+				Effect.gen(function* (): Effect.fn.Return<Grant, never, Database> {
+					const [call] = yield* query((db) =>
+						db
+							.select({
+								workspaceId: thread.workspaceId,
+								podId: thread.podId,
+								approvalStatus: toolCall.approvalStatus,
+								decidedById: toolCall.decidedById,
+							})
+							.from(toolCall)
+							.innerJoin(thread, eq(thread.id, toolCall.threadId))
+							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.sdkToolCallId, sdkToolCallId)))
+							.limit(1),
+					);
+					if (call?.approvalStatus !== "allowed") return { kind: "not-allowed" };
+					// Blocked while the request waited for its answer.
+					const by = yield* blockFor(call.workspaceId, host);
+					if (by !== undefined) return { kind: "blocked", by };
+					if (!TRUSTED_HOSTS.includes(host)) {
+						yield* addToPod({
+							workspaceId: call.workspaceId,
+							podId: call.podId,
+							host,
+							addedById: call.decidedById,
+						});
+					}
+					return { kind: "added" };
 				}),
 			),
 	});

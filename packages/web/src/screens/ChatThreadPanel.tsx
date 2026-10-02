@@ -180,7 +180,7 @@ export function ChatThreadPanel({
 					participants={mentionableIn(details)}
 					onOpenThread={onOpenThread}
 					podId={details.thread.podId}
-					canApproveToolCalls={details.capabilities?.approveToolCalls}
+					approvalCapabilities={details.capabilities}
 					compact
 					authorLinkOf={authorLinkOf}
 				/>

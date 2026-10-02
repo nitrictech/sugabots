@@ -3,6 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { type ToolCallRow, toolCall, user } from "../../database/schema.ts";
+import { decidersOf } from "../tools/approval-deciders.ts";
 
 /**
  * Reading tool calls back into the messages they belong to.
@@ -50,6 +51,7 @@ export function toToolCallPart(
 		approval: row.approvalStatus
 			? {
 					status: row.approvalStatus,
+					deciders: decidersOf(row.tool),
 					decidedByName,
 					decidedAt: row.decidedAt?.toISOString() ?? null,
 				}

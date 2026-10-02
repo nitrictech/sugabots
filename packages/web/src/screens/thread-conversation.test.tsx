@@ -108,7 +108,7 @@ function show(
 				podId={POD}
 				onOpenThread={() => undefined}
 				dividers={false}
-				canApproveToolCalls={over.canApprove ?? true}
+				approvalCapabilities={{ approveToolCalls: over.canApprove ?? true }}
 			/>
 		</QueryClientProvider>
 	);
