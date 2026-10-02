@@ -9,6 +9,7 @@ const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment 
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
 	connectionTools: undefined,
+	sandbox: undefined,
 	...overrides,
 });
 
@@ -269,6 +270,7 @@ function context(): TurnContext {
 			prompt: "Check facts carefully.",
 			disabledTools: [],
 			interviewing: false,
+			usesSandbox: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

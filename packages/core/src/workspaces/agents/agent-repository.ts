@@ -185,6 +185,7 @@ export const make = Effect.gen(function* () {
 										model: input.model,
 										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
+										usesSandbox: input.usesSandbox ?? false,
 									})
 									.returning(),
 							(failure) => nameTaken(failure, { name: input.name, handle }),

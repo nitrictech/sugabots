@@ -30,6 +30,7 @@ export function toAgent(row: CrewAgentRow): Agent {
 		model: row.model,
 		prompt: row.prompt,
 		disabledTools: row.disabledTools,
+		usesSandbox: row.usesSandbox,
 		createdAt: row.createdAt.toISOString(),
 	};
 }
