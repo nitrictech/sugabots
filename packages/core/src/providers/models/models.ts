@@ -118,6 +118,21 @@ export interface Interface {
 	): Effect.Effect<Answer, RequestFailed | AnswerTimedOut | UnusableAnswer, Database>;
 }
 
+/**
+ * logProviderResponse logs everything a provider sent back about a failed
+ * request, when `cause` is an HTTP failure: its address, status, headers and
+ * body. The request body is left out, since it holds the conversation.
+ */
+function logProviderResponse(cause: unknown): Effect.Effect<void> {
+	if (!APICallError.isInstance(cause)) return Effect.void;
+	return Effect.logWarning("A model provider refused a request", {
+		url: cause.url,
+		status: cause.statusCode,
+		headers: cause.responseHeaders,
+		body: cause.responseBody,
+	});
+}
+
 /** The model could not be asked, or its provider failed the request. */
 export class RequestFailed
 	extends Data.TaggedError("ModelRequestFailed")<{
@@ -145,9 +160,11 @@ export class RequestFailed
 			reason:
 				status === 401 || status === 403
 					? "rejected"
-					: status === 429
-						? "rateLimited"
-						: "unavailable",
+					: status === 402
+						? "outOfCredit"
+						: status === 429
+							? "rateLimited"
+							: "unavailable",
 			cause,
 		});
 	}
@@ -157,12 +174,19 @@ export class RequestFailed
 	}
 }
 
-type RequestFailure = "noProvider" | "signInFailed" | "rejected" | "rateLimited" | "unavailable";
+type RequestFailure =
+	| "noProvider"
+	| "signInFailed"
+	| "rejected"
+	| "outOfCredit"
+	| "rateLimited"
+	| "unavailable";
 
 const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
 	noProvider: UserMessage.of`No active provider offers this model.`,
 	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
 	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
+	outOfCredit: UserMessage.of`The model provider says the account or this bot's API key doesn't have enough credit for this request. A workspace admin can add credit or raise the key's spending limit.`,
 	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
 	unavailable: UserMessage.of`The model provider could not answer.`,
 };
@@ -275,8 +299,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 							responseMessages,
 						};
 					},
-					catch: (cause) => RequestFailed.fromCause(providerFailure ?? cause),
-				}),
+					catch: (cause) => providerFailure ?? cause,
+				}).pipe(Effect.tapError(logProviderResponse), Effect.mapError(RequestFailed.fromCause)),
 			};
 		}),
 	);
@@ -437,7 +461,10 @@ export const forEachDelta = <E, R>(
 	const next = Effect.callback<IteratorResult<string>, RequestFailed>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) => resume(Effect.fail(RequestFailed.fromCause(cause))),
+			(cause) =>
+				resume(
+					Effect.andThen(logProviderResponse(cause), Effect.fail(RequestFailed.fromCause(cause))),
+				),
 		);
 	});
 	const loop: Effect.Effect<void, E | RequestFailed, R> = Effect.flatMap(next, (result) =>

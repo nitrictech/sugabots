@@ -166,6 +166,20 @@ describe("a failed model request", () => {
 		expect(failure.userMessage).toBe("The model provider refused the request. Check its API key.");
 	});
 
+	it("says plainly when a provider wants more credit", () => {
+		const refused = new APICallError({
+			message: "Payment Required",
+			url: "https://models.example/v1/chat/completions",
+			requestBodyValues: {},
+			statusCode: 402,
+			responseBody: JSON.stringify({ error: { message: "Insufficient credit" } }),
+		});
+
+		expect(Models.RequestFailed.fromCause(refused).userMessage).toBe(
+			"The model provider says the account or this bot's API key doesn't have enough credit for this request. A workspace admin can add credit or raise the key's spending limit.",
+		);
+	});
+
 	it("logs the SDK's message when the body says nothing readable", () => {
 		const opaque = new APICallError({
 			message: "Bad Gateway",
