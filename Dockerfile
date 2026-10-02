@@ -20,6 +20,7 @@ COPY packages/accounting/package.json packages/accounting/
 COPY packages/avatars/package.json packages/avatars/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
+COPY packages/docs/package.json packages/docs/
 COPY packages/provider-logos/package.json packages/provider-logos/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/server/package.json packages/server/
@@ -50,6 +51,7 @@ COPY --from=server /app ./
 COPY packages/accounting packages/accounting
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
+COPY packages/docs packages/docs
 COPY packages/server packages/server
 COPY packages/workflow packages/workflow
 COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh

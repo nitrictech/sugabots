@@ -1,4 +1,5 @@
 import type { CollaborationPart } from "@sugabots/contracts";
+import { docPages } from "@sugabots/docs";
 import type { ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
@@ -8,6 +9,7 @@ import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
@@ -26,7 +28,8 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
  * `search_history` is recorded the same way, and offered only once the
  * thread has been compacted; `save_instructions` too, offered only while the
- * agent interviews its creator.
+ * agent interviews its creator. So is `read_docs`, offered to every turn: it
+ * reads the app's own docs, so there is nothing to switch on or off.
  */
 
 export interface ToolDependencies {
@@ -63,6 +66,8 @@ export interface ToolDependencies {
 	signal: AbortSignal;
 }
 
+const readDocs = readDocsTool(docPages);
+
 export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {
 	const tools: ToolSet = {};
 	const recording: RecordingOptions = {
@@ -97,6 +102,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 				: {}),
 		});
 	}
+	tools[READ_DOCS_TOOL] = recorded(READ_DOCS_TOOL, readDocs, recording);
 	if (prepared.context.compaction) {
 		tools[SEARCH_HISTORY_TOOL] = recorded(
 			SEARCH_HISTORY_TOOL,
