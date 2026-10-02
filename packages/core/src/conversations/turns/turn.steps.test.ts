@@ -15,6 +15,7 @@ import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
@@ -348,6 +349,65 @@ describe("runSegment", () => {
 		expect(turnNote).not.toContain("drive__lookup");
 	});
 
+	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
+		const { turns } = fakes();
+		const usingSandbox: PreparedTurn = {
+			...prepared,
+			context: {
+				...prepared.context,
+				agent: { ...prepared.context.agent, usesSandbox: true },
+			},
+		};
+		const execution: Given["execution"] = { prepare: () => Effect.succeed(usingSandbox) };
+		const calls = toolCalls();
+		let received: Models.StreamRequest | undefined;
+		const model = Models.fromStream((input) => {
+			received = input;
+			return Effect.succeed(streamed(chunks("Done")));
+		});
+		const request = requestNetworkAccess({
+			turnId: prepared.turnId,
+			network: { grantRequest: () => Effect.die("a refused request is never granted") },
+			blocked: ["*.pastebin.com"],
+			run: () => Promise.reject(new Error("a refused request runs nothing")),
+		});
+
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: calls,
+				sandboxTools: {
+					forTurn: () =>
+						Effect.succeed({
+							tools: {},
+							requests: { [REQUEST_NETWORK_ACCESS_TOOL]: request },
+							usable: true,
+							note: undefined,
+						}),
+				},
+			}),
+		);
+		const approval = (received?.toolApproval ?? {}) as Record<string, (input: unknown) => unknown>;
+		const blocked = { host: "paste.pastebin.com" };
+		const output = await received?.tools?.[REQUEST_NETWORK_ACCESS_TOOL]?.execute?.(blocked, {
+			toolCallId: "sdk-1",
+			messages: [],
+		} as never);
+
+		expect(approval[REQUEST_NETWORK_ACCESS_TOOL]?.(blocked)).toBe("not-applicable");
+		expect(approval[REQUEST_NETWORK_ACCESS_TOOL]?.({ host: "api.example.com" })).toBe(
+			"user-approval",
+		);
+		expect(output).toMatchObject({ status: "failed", error: expect.stringContaining("blocked") });
+		expect(calls.close).toHaveBeenCalledWith(expect.anything(), {
+			error: expect.stringContaining("*.pastebin.com"),
+		});
+	});
+
 	it("still offers a built-in tool the agent has switched off, refusing each call to it", async () => {
 		const { execution, turns } = fakes();
 		const probe = tool({
@@ -556,6 +616,7 @@ interface Given {
 	events: EventBus.Interface;
 	builtInTools?: BuiltInTools.Interface;
 	connectionTools?: ConnectionTools.Interface;
+	sandboxTools?: SandboxTools.Interface;
 }
 
 /**
@@ -569,7 +630,7 @@ function segmentWith(given: Given) {
 				Layer.succeed(Models.Service, given.model),
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
-				Layer.succeed(SandboxTools.Service, SandboxTools.none),
+				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),
 				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),

@@ -1012,8 +1012,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			return written;
 		};
 
-		/** A reply in the chat that called a write and stopped for someone to approve it. */
-		const askForApproval = async (threadId: string) => {
+		/** A reply in the chat that called `tool` and stopped for someone to approve it. */
+		const askForApproval = async (threadId: string, tool = "linear__create_issue") => {
 			const reply = await botWrites(threadId, "", 1);
 			const [asked] = await onDatabase((db) =>
 				db
@@ -1036,7 +1036,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						threadId,
 						messageId: reply.id,
 						turnId: asked.id,
-						tool: "linear__create_issue",
+						tool,
 						approvalId: `approval-${crypto.randomUUID()}`,
 						approvalStatus: "pending",
 						status: "awaiting_approval",
@@ -1195,6 +1195,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					})),
 				),
 			);
+			const callId = await askForApproval(current.mainThreadId);
+
+			expect((await view.approvals(workspaceId)).waiting).toEqual([
+				expect.objectContaining({ call: expect.objectContaining({ id: callId }) }),
+			]);
+		});
+
+		it("leaves out a request to change the pod's sandbox, which only its managers decide", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await askForApproval(current.mainThreadId, "request_network_access");
 			const callId = await askForApproval(current.mainThreadId);
 
 			expect((await view.approvals(workspaceId)).waiting).toEqual([

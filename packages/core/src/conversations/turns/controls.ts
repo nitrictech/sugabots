@@ -7,6 +7,7 @@ import { afterCommit, query, serviceOperations, transaction } from "../../databa
 import { thread, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
+import { decidersOf } from "../tools/approval-deciders.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
@@ -62,7 +63,8 @@ export const makeControls = Effect.gen(function* () {
 					Effect.gen(function* () {
 						// Inside the transaction that sends or records the decision, so a
 						// demotion a moment earlier is seen.
-						const decider = yield* authorization.pod(input.podId, "approval.decide");
+						// Reaching the pod is enough to ask: who decides depends on the call.
+						const decider = yield* authorization.pod(input.podId, "pod.read");
 						const { pod } = decider;
 						if (!isUuid(input.toolCallId)) return yield* new ToolApprovalNotFound();
 						const [candidate] = yield* query((db) =>
@@ -92,7 +94,7 @@ export const makeControls = Effect.gen(function* () {
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
 						const forRoutine = yield* admission.forRoutine(candidate.threadId);
-						if (!mayDecideApprovals(decider, forRoutine)) {
+						if (!mayDecideApprovals(decider, forRoutine, decidersOf(candidate.call.tool))) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;

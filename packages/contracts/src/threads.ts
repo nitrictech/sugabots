@@ -183,6 +183,15 @@ export const toolApprovalStatusSchema = Schema.Literals([
 export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 
 /**
+ * Who may decide a tool call's approval: `pod`, those who decide the pod's
+ * approvals; `sandbox-managers`, those who decide what the pod's sandbox may
+ * reach and has installed, for an agent's request to change that.
+ */
+export const toolApprovalDecidersSchema = Schema.Literals(["pod", "sandbox-managers"]);
+
+export type ToolApprovalDeciders = typeof toolApprovalDecidersSchema.Type;
+
+/**
  * jsonValueSchema validates JSON recursively but exposes shallow types, so the
  * recursive message-part types built on it stay within TypeScript's
  * instantiation depth.
@@ -219,11 +228,13 @@ export const toolCallPartSchema = Schema.Struct({
 	/** Null until the tool returns, and after it fails. */
 	output: Schema.NullOr(jsonValueSchema),
 	status: toolCallStatusSchema,
-	/** Present only when this mutating connection call passed through approval policy. */
+	/** Present only when the call passed through approval: a mutating connection call, or a request a person decides. */
 	approval: Schema.optional(
 		Schema.NullOr(
 			Schema.Struct({
 				status: toolApprovalStatusSchema,
+				/** Absent: `pod`. */
+				deciders: Schema.optional(toolApprovalDecidersSchema),
 				decidedByName: Schema.NullOr(Schema.String),
 				decidedAt: Schema.NullOr(isoTimestampSchema),
 			}),
@@ -384,6 +395,8 @@ export const threadDetailsSchema = Schema.Struct({
 	capabilities: Schema.optional(
 		Schema.Struct({
 			approveToolCalls: Schema.Boolean,
+			/** Whether this person may decide the pod's requests to change its sandbox. */
+			approveSandboxRequests: Schema.optional(Schema.Boolean),
 		}),
 	),
 	routineExecution: Schema.NullOr(routineExecutionSchema),

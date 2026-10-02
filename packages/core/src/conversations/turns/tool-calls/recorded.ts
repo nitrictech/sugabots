@@ -27,9 +27,7 @@ export interface RecordingOptions {
 	mutating?: boolean;
 	approval?: {
 		approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
+		binding: ToolCallRepository.ApprovalBinding;
 	};
 }
 
@@ -85,9 +83,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 							tool: key,
 							input,
 							atOffset,
-							connectionId: approval.connectionId,
-							connectionRevision: approval.connectionRevision,
-							remoteToolName: approval.remoteToolName,
+							binding: approval.binding,
 						})
 						.pipe(
 							Effect.catchTag("ToolExecutionRefused", (refused) =>
