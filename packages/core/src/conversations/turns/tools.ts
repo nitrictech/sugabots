@@ -3,10 +3,12 @@ import type { ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
@@ -23,7 +25,8 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
  * `search_history` is recorded the same way, and offered only once the
- * thread has been compacted.
+ * thread has been compacted; `save_instructions` too, offered only while the
+ * agent interviews its creator.
  */
 
 export interface ToolDependencies {
@@ -37,6 +40,8 @@ export interface ToolDependencies {
 	builtIn: ToolSet;
 	/** The pod connections' tools, keyed `handle__tool`, each with whether it changes things. */
 	connections?: Record<string, OfferedTool>;
+	/** Where an interviewing agent's own instructions are saved. */
+	agents: Pick<AgentRepository.Interface, "finishInterview">;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
@@ -101,6 +106,17 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 				run: deps.run,
 			}),
 			recording,
+		);
+	}
+	if (prepared.context.agent.interviewing) {
+		tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
+			SAVE_INSTRUCTIONS_TOOL,
+			saveInstructionsTool({
+				agent: { workspaceId: prepared.context.thread.workspaceId, id: prepared.context.agent.id },
+				agents: deps.agents,
+				run: deps.run,
+			}),
+			{ ...recording, mutating: true },
 		);
 	}
 	if (prepared.context.crew.length > 0) {

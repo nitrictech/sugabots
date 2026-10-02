@@ -132,11 +132,16 @@ const toolKeysSchema = Schema.mutable(
 /** How long a prompt may be. The settings page counts against it as you type. */
 export const PROMPT_MAX_LENGTH = 20_000;
 
+/** How long a description may be: one or two lines, read by people and by the bot's pod mates. */
+export const DESCRIPTION_MAX_LENGTH = 280;
+
 export const newAgentInPodSchema = Schema.Struct({
 	name: nameSchema,
 	/** Derived from the name when left out. */
 	handle: Schema.optional(handleSchema),
-	description: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(280)))),
+	description: Schema.optional(
+		Schema.NullOr(Schema.String.check(Schema.isMaxLength(DESCRIPTION_MAX_LENGTH))),
+	),
 	color: Schema.optional(agentColorSchema),
 	face: Schema.optional(agentFaceSchema),
 	model: modelIdSchema,

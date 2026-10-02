@@ -10,6 +10,7 @@ import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -79,6 +80,7 @@ const prepared: PreparedTurn = {
 			model: "claude-sonnet-4-20250514",
 			prompt: "",
 			disabledTools: [],
+			interviewing: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },
@@ -523,6 +525,7 @@ function segmentWith(given: Given) {
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
+				unimplemented(AgentRepository.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {

@@ -228,7 +228,7 @@ export const ChooseModel = meta.story({
 	},
 });
 
-/** The first bot: its face as it is chosen, a name, and what it is for. */
+/** The first bot: its face as it is chosen, and a name. */
 export const FirstBot = meta.story({
 	render: (args) => (
 		<Preview stage="model">
@@ -242,7 +242,6 @@ export const FirstBot = meta.story({
 			await canvas.findByRole("heading", { name: "Make your first bot" }),
 		).toBeInTheDocument();
 		await userEvent.type(canvas.getByLabelText("Name"), "Chief");
-		await userEvent.click(canvas.getByRole("radio", { name: "Planning" }));
 		await expect(canvas.getByRole("button", { name: "Create bot" })).toBeEnabled();
 	},
 });
@@ -254,7 +253,6 @@ const chief = {
 	handle: "chief",
 	color: "purple",
 	face: "arc",
-	description: "Keeps your calendar, trips and plans in order.",
 };
 
 /** Saving the first bot, and the roster after it. */
@@ -269,7 +267,7 @@ function firstBotSaved({
 	);
 }
 
-/** Makes the first bot: a name, a colour, eyes and what it is for, then Create bot. */
+/** Makes the first bot: a name, a colour and eyes, then Create bot. */
 async function makeChief(
 	canvas: ReturnType<typeof within>,
 	userEvent: {
@@ -281,7 +279,6 @@ async function makeChief(
 	await userEvent.type(canvas.getByLabelText("Name"), "Chief");
 	await userEvent.click(canvas.getByRole("radio", { name: "purple" }));
 	await userEvent.click(canvas.getByRole("radio", { name: "arc" }));
-	await userEvent.click(canvas.getByRole("radio", { name: "Planning" }));
 	await userEvent.click(canvas.getByRole("button", { name: "Create bot" }));
 }
 
@@ -321,7 +318,7 @@ export const Ready = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Chief is ready" }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText(/calendar, trips and plans/)).toBeInTheDocument();
+		await expect(canvas.getByText(/help me work out what I'm for/i)).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Start chatting" })).toBeEnabled();
 	},
 });

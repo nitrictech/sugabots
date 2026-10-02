@@ -1,6 +1,12 @@
-import type { Agent, AgentColor, AgentFace, Pod } from "@sugabots/contracts";
+import {
+	type Agent,
+	type AgentColor,
+	type AgentFace,
+	type Pod,
+	PROMPT_MAX_LENGTH,
+} from "@sugabots/contracts";
 import { Check, ChevronRight } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useId, useState } from "react";
 import { useAgents, useCreateAgent, useModels } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -13,12 +19,27 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
-import { SettingsFieldLabel, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import {
+	SettingsControlRow,
+	SettingsFieldLabel,
+	SettingsFieldRow,
+	SettingsGroup,
+} from "@/ui/settings-page.tsx";
+
+/** How the bot gets its first instructions: it interviews its creator, or they write them. */
+type InstructionsStart = "interview" | "written";
+
+const INSTRUCTIONS_STARTS = [
+	{ value: "interview", label: "Interview me" },
+	{ value: "written", label: "Write my own" },
+] as const satisfies readonly { value: InstructionsStart; label: string }[];
 
 /**
  * Making a bot: its face first, as it will look, then its name and the pod it
- * lives in. It runs on the workspace's first switched-on model until somebody
- * chooses another on its page, which is also where it is described.
+ * lives in, and whether it interviews its creator for its instructions or is
+ * given them. It runs on the workspace's first switched-on model until
+ * somebody chooses another on its page, which is also where it is described.
  */
 export function NewAgentDialog({
 	podId: fixedPodId,
@@ -36,6 +57,9 @@ export function NewAgentDialog({
 	const [face, setFace] = useState<AgentFace>("pill");
 	const [chosenPodId, setChosenPodId] = useState(pods[0]?.id);
 	const [choosingPod, setChoosingPod] = useState(false);
+	const [instructionsStart, setInstructionsStart] = useState<InstructionsStart>("interview");
+	const [instructions, setInstructions] = useState("");
+	const instructionsId = useId();
 	const podId = fixedPodId ?? chosenPodId ?? "";
 	const create = useCreateAgent(podId);
 	const models = useModels();
@@ -51,7 +75,14 @@ export function NewAgentDialog({
 		event.preventDefault();
 		if (!trimmedName || !model || !podId) return;
 		try {
-			const agent = await create.mutateAsync({ name: trimmedName, model, color, face });
+			const agent = await create.mutateAsync({
+				name: trimmedName,
+				model,
+				color,
+				face,
+				// A bot created without a prompt starts by interviewing its creator.
+				...(instructionsStart === "written" ? { prompt: instructions } : {}),
+			});
 			await onCreated(agent, chosenPod);
 		} catch {
 			return;
@@ -89,6 +120,39 @@ export function NewAgentDialog({
 							setChoosingPod(false);
 						}}
 					/>
+				</SettingsGroup>
+
+				<SettingsGroup
+					className="mt-2"
+					note={
+						instructionsStart === "interview"
+							? `${trimmedName || "It"} will ask what it's for in its first chat, then write its own instructions for you to approve.`
+							: "Leave them blank to start without any. You can change them later in its settings."
+					}
+				>
+					<SettingsControlRow label="Instructions">
+						<SegmentedControl
+							label="Instructions"
+							options={INSTRUCTIONS_STARTS}
+							value={instructionsStart}
+							onChange={setInstructionsStart}
+						/>
+					</SettingsControlRow>
+					{instructionsStart === "written" && (
+						<div className="border-border border-t p-1">
+							<label htmlFor={instructionsId} className="sr-only">
+								Instructions
+							</label>
+							<textarea
+								id={instructionsId}
+								value={instructions}
+								onChange={(event) => setInstructions(event.target.value)}
+								maxLength={PROMPT_MAX_LENGTH}
+								placeholder="What it's for, how to sound, and what to never do."
+								className="block min-h-[120px] w-full resize-y rounded-[12px] bg-transparent p-3 text-[14.5px] text-foreground leading-[1.6] outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+							/>
+						</div>
+					)}
 				</SettingsGroup>
 
 				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">

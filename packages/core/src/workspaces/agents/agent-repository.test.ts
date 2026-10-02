@@ -1,4 +1,5 @@
 import type { NewAgent } from "@sugabots/contracts";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
@@ -10,6 +11,7 @@ import {
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
+import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	let repository: Promised<AgentRepository.Interface>;
@@ -33,6 +35,16 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 	const create = (createdById: string, input: NewAgent) =>
 		repository.create(workspaceId, { createdById, agent: input });
+	const poems = { prompt: "You write poems.", description: "Writes poems." };
+	const settledOf = async (agentId: string) => {
+		const [row] = await onDatabase((db) =>
+			db
+				.select({ prompt: agent.prompt, description: agent.description })
+				.from(agent)
+				.where(eq(agent.id, agentId)),
+		);
+		return row;
+	};
 	const visibleTo = (userId: string) => administrationAs(userId).list({ workspace: workspaceId });
 
 	beforeEach(async () => {
@@ -85,6 +97,28 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		});
 		expect(made.podId).toBe(podId);
 		expect((await visibleTo(memberId)).map(({ id }) => id)).toEqual([made.id]);
+	});
+
+	it("starts a bot made without a prompt on the interview, which finishing replaces once", async () => {
+		const triage = { prompt: "You triage tickets.", description: "Sorts new tickets by urgency." };
+		const made = await create(adminId, { podId, name: "Triage", model: "gpt-4o-mini" });
+		expect(made.prompt).toBe(INTERVIEW_PROMPT);
+
+		expect(await repository.finishInterview(workspaceId, made.id, triage)).toBe(true);
+		expect(await repository.finishInterview(workspaceId, made.id, poems)).toBe(false);
+		expect(await settledOf(made.id)).toEqual(triage);
+	});
+
+	it("never replaces a prompt somebody wrote", async () => {
+		const made = await create(adminId, {
+			podId,
+			name: "Triage",
+			model: "gpt-4o-mini",
+			prompt: "You triage tickets.",
+		});
+
+		expect(await repository.finishInterview(workspaceId, made.id, poems)).toBe(false);
+		expect(await settledOf(made.id)).toEqual({ prompt: "You triage tickets.", description: null });
 	});
 
 	it("rejects a pod from another workspace", async () => {

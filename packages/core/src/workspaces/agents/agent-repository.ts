@@ -20,6 +20,7 @@ import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { agent, pod } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
+import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import {
 	findRunnableSystemAgent,
 	SYSTEM_AGENTS,
@@ -32,7 +33,10 @@ import {
  * in no pod and of which only the model ever changes.
  */
 export interface Interface {
-	/** Creates a crew agent in `agent.podId`, which must be in the workspace. */
+	/**
+	 * Creates a crew agent in `agent.podId`, which must be in the workspace.
+	 * Without a prompt it starts with `INTERVIEW_PROMPT`.
+	 */
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; agent: NewAgent },
@@ -47,8 +51,18 @@ export interface Interface {
 		agentId: string,
 	) => Effect.Effect<void, SystemAgentImmutable>;
 	/**
+	 * Replaces the agent's prompt and description with what its interview
+	 * settled on, if its prompt is still `INTERVIEW_PROMPT`. False when it is
+	 * not, so a prompt somebody wrote in the meantime is never overwritten.
+	 */
+	readonly finishInterview: (
+		workspaceId: string,
+		agentId: string,
+		settled: { prompt: string; description: string },
+	) => Effect.Effect<boolean>;
+	/**
 	 * The Personal pod's Personal Assistant, placed there on `model`, or with
-	 * no model, if it is missing. One already there is returned exactly as its
+	 * no model, if it is missing. It starts with `INTERVIEW_PROMPT`. One already there is returned exactly as its
 	 * owner left it.
 	 */
 	readonly provisionPersonalAssistant: (input: {
@@ -169,7 +183,7 @@ export const make = Effect.gen(function* () {
 										color: input.color ?? colorFromText(input.name),
 										face: input.face ?? "pill",
 										model: input.model,
-										prompt: input.prompt ?? "",
+										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
 									})
 									.returning(),
@@ -210,6 +224,24 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		finishInterview: (workspaceId, agentId, { prompt, description }) =>
+			operation(
+				"finishInterview",
+				query((db) =>
+					db
+						.update(agent)
+						.set({ prompt, description })
+						.where(
+							and(
+								eq(agent.id, agentId),
+								eq(agent.workspaceId, workspaceId),
+								eq(agent.prompt, INTERVIEW_PROMPT),
+							),
+						)
+						.returning({ id: agent.id }),
+				).pipe(Effect.map((rows) => rows.length > 0)),
+			),
+
 		remove: (workspaceId, agentId) =>
 			operation(
 				"remove",
@@ -241,7 +273,7 @@ export const make = Effect.gen(function* () {
 								color: "sky",
 								face: "pill",
 								model: model ?? null,
-								prompt: PERSONAL_ASSISTANT_PROMPT,
+								prompt: INTERVIEW_PROMPT,
 							})
 							.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
 							.returning(),
@@ -310,9 +342,6 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-export const PERSONAL_ASSISTANT_PROMPT =
-	"You are Personal Assistant, the user's general-purpose assistant. Help them answer questions, think through problems, make plans, write, and complete tasks. Be clear, practical, and concise. Ask clarifying questions when important details are missing. Distinguish facts from assumptions and say when you are uncertain. Use available tools when they help, and report their results accurately.";
 
 /** Another agent in the pod already has this name or handle. */
 export class AgentNameTaken

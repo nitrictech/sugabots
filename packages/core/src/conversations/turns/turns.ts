@@ -24,6 +24,7 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
 	makeControls,
@@ -146,7 +147,9 @@ export const workflow = turnWorkflow;
 
 /** What the turn workflow's steps do: the rest of a turn's machinery. */
 export const stepsLayer = turnStepsLayer.pipe(
-	Layer.provide(Layer.mergeAll(TurnExecution.layer, ApprovedToolCalls.layer)),
+	Layer.provide(
+		Layer.mergeAll(TurnExecution.layer, ApprovedToolCalls.layer, AgentRepository.layer),
+	),
 	Layer.provide(internals),
 );
 

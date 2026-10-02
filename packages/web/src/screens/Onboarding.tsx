@@ -547,46 +547,6 @@ function ChooseModelStep({
 	);
 }
 
-/** What the first bot can be for, each with what it says when it first says hello. */
-const purposes = [
-	{
-		label: "Inbox",
-		description: "Sorts your email and flags what needs you.",
-		intro: "I'll sort your email and flag what needs you.",
-		ask: "Want me to go through what came in overnight?",
-	},
-	{
-		label: "Research",
-		description: "Digs into anything you're curious about and sums it up.",
-		intro: "I'll dig into anything you're curious about and sum it up.",
-		ask: "What's on your mind? I'll put a short brief together.",
-	},
-	{
-		label: "Planning",
-		description: "Keeps your calendar, trips and plans in order.",
-		intro: "I'll keep your calendar, trips and plans in order.",
-		ask: "Anything coming up this week I should help with?",
-	},
-	{
-		label: "Reminders",
-		description: "Keeps track of the things you'd rather not remember.",
-		intro: "I'll keep track of the things you'd rather not remember.",
-		ask: "What should I remind you about first?",
-	},
-	{
-		label: "Something else",
-		description: undefined,
-		intro: "",
-		ask: "Tell me what you need help with.",
-	},
-] as const;
-
-type Purpose = (typeof purposes)[number];
-
-function purposeOf(bot: Agent | undefined): Purpose | undefined {
-	return purposes.find((purpose) => purpose.description === bot?.description);
-}
-
 function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 	const update = useUpdateAgent(bot?.id ?? "");
 	// The Personal pod's bot starts as a placeholder; it becomes yours here.
@@ -594,8 +554,6 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 	const [color, setColor] = useState<AgentColor>(started ? bot.color : "green");
 	const [face, setFace] = useState<AgentFace>(started ? bot.face : "pill");
 	const [name, setName] = useState(started ? bot.name : "");
-	const [purpose, setPurpose] = useState<Purpose | undefined>(purposeOf(bot));
-	const group = useId();
 	const trimmed = name.trim();
 
 	async function submit(event: FormEvent) {
@@ -606,7 +564,6 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 				name: trimmed,
 				color,
 				face,
-				description: purpose?.description ?? null,
 			});
 		} catch {
 			return;
@@ -631,28 +588,6 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 				placeholder="Give it a name"
 				className={fieldClass}
 			/>
-			<fieldset className="m-0 flex flex-col gap-2.5 border-0 p-0">
-				<legend className="px-1 pb-2.5 font-medium text-sm text-subtle-foreground">
-					What should it help with?
-				</legend>
-				<div className="flex flex-wrap gap-2">
-					{purposes.map((one) => (
-						<label
-							key={one.label}
-							className="cursor-pointer rounded-full bg-chip px-3.5 py-2 font-medium text-[14px] text-foreground transition-colors has-checked:bg-foreground has-checked:text-background has-focus-visible:shadow-(--ring-shadow)"
-						>
-							<input
-								type="radio"
-								name={group}
-								checked={purpose?.label === one.label}
-								onChange={() => setPurpose(one)}
-								className="sr-only"
-							/>
-							{one.label}
-						</label>
-					))}
-				</div>
-			</fieldset>
 			{!bot && <Alert>Your Personal pod has no bot to set up. Reload to try again.</Alert>}
 			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			<Button
@@ -797,8 +732,6 @@ function ReadyStep({
 }) {
 	const navigate = useNavigate();
 	const complete = useCompleteOnboarding();
-	const purpose = purposeOf(bot);
-	const hello = [`Hi, I'm ${bot.name}.`, purpose?.intro].filter(Boolean).join(" ");
 
 	async function finish() {
 		try {
@@ -827,7 +760,10 @@ function ReadyStep({
 				<div className="flex items-end gap-2">
 					<AgentAvatar color={bot.color} face={bot.face} size={34} />
 					<div className="flex min-w-0 flex-col gap-[3px]">
-						{[hello, purpose?.ask ?? purposes[4].ask].map((line) => (
+						{[
+							`Hi, I'm ${bot.name}.`,
+							"I've only just been set up. Help me work out what I'm for?",
+						].map((line) => (
 							<p
 								key={line}
 								className="m-0 rounded-[20px_20px_20px_6px] bg-bot-tint px-3.5 py-2.5 text-[15px] text-bot-text leading-normal"

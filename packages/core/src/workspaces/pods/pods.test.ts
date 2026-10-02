@@ -20,7 +20,7 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { AgentAdministration } from "../agents/agent-administration.ts";
-import { AgentRepository } from "../agents/agent-repository.ts";
+import { INTERVIEW_PROMPT } from "../agents/interview-prompt.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { PersonalPods } from "./personal-pods.ts";
 import { PodAdministration } from "./pod-administration.ts";
@@ -289,7 +289,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(assistant).toMatchObject({
 				name: "Personal Assistant",
 				model: "first-model",
-				prompt: AgentRepository.PERSONAL_ASSISTANT_PROMPT,
+				prompt: INTERVIEW_PROMPT,
 			});
 
 			await onDatabase((db) =>

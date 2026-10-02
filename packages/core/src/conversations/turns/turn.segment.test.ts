@@ -5,16 +5,18 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { message, toolCall, turn } from "../../database/schema.ts";
+import { agent, message, toolCall, turn, user } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
 import { UserMessage } from "../../user-message.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
 import { type PreparedTurn, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
@@ -41,6 +43,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	const providerDown = UserMessage.of`The model provider could not answer.`;
 	let threadId: string;
 	let connectionId: string;
+	let hostId: string;
 	let prepared: PreparedTurn;
 
 	afterAll(async () => {
@@ -49,7 +52,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	beforeEach(async () => {
-		({ threadId, connectionId } = await aChatAwaitingReply(chatsAs));
+		({ threadId, connectionId, hostId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(threadId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -293,5 +296,78 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		expect(calls).toMatchObject([
 			{ tool: "wiki__wipe", approvalId: "approval-1", approvalStatus: "pending", mutating: true },
 		]);
+	});
+
+	describe("a bot still on its interview", () => {
+		beforeEach(async () => {
+			await onDatabase((db) =>
+				db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, hostId)),
+			);
+		});
+
+		const storedAgent = async () => {
+			const [row] = await onDatabase((db) =>
+				db
+					.select({ prompt: agent.prompt, description: agent.description })
+					.from(agent)
+					.where(eq(agent.id, hostId)),
+			);
+			return row;
+		};
+
+		it("saves the instructions its creator agreed to in place of the interview", async () => {
+			const model = Models.fromStream((input) =>
+				Effect.sync(() =>
+					streamed(
+						(async function* () {
+							const output = await input.tools?.[SAVE_INSTRUCTIONS_TOOL]?.execute?.(
+								{
+									instructions: "You triage support tickets.",
+									description: "Sorts support tickets by urgency.",
+								} as never,
+								{ toolCallId: "sdk-1", messages: [] } as never,
+							);
+							yield `Saved: ${JSON.stringify(output)}.`;
+						})(),
+					),
+				),
+			);
+
+			await segmentWith(model);
+
+			expect(await storedAgent()).toEqual({
+				prompt: "You triage support tickets.",
+				description: "Sorts support tickets by urgency.",
+			});
+			expect(await storedReply()).toMatchObject({ content: 'Saved: {"saved":true}.' });
+		});
+
+		it("is not offered the tool when someone other than its creator asked", async () => {
+			const [someoneElse] = await onDatabase((db) =>
+				db
+					.insert(user)
+					.values({ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` })
+					.returning({ id: user.id }),
+			);
+			await onDatabase((db) =>
+				db.update(agent).set({ createdById: someoneElse?.id }).where(eq(agent.id, hostId)),
+			);
+			const offered: string[][] = [];
+			const model = Models.fromStream((input) =>
+				Effect.sync(() => {
+					offered.push(Object.keys(input.tools ?? {}));
+					return streamed(
+						(async function* () {
+							yield "Happy to help.";
+						})(),
+					);
+				}),
+			);
+
+			await segmentWith(model);
+
+			expect(offered).toEqual([expect.not.arrayContaining([SAVE_INSTRUCTIONS_TOOL])]);
+			expect(await storedAgent()).toMatchObject({ prompt: INTERVIEW_PROMPT });
+		});
 	});
 });
