@@ -178,19 +178,33 @@ export const AddingAnApp = meta.story({
 	},
 });
 
-/** Any other MCP server: its name, address, a secret if it takes one, and its approval. */
+/** Any other MCP server: its name, address, an access token by default, and its approval. */
 export const AddingByUrl = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
-		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
-		await userEvent.click(within(list).getByRole("button", { name: /Connect by URL/ }));
-		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
-		await expect(within(step).getByLabelText("Address")).toBeInTheDocument();
+		const step = await openConnectByUrl(canvas);
+		await expect(within(step).getByLabelText("Access token")).toBeInTheDocument();
 		await expect(within(step).getByRole("button", { name: "Add" })).toBeDisabled();
 	},
 });
+
+/** Signing in with a custom header: a header name and a secret sent exactly as typed. */
+export const AddingByUrlWithHeader = meta.story({
+	play: async ({ canvas }) => {
+		const step = await openConnectByUrl(canvas);
+		await userEvent.click(within(step).getByRole("radio", { name: "Header" }));
+		await expect(within(step).getByLabelText("Header name")).toBeInTheDocument();
+		await expect(within(step).queryByLabelText("Access token")).toBeNull();
+	},
+});
+
+async function openConnectByUrl(canvas: ReturnType<typeof within>) {
+	await userEvent.click(
+		await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
+	);
+	const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
+	await userEvent.click(within(list).getByRole("button", { name: /Connect by URL/ }));
+	return screen.findByRole("dialog", { name: "Connect by URL" });
+}
 
 /** None yet: the group holds only Add connection. */
 export const Empty = meta.story({

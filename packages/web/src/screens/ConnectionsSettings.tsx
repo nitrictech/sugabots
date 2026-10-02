@@ -9,7 +9,7 @@ import {
 } from "@sugabots/contracts";
 import { ArrowUpRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
-import { useConnectionActions, useConnections } from "@/lib/connections.ts";
+import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -452,6 +452,12 @@ function ConnectionDialog({
 	);
 }
 
+const signInMethodNote: Record<SignInMethod, string> = {
+	token: "Paste the access token or API key the server gave you.",
+	oauth: "You'll sign in to the server next.",
+	header: "The secret is sent in this header exactly as you type it.",
+};
+
 /** The docs on fixing a connection whose check failed. */
 const TROUBLESHOOTING_URL = "https://sugabots.ai/docs/connections#troubleshooting";
 
@@ -627,7 +633,18 @@ function AppStep({
 	);
 }
 
-/** Any other MCP server: its name, its address, a secret if it takes one, and its approval. */
+type SignInMethod = "token" | "oauth" | "header";
+
+const signInMethodOptions: { value: SignInMethod; label: string }[] = [
+	{ value: "token", label: "Token" },
+	{ value: "oauth", label: "Sign in" },
+	{ value: "header", label: "Header" },
+];
+
+/**
+ * ByUrlStep adds any other MCP server by its address, signing in with an access
+ * token, the server's own OAuth sign-in, or a secret in a custom header.
+ */
 function ByUrlStep({
 	podId,
 	onBack,
@@ -640,22 +657,28 @@ function ByUrlStep({
 	const actions = useConnectionActions(podId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
-	const [secretHeader, setSecretHeader] = useState("Authorization");
+	const [method, setMethod] = useState<SignInMethod>("token");
+	const [secretHeader, setSecretHeader] = useState("");
 	const [secret, setSecret] = useState("");
 	const [access, setAccess] = useState<ConnectionAccess>("ask");
 	const ready = name.trim() !== "" && url.trim() !== "";
-	const pending = actions.create.isPending || actions.update.isPending;
+	const pending = actions.create.isPending || actions.update.isPending || actions.connect.isPending;
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!ready) return;
 		try {
-			const made = await actions.create.mutateAsync({
-				name,
-				url,
-				...(secretHeader ? { secretHeader } : {}),
-				...(secret ? { secret } : {}),
-			});
+			if (method === "oauth") {
+				await actions.connect.mutateAsync({ name, url, access: access === "off" ? "ask" : access });
+				return;
+			}
+			const made = await actions.create.mutateAsync(
+				method === "token"
+					? secret.trim()
+						? { name, url, secretHeader: "Authorization", secret: bearerAuthorization(secret) }
+						: { name, url }
+					: { name, url, ...(secretHeader ? { secretHeader } : {}), ...(secret ? { secret } : {}) },
+			);
 			// A server added by its address starts at Allow.
 			if (access !== "allow") {
 				await actions.update.mutateAsync({ connectionId: made.id, json: { access } });
@@ -666,7 +689,7 @@ function ByUrlStep({
 		done();
 	}
 
-	const error = actions.create.error ?? actions.update.error;
+	const error = actions.create.error ?? actions.update.error ?? actions.connect.error;
 	return (
 		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
@@ -685,21 +708,48 @@ function ByUrlStep({
 						placeholder="https://mcp.example.com/mcp"
 						mono
 					/>
-					<SettingsFieldRow
-						label="Header"
-						value={secretHeader}
-						onChange={setSecretHeader}
-						placeholder="Authorization"
-						mono
+				</SettingsGroup>
+				<SettingsGroup note={signInMethodNote[method]}>
+					<SettingsRow
+						label="Sign in with"
+						trailing={
+							<SegmentedControl
+								label="How to sign in to the server"
+								options={signInMethodOptions}
+								value={method}
+								onChange={setMethod}
+							/>
+						}
 					/>
-					<SettingsFieldRow
-						label="Secret"
-						value={secret}
-						onChange={setSecret}
-						placeholder="Optional"
-						mono
-						secret
-					/>
+					{method === "token" && (
+						<SettingsFieldRow
+							label="Access token"
+							value={secret}
+							onChange={setSecret}
+							placeholder="Optional"
+							mono
+							secret
+						/>
+					)}
+					{method === "header" && (
+						<>
+							<SettingsFieldRow
+								label="Header name"
+								value={secretHeader}
+								onChange={setSecretHeader}
+								placeholder="X-API-Key"
+								mono
+							/>
+							<SettingsFieldRow
+								label="Secret"
+								value={secret}
+								onChange={setSecret}
+								placeholder="Optional"
+								mono
+								secret
+							/>
+						</>
+					)}
 				</SettingsGroup>
 				<SettingsGroup>
 					<SettingsRow
@@ -707,8 +757,8 @@ function ByUrlStep({
 						trailing={
 							<SegmentedControl
 								label="What bots may do with it"
-								options={accessOptions}
-								value={access}
+								options={method === "oauth" ? addingOptions : accessOptions}
+								value={method === "oauth" && access === "off" ? "ask" : access}
 								onChange={setAccess}
 							/>
 						}
@@ -716,7 +766,11 @@ function ByUrlStep({
 				</SettingsGroup>
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
-			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
+			<DialogFormFooter
+				action={method === "oauth" ? "Sign in" : "Add"}
+				actionDisabled={!ready || pending}
+				cancel={false}
+			/>
 		</DialogFormStep>
 	);
 }
