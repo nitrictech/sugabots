@@ -354,14 +354,18 @@ describe("a reply still being written", () => {
 						output: null,
 						finishedAt: null,
 						mutating: true,
-						approval: { status: "pending", decidedByName: null, decidedAt: null },
+						approval: {
+							status: "pending",
+							decidedByName: null,
+							decidedAt: null,
+						},
 					}),
 				],
 				{ status: "streaming" },
 			),
 		]);
 
-		expect(await screen.findByRole("button", { name: "Allow" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: /^Allow/ })).toBeDefined();
 		expect(screen.queryByRole("status")).toBeNull();
 	});
 
@@ -374,18 +378,21 @@ describe("a reply still being written", () => {
 						output: null,
 						finishedAt: null,
 						mutating: true,
-						approval: { status: "allowed", decidedByName: "Ryan Eyes", decidedAt: null },
+						approval: {
+							status: "allowed",
+							decidedByName: "Ryan Eyes",
+							decidedAt: null,
+						},
 					}),
 				],
 				{ status: "streaming" },
 			),
 		]);
 
-		const line = await screen.findByRole("button", { name: /Using Linear/ });
+		await screen.findByRole("button", { name: /Using Linear/ });
 		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
-		expect(screen.queryByRole("region", { name: /Approval needed/ })).toBeNull();
-		fireEvent.click(line);
-		expect(screen.getByText("Allowed by Ryan Eyes")).toBeDefined();
+		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
+		expect(within(card).queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 });
 
@@ -400,25 +407,23 @@ describe("a write that needs approving", () => {
 	});
 	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
 
-	it("stops the thread, says so on its tool line, and shows what it would send on request", async () => {
+	it("stops the thread, says so on its tool line, and shows what it would send", async () => {
 		show([asking]);
 
-		expect(
-			await screen.findByRole("region", { name: "Approval needed: Create issue in Linear" }),
-		).toBeDefined();
+		const card = await screen.findByRole("region", {
+			name: "Approval request: Create issue in Linear",
+		});
 		expect(screen.getByRole("button", { name: /Waiting on Linear approval/ })).toBeDefined();
-
-		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
-		const request = await screen.findByRole("dialog");
-		expect(within(request).getByText("Team")).toBeDefined();
-		expect(within(request).getByText("Platform")).toBeDefined();
+		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
+		expect(within(card).getByText("Team")).toBeDefined();
+		expect(within(card).getByText("Platform")).toBeDefined();
 	});
 
 	it("allows it once, with no standing permission offered here", async () => {
 		const approval = client.api.toolApprovals.decide;
 		show([asking]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Allow/ }));
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
 		expect(screen.queryByRole("checkbox")).toBeNull();
@@ -428,21 +433,21 @@ describe("a write that needs approving", () => {
 		const approval = client.api.toolApprovals.decide;
 		show([asking]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Deny/ }));
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
 	});
 
-	it("says so when the viewer is not the one who can answer", async () => {
+	it("says so when the reader is not the one who can answer", async () => {
 		show([asking], { canApprove: false });
 
 		expect(
 			await screen.findByText("Waiting for someone with permission to answer this."),
 		).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 
-	it("says on its tool line when it was refused, and by whom when opened", async () => {
+	it("keeps a refused write as its card, and says on its tool line who refused it", async () => {
 		show([
 			reply([
 				{ type: "text", text: "Left it untracked." },
@@ -451,14 +456,19 @@ describe("a write that needs approving", () => {
 					output: null,
 					finishedAt: null,
 					mutating: true,
-					approval: { status: "denied", decidedByName: "Ryan Eyes", decidedAt: null },
+					approval: {
+						status: "denied",
+						decidedByName: "Ryan Eyes",
+						decidedAt: null,
+					},
 				}),
 			]),
 		]);
 
 		const line = await screen.findByRole("button", { name: /Linear denied/ });
+		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
+		expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
 		fireEvent.click(line);
 		expect(screen.getByText("Denied by Ryan Eyes")).toBeDefined();
-		expect(screen.queryByRole("region", { name: /Approval needed/ })).toBeNull();
 	});
 });

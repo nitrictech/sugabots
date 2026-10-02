@@ -1,27 +1,34 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
-import { Check, Copy } from "lucide-react";
-import { Fragment, type ReactNode, useId, useRef, useState } from "react";
+import { cn } from "cn";
+import { ChevronDown, X } from "lucide-react";
+import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
 import { connectionLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { Dialog, DialogContent } from "@/ui/dialog.tsx";
+import { Dialog, DialogClose, DialogContent } from "@/ui/dialog.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
+import { awaitsApproval } from "./tool-activity.ts";
 
 /*
- * A write a bot wants to make, and its reply stopped until someone answers:
- * what it would do and where, then Allow or Deny. It sits among the bot's
- * bubbles in the bot's tint, tucked under the message above it. The tool's
- * name opens the whole request, laid out as fields, where it can be answered
- * too.
+ * A write a bot wants to make, held for someone to allow or deny, and what
+ * became of it once they did. It sits among the bot's bubbles in the bot's
+ * tint, tucked under the message above it, and says what it is asking before
+ * anyone answers: who wants to use what, then the request itself.
+ *
+ * On a wide screen the request is in the card, folded once it runs long, and
+ * is answered there. On a phone the card shows the start of it and opens the
+ * whole request full screen, with the answer pinned under it, so a long
+ * request is read as a page rather than in a box inside the chat.
  */
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
-
 type Asker = Pick<AgentParticipant, "name" | "color" | "face">;
+type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
 	call,
@@ -30,200 +37,374 @@ export function ToolApprovalCard({
 	podId,
 	canApprove,
 	look,
-	answerPinned = false,
 	outgoing = false,
+	endsRun = false,
+	compact = false,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
 	agent: Asker;
 	threadId: string;
 	podId: string;
+	/** Whether the reader may answer it. */
 	canApprove: boolean;
 	look?: ConnectionLook;
-	/** Whether, on a phone, Allow and Deny are pinned below instead, as `PinnedApproval`. */
-	answerPinned?: boolean;
 	/** Whether the asking bot's messages sit on the right, so the card sits under them there. */
 	outgoing?: boolean;
+	/** The last of its bot's run, which carries the bot's face, as a bubble would. */
+	endsRun?: boolean;
+	/** The sidebar's narrower thread, with smaller faces. */
+	compact?: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
-	// This goes when the thread's events say the call is decided, a moment
-	// after the decision is accepted; until then the answer stays given.
-	const sent = review.isPending || review.isSuccess;
-	const [requestOpen, setRequestOpen] = useState(false);
+	const [reviewing, setReviewing] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";
-	const label = stepLabel(call.tool, name);
-	const title = where ? `${label} in ${where}` : label;
-	const wants = call.mutating ? "wants to make a change" : "wants to use a tool";
-	// One answer, drawn on the card and again in the full request.
-	const answer = canApprove ? (
-		<Answer
-			pending={sent}
-			error={review.error}
-			onDeny={() => review.mutate({ toolCallId: call.id, decision: "deny" })}
-			onAllow={() => review.mutate({ toolCallId: call.id, decision: "allow_once" })}
-		/>
-	) : (
-		<p className="m-0 text-muted-foreground text-xs">
-			Waiting for someone with permission to answer this.
-		</p>
-	);
+	const action = stepLabel(call.tool, name);
+	const step: Step = {
+		action,
+		who: `${agent.name} wants to use ${where || "a tool"}`,
+		where,
+		look,
+	};
+	const answerable = awaitsApproval(call) && canApprove;
+	// The answer stays given from when it is sent until the thread's events say
+	// the call is decided, a moment after the decision is accepted.
+	const sent = review.isPending || review.isSuccess;
+	const decide = (decision: Decision) =>
+		review.mutate({ toolCallId: call.id, decision }, { onSuccess: () => setReviewing(false) });
+	// An answered request needs no line of its own: the tool line above the
+	// reply says how it was answered, and by whom.
+	const status =
+		awaitsApproval(call) && !canApprove ? (
+			<p role="status" className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
+				Waiting for someone with permission to answer this.
+			</p>
+		) : null;
+
 	return (
 		<section
-			aria-label={`Approval needed: ${title}`}
-			className={`flex animate-rise motion-reduce:animate-none ${outgoing ? "justify-end pr-[42px]" : "pl-[42px]"}`}
+			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
+			className={cn(
+				"flex animate-rise items-end gap-2 motion-reduce:animate-none",
+				outgoing && "flex-row-reverse",
+			)}
 			style={botColorVariables(agent.color)}
 		>
+			<span className={cn("flex shrink-0", compact ? "w-[26px]" : "w-[34px]")}>
+				{endsRun && <AgentAvatar color={agent.color} face={agent.face} size={compact ? 26 : 34} />}
+			</span>
 			<div
-				className={`inline-flex max-w-full flex-col items-start gap-1 bg-bot-tint py-[9px] pr-3 pl-2.5 text-bot-text ${outgoing ? "rounded-[20px_6px_20px_20px]" : "rounded-[6px_20px_20px_20px]"}`}
+				className={cn(
+					"flex min-w-0 max-w-[460px] flex-1 flex-col gap-2.5 bg-bot-tint pt-2.5 pr-3 pb-3 pl-2.5 text-bot-text",
+					outgoing ? "rounded-[20px_6px_20px_20px]" : "rounded-[6px_20px_20px_20px]",
+				)}
 			>
-				<span className="flex min-w-0 items-center gap-2.5">
-					<ConnectionMark presetId={look?.presetId} name={where || label} size="md" />
-					<button
-						type="button"
-						onClick={() => setRequestOpen(true)}
-						aria-label={`View the full request: ${title}`}
-						className="focus-ring min-w-0 rounded-md text-left font-medium text-[14px] hover:underline"
-					>
-						{label}
-						{where && <span className="font-normal text-muted-foreground"> in {where}</span>}
-					</button>
-				</span>
-				<div className={`mt-1 mb-0.5 ml-[34px] ${answerPinned ? "max-md:hidden" : ""}`}>
-					{answer}
+				<StepHeading step={step} />
+				<div className="min-w-0 md:ml-[34px]">
+					<FoldedRequest input={call.input} />
+				</div>
+				<div
+					className={cn(
+						"flex min-w-0 flex-col gap-2 md:ml-[34px]",
+						// On a wide screen an answered request has nothing here; only a phone's See request is.
+						!answerable && !status && "md:hidden",
+					)}
+				>
+					{status}
+					{answerable && (
+						<div className="max-md:hidden">
+							<Answer pending={sent} error={review.error} onDecide={decide} actionLabel={action} />
+						</div>
+					)}
+					<div className="md:hidden">
+						{answerable ? (
+							<Button className="h-11 w-full text-[15px]" onClick={() => setReviewing(true)}>
+								Review
+							</Button>
+						) : (
+							<Button
+								variant="secondary"
+								className="h-11 w-full text-[15px]"
+								onClick={() => setReviewing(true)}
+							>
+								See request
+							</Button>
+						)}
+					</div>
 				</div>
 			</div>
-
-			<RequestDialog
+			<ReviewSheet
 				input={call.input}
+				step={step}
+				open={reviewing}
+				onOpenChange={setReviewing}
 				agent={agent}
-				wants={wants}
-				look={look}
-				label={label}
-				where={where}
-				answer={answer}
-				open={requestOpen}
-				onOpenChange={setRequestOpen}
-			/>
+			>
+				{answerable ? (
+					<Answer
+						pending={sent}
+						error={review.error}
+						onDecide={decide}
+						actionLabel={action}
+						pinned
+					/>
+				) : (
+					status
+				)}
+			</ReviewSheet>
 		</section>
 	);
 }
 
-/**
- * Allow and Deny for the first call waiting on an answer, full width along the
- * foot of a phone's collaboration sheet, where a thumb reaches them. The card
- * in the thread still says what is being asked.
- */
-export function PinnedApproval({
-	call,
-	threadId,
-	podId,
-	canApprove,
-}: {
-	call: ToolCallPart;
-	threadId: string;
-	podId: string;
-	canApprove: boolean;
-}) {
-	const review = useReviewToolCall(threadId, podId);
-	// This goes when the thread's events say the call is decided, a moment
-	// after the decision is accepted; until then the answer stays given.
-	const sent = review.isPending || review.isSuccess;
-	const label = stepLabel(call.tool, splitToolKey(call.tool).name);
-	if (!canApprove) {
-		return (
-			<p className="m-0 px-4 pt-2 pb-4 text-center text-muted-foreground text-sm">
-				Waiting for someone with permission to answer this.
-			</p>
-		);
-	}
-	return (
-		<div className="flex flex-col gap-2 px-4 pt-2 pb-4">
-			<div className="grid grid-cols-2 gap-2.5">
-				<Button
-					size="lg"
-					variant="secondary"
-					disabled={sent}
-					aria-label={`Deny: ${label}`}
-					onClick={() => review.mutate({ toolCallId: call.id, decision: "deny" })}
-					className="bg-border-strong hover:bg-person-avatar"
-				>
-					Deny
-				</Button>
-				<Button
-					size="lg"
-					disabled={sent}
-					aria-label={`Allow: ${label}`}
-					onClick={() => review.mutate({ toolCallId: call.id, decision: "allow_once" })}
-				>
-					Allow
-				</Button>
-			</div>
-			{review.error && (
-				<p role="alert" className="m-0 text-center text-destructive-text text-xs">
-					{failureMessage(review.error)}
-				</p>
-			)}
-		</div>
-	);
+/** What a card says it is asking, in its header and the full-screen request's. */
+interface Step {
+	action: string;
+	who: string;
+	where: string;
+	look: ConnectionLook | undefined;
 }
 
-/** The connection's logo beside what the step does, and a line under it: where, unless told otherwise. */
-function StepHeading({
-	look,
-	label,
-	where,
-	detail = where,
-	headingId,
-}: {
-	look?: ConnectionLook;
-	label: string;
-	where: string;
-	detail?: string;
-	/** Set where the heading names a surface, as the full request's does. */
-	headingId?: string;
-}) {
+/** The connection's mark beside who wants to use it, and what they would do. */
+function StepHeading({ step }: { step: Step }) {
 	return (
-		<div className="flex items-center gap-2.5">
-			<ConnectionMark presetId={look?.presetId} name={where || label} size="sm" />
-			<span className="flex min-w-0 flex-col">
-				<span id={headingId} className="font-semibold text-base text-foreground">
-					{label}
+		<div className="flex min-w-0 items-start gap-2.5">
+			<span className="mt-px">
+				<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size="md" />
+			</span>
+			<span className="flex min-w-0 flex-col gap-0.5">
+				<span className="text-[14px] text-muted-foreground leading-[1.4]">{step.who}</span>
+				<span className="text-pretty font-medium text-[14px] leading-[1.4] [overflow-wrap:anywhere]">
+					{step.action}
 				</span>
-				{detail && <span className="text-muted-foreground text-xs">{detail}</span>}
 			</span>
 		</div>
 	);
 }
 
-/** Allow and Deny, and what went wrong if answering failed. Deny is neutral: refusing is not a danger. */
+/** How tall a folded request stands: about three of its rows. */
+const FOLDED_HEIGHT_PX = 66;
+
+/**
+ * The request on its hairline rule. Past about three rows it folds, fading
+ * out; unfolded it scrolls inside the card past a cap, and stops at its ends
+ * rather than handing the scroll to the chat. On a phone a long one is only
+ * ever its folded start, since the whole of it opens full screen.
+ */
+function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
+	const bodyId = useId();
+	const content = useRef<HTMLDivElement>(null);
+	const [foldable, setFoldable] = useState(false);
+	const [open, setOpen] = useState(false);
+	useLayoutEffect(() => {
+		const element = content.current;
+		if (!element) return;
+		const measure = () => setFoldable(element.scrollHeight > FOLDED_HEIGHT_PX);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, []);
+	const folded = foldable && !open;
+	return (
+		<div className="flex min-w-0 flex-col items-start gap-1">
+			<div
+				id={bodyId}
+				// Unfolded, it scrolls, so a keyboard needs to reach it.
+				tabIndex={foldable && open ? 0 : undefined}
+				className={cn(
+					"focus-ring w-full min-w-0 border-current/20 border-l-2 pl-2.5",
+					foldable && FOLDED_CLASSES_ON_PHONE,
+					folded && FOLDED_CLASSES,
+					foldable &&
+						open &&
+						"md:max-h-[min(168px,40vh)] md:overflow-y-auto md:overscroll-contain md:pr-1.5 md:[scrollbar-width:thin]",
+				)}
+			>
+				<div ref={content}>
+					<RequestValue value={input} depth={0} />
+				</div>
+			</div>
+			{foldable && (
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-controls={bodyId}
+					onClick={() => setOpen(!open)}
+					className="focus-ring flex cursor-pointer items-center gap-1 rounded-md py-0.5 font-medium text-[14px] text-link max-md:hidden"
+				>
+					{open ? "See less" : "See more"}
+					<ChevronDown
+						aria-hidden
+						className={cn("size-3 transition-transform", open && "rotate-180")}
+						strokeWidth={3}
+					/>
+				</button>
+			)}
+		</div>
+	);
+}
+
+const FOLDED_CLASSES =
+	"max-h-[66px] overflow-hidden [mask-image:linear-gradient(#000_55%,transparent)]";
+const FOLDED_CLASSES_ON_PHONE =
+	"max-md:max-h-[66px] max-md:overflow-hidden max-md:[mask-image:linear-gradient(#000_55%,transparent)]";
+
+/**
+ * The whole request on a phone, full screen: what is asked at the top, every
+ * field under it scrolling with the page, and the answer pinned along the
+ * foot where a thumb reaches it. Closing it changes nothing; answering closes
+ * it.
+ */
+function ReviewSheet({
+	input,
+	step,
+	open,
+	onOpenChange,
+	agent,
+	children,
+}: {
+	input: ToolCallPart["input"];
+	step: Step;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	/** The bot asking, whose face heads the request. */
+	agent: Asker;
+	/** The answer, or what became of the request. */
+	children: ReactNode;
+}) {
+	const headingId = useId();
+	// Opening puts focus on the top of the request rather than on Close, so it
+	// is read from the start.
+	const top = useRef<HTMLDivElement>(null);
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent
+				showCloseButton={false}
+				initialFocus={top}
+				aria-labelledby={headingId}
+				style={botColorVariables(agent.color)}
+				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-[min(38rem,calc(100dvh-4rem))] md:max-w-[36rem] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
+			>
+				<div
+					ref={top}
+					tabIndex={-1}
+					className="flex shrink-0 justify-end px-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] outline-none"
+				>
+					<DialogClose
+						aria-label="Close"
+						className="focus-ring grid size-8 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover"
+					>
+						<X aria-hidden size={15} strokeWidth={2.4} />
+					</DialogClose>
+				</div>
+				<ScrollArea className="min-h-0 flex-1">
+					<div className="flex flex-col gap-4 px-4 py-4">
+						<ReviewHeading step={step} agent={agent} headingId={headingId} />
+						<RequestValue value={input} depth={0} />
+					</div>
+				</ScrollArea>
+				<footer className="shrink-0 border-border-subtle border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+					{children}
+				</footer>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+/**
+ * The top of the full-screen request: the asking bot's face with the app's
+ * mark on its corner, what it would do as the heading, and who wants to use
+ * what under it.
+ */
+function ReviewHeading({
+	step,
+	agent,
+	headingId,
+}: {
+	step: Step;
+	agent: Asker;
+	headingId: string;
+}) {
+	return (
+		<div className="flex flex-col items-center gap-1 pb-2 text-center">
+			<span aria-hidden className="relative mb-2.5 inline-flex">
+				<AgentAvatar color={agent.color} face={agent.face} size={64} />
+				<span className="absolute -right-2 -bottom-1 rounded-[10px] ring-[3px] ring-panel">
+					<ConnectionMark
+						presetId={step.look?.presetId}
+						name={step.where || step.action}
+						size="sm"
+					/>
+				</span>
+			</span>
+			<h2
+				id={headingId}
+				className="m-0 text-balance font-bold text-[20px] text-foreground leading-tight [overflow-wrap:anywhere]"
+			>
+				{step.action}
+			</h2>
+			<p className="m-0 text-pretty text-[14px] text-muted-foreground">{step.who}</p>
+		</div>
+	);
+}
+
+/**
+ * Allow and Deny, and what went wrong if answering failed. Deny is neutral:
+ * refusing is not a danger. Pinned along a phone's foot they are two halves,
+ * Deny first, so Allow is under the thumb.
+ */
 function Answer({
 	pending,
 	error,
-	onDeny,
-	onAllow,
+	onDecide,
+	actionLabel,
+	pinned = false,
 }: {
 	pending: boolean;
 	error: Error | null;
-	onDeny: () => void;
-	onAllow: () => void;
+	onDecide: (decision: Decision) => void;
+	/** What would be allowed, for Allow's accessible name. */
+	actionLabel: string;
+	pinned?: boolean;
 }) {
+	const allow = (
+		<Button
+			disabled={pending}
+			onClick={() => onDecide("allow_once")}
+			aria-label={`Allow: ${actionLabel}`}
+			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+		>
+			Allow
+		</Button>
+	);
+	const deny = (
+		<Button
+			variant="secondary"
+			disabled={pending}
+			onClick={() => onDecide("deny")}
+			aria-label={`Deny: ${actionLabel}`}
+			className={pinned ? "h-11 flex-1 text-[15px]" : "h-[31px] px-4 text-[13px]"}
+		>
+			Deny
+		</Button>
+	);
 	return (
 		<div className="flex flex-col gap-1.5">
-			<div className="flex gap-1.5">
-				<Button size="sm" disabled={pending} onClick={onAllow}>
-					Allow
-				</Button>
-				<Button
-					size="sm"
-					variant="secondary"
-					disabled={pending}
-					onClick={onDeny}
-					className="bg-border-strong hover:bg-person-avatar"
-				>
-					Deny
-				</Button>
-			</div>
+			<fieldset className="m-0 flex flex-wrap gap-2 border-0 p-0">
+				<legend className="sr-only">Answer this request</legend>
+				{pinned ? (
+					<>
+						{deny}
+						{allow}
+					</>
+				) : (
+					<>
+						{allow}
+						{deny}
+					</>
+				)}
+			</fieldset>
 			{error && (
 				<p role="alert" className="m-0 text-destructive-text text-xs">
 					{failureMessage(error)}
@@ -256,73 +437,6 @@ function isRecordList(value: unknown): value is unknown[] {
 	return Array.isArray(value) && value.length > 0 && !isPlainList(value);
 }
 
-/**
- * The whole request, to judge it by: the same step as the card, with who asks
- * folded into the line under it, every field laid out as fields all the way down,
- * and the answer, so it can be given without going back to the card. It
- * scrolls inside the dialog, so a request of any size never stretches the
- * thread.
- */
-function RequestDialog({
-	input,
-	agent,
-	wants,
-	look,
-	label,
-	where,
-	answer,
-	open,
-	onOpenChange,
-}: {
-	input: ToolCallPart["input"];
-	agent: Asker;
-	wants: string;
-	look?: ConnectionLook;
-	label: string;
-	where: string;
-	answer: ReactNode;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-}) {
-	const headingId = useId();
-	// Opening puts focus on the header, so the request starts from its top
-	// rather than scrolled to its first control.
-	const top = useRef<HTMLElement>(null);
-	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent
-				initialFocus={top}
-				aria-labelledby={headingId}
-				className="flex max-h-[min(38rem,calc(100dvh-4rem))] flex-col gap-0 p-0 sm:max-w-[36rem]"
-				style={botColorVariables(agent.color)}
-			>
-				<header
-					ref={top}
-					tabIndex={-1}
-					className="border-border-subtle border-b px-4 pt-4 pb-3 outline-none"
-				>
-					<StepHeading
-						look={look}
-						label={label}
-						where={where}
-						detail={`${agent.name} ${wants}${where ? ` in ${where}` : ""}`}
-						headingId={headingId}
-					/>
-				</header>
-				<ScrollArea className="min-h-0 flex-1">
-					<div className="px-4 py-3">
-						<RequestValue value={input} depth={0} />
-					</div>
-				</ScrollArea>
-				<footer className="flex flex-wrap items-start gap-2 border-border-subtle border-t px-4 py-3">
-					<CopyJson value={input} />
-					<div className="ml-auto min-w-0 flex-1">{answer}</div>
-				</footer>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
 /** Past this depth a value is written as JSON rather than nested any further. */
 const MAX_DEPTH = 3;
 
@@ -339,7 +453,7 @@ function RequestValue({ value, depth }: { value: unknown; depth: number }) {
 	if (isRecordList(value) && depth < MAX_DEPTH) return <EntryList entries={value} depth={depth} />;
 	if (value !== null && typeof value === "object" && !isPlainList(value)) {
 		return (
-			<pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md bg-list px-2.5 py-2 font-mono text-2xs text-foreground">
+			<pre className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md bg-list px-2.5 py-2 font-mono text-2xs">
 				{JSON.stringify(value, null, 2)}
 			</pre>
 		);
@@ -348,17 +462,22 @@ function RequestValue({ value, depth }: { value: unknown; depth: number }) {
 }
 
 /**
- * A record's fields, named in words. A field holding more structure puts it
- * under its name, indented along a guide line, rather than beside it.
+ * A record's fields, named in words: each name beside its value on a wide
+ * screen, and above it on a phone, where a row is too narrow for both. A
+ * field holding more structure puts it under its name, indented along a guide
+ * line, rather than beside it.
  */
 function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 	return (
-		<dl className="m-0 grid grid-cols-[fit-content(9rem)_minmax(0,1fr)] gap-x-4 gap-y-2">
+		<dl className="m-0 flex flex-col gap-3 md:grid md:grid-cols-[fit-content(8rem)_minmax(0,1fr)] md:gap-x-2.5 md:gap-y-0.5">
 			{fields.map(([key, value]) => {
 				const nested = hasStructure(value);
 				return (
-					<div key={key} className="col-span-2 grid grid-cols-subgrid">
-						<dt className="truncate text-muted-foreground text-xs leading-5">
+					<div
+						key={key}
+						className="flex min-w-0 flex-col gap-0.5 md:col-span-2 md:grid md:grid-cols-subgrid md:gap-0"
+					>
+						<dt className="text-[14px] text-muted-foreground leading-normal md:min-w-[76px]">
 							{wordsFromKey(key)}
 						</dt>
 						{nested ? (
@@ -459,7 +578,7 @@ function EntryTable({ columns, rows }: { columns: string[]; rows: Record<string,
 						<th
 							key={column}
 							scope="col"
-							className="pr-4 pb-1 text-left font-normal text-muted-foreground text-xs"
+							className="pr-4 pb-1 text-left font-normal text-[14px] text-muted-foreground"
 						>
 							{wordsFromKey(column)}
 						</th>
@@ -511,8 +630,8 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 		<p className="m-0 leading-5">
 			{Object.entries(fields).map(([key, value], index) => (
 				<Fragment key={key}>
-					{index > 0 && <span className="text-muted-foreground text-sm"> · </span>}
-					<span className="text-muted-foreground text-xs">{wordsFromKey(key)}</span>{" "}
+					{index > 0 && <span className="text-[14px] text-muted-foreground"> · </span>}
+					<span className="text-[14px] text-muted-foreground">{wordsFromKey(key)}</span>{" "}
 					<PlainValue value={value} />
 				</Fragment>
 			))}
@@ -528,39 +647,21 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 function PlainValue({ value }: { value: unknown }) {
 	if (isPlainList(value)) {
 		if (value.length === 0) return <Quiet>None</Quiet>;
-		return <span className="text-foreground text-sm">{value.map(String).join(", ")}</span>;
+		return <span className="text-[14px] leading-normal">{value.map(String).join(", ")}</span>;
 	}
 	if (value === null || value === undefined || value === "") return <Quiet>Empty</Quiet>;
 	if (typeof value === "boolean") return <Quiet>{value ? "Yes" : "No"}</Quiet>;
 	if (typeof value === "number") {
-		return <span className="text-foreground text-sm tabular-nums">{value}</span>;
+		return <span className="text-[14px] tabular-nums leading-normal">{value}</span>;
 	}
 	if (fieldsOf(value) === undefined && typeof value === "object") return <Quiet>None</Quiet>;
 	return (
-		<span className="whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground text-sm">
+		<span className="whitespace-pre-wrap text-pretty text-[14px] leading-normal [overflow-wrap:anywhere]">
 			{String(value)}
 		</span>
 	);
 }
 
 function Quiet({ children }: { children: ReactNode }) {
-	return <span className="text-muted-foreground text-sm">{children}</span>;
-}
-
-/** The request exactly as the tool would receive it, for anyone who needs the payload itself. */
-function CopyJson({ value }: { value: unknown }) {
-	const [copied, setCopied] = useState(false);
-	return (
-		<Button
-			variant="ghost"
-			size="sm"
-			onClick={() => {
-				void navigator.clipboard?.writeText(JSON.stringify(value, null, 2));
-				setCopied(true);
-			}}
-		>
-			{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-			{copied ? "Copied" : "Copy JSON"}
-		</Button>
-	);
+	return <span className="text-[14px] text-muted-foreground leading-normal">{children}</span>;
 }
