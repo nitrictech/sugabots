@@ -21,6 +21,7 @@ import { connectionIn, connectionsIn, toConnection } from "./connection-reads.ts
 import { ConnectionRepository } from "./connection-repository.ts";
 import { ConnectionSignIn } from "./connection-sign-in.ts";
 import { listServerTools } from "./mcp.ts";
+import { type SignInStartFailure, signInStartFailure } from "./oauth.ts";
 
 /**
  * Connecting a pod to MCP servers: checking an address against the egress
@@ -207,7 +208,9 @@ export const make = Effect.gen(function* () {
 			Effect.tapError((failure) =>
 				Effect.logWarning("A connection's sign-in did not start", failure),
 			),
-			Effect.mapError(() => new ConnectionOAuthStartFailed()),
+			Effect.mapError(
+				(failure) => new ConnectionOAuthStartFailed({ reason: signInStartFailure(failure.cause) }),
+			),
 		);
 
 	return Service.of({
@@ -396,13 +399,22 @@ export class ConnectionNotFound
 	}
 }
 
-/** The server or its authorization server would not start a sign-in; the logs say why. */
+/**
+ * The server or its authorization server would not start a sign-in. `reason`
+ * is why, as far as it is known; the logs have the full cause.
+ */
 export class ConnectionOAuthStartFailed
-	extends Data.TaggedError("ConnectionOAuthStartFailed")
+	extends Data.TaggedError("ConnectionOAuthStartFailed")<{ readonly reason: SignInStartFailure }>
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Could not start signing in to that server`;
+		if (this.reason === "registration_unsupported") {
+			return UserMessage.of`Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.`;
+		}
+		if (this.reason === "unreachable") {
+			return UserMessage.of`Sugabots couldn't reach the server to start signing in. Check the address and that the server is running, then try again.`;
+		}
+		return UserMessage.of`The server didn't start a sign-in. Try again, or connect it with an access token from the server instead.`;
 	}
 }
 
@@ -420,6 +432,6 @@ export class ConnectionNeededNoSignIn
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The server needed no sign-in`;
+		return UserMessage.of`This server doesn't need a sign-in, so nothing was added. Connect it without one instead.`;
 	}
 }
