@@ -1,7 +1,7 @@
 import type { BotLook } from "@sugabots/avatars";
 import type { AccentTone } from "@/components/accent";
 
-/** A page's place in the docs: its file in `content/`, and the bot that hosts it. */
+/** A page's place in the docs: its file in `packages/docs/content/`, and the bot that hosts it. */
 export interface DocLink {
 	slug: string;
 	bot: BotLook;
@@ -15,7 +15,7 @@ export interface DocGroup {
 	pages: readonly DocLink[];
 }
 
-/** The docs in reading order. A page in `content/` must be listed here to be published. */
+/** The docs in reading order. A page in `packages/docs/content/` must be listed here to be published. */
 export const docGroups: readonly DocGroup[] = [
 	{
 		title: "Start here",

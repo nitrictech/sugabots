@@ -82,6 +82,10 @@
         "pg": "^8.23.0",
       },
     },
+    "packages/docs": {
+      "name": "@sugabots/docs",
+      "version": "0.0.0",
+    },
     "packages/provider-logos": {
       "name": "@sugabots/provider-logos",
       "version": "0.0.0",
@@ -889,6 +893,8 @@
     "@sugabots/contracts": ["@sugabots/contracts@workspace:packages/contracts"],
 
     "@sugabots/core": ["@sugabots/core@workspace:packages/core"],
+
+    "@sugabots/docs": ["@sugabots/docs@workspace:packages/docs"],
 
     "@sugabots/provider-logos": ["@sugabots/provider-logos@workspace:packages/provider-logos"],
 

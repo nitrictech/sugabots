@@ -32,10 +32,11 @@ export interface DocPage extends Frontmatter {
 	markdown: string;
 }
 
-const CONTENT_DIRECTORY = "./content/";
+/** The pages live in `packages/docs`, which the server reads them from too. */
+const CONTENT_DIRECTORY = "../../../docs/content/";
 
-const modules = import.meta.glob<DocModule>("./content/*.mdx", { eager: true });
-const sources = import.meta.glob<string>("./content/*.mdx", {
+const modules = import.meta.glob<DocModule>("../../../docs/content/*.mdx", { eager: true });
+const sources = import.meta.glob<string>("../../../docs/content/*.mdx", {
 	eager: true,
 	query: "?raw",
 	import: "default",
