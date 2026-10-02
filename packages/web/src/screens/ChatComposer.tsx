@@ -194,7 +194,6 @@ export function ChatComposer({
 					placeholder={placeholder}
 					maxLength={20_000}
 					rows={1}
-					required
 					className={cn(
 						"field-sizing-content block max-h-40 min-h-9 min-w-0 resize-none bg-transparent py-[7px] text-foreground text-lg leading-[22px] outline-none [grid-area:draft] placeholder:text-subtle-foreground",
 						// In line with the + below it.
