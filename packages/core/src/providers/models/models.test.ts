@@ -166,6 +166,29 @@ describe("a failed model request", () => {
 		expect(failure.userMessage).toBe("The model provider refused the request. Check its API key.");
 	});
 
+	it.each([
+		["a 402", 402, { error: { message: "Insufficient balance" } }],
+		[
+			"an exhausted quota",
+			429,
+			{ error: { message: "Quota exceeded", code: "insufficient_quota" } },
+		],
+	])("says plainly when a provider wants payment, for %s", (_, statusCode, body) => {
+		const refused = new APICallError({
+			message: "Refused",
+			url: "https://models.example/v1/chat/completions",
+			requestBodyValues: {},
+			statusCode,
+			responseBody: JSON.stringify(body),
+		});
+
+		expect(Models.RequestFailed.fromCause(refused)).toMatchObject({
+			reason: "outOfCredit",
+			userMessage:
+				"The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.",
+		});
+	});
+
 	it("logs the SDK's message when the body says nothing readable", () => {
 		const opaque = new APICallError({
 			message: "Bad Gateway",
