@@ -41,17 +41,33 @@ describe("Egress.layer", () => {
 		["in production", { NODE_ENV: "production" }, PRIVATE],
 		[
 			"in production when allowed",
+			{ NODE_ENV: "production", ALLOW_UNSAFE_WORKSPACE_URLS: "true" },
+			"resolved",
+		],
+		["outside production when refused", { ALLOW_UNSAFE_WORKSPACE_URLS: "false" }, PRIVATE],
+		[
+			"in production when allowed by the deprecated name",
 			{ NODE_ENV: "production", ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true" },
 			"resolved",
 		],
-		["outside production when refused", { ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "false" }, PRIVATE],
-	])("lets model providers reach a private network %s as configured", async (_, env, expected) => {
-		const exit = await withEgress(env, (egress) =>
-			rejection(Effect.runPromise(egress.validateProviderUrl(privateProvider))),
-		);
+		[
+			"when the new name refuses what the deprecated name allows",
+			{
+				ALLOW_UNSAFE_WORKSPACE_URLS: "false",
+				ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true",
+			},
+			PRIVATE,
+		],
+	])(
+		"lets workspace addresses reach a private network %s as configured",
+		async (_, env, expected) => {
+			const exit = await withEgress(env, (egress) =>
+				rejection(Effect.runPromise(egress.validateProviderUrl(privateProvider))),
+			);
 
-		expect(Exit.isSuccess(exit) && exit.value).toMatch(expected);
-	});
+			expect(Exit.isSuccess(exit) && exit.value).toMatch(expected);
+		},
+	);
 
 	it("keeps web_fetch off private networks unless allowed", async () => {
 		const refused = await withEgress({}, (egress) => rejection(egress.webFetch(privatePage)));
@@ -65,6 +81,7 @@ describe("Egress.layer", () => {
 	});
 
 	it.each([
+		["ALLOW_UNSAFE_WORKSPACE_URLS", "maybe"],
 		["ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK", "maybe"],
 		["ALLOW_PRIVATE_WEB_FETCH_NETWORK", "ture"],
 	])("refuses to start when %s is not a boolean", async (name, value) => {

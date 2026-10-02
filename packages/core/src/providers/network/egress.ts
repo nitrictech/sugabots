@@ -2,7 +2,7 @@ export * as Egress from "./egress.ts";
 
 import { lookup as nodeLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
-import { Config, Context, Data, Effect, Layer } from "effect";
+import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import {
 	Agent,
 	type Dispatcher,
@@ -31,28 +31,27 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Egress") {}
 
 /**
- * Reads the two policies: model providers may reach private networks outside
- * production unless `ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK` says otherwise, and
+ * Reads the two policies: the addresses a workspace gives, for its model and
+ * search providers and its connections, may be plain HTTP or on a local network
+ * outside production unless `ALLOW_UNSAFE_WORKSPACE_URLS` says otherwise, and
  * `web_fetch` may not unless `ALLOW_PRIVATE_WEB_FETCH_NETWORK` says it may.
  * The clients close when the layer does.
  */
 export const make = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
-	const allowPrivateProviderNetwork = yield* Config.Boolean(
-		"ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK",
-	).pipe(Config.withDefault(!installation.isProduction));
+	const allowUnsafeWorkspaceUrls = yield* unsafeWorkspaceUrls(!installation.isProduction);
 	const allowPrivateWebFetchNetwork = yield* Config.Boolean("ALLOW_PRIVATE_WEB_FETCH_NETWORK").pipe(
 		Config.withDefault(false),
 	);
 	return {
 		providers: yield* closedWithLayer(() =>
-			createEgressHttpClients({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+			createEgressHttpClients({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		),
 		validateProviderUrl: urlValidation(
-			createEgressUrlValidator({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+			createEgressUrlValidator({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		),
 		oauth: yield* closedWithLayer(() =>
-			createEgressHttpClient({ allowPrivateNetwork: allowPrivateProviderNetwork }),
+			createEgressHttpClient({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		),
 		webFetch: yield* closedWithLayer(() =>
 			createEgressHttpClient({ allowPrivateNetwork: allowPrivateWebFetchNetwork }),
@@ -425,4 +424,30 @@ function closedWithLayer<A extends { close(): Promise<void> }>(create: () => A) 
 	return Effect.acquireRelease(Effect.sync(create), (acquired) =>
 		Effect.promise(() => acquired.close()),
 	);
+}
+
+const UNSAFE_WORKSPACE_URLS = "ALLOW_UNSAFE_WORKSPACE_URLS";
+/** The deprecated name for `UNSAFE_WORKSPACE_URLS`, still read so existing installations keep working. */
+const DEPRECATED_UNSAFE_WORKSPACE_URLS = "ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK";
+
+/**
+ * unsafeWorkspaceUrls reads whether workspaces may give plain-HTTP and
+ * local-network addresses: `UNSAFE_WORKSPACE_URLS` if set, else
+ * `DEPRECATED_UNSAFE_WORKSPACE_URLS`, else `defaultValue`. It logs a warning
+ * whenever `DEPRECATED_UNSAFE_WORKSPACE_URLS` is set.
+ */
+function unsafeWorkspaceUrls(defaultValue: boolean) {
+	return Effect.gen(function* () {
+		const current = yield* Config.option(Config.Boolean(UNSAFE_WORKSPACE_URLS));
+		const deprecated = yield* Config.option(Config.Boolean(DEPRECATED_UNSAFE_WORKSPACE_URLS));
+		if (Option.isSome(deprecated)) {
+			yield* Effect.logWarning(
+				`${DEPRECATED_UNSAFE_WORKSPACE_URLS} is deprecated: set ${UNSAFE_WORKSPACE_URLS} instead`,
+			);
+		}
+		return Option.getOrElse(
+			Option.orElse(current, () => deprecated),
+			() => defaultValue,
+		);
+	});
 }

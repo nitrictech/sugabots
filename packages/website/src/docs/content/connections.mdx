@@ -34,6 +34,9 @@ Choose **Something else**, then **Connect by URL**, and fill in:
 - **Name**: what it's called in Sugabots.
 - **Address**: the server's URL. Sugabots connects to remote servers over
   Streamable HTTP. It doesn't run servers itself.
+  A plain-HTTP or local-network address needs
+  [`ALLOW_UNSAFE_WORKSPACE_URLS=true`](/docs/configuration#network) in
+  production.
 - **Sign in with**: how Sugabots proves itself to the server.
   - **Token**: an access token, sent as `Authorization: Bearer <token>`. Leave
     it empty if the server needs none.
