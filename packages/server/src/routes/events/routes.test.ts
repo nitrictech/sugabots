@@ -170,9 +170,24 @@ describe("the stream", () => {
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
 		expect(stream.response.headers.get("content-type")).toContain("text/event-stream");
-		expect(stream.response.headers.get("cache-control")).toBe("no-store");
+		expect(stream.response.headers.get("cache-control")).toBe("no-store, no-transform");
 		expect(stream.response.headers.get("x-accel-buffering")).toBe("no");
 		stream.close();
+	});
+
+	it("is not compressed for a client that accepts compression", async () => {
+		const { app, bus } = server();
+		const response = await app.request(`/workspaces/${WORKSPACE}/events`, {
+			headers: { authorization: "Bearer good-token", "accept-encoding": "gzip, deflate, br" },
+		});
+		const reader = response.body?.getReader();
+
+		await bus.publish(`workspace:${WORKSPACE}`, streamEvent("thread.created", { threadId: "c1" }));
+		const chunk = await reader?.read();
+
+		expect(response.headers.get("content-encoding")).toBeNull();
+		expect(new TextDecoder().decode(chunk?.value)).toContain("thread.created");
+		await reader?.cancel();
 	});
 
 	it("answers HEAD with stream headers without subscribing", async () => {
@@ -186,7 +201,7 @@ describe("the stream", () => {
 
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/event-stream");
-		expect(response.headers.get("cache-control")).toBe("no-store");
+		expect(response.headers.get("cache-control")).toBe("no-store, no-transform");
 		expect(response.headers.get("x-accel-buffering")).toBe("no");
 		expect(response.body).toBeNull();
 		expect(subscribe).not.toHaveBeenCalled();

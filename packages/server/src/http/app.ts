@@ -6,6 +6,7 @@ import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
 	HttpMiddleware,
+	HttpPlatform,
 	HttpRouter,
 	type HttpServer,
 	HttpServerError,
@@ -45,11 +46,28 @@ const betterAuthRoutes = Layer.effectDiscard(
 		yield* router.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
 			toWebRequest(request).pipe(
 				Effect.flatMap(authentication.handler),
-				Effect.map(HttpServerResponse.fromWeb),
+				Effect.map((response) => withoutTransforms(HttpServerResponse.fromWeb(response))),
 			),
 		);
 	}),
 );
+
+/**
+ * better-auth's answers carry session tokens beside words the request supplies,
+ * which is what a BREACH attack needs: compressed, their size leaks a token a
+ * guess at a time. `no-transform` keeps this server, and any proxy in front of
+ * it, Cloudflare included, from compressing them.
+ */
+function withoutTransforms(
+	response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse {
+	const cacheControl = response.headers["cache-control"];
+	return HttpServerResponse.setHeader(
+		response,
+		"cache-control",
+		cacheControl ? `${cacheControl}, no-transform` : "no-transform",
+	);
+}
 
 /**
  * The API, as routes on an `HttpRouter`.
@@ -98,7 +116,11 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
 	Layer.provide(
 		HttpRouter.middleware(
-			Effect.map(Installation.Service, ({ trustedOrigins }) => everyRequest(trustedOrigins)),
+			Effect.gen(function* () {
+				const { trustedOrigins } = yield* Installation.Service;
+				const platform = yield* HttpPlatform.HttpPlatform;
+				return everyRequest(trustedOrigins, platform);
+			}),
 			{ global: true },
 		),
 	),
@@ -135,7 +157,8 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 }
 
 /** What happens to every request, the outermost first. */
-function everyRequest(origins: readonly string[]) {
+function everyRequest(origins: readonly string[], platform: HttpPlatform.HttpPlatform["Service"]) {
+	const compress = HttpMiddleware.compression();
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
 		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
@@ -145,9 +168,13 @@ function everyRequest(origins: readonly string[]) {
 	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
 	// send Authorization, but the token issuance header is not exposed to pages.
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
-		cors(
-			serverTiming(defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect))))),
-		);
+		compress(
+			cors(
+				serverTiming(
+					defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect)))),
+				),
+			),
+		).pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform));
 }
 
 /**

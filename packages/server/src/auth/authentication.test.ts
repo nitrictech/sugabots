@@ -317,6 +317,27 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	it("rejects a token it never issued", async () => {
 		expect((await me("not-a-real-token")).status).toBe(401);
 	});
+
+	it("sends its answers uncompressed, since they carry session tokens", async () => {
+		const response = await app.request(`${API_BASE_PATH}/auth/sign-up/email`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: ORIGIN,
+				"accept-encoding": "br, gzip",
+			},
+			body: JSON.stringify({
+				name: "Sam",
+				image: `https://example.com/${"a".repeat(1500)}.png`,
+				email: `long-${crypto.randomUUID().slice(0, 8)}@example.com`,
+				password: "correct-horse-battery",
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-encoding")).toBeNull();
+		expect((await response.text()).length).toBeGreaterThan(1024);
+	});
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => {

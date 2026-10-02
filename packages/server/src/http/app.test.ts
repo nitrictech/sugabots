@@ -1,3 +1,4 @@
+import { brotliDecompressSync } from "node:zlib";
 import { healthResponseSchema, meSchema } from "@sugabots/contracts";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
@@ -144,6 +145,19 @@ describe("JSON body limit", () => {
 		});
 
 		expect(response.status).toBe(404);
+	});
+});
+
+describe("response compression", () => {
+	it("compresses a large JSON body with Node's brotli", async () => {
+		const longNamedUser = { ...user, name: "Sam ".repeat(1024) };
+		const app = createTestApp(identifiedBy(async () => longNamedUser));
+
+		const response = await app.request("/me", { headers: { "accept-encoding": "br" } });
+
+		expect(response.headers.get("content-encoding")).toBe("br");
+		const body = brotliDecompressSync(Buffer.from(await response.arrayBuffer()));
+		expect(JSON.parse(body.toString("utf8")).user).toEqual(longNamedUser);
 	});
 });
 
