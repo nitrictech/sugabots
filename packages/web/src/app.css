@@ -212,6 +212,32 @@
 	}
 }
 
+/*
+ * Whether the chat composer has room for its wide controls: a wide screen, and
+ * a composer wide enough beside the draft. A side panel can leave a wide screen
+ * with a narrow composer. The composer is the `composer` container.
+ *
+ * 80rem is Tailwind's `xl` screen. 36rem leaves the draft about 240px beside
+ * the chip and the switch's words.
+ */
+@custom-variant composer-wide {
+	@media (width >= 80rem) {
+		@container composer (width >= 36rem) {
+			@slot;
+		}
+	}
+}
+
+@custom-variant composer-narrow {
+	@media (width < 80rem) {
+		@slot;
+	}
+
+	@container composer (width < 36rem) {
+		@slot;
+	}
+}
+
 @layer base {
 	* {
 		border-color: var(--border);

@@ -134,7 +134,7 @@ export function ChatComposer({
 				event.preventDefault();
 				void onSubmit();
 			}}
-			className={cn("relative flex shrink-0 flex-col gap-1.5", className)}
+			className={cn("@container/composer relative flex shrink-0 flex-col gap-1.5", className)}
 		>
 			{mentionMenuOpen && (
 				<MentionMenu
@@ -297,18 +297,18 @@ const PILL_LAYOUTS = {
 	},
 };
 
-/** The switch on a wide screen: words, named for Tab. */
+/** The switch in a wide composer: words, named for Tab. */
 const SWITCH_AS_WORDS =
 	"mb-1.5 gap-1.5 whitespace-nowrap rounded-md px-1 py-0.5 text-subtle-foreground text-xs hover:text-muted-foreground";
-/** Below a wide screen: a round icon button the size of the send button. */
+/** In a narrow composer: a round icon button the size of the send button. */
 const SWITCH_AS_ICON =
-	"max-xl:mb-0.5 max-xl:size-8 max-xl:justify-center max-xl:rounded-full max-xl:p-0";
+	"composer-narrow:mb-0.5 composer-narrow:size-8 composer-narrow:justify-center composer-narrow:rounded-full composer-narrow:p-0";
 /** A solid disc in the text colour, so it is never taken for the send button. */
-const SWITCH_ICON_ON = "max-xl:bg-foreground max-xl:text-background";
-const SWITCH_ICON_OFF = "max-xl:text-muted-foreground max-xl:hover:bg-hover";
+const SWITCH_ICON_ON = "composer-narrow:bg-foreground composer-narrow:text-background";
+const SWITCH_ICON_OFF = "composer-narrow:text-muted-foreground composer-narrow:hover:bg-hover";
 
 /**
- * Shown beside the + while the message is for people only, on a wide screen;
+ * Shown beside the + while the message is for people only, in a wide composer;
  * below one the switch shows it. Clicking it goes back to writing to the bot.
  */
 function PeopleOnlyChip({
@@ -329,7 +329,7 @@ function PeopleOnlyChip({
 				type="button"
 				aria-label="Back to bots"
 				onClick={onSwitchBack}
-				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors hover:bg-hover max-xl:hidden"
+				className="focus-ring mb-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border-strong bg-chip px-2.5 font-semibold text-foreground text-sm transition-colors hover:bg-hover composer-narrow:hidden"
 			>
 				<UsersRound size={15} strokeWidth={2.2} />
 				People only
@@ -341,9 +341,10 @@ function PeopleOnlyChip({
 /**
  * Switches who the message is for, before the send button: named for Tab,
  * which does the same from the draft. A touch screen has no Tab key, so there
- * it shows the words alone. Below a wide screen, on a tablet or a phone, it
- * is a people icon instead, on a solid disc in the text colour while the
- * message is for people only, so it is never taken for the send button.
+ * it shows the words alone. In a narrow composer, as on a tablet, a phone or
+ * beside a side panel, it is a people icon instead, on a solid disc in the
+ * text colour while the message is for people only, so it is never taken for
+ * the send button.
  */
 function AudienceSwitch({
 	on,
@@ -377,13 +378,13 @@ function AudienceSwitch({
 					on ? SWITCH_ICON_ON : SWITCH_ICON_OFF,
 				)}
 			>
-				<span className="flex items-center gap-1.5 max-xl:hidden">
+				<span className="flex items-center gap-1.5 composer-narrow:hidden">
 					<kbd className="rounded-[5px] border border-border-strong px-1.5 py-px font-sans font-semibold text-[11px] text-muted-foreground [@media(hover:none)]:hidden">
 						Tab
 					</kbd>
 					{on ? "back to bots" : "people only"}
 				</span>
-				<UsersRound aria-hidden size={18} strokeWidth={2.2} className="xl:hidden" />
+				<UsersRound aria-hidden size={18} strokeWidth={2.2} className="composer-wide:hidden" />
 			</button>
 		</DetailTooltip>
 	);
