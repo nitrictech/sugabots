@@ -8,7 +8,7 @@ services:
   sugabots:
     image: ghcr.io/nitrictech/sugabots:latest
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       DATABASE_URL: postgres://sugabots:sugabots@postgres:5432/sugabots
       PUBLIC_URL: http://localhost:3000

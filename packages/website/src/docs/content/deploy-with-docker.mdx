@@ -3,9 +3,9 @@ title: Deploy with Docker
 description: Host Sugabots on a server or a hosting platform so your team can use it.
 ---
 
-The [Quickstart](/docs/quickstart) runs Sugabots on your own computer, where
-nobody else can reach it. To use it with other people, host it somewhere they
-can reach over HTTPS, and set up email so they receive their invites.
+The [Quickstart](/docs/quickstart) runs Sugabots on your own computer. To use it
+with other people, host it somewhere they can reach over HTTPS, and set up
+email so they receive their invites.
 
 Sugabots is a single Docker image, `ghcr.io/nitrictech/sugabots`, that serves
 both the web app and the API. It stores everything in PostgreSQL 18.
@@ -34,7 +34,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
      sugabots:
        image: ghcr.io/nitrictech/sugabots:latest
        ports:
-         - "127.0.0.1:3000:3000"
+         - "3000:3000"
        environment:
          DATABASE_URL: postgres://sugabots:${POSTGRES_PASSWORD}@postgres:5432/sugabots
          PUBLIC_URL: https://sugabots.example.com
@@ -98,8 +98,8 @@ both the web app and the API. It stores everything in PostgreSQL 18.
 
 4. Add HTTPS
 
-   Sugabots only listens on the server itself, at `127.0.0.1:3000`. Put a reverse
-   proxy in front of it to serve HTTPS. With [Caddy](https://caddyserver.com/docs/install),
+   Sugabots serves plain HTTP on port 3000. Put a reverse proxy in front of it
+   to serve HTTPS. With [Caddy](https://caddyserver.com/docs/install),
    which gets and renews certificates automatically, add this to
    `/etc/caddy/Caddyfile`:
 
