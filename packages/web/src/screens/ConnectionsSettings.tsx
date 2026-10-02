@@ -5,7 +5,6 @@ import {
 	type ConnectionTool,
 	connectionCatalog,
 	connectionPresetFor,
-	connectionToolMutating,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { ArrowUpRight, Code, Search } from "lucide-react";
@@ -81,7 +80,7 @@ export function ConnectionsSettings({
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 			<SettingsGroup
 				label="Connections"
-				note="Every bot in this pod can use these. Ask means it waits for your approval first."
+				note="Every bot in this pod can use these. Ask means it waits for your approval first; Allow runs without asking."
 			>
 				{listed.map((one) => (
 					<ConnectionRow
@@ -208,11 +207,7 @@ function toolGroups(
 	if (connection.access === "off") {
 		return [{ label: "Tools", note: "Off, so bots in this pod can't use these.", tools }];
 	}
-	if (connection.access === "ask") return [{ label: "Asks first", tools }];
-	return [
-		{ label: "Asks first", tools: tools.filter(connectionToolMutating) },
-		{ label: "Runs freely", tools: tools.filter((tool) => !connectionToolMutating(tool)) },
-	];
+	return [{ label: connection.access === "ask" ? "Asks first" : "Runs freely", tools }];
 }
 
 /**

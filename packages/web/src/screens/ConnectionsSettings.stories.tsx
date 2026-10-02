@@ -118,14 +118,13 @@ export const States = meta.story({
 	},
 });
 
-/** One connection opened: its address, its check, its tools by whether they ask first, and Remove. */
+/** One connection opened: its address, its check, its tools, and Remove. */
 export const OneOpened = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(
 			await canvas.findByRole("button", { name: "About Linear" }, { timeout: 10_000 }),
 		);
 		const dialog = await screen.findByRole("dialog", { name: "Linear" });
-		await expect(within(dialog).getByRole("heading", { name: "Asks first" })).toBeInTheDocument();
 		await expect(within(dialog).getByRole("heading", { name: "Runs freely" })).toBeInTheDocument();
 		await expect(
 			within(dialog).getByRole("button", { name: "Remove connection" }),

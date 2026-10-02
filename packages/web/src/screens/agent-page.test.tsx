@@ -167,7 +167,7 @@ describe("a member", () => {
 		expect(screen.queryByRole("button", { name: /Wiki/ })).toBeNull();
 	});
 
-	it("says a change asks first, and a read runs freely", async () => {
+	it("says every tool of a connection set to allow runs freely, changes included", async () => {
 		client.api.connections.list.mockReturnValue(
 			Effect.succeed([linearConnection({ tools: readsAndWrites })]),
 		);
@@ -176,11 +176,11 @@ describe("a member", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /Linear.*3 tools/ }));
 
 		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
+		expect(within(tools).queryByRole("region", { name: "Asks first" })).toBeNull();
 		const free = within(tools).getByRole("region", { name: "Runs freely" });
 		expect(within(free).getByText("List issues")).toBeDefined();
-		const asks = within(tools).getByRole("region", { name: "Asks first" });
-		expect(within(asks).getByText("Create issue label")).toBeDefined();
-		expect(within(asks).getByText("Save issue")).toBeDefined();
+		expect(within(free).getByText("Create issue label")).toBeDefined();
+		expect(within(free).getByText("Save issue")).toBeDefined();
 	});
 
 	it("asks first for every tool of a connection set to ask", async () => {

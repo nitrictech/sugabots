@@ -1,4 +1,4 @@
-import { type Connection, type ConnectionTool, connectionToolMutating } from "@sugabots/contracts";
+import type { Connection, ConnectionTool } from "@sugabots/contracts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -24,16 +24,11 @@ export interface AgentTool {
 	access: ToolAccess;
 }
 
-/**
- * Each of a connection's tools with what happens when a bot calls it: a tool
- * that changes things always asks first, and so does every tool of a
- * connection set to ask. A connection that is off offers none of them.
- */
 export function agentToolsOf(connection: Connection): AgentTool[] {
 	if (connection.access === "off") return [];
 	return connection.tools.map((tool) => ({
 		tool,
-		access: connectionToolMutating(tool) || connection.access === "ask" ? "asks" : "free",
+		access: connection.access === "ask" ? "asks" : "free",
 	}));
 }
 

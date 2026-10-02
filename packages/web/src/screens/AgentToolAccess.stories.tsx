@@ -69,7 +69,7 @@ const meta = preview.meta({
 	},
 });
 
-/** Allowed: its reads run freely, and each change asks first. */
+/** Allowed: every tool runs freely, changes included. */
 export const Allowed = meta.story({});
 
 /** Set to ask: every call waits for a person, reads included. */

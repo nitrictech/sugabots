@@ -9,7 +9,7 @@ const features: readonly Feature[] = [
 	},
 	{
 		title: "Connect your tools",
-		body: "Plug any MCP server into a pod, from Linear to Notion. Keep it read-only, or let agents make changes with approval.",
+		body: "Plug any MCP server into a pod, from Linear to Notion. Have agents ask before each tool call, or let them run freely.",
 	},
 	{
 		title: "Usage you can see",

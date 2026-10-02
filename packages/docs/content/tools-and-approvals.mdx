@@ -34,14 +34,11 @@ Each connection has an **Approval** setting:
 | --- | --- |
 | Off | Bots aren't offered its tools |
 | Ask | Every call waits for a person |
-| Allow | Tools that only read run straight away. Anything else waits |
-
-A tool counts as read-only only when the app says so. If it doesn't say, the
-tool is treated as one that makes changes, and it always waits.
+| Allow | Every call runs straight away |
 
 ## Try it
 
-Set the approval, pick what the bot wants to do, and answer it.
+Set the approval and pick what the bot wants to do. A read and a change are treated the same, so only the approval decides what happens.
 
 <ApprovalPlayground />
 
