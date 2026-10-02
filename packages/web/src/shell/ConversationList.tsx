@@ -27,7 +27,7 @@ export function ConversationList({
 	selectedAgentId?: string;
 	className?: string;
 }) {
-	const list = useChatList(pod.id);
+	const list = useChatList(pod.slug);
 	const session = useSession();
 	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();

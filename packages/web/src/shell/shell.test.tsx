@@ -356,7 +356,7 @@ describe("the conversation list", () => {
 		expect(rows[0]?.getAttribute("aria-current")).toBe("page");
 		expect(client.api.chats.list).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
-			query: { pod: pods[0]?.id },
+			query: { pod: pods[0]?.slug },
 		});
 	});
 

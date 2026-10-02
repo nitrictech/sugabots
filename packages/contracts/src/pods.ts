@@ -18,6 +18,8 @@ import { uuidSchema } from "./uuid.ts";
  * installation: two workspaces may both have a `general`, and neither should
  * have to know about the other.
  */
+const ID_SHAPED = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export const podSlugSchema = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(48),
@@ -32,11 +34,13 @@ export const podSlugSchema = Schema.String.check(
  */
 export const PERSONAL_POD_SLUG = "personal";
 
-/** A slug a shared pod may take: any but the one every Personal pod answers to. */
+/** A slug a shared pod may take: any but the one every Personal pod answers to, and not one shaped like an id. */
 export const sharedPodSlugSchema = podSlugSchema.check(
 	Schema.makeFilter((slug) => slug !== PERSONAL_POD_SLUG, {
 		message: `"${PERSONAL_POD_SLUG}" is reserved for Personal pods`,
 	}),
+	// An address takes an id or a slug in the same place, so a slug shaped like an id would be read as one.
+	Schema.makeFilter((slug) => !ID_SHAPED.test(slug), { message: "Cannot be shaped like an id" }),
 );
 
 /**

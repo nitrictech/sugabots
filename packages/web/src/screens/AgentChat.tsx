@@ -62,7 +62,7 @@ export function AgentChat({
 	onDetailsClose: () => void;
 	onThreadChange: (threadId: string | undefined) => void;
 }) {
-	const chat = useChat(pod.id, agent.id);
+	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
 	const mainThread = useThread(chat.data?.mainThreadId);
