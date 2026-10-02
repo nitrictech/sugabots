@@ -40,5 +40,59 @@ services:
       retries: 12
       start_period: 5s
 
+  # Sandboxes for local development, only with `--profile sandboxes`. It holds
+  # the Docker socket, so it can start containers on this machine: that is how
+  # it makes sandboxes, and why it is not started unless asked for.
+  opensandbox:
+    container_name: sugabots_opensandbox
+    profiles: [sandboxes]
+    image: opensandbox/server:release-1.1.0
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+    configs:
+      - source: opensandbox_config
+        target: /etc/opensandbox/config.toml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${OPENSANDBOX_PORT:-8090}:8090"
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+configs:
+  opensandbox_config:
+    content: |
+      [server]
+      host = "0.0.0.0"
+      port = 8090
+      api_key = "${OPENSANDBOX_API_KEY:-development-opensandbox-key}"
+
+      [runtime]
+      type = "docker"
+      execd_image = "opensandbox/execd:v1.1.0"
+
+      [egress]
+      image = "opensandbox/egress:v1.1.7"
+      mode = "dns+nft"
+
+      [docker]
+      network_mode = "bridge"
+      # Sandboxes' ports are published on Docker's bridge address, which this
+      # container can reach and nothing outside the machine can. 172.17.0.1 is
+      # Docker's default on Linux.
+      host_ip = "${OPENSANDBOX_HOST_IP:-172.17.0.1}"
+      publish_host = "${OPENSANDBOX_HOST_IP:-172.17.0.1}"
+      # Below Linux's ephemeral ports (32768 and up), which outgoing
+      # connections take, so a sandbox's port is never already in use.
+      port_range_min = 20000
+      port_range_max = 30000
+      drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+      no_new_privileges = true
+      pids_limit = 4096
+
+      [ingress]
+      mode = "direct"
+
 volumes:
   sugabots_postgres_data:

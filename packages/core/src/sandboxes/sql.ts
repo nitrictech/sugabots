@@ -1,3 +1,4 @@
+import type { SandboxProviderSettings } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
 	boolean,
@@ -13,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { pod, user, workspace } from "../workspaces/sql.ts";
+import type { Sandboxes } from "./sandboxes.ts";
 
 /**
  * A sandbox provider a workspace has configured: an account at a service that
@@ -56,26 +58,6 @@ export const sandboxProvider = pgTable(
 
 export type SandboxProviderRow = typeof sandboxProvider.$inferSelect;
 
-/**
- * A provider's settings, by preset. A provider may be saved before it has
- * every address it needs; it can't be enabled until it has. An image or
- * template left out follows the preset's default, so a new default reaches
- * every provider not set to something else.
- */
-export type SandboxProviderSettings =
-	| {
-			readonly preset: "opensandbox";
-			readonly serverUrl?: string;
-			readonly image?: string;
-	  }
-	| {
-			readonly preset: "e2b";
-			/** E2B Embed's API and its address for reaching sandboxes; both left out for E2B Cloud. */
-			readonly apiUrl?: string;
-			readonly sandboxUrl?: string;
-			readonly template?: string;
-	  };
-
 /** What Sugabots made in a provider's account, by preset. */
 export type SandboxManagedResources = {
 	readonly preset: "e2b";
@@ -100,7 +82,7 @@ export const sandbox = pgTable(
 		 */
 		sandboxProviderId: uuid("sandbox_provider_id").notNull(),
 		/** The provider's own id for it. */
-		providerSandboxId: text("provider_sandbox_id").notNull(),
+		providerSandboxId: text("provider_sandbox_id").$type<Sandboxes.SandboxId>().notNull(),
 		/** When it was paused for sitting idle; null while it runs. */
 		pausedAt: timestamp("paused_at", { withTimezone: true }),
 		/** When a turn last let go of it, which is when its idle time starts. */
