@@ -6,6 +6,7 @@ import type {
 	ConnectionTestResult,
 	ConnectionUpdate,
 	NewConnection,
+	UnsavedConnection,
 } from "@sugabots/contracts";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
@@ -15,7 +16,7 @@ import type { PodPermission } from "../../authorization/permissions.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { Egress } from "../network/egress.ts";
+import { Egress, type EgressHttpClient } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { connectionIn, connectionsIn, toConnection } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
@@ -45,6 +46,14 @@ export interface Interface {
 		| UrlNotAllowed
 		| ConnectionRepository.ConnectionNameTaken
 		| ConnectionNotFound,
+		CurrentActor.Service
+	>;
+	/** testUnsaved asks the server at `server.url`, with its secret, for its tools, saving nothing. */
+	readonly testUnsaved: (
+		input: InPod & { server: UnsavedConnection },
+	) => Effect.Effect<
+		ConnectionTestResult,
+		AuthorizationDenied | UrlNotAllowed,
 		CurrentActor.Service
 	>;
 	/** A new address or secret sends the connection back to learn its tools. */
@@ -167,33 +176,39 @@ export const make = Effect.gen(function* () {
 				return yield* new ConnectionNotFound();
 			}
 			const clients = yield* signIn.clients;
-			const started = yield* Clock.currentTimeMillis;
-			const found = yield* Effect.promise(() =>
-				listServerTools(
-					{
-						url: target.url,
-						headers: target.headers,
-						authProvider:
-							target.auth === "oauth" ? clients.for(at.workspaceId, at.connectionId) : undefined,
-					},
-					target.auth === "oauth" ? egress.oauth : egress.providers.for({ baseUrl: target.url }),
-				),
+			const { found, result } = yield* askServer(
+				{
+					url: target.url,
+					headers: target.headers,
+					authProvider:
+						target.auth === "oauth" ? clients.for(at.workspaceId, at.connectionId) : undefined,
+				},
+				target.auth === "oauth" ? egress.oauth : egress.providers.for({ baseUrl: target.url }),
 			);
-			const latencyMs = (yield* Clock.currentTimeMillis) - started;
-			if (!found.ok) {
-				yield* Effect.logWarning("Asking a connection's server for its tools failed", found.cause);
-			}
 			yield* connections.recordTest(
 				at.workspaceId,
 				at.connectionId,
 				target.configurationUpdatedAt,
 				found.ok ? { tools: found.tools } : { error: found.reason },
 			);
-			return {
+			return result;
+		});
+
+	/** askServer lists the tools of `server` through `fetch`, timing it, and logs why it failed when it does. */
+	const askServer = (server: Parameters<typeof listServerTools>[0], fetch: EgressHttpClient) =>
+		Effect.gen(function* () {
+			const started = yield* Clock.currentTimeMillis;
+			const found = yield* Effect.promise(() => listServerTools(server, fetch));
+			const latencyMs = (yield* Clock.currentTimeMillis) - started;
+			if (!found.ok) {
+				yield* Effect.logWarning("Asking a connection's server for its tools failed", found.cause);
+			}
+			const result: ConnectionTestResult = {
 				reachable: found.ok,
 				latencyMs,
 				...(found.ok ? { tools: found.tools.length } : { error: found.reason }),
 			};
+			return { found, result };
 		});
 
 	/** A test whose outcome is recorded on the connection rather than returned. */
@@ -237,6 +252,22 @@ export const make = Effect.gen(function* () {
 						yield* discoverQuietly(at);
 					}
 					return yield* requireConnection(at);
+				}),
+			),
+
+		testUnsaved: ({ podId, server }) =>
+			operation(
+				"testUnsaved",
+				Effect.gen(function* () {
+					yield* authorization.pod(podId, "connection.manage");
+					yield* requireAllowedUrl(egress, server.url);
+					const headers: Record<string, string> =
+						server.secretHeader && server.secret ? { [server.secretHeader]: server.secret } : {};
+					const { result } = yield* askServer(
+						{ url: server.url, headers },
+						egress.providers.for({ baseUrl: server.url }),
+					);
+					return result;
 				}),
 			),
 

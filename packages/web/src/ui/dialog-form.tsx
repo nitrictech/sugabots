@@ -118,7 +118,10 @@ export function DialogFormFooter({
 	cancel = true,
 	cancelDisabled = false,
 	onCancel,
+	beside,
 }: {
+	/** A button shown before Cancel and the action, such as Test. */
+	beside?: ReactNode;
 	action?: string;
 	actionDisabled?: boolean;
 	cancel?: boolean;
@@ -127,6 +130,7 @@ export function DialogFormFooter({
 }) {
 	return (
 		<footer className="flex justify-end gap-2 px-[18px] pb-[18px]">
+			{beside}
 			{cancel &&
 				(onCancel ? (
 					<Button type="button" variant="secondary" disabled={cancelDisabled} onClick={onCancel}>

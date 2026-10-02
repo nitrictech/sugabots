@@ -100,6 +100,7 @@ export const client = {
 			update: vi.fn(),
 			remove: vi.fn(),
 			test: vi.fn(),
+			testUnsaved: vi.fn(),
 			connectFromCatalog: vi.fn(),
 			startOAuth: vi.fn(),
 		},

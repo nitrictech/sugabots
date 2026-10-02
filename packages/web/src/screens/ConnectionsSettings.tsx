@@ -6,6 +6,7 @@ import {
 	connectionCatalog,
 	connectionPresetFor,
 	connectionToolMutating,
+	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { ArrowUpRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
@@ -677,6 +678,20 @@ function ByUrlStep({
 	const [access, setAccess] = useState<ConnectionAccess>("ask");
 	const ready = name.trim() !== "" && url.trim() !== "";
 	const pending = actions.create.isPending || actions.update.isPending || actions.connect.isPending;
+	const server: UnsavedConnection =
+		method === "token"
+			? {
+					url,
+					...(secret.trim()
+						? { secretHeader: "Authorization", secret: bearerAuthorization(secret) }
+						: {}),
+				}
+			: { url, ...(secretHeader ? { secretHeader } : {}), ...(secret ? { secret } : {}) };
+	// A test of what the form held before its last change says nothing about it now.
+	const tested =
+		JSON.stringify(actions.testUnsaved.variables) === JSON.stringify(server)
+			? actions.testUnsaved.data
+			: undefined;
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -686,13 +701,7 @@ function ByUrlStep({
 				await actions.connect.mutateAsync({ name, url, access: access === "off" ? "ask" : access });
 				return;
 			}
-			const made = await actions.create.mutateAsync(
-				method === "token"
-					? secret.trim()
-						? { name, url, secretHeader: "Authorization", secret: bearerAuthorization(secret) }
-						: { name, url }
-					: { name, url, ...(secretHeader ? { secretHeader } : {}), ...(secret ? { secret } : {}) },
-			);
+			const made = await actions.create.mutateAsync({ name, ...server });
 			// A server added by its address starts at Allow.
 			if (access !== "allow") {
 				await actions.update.mutateAsync({ connectionId: made.id, json: { access } });
@@ -703,7 +712,11 @@ function ByUrlStep({
 		done();
 	}
 
-	const error = actions.create.error ?? actions.update.error ?? actions.connect.error;
+	const error =
+		actions.create.error ??
+		actions.update.error ??
+		actions.connect.error ??
+		actions.testUnsaved.error;
 	return (
 		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
@@ -779,8 +792,28 @@ function ByUrlStep({
 					/>
 				</SettingsGroup>
 				{error && <Alert>{failureMessage(error)}</Alert>}
+				{tested &&
+					(tested.reachable ? (
+						<p className="m-0 px-1 text-sm text-subtle-foreground">
+							Found {tested.tools ?? 0} actions in {tested.latencyMs} ms.
+						</p>
+					) : (
+						<Alert>{tested.error ?? "The server did not answer."}</Alert>
+					))}
 			</DialogFormBody>
 			<DialogFormFooter
+				beside={
+					method !== "oauth" && (
+						<Button
+							type="button"
+							variant="secondary"
+							disabled={url.trim() === "" || actions.testUnsaved.isPending}
+							onClick={() => actions.testUnsaved.mutate(server)}
+						>
+							{actions.testUnsaved.isPending ? "Testing…" : "Test"}
+						</Button>
+					)
+				}
 				action={method === "oauth" ? "Sign in" : "Add"}
 				actionDisabled={!ready || pending}
 				cancel={false}

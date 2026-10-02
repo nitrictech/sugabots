@@ -134,6 +134,15 @@ export const newConnectionSchema = Schema.Struct({
 
 export type NewConnection = typeof newConnectionSchema.Type;
 
+/** A server's address and secret, to test before a connection is made with them. */
+export const unsavedConnectionSchema = Schema.Struct({
+	url: providerUrlSchema,
+	secretHeader: Schema.optional(secretHeaderSchema),
+	secret: Schema.optional(secretSchema),
+});
+
+export type UnsavedConnection = typeof unsavedConnectionSchema.Type;
+
 /** Making a connection from the catalog and starting its sign-in, as one request. */
 export const connectFromCatalogSchema = Schema.Struct({
 	name: connectionNameSchema,

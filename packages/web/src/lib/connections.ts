@@ -3,6 +3,7 @@ import type {
 	ConnectionSignInFailure,
 	ConnectionUpdate,
 	NewConnection,
+	UnsavedConnection,
 } from "@sugabots/contracts";
 import { connectionPresetFor, connectionSignInFailures } from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,6 +68,10 @@ export function useConnectionActions(podId: string) {
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
 				Effect.runPromise(connections.remove({ params: { podId, connectionId } })),
 			onSuccess: refresh,
+		}),
+		testUnsaved: useMutation({
+			mutationFn: (json: UnsavedConnection) =>
+				Effect.runPromise(connections.testUnsaved({ params: { podId }, payload: json })),
 		}),
 		test: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>

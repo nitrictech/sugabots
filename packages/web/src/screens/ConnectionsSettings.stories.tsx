@@ -176,11 +176,12 @@ export const AddingAnApp = meta.story({
 	},
 });
 
-/** Any other MCP server: its name, address, an access token by default, and its approval. */
+/** Any other MCP server: its name, address, an access token by default, its approval, and Test beside Add. */
 export const AddingByUrl = meta.story({
 	play: async ({ canvas }) => {
 		const step = await openConnectByUrl(canvas);
 		await expect(within(step).getByLabelText("Access token")).toBeInTheDocument();
+		await expect(within(step).getByRole("button", { name: "Test" })).toBeDisabled();
 		await expect(within(step).getByRole("button", { name: "Add" })).toBeDisabled();
 	},
 });

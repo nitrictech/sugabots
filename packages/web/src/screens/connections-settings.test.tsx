@@ -172,6 +172,31 @@ describe("the Connections settings", () => {
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
 	});
 
+	it("tests a server by address before adding it", async () => {
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.testUnsaved.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 3 }));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.change(within(step).getByLabelText("Access token"), { target: { value: "abc123" } });
+		fireEvent.click(within(step).getByRole("button", { name: "Test" }));
+
+		expect(await within(step).findByText("Found 3 actions in 40 ms.")).toBeDefined();
+		expect(route.testUnsaved.mock.calls[0]?.[0]).toMatchObject({
+			payload: {
+				url: "https://wiki.example.com/mcp",
+				secretHeader: "Authorization",
+				secret: "Bearer abc123",
+			},
+		});
+		expect(route.create).not.toHaveBeenCalled();
+	});
+
 	it("adds a server by address through its own sign-in", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		route.list.mockReturnValue(Effect.succeed([]));
