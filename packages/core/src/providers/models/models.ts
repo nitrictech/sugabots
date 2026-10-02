@@ -9,6 +9,7 @@ export * as Models from "./models.ts";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import {
 	APICallError,
 	type AssistantModelMessage,
@@ -370,6 +371,16 @@ function languageModel(
 				: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
 			headers: connection.headers,
 			fetch,
+		})(modelId);
+	}
+	if (connection.preset === "openrouter") {
+		return createOpenRouter({
+			apiKey: connection.apiKey ?? "",
+			baseURL: connection.baseUrl,
+			headers: connection.headers,
+			fetch,
+			// Asks for usage at the end of each stream, which costs are recorded from.
+			compatibility: "strict",
 		})(modelId);
 	}
 	const openai = createOpenAI({
