@@ -121,6 +121,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/settings/members/$member   one person, by membership id
  *   /$workspace/settings/pods/$pod   workspace pod detail
  *   /$workspace/settings/pods/$pod/agents/$agent   agent configuration
+ *   /$workspace/settings/pods/$pod/connections/$connection   one connection, by id
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
@@ -638,6 +639,14 @@ const settingsPodRoute = createRoute({
 	component: SettingsPodRoute,
 });
 
+/** One of a pod's connections, by its id. */
+const settingsPodConnectionRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/pods/$pod/connections/$connection",
+	loader: () => WorkspaceSettings.preload(),
+	component: SettingsPodConnectionRoute,
+});
+
 /** One model provider, by its id. */
 const settingsProviderRoute = createRoute({
 	getParentRoute: () => shellRoute,
@@ -710,6 +719,25 @@ function SettingsPodRoute() {
 				selectedPodId={pod.id}
 				connectionSignInError={signInError && signInFailureReason(signInError)}
 			/>
+		</SettingsLayout>
+	);
+}
+
+function SettingsPodConnectionRoute() {
+	const { pod: podSlug, connection } = settingsPodConnectionRoute.useParams();
+	const { data: pods, isPending, error } = usePods();
+	const pod = findPod(pods, podSlug);
+	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
+	if (!pod) {
+		return (
+			<Panes>
+				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
+			</Panes>
+		);
+	}
+	return (
+		<SettingsLayout>
+			<WorkspaceSettings section="pods" selectedPodId={pod.id} selectedConnectionId={connection} />
 		</SettingsLayout>
 	);
 }
@@ -969,6 +997,7 @@ const routeTree = rootRoute.addChildren([
 		settingsSectionRoute,
 		settingsMemberRoute,
 		settingsPodAgentRoute,
+		settingsPodConnectionRoute,
 		settingsPodRoute,
 		settingsSystemModelRoute,
 		settingsDefaultModelRoute,

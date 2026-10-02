@@ -2,7 +2,7 @@ import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { ConnectionMark } from "./connection-mark.tsx";
 
-const SIZES = ["xs", "md", "sm", "tile", "default"] as const;
+const SIZES = ["xs", "md", "sm", "tile", "default", "lg"] as const;
 
 const meta = preview.meta({
 	title: "Controls/ConnectionMark",
@@ -11,7 +11,7 @@ const meta = preview.meta({
 	args: { name: "Linear", presetId: "linear" },
 });
 
-/** Every size, from inline in a line of text to a settings row's tile. */
+/** Every size, from inline in a line of text to a connection page's heading. */
 export const Sizes = meta.story({
 	render: (args) => (
 		<div style={{ display: "flex", alignItems: "center", gap: 14 }}>

@@ -8,7 +8,8 @@ import { appHandlers, StoryApp, storyPods } from "../story-app.tsx";
 /*
  * A pod's connections, as its settings page shows them: each app its bots
  * can reach, with Allow, Ask or Off for what they may do there and what needs
- * attention; one opened; and the Add connection dialog's steps.
+ * attention; and the Add connection dialog's steps. A connection opened is
+ * `Views/Connection`.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -115,34 +116,6 @@ export const States = meta.story({
 			}),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
-	},
-});
-
-/** One connection opened: its address, its check, its tools, and Remove. */
-export const OneOpened = meta.story({
-	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "About Linear" }, { timeout: 10_000 }),
-		);
-		const dialog = await screen.findByRole("dialog", { name: "Linear" });
-		await expect(within(dialog).getByRole("heading", { name: "Runs freely" })).toBeInTheDocument();
-		await expect(
-			within(dialog).getByRole("button", { name: "Remove connection" }),
-		).toBeInTheDocument();
-	},
-});
-
-/** A connection whose last check failed: why, and a link to how to fix it. */
-export const FailedCheck = meta.story({
-	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "About Stripe" }, { timeout: 10_000 }),
-		);
-		const dialog = await screen.findByRole("dialog", { name: "Stripe" });
-		await expect(within(dialog).getByRole("link", { name: "How to fix this" })).toHaveAttribute(
-			"href",
-			"https://sugabots.ai/docs/connections#troubleshooting",
-		);
 	},
 });
 

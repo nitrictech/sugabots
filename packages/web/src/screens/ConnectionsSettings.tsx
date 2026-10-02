@@ -2,20 +2,21 @@ import {
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionPreset,
-	type ConnectionTool,
 	connectionCatalog,
 	connectionPresetFor,
+	type Pod,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
-import { ArrowUpRight, Code, Search } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ArrowUpRight, ChevronRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { wordsFromKey } from "@/lib/tool-names.ts";
+import { connectionSettingsLink } from "@/lib/links.ts";
+import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
@@ -27,7 +28,6 @@ import {
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsAddRow,
-	SettingsDanger,
 	SettingsFieldRow,
 	SettingsGroup,
 	SettingsRow,
@@ -38,9 +38,9 @@ import {
 /*
  * The apps a pod's bots can reach, as one group on the pod's page: each with
  * Allow, Ask or Off for what its bots may do there, and whatever it needs (a
- * sign-in, a reconnect) on its line. A row opens the connection itself: its
- * address, its tools and removing it. Adding one is a dialog: the app, then
- * its sign-in and one approval control, or any other server by its address.
+ * sign-in, a reconnect) on its line. A row opens the connection's own page:
+ * its address, its tools and removing it. Adding one is a dialog: the app,
+ * then its sign-in and one approval control, or any other server by its address.
  */
 
 const accessLabel: Record<ConnectionAccess, string> = { allow: "Allow", ask: "Ask", off: "Off" };
@@ -55,25 +55,21 @@ const addingOptions = (["allow", "ask"] as const).map((value) => ({
 }));
 
 export function ConnectionsSettings({
-	podId,
-	podName,
+	pod,
 	canManage,
 	signInError,
 }: {
-	podId: string;
-	podName: string;
+	pod: Pod;
 	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
 }) {
-	const connections = useConnections(podId);
+	const connections = useConnections(pod.id);
 	const [adding, setAdding] = useState(false);
-	const [open, setOpen] = useState<string>();
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	const listed = connections.data;
 	const taken = new Set(listed.map((one) => connectionPresetFor(one.url)?.id));
-	const opened = listed.find((one) => one.id === open);
 
 	return (
 		<>
@@ -83,13 +79,7 @@ export function ConnectionsSettings({
 				note="Every bot in this pod can use these. Ask means it waits for your approval first; Allow runs without asking."
 			>
 				{listed.map((one) => (
-					<ConnectionRow
-						key={one.id}
-						connection={one}
-						podId={podId}
-						canManage={canManage}
-						onOpen={() => setOpen(one.id)}
-					/>
+					<ConnectionRow key={one.id} connection={one} pod={pod} canManage={canManage} />
 				))}
 				{listed.length === 0 && !canManage && <SettingsRow label="No connections in this pod." />}
 				{canManage && <SettingsAddRow label="Add connection" onClick={() => setAdding(true)} />}
@@ -97,20 +87,10 @@ export function ConnectionsSettings({
 			<Dialog open={adding} onOpenChange={setAdding}>
 				{adding && (
 					<AddConnectionDialog
-						podId={podId}
-						podName={podName}
+						podId={pod.id}
+						podName={pod.name}
 						available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
 						done={() => setAdding(false)}
-					/>
-				)}
-			</Dialog>
-			<Dialog open={opened !== undefined} onOpenChange={(next) => !next && setOpen(undefined)}>
-				{opened && (
-					<ConnectionDialog
-						connection={opened}
-						podId={podId}
-						canManage={canManage}
-						done={() => setOpen(undefined)}
 					/>
 				)}
 			</Dialog>
@@ -130,16 +110,17 @@ function lineFor(connection: Connection): string {
 
 function ConnectionRow({
 	connection,
-	podId,
+	pod,
 	canManage,
-	onOpen,
 }: {
 	connection: Connection;
-	podId: string;
+	pod: Pod;
 	canManage: boolean;
-	onOpen: () => void;
 }) {
-	const actions = useConnectionActions(podId);
+	const actions = useConnectionActions(pod.id);
+	const navigate = useNavigate();
+	const backToPod = useBackToHere(pod.name);
+	const page = { ...connectionSettingsLink(pod, connection), state: backToPod };
 	const preset = connectionPresetFor(connection.url);
 	const needsSignIn = !connection.signedIn;
 	const failing = connection.signedIn && connection.status === "error";
@@ -147,7 +128,9 @@ function ConnectionRow({
 	const error = actions.update.error ?? actions.signIn.error;
 	// A failing secret or address is fixed on the connection's own page.
 	const reconnect = () =>
-		connection.auth === "oauth" ? actions.signIn.mutate({ connectionId: connection.id }) : onOpen();
+		connection.auth === "oauth"
+			? actions.signIn.mutate({ connectionId: connection.id })
+			: void navigate(page);
 	const line = error ? failureMessage(error) : lineFor(connection);
 
 	return (
@@ -155,11 +138,9 @@ function ConnectionRow({
 			aria-label={connection.name}
 			className="flex min-h-[58px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-md:flex-wrap"
 		>
-			<button
-				type="button"
-				onClick={onOpen}
-				aria-haspopup="dialog"
-				aria-label={`About ${connection.name}`}
+			<Link
+				{...page}
+				aria-label={`Open ${connection.name}`}
 				className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left max-md:min-w-[60%]"
 			>
 				<ConnectionMark presetId={preset?.id} name={connection.name} size="tile" />
@@ -173,7 +154,7 @@ function ConnectionRow({
 						{line}
 					</span>
 				</span>
-			</button>
+			</Link>
 			{/* On a phone these wrap below the name, kept to the right. */}
 			<span className="ml-auto flex shrink-0 items-center gap-2">
 				{canManage && (needsSignIn || failing) && (
@@ -194,254 +175,12 @@ function ConnectionRow({
 				) : (
 					<SettingsValue>{accessLabel[connection.access]}</SettingsValue>
 				)}
+				{/* The name's link is the one in the tab order; this is a larger target beside the control. */}
+				<Link {...page} tabIndex={-1} aria-hidden className="grid place-items-center">
+					<ChevronRight size={16} strokeWidth={2.4} className="shrink-0 text-subtle-foreground" />
+				</Link>
 			</span>
 		</article>
-	);
-}
-
-/** How a tool runs under the connection's access: straight away, after a yes, or not at all. */
-function toolGroups(
-	connection: Connection,
-): { label: string; note?: string; tools: ConnectionTool[] }[] {
-	const tools = connection.tools;
-	if (connection.access === "off") {
-		return [{ label: "Tools", note: "Off, so bots in this pod can't use these.", tools }];
-	}
-	return [{ label: connection.access === "ask" ? "Asks first" : "Runs freely", tools }];
-}
-
-/**
- * One of a connection's tools: its name in words, and what it does, unless
- * the description only says the name again.
- */
-export function ConnectionToolRow({ tool }: { tool: ConnectionTool }) {
-	const label = wordsFromKey(tool.name);
-	const description = tool.description?.trim();
-	const says = description && description.toLowerCase() !== label.toLowerCase();
-	return <SettingsRow label={label} sub={says ? description : undefined} />;
-}
-
-/**
- * One connection: where it is, how it signs in, a check that it answers, what
- * its tools do under its access, and removing it.
- */
-function ConnectionDialog({
-	connection,
-	podId,
-	canManage,
-	done,
-}: {
-	connection: Connection;
-	podId: string;
-	canManage: boolean;
-	done: () => void;
-}) {
-	const actions = useConnectionActions(podId);
-	const [replacing, setReplacing] = useState(false);
-	const [secret, setSecret] = useState("");
-	const [removing, setRemoving] = useState(false);
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const preset = connectionPresetFor(connection.url);
-	const oauth = connection.auth === "oauth";
-	const checked =
-		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
-	const failure = checked
-		? !checked.reachable && (checked.error ?? "The server did not answer.")
-		: connection.status === "error" && (connection.lastTestError ?? "The last check failed.");
-	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
-	const matches = (tool: ConnectionTool) =>
-		needle === "" ||
-		tool.name.toLowerCase().includes(needle) ||
-		tool.description?.toLowerCase().includes(needle);
-
-	async function saveSecret(event: FormEvent) {
-		event.preventDefault();
-		if (!secret) return;
-		try {
-			await actions.update.mutateAsync({
-				connectionId: connection.id,
-				json:
-					connection.secretHeader === null
-						? { secretHeader: "Authorization", secret: bearerAuthorization(secret) }
-						: { secret },
-			});
-		} catch {
-			return;
-		}
-		setSecret("");
-		setReplacing(false);
-	}
-
-	return (
-		<DialogFormFrame>
-			<DialogFormStep
-				onSubmit={(event) => {
-					event.preventDefault();
-					done();
-				}}
-			>
-				<DialogFormHeader title={connection.name} />
-				<DialogFormBody>
-					<div className="max-h-[min(620px,70vh)] -mx-1 flex flex-col gap-5 overflow-y-auto px-1">
-						<div className="flex flex-col items-center gap-1.5 text-center">
-							<ConnectionMark presetId={preset?.id} name={connection.name} />
-							<span className="max-w-full truncate font-mono text-[12.5px] text-muted-foreground">
-								{connection.url}
-							</span>
-						</div>
-						<SettingsGroup label="Connection">
-							{oauth ? (
-								<SettingsRow
-									label="Sign-in"
-									sub={connection.signedIn ? "Signed in" : "Not signed in yet"}
-									trailing={
-										canManage && (
-											<Button
-												size="sm"
-												variant="secondary"
-												disabled={actions.signIn.isPending}
-												onClick={() => actions.signIn.mutate({ connectionId: connection.id })}
-											>
-												{connection.signedIn ? "Sign in again" : "Sign in"}
-											</Button>
-										)
-									}
-								/>
-							) : (
-								<SettingsRow
-									label={connection.secretHeader === null ? "Access token" : "Secret"}
-									sub={
-										connection.secretHeader === null
-											? "None yet"
-											: `Sent as ${connection.secretHeader}`
-									}
-									trailing={
-										canManage && (
-											<Button
-												size="sm"
-												variant="secondary"
-												onClick={() => setReplacing(!replacing)}
-											>
-												{connection.hasSecret ? "Replace" : "Add"}
-											</Button>
-										)
-									}
-								/>
-							)}
-							{replacing && (
-								// A form of its own inside the dialog's, which Save submits alone.
-								<div className="flex items-center gap-3 border-border border-t px-4 py-2.5">
-									<input
-										aria-label={`${connection.name} secret`}
-										type="password"
-										autoComplete="off"
-										value={secret}
-										onChange={(event) => setSecret(event.target.value)}
-										onKeyDown={(event) => {
-											if (event.key === "Enter") void saveSecret(event);
-										}}
-										placeholder={
-											connection.secretHeader === null
-												? "Paste the access token"
-												: "Paste the new secret"
-										}
-										className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
-									/>
-									<Button
-										size="sm"
-										disabled={!secret || actions.update.isPending}
-										onClick={(event) => void saveSecret(event)}
-									>
-										Save
-									</Button>
-								</div>
-							)}
-							<SettingsRow
-								label="Check connection"
-								sub="Make sure Sugabots can reach the server."
-								trailing={
-									<Button
-										size="sm"
-										variant="secondary"
-										disabled={actions.test.isPending}
-										onClick={() => actions.test.mutate({ connectionId: connection.id })}
-									>
-										{actions.test.isPending ? "Checking…" : "Check"}
-									</Button>
-								}
-							/>
-						</SettingsGroup>
-						{failure && (
-							<Alert>
-								{failure}{" "}
-								<a
-									href={TROUBLESHOOTING_URL}
-									target="_blank"
-									rel="noreferrer"
-									className="focus-ring rounded-sm font-medium text-link"
-								>
-									How to fix this
-								</a>
-							</Alert>
-						)}
-						{checked?.reachable && <Success>Connection successful</Success>}
-						{error && <Alert>{failureMessage(error)}</Alert>}
-						{connection.tools.length > 8 && (
-							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
-								<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-								<input
-									type="search"
-									value={query}
-									onChange={(event) => setQuery(event.target.value)}
-									placeholder={`Search ${connection.tools.length} tools`}
-									aria-label="Search tools"
-									className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
-								/>
-							</label>
-						)}
-						{connection.tools.length === 0 ? (
-							<SettingsGroup label="Tools">
-								<SettingsRow label="No actions found yet." />
-							</SettingsGroup>
-						) : (
-							toolGroups(connection)
-								.map((group) => ({ ...group, tools: group.tools.filter(matches) }))
-								.filter((group) => group.tools.length > 0)
-								.map((group) => (
-									<SettingsGroup key={group.label} label={group.label} note={group.note}>
-										{group.tools.map((tool) => (
-											<ConnectionToolRow key={tool.name} tool={tool} />
-										))}
-									</SettingsGroup>
-								))
-						)}
-						{canManage && (
-							<SettingsDanger onClick={() => setRemoving(true)}>Remove connection</SettingsDanger>
-						)}
-					</div>
-				</DialogFormBody>
-				<DialogFormFooter action="Done" cancel={false} />
-			</DialogFormStep>
-			<DeleteDialog
-				open={removing}
-				onOpenChange={setRemoving}
-				title={`Remove ${connection.name}?`}
-				description="Bots in this pod can no longer use its tools. Adding it again means signing in or entering its details again."
-				confirmLabel="Remove"
-				pending={actions.remove.isPending}
-				error={actions.remove.error ? failureMessage(actions.remove.error) : undefined}
-				onDelete={async () => {
-					try {
-						await actions.remove.mutateAsync({ connectionId: connection.id });
-					} catch {
-						return;
-					}
-					setRemoving(false);
-					done();
-				}}
-			/>
-		</DialogFormFrame>
 	);
 }
 
@@ -450,9 +189,6 @@ const signInMethodNote: Record<SignInMethod, string> = {
 	oauth: "You'll sign in to the server next.",
 	header: "The secret is sent in this header exactly as you type it.",
 };
-
-/** The docs on fixing a connection whose check failed. */
-const TROUBLESHOOTING_URL = "https://sugabots.ai/docs/connections#troubleshooting";
 
 type Choice = ConnectionPreset | "custom";
 
