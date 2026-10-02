@@ -1,4 +1,5 @@
 import type { Connection } from "@sugabots/contracts";
+import { BadRequest } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -195,6 +196,29 @@ describe("the Connections settings", () => {
 			},
 		});
 		expect(route.create).not.toHaveBeenCalled();
+	});
+
+	it("shows only the latest result once the way to sign in changes", async () => {
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.fail(new BadRequest({ message: "The server didn't start a sign-in." })),
+		);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
+		fireEvent.click(within(step).getByRole("button", { name: "Sign in" }));
+		expect(await within(step).findByText("The server didn't start a sign-in.")).toBeDefined();
+
+		fireEvent.click(within(step).getByRole("radio", { name: "Token" }));
+
+		expect(within(step).queryByRole("alert")).toBeNull();
 	});
 
 	it("adds a server by address through its own sign-in", async () => {
