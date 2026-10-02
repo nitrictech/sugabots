@@ -1,0 +1,13 @@
+# The dock's settings, as the system's defaults: Plank reads them from dconf,
+# by path, so they need no write at runtime.
+[net/launchpad/plank/docks/dock1]
+dock-items=['chromium.dockitem', 'lxterminal.dockitem', 'pcmanfm.dockitem']
+position='bottom'
+alignment='center'
+hide-mode='none'
+icon-size=48
+zoom-enabled=true
+zoom-percent=140
+lock-items=true
+show-dock-item=false
+theme='Sugabots'

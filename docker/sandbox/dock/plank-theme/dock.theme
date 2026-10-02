@@ -1,0 +1,35 @@
+# The dock's look: a rounded, light, see-through bar the icons sit inside,
+# in the style of macOS's. Sizes are tenths of the icon size.
+[PlankTheme]
+TopRoundness=4
+BottomRoundness=4
+LineWidth=1
+OuterStrokeColor=255;;255;;255;;110
+FillStartColor=245;;245;;247;;150
+FillEndColor=235;;235;;240;;150
+InnerStrokeColor=255;;255;;255;;0
+
+[PlankDockTheme]
+HorizPadding=1.5
+TopPadding=1.2
+BottomPadding=1.2
+ItemPadding=2.5
+IndicatorSize=4
+IconShadowSize=1
+UrgentBounceHeight=1.6666666666666667
+LaunchBounceHeight=0.625
+FadeOpacity=1
+ClickTime=300
+UrgentBounceTime=600
+LaunchBounceTime=600
+ActiveTime=300
+SlideTime=300
+FadeTime=250
+HideTime=250
+GlowSize=30
+GlowTime=10000
+GlowPulseTime=2000
+UrgentHueShift=150
+ItemMoveTime=450
+CascadeHide=true
+BadgeColor=0;;0;;0;;0
