@@ -145,10 +145,9 @@ function ConnectionRow({
 	const failing = connection.signedIn && connection.status === "error";
 	const pending = actions.update.isPending || actions.signIn.isPending || actions.test.isPending;
 	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
+	// A failing secret or address is fixed on the connection's own page.
 	const reconnect = () =>
-		connection.auth === "oauth"
-			? actions.signIn.mutate({ connectionId: connection.id })
-			: actions.test.mutate({ connectionId: connection.id });
+		connection.auth === "oauth" ? actions.signIn.mutate({ connectionId: connection.id }) : onOpen();
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const line = error
@@ -177,7 +176,7 @@ function ConnectionRow({
 						{connection.name}
 					</span>
 					<span
-						className={`truncate text-sm ${failing || error ? "text-destructive-text" : "text-muted-foreground"}`}
+						className={`text-sm ${failing || error ? "line-clamp-2 text-destructive-text" : "truncate text-muted-foreground"}`}
 					>
 						{line}
 					</span>
@@ -187,7 +186,7 @@ function ConnectionRow({
 			<span className="ml-auto flex shrink-0 items-center gap-2">
 				{canManage && (needsSignIn || failing) && (
 					<Button size="sm" variant="secondary" disabled={pending} onClick={reconnect}>
-						{needsSignIn ? "Sign in" : "Reconnect"}
+						{needsSignIn ? "Sign in" : connection.auth === "oauth" ? "Reconnect" : "Fix"}
 					</Button>
 				)}
 				{canManage ? (
@@ -259,7 +258,9 @@ function ConnectionDialog({
 	const oauth = connection.auth === "oauth";
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
-	const checkFailed = checked ? !checked.reachable : connection.status === "error";
+	const failure = checked
+		? !checked.reachable && (checked.error ?? "The server did not answer.")
+		: connection.status === "error" && (connection.lastTestError ?? "The last check failed.");
 	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
 	const matches = (tool: ConnectionTool) =>
 		needle === "" ||
@@ -270,7 +271,13 @@ function ConnectionDialog({
 		event.preventDefault();
 		if (!secret) return;
 		try {
-			await actions.update.mutateAsync({ connectionId: connection.id, json: { secret } });
+			await actions.update.mutateAsync({
+				connectionId: connection.id,
+				json:
+					connection.secretHeader === null
+						? { secretHeader: "Authorization", secret: bearerAuthorization(secret) }
+						: { secret },
+			});
 		} catch {
 			return;
 		}
@@ -298,15 +305,18 @@ function ConnectionDialog({
 						<SettingsGroup
 							label="Connection"
 							note={
-								checkFailed && (
-									<a
-										href={TROUBLESHOOTING_URL}
-										target="_blank"
-										rel="noreferrer"
-										className="focus-ring rounded-sm font-medium text-link"
-									>
-										How to fix this
-									</a>
+								failure && (
+									<>
+										{failure}{" "}
+										<a
+											href={TROUBLESHOOTING_URL}
+											target="_blank"
+											rel="noreferrer"
+											className="focus-ring rounded-sm font-medium text-link"
+										>
+											How to fix this
+										</a>
+									</>
 								)
 							}
 						>
@@ -328,23 +338,25 @@ function ConnectionDialog({
 									}
 								/>
 							) : (
-								connection.secretHeader !== null && (
-									<SettingsRow
-										label="Secret"
-										sub={`Sent as ${connection.secretHeader}`}
-										trailing={
-											canManage && (
-												<Button
-													size="sm"
-													variant="secondary"
-													onClick={() => setReplacing(!replacing)}
-												>
-													{connection.hasSecret ? "Replace" : "Add"}
-												</Button>
-											)
-										}
-									/>
-								)
+								<SettingsRow
+									label={connection.secretHeader === null ? "Access token" : "Secret"}
+									sub={
+										connection.secretHeader === null
+											? "None yet"
+											: `Sent as ${connection.secretHeader}`
+									}
+									trailing={
+										canManage && (
+											<Button
+												size="sm"
+												variant="secondary"
+												onClick={() => setReplacing(!replacing)}
+											>
+												{connection.hasSecret ? "Replace" : "Add"}
+											</Button>
+										)
+									}
+								/>
 							)}
 							{replacing && (
 								// A form of its own inside the dialog's, which Save submits alone.
@@ -358,7 +370,11 @@ function ConnectionDialog({
 										onKeyDown={(event) => {
 											if (event.key === "Enter") void saveSecret(event);
 										}}
-										placeholder="Paste the new secret"
+										placeholder={
+											connection.secretHeader === null
+												? "Paste the access token"
+												: "Paste the new secret"
+										}
 										className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
 									/>
 									<Button
@@ -373,12 +389,10 @@ function ConnectionDialog({
 							<SettingsRow
 								label="Check connection"
 								sub={
-									checked
-										? checked.reachable
+									failure
+										? "The last check failed."
+										: checked
 											? `Found ${checked.tools ?? 0} actions in ${checked.latencyMs} ms.`
-											: (checked.error ?? "The server did not answer.")
-										: connection.status === "error"
-											? (connection.lastTestError ?? "The last check failed.")
 											: "Ask the server what it can do."
 								}
 								trailing={
@@ -409,7 +423,7 @@ function ConnectionDialog({
 						)}
 						{connection.tools.length === 0 ? (
 							<SettingsGroup label="Tools">
-								<SettingsRow label="No actions found yet. Check the connection to see what it can do." />
+								<SettingsRow label="No actions found yet." />
 							</SettingsGroup>
 						) : (
 							toolGroups(connection)

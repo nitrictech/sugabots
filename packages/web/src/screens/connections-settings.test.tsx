@@ -253,20 +253,33 @@ describe("the Connections settings", () => {
 		);
 	});
 
-	it("offers to reconnect a server whose last test failed, and says how it went", async () => {
-		route.list.mockReturnValue(
-			Effect.succeed([{ ...wiki, access: "allow", status: "error", lastTestError: "HTTP 401" }]),
-		);
-		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 2 }));
+	it("takes a failing connection with no token to where one can be added", async () => {
+		const failing = {
+			...wiki,
+			access: "allow" as const,
+			status: "error" as const,
+			lastTestError: "The server needs an access token or a sign-in (HTTP 401)",
+			secretHeader: null,
+			hasSecret: false,
+		};
+		route.list.mockReturnValue(Effect.succeed([failing]));
+		route.update.mockReturnValue(Effect.succeed(failing));
 		mount(page);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).getByText("HTTP 401")).toBeDefined();
-		fireEvent.click(within(row).getByRole("button", { name: "Reconnect" }));
+		fireEvent.click(within(row).getByRole("button", { name: "Fix" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+		expect(within(dialog).getByText(/needs an access token/)).toBeDefined();
+		fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+		fireEvent.change(within(dialog).getByLabelText("Wiki secret"), { target: { value: "abc123" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
-		await waitFor(() => expect(route.test).toHaveBeenCalledOnce());
-		expect(await within(row).findByText(/Found 2 actions/)).toBeDefined();
+		await waitFor(() =>
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { secretHeader: "Authorization", secret: "Bearer abc123" },
+			}),
+		);
 	});
 
 	it("checks, replaces the secret of and removes a connection from its own page", async () => {

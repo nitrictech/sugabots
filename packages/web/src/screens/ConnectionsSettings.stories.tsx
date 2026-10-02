@@ -107,9 +107,7 @@ export const States = meta.story({
 			}),
 		).toBeChecked();
 		await expect(
-			within(canvas.getByRole("article", { name: "Stripe" })).getByRole("button", {
-				name: "Reconnect",
-			}),
+			within(canvas.getByRole("article", { name: "Stripe" })).getByRole("button", { name: "Fix" }),
 		).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("article", { name: "Notion" })).getByRole("button", {
