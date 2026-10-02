@@ -77,6 +77,40 @@ function Splash() {
 	return <div className="h-full bg-list" />;
 }
 
+/*
+ * A deploy replaces every hashed chunk, so a tab opened before it fails to load
+ * any chunk it has not fetched yet. Reloading picks up the new `index.html` and
+ * its hashes. A second failure soon after the reload is a chunk that is really
+ * missing, and is left to throw rather than reload forever.
+ */
+const STALE_CHUNK_RELOADED_AT = "stale-chunk-reloaded-at";
+const STALE_CHUNK_RELOAD_COOLDOWN_MS = 10_000;
+
+window.addEventListener("vite:preloadError", (event) => {
+	const reloadedAt = Number(readSessionStorage(STALE_CHUNK_RELOADED_AT));
+	if (Date.now() - reloadedAt < STALE_CHUNK_RELOAD_COOLDOWN_MS) {
+		return;
+	}
+	event.preventDefault();
+	writeSessionStorage(STALE_CHUNK_RELOADED_AT, String(Date.now()));
+	window.location.reload();
+});
+
+/** Storage can throw in private windows or with site data blocked. */
+function readSessionStorage(key: string): string | null {
+	try {
+		return sessionStorage.getItem(key);
+	} catch {
+		return null;
+	}
+}
+
+function writeSessionStorage(key: string, value: string) {
+	try {
+		sessionStorage.setItem(key, value);
+	} catch {}
+}
+
 const root = document.getElementById("root");
 if (!root) {
 	throw new Error("missing #root");
