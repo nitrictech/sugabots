@@ -28,6 +28,7 @@ import { toToolCallPart } from "./tool-calls.ts";
 export const participantColumns = {
 	userId: user.id,
 	userName: user.name,
+	userEmail: user.email,
 	userImage: user.image,
 	agentId: agent.id,
 	agentName: agent.name,
@@ -39,6 +40,7 @@ export const participantColumns = {
 export interface ParticipantRow {
 	userId: string | null;
 	userName: string | null;
+	userEmail: string | null;
 	userImage: string | null;
 	agentId: string | null;
 	agentName: string | null;
@@ -48,8 +50,13 @@ export interface ParticipantRow {
 }
 
 export function toParticipant(row: ParticipantRow): ThreadParticipant {
-	if (row.userId && row.userName) {
-		return toPerson({ id: row.userId, name: row.userName, image: row.userImage });
+	if (row.userId && row.userName && row.userEmail) {
+		return toPerson({
+			id: row.userId,
+			name: row.userName,
+			email: row.userEmail,
+			image: row.userImage,
+		});
 	}
 	if (row.agentId && row.agentName && row.agentHandle && row.agentColor !== null && row.agentFace) {
 		return {
@@ -106,7 +113,9 @@ export function toMessage(
 }
 
 /** A person's columns, for a relational query that names who wrote or joined. */
-export const personColumns = { columns: { id: true, name: true, image: true } } as const;
+export const personColumns = {
+	columns: { id: true, name: true, email: true, image: true },
+} as const;
 
 /** A person read with {@link personColumns}, as the API shows them. */
 export function toPerson(row: PersonIdentity): PersonParticipant {
@@ -114,6 +123,7 @@ export function toPerson(row: PersonIdentity): PersonParticipant {
 		kind: "person",
 		id: row.id,
 		name: row.name,
+		email: row.email,
 		handle: handleFromName(row.name),
 		image: row.image,
 	};
@@ -136,7 +146,7 @@ export const messageRelations = {
 } as const;
 
 /** Who a person is, as read with {@link personColumns}. */
-export type PersonIdentity = { id: string; name: string; image: string | null };
+export type PersonIdentity = { id: string; name: string; email: string; image: string | null };
 type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face">;
 
 /** A message row read with `messageRelations`. */
@@ -174,6 +184,7 @@ export function authorRow(
 	return {
 		userId: person?.id ?? null,
 		userName: person?.name ?? null,
+		userEmail: person?.email ?? null,
 		userImage: person?.image ?? null,
 		agentId: author?.id ?? null,
 		agentName: author?.name ?? null,
@@ -195,12 +206,14 @@ const RECENT_ACTIVITY_WINDOW = sql`interval '7 days'`;
  */
 export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow[]>`(
 	select coalesce(json_agg(json_build_object(
-		'userId', recent.user_id, 'userName', recent.user_name, 'userImage', recent.user_image,
+		'userId', recent.user_id, 'userName', recent.user_name, 'userEmail', recent.user_email,
+		'userImage', recent.user_image,
 		'agentId', recent.agent_id, 'agentName', recent.agent_name, 'agentHandle', recent.agent_handle,
 		'agentColor', recent.agent_color, 'agentFace', recent.agent_face
 	) order by recent.last_active_at desc), '[]'::json)
 	from (
-		select ${user.id} as user_id, ${user.name} as user_name, ${user.image} as user_image,
+		select ${user.id} as user_id, ${user.name} as user_name, ${user.email} as user_email,
+			${user.image} as user_image,
 			${agent.id} as agent_id, ${agent.name} as agent_name, ${agent.handle} as agent_handle,
 			${agent.color} as agent_color, ${agent.face} as agent_face,
 			max(${message.createdAt}) as last_active_at
@@ -218,7 +231,7 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 				), '-infinity'::timestamptz),
 				now() - ${RECENT_ACTIVITY_WINDOW}
 			)
-		group by 1, 2, 3, 4, 5, 6, 7, 8
+		group by 1, 2, 3, 4, 5, 6, 7, 8, 9
 	) as recent
 )`;
 
