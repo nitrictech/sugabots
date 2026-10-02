@@ -19,6 +19,7 @@ import {
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
+import { randomUuid } from "@/lib/random-uuid.ts";
 import { readReceipts } from "@/lib/read-receipts.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -145,7 +146,7 @@ export function AgentChat({
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
-				id: crypto.randomUUID(),
+				id: randomUuid(),
 				message,
 				peopleOnly: writingToPeople,
 			});

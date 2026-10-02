@@ -16,6 +16,7 @@ import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
 import { refreshChatMarkers } from "@/lib/chats.ts";
+import { randomUuid } from "@/lib/random-uuid.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 export function useThreadEvents(threadId: string | undefined): void {
@@ -198,7 +199,7 @@ async function applyThreadEvent(
 		return;
 	}
 	if (update.type === "thread.notice") {
-		const notice = { id: crypto.randomUUID(), text: update.notice };
+		const notice = { id: randomUuid(), text: update.notice };
 		queries.setQueryData<ThreadNotice[]>(noticesKey(threadId), (notices = []) => [
 			...notices,
 			notice,
