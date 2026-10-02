@@ -613,6 +613,50 @@ describe("ongoing agent Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
 	});
 
+	it("updates a reply on the chat's first page however many messages followed it", async () => {
+		const updates = controlledEventStream();
+		client.events.thread.mockReturnValue(updates.stream);
+		const writing: Message = {
+			...agentMessage,
+			id: "0199a3a0-0000-7000-8000-0000000001fc",
+			status: "streaming",
+			content: "Looking",
+			parts: [{ type: "text", text: "Looking" }],
+			createdAt: "2026-09-18T09:00:00.000Z",
+		};
+		const followUps: Message[] = Array.from({ length: 12 }, (_, index) => ({
+			...mainMessage,
+			id: `0199a3a0-0000-7000-8000-0000000002${String(index).padStart(2, "0")}`,
+			content: `Follow-up ${index + 1}`,
+			parts: [{ type: "text", text: `Follow-up ${index + 1}` }],
+			createdAt: `2026-09-18T09:${String(index + 1).padStart(2, "0")}:00.000Z`,
+		}));
+		const page = [writing, ...followUps];
+		client.api.chats.messages.mockReturnValue(
+			Effect.succeed({
+				items: page.map((message) => ({ kind: "message" as const, message })),
+				nextCursor: null,
+			}),
+		);
+		// As the API does: a thread's newest messages, as many as are asked for.
+		client.api.threads.get.mockImplementation(({ query }: { query: { limit: number } }) =>
+			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", page.slice(-query.limit))),
+		);
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		await screen.findByText("Follow-up 12");
+
+		updates.emit(
+			streamEvent("message.completed", {
+				threadId: chat.mainThreadId,
+				messageId: writing.id,
+				content: "Looking it up now",
+				status: "complete",
+			}),
+		);
+
+		expect(await screen.findByText("Looking it up now")).toBeDefined();
+	});
+
 	it("shows the reply that finished while you were elsewhere", async () => {
 		const writing: Message = {
 			...agentMessage,

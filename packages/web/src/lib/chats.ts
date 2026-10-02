@@ -21,7 +21,8 @@ import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
-const PAGE_SIZE = 30;
+/** Messages, or side threads, a page of the chat holds. */
+export const CHAT_PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
 function chatListQuery(workspaceId: string | undefined, pod: string | undefined) {
@@ -140,7 +141,7 @@ export function useChatMessages(chatId: string | undefined) {
 					Effect.runPromise(
 						client.api.chats.messages({
 							params: { chatId },
-							query: { limit: PAGE_SIZE, cursor: pageParam },
+							query: { limit: CHAT_PAGE_SIZE, cursor: pageParam },
 						}),
 						{ signal },
 					)
@@ -169,7 +170,7 @@ export function useChatHistory(chatId: string | undefined) {
 					Effect.runPromise(
 						client.api.chats.history({
 							params: { chatId },
-							query: { limit: PAGE_SIZE, cursor: pageParam },
+							query: { limit: CHAT_PAGE_SIZE, cursor: pageParam },
 						}),
 						{ signal },
 					)

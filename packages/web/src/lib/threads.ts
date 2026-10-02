@@ -42,10 +42,15 @@ export function useThreadActivity(threadId: string | undefined) {
 }
 
 /**
- * A thread and a page of its messages. The thread's events keep it current
- * while it is on screen, and it is fetched again whenever it comes back.
+ * A thread, with its newest `messageLimit` messages as it is fetched, and any
+ * earlier ones already held or loaded with `loadOlder`. The thread's events keep
+ * it current while it is on screen, and it is fetched again whenever it comes
+ * back.
  */
-export function useThread(threadId: string | undefined) {
+export function useThread(
+	threadId: string | undefined,
+	messageLimit: number = DEFAULT_THREAD_HISTORY_LIMIT,
+) {
 	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
 	const query = useQuery<ThreadDetails>({
@@ -56,10 +61,7 @@ export function useThread(threadId: string | undefined) {
 		queryFn: threadId
 			? async ({ signal }): Promise<ThreadDetails> => {
 					const latest = await Effect.runPromise(
-						client.api.threads.get({
-							params: { threadId },
-							query: { limit: DEFAULT_THREAD_HISTORY_LIMIT },
-						}),
+						client.api.threads.get({ params: { threadId }, query: { limit: messageLimit } }),
 						{ signal },
 					);
 					const current = queries.getQueryData<ThreadDetails>(queryKey);

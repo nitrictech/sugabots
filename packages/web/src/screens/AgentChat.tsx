@@ -11,6 +11,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react"
 import { v4 as uuidv4 } from "uuid";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
+	CHAT_PAGE_SIZE,
 	useChat,
 	useChatHistory,
 	useChatMessages,
@@ -44,6 +45,14 @@ import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
+/**
+ * Messages the main thread's details carry. The thread's events change only
+ * messages its details hold, and the chat's newest page has to stay live, so
+ * the details carry a page's worth: fewer would leave a reply that newer
+ * messages pushed past them still writing on screen.
+ */
+const LIVE_MESSAGE_LIMIT = CHAT_PAGE_SIZE;
+
 export function AgentChat({
 	agent,
 	pod,
@@ -65,7 +74,7 @@ export function AgentChat({
 	const chat = useChat(pod.id, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
-	const mainThread = useThread(chat.data?.mainThreadId);
+	const mainThread = useThread(chat.data?.mainThreadId, LIVE_MESSAGE_LIMIT);
 	useThreadEvents(chat.data?.mainThreadId);
 	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
