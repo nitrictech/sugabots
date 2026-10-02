@@ -1,6 +1,6 @@
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
-import { Alert } from "./alert.tsx";
+import { Alert, Success } from "./alert.tsx";
 
 const meta = preview.meta({
 	title: "Controls/Alert",
@@ -28,5 +28,13 @@ export const SeveralLines = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("alert")).toHaveTextContent("jay@example.com");
+	},
+});
+
+/** Something worked, said in green with a tick where it was tried, and announced. */
+export const Succeeded = meta.story({
+	render: () => <Success>Connection successful</Success>,
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("status")).toHaveTextContent("Connection successful");
 	},
 });

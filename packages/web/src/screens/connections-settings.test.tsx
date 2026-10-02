@@ -1,4 +1,5 @@
 import type { Connection } from "@sugabots/contracts";
+import { BadRequest } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -172,6 +173,54 @@ describe("the Connections settings", () => {
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
 	});
 
+	it("tests a server by address before adding it", async () => {
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.testUnsaved.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 3 }));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.change(within(step).getByLabelText("Access token"), { target: { value: "abc123" } });
+		fireEvent.click(within(step).getByRole("button", { name: "Test" }));
+
+		expect(await within(step).findByText("Connection successful")).toBeDefined();
+		expect(route.testUnsaved.mock.calls[0]?.[0]).toMatchObject({
+			payload: {
+				url: "https://wiki.example.com/mcp",
+				secretHeader: "Authorization",
+				secret: "Bearer abc123",
+			},
+		});
+		expect(route.create).not.toHaveBeenCalled();
+	});
+
+	it("shows only the latest result once the way to sign in changes", async () => {
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.fail(new BadRequest({ message: "The server didn't start a sign-in." })),
+		);
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
+		fireEvent.click(within(step).getByRole("button", { name: "Sign in" }));
+		expect(await within(step).findByText("The server didn't start a sign-in.")).toBeDefined();
+
+		fireEvent.click(within(step).getByRole("radio", { name: "Token" }));
+
+		expect(within(step).queryByRole("alert")).toBeNull();
+	});
+
 	it("adds a server by address through its own sign-in", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		route.list.mockReturnValue(Effect.succeed([]));
@@ -293,7 +342,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
 		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Check" }));
-		expect(await within(dialog).findByText(/Found 2 actions in 12 ms/)).toBeDefined();
+		expect(await within(dialog).findByText("Connection successful")).toBeDefined();
 
 		fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
 		fireEvent.change(within(dialog).getByLabelText("Wiki secret"), {

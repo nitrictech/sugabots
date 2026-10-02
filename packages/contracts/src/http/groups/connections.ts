@@ -9,6 +9,7 @@ import {
 	connectionTestResultSchema,
 	connectionUpdateSchema,
 	newConnectionSchema,
+	unsavedConnectionSchema,
 } from "../../connections.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, NotFound, refused } from "../errors.ts";
@@ -30,6 +31,13 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 			payload: newConnectionSchema,
 			success: connectionSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
+		}),
+		// Tests an address and secret without saving them, or anything about the test.
+		HttpApiEndpoint.post("testUnsaved", `${root}/test`, {
+			params: pod,
+			payload: unsavedConnectionSchema,
+			success: connectionTestResultSchema,
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.get("get", `${root}/:connectionId`, {
 			params: connection,

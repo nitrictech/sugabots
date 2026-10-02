@@ -6,13 +6,14 @@ import {
 	connectionCatalog,
 	connectionPresetFor,
 	connectionToolMutating,
+	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { ArrowUpRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
-import { Alert } from "@/ui/alert.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -143,20 +144,12 @@ function ConnectionRow({
 	const preset = connectionPresetFor(connection.url);
 	const needsSignIn = !connection.signedIn;
 	const failing = connection.signedIn && connection.status === "error";
-	const pending = actions.update.isPending || actions.signIn.isPending || actions.test.isPending;
-	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
+	const pending = actions.update.isPending || actions.signIn.isPending;
+	const error = actions.update.error ?? actions.signIn.error;
 	// A failing secret or address is fixed on the connection's own page.
 	const reconnect = () =>
 		connection.auth === "oauth" ? actions.signIn.mutate({ connectionId: connection.id }) : onOpen();
-	const checked =
-		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
-	const line = error
-		? failureMessage(error)
-		: checked
-			? checked.reachable
-				? `Found ${checked.tools ?? 0} actions in ${checked.latencyMs} ms.`
-				: (checked.error ?? "The server did not answer.")
-			: lineFor(connection);
+	const line = error ? failureMessage(error) : lineFor(connection);
 
 	return (
 		<article
@@ -302,24 +295,7 @@ function ConnectionDialog({
 								{connection.url}
 							</span>
 						</div>
-						<SettingsGroup
-							label="Connection"
-							note={
-								failure && (
-									<>
-										{failure}{" "}
-										<a
-											href={TROUBLESHOOTING_URL}
-											target="_blank"
-											rel="noreferrer"
-											className="focus-ring rounded-sm font-medium text-link"
-										>
-											How to fix this
-										</a>
-									</>
-								)
-							}
-						>
+						<SettingsGroup label="Connection">
 							{oauth ? (
 								<SettingsRow
 									label="Sign-in"
@@ -388,13 +364,7 @@ function ConnectionDialog({
 							)}
 							<SettingsRow
 								label="Check connection"
-								sub={
-									failure
-										? "The last check failed."
-										: checked
-											? `Found ${checked.tools ?? 0} actions in ${checked.latencyMs} ms.`
-											: "Ask the server what it can do."
-								}
+								sub="Make sure Sugabots can reach the server."
 								trailing={
 									<Button
 										size="sm"
@@ -407,6 +377,20 @@ function ConnectionDialog({
 								}
 							/>
 						</SettingsGroup>
+						{failure && (
+							<Alert>
+								{failure}{" "}
+								<a
+									href={TROUBLESHOOTING_URL}
+									target="_blank"
+									rel="noreferrer"
+									className="focus-ring rounded-sm font-medium text-link"
+								>
+									How to fix this
+								</a>
+							</Alert>
+						)}
+						{checked?.reachable && <Success>Connection successful</Success>}
 						{error && <Alert>{failureMessage(error)}</Alert>}
 						{connection.tools.length > 8 && (
 							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
@@ -675,8 +659,38 @@ function ByUrlStep({
 	const [secretHeader, setSecretHeader] = useState("");
 	const [secret, setSecret] = useState("");
 	const [access, setAccess] = useState<ConnectionAccess>("ask");
+	// What the last Test or Add found. Changing how to reach the server makes it out of date.
+	const [outcome, setOutcome] = useState<{ ok: true } | { ok: false; message: string }>();
+	const clearingOutcome =
+		<T,>(set: (value: T) => void) =>
+		(value: T) => {
+			set(value);
+			setOutcome(undefined);
+		};
 	const ready = name.trim() !== "" && url.trim() !== "";
 	const pending = actions.create.isPending || actions.update.isPending || actions.connect.isPending;
+	const server: UnsavedConnection =
+		method === "token"
+			? {
+					url,
+					...(secret.trim()
+						? { secretHeader: "Authorization", secret: bearerAuthorization(secret) }
+						: {}),
+				}
+			: { url, ...(secretHeader ? { secretHeader } : {}), ...(secret ? { secret } : {}) };
+
+	async function test() {
+		try {
+			const tested = await actions.testUnsaved.mutateAsync(server);
+			setOutcome(
+				tested.reachable
+					? { ok: true }
+					: { ok: false, message: tested.error ?? "The server did not answer." },
+			);
+		} catch (failure) {
+			setOutcome({ ok: false, message: failureMessage(failure) });
+		}
+	}
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -686,24 +700,18 @@ function ByUrlStep({
 				await actions.connect.mutateAsync({ name, url, access: access === "off" ? "ask" : access });
 				return;
 			}
-			const made = await actions.create.mutateAsync(
-				method === "token"
-					? secret.trim()
-						? { name, url, secretHeader: "Authorization", secret: bearerAuthorization(secret) }
-						: { name, url }
-					: { name, url, ...(secretHeader ? { secretHeader } : {}), ...(secret ? { secret } : {}) },
-			);
+			const made = await actions.create.mutateAsync({ name, ...server });
 			// A server added by its address starts at Allow.
 			if (access !== "allow") {
 				await actions.update.mutateAsync({ connectionId: made.id, json: { access } });
 			}
-		} catch {
+		} catch (failure) {
+			setOutcome({ ok: false, message: failureMessage(failure) });
 			return;
 		}
 		done();
 	}
 
-	const error = actions.create.error ?? actions.update.error ?? actions.connect.error;
 	return (
 		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
@@ -718,7 +726,7 @@ function ByUrlStep({
 					<SettingsFieldRow
 						label="Address"
 						value={url}
-						onChange={setUrl}
+						onChange={clearingOutcome(setUrl)}
 						placeholder="https://mcp.example.com/mcp"
 						mono
 					/>
@@ -731,7 +739,7 @@ function ByUrlStep({
 								label="How to sign in to the server"
 								options={signInMethodOptions}
 								value={method}
-								onChange={setMethod}
+								onChange={clearingOutcome(setMethod)}
 							/>
 						}
 					/>
@@ -739,7 +747,7 @@ function ByUrlStep({
 						<SettingsFieldRow
 							label="Access token"
 							value={secret}
-							onChange={setSecret}
+							onChange={clearingOutcome(setSecret)}
 							placeholder="Optional"
 							mono
 							secret
@@ -750,14 +758,14 @@ function ByUrlStep({
 							<SettingsFieldRow
 								label="Header name"
 								value={secretHeader}
-								onChange={setSecretHeader}
+								onChange={clearingOutcome(setSecretHeader)}
 								placeholder="X-API-Key"
 								mono
 							/>
 							<SettingsFieldRow
 								label="Secret"
 								value={secret}
-								onChange={setSecret}
+								onChange={clearingOutcome(setSecret)}
 								placeholder="Optional"
 								mono
 								secret
@@ -778,9 +786,26 @@ function ByUrlStep({
 						}
 					/>
 				</SettingsGroup>
-				{error && <Alert>{failureMessage(error)}</Alert>}
+				{outcome &&
+					(outcome.ok ? (
+						<Success>Connection successful</Success>
+					) : (
+						<Alert>{outcome.message}</Alert>
+					))}
 			</DialogFormBody>
 			<DialogFormFooter
+				beside={
+					method !== "oauth" && (
+						<Button
+							type="button"
+							variant="secondary"
+							disabled={url.trim() === "" || actions.testUnsaved.isPending}
+							onClick={() => void test()}
+						>
+							{actions.testUnsaved.isPending ? "Testing…" : "Test"}
+						</Button>
+					)
+				}
 				action={method === "oauth" ? "Sign in" : "Add"}
 				actionDisabled={!ready || pending}
 				cancel={false}

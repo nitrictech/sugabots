@@ -194,6 +194,18 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		expect(made).toMatchObject({ status: "connected", tools: [{ name: "lookup" }] });
 	});
 
+	it("tests an address and secret before a connection is made, saving nothing", async () => {
+		const setup = await setupWith();
+
+		const tested = await setup.testUnsaved({
+			...inPod(),
+			server: { url: `${serverUrl}/mcp`, secretHeader: "x-fixture-key", secret: "open-sesame" },
+		});
+
+		expect(tested).toMatchObject({ reachable: true, tools: 1 });
+		expect(await setup.list(inPod())).toEqual([]);
+	});
+
 	it("refuses an address the network policy forbids, and stores nothing", async () => {
 		const setup = await setupWith({ allowPrivateNetwork: false });
 

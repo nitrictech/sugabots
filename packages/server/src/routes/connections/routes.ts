@@ -36,6 +36,11 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 			.handle("remove", ({ params }) =>
 				connections.remove(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 			)
+			.handle("testUnsaved", ({ params, payload }) =>
+				connections
+					.testUnsaved({ ...params, server: payload })
+					.pipe(asSessionUser, asHttpError(connectionErrors)),
+			)
 			.handle("test", ({ params }) =>
 				connections.test(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 			)
