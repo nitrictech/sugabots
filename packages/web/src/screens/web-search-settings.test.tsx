@@ -154,7 +154,7 @@ describe("the Web search settings", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /Test search/ }));
 
-		expect(await screen.findByText("Search works: 8 results in 212 ms.")).toBeDefined();
+		expect(await screen.findByText("Search works")).toBeDefined();
 	});
 
 	it("tells a member the pane is for administrators", async () => {

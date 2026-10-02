@@ -51,7 +51,7 @@ export interface Interface {
 	readonly update: (
 		workspaceId: string,
 		providerId: string,
-		changes: SettingsChange,
+		changes: ModelProviderUpdate,
 	) => Effect.Effect<ModelProviderRow | undefined>;
 	/** Only a custom provider goes; `false` for a seeded one or one that is not there. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
@@ -77,8 +77,8 @@ export interface Interface {
 	) => Effect.Effect<OAuthTokens | undefined, E>;
 	/**
 	 * Records how a test of the configuration last updated at `testedAt` went,
-	 * unless the provider has been reconfigured since. A failure switches the
-	 * provider off; a success switches it on when `activateOnSuccess` asks.
+	 * unless the provider has been reconfigured since. A success switches it on
+	 * when `activateOnSuccess` asks; a failure leaves it as it was.
 	 */
 	readonly recordTest: (
 		workspaceId: string,
@@ -408,7 +408,8 @@ export const make = Effect.gen(function* () {
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
-								active: "error" in outcome ? false : outcome.activateOnSuccess ? true : undefined,
+								active:
+									"activateOnSuccess" in outcome && outcome.activateOnSuccess ? true : undefined,
 							})
 							.where(
 								and(
@@ -622,12 +623,6 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-/**
- * What `update` may change. `active` may only be switched off here: a
- * provider is switched on by a successful test, through `recordTest`.
- */
-export type SettingsChange = Omit<ModelProviderUpdate, "active"> & { readonly active?: false };
 
 /** How to reach a provider: where, in which protocol, and with which credentials. */
 export interface ProviderEndpoint {
