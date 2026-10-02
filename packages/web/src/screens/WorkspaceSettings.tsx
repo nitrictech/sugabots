@@ -233,7 +233,7 @@ function ProfileSettings() {
 
 	return (
 		<SettingsPage
-			hero={<PersonAvatar name={user.name} image={user.image} size={88} />}
+			hero={<PersonAvatar person={user} size={88} />}
 			title={user.name}
 			description={user.email}
 		>

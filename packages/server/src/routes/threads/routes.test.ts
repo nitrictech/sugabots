@@ -1,5 +1,6 @@
 import type { ThreadDetails } from "@sugabots/contracts";
 import { threadActivitySchema, threadDetailsSchema, threadSchema } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
@@ -48,7 +49,7 @@ const details: ThreadDetails = {
 	routineExecution: null,
 	crew: [],
 	participants: [
-		{ kind: "person", id: USER, name: "Sam", handle: "sam", image: null },
+		testPerson({ id: USER, name: "Sam" }),
 		{
 			kind: "agent",
 			id: AGENT,
@@ -65,7 +66,7 @@ const details: ThreadDetails = {
 		{
 			id: "0199a3a0-0000-7000-8000-000000000007",
 			threadId: THREAD,
-			author: { kind: "person", id: USER, name: "Sam", handle: "sam", image: null },
+			author: testPerson({ id: USER, name: "Sam" }),
 			kind: "text",
 			status: "complete",
 			parts: [{ type: "text", text: "Check the release" }],

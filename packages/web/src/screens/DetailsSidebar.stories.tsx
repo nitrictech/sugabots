@@ -6,6 +6,7 @@ import type {
 	ThreadActivity,
 	ThreadParticipant,
 } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
@@ -28,13 +29,7 @@ const people: ThreadParticipant[] = [
 	["Mara Kent", "0199a3a0-0000-7000-8000-000000000503"],
 	["Sam Park", "0199a3a0-0000-7000-8000-000000000504"],
 	["Alex Lee", "0199a3a0-0000-7000-8000-000000000505"],
-].map(([name, id]) => ({
-	kind: "person" as const,
-	id: id as string,
-	name: name as string,
-	handle: (name as string).toLowerCase().replace(" ", "-"),
-	image: null,
-}));
+].map(([name, id]) => testPerson({ id: id as string, name: name as string }));
 
 const threadId = "0199a3a0-0000-7000-8000-000000000510";
 

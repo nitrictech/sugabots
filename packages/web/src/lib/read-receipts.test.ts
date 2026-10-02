@@ -1,14 +1,9 @@
 import type { AgentParticipant, Message, PersonParticipant } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { readReceipts } from "./read-receipts.ts";
 
-const person = (name: string): PersonParticipant => ({
-	kind: "person",
-	id: crypto.randomUUID(),
-	name,
-	handle: name.toLowerCase(),
-	image: null,
-});
+const person = (name: string): PersonParticipant => testPerson({ id: crypto.randomUUID(), name });
 const you = person("You");
 const tom = person("Tom");
 const sam = person("Sam");

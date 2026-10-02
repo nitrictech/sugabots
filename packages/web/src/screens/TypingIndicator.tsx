@@ -80,7 +80,7 @@ function Face({ typer, size, className }: { typer: Typer; size: number; classNam
 	return typer.kind === "agent" ? (
 		<AgentAvatar color={typer.color} face={typer.face} size={size} className={className} />
 	) : (
-		<PersonAvatar name={typer.name} image={typer.image} size={size} className={className} />
+		<PersonAvatar person={typer} size={size} className={className} />
 	);
 }
 

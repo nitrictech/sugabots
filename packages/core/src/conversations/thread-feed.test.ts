@@ -4,6 +4,7 @@ import {
 	threadChannel,
 	workspaceChannel,
 } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
@@ -255,7 +256,7 @@ describe("the thread feed", () => {
 				message: {
 					id: "m1",
 					threadId,
-					author: { kind: "person", id: "u1", name: "Sam", handle: "sam", image: null },
+					author: testPerson({ id: "u1", name: "Sam" }),
 					kind: "text",
 					status: "complete",
 					parts: [{ type: "text", text: "Hi" }],

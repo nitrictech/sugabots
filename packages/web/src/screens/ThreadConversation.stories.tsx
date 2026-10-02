@@ -5,6 +5,7 @@ import type {
 	ThreadParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, waitFor } from "storybook/test";
@@ -22,21 +23,15 @@ const host: Extract<ThreadParticipant, { kind: "agent" }> = {
 	face: "arc",
 };
 
-const person: Extract<ThreadParticipant, { kind: "person" }> = {
-	kind: "person",
+const person = testPerson({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam Rivera",
-	handle: "sam-rivera",
-	image: null,
-};
+});
 
-const jay: Extract<ThreadParticipant, { kind: "person" }> = {
-	kind: "person",
+const jay = testPerson({
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	name: "Jay Park",
-	handle: "jay-park",
-	image: null,
-};
+});
 
 const user: SessionUser = {
 	id: person.id,
@@ -658,13 +653,8 @@ export const Mentions = meta.story({
 	},
 });
 
-const reader = (id: string, name: string): Extract<ThreadParticipant, { kind: "person" }> => ({
-	kind: "person",
-	id: `0199a3a0-0000-7000-8000-0000000009${id}`,
-	name,
-	handle: name.toLowerCase().replace(" ", "-"),
-	image: null,
-});
+const reader = (id: string, name: string) =>
+	testPerson({ id: `0199a3a0-0000-7000-8000-0000000009${id}`, name });
 const readers = {
 	tom: reader("01", "Tom Ortiz"),
 	sora: reader("02", "Sora Reyes"),

@@ -1,4 +1,5 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { useEffect, useState } from "react";
 import { expect, fireEvent, fn, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
@@ -21,13 +22,7 @@ const mentionable: ThreadParticipant[] = [
 		color: "orange",
 		face: "dot",
 	},
-	{
-		kind: "person",
-		id: "0199a3a0-0000-7000-8000-000000000002",
-		name: "Sam Rivera",
-		handle: "sam-rivera",
-		image: null,
-	},
+	testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" }),
 ];
 
 const meta = preview.meta({

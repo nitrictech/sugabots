@@ -386,7 +386,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 		rows = members.data?.map((member) => (
 			<SettingsRow
 				key={member.userId}
-				icon={<PersonAvatar name={member.name} image={member.image} size={30} />}
+				icon={<PersonAvatar person={member} size={30} />}
 				label={member.name}
 				trailing={
 					<>
@@ -440,7 +440,7 @@ function Members({ pod, canManageMembers }: { pod: Pod; canManageMembers: boolea
 								>
 									{/* Hidden from the name, or the initials would read as part of it. */}
 									<span aria-hidden>
-										<PersonAvatar name={member.user.name} image={member.user.image} size={22} />
+										<PersonAvatar person={member.user} size={22} />
 									</span>
 									<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
 								</DropdownMenuItem>

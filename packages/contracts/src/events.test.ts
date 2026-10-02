@@ -11,6 +11,7 @@ import {
 	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "./events.ts";
+import { testPerson } from "./testing.ts";
 
 describe("durability", () => {
 	it("persists state changes and not progress", () => {
@@ -221,13 +222,7 @@ function message() {
 	return {
 		id: "00000000-0000-4000-8000-000000000004",
 		threadId: "00000000-0000-4000-8000-000000000001",
-		author: {
-			kind: "person" as const,
-			id: "00000000-0000-4000-8000-000000000005",
-			name: "Sam",
-			handle: "sam",
-			image: null,
-		},
+		author: testPerson({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
 		kind: "text" as const,
 		status: "complete" as const,
 		parts: [{ type: "text" as const, text: "hi" }],

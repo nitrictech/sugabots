@@ -1,5 +1,6 @@
 import { Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
+import { testPerson } from "./testing.ts";
 import {
 	DEFAULT_THREAD_HISTORY_LIMIT,
 	jsonValueSchema,
@@ -109,7 +110,7 @@ describe("thread contracts", () => {
 		const message = {
 			id: ID,
 			threadId: ID,
-			author: { kind: "person", id: ID, name: "Sam", handle: "sam", image: null },
+			author: testPerson({ id: ID, name: "Sam" }),
 			kind: "text",
 			status: "complete",
 			parts: [

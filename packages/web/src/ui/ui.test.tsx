@@ -43,13 +43,13 @@ describe("IconButton", () => {
 
 describe("PersonAvatar", () => {
 	it("falls back to initials until there is a photo", () => {
-		render(<PersonAvatar name="Ryan Eyes" />);
+		render(<PersonAvatar person={{ name: "Ryan Eyes" }} />);
 
 		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
 	});
 
 	it("gives two letters for a single name, so a stack stays even", () => {
-		render(<PersonAvatar name="Jye" />);
+		render(<PersonAvatar person={{ name: "Jye" }} />);
 
 		expect(screen.getByTitle("Jye").textContent).toBe("JY");
 	});

@@ -1,4 +1,5 @@
 import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import { EventStore } from "@sugabots/core/database/events/store";
@@ -482,7 +483,7 @@ describe("typing", () => {
 				v: 1,
 				type: "person.typing",
 				threadId: THREAD,
-				person: { kind: "person", id: user.id, name: "Sam", handle: "sam", image: null },
+				person: testPerson({ id: user.id, name: "Sam" }),
 			},
 		});
 		stream.close();

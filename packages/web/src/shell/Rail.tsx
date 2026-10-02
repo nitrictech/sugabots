@@ -212,8 +212,7 @@ export function RailView({
 					>
 						<SelectionBar selected={selected === "settings"} className="-left-[14px] md:-left-5" />
 						<PersonAvatar
-							name={user.name}
-							image={user.image}
+							person={user}
 							size={36}
 							className={cn(
 								selected === "settings" &&

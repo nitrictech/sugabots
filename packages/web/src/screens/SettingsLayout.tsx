@@ -159,7 +159,7 @@ function SettingsNavigation() {
 			</div>
 			{session.user && (
 				<div className="flex shrink-0 items-center gap-2.5 border-border border-t px-[18px] pt-3 pb-[18px]">
-					<PersonAvatar name={session.user.name} image={session.user.image} size={32} />
+					<PersonAvatar person={session.user} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col">
 						<span className="truncate font-medium text-[13.5px] text-foreground">
 							{session.user.name}
@@ -199,7 +199,7 @@ function CompactSettingsList() {
 			{session.user && (
 				<div className="overflow-hidden rounded-panel bg-list">
 					<SettingsRow
-						icon={<PersonAvatar name={session.user.name} image={session.user.image} size={46} />}
+						icon={<PersonAvatar person={session.user} size={46} />}
 						label={session.user.name}
 						sub={session.user.email}
 						chevron

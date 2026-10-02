@@ -1,3 +1,4 @@
+import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";
@@ -263,13 +264,7 @@ function context(): TurnContext {
 		workspaceName: "Suga",
 		crew: [],
 		participants: [
-			{
-				kind: "person",
-				id: "0199a3a0-0000-7000-8000-000000000004",
-				name: "Sam",
-				handle: "sam",
-				image: null,
-			},
+			testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 			{
 				kind: "agent",
 				id: "0199a3a0-0000-7000-8000-000000000003",
@@ -291,13 +286,7 @@ function context(): TurnContext {
 			{
 				id: "0199a3a0-0000-7000-8000-000000000006",
 				threadId: "0199a3a0-0000-7000-8000-000000000001",
-				author: {
-					kind: "person",
-					id: "0199a3a0-0000-7000-8000-000000000004",
-					name: "Sam",
-					handle: "sam",
-					image: null,
-				},
+				author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: "Check the release" }],

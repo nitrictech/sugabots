@@ -9,7 +9,13 @@ import { chat, message, thread, threadParticipant, threadRead } from "../../data
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { personAuthor, personColumns, toMessage, toPerson } from "./participants.ts";
+import {
+	type PersonIdentity,
+	personAuthor,
+	personColumns,
+	toMessage,
+	toPerson,
+} from "./participants.ts";
 
 /**
  * The only writer of `thread`, `thread_participant`, `chat` and `thread_read`,
@@ -41,7 +47,7 @@ export interface Interface {
 		/** The id the person's client chose, which makes sending it again safe to detect. */
 		id: string;
 		threadId: string;
-		author: { id: string; name: string; image: string | null };
+		author: PersonIdentity;
 		content: string;
 	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict>;
 	/** Brings agents into the thread, announcing the ones who were not there yet. */
@@ -217,11 +223,7 @@ export const make = Effect.gen(function* () {
 								.values({ threadId: input.threadId, userId: input.author.id })
 								.onConflictDoNothing(),
 						);
-						const author = personAuthor({
-							userId: input.author.id,
-							userName: input.author.name,
-							userImage: input.author.image,
-						});
+						const author = personAuthor(input.author);
 						yield* emit([
 							ConversationEvent.MessagePosted({
 								threadId: input.threadId,

@@ -9,10 +9,10 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { agent, pod, user } from "../../database/schema.ts";
+import { agent, pod } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
-import { crewOf, personAuthor, toMessage } from "../threads/participants.ts";
+import { crewOf, personAuthor, personColumns, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 
 /**
@@ -85,11 +85,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const visible = yield* visibility.chat(input.chatId);
 						const sender = yield* senderOf(yield* CurrentActor.Service);
-						const author = personAuthor({
-							userId: sender.id,
-							userName: sender.name,
-							userImage: sender.image,
-						});
+						const author = personAuthor(sender);
 						const posted = yield* threads.post({
 							id: input.messageId,
 							threadId: visible.mainThreadId,
@@ -189,14 +185,8 @@ const placementAllowed = (
 /** The actor as their messages are signed. */
 const senderOf = ({ userId }: CurrentActor.Interface) =>
 	Effect.flatMap(
-		query((db) =>
-			db
-				.select({ id: user.id, name: user.name, image: user.image })
-				.from(user)
-				.where(eq(user.id, userId))
-				.limit(1),
-		),
-		([sender]) =>
+		query((db) => db.query.user.findFirst({ where: { id: userId }, ...personColumns })),
+		(sender) =>
 			sender ? Effect.succeed(sender) : Effect.die(new Error("The current actor has no account")),
 	);
 

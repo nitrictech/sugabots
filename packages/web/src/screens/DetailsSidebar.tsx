@@ -137,7 +137,7 @@ function ParticipantRow({
 			{participant.kind === "agent" ? (
 				<AgentAvatar color={participant.color} face={participant.face} size={28} />
 			) : (
-				<PersonAvatar name={participant.name} image={participant.image} size={28} />
+				<PersonAvatar person={participant} size={28} />
 			)}
 			<span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
 				{participant.name}

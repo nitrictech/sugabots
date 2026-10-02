@@ -444,7 +444,7 @@ function MentionMenu({
 						{participant.kind === "agent" ? (
 							<AgentAvatar color={participant.color} face={participant.face} size={28} />
 						) : (
-							<PersonAvatar name={participant.name} image={participant.image} size={28} />
+							<PersonAvatar person={participant} size={28} />
 						)}
 						<span className="min-w-0 flex-1 truncate font-medium">{participant.name}</span>
 						<span className="shrink-0 text-muted-foreground text-sm">@{participant.handle}</span>
