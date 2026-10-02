@@ -635,7 +635,6 @@ describe("routes", () => {
 		expect(create.hasAttribute("disabled")).toBe(true);
 		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Chief" } });
 		fireEvent.click(screen.getByRole("radio", { name: "purple" }));
-		fireEvent.click(screen.getByRole("radio", { name: "Inbox" }));
 		fireEvent.click(create);
 
 		await waitFor(() =>
@@ -645,7 +644,6 @@ describe("routes", () => {
 					name: "Chief",
 					color: "purple",
 					face: "pill",
-					description: "Sorts your email and flags what needs you.",
 				},
 			}),
 		);
