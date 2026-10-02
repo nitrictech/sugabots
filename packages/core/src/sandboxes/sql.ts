@@ -1,3 +1,4 @@
+import type { SandboxProviderPresetId } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
 	boolean,
@@ -13,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { pod, user, workspace } from "../workspaces/sql.ts";
+import type { Sandboxes } from "./sandboxes.ts";
 
 /**
  * A sandbox provider a workspace has configured: an account at a service that
@@ -26,7 +28,7 @@ export const sandboxProvider = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		preset: text("preset").$type<"opensandbox" | "e2b">().notNull(),
+		preset: text("preset").$type<SandboxProviderPresetId>().notNull(),
 		/** OpenSandbox's server, or E2B Embed's API; null for E2B Cloud. */
 		baseUrl: text("base_url"),
 		/** E2B Embed's address for reaching sandboxes; null otherwise. */
@@ -40,7 +42,7 @@ export const sandboxProvider = pgTable(
 		enabled: boolean("enabled").notNull().default(false),
 		apiKeyEncrypted: text("api_key_encrypted"),
 		/** The last build of its template that Sugabots started, for a provider that builds them (E2B). */
-		templateBuild: jsonb("template_build").$type<{ templateId: string; buildId: string }>(),
+		templateBuild: jsonb("template_build").$type<Sandboxes.TemplateBuild>(),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
@@ -72,7 +74,7 @@ export const sandbox = pgTable(
 		 */
 		sandboxProviderId: uuid("sandbox_provider_id").notNull(),
 		/** The provider's own id for it. */
-		providerSandboxId: text("provider_sandbox_id").notNull(),
+		providerSandboxId: text("provider_sandbox_id").$type<Sandboxes.SandboxId>().notNull(),
 		/** When it was paused for sitting idle; null while it runs. */
 		pausedAt: timestamp("paused_at", { withTimezone: true }),
 		/** When a turn last let go of it, which is when its idle time starts. */
