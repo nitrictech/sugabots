@@ -5,9 +5,13 @@
 	"license": "MIT",
 	"type": "module",
 	"exports": {
-		".": "./src/pages.ts"
+		".": "./src/pages.ts",
+		"./roles": "./src/roles.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@sugabots/contracts": "workspace:*"
 	}
 }

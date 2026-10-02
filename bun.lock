@@ -86,6 +86,9 @@
     "packages/docs": {
       "name": "@sugabots/docs",
       "version": "0.0.0",
+      "dependencies": {
+        "@sugabots/contracts": "workspace:*",
+      },
     },
     "packages/provider-logos": {
       "name": "@sugabots/provider-logos",
@@ -186,6 +189,7 @@
         "@fontsource-variable/rubik": "^5.3.0",
         "@sugabots/avatars": "workspace:*",
         "@sugabots/contracts": "workspace:*",
+        "@sugabots/docs": "workspace:*",
         "@sugabots/provider-logos": "workspace:*",
         "@tanstack/react-router": "^1.170.39",
         "@tanstack/react-start": "^1.168.58",

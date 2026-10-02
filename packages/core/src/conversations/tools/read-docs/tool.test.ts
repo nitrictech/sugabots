@@ -1,4 +1,5 @@
 import { type DocPage, type DocSection, docPages } from "@sugabots/docs";
+import { roleAbilities } from "@sugabots/docs/roles";
 import { describe, expect, it } from "vitest";
 import { type ReadDocsResult, readDocsTool } from "./tool.ts";
 
@@ -65,6 +66,12 @@ describe("read_docs", () => {
 			),
 		});
 		expect(result).toEqual({ refused: expect.stringContaining("Pricing") });
+	});
+
+	it("writes out what each role may do, where the website shows an interactive table", async () => {
+		const markdown = markdownOf(await read({ page: "people-and-roles", sections: ["Roles"] }));
+		expect(markdown).not.toContain("<RoleMatrix");
+		for (const ability of roleAbilities) expect(markdown).toContain(ability.label);
 	});
 
 	it("leaves out the padding that lines up tables' columns", async () => {
