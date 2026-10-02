@@ -48,8 +48,9 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  * step count on the message's own action bar is the way to what they did. What
  * the agent said just before a call is narration and goes with them: the thread
  * shows the answer, and the activity log how it got there. The exception is a
- * write waiting to be approved, and one that was refused: those stopped or
- * changed the reply, so they stay in the thread, mid-turn included.
+ * write somebody was asked to approve: it stopped the reply, and whoever
+ * answered it may want to read again what they agreed to, so it stays in the
+ * thread as its card, waiting or answered, mid-turn included.
  */
 
 export function ThreadConversation({
@@ -64,7 +65,6 @@ export function ThreadConversation({
 	podId,
 	canApproveToolCalls = false,
 	compact = false,
-	approvalsPinned = false,
 	queued = NONE_QUEUED,
 	peopleTyping = [],
 	receipts,
@@ -92,8 +92,6 @@ export function ThreadConversation({
 	onOpenCollaboration: (threadId: string) => void;
 	podId: string;
 	canApproveToolCalls?: boolean;
-	/** Whether, on a phone, the caller pins Allow and Deny below the thread instead of on each card. */
-	approvalsPinned?: boolean;
 	/**
 	 * The sidebar's narrower thread: smaller faces and bubbles, and no names,
 	 * since a collaboration has only its two bots and its header names them.
@@ -204,27 +202,27 @@ export function ThreadConversation({
 							}
 							if (segment.type === "tool_call") {
 								const call = segment.toolCall;
-								const pending = awaitsApproval(call);
 								// Only an agent calls tools; the check narrows the author for the card.
-								if (pending && message.author.kind === "agent") {
-									return (
-										<Fragment key={segment.key}>
-											{nameOnce()}
-											<ToolApprovalCard
-												call={call}
-												agent={message.author}
-												threadId={message.threadId}
-												podId={podId}
-												canApprove={canApproveToolCalls}
-												answerPinned={approvalsPinned}
-												outgoing={outgoing}
-												look={looks.get(splitToolKey(call.tool).handle)}
-											/>
-										</Fragment>
-									);
-								}
-								// Every other call is on the tool line above the message.
-								return null;
+								if (message.author.kind !== "agent") return null;
+								// A reply stopped on the card has nothing after it, so the card ends the run.
+								const endsRun =
+									position === segments.length - 1 && !runContinues && !isTyping(message);
+								return (
+									<Fragment key={segment.key}>
+										{nameOnce()}
+										<ToolApprovalCard
+											call={call}
+											agent={message.author}
+											threadId={message.threadId}
+											podId={podId}
+											canApprove={canApproveToolCalls}
+											outgoing={outgoing}
+											endsRun={endsRun}
+											compact={compact}
+											look={looks.get(splitToolKey(call.tool).handle)}
+										/>
+									</Fragment>
+								);
 							}
 							const isLast = position === lastBubble;
 							const endsRun = isLast && !runContinues && !isTyping(message);
@@ -337,6 +335,12 @@ function waitingOn(message: Message): string | undefined {
 	return last?.type === "collaboration" ? last.agentName : undefined;
 }
 
+/** Whether a person was asked to allow the call, rather than policy allowing it on its own. */
+function wasPutToSomeone(call: ToolCallPart): boolean {
+	const status = call.approval?.status;
+	return status === "pending" || status === "allowed" || status === "denied";
+}
+
 type Segment =
 	| { type: "text"; key: string; text: string }
 	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
@@ -344,7 +348,7 @@ type Segment =
 
 /**
  * The message's parts as things to draw, leaving out narration and every tool
- * call but a pending approval or a refusal. A reply still being written shows
+ * call but those somebody was asked to approve. A reply still being written shows
  * only those, its collaborations, and text that something has followed: the
  * run it is still writing waits until it is finished.
  */
@@ -360,8 +364,8 @@ function segmentsOf(message: Message): Segment[] {
 			return;
 		}
 		if (part.type === "tool_call") {
-			// A call waiting for approval is the only one drawn among the bubbles, as its card.
-			if (awaitsApproval(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
+			// A call somebody had to answer is the only one drawn among the bubbles, as its card.
+			if (wasPutToSomeone(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });
 			return;
 		}
 		const followed = index < message.parts.length - 1 && part.text.trim() !== "";

@@ -1348,7 +1348,7 @@ describe("a thread open beside the Chat", () => {
 		expect(within(panel).queryByRole("status", { name: `${triager.name} is typing` })).toBeNull();
 	});
 
-	it("answers the call the thread waits on from the foot of a phone's sheet", async () => {
+	it("answers the call the collaboration waits on from its card", async () => {
 		client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
 		const waitingCall = {
 			type: "tool_call" as const,
@@ -1362,7 +1362,11 @@ describe("a thread open beside the Chat", () => {
 			atOffset: 0,
 			startedAt: "2026-09-18T09:12:00.000Z",
 			finishedAt: null,
-			approval: { status: "pending" as const, decidedByName: null, decidedAt: null },
+			approval: {
+				status: "pending" as const,
+				decidedByName: null,
+				decidedAt: null,
+			},
 		};
 		answerThread(() =>
 			Effect.succeed({

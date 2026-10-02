@@ -3,7 +3,6 @@ import type {
 	RoutineExecution,
 	SessionUser,
 	ThreadParticipant,
-	ToolCallPart,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, Repeat } from "lucide-react";
@@ -20,8 +19,6 @@ import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
-import { PinnedApproval } from "./ToolApprovalCard.tsx";
-import { awaitsApproval } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
@@ -91,10 +88,6 @@ export function ChatThreadPanel({
 	}
 
 	const title = details?.thread.title ?? "Thread";
-	// The first call still waiting on a person, whose answer a phone pins to the sheet's foot.
-	const waiting = details?.messages
-		.flatMap((message) => message.parts)
-		.find((part): part is ToolCallPart => part.type === "tool_call" && awaitsApproval(part));
 	return (
 		<ChatSidebar
 			label={title}
@@ -220,20 +213,9 @@ export function ChatThreadPanel({
 							podId={details.thread.podId}
 							canApproveToolCalls={details.capabilities?.approveToolCalls}
 							compact
-							approvalsPinned
 						/>
 						<ThreadNotices notices={notices} />
 					</div>
-					{waiting && (
-						<div className="shrink-0 md:hidden">
-							<PinnedApproval
-								call={waiting}
-								threadId={details.thread.id}
-								podId={details.thread.podId}
-								canApprove={details.capabilities?.approveToolCalls ?? false}
-							/>
-						</div>
-					)}
 				</>
 			)}
 		</ChatSidebar>

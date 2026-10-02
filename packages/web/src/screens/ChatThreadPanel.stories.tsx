@@ -188,15 +188,14 @@ const meta = preview.meta({
 });
 
 /**
- * A collaboration waiting on an approval. Beside the chat on a wide screen;
- * on a phone a sheet with its heading beside the faces and Allow and Deny
- * along its foot.
+ * A collaboration waiting on an approval. Beside the chat on a wide screen,
+ * answered on its card; on a phone a sheet whose card opens the request full
+ * screen to answer it.
  */
 export const WaitingOnApproval = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Collaboration" })).toBeInTheDocument();
-		// The card answers on a wide screen; a phone pins the answer to the sheet's foot instead.
-		await expect(canvas.getByRole("button", { name: "Allow" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: /^Allow/ })).toBeInTheDocument();
 	},
 });
 

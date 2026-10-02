@@ -12,7 +12,14 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const agent = { name: "Linear Handler", color: "green" as const, face: "pill" as const };
 
-function asking(input: ToolCallPart["input"]): ToolCallPart {
+function asking(
+	input: ToolCallPart["input"],
+	approval: ToolCallPart["approval"] = {
+		status: "pending",
+		decidedByName: null,
+		decidedAt: null,
+	},
+): ToolCallPart {
 	return {
 		type: "tool_call",
 		id: "0199a3a0-0000-7000-8000-000000000001",
@@ -25,23 +32,29 @@ function asking(input: ToolCallPart["input"]): ToolCallPart {
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
-		approval: { status: "pending", decidedByName: null, decidedAt: null },
+		approval,
 	};
 }
 
-function show(input: ToolCallPart["input"]) {
+function show(call: ToolCallPart, canApprove = true) {
 	render(
 		<QueryClientProvider client={createQueryClient()}>
 			<ToolApprovalCard
-				call={asking(input)}
+				call={call}
 				agent={agent}
 				threadId="0199a3a0-0000-7000-8000-0000000000b2"
 				podId="0199a3a0-0000-7000-8000-0000000000b1"
-				canApprove
+				canApprove={canApprove}
 				look={{ name: "Linear", presetId: "linear" }}
 			/>
 		</QueryClientProvider>,
 	);
+}
+
+/** The card's answer as a wide screen shows it, in the card rather than the full-screen request. */
+function inCard(name: RegExp) {
+	const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
+	return within(card).getByRole("button", { name });
 }
 
 beforeEach(() => {
@@ -54,13 +67,15 @@ afterEach(() => {
 });
 
 describe("an approval request", () => {
-	it("asks what it would do and where, and allows it once", async () => {
+	it("says who wants to use what, shows the request, and allows it once", async () => {
 		const approval = client.api.toolApprovals.decide;
-		show({ team: "Platform" });
+		show(asking({ team: "Platform" }));
 
-		const card = screen.getByRole("region", { name: "Approval needed: Update issue in Linear" });
+		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
+		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
+		expect(within(card).getByText("Platform")).toBeDefined();
 		expect(within(card).queryByRole("checkbox")).toBeNull();
-		fireEvent.click(within(card).getByRole("button", { name: "Allow" }));
+		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
@@ -68,15 +83,13 @@ describe("an approval request", () => {
 
 	it("keeps the answer given once it is accepted, until the turn records it", async () => {
 		const approval = client.api.toolApprovals.decide;
-		show({ team: "Platform" });
+		show(asking({ team: "Platform" }));
 
-		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		await waitFor(() =>
-			expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(true),
-		);
-		expect(screen.getByRole("button", { name: "Deny" }).hasAttribute("disabled")).toBe(true);
+		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
+		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
 	});
 
 	it("lets the answer be given again if sending it failed", async () => {
@@ -84,50 +97,90 @@ describe("an approval request", () => {
 		approval.mockReturnValue(
 			Effect.fail(new Conflict({ message: "That tool approval has already been decided" })),
 		);
-		show({ team: "Platform" });
+		show(asking({ team: "Platform" }));
 
-		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
-		expect(screen.getByRole("button", { name: "Allow" }).hasAttribute("disabled")).toBe(false);
+		expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(false);
 	});
 
 	it("denies it", async () => {
 		const approval = client.api.toolApprovals.decide;
-		show({ team: "Platform" });
+		show(asking({ team: "Platform" }));
 
-		fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+		fireEvent.click(inCard(/^Deny/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
 	});
 
-	it("lays out every field on request, structured values as fields of their own", () => {
-		show({
-			...Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`field${index + 1}`, "x"])),
-			assignee: { id: "u_123", name: "Tim Holm" },
-			subscribers: [{ id: "u_1" }, { id: "u_2" }],
-		});
+	it("lays out every field, structured values as fields of their own", () => {
+		show(
+			asking({
+				...Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`field${index + 1}`, "x"])),
+				assignee: { id: "u_123", name: "Tim Holm" },
+				subscribers: [{ id: "u_1" }, { id: "u_2" }],
+			}),
+		);
 
-		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
-
-		const request = screen.getByRole("dialog", { name: "Update issue" });
-		expect(within(request).getByText("Field7")).toBeDefined();
-		expect(within(request).getByText("Name")).toBeDefined();
-		expect(within(request).getByText("Tim Holm")).toBeDefined();
-		expect(within(request).getAllByRole("columnheader", { name: "Id" })).toHaveLength(1);
-		expect(within(request).getAllByRole("row")).toHaveLength(3);
-		expect(within(request).queryByText(/"name"/)).toBeNull();
+		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
+		expect(within(card).getByText("Field7")).toBeDefined();
+		expect(within(card).getByText("Name")).toBeDefined();
+		expect(within(card).getByText("Tim Holm")).toBeDefined();
+		expect(within(card).getAllByRole("columnheader", { name: "Id" })).toHaveLength(1);
+		expect(within(card).getAllByRole("row")).toHaveLength(3);
+		expect(within(card).queryByText(/"name"/)).toBeNull();
 	});
 
-	it("can be answered from the full request", async () => {
+	it("opens the whole request full screen for review, and closes it once answered", async () => {
 		const approval = client.api.toolApprovals.decide;
-		show({ team: "Platform" });
+		show(asking({ team: "Platform" }));
 
-		fireEvent.click(screen.getByRole("button", { name: /View the full request/ }));
-		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Allow" }));
+		fireEvent.click(screen.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog", { name: "Update issue" });
+		expect(within(request).getByText("Platform")).toBeDefined();
+		fireEvent.click(within(request).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
+
+	it("closes the full-screen request without answering", async () => {
+		show(asking({ team: "Platform" }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog");
+		fireEvent.click(within(request).getByRole("button", { name: "Close" }));
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(client.api.toolApprovals.decide).not.toHaveBeenCalled();
+	});
+
+	it("says it waits on someone with permission when the reader cannot answer", () => {
+		show(asking({ team: "Platform" }), false);
+
+		expect(screen.getByRole("status").textContent).toBe(
+			"Waiting for someone with permission to answer this.",
+		);
+		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+	});
+
+	it.each(["allowed", "denied"] as const)(
+		"keeps the request readable once %s, with nothing left to answer",
+		(status) => {
+			show(
+				asking(
+					{ team: "Platform" },
+					{ status, decidedByName: "Mia Chen", decidedAt: "2026-09-18T09:01:00.000Z" },
+				),
+			);
+
+			const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
+			expect(within(card).getByText("Platform")).toBeDefined();
+			expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
+			expect(within(card).queryByRole("status")).toBeNull();
+		},
+	);
 });
