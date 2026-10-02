@@ -1,6 +1,7 @@
-import { type Channel, handleFromName, type StreamEvent, streamEvent } from "@sugabots/contracts";
+import { type Channel, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { toPerson } from "@sugabots/core/conversations/threads/participants";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { PodAudience } from "@sugabots/core/database/events/pod-audience";
 import {
@@ -115,13 +116,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					const user = yield* CurrentUser;
 					const typing = streamEvent("person.typing", {
 						threadId: params.threadId,
-						person: {
-							kind: "person",
-							id: user.id,
-							name: user.name,
-							handle: handleFromName(user.name),
-							image: user.image,
-						},
+						person: toPerson(user),
 					});
 					yield* Effect.promise(() => bus.publish(channel, typing));
 				}).pipe(asSessionUser),

@@ -2,7 +2,6 @@ import {
 	type Chat,
 	type ChatHistoryEntry,
 	DEFAULT_THREAD_HISTORY_LIMIT,
-	handleFromName,
 	type Message,
 	type RoutineExecution,
 	streamEvent,
@@ -10,6 +9,7 @@ import {
 	type ThreadDetails,
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
+import { testPerson } from "@sugabots/contracts/testing";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -61,13 +61,7 @@ const routineExecution: RoutineExecution = {
 	startedAt: "2026-09-18T08:00:01.000Z",
 	finishedAt: "2026-09-18T08:30:00.000Z",
 };
-const person = {
-	kind: "person" as const,
-	id: sam.id,
-	name: sam.name,
-	handle: handleFromName(sam.name),
-	image: null,
-};
+const person = testPerson({ id: sam.id, name: sam.name });
 const host = {
 	kind: "agent" as const,
 	id: linear.id,
@@ -442,13 +436,7 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("keeps writing to people only after a message is sent", async () => {
-		const jyeInThread = {
-			kind: "person" as const,
-			id: jye.id,
-			name: jye.name,
-			handle: handleFromName(jye.name),
-			image: null,
-		};
+		const jyeInThread = testPerson({ id: jye.id, name: jye.name });
 		const withJye = details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]);
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed({ ...withJye, participants: [...withJye.participants, jyeInThread] }),
@@ -658,13 +646,7 @@ describe("ongoing agent Chat", () => {
 		const followUp: Message = {
 			...mainMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fd",
-			author: {
-				kind: "person",
-				id: "0199a3a0-0000-7000-8000-0000000000fe",
-				name: "Jay Park",
-				handle: "jay-park",
-				image: null,
-			},
+			author: testPerson({ id: "0199a3a0-0000-7000-8000-0000000000fe", name: "Jay Park" }),
 			content: "Is the Stripe webhook part of it?",
 			parts: [{ type: "text", text: "Is the Stripe webhook part of it?" }],
 			createdAt: "2026-09-18T09:21:00.000Z",
@@ -953,13 +935,7 @@ describe("ongoing agent Chat", () => {
 });
 
 describe("people typing in the Chat", () => {
-	const jyeInThread = {
-		kind: "person" as const,
-		id: jye.id,
-		name: jye.name,
-		handle: handleFromName(jye.name),
-		image: null,
-	};
+	const jyeInThread = testPerson({ id: jye.id, name: jye.name });
 	const jyeTyping = streamEvent("person.typing", {
 		threadId: chat.mainThreadId,
 		person: jyeInThread,

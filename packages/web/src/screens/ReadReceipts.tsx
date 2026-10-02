@@ -44,7 +44,7 @@ function ReceiptFace({ receipt: { reader, readAt } }: { receipt: Receipt }) {
 				{reader.kind === "agent" ? (
 					<AgentAvatar color={reader.color} face={reader.face} size={FACE_SIZE} />
 				) : (
-					<PersonAvatar name={reader.name} image={reader.image} size={FACE_SIZE} />
+					<PersonAvatar person={reader} size={FACE_SIZE} />
 				)}
 			</span>
 		</Tooltip>

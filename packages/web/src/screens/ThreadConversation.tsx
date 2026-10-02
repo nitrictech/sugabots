@@ -463,14 +463,14 @@ function MessageBubble({
 				{!mine && (
 					<span className={cn("flex shrink-0", compact ? "w-[26px]" : "w-[34px]")}>
 						{endsRun &&
-							(agent ? (
-								<AgentAvatar color={agent.color} face={agent.face} size={compact ? 26 : 34} />
-							) : (
-								<PersonAvatar
-									name={message.author.name}
-									image={message.author.kind === "person" ? message.author.image : null}
+							(message.author.kind === "agent" ? (
+								<AgentAvatar
+									color={message.author.color}
+									face={message.author.face}
 									size={compact ? 26 : 34}
 								/>
+							) : (
+								<PersonAvatar person={message.author} size={compact ? 26 : 34} />
 							))}
 					</span>
 				)}

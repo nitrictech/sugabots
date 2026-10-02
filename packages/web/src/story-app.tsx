@@ -12,6 +12,7 @@ import type {
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, type RequestHandler } from "msw";
@@ -134,13 +135,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		color: agent.color,
 		face: agent.face,
 	};
-	const person = {
-		kind: "person" as const,
-		id: storyUser.id,
-		name: storyUser.name,
-		handle: "ryan-eyes",
-		image: null,
-	};
+	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {
 		thread: {
 			id: chat.mainThreadId,

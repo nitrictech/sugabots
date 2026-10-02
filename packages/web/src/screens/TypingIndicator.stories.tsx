@@ -1,3 +1,4 @@
+import { testPerson } from "@sugabots/contracts/testing";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { type Typer, TypingIndicator } from "./TypingIndicator.tsx";
@@ -10,12 +11,8 @@ const growthDesk: Typer = {
 	face: "pill",
 };
 
-const person = (id: string, name: string): Typer => ({
-	kind: "person",
-	id: `0199a3a0-0000-7000-8000-00000000010${id}`,
-	name,
-	image: null,
-});
+const person = (id: string, name: string): Typer =>
+	testPerson({ id: `0199a3a0-0000-7000-8000-00000000010${id}`, name });
 
 const ana = person("1", "Ana Ortiz");
 const ben = person("2", "Ben Lee");

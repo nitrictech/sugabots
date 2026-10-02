@@ -1,4 +1,5 @@
 import type { Message, ThreadDetails } from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -25,13 +26,7 @@ function said(id: string, by: "you" | "bot", text: string, at: string): Message 
 		threadId: thread,
 		author:
 			by === "you"
-				? {
-						kind: "person",
-						id: storyUser.id,
-						name: storyUser.name,
-						handle: "ryan-eyes",
-						image: null,
-					}
+				? testPerson({ id: storyUser.id, name: storyUser.name })
 				: {
 						kind: "agent",
 						id: growthDesk.id,

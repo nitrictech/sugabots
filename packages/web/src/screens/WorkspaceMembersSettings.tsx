@@ -153,7 +153,7 @@ function Roster({
 					{members.data?.map((member) => (
 						<SettingsRow
 							key={member.id}
-							icon={<PersonAvatar name={member.user.name} image={member.user.image} size={32} />}
+							icon={<PersonAvatar person={member.user} size={32} />}
 							label={member.user.name}
 							sub={member.user.email}
 							trailing={
@@ -211,7 +211,7 @@ function Invitations({
 			{invitations.map((invitation) => (
 				<SettingsRow
 					key={invitation.id}
-					icon={<PersonAvatar name={invitation.email} size={32} />}
+					icon={<PersonAvatar person={{ name: invitation.email }} size={32} />}
 					label={invitation.email}
 					sub={resent.has(invitation.id) ? "Sent again" : expiryText(invitation.expiresAt)}
 					trailing={
@@ -326,7 +326,7 @@ function MemberPage({
 	return (
 		<SettingsPage
 			back={<PageBackLink {...back} />}
-			hero={<PersonAvatar name={member.user.name} image={member.user.image} size={88} />}
+			hero={<PersonAvatar person={member.user} size={88} />}
 			title={member.user.name}
 			description={member.user.email}
 		>

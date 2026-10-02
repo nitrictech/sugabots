@@ -1,13 +1,11 @@
 import { cn } from "cn";
 
 export function PersonAvatar({
-	name,
-	image,
+	person: { name, image },
 	size = 32,
 	className,
 }: {
-	name: string;
-	image?: string | null;
+	person: { name: string; image?: string | null };
 	size?: number;
 	className?: string;
 }) {

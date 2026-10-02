@@ -65,19 +65,8 @@ export function toParticipant(row: ParticipantRow): ThreadParticipant {
 }
 
 /** A person as a message author, for rows where the author is known to be a user. */
-export function personAuthor(person: {
-	userId: string;
-	userName: string;
-	userImage: string | null;
-}): ParticipantRow {
-	return {
-		...person,
-		agentId: null,
-		agentName: null,
-		agentHandle: null,
-		agentColor: null,
-		agentFace: null,
-	};
+export function personAuthor(person: PersonIdentity): ParticipantRow {
+	return authorRow(person, null);
 }
 
 /**
@@ -120,11 +109,7 @@ export function toMessage(
 export const personColumns = { columns: { id: true, name: true, image: true } } as const;
 
 /** A person read with {@link personColumns}, as the API shows them. */
-export function toPerson(row: {
-	id: string;
-	name: string;
-	image: string | null;
-}): PersonParticipant {
+export function toPerson(row: PersonIdentity): PersonParticipant {
 	return {
 		kind: "person",
 		id: row.id,
@@ -150,7 +135,8 @@ export const messageRelations = {
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
 } as const;
 
-type PersonIdentity = { id: string; name: string; image: string | null };
+/** Who a person is, as read with {@link personColumns}. */
+export type PersonIdentity = { id: string; name: string; image: string | null };
 type AgentIdentity = Pick<schema.AgentRow, "id" | "name" | "handle" | "color" | "face">;
 
 /** A message row read with `messageRelations`. */
