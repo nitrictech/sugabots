@@ -162,12 +162,24 @@ export interface Sandbox {
 		content: Uint8Array,
 	) => Effect.Effect<void, FileFailed | Unavailable>;
 	/**
+	 * Where Sugabots reaches `port` inside the sandbox, over HTTP or a
+	 * WebSocket. Only Sugabots should be given it: it may need no credential.
+	 */
+	readonly endpoint: (port: number) => Effect.Effect<Endpoint, Unavailable>;
+	/**
 	 * Lets it connect to `hosts` and nothing else, in place of what it was
 	 * allowed before, while it runs and after a pause. A host is a domain name
 	 * or a leading wildcard such as `*.example.com`, which leaves the domain
 	 * itself out. Connections Sugabots makes to it are not affected.
 	 */
 	readonly setAllowedHosts: (hosts: readonly string[]) => Effect.Effect<void, Unavailable>;
+}
+
+export interface Endpoint {
+	/** The port's root, such as `http://172.17.0.1:50699/proxy/8931`, without a trailing slash. */
+	readonly url: string;
+	/** Headers every request to it must carry. */
+	readonly headers: Readonly<Record<string, string>>;
 }
 
 export interface ExecOptions {

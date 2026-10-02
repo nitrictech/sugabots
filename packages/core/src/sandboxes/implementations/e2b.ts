@@ -154,6 +154,24 @@ export const fromE2b = (connection: Sandboxes.E2bConnection): Sandboxes.Provider
 					try: () => sandbox.files.write(path, toArrayBuffer(content), { user: AGENT_USER }),
 					catch: (cause) => fileFailure(path, cause) ?? unavailable(cause),
 				}).pipe(Effect.asVoid),
+			endpoint: (port) =>
+				Effect.sync((): Sandboxes.Endpoint => {
+					const traffic: Record<string, string> = sandbox.trafficAccessToken
+						? { "e2b-traffic-access-token": sandbox.trafficAccessToken }
+						: {};
+					// E2B Embed has no wildcard domain for sandboxes' hosts, so its
+					// proxy routes on headers instead.
+					return connection.endpoints
+						? {
+								url: connection.endpoints.sandboxUrl.replace(/\/$/, ""),
+								headers: {
+									...traffic,
+									"E2b-Sandbox-Id": sandbox.sandboxId,
+									"E2b-Sandbox-Port": String(port),
+								},
+							}
+						: { url: `https://${sandbox.getHost(port)}`, headers: traffic };
+				}),
 			setAllowedHosts: (hosts) =>
 				Effect.tryPromise({
 					try: () => sandbox.updateNetwork(allowOnly(hosts)),

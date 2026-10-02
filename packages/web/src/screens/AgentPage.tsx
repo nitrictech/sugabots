@@ -3,11 +3,15 @@ import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useState } from "react";
+import { useChat } from "@/lib/chats.ts";
+import { useDesktopInUse } from "@/lib/desktop.ts";
 import { podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDEBAR_BESIDE } from "@/lib/media.ts";
+import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AgentChat } from "./AgentChat.tsx";
+import { SandboxButton } from "./SandboxButton.tsx";
 
 export function AgentPage({
 	agent,
@@ -53,7 +57,8 @@ export function AgentPage({
 /**
  * The bot's face, name and pod across the top of its chat, with the way into
  * its Details: the ⓘ, or the face and name themselves, which is how a phone
- * reaches them. On a phone the chat covers the list, so Back returns to it.
+ * reaches them, and into its sandbox's desktop when it has one. On a phone
+ * the chat covers the list, so Back returns to it.
  */
 const backClass =
 	"focus-ring absolute top-3 left-2 grid size-9 shrink-0 place-items-center rounded-full text-link md:hidden";
@@ -97,6 +102,7 @@ function ChatHeader({
 					<p className="m-0 truncate text-muted-foreground text-sm max-md:hidden">{pod.name}</p>
 				</div>
 			</div>
+			<ChatSandbox agent={agent} pod={pod} />
 			<Tooltip label="Details">
 				<button
 					type="button"
@@ -109,5 +115,21 @@ function ChatHeader({
 				</button>
 			</Tooltip>
 		</header>
+	);
+}
+
+/**
+ * The bot's sandbox, for its chat: there while the workspace has sandboxes
+ * and the bot uses one. On a phone it sits at the right of the centred header.
+ */
+function ChatSandbox({ agent, pod }: { agent: Agent; pod: Pod }) {
+	const threadId = useChat(pod, agent.id).data?.mainThreadId;
+	const sandboxesOn = useSandboxAccess().data?.enabled === true;
+	const inUse = useDesktopInUse(threadId, agent.id);
+	if (!agent.usesSandbox || !sandboxesOn || !threadId) return null;
+	return (
+		<div className="max-md:absolute max-md:top-3 max-md:right-2">
+			<SandboxButton threadId={threadId} agentId={agent.id} agentName={agent.name} inUse={inUse} />
+		</div>
 	);
 }

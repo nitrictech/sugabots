@@ -147,3 +147,27 @@ export const AFailedCall = meta.story({
 		await expect(canvas.getByText("Rate limited")).toBeVisible();
 	},
 });
+
+/**
+ * Browser calls read as one app, the agent's browser, and offer to open the
+ * desktop it runs on: a live view people can use, here with no desktop to show.
+ */
+export const Browser = meta.story({
+	args: {
+		calls: [
+			call("browser_navigate", { output: { text: "Page title: Northwind pricing" } }),
+			call("browser_click", { output: { text: "Clicked Plans" } }),
+		],
+		desktop: {
+			threadId: "0199a3a0-0000-7000-8000-000000000501",
+			agentId: "0199a3a0-0000-7000-8000-000000000502",
+			agentName: "Researcher",
+		},
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: /Used Browser for/ }));
+		await expect(canvas.getByText("Navigate")).toBeVisible();
+		await expect(canvas.getByText("Click")).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Open desktop" })).toBeVisible();
+	},
+});

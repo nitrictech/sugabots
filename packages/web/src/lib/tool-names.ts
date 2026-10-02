@@ -12,6 +12,12 @@ export const BUILT_IN_HANDLE = "";
 export const NETWORK_REQUEST_TOOL = "request_network_access";
 
 /**
+ * The browser tools' names start with this. They are the product's own, all
+ * one app, the agent's browser, and each step is named by what it does.
+ */
+export const BROWSER_TOOL_PREFIX = "browser_";
+
+/**
  * What a connection is called wherever one of its tools is shown. A handle with
  * no connection behind it any more is written out rather than shown raw, so a
  * deleted connection reads as `Linear` and not as `linear`.
@@ -46,7 +52,10 @@ export function splitToolKey(tool: string): { handle: string; name: string } {
  */
 export function stepLabel(tool: string, name = splitToolKey(tool).name): string {
 	const builtIn = builtInToolCatalog.find((entry) => entry.key === tool);
-	return builtIn ? builtIn.name : wordsFromKey(name);
+	if (builtIn) return builtIn.name;
+	if (tool.startsWith(BROWSER_TOOL_PREFIX))
+		return wordsFromKey(tool.slice(BROWSER_TOOL_PREFIX.length));
+	return wordsFromKey(name);
 }
 
 /** A tool as its approval card titles it: `List issues in Linear`, or a built-in tool's name alone. */

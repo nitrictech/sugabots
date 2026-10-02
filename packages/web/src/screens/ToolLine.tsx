@@ -1,9 +1,10 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronRight, Wrench } from "lucide-react";
+import { ChevronRight, MonitorPlay, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import {
+	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
 	connectionLabel,
 	splitToolKey,
@@ -11,6 +12,7 @@ import {
 	wordsFromKey,
 } from "@/lib/tool-names.ts";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { DesktopViewerDialog } from "./DesktopViewer.tsx";
 import { awaitsApproval, durationOf, formatDuration, formatTotal } from "./tool-activity.ts";
 
 /**
@@ -21,36 +23,62 @@ import { awaitsApproval, durationOf, formatDuration, formatTotal } from "./tool-
 export function ToolLine({
 	calls,
 	looks,
+	desktop,
 	className,
 }: {
 	calls: readonly ToolCallPart[];
 	looks: ReadonlyMap<string, ConnectionLook>;
+	/** Whose desktop the reply's browser calls ran on, so people can open it. */
+	desktop?: { threadId: string; agentId: string; agentName: string };
 	className?: string;
 }) {
 	const [open, setOpen] = useState(false);
+	const [watching, setWatching] = useState(false);
 	const listId = useId();
 	if (calls.length === 0) return null;
+	const browsed = desktop && calls.some((call) => call.tool.startsWith(BROWSER_TOOL_PREFIX));
 
 	return (
 		<div className={cn("flex flex-col items-start", className)}>
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={listId}
-				onClick={() => setOpen(!open)}
-				className="focus-ring flex items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
-			>
-				{toolLineText(calls, looks)}
-				<ChevronRight
-					aria-hidden
-					size={10}
-					strokeWidth={3}
-					className={cn(
-						"shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
-						open && "rotate-90",
-					)}
+			<div className="flex items-center gap-3">
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-controls={listId}
+					onClick={() => setOpen(!open)}
+					className="focus-ring flex items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
+				>
+					{toolLineText(calls, looks)}
+					<ChevronRight
+						aria-hidden
+						size={10}
+						strokeWidth={3}
+						className={cn(
+							"shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
+							open && "rotate-90",
+						)}
+					/>
+				</button>
+				{browsed && (
+					<button
+						type="button"
+						onClick={() => setWatching(true)}
+						className="focus-ring flex items-center gap-1 rounded-md pb-1.5 font-medium text-link text-sm"
+					>
+						<MonitorPlay aria-hidden size={13} strokeWidth={2.2} />
+						Open desktop
+					</button>
+				)}
+			</div>
+			{browsed && (
+				<DesktopViewerDialog
+					threadId={desktop.threadId}
+					agentId={desktop.agentId}
+					agentName={desktop.agentName}
+					open={watching}
+					onOpenChange={setWatching}
 				/>
-			</button>
+			)}
 			{open && (
 				<ul
 					id={listId}
@@ -109,6 +137,7 @@ function ToolCallRow({ call, look }: { call: ToolCallPart; look?: ConnectionLook
 /** The app a call reached, by name: the connection, or the built-in tool itself ("Web search"). */
 function appOf(call: ToolCallPart, look?: ConnectionLook): string {
 	const { handle } = splitToolKey(call.tool);
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
 	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
 }
 

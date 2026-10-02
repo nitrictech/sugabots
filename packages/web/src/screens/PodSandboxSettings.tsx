@@ -54,13 +54,19 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 			<SettingsGroup label="Sandbox">
 				<SettingsRow
 					label="No sandbox yet"
-					sub="One is made the first time a bot here runs a command."
+					sub="One is made the first time a bot here runs a command or uses its browser."
 				/>
 			</SettingsGroup>
 		);
 	}
 
 	const now = new Date();
+	const busy = [
+		sandbox.turnsUsing > 0 &&
+			`${sandbox.turnsUsing === 1 ? "A bot is" : `${sandbox.turnsUsing} bots are`} using it`,
+		sandbox.peopleWatching > 0 &&
+			`${sandbox.peopleWatching === 1 ? "1 person" : `${sandbox.peopleWatching} people`} watching`,
+	].filter(Boolean);
 	const inUse = sandbox.turnsUsing > 0;
 
 	return (
@@ -76,8 +82,8 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 			<SettingsRow
 				label="Activity"
 				sub={
-					inUse
-						? `${sandbox.turnsUsing === 1 ? "A bot is" : `${sandbox.turnsUsing} bots are`} using it`
+					busy.length > 0
+						? busy.join(", ")
 						: `Last used ${formatListTime(new Date(sandbox.lastUsedAt), now).toLowerCase()}`
 				}
 				trailing={
@@ -104,7 +110,7 @@ function SandboxGroup({ podId, shown }: { podId: string; shown: PodSandbox }) {
 				open={confirm === "upgrade"}
 				onOpenChange={(open) => setConfirm(open ? "upgrade" : undefined)}
 				title="Upgrade the sandbox?"
-				description="Its workspace, every thread's folder and every bot's home, moves to a new sandbox made from the current image. Running programs are lost."
+				description="Its workspace, every thread's folder and every bot's home, moves to a new sandbox made from the current image. Running programs and open browser tabs are lost."
 				confirmLabel="Upgrade"
 				pending={actions.upgrade.isPending}
 				error={actions.upgrade.error ? failureMessage(actions.upgrade.error) : undefined}

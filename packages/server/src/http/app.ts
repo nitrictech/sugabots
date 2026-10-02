@@ -35,6 +35,7 @@ import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
 import { usageRoutes } from "../routes/usage/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
+import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
@@ -96,6 +97,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 		),
 	),
 	betterAuthRoutes,
+	desktopViewerRoutes,
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the
 	// router hands to it per request rather than capturing it once.

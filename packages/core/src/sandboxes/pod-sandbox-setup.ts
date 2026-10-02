@@ -71,6 +71,7 @@ export const make = Effect.gen(function* () {
 					createdAt: status.createdAt.toISOString(),
 					lastUsedAt: status.lastUsedAt.toISOString(),
 					turnsUsing: status.turnsUsing,
+					peopleWatching: status.peopleWatching,
 					upgradeAvailable: status.upgradeAvailable,
 				},
 				providerEnabled,
