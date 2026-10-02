@@ -162,6 +162,14 @@ export class RequestFailed
 		});
 	}
 
+	/**
+	 * Whether the same request may work if sent again: the provider was busy or
+	 * failed. A refusal, such as a rejected key or no credit, would only be refused again.
+	 */
+	get mayRetry(): boolean {
+		return this.reason === "rateLimited" || this.reason === "unavailable";
+	}
+
 	get userMessage() {
 		return REQUEST_USER_MESSAGES[this.reason];
 	}
