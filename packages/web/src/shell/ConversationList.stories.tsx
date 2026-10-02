@@ -1,5 +1,6 @@
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
+import { storyChatFor } from "@/story-app.tsx";
 import { ConversationListView, type ConversationRowData } from "./ConversationList.tsx";
 import { accountManager, design, growthDesk, leadResearcher, revenue } from "./story-fixtures.ts";
 
@@ -9,7 +10,7 @@ const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000)
 const revenueRows: ConversationRowData[] = [
 	{
 		agent: growthDesk,
-		chatId: null,
+		chat: storyChatFor(growthDesk),
 		fromYou: false,
 		unread: true,
 		needsApproval: true,
@@ -22,7 +23,7 @@ const revenueRows: ConversationRowData[] = [
 	},
 	{
 		agent: accountManager,
-		chatId: null,
+		chat: storyChatFor(accountManager),
 		fromYou: false,
 		unread: true,
 		needsApproval: false,
@@ -35,7 +36,7 @@ const revenueRows: ConversationRowData[] = [
 	},
 	{
 		agent: leadResearcher,
-		chatId: null,
+		chat: storyChatFor(leadResearcher),
 		fromYou: true,
 		unread: false,
 		needsApproval: false,

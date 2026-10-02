@@ -376,7 +376,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				.filter((agent) => agent.systemAgentKey === null && agent.podId === query.pod)
 				.map((agent) => ({
 					agent,
-					chatId: null,
+					chat: null,
 					lastMessage: null,
 					waitingOn: null,
 					unread: false,

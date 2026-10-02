@@ -36,11 +36,13 @@ export const chatListQuerySchema = Schema.Struct({ pod: uuidSchema });
 
 /**
  * One row of the conversation list: a bot, since each bot has one chat in its
- * pod. `chatId` and `lastMessage` are null until somebody first messages it.
+ * pod. `chat` is null until the bot's chat is first opened, by a person or a
+ * routine, and is the whole chat, so opening it needs no request of its own.
+ * `lastMessage` is null until a message is written.
  */
 export const chatListItemSchema = Schema.Struct({
 	agent: agentSchema,
-	chatId: Schema.NullOr(uuidSchema),
+	chat: Schema.NullOr(chatSchema),
 	lastMessage: Schema.NullOr(
 		Schema.Struct({
 			/** The message's first line, shortened for a one-line row. */

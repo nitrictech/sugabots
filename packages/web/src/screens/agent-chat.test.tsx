@@ -245,7 +245,24 @@ function details(
 	};
 }
 
+/** The pod's conversation list, with Linear Handler's chat in it when `listed`. */
+function chatList({ listed }: { listed: boolean }) {
+	return Effect.succeed({
+		items: [
+			{
+				agent: linear,
+				chat: listed ? chat : null,
+				lastMessage: null,
+				waitingOn: null,
+				unread: false,
+				needsApproval: false,
+			},
+		],
+	});
+}
+
 function chatAnswers() {
+	client.api.chats.list.mockReturnValue(chatList({ listed: true }));
 	client.api.chats.getOrCreate.mockReturnValue(Effect.succeed(chat));
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
@@ -383,6 +400,14 @@ describe("ongoing agent Chat", () => {
 		});
 		// Both bots' faces, each a disc filling its 40-unit viewbox.
 		expect(collaboration.querySelectorAll('svg > circle[r="20"]')).toHaveLength(2);
+		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
+	});
+
+	it("opens a chat the pod's list does not have yet", async () => {
+		client.api.chats.list.mockReturnValue(chatList({ listed: false }));
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+
+		await screen.findByText(mainMessage.content);
 		expect(client.api.chats.getOrCreate).toHaveBeenCalledWith({
 			params: { workspace: linear.workspaceId },
 			payload: { podId: linear.podId, hostAgentId: linear.id },
