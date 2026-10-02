@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { failureMessage } from "@/lib/failure.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { type Session, useSessionFromApi } from "@/lib/session.ts";
+import { reloadWhenADeployReplacesChunks } from "@/lib/stale-chunks.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -76,6 +77,8 @@ function SessionRouter({ session }: { session: Session }) {
 function Splash() {
 	return <div className="h-full bg-list" />;
 }
+
+reloadWhenADeployReplacesChunks();
 
 const root = document.getElementById("root");
 if (!root) {
