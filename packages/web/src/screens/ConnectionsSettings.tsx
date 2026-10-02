@@ -144,20 +144,12 @@ function ConnectionRow({
 	const preset = connectionPresetFor(connection.url);
 	const needsSignIn = !connection.signedIn;
 	const failing = connection.signedIn && connection.status === "error";
-	const pending = actions.update.isPending || actions.signIn.isPending || actions.test.isPending;
-	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
+	const pending = actions.update.isPending || actions.signIn.isPending;
+	const error = actions.update.error ?? actions.signIn.error;
 	// A failing secret or address is fixed on the connection's own page.
 	const reconnect = () =>
 		connection.auth === "oauth" ? actions.signIn.mutate({ connectionId: connection.id }) : onOpen();
-	const checked =
-		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
-	const line = error
-		? failureMessage(error)
-		: checked
-			? checked.reachable
-				? "Connection successful"
-				: (checked.error ?? "The server did not answer.")
-			: lineFor(connection);
+	const line = error ? failureMessage(error) : lineFor(connection);
 
 	return (
 		<article
@@ -372,7 +364,7 @@ function ConnectionDialog({
 							)}
 							<SettingsRow
 								label="Check connection"
-								sub="Make sure Sugabots can reach the server and sign in to it."
+								sub="Make sure Sugabots can reach the server."
 								trailing={
 									<Button
 										size="sm"
