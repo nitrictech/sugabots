@@ -20,6 +20,7 @@ import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { agent, pod } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
+import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import {
 	findRunnableSystemAgent,
 	SYSTEM_AGENTS,
@@ -32,7 +33,10 @@ import {
  * in no pod and of which only the model ever changes.
  */
 export interface Interface {
-	/** Creates a crew agent in `agent.podId`, which must be in the workspace. */
+	/**
+	 * Creates a crew agent in `agent.podId`, which must be in the workspace.
+	 * Without a prompt it starts with `INTERVIEW_PROMPT`.
+	 */
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; agent: NewAgent },
@@ -46,6 +50,16 @@ export interface Interface {
 		workspaceId: string,
 		agentId: string,
 	) => Effect.Effect<void, SystemAgentImmutable>;
+	/**
+	 * Replaces the agent's prompt and description with what its interview
+	 * settled on, if its prompt is still `INTERVIEW_PROMPT`. False when it is
+	 * not, so a prompt somebody wrote in the meantime is never overwritten.
+	 */
+	readonly finishInterview: (
+		workspaceId: string,
+		agentId: string,
+		settled: { prompt: string; description: string },
+	) => Effect.Effect<boolean>;
 	/**
 	 * The Personal pod's Personal Assistant, placed there on `model`, or with
 	 * no model, if it is missing. One already there is returned exactly as its
@@ -169,7 +183,7 @@ export const make = Effect.gen(function* () {
 										color: input.color ?? colorFromText(input.name),
 										face: input.face ?? "pill",
 										model: input.model,
-										prompt: input.prompt ?? "",
+										prompt: input.prompt ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
 									})
 									.returning(),
@@ -208,6 +222,24 @@ export const make = Effect.gen(function* () {
 					}
 					return crew;
 				}),
+			),
+
+		finishInterview: (workspaceId, agentId, { prompt, description }) =>
+			operation(
+				"finishInterview",
+				query((db) =>
+					db
+						.update(agent)
+						.set({ prompt, description })
+						.where(
+							and(
+								eq(agent.id, agentId),
+								eq(agent.workspaceId, workspaceId),
+								eq(agent.prompt, INTERVIEW_PROMPT),
+							),
+						)
+						.returning({ id: agent.id }),
+				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
 		remove: (workspaceId, agentId) =>

@@ -1,13 +1,27 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
-import { expect, fn, screen, within } from "storybook/test";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
 import { NewAgentDialog } from "./NewAgent.tsx";
-import { engineering, personal, podsWithBots, revenue } from "./story-fixtures.ts";
+import { engineering, growthDesk, personal, podsWithBots, revenue } from "./story-fixtures.ts";
 
 const WORKSPACE = revenue.workspaceId;
+const API = import.meta.env.VITE_API_URL;
+
+/** The bodies of the create requests a story sends, to check what the bot was made with. */
+let created: Record<string, unknown>[] = [];
+const createAgent = http.post(`${API}/pods/:podId/agents`, async ({ request }) => {
+	const body = (await request.json()) as Record<string, unknown>;
+	created.push(body);
+	return HttpResponse.json({ ...growthDesk, ...body }, { status: 201 });
+});
+/** The roster, which creating a bot fetches again. */
+const listAgents = http.get(`${API}/workspaces/:workspace/agents`, () =>
+	HttpResponse.json(podsWithBots.flatMap(({ bots }) => bots)),
+);
 
 function Preview({ models, children }: { models: boolean; children: ReactNode }) {
 	const [queryClient] = useState(() => {
@@ -97,5 +111,48 @@ export const NoModelYet = meta.story({
 		await userEvent.type(within(dialog).getByLabelText("Name"), "Support Desk");
 		await expect(within(dialog).getByText(/Connect a model first/)).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+	},
+});
+
+/** By default the bot interviews its creator, so it is created without a prompt. */
+export const InterviewByDefault = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	beforeEach({ msw }) {
+		created = [];
+		msw.use(createAgent, listAgents);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.type(within(dialog).getByLabelText("Name"), "Support Desk");
+		await expect(within(dialog).getByRole("radio", { name: "Interview me" })).toBeChecked();
+		await expect(
+			within(dialog).getByText(/Support Desk will ask what it's for/),
+		).toBeInTheDocument();
+		await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+		await waitFor(() => expect(args.onCreated).toHaveBeenCalled());
+		await expect(created).toEqual([expect.not.objectContaining({ prompt: expect.anything() })]);
+	},
+});
+
+/** Writing its instructions instead: they are created with the bot, and may be left blank. */
+export const WritingItsInstructions = meta.story({
+	args: { podId: revenue.id, pods: [revenue] },
+	beforeEach({ msw }) {
+		created = [];
+		msw.use(createAgent, listAgents);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		await userEvent.type(within(dialog).getByLabelText("Name"), "Support Desk");
+		await userEvent.click(within(dialog).getByRole("radio", { name: "Write my own" }));
+		await userEvent.type(
+			within(dialog).getByRole("textbox", { name: "Instructions" }),
+			"You answer support tickets.",
+		);
+		await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+		await waitFor(() => expect(args.onCreated).toHaveBeenCalled());
+		await expect(created).toEqual([
+			expect.objectContaining({ prompt: "You answer support tickets." }),
+		]);
 	},
 });

@@ -5,6 +5,7 @@ import { query } from "../../database/database.ts";
 import { agent, connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
+import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import type { Chats } from "../chats/chats.ts";
 import {
 	admitFacilitation,
@@ -36,6 +37,7 @@ export const turnInternalsForTests = Layer.mergeAll(
 	TurnRepository.layer,
 	ToolCallRepository.layer,
 	ApprovedToolCalls.layer,
+	AgentRepository.layer,
 );
 
 /*

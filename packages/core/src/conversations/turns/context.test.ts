@@ -255,6 +255,7 @@ function context(): TurnContext {
 			model: "claude-sonnet-4-20250514",
 			prompt: "Check facts carefully.",
 			disabledTools: [],
+			interviewing: false,
 		},
 		reason: "default",
 		routing: { facilitator: false },

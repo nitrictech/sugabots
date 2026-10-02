@@ -13,6 +13,7 @@ import {
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
 import { UserMessage } from "../../user-message.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { messageTextWithPlacedParts } from "../threads/message-text.ts";
@@ -162,6 +163,14 @@ export const make = Effect.gen(function* () {
 						const windowTokens = yield* query((db) =>
 							loadContextWindow(db, loaded.workspaceId, model),
 						);
+						const messages = loaded.messages
+							.reverse()
+							.map((stored) => messageFromRelations(stored));
+						const trigger = messages.find(({ id }) => id === request.triggerMessageId);
+						const interviewing =
+							speaker.prompt === INTERVIEW_PROMPT &&
+							trigger?.author.kind === "person" &&
+							trigger.author.id === speaker.createdById;
 						return {
 							_tag: "Prepared",
 							run,
@@ -183,6 +192,7 @@ export const make = Effect.gen(function* () {
 									prompt: speaker.prompt,
 									disabledTools: speaker.disabledTools,
 									podId: loaded.podId,
+									interviewing,
 								},
 								reason: request.reason,
 								routing: loaded.pod.routing,
@@ -197,7 +207,7 @@ export const make = Effect.gen(function* () {
 								windowTokens,
 								compaction: loaded.compaction ?? undefined,
 								messages: newestWithinLimit(
-									loaded.messages.reverse().map((stored) => messageFromRelations(stored)),
+									messages,
 									(message) => estimatedTokens(messageTextWithPlacedParts(message)),
 									historyLimitTokens(windowTokens),
 								),
@@ -276,6 +286,11 @@ export interface TurnContext {
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];
 		podId: string;
+		/**
+		 * Whether the agent still has `INTERVIEW_PROMPT` and this turn answers
+		 * the person who created it, who alone may settle its instructions.
+		 */
+		interviewing: boolean;
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
@@ -359,6 +374,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 							model: true,
 							prompt: true,
 							disabledTools: true,
+							createdById: true,
 						},
 						orderBy: { name: "asc" },
 					},
