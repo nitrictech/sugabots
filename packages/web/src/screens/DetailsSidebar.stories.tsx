@@ -104,6 +104,7 @@ function connection(id: string, name: string, url: string): Connection {
 		],
 		lastTestedAt: null,
 		lastTestError: null,
+		connectedBy: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }

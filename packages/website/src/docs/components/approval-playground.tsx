@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cast } from "@/docs/cast";
 
-/** A connection's approval setting, as the app labels it. */
+/** A tool's approval setting, as the app labels it. */
 const approvals = {
 	off: "Off",
 	ask: "Ask",
@@ -32,7 +32,7 @@ function outcomeOf(setting: ApprovalSetting): Outcome {
 const outcomeText: Record<Outcome, string> = {
 	refused: "The call is refused, and the bot is told the tool is off.",
 	waits: "The call waits in the chat until someone who's allowed to answer it does.",
-	runs: "The connection allows it, so it runs straight away.",
+	runs: "The tool is allowed, so it runs straight away.",
 };
 
 type Decision = "pending" | "allowed" | "denied";
@@ -73,7 +73,7 @@ function Choice<T extends string>({
 	);
 }
 
-/** The approval rules to play with: set a connection's approval, pick a tool, and answer the request. */
+/** The approval rules to play with: set a tool's approval, pick the tool, and answer the request. */
 export function ApprovalPlayground() {
 	const [setting, setSetting] = useState<ApprovalSetting>("allow");
 	const [tool, setTool] = useState<ToolChoice>("change");
@@ -93,7 +93,7 @@ export function ApprovalPlayground() {
 		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
 			<div className="flex flex-wrap gap-6 border-b px-5 py-4">
 				<Choice
-					label="Linear connection's approval"
+					label="The tool's approval"
 					options={approvals}
 					value={setting}
 					onChange={reset(setSetting)}

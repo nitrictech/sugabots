@@ -18,7 +18,7 @@ import { serviceOperations } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
-import { connectionIn, connectionsIn, toConnection } from "./connection-reads.ts";
+import { connectionIn, connectionsIn } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
 import { ConnectionSignIn } from "./connection-sign-in.ts";
 import { listServerTools } from "./mcp.ts";
@@ -290,13 +290,12 @@ export const make = Effect.gen(function* () {
 						return yield* new ConnectionNotFound();
 					}
 					if (
-						changes.url === undefined &&
-						changes.secret === undefined &&
-						changes.secretHeader === undefined
+						changes.url !== undefined ||
+						changes.secret !== undefined ||
+						changes.secretHeader !== undefined
 					) {
-						return toConnection(updated, cipher);
+						yield* discoverQuietly(at);
 					}
-					yield* discoverQuietly(at);
 					return yield* requireConnection(at);
 				}),
 			),

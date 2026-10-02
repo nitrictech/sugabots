@@ -1,5 +1,6 @@
 import type {
 	Connection,
+	ConnectionAccess,
 	ConnectionSignInFailure,
 	ConnectionToolWithAccess,
 	ConnectionUpdate,
@@ -56,7 +57,9 @@ export function useConnectionLooks(podId: string): ReadonlyMap<string, Connectio
 
 export function useConnectionActions(podId: string) {
 	const queryClient = useQueryClient();
-	const refresh = () => queryClient.invalidateQueries({ queryKey: ["connections", podId] });
+	const listKey = ["connections", podId];
+	const updateKey = ["connections", podId, "update"];
+	const refresh = () => queryClient.invalidateQueries({ queryKey: listKey });
 	const { connections } = client.api;
 
 	return {
@@ -65,10 +68,34 @@ export function useConnectionActions(podId: string) {
 				Effect.runPromise(connections.create({ params: { podId }, payload: json })),
 			onSuccess: refresh,
 		}),
+		/**
+		 * A change to what bots may do with the tools shows at once, and is put
+		 * back if it fails. The list is fetched again once the last of several
+		 * quick changes is done, so an earlier one's answer does not show the
+		 * later ones undone.
+		 */
 		update: useMutation({
+			mutationKey: updateKey,
 			mutationFn: ({ connectionId, json }: { connectionId: string; json: ConnectionUpdate }) =>
 				Effect.runPromise(connections.update({ params: { podId, connectionId }, payload: json })),
-			onSuccess: refresh,
+			onMutate: async ({ connectionId, json }) => {
+				const { toolAccess } = json;
+				if (toolAccess === undefined) return undefined;
+				await queryClient.cancelQueries({ queryKey: listKey });
+				const before = queryClient.getQueryData<Connection[]>(listKey);
+				queryClient.setQueryData<Connection[]>(listKey, (listed) =>
+					listed?.map((one) => (one.id === connectionId ? withToolAccess(one, toolAccess) : one)),
+				);
+				return { before };
+			},
+			onError: (_failure, _change, context) => {
+				if (context?.before) queryClient.setQueryData(listKey, context.before);
+			},
+			onSettled: () => {
+				// This mutation still counts until its own onSettled is done.
+				if (queryClient.isMutating({ mutationKey: updateKey }) > 1) return;
+				return refresh();
+			},
 		}),
 		remove: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
@@ -117,6 +144,20 @@ export function useConnectionActions(podId: string) {
 				if (!result.authorizationUrl) void refresh();
 			},
 		}),
+	};
+}
+
+/** `connection` with each tool `toolAccess` names set as it says, as the server will once it has it. */
+function withToolAccess(
+	connection: Connection,
+	toolAccess: Record<string, ConnectionAccess>,
+): Connection {
+	return {
+		...connection,
+		tools: connection.tools.map((tool) => ({
+			...tool,
+			access: toolAccess[tool.name] ?? tool.access,
+		})),
 	};
 }
 

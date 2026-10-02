@@ -43,6 +43,7 @@ function connection(
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
+		connectedBy: "Ryan Eyes",
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -51,6 +52,43 @@ function connection(
 /** One in each state the design draws: allowed, asking, off, failing its test, and not yet signed in. */
 const connections: Connection[] = [
 	connection(1, { name: "Linear", handle: "linear", url: "https://mcp.linear.app/mcp" }),
+	{
+		...connection(6, {
+			name: "GitHub",
+			handle: "github",
+			url: "https://api.githubcopilot.com/mcp/",
+		}),
+		tools: [
+			{
+				name: "search_code",
+				description: "Search code",
+				readOnly: true,
+				destructive: false,
+				access: "allow",
+			},
+			{
+				name: "get_file",
+				description: "Read a file",
+				readOnly: true,
+				destructive: false,
+				access: "allow",
+			},
+			{
+				name: "create_pull_request",
+				description: "Open a pull request",
+				readOnly: false,
+				destructive: false,
+				access: "ask",
+			},
+			{
+				name: "delete_branch",
+				description: "Delete a branch",
+				readOnly: false,
+				destructive: true,
+				access: "off",
+			},
+		],
+	},
 	connection(2, {
 		name: "Sentry",
 		handle: "sentry",
@@ -104,19 +142,35 @@ const meta = preview.meta({
 	render: () => <StoryApp path={podPath} />,
 });
 
-/** Each connection with its access, the one that failed its check, and the one waiting on a sign-in. */
+/**
+ * Each connection with what its tools are set to, one set tool by tool with no
+ * one setting chosen, the one that failed its check, and the one waiting on a
+ * sign-in.
+ */
 export const States = meta.story({
 	play: async ({ canvas }) => {
-		const linear = await canvas.findByRole("article", { name: "Linear" }, { timeout: 10_000 });
-		await expect(within(linear).getByRole("radio", { name: "Allow" })).toBeChecked();
+		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
 		await expect(
-			within(canvas.getByRole("article", { name: "Sentry" })).getByRole("radio", { name: "Ask" }),
-		).toBeChecked();
+			within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off"),
+		).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("article", { name: "Team wiki" })).getByRole("radio", {
-				name: "Off",
+			within(github).getByRole("button", { name: "GitHub, all tools: Custom" }),
+		).toBeInTheDocument();
+		await expect(
+			within(canvas.getByRole("article", { name: "Linear" })).getByRole("button", {
+				name: "Linear, all tools: Allow",
 			}),
-		).toBeChecked();
+		).toBeInTheDocument();
+		await expect(
+			within(canvas.getByRole("article", { name: "Sentry" })).getByRole("button", {
+				name: "Sentry, all tools: Ask",
+			}),
+		).toBeInTheDocument();
+		await expect(
+			within(canvas.getByRole("article", { name: "Team wiki" })).getByRole("button", {
+				name: "Team wiki, all tools: Off",
+			}),
+		).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("article", { name: "Stripe" })).getByRole("button", { name: "Fix" }),
 		).toBeInTheDocument();
@@ -126,6 +180,17 @@ export const States = meta.story({
 			}),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
+	},
+});
+
+/** A row's menu: Allow, Ask or Off for every tool, or Custom to open the connection and set each. */
+export const RowMenu = meta.story({
+	play: async ({ canvas }) => {
+		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
+		await userEvent.click(
+			within(github).getByRole("button", { name: "GitHub, all tools: Custom" }),
+		);
+		await expect(await screen.findByRole("menuitemradio", { name: "Custom" })).toBeChecked();
 	},
 });
 
@@ -226,12 +291,12 @@ export const Member = meta.story({
 	},
 });
 
-/** On a phone: the rows wrap their approval control under the app's name. */
+/** On a phone: each row says what its tools are set to, and opens to change them. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("article", { name: "Linear" }, { timeout: 10_000 }),
-		).toBeInTheDocument();
+		const github = await canvas.findByRole("article", { name: "GitHub" }, { timeout: 10_000 });
+		await expect(within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off")).toBeVisible();
+		await expect(within(github).queryByRole("button", { name: /all tools/ })).toBeNull();
 	},
 });

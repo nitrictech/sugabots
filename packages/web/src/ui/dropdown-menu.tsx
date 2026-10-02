@@ -1,6 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "cn";
+import { Check } from "lucide-react";
 
 /*
  * A menu that floats over the page, drawn as the design draws every floating
@@ -69,6 +70,30 @@ function DropdownMenuItem({
 	);
 }
 
+/** A set of items of which one is chosen, such as a setting's values. */
+function DropdownMenuRadioGroup({ ...props }: MenuPrimitive.RadioGroup.Props) {
+	return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
+}
+
+/** One of a radio group's items, ticked at its end while it is the chosen one. */
+function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props) {
+	return (
+		<MenuPrimitive.RadioItem
+			data-slot="dropdown-menu-radio-item"
+			className={cn(
+				"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-[10px] py-2 pr-8 pl-2.5 text-[14.5px] outline-hidden data-disabled:pointer-events-none data-highlighted:bg-hover data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+				className,
+			)}
+			{...props}
+		>
+			{children}
+			<MenuPrimitive.RadioItemIndicator className="absolute right-2.5 text-link">
+				<Check aria-hidden />
+			</MenuPrimitive.RadioItemIndicator>
+		</MenuPrimitive.RadioItem>
+	);
+}
+
 function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
 	return (
 		<MenuPrimitive.Separator
@@ -109,6 +134,8 @@ export {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 };

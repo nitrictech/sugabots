@@ -50,6 +50,7 @@ function linear(access: ConnectionAccess): Connection {
 		].map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-19T00:00:00.000Z",
 		lastTestError: null,
+		connectedBy: null,
 		createdAt: "2026-09-19T00:00:00.000Z",
 	};
 }

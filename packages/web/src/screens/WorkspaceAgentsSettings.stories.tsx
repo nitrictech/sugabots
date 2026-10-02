@@ -73,6 +73,7 @@ function connection(
 		tools: tools.map((tool) => ({ ...tool, access: "allow" as const })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
+		connectedBy: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
