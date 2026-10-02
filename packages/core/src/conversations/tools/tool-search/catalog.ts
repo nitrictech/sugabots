@@ -1,4 +1,4 @@
-import type { JSONSchema7 } from "ai";
+import { asSchema, type JSONSchema7, type Tool } from "ai";
 import MiniSearch from "minisearch";
 import type { OfferedTool } from "../connections.ts";
 
@@ -16,12 +16,41 @@ export type CatalogEntry = Pick<
 	"handle" | "remoteToolName" | "description" | "inputSchema"
 > & { key: string };
 
-/** buildCatalog returns the tools that may be called, sorted so the listing is stable across turns. */
-export function buildCatalog(tools: Readonly<Record<string, OfferedTool>>): CatalogEntry[] {
-	return Object.entries(tools)
+/** What Sugabots' own tools in the catalog are listed under, as a connection's are under its handle. */
+export const BUILT_IN_HANDLE = "sugabots";
+
+/**
+ * buildCatalog returns the tools that may be called: Sugabots' own `builtIn`
+ * first, then the connections' `tools`, each sorted so the listing is stable
+ * across turns.
+ */
+export function buildCatalog(
+	tools: Readonly<Record<string, OfferedTool>>,
+	builtIn: Readonly<Record<string, Tool>> = {},
+): CatalogEntry[] {
+	const own = Object.entries(builtIn).map(([key, found]) => builtInEntry(key, found));
+	const connections = Object.entries(tools)
 		.filter(([, offered]) => offered.access !== "off")
-		.map(([key, offered]) => ({ ...offered, key }))
-		.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+		.map(([key, offered]) => ({ ...offered, key }));
+	return [...own.sort(byKey), ...connections.sort(byKey)];
+}
+
+function byKey(a: CatalogEntry, b: CatalogEntry): number {
+	return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+}
+
+/** A built-in tool as the catalog lists it, called by its own name. */
+function builtInEntry(key: string, found: Tool): CatalogEntry {
+	const inputSchema = asSchema(found.inputSchema).jsonSchema;
+	// Searching is synchronous, so a schema still being made can't be searched.
+	if ("then" in inputSchema) throw new Error(`The ${key} tool's input schema isn't ready`);
+	return {
+		key,
+		handle: BUILT_IN_HANDLE,
+		remoteToolName: key,
+		description: typeof found.description === "string" ? found.description : "",
+		inputSchema,
+	};
 }
 
 type FoundTool =
@@ -87,8 +116,9 @@ function firstSentence(text: string): string {
 }
 
 /**
- * catalogListing names each connection's tools within an equal share of
- * `LISTING_CHARACTERS`, so one with hundreds of tools cannot crowd out the rest.
+ * catalogListing names each connection's tools, and Sugabots' own, within an
+ * equal share of `LISTING_CHARACTERS`, so one with hundreds of tools cannot
+ * crowd out the rest.
  */
 export function catalogListing(catalog: readonly CatalogEntry[]): string {
 	const byConnection = new Map<string, string[]>();

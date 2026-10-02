@@ -396,7 +396,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		const promptMessages = modelPrompt(next.context, {
 			now: new Date(),
 			builtInTools: [],
-			connectionTools: undefined,
+			toolCatalog: undefined,
 			sandbox: undefined,
 		}).messages;
 		expect(promptMessages).toContainEqual(

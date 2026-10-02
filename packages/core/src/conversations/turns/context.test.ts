@@ -8,7 +8,7 @@ import type { TurnContext } from "./execution.ts";
 const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
-	connectionTools: undefined,
+	toolCatalog: undefined,
 	sandbox: undefined,
 	...overrides,
 });

@@ -1,4 +1,5 @@
 import type { CollaborationPart } from "@sugabots/contracts";
+import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
@@ -11,12 +12,13 @@ import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import { READ_FILE_TOOL } from "../tools/sandbox/tools.ts";
 import type { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { buildCatalog } from "../tools/tool-search/catalog.ts";
+import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
@@ -33,7 +35,10 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * sandbox tools work in the pod's sandbox, and the connection tools do work
  * at a server the workspace configured; every call to any of them is recorded
  * as a `tool_call` part of the reply (`calls/`).
- * Connection tools are reached through `tool_search` and `call_tool`.
+ * Connection tools, and the built-in tools a bot needs only now and then,
+ * such as `read_docs`, are in the catalog: reached through `tool_search` and
+ * `call_tool`, so they cost a line in the turn's note rather than a whole
+ * description and schema in every request.
  *
  * A tool that can't run is still offered, and its calls refused: the tools
  * lead the provider's cached prompt, so changing them mid-thread loses the
@@ -86,7 +91,15 @@ const TOOL_UNAVAILABLE = userText`This tool is switched off for this bot.`;
 
 const NO_SANDBOX = userText`This bot has no sandbox to work in.`;
 
-export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {
+const readDocs = readDocsTool(docPages);
+
+/** The tools sent with the turn's requests, and the catalog `tool_search` finds the rest in. */
+export interface TurnTools {
+	tools: ToolSet;
+	catalog: CatalogEntry[];
+}
+
+export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): TurnTools {
 	const tools: ToolSet = {};
 	const recording: RecordingOptions = {
 		calls: deps.calls,
@@ -135,16 +148,21 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			},
 		};
 	}
-	const connectionTools: Record<string, Tool> = {};
+	// Sugabots' own tools in the catalog, which are always there to be found.
+	const builtInFound: Record<string, Tool> = { [READ_DOCS_TOOL]: readDocs };
+	const catalogTools: Record<string, Tool> = {};
+	for (const [key, found] of Object.entries(builtInFound)) {
+		catalogTools[key] = recorded(key, found, recording);
+	}
 	for (const [key, offered] of Object.entries(deps.connections)) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
 		// An approved call is left to its approval, which refuses it if the tool
 		// was turned off since.
 		if (offered.access === "off" && !approvalBound) {
-			connectionTools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
+			catalogTools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
 			continue;
 		}
-		connectionTools[key] = recorded(key, offered.tool, {
+		catalogTools[key] = recorded(key, offered.tool, {
 			...recording,
 			mutating: offered.mutating || approvalBound,
 			...(offered.access === "ask" || approvalBound
@@ -155,10 +173,10 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		});
 	}
 	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
-	const catalog = buildCatalog(deps.connections);
+	const catalog = buildCatalog(deps.connections, builtInFound);
 	tools[TOOL_SEARCH] = recorded(TOOL_SEARCH, toolSearchTool({ catalog }), recording);
 	// Not recorded itself: the tool it calls records the call, under its own name.
-	tools[CALL_TOOL] = callToolTool({ catalog, connectionTools });
+	tools[CALL_TOOL] = callToolTool({ catalog, tools: catalogTools });
 	tools[SEARCH_HISTORY_TOOL] = recorded(
 		SEARCH_HISTORY_TOOL,
 		searchHistoryTool({
@@ -198,7 +216,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		noteCollaboration: deps.reply.noteCollaboration,
 		signal: deps.signal,
 	});
-	return tools;
+	return { tools, catalog };
 }
 
 /** What a call to a connection's tool is approved against: the connection as it is configured now. */

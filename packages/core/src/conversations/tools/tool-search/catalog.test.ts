@@ -1,5 +1,12 @@
+import { jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
-import { type CatalogEntry, catalogListing, LISTING_CHARACTERS, searchCatalog } from "./catalog.ts";
+import {
+	buildCatalog,
+	type CatalogEntry,
+	catalogListing,
+	LISTING_CHARACTERS,
+	searchCatalog,
+} from "./catalog.ts";
 
 const entry = (
 	handle: string,
@@ -32,6 +39,55 @@ describe("the listing of connection tools", () => {
 		expect(catalogListing([entry("notes", "list_notes")])).toBe(
 			"- notes (1 tool): notes__list_notes",
 		);
+	});
+});
+
+describe("Sugabots' own tools in the catalog", () => {
+	const readDocs = tool({
+		description: "Read the documentation for Sugabots.",
+		inputSchema: jsonSchema({
+			type: "object",
+			properties: { page: { type: "string" } },
+			required: ["page"],
+		}),
+		execute: async () => ({}),
+	});
+	const notes: CatalogEntry = entry("notes", "list_notes");
+
+	it("lists them first, under Sugabots, by their own names", () => {
+		const catalog = buildCatalog(
+			{
+				notes__list_notes: {
+					...notes,
+					tool: readDocs,
+					mutating: false,
+					access: "allow",
+					connectionId: "",
+					connectionRevision: 1,
+				},
+			},
+			{ read_docs: readDocs },
+		);
+
+		expect(catalogListing(catalog)).toBe(
+			"- sugabots (1 tool): read_docs\n- notes (1 tool): notes__list_notes",
+		);
+	});
+
+	it("finds one by what it does, with its schema", () => {
+		const found = searchCatalog(buildCatalog({}, { read_docs: readDocs }), "documentation");
+
+		expect(found).toEqual([
+			{
+				tool: "read_docs",
+				description: "Read the documentation for Sugabots.",
+				inputSchema: {
+					type: "object",
+					properties: { page: { type: "string" } },
+					required: ["page"],
+				},
+			},
+		]);
 	});
 });
 

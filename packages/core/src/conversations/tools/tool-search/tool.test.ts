@@ -1,7 +1,8 @@
 import { jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
 import type { OfferedTool } from "../connections.ts";
-import { connectionToolsNote } from "./tool.ts";
+import { buildCatalog } from "./catalog.ts";
+import { toolCatalogNote } from "./tool.ts";
 
 const lookup: OfferedTool = {
 	tool: tool({ inputSchema: jsonSchema({ type: "object" }), execute: async () => ({}) }),
@@ -17,8 +18,8 @@ const lookup: OfferedTool = {
 
 describe("the turn's note on connection tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
-		const note = connectionToolsNote({
-			tools: { wiki__lookup: lookup },
+		const note = toolCatalogNote({
+			catalog: buildCatalog({ wiki__lookup: lookup }),
 			unavailable: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
 		});

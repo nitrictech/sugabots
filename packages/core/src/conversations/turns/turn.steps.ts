@@ -30,8 +30,8 @@ import { ConnectionTools } from "../tools/connections.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import {
 	callToolApproval,
-	connectionToolsNote,
 	findApprovalTarget,
+	toolCatalogNote,
 } from "../tools/tool-search/tool.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
@@ -465,7 +465,7 @@ const streamReply = (
 					]),
 				),
 			};
-			const tools = toolsForTurn(prepared, {
+			const { tools, catalog } = toolsForTurn(prepared, {
 				collaborations,
 				calls: toolCalls,
 				approvals,
@@ -502,7 +502,11 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: builtIn.usable,
-				connectionTools: connectionToolsNote(connections),
+				toolCatalog: toolCatalogNote({
+					catalog,
+					unavailable: connections.unavailable,
+					instructions: connections.instructions,
+				}),
 				sandbox: sandbox.note,
 			};
 			const resultFiles = yield* files.resultFiles(prepared.context.thread.id);
