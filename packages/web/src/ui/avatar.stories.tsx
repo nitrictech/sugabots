@@ -11,7 +11,7 @@ const meta = preview.meta({
 	title: "Controls/PersonAvatar",
 	component: PersonAvatar,
 	tags: ["ai-generated"],
-	args: { person: { name: "Ryan Eyes" } },
+	args: { person: { name: "Ryan Eyes", email: "ryan@example.com" } },
 });
 
 /** Initials on a grey disc at each size the app uses: rows, lists, the rail, a page's hero. */
@@ -32,9 +32,9 @@ export const Sizes = meta.story({
 export const Initials = meta.story({
 	render: () => (
 		<div style={{ display: "flex", gap: 16 }}>
-			<PersonAvatar person={{ name: "Mara" }} size={36} />
-			<PersonAvatar person={{ name: "Jay Young" }} size={36} />
-			<PersonAvatar person={{ name: "Sam de la Park" }} size={36} />
+			<PersonAvatar person={{ name: "Mara", email: "mara@example.com" }} size={36} />
+			<PersonAvatar person={{ name: "Jay Young", email: "jay@example.com" }} size={36} />
+			<PersonAvatar person={{ name: "Sam de la Park", email: "sam@example.com" }} size={36} />
 		</div>
 	),
 	play: async ({ canvas }) => {
@@ -45,7 +45,7 @@ export const Initials = meta.story({
 
 /** A photo fills the disc in place of the initials. */
 export const WithPhoto = meta.story({
-	args: { person: { name: "Ryan Eyes", image: PHOTO }, size: 46 },
+	args: { person: { name: "Ryan Eyes", email: "ryan@example.com", image: PHOTO }, size: 46 },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByTitle("Ryan Eyes").querySelector("img")).not.toBeNull();
 	},

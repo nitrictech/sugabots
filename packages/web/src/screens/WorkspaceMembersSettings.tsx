@@ -211,7 +211,9 @@ function Invitations({
 			{invitations.map((invitation) => (
 				<SettingsRow
 					key={invitation.id}
-					icon={<PersonAvatar person={{ name: invitation.email }} size={32} />}
+					icon={
+						<PersonAvatar person={{ name: invitation.email, email: invitation.email }} size={32} />
+					}
 					label={invitation.email}
 					sub={resent.has(invitation.id) ? "Sent again" : expiryText(invitation.expiresAt)}
 					trailing={

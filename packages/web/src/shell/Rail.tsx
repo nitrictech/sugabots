@@ -110,7 +110,7 @@ export function RailView({
 	workspace?: Workspace;
 	/** Every workspace the viewer belongs to, which the workspace's menu offers to switch to. */
 	workspaces?: readonly Workspace[];
-	user?: { name: string; image?: string | null };
+	user?: { name: string; email: string; image?: string | null };
 	/** Absent when the viewer may not make a pod. */
 	onNewPod?: () => void;
 	/** Opens a new bot in the pod whose menu it was chosen from. Offered only where the viewer may add a bot. */
