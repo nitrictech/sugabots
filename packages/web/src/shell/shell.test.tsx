@@ -1840,6 +1840,32 @@ describe("your profile", () => {
 		// anybody to the login page.
 		await waitFor(() => expect(refresh).toHaveBeenCalled());
 	});
+
+	it("changes your name when you leave the field, and re-asks who you are", async () => {
+		client.auth.updateName.mockResolvedValue({ status: true });
+		const refresh = vi.fn();
+		mount("/suga/settings/profile", sam, refresh);
+
+		const name = await screen.findByRole("textbox", { name: "Name" });
+		fireEvent.change(name, { target: { value: "  Samantha " } });
+		fireEvent.blur(name);
+
+		await waitFor(() => expect(client.auth.updateName).toHaveBeenCalledWith({ name: "Samantha" }));
+		await waitFor(() => expect(refresh).toHaveBeenCalled());
+	});
+
+	it("puts your name back, and says why, when the change is refused", async () => {
+		const refusal = "That name can't be used.";
+		client.auth.updateName.mockRejectedValue(failureForStatus(400, refusal, "INVALID_NAME"));
+		mount("/suga/settings/profile", sam);
+
+		const name = await screen.findByRole("textbox", { name: "Name" });
+		fireEvent.change(name, { target: { value: "Samantha" } });
+		fireEvent.blur(name);
+
+		expect(await screen.findByText(refusal)).toBeDefined();
+		expect((name as HTMLInputElement).value).toBe(sam.name);
+	});
 });
 
 describe("pod settings", () => {

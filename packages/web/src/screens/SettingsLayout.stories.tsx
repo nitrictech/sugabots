@@ -48,13 +48,14 @@ export const DeleteWorkspace = meta.story({
 	},
 });
 
-/** Profile: you, and signing out. */
+/** Profile: you, your name to change, and signing out. */
 export const Profile = meta.story({
 	render: () => <StoryApp path={`${settings}/profile`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: storyUser.name }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyUser.name);
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 	},
 });

@@ -145,5 +145,6 @@ export const client = {
 		signIn: vi.fn(),
 		signUp: vi.fn(),
 		signOut: vi.fn(),
+		updateName: vi.fn(),
 	},
 };

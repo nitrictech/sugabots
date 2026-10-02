@@ -65,6 +65,8 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 		resetPassword: (input: { token: string; newPassword: string }) =>
 			orThrow(auth.resetPassword(input)),
 
+		updateName: (input: { name: string }) => orThrow(auth.updateUser(input)),
+
 		async signOut(): Promise<void> {
 			try {
 				await orThrow(auth.signOut());

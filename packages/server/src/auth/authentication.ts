@@ -1,6 +1,6 @@
 export * as Authentication from "./authentication.ts";
 
-import type { SessionUser } from "@sugabots/contracts";
+import { type SessionUser, USER_NAME_MAX_LENGTH, userNameSchema } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
@@ -12,7 +12,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { bearer } from "better-auth/plugins/bearer";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
+import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
@@ -111,10 +111,12 @@ export const make = Effect.gen(function* () {
 			},
 		},
 
+		// better-auth stores whatever name it is sent, at sign-up and after.
 		databaseHooks: {
 			user: {
 				create: {
 					before: async (creating, context) => {
+						const name = validUserName(creating.name);
 						const { referredBy } = await run(
 							Effect.mapError(
 								accounts.admit({
@@ -128,7 +130,13 @@ export const make = Effect.gen(function* () {
 									}),
 							),
 						);
-						return { data: { ...creating, referredBy } };
+						return { data: { ...creating, name, referredBy } };
+					},
+				},
+				update: {
+					before: async (updating) => {
+						if (updating.name === undefined) return;
+						return { data: { ...updating, name: validUserName(updating.name) } };
 					},
 				},
 			},
@@ -212,6 +220,18 @@ const refusalCodes = {
 	SignUpClosed: "SIGN_UP_CLOSED",
 	ReferralLinkInvalid: "REFERRAL_LINK_INVALID",
 } as const;
+
+/** `name` trimmed, or a refusal the caller is shown when it is blank or too long. */
+function validUserName(name: unknown): string {
+	return Option.getOrThrowWith(
+		Schema.decodeUnknownOption(userNameSchema)(name),
+		() =>
+			new APIError("BAD_REQUEST", {
+				code: "INVALID_NAME",
+				message: `Your name needs 1 to ${USER_NAME_MAX_LENGTH} characters.`,
+			}),
+	);
+}
 
 /** `referralCode` from a sign-up's body, which better-auth passes on without looking at it. */
 function referralCodeIn(body: unknown): string | undefined {

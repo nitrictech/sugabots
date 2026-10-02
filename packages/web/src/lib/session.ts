@@ -1,5 +1,7 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
@@ -88,4 +90,22 @@ export function useSession(): Session {
 	}, [refresh]);
 
 	return { user, error, refresh };
+}
+
+/**
+ * Changes your name. Members, pods and chats look a person's name up whenever
+ * they are read, so every cached answer is asked for again, as is who you are,
+ * without holding up the save. A route takes the session when it loads, so
+ * your own name where the page shows it changes once the page is reloaded.
+ */
+export function useUpdateName() {
+	const { session } = useRouteContext({ from: "__root__" });
+	const queries = useQueryClient();
+	return useMutation({
+		mutationFn: (name: string) => client.auth.updateName({ name }),
+		onSuccess: () => {
+			void session.refresh().catch(() => {});
+			void queries.invalidateQueries();
+		},
+	});
 }

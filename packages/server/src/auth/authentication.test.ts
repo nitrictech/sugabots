@@ -273,6 +273,30 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(sent.length).toBe(sentBefore);
 	});
 
+	it("changes your name, trimmed, and refuses a blank one", async () => {
+		const token = await signUp("Ada", `rename-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		const name = async () =>
+			Schema.decodeUnknownSync(sessionUserSchema)(await (await me(token)).json()).name;
+
+		expect((await post(app, "/auth/update-user", { name: "  Ada Lovelace " }, token)).status).toBe(
+			200,
+		);
+		expect(await name()).toBe("Ada Lovelace");
+
+		expect((await post(app, "/auth/update-user", { name: "   " }, token)).status).toBe(400);
+		expect(await name()).toBe("Ada Lovelace");
+	});
+
+	it("refuses a blank name at sign-up", async () => {
+		const response = await signUpAt(
+			app,
+			"   ",
+			`blank-${crypto.randomUUID().slice(0, 8)}@example.com`,
+		);
+
+		expect(response.status).toBe(400);
+	});
+
 	it("rejects a token it never issued", async () => {
 		expect((await me("not-a-real-token")).status).toBe(401);
 	});
