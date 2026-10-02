@@ -157,10 +157,7 @@ function ContactCard({
 			title={agent.name}
 			description={pod.name}
 			headerAction={
-				<Link
-					{...agentChatLink({ pod, agent })}
-					className={buttonStyles({ size: "sm" })}
-				>
+				<Link {...agentChatLink({ pod, agent })} className={buttonStyles({ size: "sm" })}>
 					<MessageCircle aria-hidden />
 					Message
 				</Link>
