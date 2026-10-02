@@ -99,21 +99,33 @@ export async function listServerTools(
 			await session.close();
 		}
 	} catch (cause) {
-		return { ok: false, reason: describe(cause), cause };
+		return { ok: false, reason: describe(cause, target), cause };
 	}
 }
 
 /**
- * What a person is told about `cause`, in our words. The SDK's transport error
- * names the server's HTTP status in its message, which is the one part of it
- * worth repeating.
+ * describe returns what a person is told about `cause`, worded for what
+ * `target` sent. Only the HTTP status and content type are taken from the SDK's
+ * error message, because the rest of it can quote the server's response.
  */
-function describe(cause: unknown): UserMessage {
-	if (cause instanceof UnauthorizedError) return UserMessage.of`Sign in again to reconnect`;
+function describe(cause: unknown, target: ServerTarget): UserMessage {
 	if (cause instanceof EgressRefused) return cause.userMessage;
+	if (cause instanceof UnauthorizedError) return UserMessage.of`Sign in again to reconnect`;
 	const message = cause instanceof Error ? cause.message : String(cause);
-	const status = /\bHTTP (\d{3})\b/.exec(message)?.[1];
-	return status
-		? UserMessage.of`The server answered HTTP ${Number(status)}`
-		: UserMessage.of`The server could not be reached`;
+	const status = Number(/\bHTTP (\d{3})\b/.exec(message)?.[1]);
+	if (status === 401 && target.authProvider) return UserMessage.of`Sign in again to reconnect`;
+	if (status === 401 && Object.keys(target.headers).length > 0) {
+		return UserMessage.of`The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)`;
+	}
+	if (status === 401)
+		return UserMessage.of`The server needs an access token or a sign-in (HTTP 401)`;
+	if (status === 403) {
+		return UserMessage.of`The server refused access. Check what the token or account is allowed to do (HTTP 403)`;
+	}
+	if (status === 404 || status === 405 || /Unexpected content type/.test(message)) {
+		return UserMessage.of`Nothing answers as an MCP server at that address. Check the path, which often ends in /mcp`;
+	}
+	if (status)
+		return UserMessage.of`The server answered with an error. Try again later (HTTP ${status})`;
+	return UserMessage.of`The server could not be reached. Check the address and port, and that the server is running`;
 }

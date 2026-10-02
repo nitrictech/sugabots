@@ -215,14 +215,20 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		const tested = await setup.test({ ...inPod(), connectionId: made.id });
 
-		expect(tested).toMatchObject({ reachable: false, error: "The server could not be reached" });
+		expect(tested).toMatchObject({
+			reachable: false,
+			error:
+				"The server could not be reached. Check the address and port, and that the server is running",
+		});
 		const [stored] = await onDatabase((db) =>
 			db
 				.select({ error: connection.lastTestError })
 				.from(connection)
 				.where(eq(connection.id, made.id)),
 		);
-		expect(stored?.error).toBe("The server could not be reached");
+		expect(stored?.error).toBe(
+			"The server could not be reached. Check the address and port, and that the server is running",
+		);
 	});
 
 	it("takes nothing back from a sign-in that could not start", async () => {

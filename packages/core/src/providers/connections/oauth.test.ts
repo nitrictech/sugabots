@@ -171,6 +171,9 @@ describe("signing a connection in", () => {
 	it("says a server that wants a sign-in needs one, in the words the settings page shows", async () => {
 		const listed = await listServerTools({ url: serverUrl, headers: {} }, fetch);
 		expect(listed.ok).toBe(false);
-		expect(listed).toMatchObject({ ok: false, reason: "The server answered HTTP 401" });
+		expect(listed).toMatchObject({
+			ok: false,
+			reason: "The server needs an access token or a sign-in (HTTP 401)",
+		});
 	});
 });

@@ -252,7 +252,11 @@ describe("the SearXNG backend", () => {
 				query: "q",
 				count: 1,
 			}),
-		).toEqual({ ok: false, reason: "Address is on a private or reserved network" });
+		).toEqual({
+			ok: false,
+			reason:
+				"That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
+		});
 	});
 
 	it("keeps any other failure's details out of its reason", async () => {

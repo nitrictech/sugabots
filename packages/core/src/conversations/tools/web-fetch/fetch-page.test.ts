@@ -208,7 +208,8 @@ describe("fetching a page", () => {
 		try {
 			expect(await pageFetcher({ fetch: client })("https://intranet.example/")).toEqual({
 				ok: false,
-				reason: "Address is on a private or reserved network",
+				reason:
+					"That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
 			});
 			expect(dispatch).not.toHaveBeenCalled();
 		} finally {

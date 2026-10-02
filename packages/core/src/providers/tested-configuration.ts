@@ -2,7 +2,7 @@ import type { ProviderStatus } from "@sugabots/contracts";
 import { type SQL, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { Data, Effect } from "effect";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import type { Egress, EgressRefused } from "./network/egress.ts";
 
 /**
@@ -46,6 +46,6 @@ export class UrlNotAllowed
 		return `The address is not allowed: ${this.refusal.message}`;
 	}
 	get userMessage() {
-		return UserMessage.of`That address is not allowed: ${this.refusal.userMessage}`;
+		return this.refusal.userMessage;
 	}
 }

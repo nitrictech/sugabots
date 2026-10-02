@@ -63,7 +63,8 @@ const connections: Connection[] = [
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
 		status: "error",
-		lastTestError: "The server answered 401: the key was refused.",
+		lastTestError:
+			"The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)",
 	}),
 	connection(5, {
 		name: "Notion",
@@ -131,6 +132,20 @@ export const OneOpened = meta.story({
 		await expect(
 			within(dialog).getByRole("button", { name: "Remove connection" }),
 		).toBeInTheDocument();
+	},
+});
+
+/** A connection whose last check failed: why, and a link to how to fix it. */
+export const FailedCheck = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "About Stripe" }, { timeout: 10_000 }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: "Stripe" });
+		await expect(within(dialog).getByRole("link", { name: "How to fix this" })).toHaveAttribute(
+			"href",
+			"https://sugabots.ai/docs/connections#troubleshooting",
+		);
 	},
 });
 
