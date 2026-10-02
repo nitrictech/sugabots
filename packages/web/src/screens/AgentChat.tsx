@@ -8,6 +8,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -19,7 +20,6 @@ import {
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
-import { randomUuid } from "@/lib/random-uuid.ts";
 import { readReceipts } from "@/lib/read-receipts.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -146,7 +146,7 @@ export function AgentChat({
 		followingLatest.current = true;
 		try {
 			const sent = send.mutateAsync({
-				id: randomUuid(),
+				id: uuidv4(),
 				message,
 				peopleOnly: writingToPeople,
 			});

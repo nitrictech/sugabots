@@ -14,9 +14,9 @@ import {
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { refreshChatMarkers } from "@/lib/chats.ts";
-import { randomUuid } from "@/lib/random-uuid.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 export function useThreadEvents(threadId: string | undefined): void {
@@ -199,7 +199,7 @@ async function applyThreadEvent(
 		return;
 	}
 	if (update.type === "thread.notice") {
-		const notice = { id: randomUuid(), text: update.notice };
+		const notice = { id: uuidv4(), text: update.notice };
 		queries.setQueryData<ThreadNotice[]>(noticesKey(threadId), (notices = []) => [
 			...notices,
 			notice,
