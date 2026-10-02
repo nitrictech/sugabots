@@ -117,7 +117,8 @@ describe("signing a connection in", () => {
 
 	it("keeps why a sign-in could not start out of the response", async () => {
 		const response = await app({
-			connectFromCatalog: () => Effect.fail(new ConnectionSetup.ConnectionOAuthStartFailed()),
+			connectFromCatalog: () =>
+				Effect.fail(new ConnectionSetup.ConnectionOAuthStartFailed({ reason: "unknown" })),
 		}).request(`${root}/connect`, {
 			method: "POST",
 			headers,
@@ -127,7 +128,8 @@ describe("signing a connection in", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "Could not start signing in to that server",
+			message:
+				"The server didn't start a sign-in. Try again, or connect it with an access token from the server instead.",
 		});
 	});
 

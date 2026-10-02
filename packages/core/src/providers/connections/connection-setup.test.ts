@@ -238,7 +238,9 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 					Effect.fail(
 						new ConnectionSignIn.SignInFailed({
 							step: "begin",
-							cause: new Error("Incompatible auth server: no dynamic client registration"),
+							cause: new Error(
+								"Incompatible auth server: does not support dynamic client registration",
+							),
 						}),
 					),
 			},
@@ -251,7 +253,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			}),
 		).rejects.toMatchObject({
 			_tag: "ConnectionOAuthStartFailed",
-			userMessage: "Could not start signing in to that server",
+			userMessage:
+				"Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.",
 		});
 		expect(await setup.list(inPod())).toEqual([]);
 	});

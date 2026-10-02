@@ -153,6 +153,27 @@ export async function finishAuthorization(
 	await provider.saveState?.("");
 }
 
+/** Why a sign-in could not start: see {@link signInStartFailure}. */
+export type SignInStartFailure = "registration_unsupported" | "unreachable" | "unknown";
+
+/**
+ * signInStartFailure returns why `cause`, thrown while starting a sign-in,
+ * stopped it: the authorization server offers no dynamic client registration,
+ * which is the only way Sugabots registers, or no server answered at all.
+ */
+export function signInStartFailure(cause: unknown): SignInStartFailure {
+	for (let current = cause; current instanceof Error; current = current.cause) {
+		if (/does not support dynamic client registration/.test(current.message)) {
+			return "registration_unsupported";
+		}
+		const code = (current as { code?: unknown }).code;
+		if (current.name === "TimeoutError" || (typeof code === "string" && /^E[A-Z]+$/.test(code))) {
+			return "unreachable";
+		}
+	}
+	return "unknown";
+}
+
 /** Whether a failure means the connection needs signing in again rather than fixing. */
 export function needsSignIn(cause: unknown): boolean {
 	return cause instanceof UnauthorizedError;
