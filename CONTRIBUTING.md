@@ -28,16 +28,17 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/workflow`  | The workflow engines (in memory, and single-runner on Postgres) and activities |
 | `packages/sdk`       | Typed API, authentication, and reconnecting SSE client                         |
 | `packages/web`       | React and Vite web app                                                         |
+| `packages/docs`      | The docs pages, which the website publishes                                    |
 | `packages/website`   | Landing page and docs, prerendered and served from Cloudflare                  |
 
 ## Docs
 
 The docs are part of the website, at `/docs`. Each page is an MDX file in
-`packages/website/src/docs/content/` with a `title` and `description` in its
-frontmatter, and is published once it's listed in `src/docs/nav.ts`, which sets
-its place and the bot beside it. Pages can use the components in
-`src/docs/components/mdx-components.ts` without importing them. Preview with
-`bun run --cwd packages/website dev`.
+`packages/docs/content/` with a `title` and `description` in its frontmatter,
+and is published once it's listed in `packages/website/src/docs/nav.ts`, which
+sets its place and the bot beside it. Pages can use the components in
+`packages/website/src/docs/components/mdx-components.ts` without importing
+them. Preview with `bun run --cwd packages/website dev`.
 
 The website sends analytics to PostHog, through Suga's proxy at `p.suga.app`,
 only from a production build made with `VITE_POSTHOG_KEY` set to the project
