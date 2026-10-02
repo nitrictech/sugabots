@@ -9,6 +9,7 @@ export * as Models from "./models.ts";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import {
 	APICallError,
 	type AssistantModelMessage,
@@ -368,6 +369,17 @@ function languageModel(
 			baseURL: connection.baseUrl.endsWith("/v1")
 				? connection.baseUrl
 				: `${connection.baseUrl.replace(/\/$/, "")}/v1`,
+			headers: connection.headers,
+			fetch,
+		})(modelId);
+	}
+	// Gemini needs the thought signatures from its earlier tool calls sent back
+	// with their results, or it can answer with nothing at all. OpenRouter
+	// returns them as `reasoning_details`, which only its own client sends back.
+	if (connection.preset === "openrouter") {
+		return createOpenRouter({
+			apiKey: connection.apiKey ?? "",
+			baseURL: connection.baseUrl,
 			headers: connection.headers,
 			fetch,
 		})(modelId);
