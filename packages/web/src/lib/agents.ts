@@ -1,5 +1,11 @@
 import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
@@ -23,17 +29,7 @@ export function useAgents(): {
 	refetch: () => Promise<unknown>;
 } {
 	const workspace = useWorkspace();
-	const workspaceId = workspace.workspace?.id;
-
-	const query = useQuery({
-		queryKey: ["agents", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.agents.list({ params: { workspace: workspaceId } }), {
-						signal,
-					})
-			: skipToken,
-	});
+	const query = useQuery(agentsQuery(workspace.workspace?.id));
 
 	return {
 		agents: query.data,
@@ -43,11 +39,24 @@ export function useAgents(): {
 	};
 }
 
+/** The agents of one workspace, which need not be the one being looked at. */
+export function agentsQuery(workspaceId: string | undefined) {
+	return queryOptions({
+		queryKey: ["agents", workspaceId],
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.agents.list({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
 /**
  * The pod and agent an address names. A handle is unique only within its pod,
  * so the same handle in another pod is a different agent, not a fallback.
  */
-function findPodAgent(
+export function findPodAgent(
 	pods: readonly Pod[] | undefined,
 	agents: readonly Agent[] | undefined,
 	podSlug: string,

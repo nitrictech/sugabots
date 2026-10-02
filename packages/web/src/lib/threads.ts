@@ -4,7 +4,13 @@ import {
 	type ThreadDetails,
 	type ToolApprovalDecision,
 } from "@sugabots/contracts";
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	queryOptions,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
@@ -42,24 +48,21 @@ export function useThreadActivity(threadId: string | undefined) {
 }
 
 /**
- * A thread, with its newest `messageLimit` messages as it is fetched, and any
- * earlier ones already held or loaded with `loadOlder`. The thread's events keep
- * it current while it is on screen, and it is fetched again whenever it comes
- * back.
+ * A thread, with its newest `messageLimit` messages as it is fetched, merged
+ * into what the cache already holds of it.
  */
-export function useThread(
+export function threadQuery(
 	threadId: string | undefined,
 	messageLimit: number = DEFAULT_THREAD_HISTORY_LIMIT,
 ) {
-	const queries = useQueryClient();
 	const queryKey = ["thread", threadId] as const;
-	const query = useQuery<ThreadDetails>({
+	return queryOptions<ThreadDetails>({
 		queryKey,
 		// Nothing hears the thread's events while it is off screen, and a new
 		// stream starts from now, so a cached copy may have missed a reply finishing.
 		refetchOnMount: "always",
 		queryFn: threadId
-			? async ({ signal }): Promise<ThreadDetails> => {
+			? async ({ signal, client: queries }): Promise<ThreadDetails> => {
 					const latest = await Effect.runPromise(
 						client.api.threads.get({ params: { threadId }, query: { limit: messageLimit } }),
 						{ signal },
@@ -82,6 +85,21 @@ export function useThread(
 				}
 			: skipToken,
 	});
+}
+
+/**
+ * A thread, with its newest `messageLimit` messages as it is fetched, and any
+ * earlier ones already held or loaded with `loadOlder`. The thread's events keep
+ * it current while it is on screen, and it is fetched again whenever it comes
+ * back.
+ */
+export function useThread(
+	threadId: string | undefined,
+	messageLimit: number = DEFAULT_THREAD_HISTORY_LIMIT,
+) {
+	const queries = useQueryClient();
+	const options = threadQuery(threadId, messageLimit);
+	const query = useQuery(options);
 	const older = useMutation({
 		mutationFn: async (cursor: string) => {
 			if (!threadId) throw new NotReadyError();
@@ -93,7 +111,7 @@ export function useThread(
 			);
 		},
 		onSuccess: (page) => {
-			queries.setQueryData<ThreadDetails>(queryKey, (current) =>
+			queries.setQueryData(options.queryKey, (current) =>
 				current
 					? {
 							...current,
