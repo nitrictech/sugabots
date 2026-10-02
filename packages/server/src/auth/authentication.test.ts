@@ -1,4 +1,4 @@
-import { sessionUserSchema, type WorkspaceMember } from "@sugabots/contracts";
+import { meSchema, type WorkspaceMember } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { user } from "@sugabots/core/database/schema";
@@ -6,6 +6,7 @@ import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/da
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -44,7 +45,7 @@ async function appWith(
 	sent: Email.Message[],
 ) {
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
+		Layer.mergeAll(Authentication.layer, Membership.layer, Onboarding.layer).pipe(
 			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
 				Layer.succeed(
@@ -80,6 +81,7 @@ async function appWith(
 		Effect.all({
 			authentication: Authentication.Service,
 			membership: Membership.Service,
+			onboarding: Onboarding.Service,
 			accounts: Accounts.Service,
 		}),
 	);
@@ -88,6 +90,7 @@ async function appWith(
 			Layer.mergeAll(
 				Layer.succeed(Authentication.Service, services.authentication),
 				Layer.succeed(Membership.Service, services.membership),
+				Layer.succeed(Onboarding.Service, services.onboarding),
 				Layer.succeed(Accounts.Service, services.accounts),
 				installationWithWebAppAt(ORIGIN),
 			),
@@ -172,7 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		const bobEmail = `bob-${unique}@example.com`;
 
 		const ada = await signUp("Ada", adaEmail);
-		const identified = Schema.decodeUnknownSync(sessionUserSchema)(await (await me(ada)).json());
+		const identified = Schema.decodeUnknownSync(meSchema)(await (await me(ada)).json()).user;
 		expect(identified.email).toBe(adaEmail);
 
 		const workspace = await workspaceMadeBy(app, ada, `nitric-${unique}`);
@@ -207,7 +210,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		});
 
 		expect(identified.status).toBe(200);
-		expect(Schema.decodeUnknownSync(sessionUserSchema)(await identified.json()).email).toBe(
+		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).user.email).toBe(
 			`cookie-${unique}@example.com`,
 		);
 	});
@@ -276,7 +279,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	it("changes your name, trimmed, and refuses a blank one", async () => {
 		const token = await signUp("Ada", `rename-${crypto.randomUUID().slice(0, 8)}@example.com`);
 		const name = async () =>
-			Schema.decodeUnknownSync(sessionUserSchema)(await (await me(token)).json()).name;
+			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).user.name;
 
 		expect((await post(app, "/auth/update-user", { name: "  Ada Lovelace " }, token)).status).toBe(
 			200,
@@ -295,6 +298,20 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		);
 
 		expect(response.status).toBe(400);
+	});
+
+	it("answers who someone is, their onboarding and their workspaces in one request", async () => {
+		const email = `boot-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const token = await signUp("Boot Strap", email);
+
+		const response = await me(token);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			user: expect.objectContaining({ name: "Boot Strap", email }),
+			onboarding: { completed: false },
+			workspaces: [],
+		});
 	});
 
 	it("rejects a token it never issued", async () => {

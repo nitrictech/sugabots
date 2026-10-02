@@ -1,13 +1,15 @@
 import { fileURLToPath } from "node:url";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, normalizePath } from "vite";
+import { defineConfig, normalizePath, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
 	plugins: [
 		react(),
 		tailwindcss(),
+		preloadMe(),
 		// The logo and icons belong to `@sugabots/avatars`. `index.html` cannot
 		// import from a package, so they are copied to the root instead.
 		viteStaticCopy({
@@ -49,6 +51,38 @@ export default defineConfig({
 		},
 	},
 });
+
+/**
+ * Starts `/me` as the page arrives rather than once the app's script
+ * has loaded. The app asks for it first thing on every load, so the preloaded
+ * answer is always taken at once and never left to answer a later request.
+ * Storybook's iframe has no API behind it, so it is left alone.
+ */
+function preloadMe(): Plugin {
+	let apiBaseUrl = API_BASE_PATH;
+	return {
+		name: "preload-me",
+		configResolved(config) {
+			// The base `src/lib/api-url.ts` gives the app's own requests.
+			apiBaseUrl = (config.env.VITE_API_URL ?? API_BASE_PATH).replace(/\/+$/, "");
+		},
+		transformIndexHtml: (_html, { path }) =>
+			path === "/index.html"
+				? [
+						{
+							tag: "link",
+							attrs: {
+								rel: "preload",
+								as: "fetch",
+								crossorigin: "use-credentials",
+								href: `${apiBaseUrl}/me`,
+							},
+							injectTo: "head",
+						},
+					]
+				: undefined,
+	};
+}
 
 /**
  * A file `@sugabots/avatars` exports, as a path the copy plugin's globbing
