@@ -129,13 +129,20 @@ const meta = preview.meta({
 	render: () => <StoryApp path={cardPath} />,
 });
 
-/** The list of bots beside Growth Desk's contact card: its face, about, look, tools and routines. */
+/**
+ * The list of bots beside Growth Desk's contact card: its face with the way to
+ * message it, about, look, tools and routines.
+ */
 export const ContactCard = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("navigation", { name: "Workspace bots" })).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "Message" })).toHaveAttribute(
+			"href",
+			expect.stringMatching(new RegExp(`/agents/${growthDesk.handle}$`)),
+		);
 		await expect(canvas.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
 	},
 });

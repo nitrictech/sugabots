@@ -36,7 +36,7 @@ export function SettingsPage({
 	hero?: ReactNode;
 	/** The link back to where this page was opened from, at the panel's top left: a `PageBackLink`. */
 	back?: ReactNode;
-	/** A control beside the title, such as Invite people. Not shown with `hero`. */
+	/** A control beside the title, such as Invite people, or under it with `hero`. */
 	headerAction?: ReactNode;
 	children: ReactNode;
 	className?: string;
@@ -61,6 +61,7 @@ export function SettingsPage({
 						{hero}
 						{title && <h2 className="m-0 pt-1 font-bold text-2xl text-foreground">{title}</h2>}
 						{description && <p className="m-0 text-[14px] text-muted-foreground">{description}</p>}
+						{headerAction}
 					</div>
 				) : (
 					(title || description) && (
