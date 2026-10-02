@@ -382,6 +382,8 @@ function languageModel(
 			baseURL: connection.baseUrl,
 			headers: connection.headers,
 			fetch,
+			// Asks for usage at the end of each stream, which costs are recorded from.
+			compatibility: "strict",
 		})(modelId);
 	}
 	const openai = createOpenAI({
