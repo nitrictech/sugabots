@@ -1,4 +1,4 @@
-import { healthResponseSchema, sessionUserSchema } from "@sugabots/contracts";
+import { healthResponseSchema, meSchema } from "@sugabots/contracts";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
@@ -44,7 +44,7 @@ describe("GET /me", () => {
 		});
 
 		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(sessionUserSchema)(await response.json())).toEqual(user);
+		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).user).toEqual(user);
 	});
 
 	it("returns the user behind a Better Auth cookie when Authorization is absent", async () => {
@@ -59,7 +59,7 @@ describe("GET /me", () => {
 		});
 
 		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(sessionUserSchema)(await response.json())).toEqual(user);
+		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).user).toEqual(user);
 	});
 
 	it("does not fall back to a cookie when an invalid bearer token is present", async () => {

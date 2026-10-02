@@ -1,15 +1,18 @@
 import type { CompleteOnboarding, ProviderModel } from "@sugabots/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { useUpdateAgent } from "@/lib/agents.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
 
+/** Whether the signed-in person has finished setting up. */
+export const onboardingQuery = queryOptions({
+	queryKey: ["onboarding"],
+	queryFn: ({ signal }) => Effect.runPromise(client.api.onboarding.status(), { signal }),
+});
+
 export function useOnboarding() {
-	return useQuery({
-		queryKey: ["onboarding"],
-		queryFn: ({ signal }) => Effect.runPromise(client.api.onboarding.status(), { signal }),
-	});
+	return useQuery(onboardingQuery);
 }
 
 export function useCompleteOnboarding() {
