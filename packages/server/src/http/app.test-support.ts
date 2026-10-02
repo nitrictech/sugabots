@@ -1,3 +1,4 @@
+import { NodeHttpPlatform } from "@effect/platform-node";
 import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
@@ -47,14 +48,18 @@ type TestServices = HttpServices | Authentication.Service | Installation.Service
  * The complete route table, built by `apiLayer` as the server builds it, over
  * `services` and, for everything else, fakes that reach nothing and store
  * nothing. Nobody is signed in unless `services` says who is, with
- * `identifiedBy`.
+ * `identifiedBy`. Node's `HttpPlatform` replaces the portable one in
+ * `HttpServer.layerServices`, so responses are compressed as the server
+ * compresses them. `NodeHttpServer.layerHttpServices` would bring the rest of
+ * Node's services too, which leave socket listeners behind for every one of
+ * the many apps the tests build.
  */
 export function createTestApp<Provided extends TestServices = never>(
 	services?: Layer.Layer<Provided>,
 ): TestApp {
 	const routes = apiLayer.pipe(
 		Layer.provide(Layer.merge(fakes, services ?? Layer.empty)),
-		Layer.provide([noDatabase, HttpServer.layerServices]),
+		Layer.provide([noDatabase, Layer.merge(HttpServer.layerServices, NodeHttpPlatform.layer)]),
 	);
 	const { handler } = HttpRouter.toWebHandler(routes, { disableLogger: true });
 	return {

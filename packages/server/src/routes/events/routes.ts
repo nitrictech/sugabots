@@ -49,8 +49,10 @@ const MAX_AGE = Duration.minutes(30);
 const RECHECK = Duration.seconds(5);
 
 const STREAM_HEADERS = {
-	// Private workspace events must not be written to an intermediary cache.
-	"cache-control": "no-store",
+	// Private workspace events must not be written to an intermediary cache,
+	// and each must arrive as soon as it is written, so neither this server
+	// nor a proxy may compress the stream and hold events back to do it.
+	"cache-control": "no-store, no-transform",
 	// nginx otherwise buffers proxied responses and delays event delivery.
 	"x-accel-buffering": "no",
 };
