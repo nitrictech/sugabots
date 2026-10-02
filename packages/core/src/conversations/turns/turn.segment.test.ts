@@ -175,6 +175,21 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		);
 	});
 
+	it("fails the turn for good when the provider refused the request", async () => {
+		const outcome = await segmentWith(
+			Models.fromStream(() =>
+				Effect.fail(
+					new Models.RequestFailed({ message: "Provider returned 402", reason: "outOfCredit" }),
+				),
+			),
+		);
+
+		expect(outcome).toEqual({ _tag: "Finished" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.failed", willRetry: false }),
+		);
+	});
+
 	it("fails a reply the model finished without writing anything, for good", async () => {
 		const outcome = await segmentWith(
 			Models.fromStream(() => Effect.sync(() => streamed(chunks(" \n")))),

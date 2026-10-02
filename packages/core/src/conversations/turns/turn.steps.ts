@@ -250,15 +250,18 @@ const generateReply = (
 
 			/**
 			 * Logs the failure and records what people are told of it; the turn
-			 * runs again only while that is safe. A reply without an answer does
-			 * not: running it again would repeat every tool call it made.
+			 * runs again only while that is safe and could help. A reply without
+			 * an answer does not: running it again would repeat every tool call it
+			 * made. Nor does a request the provider refused, which it would refuse again.
 			 */
 			const failed = (failure: TurnFailure) =>
 				logTurnFailure(prepared, failure.message).pipe(
 					Effect.andThen(
 						turns.fail(replyTurn, draft, {
 							userMessage: failure.userMessage,
-							mayRunAgain: !(failure instanceof ReplyWithoutAnswer),
+							mayRunAgain:
+								!(failure instanceof ReplyWithoutAnswer) &&
+								!(failure instanceof Models.RequestFailed && !failure.mayRetry),
 						}),
 					),
 					Effect.map((willRetry) => (willRetry ? retry : finished)),
