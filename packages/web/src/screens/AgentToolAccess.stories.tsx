@@ -14,6 +14,9 @@ function linear(access: ConnectionAccess): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
+		bearerToken: false,
+		problem: null,
+		problemDetail: null,
 		access,
 		status: "connected",
 		tools: [

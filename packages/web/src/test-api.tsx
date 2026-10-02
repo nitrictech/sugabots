@@ -366,6 +366,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.agents.list.mockReturnValue(Effect.succeed(agents));
 	client.api.systemAgents.list.mockReturnValue(Effect.succeed(builtInAgents));
 	client.api.connections.list.mockReturnValue(Effect.succeed([]));
+	client.api.connections.probe.mockReturnValue(Effect.succeed({ signIn: false }));
 	client.api.threads.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));

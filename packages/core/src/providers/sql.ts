@@ -1,6 +1,7 @@
 import type {
 	ConnectionAccess,
 	ConnectionAuth,
+	ConnectionProblem,
 	ConnectionTool,
 	ProviderApiFormat,
 	ProviderModel,
@@ -169,6 +170,10 @@ export const connection = pgTable(
 		tools: jsonb("tools").$type<ConnectionTool[]>().notNull().default([]),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
+		/** The `ConnectionProblem` behind `last_test_error`. */
+		lastTestProblem: text("last_test_problem").$type<ConnectionProblem>(),
+		/** The HTTP status, content type or network error code behind `last_test_error`, such as `HTTP 401`. */
+		lastTestDetail: text("last_test_detail"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),

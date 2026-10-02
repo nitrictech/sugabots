@@ -5,6 +5,8 @@ import {
 	connectFromCatalogResultSchema,
 	connectFromCatalogSchema,
 	connectionOauthStartSchema,
+	connectionProbeResultSchema,
+	connectionProbeSchema,
 	connectionSchema,
 	connectionTestResultSchema,
 	connectionUpdateSchema,
@@ -30,6 +32,13 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 			payload: newConnectionSchema,
 			success: connectionSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
+		}),
+		// Reports whether the server at an address offers an OAuth sign-in.
+		HttpApiEndpoint.post("probe", `${root}/probe`, {
+			params: pod,
+			payload: connectionProbeSchema,
+			success: connectionProbeResultSchema,
+			error: [BadRequest, ...refused],
 		}),
 		HttpApiEndpoint.get("get", `${root}/:connectionId`, {
 			params: connection,

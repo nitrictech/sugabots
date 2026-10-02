@@ -1,7 +1,12 @@
 export * as ConnectionRepository from "./connection-repository.ts";
 
-import type { ConnectionTool, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
-import { handleFromName } from "@sugabots/contracts";
+import type {
+	ConnectionProblem,
+	ConnectionTool,
+	ConnectionUpdate,
+	NewConnection,
+} from "@sugabots/contracts";
+import { bearerAuthorization, handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -10,7 +15,7 @@ import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
-import type { ConnectionTarget } from "./connection-target.ts";
+import type { ConnectionCredential, ConnectionTarget } from "./connection-target.ts";
 import type { OAuthRecord } from "./oauth.ts";
 
 /**
@@ -100,6 +105,7 @@ export const make = Effect.gen(function* () {
 			handle: row.handle,
 			url: row.url,
 			auth: row.authKind,
+			credential: credentialOf(row, cipher),
 			headers,
 			access: row.access,
 			configurationUpdatedAt: row.updatedAt,
@@ -112,13 +118,14 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const oauth = input.auth === "oauth";
+					const stored = storedCredential(input);
+					const oauth = stored.authKind === "oauth";
 					const values = {
 						name: input.name,
 						url: input.url,
-						authKind: oauth ? ("oauth" as const) : ("header" as const),
-						secretHeader: oauth ? null : (input.secretHeader ?? null),
-						secretEncrypted: !oauth && input.secret ? cipher.encrypt(input.secret) : null,
+						authKind: stored.authKind,
+						secretHeader: stored.secretHeader,
+						secretEncrypted: stored.secret ? cipher.encrypt(stored.secret) : null,
 						// Nothing can be asked of a server before it is signed in to.
 						access: oauth ? ("off" as const) : ("allow" as const),
 					};
@@ -147,10 +154,9 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const { secretHeader, secret } = changedSecret(changes);
 					const connectionChanged =
-						changes.url !== undefined ||
-						changes.secretHeader !== undefined ||
-						changes.secret !== undefined;
+						changes.url !== undefined || secretHeader !== undefined || secret !== undefined;
 					const configurationChanged =
 						changes.name !== undefined || connectionChanged || changes.access !== undefined;
 					const [row] = yield* queryCatching(
@@ -161,19 +167,21 @@ export const make = Effect.gen(function* () {
 									name: changes.name,
 									handle: changes.name === undefined ? undefined : handleFromName(changes.name),
 									url: changes.url,
-									secretHeader: changes.secretHeader,
+									secretHeader,
 									secretEncrypted:
-										changes.secret === undefined
+										secret === undefined
 											? undefined
-											: changes.secret === null
+											: secret === null
 												? null
-												: cipher.encrypt(changes.secret),
+												: cipher.encrypt(secret),
 									access: changes.access,
 									configurationRevision: configurationChanged
 										? sql`${connection.configurationRevision} + 1`
 										: undefined,
 									lastTestedAt: connectionChanged ? null : undefined,
 									lastTestError: connectionChanged ? null : undefined,
+									lastTestProblem: connectionChanged ? null : undefined,
+									lastTestDetail: connectionChanged ? null : undefined,
 								})
 								.where(
 									and(
@@ -217,6 +225,8 @@ export const make = Effect.gen(function* () {
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
+								lastTestProblem: "error" in outcome ? outcome.problem : null,
+								lastTestDetail: "error" in outcome ? (outcome.detail ?? null) : null,
 								tools: "tools" in outcome ? outcome.tools : undefined,
 							})
 							.where(
@@ -318,7 +328,60 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** What a test found: the server's tools, or why it could not be asked. */
-export type TestOutcome = { tools: ConnectionTool[] } | { error: UserMessage };
+export type TestOutcome =
+	| { tools: ConnectionTool[] }
+	| { error: UserMessage; problem: ConnectionProblem; detail?: string };
+
+/**
+ * storedCredential returns the columns `input`'s credential is saved in. A
+ * `token` is saved as an `Authorization` header whose secret is
+ * `Bearer <token>`.
+ */
+function storedCredential(input: NewConnection): {
+	authKind: "header" | "oauth";
+	secretHeader: string | null;
+	secret?: string;
+} {
+	if (input.auth === "token") {
+		return {
+			authKind: "header",
+			secretHeader: AUTHORIZATION,
+			secret: bearerAuthorization(input.token),
+		};
+	}
+	if (input.auth === "oauth") return { authKind: "oauth", secretHeader: null };
+	return { authKind: "header", secretHeader: input.secretHeader ?? null, secret: input.secret };
+}
+
+/** changedSecret returns the header and secret `changes` sets; an undefined field is left as stored. */
+function changedSecret(changes: ConnectionUpdate): {
+	secretHeader?: string | null;
+	secret?: string | null;
+} {
+	if (changes.token !== undefined) {
+		return { secretHeader: AUTHORIZATION, secret: bearerAuthorization(changes.token) };
+	}
+	return { secretHeader: changes.secretHeader, secret: changes.secret };
+}
+
+const AUTHORIZATION = "Authorization";
+
+/**
+ * credentialOf returns what `row` sends its server to authenticate. A secret
+ * in `Authorization` that starts with `Bearer ` counts as a `token`, whether it
+ * was saved as a token or typed in full as a custom header.
+ */
+export function credentialOf(
+	row: ConnectionRow,
+	cipher: Credentials.Interface,
+): ConnectionCredential {
+	if (row.authKind === "oauth") return "oauth";
+	if (!row.secretHeader || !row.secretEncrypted) return "none";
+	const bearer =
+		row.secretHeader.toLowerCase() === AUTHORIZATION.toLowerCase() &&
+		/^bearer\s/i.test(cipher.decrypt(row.secretEncrypted));
+	return bearer ? "token" : "header";
+}
 
 export class ConnectionNameTaken
 	extends Data.TaggedError("ConnectionNameTaken")

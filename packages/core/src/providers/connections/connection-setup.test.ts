@@ -40,8 +40,21 @@ let serverUrl: string;
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
 		// `/open` takes anybody, as a server signed in to with OAuth would once
-		// it has a token; `/mcp` wants the connection's secret.
-		if (request.url !== "/open" && request.headers["x-fixture-key"] !== "open-sesame") {
+		// it has a token; `/token` wants a bearer token; `/signs-in` names an
+		// OAuth server to get one from; `/mcp` wants the connection's secret.
+		const allowed =
+			request.url === "/open" ||
+			(request.url === "/token" && request.headers.authorization === "Bearer open-sesame") ||
+			request.headers["x-fixture-key"] === "open-sesame";
+		if (request.url === "/signs-in") {
+			response
+				.writeHead(401, {
+					"www-authenticate": `Bearer resource_metadata="${serverUrl}/.well-known/oauth-protected-resource/signs-in"`,
+				})
+				.end();
+			return;
+		}
+		if (!allowed) {
 			response.writeHead(401).end("who are you");
 			return;
 		}
@@ -215,14 +228,74 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		const tested = await setup.test({ ...inPod(), connectionId: made.id });
 
-		expect(tested).toMatchObject({ reachable: false, error: "The server could not be reached" });
+		const unreachable =
+			"The server could not be reached. Check the address and port, and that the server is running";
+		expect(tested).toMatchObject({ reachable: false, error: unreachable, problem: "unreachable" });
 		const [stored] = await onDatabase((db) =>
 			db
 				.select({ error: connection.lastTestError })
 				.from(connection)
 				.where(eq(connection.id, made.id)),
 		);
-		expect(stored?.error).toBe("The server could not be reached");
+		expect(stored?.error).toBe(unreachable);
+	});
+
+	it("sends an access token as a bearer token, however it was pasted", async () => {
+		const setup = await setupWith();
+
+		const made = await setup.create({
+			...inPod(),
+			connection: {
+				name: "Wiki",
+				url: `${serverUrl}/token`,
+				auth: "token",
+				token: " Bearer open-sesame\n",
+			},
+		});
+
+		expect(made).toMatchObject({
+			status: "connected",
+			bearerToken: true,
+			secretHeader: "Authorization",
+			tools: [{ name: "lookup" }],
+		});
+	});
+
+	it("says a refused access token needs replacing, and why, and takes a new one", async () => {
+		const setup = await setupWith();
+		const made = await setup.create({
+			...inPod(),
+			connection: { name: "Wiki", url: `${serverUrl}/token`, auth: "token", token: "expired" },
+		});
+
+		expect(made).toMatchObject({
+			status: "error",
+			lastTestError:
+				"The server didn't accept the access token. Check that it hasn't expired and was copied in full",
+			problem: "unauthorized",
+			problemDetail: "HTTP 401",
+		});
+
+		const replaced = await setup.update({
+			...inPod(),
+			connectionId: made.id,
+			changes: { token: "open-sesame" },
+		});
+		expect(replaced).toMatchObject({ status: "connected", problem: null, problemDetail: null });
+	});
+
+	it("tells a server that offers a sign-in from one that only wants a token", async () => {
+		const setup = await setupWith();
+
+		expect(await setup.probe({ ...inPod(), url: `${serverUrl}/signs-in` })).toEqual({
+			signIn: true,
+		});
+		expect(await setup.probe({ ...inPod(), url: `${serverUrl}/token` })).toEqual({
+			signIn: false,
+		});
+		expect(await setup.probe({ ...inPod(), url: `${serverUrl}/open` })).toEqual({
+			signIn: false,
+		});
 	});
 
 	it("takes nothing back from a sign-in that could not start", async () => {

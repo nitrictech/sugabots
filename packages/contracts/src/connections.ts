@@ -84,6 +84,28 @@ export const connectionSignInFailures = [
 export const connectionSignInFailureSchema = Schema.Literals(connectionSignInFailures);
 export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 
+/**
+ * Why a connection's last check failed. `lastTestError` holds the matching
+ * message, worded for how the connection authenticates.
+ *
+ * - `unauthorized`: the server wants a credential, or did not accept the one sent.
+ * - `forbidden`: the credential was accepted but may not do this.
+ * - `not_mcp_server`: nothing answers there as an MCP server, such as a web page or a wrong path.
+ * - `server_error`: the server failed or refused for its own reasons.
+ * - `unreachable`: no answer: a wrong address or port, or the server is down.
+ * - `address_not_allowed`: this installation's network policy refuses the address.
+ */
+export const connectionProblems = [
+	"unauthorized",
+	"forbidden",
+	"not_mcp_server",
+	"server_error",
+	"unreachable",
+	"address_not_allowed",
+] as const;
+export const connectionProblemSchema = Schema.Literals(connectionProblems);
+export type ConnectionProblem = typeof connectionProblemSchema.Type;
+
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
@@ -98,6 +120,12 @@ export const connectionSchema = Schema.Struct({
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
 	/**
+	 * Whether the secret is an access token, sent as `Authorization: Bearer
+	 * <token>` and replaced with a bare token. False for a custom header and
+	 * for OAuth.
+	 */
+	bearerToken: Schema.Boolean,
+	/**
 	 * What the pod's bots may do with its tools. A tool with no hints is taken
 	 * to change things, as the MCP spec has it.
 	 */
@@ -106,6 +134,10 @@ export const connectionSchema = Schema.Struct({
 	tools: Schema.mutable(Schema.Array(connectionToolSchema)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
+	/** Why the last check failed, when it did. */
+	problem: Schema.NullOr(connectionProblemSchema),
+	/** The HTTP status, content type or network error code behind `problem`, such as `HTTP 401`. */
+	problemDetail: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
 });
 
@@ -122,19 +154,59 @@ const secretHeaderSchema = headerNameSchema.check(
 	Schema.makeFilter((name) => !isClientOwnedHeader(name), { message: "Header name is reserved" }),
 );
 
-export const newConnectionSchema = Schema.Struct({
-	name: connectionNameSchema,
-	url: providerUrlSchema,
-	/** `oauth` to sign in through the server; the secret fields are then ignored. */
-	auth: Schema.optional(connectionAuthSchema),
-	/** The header the server reads a secret from, when it takes one. */
-	secretHeader: Schema.optional(secretHeaderSchema),
-	secret: Schema.optional(secretSchema),
-});
+/** An access token as pasted, with or without a leading `Bearer `. */
+const accessTokenSchema = secretSchema.check(
+	Schema.makeFilter((token) => bearerTokenOf(token) !== "", { message: "Paste the token itself" }),
+);
+
+const connectionPlace = { name: connectionNameSchema, url: providerUrlSchema };
+
+/**
+ * A new connection, by how it authenticates to its server:
+ *
+ * - `oauth`: through the server's own OAuth.
+ * - `token`: an access token, sent as `Authorization: Bearer <token>`, and
+ *   kept as a `header` connection that sends it.
+ * - `header`, or no `auth`: a secret sent exactly as typed in the header
+ *   named, or no secret.
+ */
+export const newConnectionSchema = Schema.Union([
+	Schema.Struct({ ...connectionPlace, auth: Schema.Literal("oauth") }),
+	Schema.Struct({ ...connectionPlace, auth: Schema.Literal("token"), token: accessTokenSchema }),
+	Schema.Struct({
+		...connectionPlace,
+		auth: Schema.optional(Schema.Literal("header")),
+		/** The header the server reads a secret from, when it takes one. */
+		secretHeader: Schema.optional(secretHeaderSchema),
+		secret: Schema.optional(secretSchema),
+	}),
+]);
 
 export type NewConnection = typeof newConnectionSchema.Type;
 
-/** Making a connection from the catalog and starting its sign-in, as one request. */
+/** The address of a server to probe for an OAuth sign-in. */
+export const connectionProbeSchema = Schema.Struct({ url: providerUrlSchema });
+/** `signIn`: whether the server supports OAuth sign-in. */
+export const connectionProbeResultSchema = Schema.Struct({ signIn: Schema.Boolean });
+export type ConnectionProbeResult = typeof connectionProbeResultSchema.Type;
+
+/**
+ * bearerAuthorization returns the `Authorization` value for `token`:
+ * `Bearer <token>`, with no doubled scheme when `token` already starts with one.
+ */
+export function bearerAuthorization(token: string): string {
+	return `Bearer ${bearerTokenOf(token)}`;
+}
+
+/** bearerTokenOf returns `value` trimmed and without a leading `Bearer `. */
+export function bearerTokenOf(value: string): string {
+	return value
+		.trim()
+		.replace(/^bearer(\s+|$)/i, "")
+		.trim();
+}
+
+/** Making a connection to a server that signs in with OAuth, from the catalog or by address, and starting its sign-in, in one request. */
 export const connectFromCatalogSchema = Schema.Struct({
 	name: connectionNameSchema,
 	url: providerUrlSchema,
@@ -158,9 +230,16 @@ export const connectionUpdateSchema = Schema.Struct({
 	secretHeader: Schema.optional(Schema.NullOr(secretHeaderSchema)),
 	/** Absent leaves the stored secret alone; null removes it. */
 	secret: Schema.optional(Schema.NullOr(secretSchema)),
+	/** A new access token, replacing the header and secret. */
+	token: Schema.optional(accessTokenSchema),
 	access: Schema.optional(connectionAccessSchema),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
+	Schema.makeFilter(
+		(value) =>
+			value.token === undefined || (value.secret === undefined && value.secretHeader === undefined),
+		{ message: "Give a token or a header and secret, not both" },
+	),
 );
 
 export type ConnectionUpdate = typeof connectionUpdateSchema.Type;
@@ -171,6 +250,8 @@ export const connectionTestResultSchema = Schema.Struct({
 	/** How many tools the server listed, when it answered. */
 	tools: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 	error: Schema.optional(Schema.String),
+	problem: Schema.optional(connectionProblemSchema),
+	problemDetail: Schema.optional(Schema.String),
 });
 
 export type ConnectionTestResult = typeof connectionTestResultSchema.Type;

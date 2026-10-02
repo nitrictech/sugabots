@@ -2,14 +2,20 @@ import {
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionPreset,
+	type ConnectionProblem,
 	type ConnectionTool,
 	connectionCatalog,
 	connectionPresetFor,
 	connectionToolMutating,
 } from "@sugabots/contracts";
 import { ArrowUpRight, Code, Search } from "lucide-react";
-import { type FormEvent, useDeferredValue, useState } from "react";
-import { useConnectionActions, useConnections } from "@/lib/connections.ts";
+import { type FormEvent, useDeferredValue, useEffect, useState } from "react";
+import {
+	troubleshootingUrl,
+	useConnectionActions,
+	useConnectionProbe,
+	useConnections,
+} from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -257,8 +263,14 @@ function ConnectionDialog({
 	const needle = useDeferredValue(query.trim().toLowerCase());
 	const preset = connectionPresetFor(connection.url);
 	const oauth = connection.auth === "oauth";
+	// A connection with no secret offers to add an access token rather than a custom header.
+	const takesToken = connection.bearerToken || connection.secretHeader === null;
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
+	const problem = checked
+		? checked.problem && { problem: checked.problem, detail: checked.problemDetail ?? null }
+		: connection.status === "error" &&
+			connection.problem && { problem: connection.problem, detail: connection.problemDetail };
 	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
 	const matches = (tool: ConnectionTool) =>
 		needle === "" ||
@@ -269,7 +281,10 @@ function ConnectionDialog({
 		event.preventDefault();
 		if (!secret) return;
 		try {
-			await actions.update.mutateAsync({ connectionId: connection.id, json: { secret } });
+			await actions.update.mutateAsync({
+				connectionId: connection.id,
+				json: takesToken ? { token: secret } : { secret },
+			});
 		} catch {
 			return;
 		}
@@ -313,29 +328,33 @@ function ConnectionDialog({
 									}
 								/>
 							) : (
-								connection.secretHeader !== null && (
-									<SettingsRow
-										label="Secret"
-										sub={`Sent as ${connection.secretHeader}`}
-										trailing={
-											canManage && (
-												<Button
-													size="sm"
-													variant="secondary"
-													onClick={() => setReplacing(!replacing)}
-												>
-													{connection.hasSecret ? "Replace" : "Add"}
-												</Button>
-											)
-										}
-									/>
-								)
+								<SettingsRow
+									label={takesToken ? "Access token" : "Secret"}
+									sub={
+										takesToken
+											? connection.hasSecret
+												? "Sent as a bearer token"
+												: "None. Add one if the server asks for it"
+											: `Sent as ${connection.secretHeader}, exactly as typed`
+									}
+									trailing={
+										canManage && (
+											<Button
+												size="sm"
+												variant="secondary"
+												onClick={() => setReplacing(!replacing)}
+											>
+												{connection.hasSecret ? "Replace" : "Add"}
+											</Button>
+										)
+									}
+								/>
 							)}
 							{replacing && (
 								// A form of its own inside the dialog's, which Save submits alone.
 								<div className="flex items-center gap-3 border-border border-t px-4 py-2.5">
 									<input
-										aria-label={`${connection.name} secret`}
+										aria-label={`${connection.name} ${takesToken ? "access token" : "secret"}`}
 										type="password"
 										autoComplete="off"
 										value={secret}
@@ -343,7 +362,7 @@ function ConnectionDialog({
 										onKeyDown={(event) => {
 											if (event.key === "Enter") void saveSecret(event);
 										}}
-										placeholder="Paste the new secret"
+										placeholder={takesToken ? "Paste the new token" : "Paste the new secret"}
 										className="min-w-0 flex-1 bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
 									/>
 									<Button
@@ -378,6 +397,7 @@ function ConnectionDialog({
 								}
 							/>
 						</SettingsGroup>
+						{problem && <ProblemHelp problem={problem.problem} detail={problem.detail} />}
 						{error && <Alert>{failureMessage(error)}</Alert>}
 						{connection.tools.length > 8 && (
 							<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
@@ -434,6 +454,24 @@ function ConnectionDialog({
 				}}
 			/>
 		</DialogFormFrame>
+	);
+}
+
+/** ProblemHelp links to the docs on fixing `problem`, and shows `detail` when there is one. */
+function ProblemHelp({ problem, detail }: { problem: ConnectionProblem; detail: string | null }) {
+	return (
+		<p className="-mt-3 m-0 flex flex-wrap items-center gap-x-2 px-1 text-sm text-subtle-foreground">
+			<a
+				href={troubleshootingUrl(problem)}
+				target="_blank"
+				rel="noreferrer"
+				className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-link hover:opacity-80"
+			>
+				How to fix this
+				<ArrowUpRight aria-hidden size={13} />
+			</a>
+			{detail && <span>The server answered {detail}.</span>}
+		</p>
 	);
 }
 
@@ -609,7 +647,16 @@ function AppStep({
 	);
 }
 
-/** Any other MCP server: its name, its address, a secret if it takes one, and its approval. */
+type Credential = "token" | "oauth" | "header";
+
+/** How long the address must stay unchanged before it is probed for an OAuth sign-in. */
+const PROBE_DELAY_MS = 500;
+
+/**
+ * ByUrlStep adds an MCP server by its address. It defaults to an access token,
+ * switches to Sign in when the server offers OAuth, and offers a custom header
+ * under Advanced.
+ */
 function ByUrlStep({
 	podId,
 	onBack,
@@ -622,22 +669,44 @@ function ByUrlStep({
 	const actions = useConnectionActions(podId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
-	const [secretHeader, setSecretHeader] = useState("Authorization");
+	const settledUrl = useSettled(url, PROBE_DELAY_MS);
+	const probe = useConnectionProbe(podId, settledUrl);
+	const offersSignIn = probe.data?.signIn === true && settledUrl === url;
+	const [chosen, setChosen] = useState<Credential>();
+	const credential: Credential =
+		chosen === "oauth" && !offersSignIn ? "token" : (chosen ?? (offersSignIn ? "oauth" : "token"));
+	const [token, setToken] = useState("");
+	const [secretHeader, setSecretHeader] = useState("");
 	const [secret, setSecret] = useState("");
 	const [access, setAccess] = useState<ConnectionAccess>("ask");
 	const ready = name.trim() !== "" && url.trim() !== "";
-	const pending = actions.create.isPending || actions.update.isPending;
+	const pending = actions.create.isPending || actions.update.isPending || actions.connect.isPending;
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!ready) return;
 		try {
-			const made = await actions.create.mutateAsync({
-				name,
-				url,
-				...(secretHeader ? { secretHeader } : {}),
-				...(secret ? { secret } : {}),
-			});
+			if (credential === "oauth") {
+				// Navigates away to the OAuth sign-in, which redirects back to this pod.
+				await actions.connect.mutateAsync({
+					name,
+					url,
+					access: access === "off" ? "ask" : access,
+				});
+				return;
+			}
+			const made = await actions.create.mutateAsync(
+				credential === "token"
+					? token.trim()
+						? { name, url, auth: "token", token }
+						: { name, url }
+					: {
+							name,
+							url,
+							...(secretHeader.trim() ? { secretHeader } : {}),
+							...(secret ? { secret } : {}),
+						},
+			);
 			// A server added by its address starts at Allow.
 			if (access !== "allow") {
 				await actions.update.mutateAsync({ connectionId: made.id, json: { access } });
@@ -648,7 +717,7 @@ function ByUrlStep({
 		done();
 	}
 
-	const error = actions.create.error ?? actions.update.error;
+	const error = actions.create.error ?? actions.update.error ?? actions.connect.error;
 	return (
 		<DialogFormStep onSubmit={submit}>
 			<DialogFormHeader title="Connect by URL" onBack={onBack} backDisabled={pending} />
@@ -667,30 +736,77 @@ function ByUrlStep({
 						placeholder="https://mcp.example.com/mcp"
 						mono
 					/>
-					<SettingsFieldRow
-						label="Header"
-						value={secretHeader}
-						onChange={setSecretHeader}
-						placeholder="Authorization"
-						mono
-					/>
-					<SettingsFieldRow
-						label="Secret"
-						value={secret}
-						onChange={setSecret}
-						placeholder="Optional"
-						mono
-						secret
-					/>
 				</SettingsGroup>
+				<SettingsGroup
+					note={
+						credential === "oauth"
+							? "You'll sign in to the server next."
+							: credential === "token"
+								? "Sent as a bearer token. Leave it empty if the server needs none."
+								: "The secret is sent in this header exactly as you type it."
+					}
+				>
+					{offersSignIn && (
+						<SettingsRow
+							label="Sign in with"
+							trailing={
+								<SegmentedControl
+									label="How to sign in to the server"
+									options={signInOptions}
+									value={credential === "oauth" ? "oauth" : "token"}
+									onChange={setChosen}
+								/>
+							}
+						/>
+					)}
+					{credential === "token" && (
+						<SettingsFieldRow
+							label="Access token"
+							value={token}
+							onChange={setToken}
+							placeholder="Optional"
+							mono
+							secret
+						/>
+					)}
+					{credential === "header" && (
+						<>
+							<SettingsFieldRow
+								label="Header"
+								value={secretHeader}
+								onChange={setSecretHeader}
+								placeholder="X-API-Key"
+								mono
+							/>
+							<SettingsFieldRow
+								label="Secret"
+								value={secret}
+								onChange={setSecret}
+								placeholder="Optional"
+								mono
+								secret
+							/>
+						</>
+					)}
+				</SettingsGroup>
+				{credential !== "oauth" && (
+					<Button
+						variant="link"
+						size="bare"
+						className="-mt-3 self-start px-1"
+						onClick={() => setChosen(credential === "header" ? "token" : "header")}
+					>
+						{credential === "header" ? "Use an access token instead" : "Use a custom header"}
+					</Button>
+				)}
 				<SettingsGroup>
 					<SettingsRow
 						label="Approval"
 						trailing={
 							<SegmentedControl
 								label="What bots may do with it"
-								options={accessOptions}
-								value={access}
+								options={credential === "oauth" ? addingOptions : accessOptions}
+								value={credential === "oauth" && access === "off" ? "ask" : access}
 								onChange={setAccess}
 							/>
 						}
@@ -698,7 +814,26 @@ function ByUrlStep({
 				</SettingsGroup>
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
-			<DialogFormFooter action="Add" actionDisabled={!ready || pending} cancel={false} />
+			<DialogFormFooter
+				action={credential === "oauth" ? "Sign in" : "Add"}
+				actionDisabled={!ready || pending}
+				cancel={false}
+			/>
 		</DialogFormStep>
 	);
+}
+
+const signInOptions = [
+	{ value: "oauth" as const, label: "Sign in" },
+	{ value: "token" as const, label: "Access token" },
+];
+
+/** useSettled returns `value` once it has stayed unchanged for `delayMs`. */
+function useSettled<T>(value: T, delayMs: number): T {
+	const [settled, setSettled] = useState(value);
+	useEffect(() => {
+		const timer = setTimeout(() => setSettled(value), delayMs);
+		return () => clearTimeout(timer);
+	}, [value, delayMs]);
+	return settled;
 }

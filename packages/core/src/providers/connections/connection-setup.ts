@@ -2,6 +2,7 @@ export * as ConnectionSetup from "./connection-setup.ts";
 
 import type {
 	Connection,
+	ConnectionProbeResult,
 	ConnectionSignInFailure,
 	ConnectionTestResult,
 	ConnectionUpdate,
@@ -20,7 +21,7 @@ import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.t
 import { connectionIn, connectionsIn, toConnection } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
 import { ConnectionSignIn } from "./connection-sign-in.ts";
-import { listServerTools } from "./mcp.ts";
+import { listServerTools, serverOffersSignIn } from "./mcp.ts";
 
 /**
  * Connecting a pod to MCP servers: checking an address against the egress
@@ -44,6 +45,14 @@ export interface Interface {
 		| UrlNotAllowed
 		| ConnectionRepository.ConnectionNameTaken
 		| ConnectionNotFound,
+		CurrentActor.Service
+	>;
+	/** probe reports whether the server at `url` offers an OAuth sign-in. */
+	readonly probe: (
+		input: InPod & { url: string },
+	) => Effect.Effect<
+		ConnectionProbeResult,
+		AuthorizationDenied | UrlNotAllowed,
 		CurrentActor.Service
 	>;
 	/** A new address or secret sends the connection back to learn its tools. */
@@ -171,6 +180,7 @@ export const make = Effect.gen(function* () {
 				listServerTools(
 					{
 						url: target.url,
+						credential: target.credential,
 						headers: target.headers,
 						authProvider:
 							target.auth === "oauth" ? clients.for(at.workspaceId, at.connectionId) : undefined,
@@ -186,12 +196,20 @@ export const make = Effect.gen(function* () {
 				at.workspaceId,
 				at.connectionId,
 				target.configurationUpdatedAt,
-				found.ok ? { tools: found.tools } : { error: found.reason },
+				found.ok
+					? { tools: found.tools }
+					: { error: found.reason, problem: found.problem, detail: found.detail },
 			);
 			return {
 				reachable: found.ok,
 				latencyMs,
-				...(found.ok ? { tools: found.tools.length } : { error: found.reason }),
+				...(found.ok
+					? { tools: found.tools.length }
+					: {
+							error: found.reason,
+							problem: found.problem,
+							...(found.detail ? { problemDetail: found.detail } : {}),
+						}),
 			};
 		});
 
@@ -230,10 +248,23 @@ export const make = Effect.gen(function* () {
 					yield* requireAllowedUrl(egress, connection.url);
 					const made = yield* connections.create(pod.workspaceId, pod.id, actor.userId, connection);
 					const at = { workspaceId: pod.workspaceId, podId: pod.id, connectionId: made.id };
-					if (connection.auth !== "oauth") {
+					if (!("auth" in connection && connection.auth === "oauth")) {
 						yield* discoverQuietly(at);
 					}
 					return yield* requireConnection(at);
+				}),
+			),
+
+		probe: ({ podId, url }) =>
+			operation(
+				"probe",
+				Effect.gen(function* () {
+					yield* authorization.pod(podId, "connection.manage");
+					yield* requireAllowedUrl(egress, url);
+					// `egress.oauth`, not a client bound to `url`: the well-known metadata
+					// addresses sit at `url`'s origin, outside its path.
+					const signIn = yield* Effect.promise(() => serverOffersSignIn(url, egress.oauth));
+					return { signIn };
 				}),
 			),
 
@@ -257,7 +288,8 @@ export const make = Effect.gen(function* () {
 					if (
 						changes.url === undefined &&
 						changes.secret === undefined &&
-						changes.secretHeader === undefined
+						changes.secretHeader === undefined &&
+						changes.token === undefined
 					) {
 						return toConnection(updated, cipher);
 					}

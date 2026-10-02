@@ -1,5 +1,6 @@
 import type {
 	ConnectionAccess,
+	ConnectionProblem,
 	ConnectionSignInFailure,
 	ConnectionUpdate,
 	NewConnection,
@@ -15,6 +16,27 @@ export function useConnections(podId: string) {
 		queryKey: ["connections", podId],
 		queryFn: ({ signal }) =>
 			Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal }),
+	});
+}
+
+/**
+ * useConnectionProbe reports whether the server at `url` offers an OAuth
+ * sign-in. It asks nothing until `url` is an http(s) address, and a failed
+ * request reports no sign-in.
+ */
+export function useConnectionProbe(podId: string, url: string) {
+	const address = url.trim();
+	const whole = /^https?:\/\/[^/\s]+/i.test(address);
+	return useQuery({
+		queryKey: ["connection-probe", podId, address],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(
+				client.api.connections.probe({ params: { podId }, payload: { url: address } }),
+				{ signal },
+			),
+		enabled: whole,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
 	});
 }
 
@@ -55,7 +77,13 @@ export function useConnectionActions(podId: string) {
 	return {
 		create: useMutation({
 			mutationFn: (json: NewConnection) =>
-				Effect.runPromise(connections.create({ params: { podId }, payload: json })),
+				Effect.runPromise(
+					// The generated client splits a union payload into one request type
+					// per member, which a request holding the whole union does not satisfy.
+					connections.create({ params: { podId }, payload: json } as Parameters<
+						typeof connections.create
+					>[0]),
+				),
 			onSuccess: refresh,
 		}),
 		update: useMutation({
@@ -122,6 +150,22 @@ export function useConnectionActions(podId: string) {
 			},
 		}),
 	};
+}
+
+const TROUBLESHOOTING_PAGE = "https://sugabots.ai/docs/connections";
+
+const TROUBLESHOOTING_SECTIONS: Record<ConnectionProblem, string> = {
+	unauthorized: "token-or-sign-in-refused",
+	forbidden: "access-refused",
+	not_mcp_server: "not-an-mcp-server",
+	server_error: "server-error",
+	unreachable: "cant-reach-the-server",
+	address_not_allowed: "address-not-allowed",
+};
+
+/** troubleshootingUrl returns the address of the docs section on fixing `problem`. */
+export function troubleshootingUrl(problem: ConnectionProblem): string {
+	return `${TROUBLESHOOTING_PAGE}#${TROUBLESHOOTING_SECTIONS[problem]}`;
 }
 
 /** Leaving the page, behind one seam so a test can watch it. */

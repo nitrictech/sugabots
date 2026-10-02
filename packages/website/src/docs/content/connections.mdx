@@ -34,8 +34,13 @@ Choose **Something else**, then **Connect by URL**, and fill in:
 - **Name**: what it's called in Sugabots.
 - **Address**: the server's URL. Sugabots connects to remote servers over
   Streamable HTTP. It doesn't run servers itself.
-- **Header** and **Secret**: an optional key sent with each request, in the
-  `Authorization` header unless you name another.
+- **Sign in with**: shown when the server has a sign-in of its own. Choose
+  **Sign in** to sign in to it next, or **Access token** to paste one instead.
+- **Access token**: the key the server gave you, if it needs one. Paste the
+  token by itself. Sugabots sends it as `Authorization: Bearer <token>`.
+- **Use a custom header**: for a server that reads its key from another
+  header, such as `X-API-Key`. The secret is sent in that header exactly as you
+  type it.
 - **Approval**: **Ask** or **Allow**. New connections start on Ask. Once it's
   added, you can also set it to **Off**.
 
@@ -54,3 +59,53 @@ Bots in the pod lose its tools straight away. Adding it again means signing in
 or entering its details again.
 
 </Careful>
+
+## Troubleshooting
+
+When a check fails, the connection's page says what went wrong, links to the
+part of this page that explains it, and shows what the server answered.
+
+### Token or sign-in refused
+
+The server wants a credential, or didn't accept the one Sugabots sent. The
+server answered `HTTP 401`.
+
+- **Access token**: it may have expired, been revoked, or lost a character when
+  it was copied. Make a new one where the server issues them, and **Replace**
+  it on the connection's page.
+- **Custom header**: check the header's name, and that the secret is what the
+  server expects, including any prefix it wants before the key.
+- **Sign-in**: choose **Sign in again**.
+- **Nothing sent**: the server needs a credential. Add an access token, or
+  remove the connection and add it again to use the server's own sign-in if it
+  has one.
+
+### Access refused
+
+The credential was accepted, but it isn't allowed to do this. The server
+answered `HTTP 403`. Check what the token, or the account you signed in with,
+has access to on the server.
+
+### Not an MCP server
+
+Something answers at the address, but not as an MCP server: a web page, or
+nothing at that path. Check that the address is the server's MCP address
+rather than its website. It often ends in `/mcp`.
+
+### Server error
+
+The server failed while answering, with an `HTTP 5xx` status, or refused the
+request for its own reasons. Try **Check** again later. If it keeps happening,
+the server's own logs will say why.
+
+### Can't reach the server
+
+No answer came back. Check the address and port, that the server is running,
+and that it's reachable from wherever Sugabots runs. A server on `localhost`
+means the machine running Sugabots, not yours.
+
+### Address not allowed
+
+The installation won't connect to plain-HTTP addresses or addresses on a local
+network unless it's set up to. Whoever runs Sugabots can allow them, as the
+[network settings](/docs/configuration#network) describe.

@@ -171,9 +171,8 @@ describe("partial updates", () => {
 			secretHeader: "X-Secret",
 		});
 		expect(
-			decode({ name: "Server", url: customProvider.baseUrl, secretHeader: "Authorization" })
-				.secretHeader,
-		).toBe("Authorization");
+			decode({ name: "Server", url: customProvider.baseUrl, secretHeader: "Authorization" }),
+		).toMatchObject({ secretHeader: "Authorization" });
 		expect(() =>
 			decode({ name: "Server", url: customProvider.baseUrl, secretHeader: "Host" }),
 		).toThrow();

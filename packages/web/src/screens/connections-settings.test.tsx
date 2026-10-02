@@ -23,6 +23,9 @@ const wiki: Connection = {
 	signedIn: true,
 	secretHeader: "authorization",
 	hasSecret: false,
+	bearerToken: false,
+	problem: null,
+	problemDetail: null,
 	access: "off",
 	status: "connected",
 	tools: [
@@ -151,8 +154,9 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
 
 		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
-		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
-			payload: { name: "Wiki", url: "https://wiki.example.com/mcp", secretHeader: "Authorization" },
+		expect(route.create.mock.calls[0]?.[0]).toEqual({
+			params: { podId: pod.id },
+			payload: { name: "Wiki", url: "https://wiki.example.com/mcp" },
 		});
 		// A server added by address starts at Allow; the dialog asks first unless told otherwise.
 		await waitFor(() =>
@@ -162,6 +166,119 @@ describe("the Connections settings", () => {
 			}),
 		);
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+	});
+
+	it("sends an access token by default, and a custom header when asked for one", async () => {
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.create.mockReturnValue(Effect.succeed(wiki));
+		route.update.mockReturnValue(Effect.succeed(wiki));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.change(within(step).getByLabelText("Access token"), {
+			target: { value: "wiki_key" },
+		});
+		fireEvent.click(within(step).getByRole("button", { name: "Add" }));
+		await waitFor(() =>
+			expect(route.create.mock.calls[0]?.[0]).toMatchObject({
+				payload: { auth: "token", token: "wiki_key" },
+			}),
+		);
+
+		route.create.mockClear();
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const again = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(again).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(again).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.click(within(again).getByRole("button", { name: "Use a custom header" }));
+		fireEvent.change(within(again).getByLabelText("Header"), { target: { value: "X-API-Key" } });
+		fireEvent.change(within(again).getByLabelText("Secret"), { target: { value: "wiki_key" } });
+		fireEvent.click(within(again).getByRole("button", { name: "Add" }));
+		await waitFor(() =>
+			expect(route.create.mock.calls[0]?.[0]).toMatchObject({
+				payload: { secretHeader: "X-API-Key", secret: "wiki_key" },
+			}),
+		);
+	});
+
+	it("offers a server's own sign-in when it has one, and leaves for it", async () => {
+		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
+		route.list.mockReturnValue(Effect.succeed([]));
+		route.probe.mockReturnValue(Effect.succeed({ signIn: true }));
+		route.connectFromCatalog.mockReturnValue(
+			Effect.succeed({
+				connectionId: "0199a3a0-0000-7000-8000-0000000000f3",
+				authorizationUrl: "https://wiki.example.com/authorize",
+			}),
+		);
+		route.update.mockReturnValue(Effect.succeed(wiki));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(within(await openAdd()).getByRole("button", { name: /Connect by URL/ }));
+		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		fireEvent.change(within(step).getByLabelText("Name"), { target: { value: "Wiki" } });
+		fireEvent.change(within(step).getByLabelText("Address"), {
+			target: { value: "https://wiki.example.com/mcp" },
+		});
+		const signIn = await within(step).findByRole("radio", { name: "Sign in" }, { timeout: 2_000 });
+		expect((signIn as HTMLInputElement).checked).toBe(true);
+		expect(route.probe.mock.calls.at(-1)?.[0]).toMatchObject({
+			payload: { url: "https://wiki.example.com/mcp" },
+		});
+		fireEvent.click(within(step).getByRole("button", { name: "Sign in" }));
+
+		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example.com/authorize"));
+		expect(route.connectFromCatalog.mock.calls[0]?.[0]).toMatchObject({
+			payload: { name: "Wiki", url: "https://wiki.example.com/mcp" },
+		});
+		expect(route.create).not.toHaveBeenCalled();
+	});
+
+	it("points a failed check at its fix, with what the server answered", async () => {
+		route.list.mockReturnValue(
+			Effect.succeed([
+				{
+					...wiki,
+					bearerToken: true,
+					hasSecret: true,
+					status: "error",
+					lastTestError: "The server didn't accept the access token",
+					problem: "unauthorized",
+					problemDetail: "HTTP 401",
+				},
+			]),
+		);
+		route.update.mockReturnValue(Effect.succeed(wiki));
+		mount(page);
+		await showConnections();
+
+		fireEvent.click(await screen.findByRole("button", { name: "About Wiki" }));
+		const dialog = await screen.findByRole("dialog", { name: "Wiki" });
+		expect(within(dialog).getByRole("link", { name: "How to fix this" }).getAttribute("href")).toBe(
+			"https://sugabots.ai/docs/connections#token-or-sign-in-refused",
+		);
+		expect(within(dialog).getByText("The server answered HTTP 401.")).toBeDefined();
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+		fireEvent.change(within(dialog).getByLabelText("Wiki access token"), {
+			target: { value: "new-token" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+		await waitFor(() =>
+			expect(route.update).toHaveBeenCalledWith({
+				params: { podId: pod.id, connectionId: wiki.id },
+				payload: { token: "new-token" },
+			}),
+		);
 	});
 
 	it("opens a connection to show its tools, grouped by whether they ask first", async () => {

@@ -28,6 +28,11 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 			.handle("get", ({ params }) =>
 				connections.get(params).pipe(asSessionUser, asHttpError(connectionErrors)),
 			)
+			.handle("probe", ({ params, payload }) =>
+				connections
+					.probe({ ...params, url: payload.url })
+					.pipe(asSessionUser, asHttpError(connectionErrors)),
+			)
 			.handle("update", ({ params, payload }) =>
 				connections
 					.update({ ...params, changes: payload })

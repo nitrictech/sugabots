@@ -78,6 +78,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 	handle: "wiki",
 	url,
 	auth: "header",
+	credential: "header",
 	headers: { "x-fixture-key": "open-sesame" },
 	access: "allow",
 	configurationUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),

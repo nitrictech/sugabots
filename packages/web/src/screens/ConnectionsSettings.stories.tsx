@@ -26,6 +26,9 @@ function connection(
 		signedIn: true,
 		secretHeader: "Authorization",
 		hasSecret: true,
+		bearerToken: false,
+		problem: null,
+		problemDetail: null,
 		access: "allow",
 		status: "connected",
 		tools: [
@@ -62,8 +65,12 @@ const connections: Connection[] = [
 		name: "Stripe",
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
+		bearerToken: true,
 		status: "error",
-		lastTestError: "The server answered 401: the key was refused.",
+		lastTestError:
+			"The server didn't accept the access token. Check that it hasn't expired and was copied in full",
+		problem: "unauthorized",
+		problemDetail: "HTTP 401",
 	}),
 	connection(5, {
 		name: "Notion",
@@ -73,6 +80,9 @@ const connections: Connection[] = [
 		signedIn: false,
 		secretHeader: null,
 		hasSecret: false,
+		bearerToken: false,
+		problem: null,
+		problemDetail: null,
 		status: "missing_key",
 		tools: [],
 		lastTestedAt: null,
@@ -86,6 +96,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json(connections)),
+			http.post(`${API}/pods/:podId/connections/probe`, () => HttpResponse.json({ signIn: false })),
 			...appHandlers(),
 		);
 	},
@@ -134,6 +145,22 @@ export const OneOpened = meta.story({
 	},
 });
 
+/** A connection whose check failed: what went wrong, where the fix is explained, and the token to replace. */
+export const FailedCheck = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "About Stripe" }, { timeout: 10_000 }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: "Stripe" });
+		await expect(within(dialog).getByRole("link", { name: "How to fix this" })).toHaveAttribute(
+			"href",
+			"https://sugabots.ai/docs/connections#token-or-sign-in-refused",
+		);
+		await expect(within(dialog).getByText("The server answered HTTP 401.")).toBeInTheDocument();
+		await expect(within(dialog).getByText("Access token")).toBeInTheDocument();
+	},
+});
+
 /** Adding one: the apps not yet connected, searchable, and any other server by its address. */
 export const AddConnection = meta.story({
 	play: async ({ canvas }) => {
@@ -163,17 +190,54 @@ export const AddingAnApp = meta.story({
 	},
 });
 
-/** Any other MCP server: its name, address, a secret if it takes one, and its approval. */
+/** Opens Connect by URL from Add connection. */
+async function openByUrl(canvas: { findByRole: typeof screen.findByRole }) {
+	await userEvent.click(
+		await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
+	);
+	const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
+	await userEvent.click(within(list).getByRole("button", { name: /Connect by URL/ }));
+	return screen.findByRole("dialog", { name: "Connect by URL" });
+}
+
+/** Any other MCP server: its name, address, an access token if it takes one, and its approval. */
 export const AddingByUrl = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(
-			await canvas.findByRole("button", { name: "Add connection" }, { timeout: 10_000 }),
-		);
-		const list = await screen.findByRole("dialog", { name: `Add to ${revenue.name}` });
-		await userEvent.click(within(list).getByRole("button", { name: /Connect by URL/ }));
-		const step = await screen.findByRole("dialog", { name: "Connect by URL" });
+		const step = await openByUrl(canvas);
 		await expect(within(step).getByLabelText("Address")).toBeInTheDocument();
+		await expect(within(step).getByLabelText("Access token")).toBeInTheDocument();
+		await expect(
+			within(step).getByRole("button", { name: "Use a custom header" }),
+		).toBeInTheDocument();
 		await expect(within(step).getByRole("button", { name: "Add" })).toBeDisabled();
+	},
+});
+
+/** A server that names an OAuth server to sign in with: its sign-in offered first, a token still possible. */
+export const AddingByUrlWithSignIn = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/pods/:podId/connections/probe`, () => HttpResponse.json({ signIn: true })),
+		);
+	},
+	play: async ({ canvas }) => {
+		const step = await openByUrl(canvas);
+		await userEvent.type(within(step).getByLabelText("Name"), "Team wiki");
+		await userEvent.type(within(step).getByLabelText("Address"), "https://wiki.example.com/mcp");
+		await expect(
+			await within(step).findByRole("radio", { name: "Sign in" }, { timeout: 5_000 }),
+		).toBeChecked();
+		await expect(within(step).getByRole("button", { name: "Sign in" })).toBeEnabled();
+	},
+});
+
+/** A server that reads its key from a header of its own: the header, and the secret sent as typed. */
+export const AddingByUrlWithCustomHeader = meta.story({
+	play: async ({ canvas }) => {
+		const step = await openByUrl(canvas);
+		await userEvent.click(within(step).getByRole("button", { name: "Use a custom header" }));
+		await expect(within(step).getByLabelText("Header")).toBeInTheDocument();
+		await expect(within(step).getByLabelText("Secret")).toBeInTheDocument();
 	},
 });
 

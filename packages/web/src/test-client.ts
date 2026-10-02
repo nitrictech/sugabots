@@ -102,6 +102,7 @@ export const client = {
 			test: vi.fn(),
 			connectFromCatalog: vi.fn(),
 			startOAuth: vi.fn(),
+			probe: vi.fn(),
 		},
 		chats: {
 			list: vi.fn(),

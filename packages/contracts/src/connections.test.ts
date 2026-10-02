@@ -1,6 +1,7 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+	bearerAuthorization,
 	type ConnectionTool,
 	connectionToolKey,
 	connectionToolMutating,
@@ -63,7 +64,29 @@ describe("a connection's tools on a turn", () => {
 describe("a connection's secret", () => {
 	it("is trimmed, so a pasted newline does not end up inside the header", () => {
 		const decode = Schema.decodeUnknownSync(newConnectionSchema);
-		expect(decode({ ...linear, secret: " Bearer lin_api_x\n" }).secret).toBe("Bearer lin_api_x");
+		expect(decode({ ...linear, secret: " Bearer lin_api_x\n" })).toMatchObject({
+			secret: "Bearer lin_api_x",
+		});
 		expect(accepts(connectionUpdateSchema, { secret: " " })).toBe(false);
+	});
+});
+
+describe("a connection's access token", () => {
+	it.each(["lin_api_x", "Bearer lin_api_x", " bearer  lin_api_x\n"])(
+		"is sent as one bearer token when pasted as %j",
+		(pasted) => {
+			expect(accepts(newConnectionSchema, { ...linear, auth: "token", token: pasted })).toBe(true);
+			expect(bearerAuthorization(pasted)).toBe("Bearer lin_api_x");
+		},
+	);
+
+	it.each(["", "  ", "Bearer", "Bearer  "])("must be there, not only its scheme: %j", (pasted) => {
+		expect(accepts(newConnectionSchema, { ...linear, auth: "token", token: pasted })).toBe(false);
+		expect(accepts(connectionUpdateSchema, { token: pasted })).toBe(false);
+	});
+
+	it("replaces the header and secret, so it is not given with them", () => {
+		expect(accepts(connectionUpdateSchema, { token: "x", secret: "y" })).toBe(false);
+		expect(accepts(connectionUpdateSchema, { token: "x", secretHeader: "X-API-Key" })).toBe(false);
 	});
 });

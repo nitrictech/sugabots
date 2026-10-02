@@ -153,7 +153,6 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			name: "Linear",
 			url: "https://mcp.linear.app/mcp",
 			auth: "oauth",
-			secret: "ignored",
 		});
 		expect(await shown(made.id)).toMatchObject({
 			auth: "oauth",

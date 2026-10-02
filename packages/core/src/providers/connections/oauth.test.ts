@@ -160,7 +160,7 @@ describe("signing a connection in", () => {
 		expect(tokenRequests.at(-1)?.get("code_verifier")).toBeTruthy();
 
 		const listed = await listServerTools(
-			{ url: serverUrl, headers: {}, authProvider: provider() },
+			{ url: serverUrl, credential: "oauth", headers: {}, authProvider: provider() },
 			fetch,
 		);
 		expect(listed).toMatchObject({ ok: true, tools: [{ name: "lookup" }] });
@@ -169,8 +169,14 @@ describe("signing a connection in", () => {
 	});
 
 	it("says a server that wants a sign-in needs one, in the words the settings page shows", async () => {
-		const listed = await listServerTools({ url: serverUrl, headers: {} }, fetch);
-		expect(listed.ok).toBe(false);
-		expect(listed).toMatchObject({ ok: false, reason: "The server answered HTTP 401" });
+		const listed = await listServerTools(
+			{ url: serverUrl, credential: "none", headers: {} },
+			fetch,
+		);
+		expect(listed).toMatchObject({
+			ok: false,
+			reason: "The server needs a sign-in or an access token",
+			problem: "unauthorized",
+		});
 	});
 });

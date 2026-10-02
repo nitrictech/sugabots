@@ -5,7 +5,7 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { unsealOauthRecord } from "./connection-repository.ts";
+import { credentialOf, unsealOauthRecord } from "./connection-repository.ts";
 
 /** The pod's connections, oldest first. `cipher` opens an OAuth record to tell whether it is signed in. */
 export const connectionsIn = (workspaceId: string, podId: string, cipher: Credentials.Interface) =>
@@ -50,6 +50,7 @@ export function toConnection(row: ConnectionRow, cipher: Credentials.Interface):
 		signedIn: row.authKind === "header" || unsealOauthRecord(row, cipher)?.tokens !== undefined,
 		secretHeader: row.secretHeader,
 		hasSecret: row.secretEncrypted !== null,
+		bearerToken: credentialOf(row, cipher) === "token",
 		access: row.access,
 		status: configurationStatus({
 			missingKey: false,
@@ -59,6 +60,8 @@ export function toConnection(row: ConnectionRow, cipher: Credentials.Interface):
 		tools: row.tools,
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
+		problem: row.lastTestProblem,
+		problemDetail: row.lastTestDetail,
 		createdAt: row.createdAt.toISOString(),
 	};
 }
