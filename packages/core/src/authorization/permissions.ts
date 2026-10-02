@@ -93,7 +93,12 @@ export type PodPermission =
 	 * blocks, and what software it has: change its hosts and software, and
 	 * allow its agents' requests for more.
 	 */
-	| "sandbox.manage";
+	| "sandbox.manage"
+	/**
+	 * Click and type on an agent's desktop in the pod's sandbox, with its
+	 * browser's sessions and the desktop's terminal, rather than only watch it.
+	 */
+	| "sandbox.desktop.use";
 
 /**
  * The caller.
@@ -163,6 +168,7 @@ const ADMINISTRATOR_POD_GRANTS = new Set<PodPermission>([
 	"approval.decide",
 	"approval.routine.decide",
 	"sandbox.manage",
+	"sandbox.desktop.use",
 ]);
 
 const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
@@ -180,6 +186,7 @@ const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
 		"routine.read",
 		"routine.history.read",
 		"approval.decide",
+		"sandbox.desktop.use",
 	]),
 	// A viewer reads and takes part — which `pod.read` grants — and configures
 	// nothing beyond that.
@@ -261,6 +268,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		deleteAgents: may("agent.delete"),
 		manageConnections: may("connection.manage"),
 		manageSandbox: may("sandbox.manage"),
+		useDesktops: may("sandbox.desktop.use"),
 		manageRoutines: may("routine.manage"),
 		runRoutines: may("routine.run"),
 	};

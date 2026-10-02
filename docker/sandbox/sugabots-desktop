@@ -13,20 +13,27 @@
 # `session` when the agent uses its browser. Both start the named desktop, or
 # find it running: a display with a window manager and a dock, served to VNC
 # viewers. `session` also starts the browser on it, or finds it running, and
-# prints `display=N viewer=PORT browser=PORT started=yes|no`, where `started`
-# says whether the browser had to start; `desktop` prints
-# `display=N viewer=PORT started=yes|no` for the desktop.
+# prints `display=N viewer=PORT watch=PORT browser=PORT started=yes|no
+# password=P watch-password=P`, where `started` says whether the browser had
+# to start; `desktop` prints the same without `browser`.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
-# people watching see what the agent does, with its profile under `profile`
+# people watching see what the agent does, in Chromium's own sandbox where the
+# sandbox it runs in allows user namespaces, with its profile under `profile`
 # and its downloads and screenshots in `output`. It lives until the desktop
 # stops, across the MCP sessions that drive it, and the dock's Browser starts
 # it if the agent hasn't. Programs that stopped, as they do when a paused
 # sandbox comes back, start again on the same display.
 #
 # Display N is served on port 5900+N to a VNC viewer, over plain VNC or a
-# WebSocket, which x11vnc accepts on the same port. Its browser's MCP server
-# is on port 8930+N, and the browser's DevTools on port 9230+N.
+# WebSocket, which x11vnc accepts on the same port, and on port 6900+N to one
+# that may only watch: that server ignores the viewer's mouse and keys. Each
+# server takes its own password, made when the desktop starts, so nothing
+# else in the sandbox can use them, such as a page in the browser, which
+# can't read the files they're kept in. Sugabots reads them from what
+# `desktop` and `session` print. Its
+# browser's MCP server is on port 8930+N, and the browser's DevTools on port
+# 9230+N.
 set -euo pipefail
 
 # Set here rather than relied on from the image: E2B runs commands without
@@ -75,9 +82,41 @@ desktop() {
 	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
 	plank >>"$log" 2>&1 &
 	echo $! >>"$pids"
-	# No password: the ports are reached only through Sugabots.
-	x11vnc -display "$DISPLAY" -nopw -forever -shared -quiet -rfbport $((5900 + n)) >>"$log" 2>&1 &
+	local password watch_password
+	password="$(new_password)"
+	watch_password="$(new_password)"
+	(
+		umask 077
+		printf '%s\n%s\n' "$password" "$watch_password" >"$state/$n.passwords"
+		x11vnc -storepasswd "$password" "$state/$n.passwd" >/dev/null 2>&1
+		x11vnc -storepasswd "$watch_password" "$state/$n.watch.passwd" >/dev/null 2>&1
+	)
+	x11vnc -display "$DISPLAY" -rfbauth "$state/$n.passwd" -forever -shared -quiet -rfbport $((5900 + n)) >>"$log" 2>&1 &
 	echo $! >>"$pids"
+	x11vnc -display "$DISPLAY" -rfbauth "$state/$n.watch.passwd" -forever -shared -quiet -viewonly -rfbport $((6900 + n)) >>"$log" 2>&1 &
+	echo $! >>"$pids"
+}
+
+# Eight characters, all VNC authentication reads of a password: 48 random bits.
+new_password() {
+	head -c 6 /dev/urandom | base64 | tr '+/' '-_'
+}
+
+# The passwords of display N's VNC servers, as `desktop` and `session` print them.
+passwords() {
+	local password watch_password
+	{ read -r password; read -r watch_password; } <"$state/$1.passwords"
+	echo "password=$password watch-password=$watch_password"
+}
+
+# Chromium's flags for its own sandbox. It needs user namespaces, which some
+# sandboxes refuse (Docker's default seccomp profile does), and refuses to
+# start as root with one; either way it runs without. --test-type leaves out
+# the bar warning that --no-sandbox is on.
+chromium_sandbox_flags() {
+	if [ "$(id -u)" = 0 ] || ! unshare --user --map-root-user --pid --net --fork true 2>/dev/null; then
+		echo "--no-sandbox --test-type"
+	fi
 }
 
 browser() {
@@ -86,12 +125,11 @@ browser() {
 	mkdir -p "$profile" "$output"
 	# Started here rather than by Playwright MCP, which closes a browser it
 	# launched when its last client disconnects: at the end of every turn.
-	# Maximized, so it stops at the dock. --test-type leaves out the bar
-	# warning that --no-sandbox is on, which a container needs. The profile is
+	# Maximized, so it stops at the dock. The profile is
 	# found through XDG_CONFIG_HOME rather than --user-data-dir, which would
 	# put its path in the windows' names, and the dock would no longer know
 	# them as the Browser's.
-	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium --no-sandbox --test-type --start-maximized \
+	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
 		--class=sugabots-browser \
 		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
 		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
@@ -141,7 +179,7 @@ named_desktop() {
 
 desktop_only() {
 	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
-	echo "display=$n viewer=$((5900 + n)) started=$desktop_started"
+	echo "display=$n viewer=$((5900 + n)) watch=$((6900 + n)) started=$desktop_started $(passwords "$n")"
 }
 
 session() {
@@ -152,7 +190,7 @@ session() {
 		browser "$n" "$2" "$3"
 		started=yes
 	fi
-	echo "display=$n viewer=$((5900 + n)) browser=$((8930 + n)) started=$started"
+	echo "display=$n viewer=$((5900 + n)) watch=$((6900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
 }
 
 viewer() {
@@ -173,7 +211,7 @@ open() {
 		{ read -r profile; read -r output; } <"$state/$n.browser-dirs"
 		if running "$n" browser; then
 			# The same profile reaches the running browser, which opens the window.
-			XDG_CONFIG_HOME="$profile" exec chromium --no-sandbox --test-type --new-window
+			XDG_CONFIG_HOME="$profile" exec chromium $(chromium_sandbox_flags) --new-window
 		fi
 		stop_part "$n" browser
 		browser "$n" "$profile" "$output"

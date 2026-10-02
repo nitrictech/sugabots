@@ -135,7 +135,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	return tool({
-		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. It reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
+		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",
@@ -171,17 +171,42 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	});
 }
 
-export function readFileTool(openSandbox: OpenSandbox, place: Place) {
+/** Images read_file shows the model, by extension. */
+const IMAGE_TYPES: Readonly<Record<string, string>> = {
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+};
+const MAX_IMAGE_BYTES = 5_000_000;
+
+export function readFileTool(openSandbox: OpenSandbox, place: Place, acceptsImages: boolean) {
 	return tool({
-		description: `Read a text file in the pod's sandbox. Long files are cut off; use run_command with head, tail or grep for parts of them.`,
+		description: acceptsImages
+			? `Read a file in the pod's sandbox: a text file as text, or an image (PNG, JPEG, GIF or WebP) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
+			: `Read a text file in the pod's sandbox. Long files are cut off; use run_command with head, tail or grep for parts of them.`,
 		inputSchema: Schema.Struct({ path: pathIn(place) }).pipe(
 			Schema.toStandardSchemaV1,
 			Schema.toStandardJSONSchemaV1,
 		),
-		execute: ({ path }) =>
-			inSandbox(openSandbox, (sandbox) =>
-				sandbox.readFile(absolute(place, path), MAX_READ_BYTES).pipe(
-					Effect.map(({ content, sizeBytes }) => {
+		execute: ({ path }) => {
+			const mediaType = IMAGE_TYPES[posix.extname(path).slice(1).toLowerCase()];
+			const asImage = mediaType !== undefined && acceptsImages;
+			return inSandbox(openSandbox, (sandbox) =>
+				sandbox.readFile(absolute(place, path), asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES).pipe(
+					Effect.map(({ content, sizeBytes }): Record<string, unknown> => {
+						if (asImage) {
+							return sizeBytes > MAX_IMAGE_BYTES
+								? {
+										status: "failed",
+										error: `The image is larger than ${MAX_IMAGE_BYTES} bytes.`,
+									}
+								: {
+										text: `The image at ${absolute(place, path)}.`,
+										images: [{ data: Buffer.from(content).toString("base64"), mediaType }],
+									};
+						}
 						const text = new TextDecoder().decode(content);
 						return text.length > MAX_READ_CHARACTERS || sizeBytes > content.length
 							? {
@@ -191,7 +216,9 @@ export function readFileTool(openSandbox: OpenSandbox, place: Place) {
 							: { content: text };
 					}),
 				),
-			),
+			);
+		},
+		toModelOutput: ({ output }) => withImages(output, acceptsImages),
 	});
 }
 
@@ -219,5 +246,38 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
  * the provider's cached prompt.
  */
 export function allowedHostsNote(allowedHosts: readonly string[]): string {
-	return `The pod's sandbox connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+	return `The pod's sandbox, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+}
+
+export interface Image {
+	/** Base 64. */
+	data: string;
+	mediaType: string;
+}
+
+/**
+ * A tool's output as the model is given it: a result with images as text and
+ * images, when the model can take them; anything else as it is.
+ */
+export function withImages(output: unknown, acceptsImages: boolean) {
+	if (!output || typeof output !== "object" || !("images" in output)) {
+		return { type: "json" as const, value: output as never };
+	}
+	const { images, ...rest } = output as { images: readonly Image[] } & Record<string, unknown>;
+	const text =
+		typeof rest.text === "string"
+			? [rest.note, rest.text].filter((part) => typeof part === "string").join("\n\n")
+			: JSON.stringify(rest);
+	if (!acceptsImages) return { type: "text" as const, value: text };
+	return {
+		type: "content" as const,
+		value: [
+			{ type: "text" as const, text },
+			...images.map((image) => ({
+				type: "image-data" as const,
+				data: image.data,
+				mediaType: image.mediaType,
+			})),
+		],
+	};
 }

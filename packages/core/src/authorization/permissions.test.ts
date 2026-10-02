@@ -64,6 +64,7 @@ const POD_PERMISSIONS = Object.keys({
 	"approval.decide": true,
 	"approval.routine.decide": true,
 	"sandbox.manage": true,
+	"sandbox.desktop.use": true,
 } satisfies Record<PodPermission, true>) as PodPermission[];
 
 /** What a Member holds in a shared pod they have been added to. */
@@ -77,6 +78,7 @@ const MEMBER_IN_JOINED_POD: PodPermission[] = [
 	"routine.read",
 	"routine.history.read",
 	"approval.decide",
+	"sandbox.desktop.use",
 ];
 
 /** What a Viewer holds there: reading, taking part, and nothing else. */

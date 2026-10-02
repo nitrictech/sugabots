@@ -47,6 +47,8 @@ export default defineConfig({
 			"/api": {
 				target: process.env.API_URL || "https://api.sugabots.localhost",
 				changeOrigin: true,
+				// The desktop viewer's WebSocket goes to the API too.
+				ws: true,
 			},
 		},
 	},

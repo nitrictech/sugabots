@@ -503,6 +503,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				deleteAgents: false,
 				manageConnections: false,
 				manageSandbox: false,
+				useDesktops: true,
 			});
 		});
 

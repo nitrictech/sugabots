@@ -83,6 +83,15 @@ COPY nix/nix.conf nix/registry.json /etc/nix/
 # user's home that needs namespaces the agents' user can't make.
 RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 
+# Chromium's managed policy, root's so agents can't change it. No page from
+# outside the sandbox may reach the sandbox itself or its network, such as
+# Playwright MCP, which has no password, and Chromium doesn't ask. And the
+# browser connects as the rest of the sandbox does, so its egress rules,
+# which allow hosts by the name a TLS connection gives, let it through: over
+# TCP rather than QUIC, and without Encrypted Client Hello, which hides that
+# name behind the CDN's own (Cloudflare's cloudflare-ech.com).
+COPY chromium/policies.json /etc/chromium/policies/managed/sugabots.json
+
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
 
 RUN mkdir -p /workspace && chmod 755 /usr/local/bin/sugabots-desktop

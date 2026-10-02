@@ -4,6 +4,7 @@ import { ChevronRight, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import {
+	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
 	connectionLabel,
 	splitToolKey,
@@ -109,6 +110,7 @@ function ToolCallRow({ call, look }: { call: ToolCallPart; look?: ConnectionLook
 /** The app a call reached, by name: the connection, or the built-in tool itself ("Web search"). */
 function appOf(call: ToolCallPart, look?: ConnectionLook): string {
 	const { handle } = splitToolKey(call.tool);
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
 	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
 }
 

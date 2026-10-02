@@ -19,6 +19,7 @@ const running: PodSandbox = {
 		createdAt: "2026-09-29T09:00:00.000Z",
 		lastUsedAt: "2026-10-02T05:40:00.000Z",
 		turnsUsing: 0,
+		peopleWatching: 0,
 		upgradeAvailable: false,
 	},
 	providerEnabled: true,
@@ -111,13 +112,13 @@ export const PausedWithUpgrade = meta.story({
 	},
 });
 
-/** In use by a bot: the actions wait until it has finished. */
+/** In use by a bot and watched: the actions wait until the bot has finished. */
 export const InUse = meta.story({
 	beforeEach({ msw }) {
-		msw.use(answers(present({ turnsUsing: 1 })));
+		msw.use(answers(present({ turnsUsing: 1, peopleWatching: 2 })));
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("A bot is using it")).toBeVisible();
+		await expect(await canvas.findByText("A bot is using it, 2 people watching")).toBeVisible();
 	},
 });
 
