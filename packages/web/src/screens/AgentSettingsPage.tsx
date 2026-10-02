@@ -7,11 +7,12 @@ import {
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { MessageCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -19,7 +20,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { Button } from "@/ui/button.tsx";
+import { Button, buttonStyles } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
@@ -155,6 +156,12 @@ function ContactCard({
 			hero={<AgentAvatar color={agent.color} face={agent.face} size={88} />}
 			title={agent.name}
 			description={pod.name}
+			headerAction={
+				<Link {...agentChatLink({ pod, agent })} className={buttonStyles({ size: "sm" })}>
+					<MessageCircle aria-hidden />
+					Message
+				</Link>
+			}
 		>
 			{failure && <Alert>{failure}</Alert>}
 			{may.updateAgents && <Look agent={agent} save={save} />}
