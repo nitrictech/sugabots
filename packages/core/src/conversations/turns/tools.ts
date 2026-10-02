@@ -3,6 +3,7 @@ import type { ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
+import { UserMessage } from "../../user-message.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -12,7 +13,7 @@ import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-inst
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
-import { type RecordingOptions, recorded } from "./tool-calls/recorded.ts";
+import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
 import type { ToolCallRepository } from "./tool-calls/repository.ts";
 
 /**
@@ -24,6 +25,8 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * and leave their own records. The built-in tools do work for the agent, and
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
+ * A connection tool turned off is offered all the same, and each call to it is
+ * recorded as refused without reaching the server.
  * `search_history` is recorded the same way, and offered only once the
  * thread has been compacted; `save_instructions` too, offered only while the
  * agent interviews its creator.
@@ -63,6 +66,9 @@ export interface ToolDependencies {
 	signal: AbortSignal;
 }
 
+/** What people, and the model, are told of a call to a tool the pod has turned off. */
+const TOOL_TURNED_OFF = UserMessage.of`This tool is turned off for bots in this pod.`;
+
 export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {
 	const tools: ToolSet = {};
 	const recording: RecordingOptions = {
@@ -82,10 +88,16 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	}
 	for (const [key, offered] of Object.entries(deps.connections ?? {})) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
+		// An approved call is left to its approval, which refuses it if the tool
+		// was turned off since.
+		if (offered.access === "off" && !approvalBound) {
+			tools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
+			continue;
+		}
 		tools[key] = recorded(key, offered.tool, {
 			...recording,
 			mutating: offered.mutating || approvalBound,
-			...(offered.requiresApproval || approvalBound
+			...(offered.access === "ask" || approvalBound
 				? {
 						approval: {
 							approvals: deps.approvals,

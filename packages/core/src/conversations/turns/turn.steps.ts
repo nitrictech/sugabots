@@ -405,7 +405,7 @@ const streamReply = (
 				approvalBoundTools.add(binding.tool);
 			}
 			const toolsNeedingApproval = Object.entries(connections.tools)
-				.filter(([, offered]) => offered.requiresApproval)
+				.filter(([, offered]) => offered.access === "ask")
 				.map(([key]) => key);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
@@ -498,7 +498,7 @@ const streamReply = (
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
 					const offered = connections.tools[request.toolCall.toolName];
-					if (!offered?.requiresApproval) {
+					if (offered?.access !== "ask") {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
 					return Effect.map(ids.next, (id) => ({

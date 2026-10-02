@@ -22,15 +22,15 @@ const tools = {
 } as const;
 type ToolChoice = keyof typeof tools;
 
-type Outcome = "not-offered" | "waits" | "runs";
+type Outcome = "refused" | "waits" | "runs";
 
 function outcomeOf(setting: ApprovalSetting): Outcome {
-	if (setting === "off") return "not-offered";
+	if (setting === "off") return "refused";
 	return setting === "allow" ? "runs" : "waits";
 }
 
 const outcomeText: Record<Outcome, string> = {
-	"not-offered": "The bot isn't offered this connection's tools at all.",
+	refused: "The call is refused, and the bot is told the tool is off.",
 	waits: "The call waits in the chat until someone who's allowed to answer it does.",
 	runs: "The connection allows it, so it runs straight away.",
 };

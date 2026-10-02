@@ -1,6 +1,10 @@
 export * as ConnectionTools from "./connections.ts";
 
-import { connectionToolKey, connectionToolMutating } from "@sugabots/contracts";
+import {
+	type ConnectionAccess,
+	connectionToolKey,
+	connectionToolMutating,
+} from "@sugabots/contracts";
 import type { Tool } from "ai";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
@@ -23,10 +27,11 @@ import {
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
  * carries whether it may change something, which decides how a failed turn
- * after it is treated, and whether a person must allow each call first: for a
- * tool set to `ask`. A tool set to `off` is left out. A tool nobody has chosen
- * for is treated as `toolAccessOf` says. A connection whose every tool is off
- * is not opened at all.
+ * after it is treated, and what the pod's bots may do with it. A tool set to
+ * `off` is still offered, so turning one off or on leaves the tools the model
+ * is sent, and the provider's cache of them, as they were; its calls are
+ * refused. A tool nobody has chosen for is treated as `toolAccessOf` says.
+ * A connection whose every tool is off is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the agent can still answer with what it
@@ -37,8 +42,8 @@ export interface OfferedTool {
 	tool: Tool;
 	/** Whether a call may change something at the other end. */
 	mutating: boolean;
-	/** Whether each call waits for a person to allow it. */
-	requiresApproval: boolean;
+	/** Whether each call runs, waits for a person to allow it, or is refused. */
+	access: ConnectionAccess;
 	connectionId: string;
 	connectionRevision: number;
 	remoteToolName: string;
@@ -118,12 +123,10 @@ export function from({
 		try {
 			const tools: Record<string, OfferedTool> = {};
 			for (const { described, tool } of await session.tools()) {
-				const access = toolAccessOf(target.toolAccess, described);
-				if (access === "off") continue;
 				tools[connectionToolKey(target.handle, described.name)] = {
 					tool,
 					mutating: connectionToolMutating(described),
-					requiresApproval: access === "ask",
+					access: toolAccessOf(target.toolAccess, described),
 					connectionId: target.connectionId,
 					connectionRevision: target.configurationRevision,
 					remoteToolName: described.name,

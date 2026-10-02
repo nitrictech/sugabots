@@ -100,8 +100,8 @@ describe("a turn's connection tools", () => {
 		const set = await run(offered.forPod("w", "p"));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: false });
-			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: false });
+			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "allow" });
+			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, access: "allow" });
 			const result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, {
 				toolCallId: "1",
 				messages: [],
@@ -117,19 +117,20 @@ describe("a turn's connection tools", () => {
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
-			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: true });
-			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: true });
+			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "ask" });
+			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, access: "ask" });
 		} finally {
 			await set.close();
 		}
 	});
 
-	it("leaves out a tool set to off", async () => {
+	it("still offers a tool set to off, so the tools sent to the model stay the same", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "allow", wipe: "off" } }));
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
-			expect(Object.keys(set.tools)).toEqual(["wiki__lookup"]);
+			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+			expect(set.tools.wiki__wipe).toMatchObject({ access: "off" });
 		} finally {
 			await set.close();
 		}
@@ -141,8 +142,8 @@ describe("a turn's connection tools", () => {
 		const set = await run(offered.forPod("w", "p"));
 		try {
 			// `lookup` says it only reads; `wipe` says nothing, so it may change things.
-			expect(set.tools.wiki__lookup).toMatchObject({ requiresApproval: false });
-			expect(set.tools.wiki__wipe).toMatchObject({ requiresApproval: true });
+			expect(set.tools.wiki__lookup).toMatchObject({ access: "allow" });
+			expect(set.tools.wiki__wipe).toMatchObject({ access: "ask" });
 		} finally {
 			await set.close();
 		}

@@ -119,3 +119,28 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		},
 	};
 }
+
+/**
+ * A tool that is offered but never runs: each call is recorded as failed with
+ * `reason`, which the model is told as the call's result.
+ */
+export function refused(
+	key: string,
+	tool: Tool,
+	reason: UserMessage,
+	options: Pick<RecordingOptions, "calls" | "run" | "from" | "replyLength" | "noteToolCall">,
+): Tool {
+	const { calls, run, from, replyLength, noteToolCall } = options;
+	return {
+		...tool,
+		execute: async (input) => {
+			const atOffset = replyLength();
+			const opened = await run(
+				calls.open({ ...from, tool: key, input, atOffset, mutating: false }),
+			);
+			await run(noteToolCall({ id: opened.id, atOffset, mutating: false }));
+			await run(calls.close(opened.id, { error: reason }));
+			return { status: "failed", error: reason } satisfies ToolFailedResult;
+		},
+	};
+}
