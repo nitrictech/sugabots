@@ -31,7 +31,7 @@ async function rejection(promise: Promise<unknown>) {
 	}
 }
 
-const PRIVATE = /private or reserved network/;
+const PRIVATE = /local or private network/;
 const privateProvider = "https://127.0.0.1/v1";
 const privatePage = "https://127.0.0.1:1/";
 

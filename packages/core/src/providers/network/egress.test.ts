@@ -60,7 +60,7 @@ describe("provider http client", () => {
 			fetch: dispatch,
 		});
 
-		await expect(client("https://models.example")).rejects.toThrow("private or reserved");
+		await expect(client("https://models.example")).rejects.toThrow("local or private network");
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 
@@ -73,7 +73,7 @@ describe("provider http client", () => {
 			fetch: vi.fn<EgressDispatch>(),
 		});
 
-		await expect(client("https://models.example")).rejects.toThrow("private or reserved");
+		await expect(client("https://models.example")).rejects.toThrow("local or private network");
 	});
 
 	it.each([
@@ -175,7 +175,7 @@ describe("provider http clients", () => {
 
 		await expect(clients.for(local)("http://127.0.0.1:11434/v1/models")).rejects.toThrow();
 		await expect(clients.for(remote)("https://models.example/v1/models")).rejects.toThrow(
-			"private or reserved",
+			"local or private network",
 		);
 		expect(dispatch).not.toHaveBeenCalled();
 	});
@@ -188,7 +188,7 @@ describe("provider http clients", () => {
 		const dispatch = vi.fn<EgressDispatch>();
 		const clients = httpClients({ allowPrivateNetwork: true, lookup: publicDns, fetch: dispatch });
 
-		await expect(clients.for(local)(url)).rejects.toThrow("outside the provider's configured URL");
+		await expect(clients.for(local)(url)).rejects.toThrow("isn't under the provider's address");
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 

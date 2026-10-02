@@ -93,7 +93,8 @@ describe("model provider routes", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "That address is not allowed: Address is on a private or reserved network",
+			message:
+				"That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
 		});
 	});
 

@@ -57,31 +57,69 @@ or entering its details again.
 
 ## Troubleshooting
 
-When a check fails, the connection's page says why. Find the message below.
+### Check the server yourself
 
-**The server didn't accept the access token or secret.** The token may have
-expired, been revoked, or lost a character when it was copied. Make a new one
-where the server issues them and **Replace** it. In the `Authorization` header,
-most servers expect the value to be `Bearer` followed by the token.
+Ask the server for its tools from the machine that runs Sugabots, with the
+credential the connection sends. This takes Sugabots out of the picture:
 
-**The server needs an access token or a sign-in.** Nothing was sent, but the
-server wants a credential. Add an access token, or remove the connection and
-add it again with its sign-in.
+```sh
+curl -i https://mcp.example.com/mcp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
 
-**Sign in again to reconnect.** The sign-in expired or was revoked. Choose
-**Sign in again**.
+A working server answers `200` with JSON describing itself. If `curl` fails
+the same way, the problem is in the server, its address or the credential, not
+in Sugabots. The full error behind each message is in Sugabots' logs:
+`docker compose logs sugabots`.
 
-**The server refused access.** The credential works, but isn't allowed to do
-this. Check what the token, or the account you signed in with, can reach.
+### The token or secret isn't accepted
 
-**Nothing answers as an MCP server at that address.** The address may be the
-server's website rather than its MCP endpoint, or have the wrong path. MCP
-addresses often end in `/mcp`.
+- Most servers want the `Authorization` header to be `Bearer` followed by the
+  token, such as `Bearer abc123`, not the token on its own.
+- Tokens are often tied to the account that made them, so they can only reach
+  what that account can. Some expire, and some are revoked when the account's
+  password changes.
+- Copying a token from a terminal or email can add a line break or drop a
+  character. Paste it into a plain text editor first to check.
 
-**The server could not be reached.** Check the address and port, that the
-server is running, and that it can be reached from wherever Sugabots runs.
-`localhost` means the machine running Sugabots.
+### The server refuses access
 
-**That address is not allowed.** The installation won't connect to plain HTTP
-or local network addresses unless it's set up to. Whoever runs Sugabots can
-allow them in the [network settings](/docs/configuration#network).
+The credential was accepted but lacks permission, an `HTTP 403`. Check the
+token's scopes or the account's role on the server. Some servers also refuse
+requests from addresses they don't recognise, so check any allow list the
+server has.
+
+### Nothing answers as an MCP server
+
+- Sugabots speaks MCP over Streamable HTTP. A server that only offers the older
+  SSE transport, often at an address ending in `/sse`, won't answer.
+- The MCP address is usually on a path such as `/mcp` or `/api/mcp`, not the
+  server's home page. The server's documentation lists it.
+- A reverse proxy in front of the server can answer with its own page. Check the
+  proxy forwards the MCP path.
+
+### The server can't be reached
+
+- When Sugabots runs in Docker, `localhost` and `127.0.0.1` mean the Sugabots
+  container itself. Use the server's network address, such as
+  `http://192.168.1.20/mcp`, instead.
+- Check a firewall on the server, or between the two machines, allows the port.
+- Sugabots gives up after 15 seconds, so a server that is slow to start may need
+  a second check.
+
+### Sign-in won't start
+
+Sugabots signs in to a server by registering itself with the server's sign-in
+service first, which the OAuth standard calls dynamic client registration. Some
+servers only accept apps registered another way, so their sign-in can't be used
+yet. Connect with an access token from the server instead.
+
+### The address isn't allowed
+
+By default, an installation only connects to `https://` addresses on the public
+internet, so that one workspace can't reach other services on the network or
+send keys unencrypted. Whoever runs Sugabots can allow plain HTTP and local
+network addresses with the [network settings](/docs/configuration#network).
