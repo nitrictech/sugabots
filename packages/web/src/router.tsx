@@ -885,7 +885,7 @@ const agentRoute = createRoute({
 	preloadStaleTime: 0,
 	// Also run while the pointer is on a link here, so the chat is loading before the click.
 	loader: ({ context, params }) => {
-		prefetchChat(context.queries, params);
+		void prefetchChat(context.queries, params);
 		return AgentPage.preload();
 	},
 	component: () => {

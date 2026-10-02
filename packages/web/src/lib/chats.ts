@@ -22,7 +22,7 @@ import { useEffect } from "react";
 import { client } from "@/api.ts";
 import { agentsQuery, findPodAgent } from "@/lib/agents.ts";
 import { NotReadyError } from "@/lib/failure.ts";
-import { podsQuery } from "@/lib/pods.ts";
+import { findPod, podsQuery } from "@/lib/pods.ts";
 import { threadQuery } from "@/lib/threads.ts";
 import { useWorkspace, workspacesQuery } from "@/lib/workspace.ts";
 
@@ -156,20 +156,22 @@ function chatKey(workspaceId: string | undefined, podId: string | undefined, hos
 export const LIVE_MESSAGE_LIMIT = CHAT_PAGE_SIZE;
 
 /**
- * Starts loading the chat an address names, as for a link the pointer is on,
- * so it is on screen when the click lands. It works from what the cache holds
- * already, the workspaces, their rosters and the pod's conversation list, and
- * does nothing without them: a preload should not add requests of its own to
- * find its way, nor open a chat nobody has.
+ * Starts loading the chat an address names: as its page first loads, and for a
+ * link the pointer is on, so the chat is on screen when the click lands. A page
+ * whose workspace's pods are not cached yet first asks for them, its agents and
+ * its conversation list at once. It never opens a chat nobody has: that waits for the screen.
  */
-export function prefetchChat(
+export async function prefetchChat(
 	queries: QueryClient,
 	address: { workspace: string; pod: string; agent: string },
-): void {
+): Promise<void> {
 	const workspace = queries
 		.getQueryData(workspacesQuery.queryKey)
 		?.find((one) => one.slug === address.workspace);
 	if (!workspace) return;
+	if (!queries.getQueryData(podsQuery(workspace.id).queryKey)) {
+		await loadChatPage(queries, workspace.id, address.pod);
+	}
 	const found = findPodAgent(
 		queries.getQueryData(podsQuery(workspace.id).queryKey),
 		queries.getQueryData(agentsQuery(workspace.id).queryKey),
@@ -185,6 +187,37 @@ export function prefetchChat(
 	void queries.prefetchInfiniteQuery(chatMessagesQuery(chat.id));
 	void queries.prefetchInfiniteQuery(chatHistoryQuery(chat.id));
 	void queries.prefetchQuery(threadQuery(chat.mainThreadId, LIVE_MESSAGE_LIMIT));
+}
+
+/**
+ * On a chat page's first load, asks for its workspace's pods and agents and the
+ * pod's conversation list side by side: the list by the pod's slug, since its
+ * id is in the pods still on their way. The list is filed under the pod's id
+ * as soon as the pods land, so the screen's own query for it waits on this
+ * request rather than sending another. A failure is left for the screen's own
+ * queries to meet and show.
+ */
+async function loadChatPage(
+	queries: QueryClient,
+	workspaceId: string,
+	podSlug: string,
+): Promise<void> {
+	const list = Effect.runPromise(
+		client.api.chats.list({ params: { workspace: workspaceId }, query: { pod: podSlug } }),
+	);
+	list.catch(() => {});
+	const agents = queries.ensureQueryData(agentsQuery(workspaceId)).catch(() => undefined);
+	const pods = await queries.ensureQueryData(podsQuery(workspaceId)).catch(() => undefined);
+	const pod = pods && findPod(pods, podSlug);
+	if (!pod) return;
+	// Filed the moment the pods land, before the screen they let render asks for it by id.
+	await Promise.all([
+		queries.prefetchQuery({
+			queryKey: chatListQuery(workspaceId, pod.id).queryKey,
+			queryFn: () => list,
+		}),
+		agents,
+	]);
 }
 
 /** The chat's main conversation, a page at a time, newest page first. */

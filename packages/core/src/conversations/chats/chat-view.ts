@@ -10,8 +10,13 @@ import type {
 	ChatPageQuery,
 	PodChatMarkers,
 } from "@sugabots/contracts";
-import { DEFAULT_CHAT_PAGE_LIMIT, messagePreview, textWithoutNarration } from "@sugabots/contracts";
-import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import {
+	DEFAULT_CHAT_PAGE_LIMIT,
+	messagePreview,
+	PERSONAL_POD_SLUG,
+	textWithoutNarration,
+} from "@sugabots/contracts";
+import { and, asc, type DBQueryConfig, desc, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, Effect, Layer } from "effect";
 import {
@@ -126,13 +131,13 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan("chat.list.pod", input.pod);
 					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
-					const listing: Listing = {
-						workspaceId,
-						scope: { pod: input.pod },
-						reachesPod: yield* visibility.reachesPod,
-					};
-					const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
-					if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
+					const reachesPod = yield* visibility.reachesPod;
+					const { userId } = yield* CurrentActor.Service;
+					const podId = yield* query((db) =>
+						reachablePod(db, input.pod, { workspaceId, reachesPod, userId }),
+					);
+					if (!podId) return yield* new ResourceHidden({ resource: "pod" });
+					const listing: Listing = { workspaceId, scope: { pod: podId }, reachesPod };
 					const bots = yield* query((db) => listedBots(db, listing));
 					const threadIds = bots.flatMap((row) => (row.chat ? [row.chat.mainThreadId] : []));
 					const latest = yield* query((db) => latestMessages(db, threadIds));
@@ -247,18 +252,36 @@ interface Listing {
 
 type ListedBot = Effect.Success<ReturnType<typeof listedBots>>[number];
 
+/**
+ * The id of the pod `podRef` names, by its id or its slug, when the actor
+ * reaches it. Every Personal pod's slug is the same, so that slug names the
+ * actor's own Personal pod, whoever else's they might also reach.
+ */
 const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
 	db: Executor,
-	podId: string,
-	input: Listing,
+	podRef: string,
+	input: Pick<Listing, "workspaceId" | "reachesPod"> & { userId: string },
 ) {
 	const [row] = yield* db
 		.select({ id: pod.id })
 		.from(pod)
-		.where(and(eq(pod.id, podId), eq(pod.workspaceId, input.workspaceId), input.reachesPod(pod.id)))
+		.where(
+			and(
+				podNamed(podRef, input.userId),
+				eq(pod.workspaceId, input.workspaceId),
+				input.reachesPod(pod.id),
+			),
+		)
 		.limit(1);
-	return row !== undefined;
+	return row?.id;
 });
+
+/** Which pod `podRef` names for `userId`: by its id, the shared Personal slug, or its own slug. */
+function podNamed(podRef: string, userId: string): SQL | undefined {
+	if (isUuid(podRef)) return eq(pod.id, podRef);
+	if (podRef === PERSONAL_POD_SLUG) return and(eq(pod.kind, "personal"), eq(pod.ownerId, userId));
+	return eq(pod.slug, podRef);
+}
 
 /** Every crew bot the list covers, with its chat in its pod when it has one. */
 const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
