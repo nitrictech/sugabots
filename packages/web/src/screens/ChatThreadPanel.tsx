@@ -223,7 +223,7 @@ export function ChatThreadPanel({
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
 							onOpenThread={onOpenThread}
 							podId={details.thread.podId}
-							canApproveToolCalls={details.capabilities?.approveToolCalls}
+							approvalCapabilities={details.capabilities}
 							compact
 						/>
 						<ThreadNotices notices={notices} />

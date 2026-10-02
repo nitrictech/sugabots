@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import { UserMessage } from "../../../user-message.ts";
+import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
@@ -134,7 +135,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	return tool({
-		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. It reaches only the hosts the turn's note lists.`,
+		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. It reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",
@@ -218,7 +219,7 @@ export function writeFileTool(openSandbox: OpenSandbox, place: Place) {
  * the provider's cached prompt.
  */
 export function allowedHostsNote(allowedHosts: readonly string[]): string {
-	return `The pod's sandbox connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. When the task needs another, say which and why, so a workspace admin can allow it.`;
+	return `The pod's sandbox connects only to these hosts (*. covers a domain's subdomains): ${allowedHosts.join(", ")}. A connection to any other host fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
 }
 
 /** `text` as one single-quoted bash word. */

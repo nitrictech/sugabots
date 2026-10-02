@@ -125,6 +125,41 @@ export const ViewerCantAnswer = meta.story({
 	},
 });
 
+/** ANetworkRequest is an agent asking for its pod's sandbox to reach a host, which an admin of the pod answers. */
+export const ANetworkRequest = meta.story({
+	args: {
+		call: asking({
+			tool: "request_network_access",
+			input: {
+				host: "api.stripe.com",
+			},
+			approval: {
+				status: "pending",
+				deciders: "sandbox-managers",
+				decidedByName: null,
+				decidedAt: null,
+			},
+		}),
+		look: undefined,
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Trip Planner wants its sandbox to reach a new host"),
+		).toBeInTheDocument();
+		await expect(canvas.queryByText("RN")).toBeNull();
+	},
+});
+
+/** ANetworkRequestNotYours is that request seen by someone who doesn't decide the pod's network access. */
+export const ANetworkRequestNotYours = meta.story({
+	args: { ...ANetworkRequest.input.args, canApprove: false },
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Waiting for an admin of this pod to answer this."),
+		).toBeInTheDocument();
+	},
+});
+
 /** Answered keeps the request readable after the answer; the tool line above the reply says how it went. */
 export const Answered = meta.story({
 	args: { call: decided("allowed", "Ryan") },

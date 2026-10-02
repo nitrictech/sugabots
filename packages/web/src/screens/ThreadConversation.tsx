@@ -15,6 +15,7 @@ import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "rea
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import type { Receipt } from "@/lib/read-receipts.ts";
+import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -65,7 +66,7 @@ export function ThreadConversation({
 	dividers = true,
 	onOpenThread,
 	podId,
-	canApproveToolCalls = false,
+	approvalCapabilities,
 	compact = false,
 	queued = NONE_QUEUED,
 	peopleTyping = [],
@@ -96,7 +97,8 @@ export function ThreadConversation({
 	 */
 	onOpenThread: (threadId: string) => void;
 	podId: string;
-	canApproveToolCalls?: boolean;
+	/** What the person may decide of the approvals the thread raises. */
+	approvalCapabilities?: ApprovalCapabilities;
 	/**
 	 * The sidebar's narrower thread: smaller faces and bubbles, and no names,
 	 * since a collaboration has only its two bots and its header names them.
@@ -220,7 +222,7 @@ export function ThreadConversation({
 											agent={message.author}
 											threadId={message.threadId}
 											podId={podId}
-											canApprove={canApproveToolCalls}
+											canApprove={mayAnswer(call, approvalCapabilities)}
 											outgoing={outgoing}
 											endsRun={endsRun}
 											compact={compact}

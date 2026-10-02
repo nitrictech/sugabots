@@ -1,12 +1,19 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Globe, X } from "lucide-react";
 import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
-import { connectionLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
+import { awaitedDeciders } from "@/lib/tool-approvals.ts";
+import {
+	connectionLabel,
+	NETWORK_REQUEST_TOOL,
+	splitToolKey,
+	stepLabel,
+	wordsFromKey,
+} from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -61,11 +68,15 @@ export function ToolApprovalCard({
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";
 	const action = stepLabel(call.tool, name);
+	const networkRequest = call.tool === NETWORK_REQUEST_TOOL;
 	const step: Step = {
 		action,
-		who: `${agent.name} wants to use ${where || "a tool"}`,
+		who: networkRequest
+			? `${agent.name} wants its sandbox to reach a new host`
+			: `${agent.name} wants to use ${where || "a tool"}`,
 		where,
 		look,
+		networkRequest,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
 	// The answer stays given from when it is sent until the thread's events say
@@ -78,7 +89,7 @@ export function ToolApprovalCard({
 	const status =
 		awaitsApproval(call) && !canApprove ? (
 			<p role="status" className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
-				Waiting for someone with permission to answer this.
+				{awaitedDeciders(call)}
 			</p>
 		) : null;
 
@@ -163,6 +174,31 @@ interface Step {
 	who: string;
 	where: string;
 	look: ConnectionLook | undefined;
+	/** A request for the sandbox to reach another host, which no connection makes. */
+	networkRequest: boolean;
+}
+
+const MARK_SIZES = {
+	md: { box: "size-6 rounded-[7px]", icon: 14 },
+	sm: { box: "size-8 rounded-lg", icon: 16 },
+} as const;
+
+/** What the step uses: the connection's mark, or a globe for a network request. */
+function StepMark({ step, size }: { step: Step; size: keyof typeof MARK_SIZES }) {
+	if (!step.networkRequest) {
+		return (
+			<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size={size} />
+		);
+	}
+	const { box, icon } = MARK_SIZES[size];
+	return (
+		<span
+			aria-hidden
+			className={cn("grid shrink-0 place-items-center bg-border-strong text-foreground", box)}
+		>
+			<Globe size={icon} strokeWidth={2} />
+		</span>
+	);
 }
 
 /** The connection's mark beside who wants to use it, and what they would do. */
@@ -170,7 +206,7 @@ function StepHeading({ step }: { step: Step }) {
 	return (
 		<div className="flex min-w-0 items-start gap-2.5">
 			<span className="mt-px">
-				<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size="md" />
+				<StepMark step={step} size="md" />
 			</span>
 			<span className="flex min-w-0 flex-col gap-0.5">
 				<span className="text-[14px] text-muted-foreground leading-[1.4]">{step.who}</span>
@@ -331,11 +367,7 @@ function ReviewHeading({
 			<span aria-hidden className="relative mb-2.5 inline-flex">
 				<AgentAvatar color={agent.color} face={agent.face} size={64} />
 				<span className="absolute -right-2 -bottom-1 rounded-[10px] ring-[3px] ring-panel">
-					<ConnectionMark
-						presetId={step.look?.presetId}
-						name={step.where || step.action}
-						size="sm"
-					/>
+					<StepMark step={step} size="sm" />
 				</span>
 			</span>
 			<h2

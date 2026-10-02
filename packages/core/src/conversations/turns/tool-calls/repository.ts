@@ -94,9 +94,7 @@ export interface Interface {
 		sdkToolCallId: string;
 		tool: string;
 		input: unknown;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
+		binding: ApprovalBinding;
 	}) => Effect.Effect<BeganExecution>;
 	/**
 	 * Fails these turns' unfinished calls, denying pending approvals, for turns
@@ -215,9 +213,7 @@ export const make = Effect.gen(function* () {
 										approvalId: approval.approvalId,
 										approvalStatus: "pending" as const,
 										approvalReason: approval.reason ?? null,
-										connectionId: approval.connectionId,
-										connectionRevision: approval.connectionRevision,
-										remoteToolName: approval.remoteToolName,
+										...bindingColumns(approval.binding),
 										input: boundedJson(approval.input),
 										executionInput: executionJson(approval.input),
 										status: "awaiting_approval" as const,
@@ -299,28 +295,31 @@ export const make = Effect.gen(function* () {
 								.for("update", { of: turn }),
 						);
 						if (!scope || !mayRunTools(scope)) return refusedExecution("The turn is not running");
-						const [approvedConnection] = yield* query((db) =>
-							db
-								.select({ toolAccess: connection.toolAccess })
-								.from(connection)
-								.where(
-									and(
-										eq(connection.id, input.connectionId),
-										eq(connection.workspaceId, scope.workspaceId),
-										eq(connection.podId, scope.podId),
-										eq(connection.configurationRevision, input.connectionRevision),
-									),
-								)
-								.limit(1)
-								.for("update"),
-						);
-						if (!approvedConnection) {
-							return refusedExecution("The connection's configuration changed after approval");
-						}
-						// Choosing what bots may do with a tool leaves the revision alone, so
-						// a tool somebody turned off after the approval is caught here.
-						if (approvedConnection.toolAccess[input.remoteToolName] === "off") {
-							return refusedExecution("The tool was turned off after approval");
+						const { binding } = input;
+						if (binding.kind === "connection") {
+							const [approvedConnection] = yield* query((db) =>
+								db
+									.select({ toolAccess: connection.toolAccess })
+									.from(connection)
+									.where(
+										and(
+											eq(connection.id, binding.connectionId),
+											eq(connection.workspaceId, scope.workspaceId),
+											eq(connection.podId, scope.podId),
+											eq(connection.configurationRevision, binding.connectionRevision),
+										),
+									)
+									.limit(1)
+									.for("update"),
+							);
+							if (!approvedConnection) {
+								return refusedExecution("The connection's configuration changed after approval");
+							}
+							// Choosing what bots may do with a tool leaves the revision alone, so
+							// a tool somebody turned off after the approval is caught here.
+							if (approvedConnection.toolAccess[binding.remoteToolName] === "off") {
+								return refusedExecution("The tool was turned off after approval");
+							}
 						}
 						const row = yield* lockedCall(
 							and(
@@ -328,6 +327,7 @@ export const make = Effect.gen(function* () {
 								eq(toolCall.sdkToolCallId, input.sdkToolCallId),
 							),
 						);
+						// Every call bound to an approval was parked for a person to allow first.
 						if (!row) return refusedExecution("The call has no approval record");
 						if (!sameCallAsApproved(row, input)) {
 							return refusedExecution(
@@ -390,7 +390,21 @@ export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
 export type ToolCallOutcome = { output: unknown } | { error: UserMessage };
 
-/** A connection tool call a reply asked for, to be parked until a person decides it. */
+/**
+ * What an approved call must still match when it runs, beyond its tool and
+ * input: for a connection's tool, the connection configured as it was when
+ * the person allowed it. A built-in tool is the same tool wherever it runs.
+ */
+export type ApprovalBinding =
+	| {
+			readonly kind: "connection";
+			readonly connectionId: string;
+			readonly connectionRevision: number;
+			readonly remoteToolName: string;
+	  }
+	| { readonly kind: "built-in" };
+
+/** A tool call a reply asked for, to be parked until a person decides it. */
 export interface PendingToolApproval {
 	id: string;
 	approvalId: string;
@@ -398,9 +412,7 @@ export interface PendingToolApproval {
 	tool: string;
 	input: unknown;
 	reason?: string;
-	connectionId: string;
-	connectionRevision: number;
-	remoteToolName: string;
+	binding: ApprovalBinding;
 	/** Whether the tool may change something, as opposed to one the connection's `ask` holds back. */
 	mutating: boolean;
 	atOffset: number;
@@ -463,11 +475,27 @@ function sameCallAsApproved(
 		row.threadId === input.threadId &&
 		row.messageId === input.messageId &&
 		row.tool === input.tool &&
-		row.connectionId === input.connectionId &&
-		row.connectionRevision === input.connectionRevision &&
-		row.remoteToolName === input.remoteToolName &&
+		isDeepStrictEqual(
+			{
+				connectionId: row.connectionId,
+				connectionRevision: row.connectionRevision,
+				remoteToolName: row.remoteToolName,
+			},
+			bindingColumns(input.binding),
+		) &&
 		isDeepStrictEqual(row.executionInput, executionJson(input.input))
 	);
+}
+
+/** How a binding is stored on the call: a built-in tool's leaves the connection's columns empty. */
+function bindingColumns(binding: ApprovalBinding) {
+	return binding.kind === "connection"
+		? {
+				connectionId: binding.connectionId,
+				connectionRevision: binding.connectionRevision,
+				remoteToolName: binding.remoteToolName,
+			}
+		: { connectionId: null, connectionRevision: null, remoteToolName: null };
 }
 
 /** The call as an event carries it once it has changed. */

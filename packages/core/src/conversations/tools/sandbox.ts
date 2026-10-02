@@ -1,11 +1,14 @@
 export * as SandboxTools from "./sandbox.ts";
 
-import type { ToolSet } from "ai";
+import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
-import { serviceOperations } from "../../database/database.ts";
-import { allowedHostsOf } from "../../sandboxes/allowed-hosts.ts";
+import { type RunEffect, serviceOperations } from "../../database/database.ts";
+import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
+import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
+import type { UserMessage } from "../../user-message.ts";
+import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	allowedHostsNote,
 	type OpenSandbox,
@@ -22,10 +25,12 @@ import {
 
 /**
  * The tools that work in a pod's sandbox: `run_command`, `read_file` and
- * `write_file`. Offered to every turn, and usable while the agent uses the
- * sandbox and the workspace has an enabled sandbox provider, looked up on
- * every call, so enabling one applies from the next turn. The sandbox is
- * opened by a turn's first call to one of the tools, not when the turn starts.
+ * `write_file`, and `request_network_access`, whose calls wait for a person,
+ * to reach a host the sandbox may not. Offered to every turn, and usable
+ * while the agent uses the sandbox and the workspace has an enabled sandbox
+ * provider, looked up on every call, so enabling one applies from the next
+ * turn. The sandbox is opened by a turn's first call to one of the tools, not
+ * when the turn starts.
  */
 export interface Interface {
 	/**
@@ -38,11 +43,23 @@ export interface Interface {
 }
 
 export interface Offered {
+	/** The tools that run when called. */
 	readonly tools: ToolSet;
-	/** Calls to the tools are refused when this is false. */
+	/** The tools whose calls wait for a person to allow them first: who is in `tools/approval-deciders.ts`. */
+	readonly requests: Readonly<Record<string, Request>>;
+	/** Calls to the tools and the requests are refused when this is false. */
 	readonly usable: boolean;
 	/** What the model is told of the sandbox with the turn, as it may change between turns. */
 	readonly note: string | undefined;
+}
+
+/**
+ * A tool whose calls wait for a person to allow them, unless `refusal` names
+ * a reason nobody could: such a call is refused without asking anyone.
+ */
+export interface Request {
+	readonly tool: Tool;
+	readonly refusal: (input: unknown) => UserMessage | undefined;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/SandboxTools") {}
@@ -50,15 +67,34 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const providers = yield* SandboxProviderRepository.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
+	const network = yield* SandboxNetwork.Service;
 	const operation = yield* serviceOperations<Interface>("SandboxTools");
+	const offeredIn = ({ turnId, place, openSandbox, run, blocked }: Behind) => ({
+		tools: {
+			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
+			[READ_FILE_TOOL]: readFileTool(openSandbox, place),
+			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
+		},
+		requests: {
+			[REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }),
+		},
+	});
 	return Service.of({
 		forTurn: ({ pod, turnId, threadId, agentId, usesSandbox }) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
 				const place = placeOf({ threadId, agentId });
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
-				if (!provider)
-					return { tools: toolsIn(NEVER_OPENED, place), usable: false, note: NO_SANDBOX_NOTE };
-				const allowedHosts = yield* operation("forTurn", allowedHostsOf(pod));
+				if (!provider) {
+					return {
+						...offeredIn({ turnId, place, openSandbox: NEVER_OPENED, run: NEVER_RUN, blocked: [] }),
+						usable: false,
+						note: NO_SANDBOX_NOTE,
+					};
+				}
+				const [allowedHosts, blocked] = yield* operation(
+					"forTurn",
+					Effect.all([allowedHostsOf(pod), blockedHostsOf(pod.workspaceId)]),
+				);
 				yield* Effect.addFinalizer(() => podSandboxes.release(turnId));
 				yield* Effect.forkScoped(
 					podSandboxes.renew(turnId).pipe(Effect.delay(PodSandboxes.LEASE_RENEWAL), Effect.forever),
@@ -80,8 +116,19 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
+				const run = <A, E>(effect: Effect.Effect<A, E>) =>
+					runPromiseExit(effect).then((exit) => {
+						if (Exit.isSuccess(exit)) return exit.value;
+						throw Cause.squash(exit.cause);
+					});
 				return {
-					tools: toolsIn(openSandbox, place),
+					...offeredIn({
+						turnId,
+						place,
+						openSandbox,
+						run,
+						blocked: blocked.map((row) => row.host),
+					}),
 					usable: true,
 					note: allowedHostsNote(allowedHosts),
 				};
@@ -92,19 +139,23 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([PodSandboxes.layer, SandboxProviderRepository.layer]),
+	Layer.provide([PodSandboxes.layer, SandboxNetwork.layer, SandboxProviderRepository.layer]),
 );
 
-function toolsIn(openSandbox: OpenSandbox, place: Place): ToolSet {
-	return {
-		[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
-		[READ_FILE_TOOL]: readFileTool(openSandbox, place),
-		[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
-	};
+/** What a turn's tools work through. */
+interface Behind {
+	readonly turnId: string;
+	readonly place: Place;
+	readonly openSandbox: OpenSandbox;
+	readonly run: RunEffect<never>;
+	/** Hosts a request is refused for without asking anyone. */
+	readonly blocked: readonly string[];
 }
 
-/** Behind tools that aren't usable, whose calls are refused before they run. */
+// Behind tools that aren't usable, whose calls are refused before they run.
 const NEVER_OPENED: OpenSandbox = () =>
+	Promise.reject(new Error("The sandbox tools aren't usable"));
+const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The sandbox tools aren't usable"));
 
 const NO_SANDBOX_NOTE =
@@ -123,5 +174,5 @@ export interface Turn {
 
 /** No sandbox tools, for cases that offer none. */
 export const none: Interface = {
-	forTurn: () => Effect.succeed({ tools: {}, usable: false, note: undefined }),
+	forTurn: () => Effect.succeed({ tools: {}, requests: {}, usable: false, note: undefined }),
 };
