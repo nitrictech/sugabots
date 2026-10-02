@@ -186,6 +186,7 @@ export function useSendChatMessage(chat: Chat | undefined, user: SessionUser) {
 						kind: "person",
 						id: user.id,
 						name: user.name,
+						email: user.email,
 						handle: handleFromName(user.name),
 						image: user.image,
 					},

@@ -75,6 +75,7 @@ describe("thread contracts", () => {
 				kind: "person",
 				id: ID,
 				name: "Sam",
+				email: "sam@example.com",
 				handle: "sam",
 				image: null,
 			}),
