@@ -7,7 +7,7 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 /** Somebody the indicator shows: a bot at work on its reply, or a person writing in the composer. */
 export type Typer =
 	| Pick<AgentParticipant, "kind" | "id" | "name" | "color" | "face">
-	| Pick<PersonParticipant, "kind" | "id" | "name" | "image">;
+	| Pick<PersonParticipant, "kind" | "id" | "name" | "email" | "image">;
 
 /** Whether there is anybody to show, which `TypingIndicator` needs. */
 export function anyoneTyping<T extends Typer>(

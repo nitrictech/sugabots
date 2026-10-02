@@ -30,7 +30,7 @@ const meta = preview.meta({
 	args: {
 		pods: podsWithBots,
 		selected: "revenue",
-		user: { name: "Ryan Eyes" },
+		user: { name: "Ryan Eyes", email: "ryan@example.com" },
 		onNewPod: fn(),
 		onNewBot: fn(),
 	},

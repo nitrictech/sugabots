@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -43,14 +43,38 @@ describe("IconButton", () => {
 
 describe("PersonAvatar", () => {
 	it("falls back to initials until there is a photo", () => {
-		render(<PersonAvatar person={{ name: "Ryan Eyes" }} />);
+		render(<PersonAvatar person={{ name: "Ryan Eyes", email: "ryan@example.com" }} />);
 
 		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
 	});
 
 	it("gives two letters for a single name, so a stack stays even", () => {
-		render(<PersonAvatar person={{ name: "Jye" }} />);
+		render(<PersonAvatar person={{ name: "Jye", email: "jye@example.com" }} />);
 
 		expect(screen.getByTitle("Jye").textContent).toBe("JY");
+	});
+
+	it("shows the Gravatar for the normalized email", async () => {
+		render(<PersonAvatar person={{ name: "Ryan Eyes", email: " RYAN@Example.com" }} size={32} />);
+
+		await vi.waitFor(() =>
+			expect(screen.getByTitle("Ryan Eyes").querySelector("img")?.getAttribute("src")).toBe(
+				"https://gravatar.com/avatar/5f58da4a1a2d0c8052a9827dec9389a285c3d60f07477e117fefb09da54fc894?s=64&d=404",
+			),
+		);
+	});
+
+	it("keeps the initials when there is no Gravatar", async () => {
+		render(<PersonAvatar person={{ name: "Ryan Eyes", email: "ryan@example.com" }} />);
+		const gravatar = await vi.waitFor(() => {
+			const img = screen.getByTitle("Ryan Eyes").querySelector("img");
+			if (!img) throw new Error("No Gravatar yet");
+			return img;
+		});
+
+		fireEvent.error(gravatar);
+
+		expect(screen.getByTitle("Ryan Eyes").querySelector("img")).toBeNull();
+		expect(screen.getByTitle("Ryan Eyes").textContent).toBe("RE");
 	});
 });
