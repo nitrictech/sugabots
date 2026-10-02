@@ -62,7 +62,7 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/**
 	 * The Personal pod's Personal Assistant, placed there on `model`, or with
-	 * no model, if it is missing. One already there is returned exactly as its
+	 * no model, if it is missing. It starts with `INTERVIEW_PROMPT`. One already there is returned exactly as its
 	 * owner left it.
 	 */
 	readonly provisionPersonalAssistant: (input: {
@@ -273,7 +273,7 @@ export const make = Effect.gen(function* () {
 								color: "sky",
 								face: "pill",
 								model: model ?? null,
-								prompt: PERSONAL_ASSISTANT_PROMPT,
+								prompt: INTERVIEW_PROMPT,
 							})
 							.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
 							.returning(),
@@ -342,9 +342,6 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-export const PERSONAL_ASSISTANT_PROMPT =
-	"You are Personal Assistant, the user's general-purpose assistant. Help them answer questions, think through problems, make plans, write, and complete tasks. Be clear, practical, and concise. Ask clarifying questions when important details are missing. Distinguish facts from assumptions and say when you are uncertain. Use available tools when they help, and report their results accurately.";
 
 /** Another agent in the pod already has this name or handle. */
 export class AgentNameTaken
