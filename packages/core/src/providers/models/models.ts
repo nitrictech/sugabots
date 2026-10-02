@@ -119,18 +119,91 @@ export interface Interface {
 }
 
 /**
- * logProviderResponse logs everything a provider sent back about a failed
- * request, when `cause` is an HTTP failure: its address, status, headers and
- * body. The request body is left out, since it holds the conversation.
+ * logModelFailure logs what is known about a failed model request: `failure`
+ * with its cause chain, every error the provider reported in the stream, and
+ * whether `signal` had aborted. For an HTTP failure that includes the
+ * provider's address, status, headers and body. The request body is left out,
+ * since it holds the conversation.
  */
-function logProviderResponse(cause: unknown): Effect.Effect<void> {
-	if (!APICallError.isInstance(cause)) return Effect.void;
-	return Effect.logWarning("A model provider refused a request", {
-		url: cause.url,
-		status: cause.statusCode,
-		headers: cause.responseHeaders,
-		body: cause.responseBody,
-	});
+function logModelFailure(
+	failure: unknown,
+	streamErrors: readonly unknown[],
+	signal: AbortSignal,
+): Effect.Effect<void> {
+	return Effect.logWarning(
+		`A model request failed: ${logJson({
+			failure: streamErrors.includes(failure) ? "the first of streamErrors" : causeChain(failure),
+			streamErrors: streamErrors.map(causeChain),
+			// False means the request's scope was still open when this was logged: nothing here aborted it.
+			abortedHere: signal.aborted,
+			...(signal.aborted ? { abortReason: causeChain(signal.reason) } : {}),
+		})}`,
+	);
+}
+
+/** The longest any one string in a logged failure may be, since a body can echo a whole prompt. */
+const MAX_LOGGED_STRING = 4_000;
+
+/**
+ * logJson returns `value` as one line of JSON, so a logger can't cut nested
+ * fields short, with each string capped at `MAX_LOGGED_STRING` characters.
+ */
+function logJson(value: unknown): string {
+	return JSON.stringify(value, (_key, field) =>
+		typeof field === "string" && field.length > MAX_LOGGED_STRING
+			? `${field.slice(0, MAX_LOGGED_STRING)}…`
+			: field,
+	);
+}
+
+/** How many causes deep `causeChain` follows, so a cycle can't run forever. */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * causeChain describes `error` and each error it was caused by, with their
+ * stacks and the fields providers and the SDK put on them: an HTTP address,
+ * status, response, code or data.
+ */
+function causeChain(error: unknown): Array<Record<string, unknown>> {
+	const chain: Array<Record<string, unknown>> = [];
+	for (let current = error, depth = 0; current !== undefined && depth < MAX_CAUSE_DEPTH; depth++) {
+		if (!(current instanceof Error)) {
+			chain.push({ value: current });
+			break;
+		}
+		const fields = current as Error & Record<string, unknown>;
+		chain.push({
+			name: current.name,
+			message: current.message,
+			stack: current.stack,
+			...(APICallError.isInstance(current)
+				? { url: current.url, status: current.statusCode, headers: current.responseHeaders }
+				: {}),
+			...definedFields(fields, ["statusCode", "responseBody", "code", "data"]),
+		});
+		current = current.cause;
+	}
+	return chain;
+}
+
+/** definedFields returns those of `names` that `record` has a value for. */
+function definedFields(record: Record<string, unknown>, names: readonly string[]) {
+	return Object.fromEntries(
+		names.flatMap((name) => (record[name] === undefined ? [] : [[name, record[name]]])),
+	);
+}
+
+/**
+ * loggingFailure passes `text` through, calling `log` with whatever ends it
+ * early, since a reader of the text alone can't say what else went wrong.
+ */
+async function* loggingFailure<T>(text: AsyncIterable<T>, log: (cause: unknown) => void) {
+	try {
+		yield* text;
+	} catch (cause) {
+		log(cause);
+		throw cause;
+	}
 }
 
 /** The model could not be asked, or its provider failed the request. */
@@ -258,6 +331,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			// result afterwards fails with "No output generated". Keeping the
 			// first error is what lets the failure say why the provider refused.
 			let providerFailure: unknown;
+			// Every error the stream reports, not just the first, so the log shows what led to the failure.
+			const streamErrors: unknown[] = [];
+			// The SDK's callbacks run outside Effect, so they log through this.
+			const runLog = Effect.runForkWith(yield* Effect.context<never>());
 			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
 			const result = streamText({
 				model: languageModel(connection, input.model, fetch),
@@ -287,9 +364,17 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				onLanguageModelCallEnd: ({ usage }) => ledger.ended(usage),
 				onError: ({ error }) => {
 					providerFailure ??= error;
+					streamErrors.push(error);
 					return ledger.failed();
 				},
-				onAbort: () => ledger.aborted(),
+				onAbort: () => {
+					runLog(
+						Effect.logWarning(
+							`A model request was aborted here: ${logJson({ reason: causeChain(signal.reason) })}`,
+						),
+					);
+					return ledger.aborted();
+				},
 				// A response stopped by the step limit on a round of tool calls ends
 				// with nothing said, so the last round is told to answer. The note
 				// rides on the newest tool result, which no provider has cached yet:
@@ -301,7 +386,9 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				maxRetries: 0,
 			});
 			return {
-				text: result.textStream,
+				text: loggingFailure(result.textStream, (cause) =>
+					runLog(logModelFailure(cause, streamErrors, signal)),
+				),
 				finished: Effect.tryPromise({
 					try: async () => {
 						const [steps, responseMessages] = await Promise.all([
@@ -317,7 +404,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 						};
 					},
 					catch: (cause) => providerFailure ?? cause,
-				}).pipe(Effect.tapError(logProviderResponse), Effect.mapError(RequestFailed.fromCause)),
+				}).pipe(
+					Effect.tapError((failure) => logModelFailure(failure, streamErrors, signal)),
+					Effect.mapError(RequestFailed.fromCause),
+				),
 			};
 		}),
 	);
@@ -490,10 +580,7 @@ export const forEachDelta = <E, R>(
 	const next = Effect.callback<IteratorResult<string>, RequestFailed>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) =>
-				resume(
-					Effect.andThen(logProviderResponse(cause), Effect.fail(RequestFailed.fromCause(cause))),
-				),
+			(cause) => resume(Effect.fail(RequestFailed.fromCause(cause))),
 		);
 	});
 	const loop: Effect.Effect<void, E | RequestFailed, R> = Effect.flatMap(next, (result) =>
