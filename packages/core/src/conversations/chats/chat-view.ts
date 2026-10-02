@@ -51,6 +51,7 @@ import {
 	personColumns,
 	toParticipant,
 } from "../threads/participants.ts";
+import { toChat } from "./chat.ts";
 
 /**
  * What the chat screens show, of the chats the current actor can see: the
@@ -94,7 +95,7 @@ export const make = Effect.gen(function* () {
 		bots: readonly ListedBot[],
 	) {
 		const { userId } = yield* CurrentActor.Service;
-		const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
+		const threadIds = bots.flatMap((row) => (row.chat ? [row.chat.mainThreadId] : []));
 		// A reply is written at the time it began, so it counts as news only once it is done.
 		const news = yield* query((db) => latestMessages(db, threadIds, { finished: true }));
 		const readThrough = yield* query((db) => readPoints(db, userId, threadIds));
@@ -102,18 +103,18 @@ export const make = Effect.gen(function* () {
 			chatsAwaitingDecisionBy(db, {
 				workspaceId,
 				userId,
-				chatIds: bots.flatMap((row) => (row.chatId ? [row.chatId] : [])),
+				chatIds: bots.flatMap((row) => (row.chat ? [row.chat.id] : [])),
 			}),
 		);
 		return (row: ListedBot) => {
-			const latest = row.mainThreadId ? news.get(row.mainThreadId) : undefined;
-			const read = row.mainThreadId ? readThrough.get(row.mainThreadId) : undefined;
+			const latest = row.chat ? news.get(row.chat.mainThreadId) : undefined;
+			const read = row.chat ? readThrough.get(row.chat.mainThreadId) : undefined;
 			return {
 				unread:
 					latest !== undefined &&
 					latest.authorUserId !== userId &&
 					(read === undefined || latest.createdAt > read),
-				needsApproval: row.chatId !== null && awaiting.has(row.chatId),
+				needsApproval: row.chat !== null && awaiting.has(row.chat.id),
 			};
 		};
 	});
@@ -133,18 +134,18 @@ export const make = Effect.gen(function* () {
 					const reachable = yield* query((db) => reachablePod(db, input.pod, listing));
 					if (!reachable) return yield* new ResourceHidden({ resource: "pod" });
 					const bots = yield* query((db) => listedBots(db, listing));
-					const threadIds = bots.flatMap((row) => (row.mainThreadId ? [row.mainThreadId] : []));
+					const threadIds = bots.flatMap((row) => (row.chat ? [row.chat.mainThreadId] : []));
 					const latest = yield* query((db) => latestMessages(db, threadIds));
 					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, threadIds));
 					const marksOf = yield* chatMarks(workspaceId, bots);
 					const items = bots.flatMap((row): ChatListItem[] => {
 						const crew = crewAgentRow(row.agent);
 						if (!crew) return [];
-						const last = row.mainThreadId ? latest.get(row.mainThreadId) : undefined;
+						const last = row.chat ? latest.get(row.chat.mainThreadId) : undefined;
 						return [
 							{
 								agent: toAgent(crew),
-								chatId: row.chatId,
+								chat: row.chat && toChat(row.chat),
 								lastMessage: last
 									? {
 											preview: messagePreview(textWithoutNarration(last.parts) || last.content),
@@ -152,7 +153,7 @@ export const make = Effect.gen(function* () {
 											at: last.createdAt.toISOString(),
 										}
 									: null,
-								waitingOn: (row.mainThreadId && waitingOn.get(row.mainThreadId)) || null,
+								waitingOn: (row.chat && waitingOn.get(row.chat.mainThreadId)) || null,
 								...marksOf(row),
 							},
 						];
@@ -262,7 +263,7 @@ const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
 /** Every crew bot the list covers, with its chat in its pod when it has one. */
 const listedBots = Effect.fn("ChatView.listedBots")(function* (db: Executor, input: Listing) {
 	return yield* db
-		.select({ agent, chatId: chat.id, mainThreadId: chat.mainThreadId })
+		.select({ agent, chat })
 		.from(agent)
 		.innerJoin(pod, crewOf(pod.id))
 		.leftJoin(chat, and(eq(chat.podId, agent.podId), eq(chat.hostAgentId, agent.id)))

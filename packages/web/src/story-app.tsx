@@ -262,7 +262,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					const last = messages[bot.id]?.at(-1);
 					return {
 						agent: bot,
-						chatId: last ? storyChatFor(bot).id : null,
+						chat: last ? storyChatFor(bot) : null,
 						lastMessage: last
 							? {
 									preview: last.content,
