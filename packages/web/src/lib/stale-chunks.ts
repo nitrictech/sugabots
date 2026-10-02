@@ -10,6 +10,10 @@
  */
 export function reloadWhenADeployReplacesChunks(): void {
 	window.addEventListener("vite:preloadError", () => {
+		if (!navigator.onLine) {
+			// The reload would fail too, replacing the app with the browser's offline page.
+			return;
+		}
 		const reloadedAt = Number(readReloadedAt());
 		if (Date.now() - reloadedAt < RELOAD_COOLDOWN_MS) {
 			return;
