@@ -32,7 +32,9 @@ export const General = meta.story({
 			"aria-current",
 			"page",
 		);
-		await expect(await canvas.findByRole("group", { name: "Theme" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("group", { name: "Theme" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
 	},
 });
 

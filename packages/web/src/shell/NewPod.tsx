@@ -1,4 +1,10 @@
-import { leastUsedPodColor, type Pod, type PodColor, slugify } from "@sugabots/contracts";
+import {
+	leastUsedPodColor,
+	POD_NAME_MAX_LENGTH,
+	type Pod,
+	type PodColor,
+	slugify,
+} from "@sugabots/contracts";
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useCreatePod, usePods } from "@/lib/pods.ts";
@@ -60,7 +66,7 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 						value={name}
 						onChange={setName}
 						placeholder="e.g. Support"
-						maxLength={64}
+						maxLength={POD_NAME_MAX_LENGTH}
 					/>
 				</SettingsGroup>
 				<p className="m-0 px-1 text-[12.5px] text-subtle-foreground leading-normal">

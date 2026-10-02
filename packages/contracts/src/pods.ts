@@ -132,8 +132,10 @@ export const podSchema = Schema.Struct({
 
 export type Pod = typeof podSchema.Type;
 
+export const POD_NAME_MAX_LENGTH = 64;
+
 export const newPodSchema = Schema.Struct({
-	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(POD_NAME_MAX_LENGTH)),
 	/** Derived from the name when it is left out. */
 	slug: Schema.optional(sharedPodSlugSchema),
 	/** The colour fewest of the workspace's pods have when it is left out. */
