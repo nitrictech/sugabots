@@ -1,11 +1,12 @@
 import type { ChatListItem, Pod } from "@sugabots/contracts";
-import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Hand, Plus, Search, Settings } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
+import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { waitingText } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -27,7 +28,7 @@ export function ConversationList({
 	className?: string;
 }) {
 	const list = useChatList(pod.id);
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;

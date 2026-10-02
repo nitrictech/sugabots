@@ -1,11 +1,5 @@
 import type { Agent, Pod, Workspace } from "@sugabots/contracts";
-import {
-	Link,
-	useMatchRoute,
-	useNavigate,
-	useParams,
-	useRouteContext,
-} from "@tanstack/react-router";
+import { Link, useMatchRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Hand, Plus, UserRound } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
@@ -13,6 +7,7 @@ import { useAgents } from "@/lib/agents.ts";
 import { usePodChatMarkers } from "@/lib/chats.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
+import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspacePermissions, useWorkspaces } from "@/lib/workspace.ts";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
@@ -40,7 +35,7 @@ export function Rail() {
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const [making, setMaking] = useState<Making>();
 	const navigate = useNavigate();
 	const selected = useRailSelection();

@@ -11,13 +11,14 @@ import {
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
 import { Effect } from "effect";
 import { vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
-import { createAppRouter } from "@/router.tsx";
+import type { Session } from "@/lib/session.ts";
+import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { client } from "@/test-client.ts";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 
@@ -496,17 +497,33 @@ export function mount(
 
 	render(
 		// A fresh cache per case, so one test's pods cannot answer another's.
-		<QueryClientProvider client={createQueryClient()}>
-			<TooltipProvider>
-				<RouterProvider
-					router={router}
-					context={{ session: { user, error: undefined, refresh } }}
-				/>
-			</TooltipProvider>
-		</QueryClientProvider>,
+		<TestApp
+			router={router}
+			queries={createQueryClient()}
+			session={{ user, error: undefined, refresh }}
+		/>,
 	);
 
 	return router;
+}
+
+/** The app as `main.tsx` mounts it, for a case that changes the session after mounting. */
+export function TestApp({
+	router,
+	queries,
+	session,
+}: {
+	router: ReturnType<typeof createAppRouter>;
+	queries: QueryClient;
+	session: Session;
+}) {
+	return (
+		<QueryClientProvider client={queries}>
+			<TooltipProvider>
+				<AppRouterProvider router={router} session={session} />
+			</TooltipProvider>
+		</QueryClientProvider>
+	);
 }
 
 /** Base UI menus and selects open on mousedown, which testing-library's click is not. */

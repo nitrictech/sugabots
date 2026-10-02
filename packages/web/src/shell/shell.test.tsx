@@ -1,10 +1,13 @@
-import type { ModelProvider, ProviderModel } from "@sugabots/contracts";
+import type { ModelProvider, ProviderModel, SessionUser } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { failureForStatus } from "@sugabots/sdk";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryHistory } from "@tanstack/react-router";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createQueryClient } from "@/lib/query.ts";
 import { chooseWorkspace } from "@/lib/workspace.ts";
+import { createAppRouter } from "@/router.tsx";
 import {
 	agents,
 	apiAnswers,
@@ -20,6 +23,7 @@ import {
 	personalPod,
 	pods,
 	sam,
+	TestApp,
 	triager,
 	VIEWER_IN_POD,
 	workspace,
@@ -1852,6 +1856,28 @@ describe("your profile", () => {
 
 		await waitFor(() => expect(client.auth.updateName).toHaveBeenCalledWith({ name: "Samantha" }));
 		await waitFor(() => expect(refresh).toHaveBeenCalled());
+	});
+
+	it("shows your new name once the session has it, without a navigation", async () => {
+		const router = createAppRouter({
+			history: createMemoryHistory({ initialEntries: ["/suga/settings/profile"] }),
+		});
+		const queries = createQueryClient();
+		const signedInAs = (user: SessionUser) => (
+			<TestApp
+				router={router}
+				queries={queries}
+				session={{ user, error: undefined, refresh: vi.fn() }}
+			/>
+		);
+		const { rerender } = render(signedInAs(sam));
+		expect(await screen.findByRole("heading", { name: sam.name })).toBeDefined();
+
+		rerender(signedInAs({ ...sam, name: "Samantha" }));
+
+		expect(await screen.findByRole("heading", { name: "Samantha" })).toBeDefined();
+		const settings = screen.getByRole("navigation", { name: "Settings" });
+		expect(within(settings).getByText("Samantha")).toBeDefined();
 	});
 
 	it("puts your name back, and says why, when the change is refused", async () => {

@@ -1,9 +1,8 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, use, useCallback, useEffect, useRef, useState } from "react";
 import { client } from "@/api.ts";
 
 /**
@@ -41,7 +40,7 @@ const RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 3_000, 3_000];
 /** One of the API's failures is the API answering. Anything else never got there. */
 const unreachable = (failure: unknown) => !isApiFailure(failure);
 
-export function useSession(): Session {
+export function useSessionFromApi(): Session {
 	const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
 	const [error, setError] = useState<unknown>();
 	const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -93,13 +92,27 @@ export function useSession(): Session {
 }
 
 /**
+ * The session `useSessionFromApi` keeps, for the components below it. Route
+ * guards read the same session from the router's context, but a route takes
+ * that context only when it loads, so a component reading it there would not
+ * see you change, as when you rename yourself, until the next navigation.
+ */
+export const SessionContext = createContext<Session | undefined>(undefined);
+
+export function useSession(): Session {
+	const session = use(SessionContext);
+	if (!session) throw new Error("useSession needs a SessionContext above it");
+	return session;
+}
+
+/**
  * Changes your name. Members, pods and chats look a person's name up whenever
  * they are read, so every cached answer is asked for again, as is who you are,
- * without holding up the save. A route takes the session when it loads, so
- * your own name where the page shows it changes once the page is reloaded.
+ * without holding up the save. Should `/me` fail just then, the old name stays
+ * on screen until the session is next asked.
  */
 export function useUpdateName() {
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: (name: string) => client.auth.updateName({ name }),

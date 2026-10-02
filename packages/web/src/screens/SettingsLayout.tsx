@@ -1,10 +1,11 @@
-import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
+import { Link, useLocation, useMatch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { X } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
+import { useSession } from "@/lib/session.ts";
 import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { type SettingSection, workspaceSettingGroups } from "@/lib/workspace-settings.ts";
@@ -116,7 +117,7 @@ function useSettingSections() {
 
 function SettingsNavigation() {
 	const { groups, counts } = useSettingSections();
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	const pathname = useSettingsPath();
 
 	return (
@@ -177,7 +178,7 @@ function SettingsNavigation() {
  */
 function CompactSettingsList() {
 	const { groups, counts } = useSettingSections();
-	const { session } = useRouteContext({ from: "__root__" });
+	const session = useSession();
 	return (
 		<nav
 			aria-label="Settings sections"

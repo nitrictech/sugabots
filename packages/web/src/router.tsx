@@ -9,10 +9,10 @@ import {
 	Link,
 	Navigate,
 	Outlet,
+	RouterProvider,
 	redirect,
 	useNavigate,
 	useParams,
-	useRouteContext,
 	useRouter,
 } from "@tanstack/react-router";
 import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -24,7 +24,7 @@ import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useOnboarding } from "@/lib/onboarding.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
-import type { Session } from "@/lib/session.ts";
+import { type Session, SessionContext, useSession } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
 	useDeleteWorkspace,
@@ -131,8 +131,13 @@ function lazyNamed<Name extends string, Props extends object>(
  * opens beside its bot's chat, as `?thread=`.
  */
 
+/**
+ * What the route guards read. A route takes its context when it loads, so a
+ * component reading it would not see you change, as when you rename yourself,
+ * until the next navigation: components read the session with `useSession()`.
+ */
 export interface RouterContext {
-	session: Session;
+	user: Session["user"];
 }
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -208,7 +213,7 @@ function isAppPath(value: unknown): value is string {
 }
 
 function LoginRoute() {
-	const { session } = loginRoute.useRouteContext();
+	const session = useSession();
 	const { invite, passwordChanged, returnTo = "/" } = loginRoute.useSearch();
 	const navigate = useNavigate();
 
@@ -245,7 +250,7 @@ const joinRoute = createRoute({
 
 /** Signing up from a referral link. Somebody already signed in has no use for it and goes home. */
 function JoinRoute() {
-	const { session } = joinRoute.useRouteContext();
+	const session = useSession();
 	const { code } = joinRoute.useParams();
 	const navigate = useNavigate();
 
@@ -277,7 +282,7 @@ const resetPasswordRoute = createRoute({
 });
 
 function ResetPasswordRoute() {
-	const { session } = resetPasswordRoute.useRouteContext();
+	const session = useSession();
 	const { token } = resetPasswordRoute.useSearch();
 	const navigate = useNavigate();
 	const toLogin = (search: LoginSearch) => navigate({ to: "/login", search, replace: true });
@@ -362,7 +367,7 @@ const inviteRoute = createRoute({
 	beforeLoad: ({ context, params }) => {
 		// An invitation is accepted as somebody. Sign in first, and come back:
 		// the id rides along so the link is not lost on the way.
-		if (context.session.user === null) {
+		if (context.user === null) {
 			throw redirect({ to: "/login", search: { invite: params.id } });
 		}
 	},
@@ -370,7 +375,7 @@ const inviteRoute = createRoute({
 });
 
 function InviteRoute() {
-	const { session } = inviteRoute.useRouteContext();
+	const session = useSession();
 	const { id } = inviteRoute.useParams();
 	const navigate = useNavigate();
 
@@ -393,7 +398,7 @@ const onboardingRoute = createRoute({
 });
 
 function OnboardingRoute() {
-	const session = onboardingRoute.useRouteContext().session;
+	const session = useSession();
 	const onboarding = useOnboarding();
 	const workspace = useWorkspace();
 
@@ -438,7 +443,7 @@ const newWorkspaceRoute = createRoute({
 });
 
 function NewWorkspaceRoute() {
-	const session = newWorkspaceRoute.useRouteContext().session;
+	const session = useSession();
 	const { workspace: madeSlug } = newWorkspaceRoute.useSearch();
 	const { workspace, isPending, error, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
@@ -901,7 +906,7 @@ function AgentChatRoute({
 	search: AgentSearch;
 	onSearchChange: (change: AgentSearch) => void;
 }) {
-	const { user } = useRouteContext({ from: "__root__" }).session;
+	const { user } = useSession();
 	const { found, isPending, error } = usePodAgent(podSlug, handle);
 
 	if (isPending) return null;
@@ -941,7 +946,7 @@ function requireUser({
 	context: RouterContext;
 	location: ParsedLocation;
 }): void {
-	if (context.session.user === null) {
+	if (context.user === null) {
 		throw redirect({
 			to: "/login",
 			search: location.href === "/" ? {} : { returnTo: location.href },
@@ -983,6 +988,21 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// and search params are exercised rather than mocked around.
 		...options,
 	});
+}
+
+/** The app's routes, signed in as `session`: guards read who you are from it, and so do components. */
+export function AppRouterProvider({
+	router,
+	session,
+}: {
+	router: ReturnType<typeof createAppRouter>;
+	session: Session;
+}) {
+	return (
+		<SessionContext value={session}>
+			<RouterProvider router={router} context={{ user: session.user }} />
+		</SessionContext>
+	);
 }
 
 declare module "@tanstack/react-router" {

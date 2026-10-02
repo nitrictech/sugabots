@@ -1,11 +1,10 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { failureMessage } from "@/lib/failure.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { type Session, useSession } from "@/lib/session.ts";
-import { createAppRouter } from "@/router.tsx";
+import { type Session, useSessionFromApi } from "@/lib/session.ts";
+import { AppRouterProvider, createAppRouter } from "@/router.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
@@ -24,7 +23,7 @@ import "@/app.css";
 const router = createAppRouter();
 
 function App() {
-	const session = useSession();
+	const session = useSessionFromApi();
 	const [retryingSession, setRetryingSession] = useState(false);
 
 	if (session.user === undefined) {
@@ -63,7 +62,7 @@ function SessionRouter({ session }: { session: Session }) {
 	return (
 		<QueryClientProvider client={queries}>
 			<TooltipProvider>
-				<RouterProvider router={router} context={{ session }} />
+				<AppRouterProvider router={router} session={session} />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
