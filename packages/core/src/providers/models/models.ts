@@ -31,6 +31,7 @@ import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
+import { toolResultFitter } from "./tool-results.ts";
 
 /** What asking a model once is about: which model, for which workspace, and what it is told. */
 export interface Prompt {
@@ -46,20 +47,29 @@ export interface PromptMessage {
 }
 
 /** A response streamed as it arrives, with tools the model may call along the way. */
-export interface StreamRequest extends Prompt {
+export type StreamRequest = Prompt & {
 	/** What the request is for, which the ledger records as whose spend it is. */
 	activity: ModelRequests.Activity;
 	/** Server-owned SDK messages appended when resuming a suspended tool call. */
 	continuationMessages?: readonly ModelMessage[];
-	/** What the model may call. The SDK executes them as it streams. */
-	tools?: ToolSet;
 	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
 	/**
 	 * How many model calls the response may take, counting one per round of
 	 * tool calls. The last is told to answer rather than call more tools.
 	 */
 	maxSteps: number;
-}
+} & (
+		| {
+				/** What the model may call. The SDK executes them as it streams. */
+				tools: ToolSet;
+				/**
+				 * The model's context window, in tokens. Tool results are cut and
+				 * cleared to keep each model call within it.
+				 */
+				windowTokens: number;
+		  }
+		| { tools?: undefined; windowTokens?: undefined }
+	);
 
 /** A whole answer, given up on if it runs past either limit. */
 export interface AnswerRequest extends Prompt {
@@ -336,6 +346,9 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			// The SDK's callbacks run outside Effect, so they log through this.
 			const runLog = Effect.runForkWith(yield* Effect.context<never>());
 			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
+			const fitToolResults = input.tools
+				? toolResultFitter(input.windowTokens, input.system)
+				: undefined;
 			const result = streamText({
 				model: languageModel(connection, input.model, fetch),
 				// The Codex backend takes the system prompt only as `instructions`,
@@ -380,8 +393,11 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				// rides on the newest tool result, which no provider has cached yet:
 				// changing the tools or system text instead would cost the cache
 				// every earlier call built.
-				prepareStep: ({ stepNumber, messages }) =>
-					stepNumber === input.maxSteps - 1 ? { messages: withLastStepNote(messages) } : undefined,
+				prepareStep: ({ stepNumber, steps, messages }) => {
+					const fitted = fitToolResults?.({ steps, messages }) ?? messages;
+					const prepared = stepNumber === input.maxSteps - 1 ? withLastStepNote(fitted) : fitted;
+					return prepared === messages ? undefined : { messages: prepared };
+				},
 				stopWhen: stepCountIs(input.maxSteps),
 				maxRetries: 0,
 			});

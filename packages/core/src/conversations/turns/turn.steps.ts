@@ -478,6 +478,7 @@ const streamReply = (
 				tools,
 				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
+				windowTokens: prepared.context.windowTokens,
 			});
 
 			const consume = Effect.gen(function* () {
