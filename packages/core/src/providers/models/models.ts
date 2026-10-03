@@ -63,9 +63,8 @@ export type StreamRequest = Prompt & {
 				/** What the model may call. The SDK executes them as it streams. */
 				tools: ToolSet;
 				/**
-				 * The context window of the model, which what the tools return is
-				 * kept within: each result is cut to its share of it, and the oldest
-				 * results are cleared once they fill too much of it.
+				 * The model's context window, in tokens. Tool results are cut and
+				 * cleared to keep each model call within it.
 				 */
 				windowTokens: number;
 		  }
@@ -389,8 +388,6 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					);
 					return ledger.aborted();
 				},
-				// Each call is sent what the tools returned fitted to the window.
-				//
 				// A response stopped by the step limit on a round of tool calls ends
 				// with nothing said, so the last round is told to answer. The note
 				// rides on the newest tool result, which no provider has cached yet:

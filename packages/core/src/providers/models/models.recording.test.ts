@@ -39,17 +39,21 @@ function streamed(
 	return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-/** A call to `lookup` with this id, from a prompt the provider counted as `promptTokens`. */
-const toolCallAs = (id: string, promptTokens: number) =>
+/** Calls to `lookup` made all at once, one per id, from a prompt the provider counted as `promptTokens`. */
+const toolCallsAs = (ids: readonly string[], promptTokens: number) =>
 	streamed(
 		{
-			tool_calls: [
-				{ index: 0, id, type: "function", function: { name: "lookup", arguments: "{}" } },
-			],
+			tool_calls: ids.map((id, index) => ({
+				index,
+				id,
+				type: "function",
+				function: { name: "lookup", arguments: "{}" },
+			})),
 		},
 		"tool_calls",
 		{ prompt_tokens: promptTokens, completion_tokens: 20 },
 	);
+const toolCallAs = (id: string, promptTokens: number) => toolCallsAs([id], promptTokens);
 const toolCall = () => toolCallAs("call-1", 1_000);
 const reply = () =>
 	streamed({ content: "Found it." }, "stop", { prompt_tokens: 1_200, completion_tokens: 10 });
@@ -317,6 +321,51 @@ describe("what a response's tools return", () => {
 			(message) => message.tool_calls?.map((call) => call.id) ?? [],
 		);
 		expect(calls).toEqual(["call-1", "call-2", "call-3", "call-4"]);
+	});
+
+	it("reaches the model before it can be cleared, and is cleared with others rather than alone", async () => {
+		const result = "h".repeat(30_000);
+		// The history alone fills most of the window, as it may before the
+		// thread is compacted, so clearing can never get the prompt down far.
+		// Each call's prompt grows by the result it was sent until the fourth
+		// result would take it past the most the window should hold.
+		const { model, sent } = modelAnswering([
+			() => toolCallAs("call-1", 135_000),
+			() => toolCallAs("call-2", 147_000),
+			() => toolCallAs("call-3", 159_000),
+			() => toolCallAs("call-4", 171_000),
+			reply,
+		]);
+
+		await answer(model, lookingUp(result, 200_000));
+
+		expect(toolResults(sent[1])).toEqual({ "call-1": result });
+		expect(toolResults(sent[2])).toEqual({ "call-1": result, "call-2": result });
+		expect(toolResults(sent[3])).toEqual({
+			"call-1": result,
+			"call-2": result,
+			"call-3": result,
+		});
+		const cleared = expect.stringMatching(/^\[This result was cleared/);
+		expect(toolResults(sent[4])).toEqual({
+			"call-1": cleared,
+			"call-2": cleared,
+			"call-3": cleared,
+			"call-4": result,
+		});
+	});
+
+	it("shares what room is left between results it has not read, cutting rather than clearing them", async () => {
+		const ids = ["call-1", "call-2", "call-3", "call-4", "call-5", "call-6"];
+		const { model, sent } = modelAnswering([() => toolCallsAs(ids, 1_000), reply]);
+
+		await answer(model, lookingUp("w".repeat(60_000)));
+
+		const results = Object.values(toolResults(sent[1]));
+		expect(results).toHaveLength(ids.length);
+		for (const result of results) expect(result).toContain("too long to show whole");
+		const promptLimitCharacters = 100_000 * 0.9 * 2.5;
+		expect(results.join("").length).toBeLessThan(promptLimitCharacters);
 	});
 });
 
