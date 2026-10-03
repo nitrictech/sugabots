@@ -349,7 +349,7 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(offered).toEqual([["other", "read_docs"]]);
+		expect(offered).toEqual([["other", "read_docs", "workspace_access"]]);
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
