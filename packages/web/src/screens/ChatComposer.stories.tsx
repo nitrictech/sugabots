@@ -412,3 +412,29 @@ export const PeopleOnlyOnATablet = meta.story({
 		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
 	},
 });
+
+/**
+ * PeopleOnlyBesideAPanel is a wide screen with a side panel open, which leaves
+ * the composer as narrow as on a tablet: the switch is the people icon and the
+ * chip is left out, so the draft keeps its width.
+ */
+export const PeopleOnlyBesideAPanel = meta.story({
+	args: {
+		label: "Message people in Product",
+		placeholder: "Message people in Product",
+		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
+	},
+	globals: { viewport: { value: "desktop", isRotated: false } },
+	decorators: [
+		(Story) => (
+			<div style={{ width: 380 }}>
+				<Story />
+			</div>
+		),
+	],
+	play: async ({ canvas }) => {
+		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
+		const input = canvas.getByRole("textbox", { name: "Message people in Product" });
+		await expect(input.getBoundingClientRect().width).toBeGreaterThan(200);
+	},
+});
