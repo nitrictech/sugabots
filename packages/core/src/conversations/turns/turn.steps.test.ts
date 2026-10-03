@@ -1,4 +1,4 @@
-import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { type ConnectionAccess, streamEvent, threadChannel } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -173,7 +173,7 @@ describe("runSegment", () => {
 								wiki__wipe: {
 									tool: wipe,
 									mutating: true,
-									requiresApproval: true,
+									access: "ask",
 									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 									connectionRevision: 1,
 									remoteToolName: "wipe",
@@ -270,16 +270,16 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("tells the model which connection tools wait for a person", async () => {
+	it("tells the model which connection tools wait for a person, offering the ones turned off too", async () => {
 		const { execution, turns } = fakes();
 		const lookup = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async () => ({ content: [] }),
 		});
-		const offered = (name: string, requiresApproval: boolean) => ({
+		const offered = (name: string, access: ConnectionAccess) => ({
 			tool: lookup,
 			mutating: false,
-			requiresApproval,
+			access,
 			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 			connectionRevision: 1,
 			remoteToolName: name,
@@ -302,8 +302,9 @@ describe("runSegment", () => {
 					forPod: () =>
 						Effect.succeed({
 							tools: {
-								wiki__lookup: offered("lookup", false),
-								notes__lookup: offered("lookup", true),
+								wiki__lookup: offered("lookup", "allow"),
+								notes__lookup: offered("lookup", "ask"),
+								drive__lookup: offered("lookup", "off"),
 							},
 							close: async () => undefined,
 						}),
@@ -312,6 +313,9 @@ describe("runSegment", () => {
 		);
 
 		expect(received?.toolApproval).toEqual({ notes__lookup: "user-approval" });
+		expect(Object.keys(received?.tools ?? {})).toEqual(
+			expect.arrayContaining(["wiki__lookup", "notes__lookup", "drive__lookup"]),
+		);
 	});
 
 	it("leaves out a built-in tool the agent has switched off", async () => {
@@ -591,7 +595,7 @@ function segmentAskingApproval(
 								execute,
 							}),
 							mutating: true,
-							requiresApproval: true,
+							access: "ask",
 							connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 							connectionRevision: 1,
 							remoteToolName: "wipe",
