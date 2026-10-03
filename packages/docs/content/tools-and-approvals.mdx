@@ -28,7 +28,7 @@ That's always on when a pod has more than one bot.
 ## Tools from connections
 
 A connection's tools belong to the pod, and every bot in the pod can use them.
-Each connection has an **Approval** setting:
+Each tool has its own approval:
 
 | Approval | What happens |
 | --- | --- |
@@ -36,12 +36,20 @@ Each connection has an **Approval** setting:
 | Ask | Every call waits for a person |
 | Allow | Every call runs straight away |
 
-A tool starts on **Allow** when the app says it only reads, on **Off** when the
-app says it deletes or overwrites, and on **Ask** otherwise.
+Until someone chooses, a tool is on **Allow** when the app says it only reads,
+on **Off** when the app says it deletes or overwrites, and on **Ask** otherwise.
+A choice stays, even while the app stops listing the tool. Turning a tool off
+also stops a call someone already allowed but that hasn't run yet.
+
+To change them, open the pod's settings and find **Connections**. Each row's
+menu sets every tool of that connection at once, and says **Custom** when they
+differ. Open a connection to see its tools, the ones that read apart from the
+ones that make changes: each group's menu sets all of its tools, and each tool
+can be set on its own.
 
 ## Try it
 
-Set the approval and pick what the bot wants to do. A read and a change are treated the same, so only the approval decides what happens.
+Set the tool's approval and pick what the bot wants to do. A read and a change are treated the same, so only the approval decides what happens.
 
 <ApprovalPlayground />
 

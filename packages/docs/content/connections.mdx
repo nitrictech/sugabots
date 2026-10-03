@@ -49,14 +49,17 @@ you can change it from the pod's settings.
 
 ## Look after it
 
-A connection's page shows whether it's signed in, and **Check connection** asks
-the server which tools it offers right now. Tools are named after the
-connection, like `linear__list_issues`, so bots can tell apps apart.
+Open a connection from the pod's settings to see its tools. Its **⋯** menu
+signs in again or replaces its secret, and **Check connection** asks the server
+which tools it offers right now. Below that, choose **Allow**, **Ask** or
+**Off** for a whole group of tools at once, or for each one. Tools are named
+after the connection, like `linear__list_issues`, so bots can tell apps apart.
 
 If a server can't be reached, its tools are left out of that turn and the bot
-carries on without them.
+carries on without them. A connection with every tool off isn't contacted at
+all.
 
-<Careful title="Removing a connection">
+<Careful title="Disconnecting">
 
 Bots in the pod lose its tools straight away. Adding it again means signing in
 or entering its details again.

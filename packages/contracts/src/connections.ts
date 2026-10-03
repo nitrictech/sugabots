@@ -106,6 +106,8 @@ export const connectionSchema = Schema.Struct({
 	tools: Schema.mutable(Schema.Array(connectionToolWithAccessSchema)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
+	/** The name of whoever added it, while they still have an account. */
+	connectedBy: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
 });
 

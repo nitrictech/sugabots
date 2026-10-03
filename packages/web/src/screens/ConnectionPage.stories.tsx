@@ -1,13 +1,18 @@
-import type { Connection, ConnectionAccess, ConnectionTool } from "@sugabots/contracts";
+import type {
+	Connection,
+	ConnectionAccess,
+	ConnectionTool,
+	ConnectionUpdate,
+} from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyPods } from "../story-app.tsx";
 
 /*
  * One connection on its own page under its pod: where it is and how it signs
- * in, its check, its tools under its access, and Remove.
+ * in, its check, Allow, Ask or Off for all its tools and for each, and Remove.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -40,6 +45,7 @@ function connection(
 		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
+		connectedBy: "Ryan Eyes",
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -49,7 +55,47 @@ const linear = connection(1, {
 	name: "Linear",
 	handle: "linear",
 	url: "https://mcp.linear.app/mcp",
+	tools: [
+		{
+			name: "list_issues",
+			description: "Find issues by team, state or label",
+			readOnly: true,
+			destructive: false,
+		},
+		{
+			name: "get_issue",
+			description: "Read one issue and its comments",
+			readOnly: true,
+			destructive: false,
+		},
+		{
+			name: "create_issue",
+			description: "Open an issue in a team",
+			readOnly: false,
+			destructive: false,
+		},
+		{
+			name: "save_comment",
+			description: "Comment on an issue",
+			readOnly: false,
+			destructive: false,
+		},
+		{
+			name: "delete_issue",
+			description: "Remove an issue for everyone",
+			readOnly: false,
+			destructive: true,
+		},
+	],
 });
+/** Linear as a pod might set it: reads run, changes ask, and deleting is off. */
+const linearCustom: Connection = {
+	...linear,
+	tools: linear.tools.map((tool) => ({
+		...tool,
+		access: tool.destructive ? "off" : tool.readOnly ? "allow" : "ask",
+	})),
+};
 const stripe = connection(2, {
 	name: "Stripe",
 	handle: "stripe",
@@ -90,25 +136,92 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
+		// Linear keeps what it is set to, as the server would.
+		let current = linearCustom;
 		msw.use(
 			http.get(`${API}/pods/:podId/connections`, () =>
-				HttpResponse.json([linear, stripe, notion, github]),
+				HttpResponse.json([current, stripe, notion, github]),
 			),
+			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
+				const change = (await request.json()) as ConnectionUpdate;
+				current = {
+					...current,
+					tools: current.tools.map((tool) => ({
+						...tool,
+						access: change.toolAccess?.[tool.name] ?? tool.access,
+					})),
+				};
+				return HttpResponse.json(current);
+			}),
 			...appHandlers(),
 		);
 	},
 	render: () => <StoryApp path={pagePath(linear)} />,
 });
 
-/** A connection with a secret: its address, the header the secret goes in, Check, its tools, and Remove. */
+/**
+ * A connection set tool by tool: its name, Disconnect and its menu; each
+ * group's menu reading Custom where its tools differ; each tool with its own
+ * setting, and the one that is off faded.
+ */
 export const Opened = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		await expect(canvas.getByText("Revenue pod connected by Ryan Eyes")).toBeInTheDocument();
 		await expect(canvas.queryByText("https://mcp.linear.app/mcp")).toBeNull();
-		await expect(canvas.getByRole("heading", { name: "Runs freely" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Remove connection" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+		const reading = canvas.getByRole("region", { name: "Reading" });
+		await expect(
+			within(reading).getByRole("button", { name: "Reading tools: Allow" }),
+		).toBeInTheDocument();
+		const changes = canvas.getByRole("region", { name: "Making changes" });
+		await expect(
+			within(changes).getByRole("button", { name: "Making changes tools: Custom" }),
+		).toBeInTheDocument();
+		await expect(
+			within(within(changes).getByRole("group", { name: "Delete issue" })).getByRole("radio", {
+				name: "Off",
+			}),
+		).toBeChecked();
+	},
+});
+
+/** The page's menu: what keeps the connection working. */
+export const ConnectionMenu = meta.story({
+	play: async ({ canvas }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "More for Linear" }, { timeout: 10_000 }),
+		);
+		await expect(
+			await screen.findByRole("menuitem", { name: "Check connection" }),
+		).toBeInTheDocument();
+		await expect(screen.getByRole("menuitem", { name: "Replace secret" })).toBeInTheDocument();
+	},
+});
+
+/** A whole group at once: choosing Allow in its menu sets each of its tools to it. */
+export const SettingAGroup = meta.story({
+	play: async ({ canvas }) => {
+		const changes = await canvas.findByRole(
+			"region",
+			{ name: "Making changes" },
+			{ timeout: 10_000 },
+		);
+		await userEvent.click(
+			within(changes).getByRole("button", { name: "Making changes tools: Custom" }),
+		);
+		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Allow" }));
+		await expect(
+			await within(within(changes).getByRole("group", { name: "Delete issue" })).findByRole(
+				"radio",
+				{ name: "Allow", checked: true },
+			),
+		).toBeInTheDocument();
+		await expect(
+			await within(changes).findByRole("button", { name: "Making changes tools: Allow" }),
+		).toBeInTheDocument();
 	},
 });
 
@@ -143,9 +256,10 @@ export const SearchingTools = meta.story({
 			{ timeout: 10_000 },
 		);
 		await userEvent.type(search, "12");
-		const asks = canvas.getByRole("region", { name: "Asks first" });
-		await expect(within(asks).getByText("Does thing 12")).toBeInTheDocument();
-		await expect(within(asks).queryByText("Does thing 3")).toBeNull();
+		const changes = canvas.getByRole("region", { name: "Making changes" });
+		await expect(within(changes).getByRole("group", { name: "Tool 12" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("group", { name: "Tool 3" })).toBeNull();
+		await expect(canvas.queryByRole("region", { name: "Reading" })).toBeNull();
 	},
 });
 
@@ -167,12 +281,13 @@ export const Member = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		await expect(canvas.queryByRole("radio")).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Replace" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Remove connection" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Disconnect" })).toBeNull();
 	},
 });
 
-/** On a phone: the page fills the screen, with Back to the pod at the top. */
+/** On a phone: Back to the pod at the top, and each tool with its setting beside it. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {

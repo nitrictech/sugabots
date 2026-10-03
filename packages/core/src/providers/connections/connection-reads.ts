@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
-import { type ConnectionRow, connection } from "../../database/schema.ts";
+import { type ConnectionRow, connection, user } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 import { isSignedIn } from "./connection-repository.ts";
 import { toolAccessOf } from "./tool-access.ts";
@@ -12,11 +12,12 @@ import { toolAccessOf } from "./tool-access.ts";
 export const connectionsIn = (workspaceId: string, podId: string, cipher: Credentials.Interface) =>
 	query((db) =>
 		db
-			.select()
+			.select({ row: connection, connectedBy: user.name })
 			.from(connection)
+			.leftJoin(user, eq(user.id, connection.createdById))
 			.where(and(eq(connection.workspaceId, workspaceId), eq(connection.podId, podId)))
 			.orderBy(asc(connection.createdAt)),
-	).pipe(Effect.map((rows) => rows.map((row) => toConnection(row, cipher))));
+	).pipe(Effect.map((rows) => rows.map((found) => toConnection(found, cipher))));
 
 /** One of the pod's connections, or nothing. */
 export const connectionIn = (
@@ -27,8 +28,9 @@ export const connectionIn = (
 ) =>
 	query((db) =>
 		db
-			.select()
+			.select({ row: connection, connectedBy: user.name })
 			.from(connection)
+			.leftJoin(user, eq(user.id, connection.createdById))
 			.where(
 				and(
 					eq(connection.id, connectionId),
@@ -37,9 +39,12 @@ export const connectionIn = (
 				),
 			)
 			.limit(1),
-	).pipe(Effect.map(([row]) => row && toConnection(row, cipher)));
+	).pipe(Effect.map(([found]) => found && toConnection(found, cipher)));
 
-export function toConnection(row: ConnectionRow, cipher: Credentials.Interface): Connection {
+function toConnection(
+	{ row, connectedBy }: { row: ConnectionRow; connectedBy: string | null },
+	cipher: Credentials.Interface,
+): Connection {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
@@ -62,6 +67,7 @@ export function toConnection(row: ConnectionRow, cipher: Credentials.Interface):
 		})),
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
+		connectedBy,
 		createdAt: row.createdAt.toISOString(),
 	};
 }

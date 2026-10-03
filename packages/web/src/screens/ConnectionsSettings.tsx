@@ -1,14 +1,13 @@
 import {
 	type Connection,
-	type ConnectionAccess,
 	type ConnectionPreset,
-	type ConnectionToolWithAccess,
 	connectionCatalog,
 	connectionPresetFor,
 	type Pod,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { cn } from "cn";
 import { ArrowUpRight, ChevronRight, Code, Search } from "lucide-react";
 import { type FormEvent, useDeferredValue, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
@@ -33,28 +32,17 @@ import {
 	SettingsGroup,
 	SettingsRow,
 	SettingsRowIcon,
-	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { AccessMenu, AccessValue, accessSettingOf, accessSummaryText } from "./tool-access.tsx";
 
 /*
  * The apps a pod's bots can reach, as one group on the pod's page: each with
- * Allow, Ask or Off for every one of its tools, and whatever it needs (a
- * sign-in, a reconnect) on its line. A row opens the connection's own page:
- * its address, its tools and removing it. Adding one is a dialog: the app and
- * its sign-in, or any other server by its address. Each tool the server lists
- * starts at its default.
+ * what its tools are set to, Allow, Ask or Off for all of them at once, and
+ * whatever it needs (a sign-in, a reconnect) on its line. A row opens the
+ * connection's own page: its address, each of its tools, and removing it.
+ * Adding one is a dialog: the app and its sign-in, or any other server by its
+ * address. Each tool the server lists starts at its default.
  */
-
-const accessLabel: Record<ConnectionAccess | "custom", string> = {
-	allow: "Allow",
-	ask: "Ask",
-	off: "Off",
-	custom: "Custom",
-};
-const accessOptions = (["allow", "ask", "off"] as const).map((value) => ({
-	value,
-	label: accessLabel[value],
-}));
 
 export function ConnectionsSettings({
 	pod,
@@ -78,7 +66,7 @@ export function ConnectionsSettings({
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 			<SettingsGroup
 				label="Connections"
-				note="Every bot in this pod can use these. Ask means it waits for your approval first; Allow runs without asking."
+				note="Every bot in this pod can use these. Open one to choose for each tool."
 			>
 				{listed.map((one) => (
 					<ConnectionRow key={one.id} connection={one} pod={pod} canManage={canManage} />
@@ -100,23 +88,11 @@ export function ConnectionsSettings({
 	);
 }
 
-/** What a connection's line says under its name: what it reaches, or what it needs. */
+/** What a connection's line says under its name: what it needs, or what its tools are set to. */
 function lineFor(connection: Connection): string {
 	if (!connection.signedIn) return "Not signed in yet";
 	if (connection.status === "error") return connection.lastTestError ?? "The last check failed";
-	const preset = connectionPresetFor(connection.url);
-	if (preset) return preset.description;
-	const count = connection.tools.length;
-	return count === 0 ? "No actions found yet" : `${count} ${count === 1 ? "action" : "actions"}`;
-}
-
-/** What a connection's tools amount to, as one setting: the one they share, `custom` when they differ, or nothing without tools. */
-function accessSettingOf(
-	tools: readonly Pick<ConnectionToolWithAccess, "access">[],
-): ConnectionAccess | "custom" | undefined {
-	const [first, ...rest] = tools;
-	if (!first) return undefined;
-	return rest.every((tool) => tool.access === first.access) ? first.access : "custom";
+	return accessSummaryText(connection.tools) ?? "No actions found yet";
 }
 
 function ConnectionRow({
@@ -148,12 +124,13 @@ function ConnectionRow({
 	return (
 		<article
 			aria-label={connection.name}
-			className="flex min-h-[58px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-md:flex-wrap"
+			className="relative flex min-h-[60px] items-center gap-3 border-border border-b px-4 py-2.5 transition-colors last:border-b-0 hover:bg-panel"
 		>
+			{/* Its link covers the whole row; the controls sit above it. */}
 			<Link
 				{...page}
-				aria-label={`Open ${connection.name}`}
-				className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left max-md:min-w-[60%]"
+				aria-label={`${connection.name}, ${line}. Open tools`}
+				className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left after:absolute after:inset-0"
 			>
 				<ConnectionMark presetId={preset?.id} name={connection.name} size="tile" />
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
@@ -161,46 +138,45 @@ function ConnectionRow({
 						{connection.name}
 					</span>
 					<span
-						className={`text-sm ${failing || error ? "line-clamp-2 text-destructive-text" : "truncate text-muted-foreground"}`}
+						className={`text-pretty text-sm ${failing || error ? "line-clamp-2 text-destructive-text" : "text-muted-foreground"}`}
 					>
 						{line}
 					</span>
 				</span>
 			</Link>
-			{/* On a phone these wrap below the name, kept to the right. */}
-			<span className="ml-auto flex shrink-0 items-center gap-2">
+			<span className="relative ml-auto flex shrink-0 items-center gap-2">
 				{canManage && (needsSignIn || failing) && (
 					<Button size="sm" variant="secondary" disabled={pending} onClick={reconnect}>
 						{needsSignIn ? "Sign in" : connection.auth === "oauth" ? "Reconnect" : "Fix"}
 					</Button>
 				)}
-				{/* With no tools found yet, there is nothing to set. */}
-				{access &&
-					(canManage ? (
-						<SegmentedControl
-							label={`What bots may do with ${connection.name}`}
-							options={accessOptions}
-							value={access === "custom" ? undefined : access}
-							onChange={(chosen) => {
-								if (!pending)
-									actions.update.mutate({
-										connectionId: connection.id,
-										json: {
-											toolAccess: Object.fromEntries(
-												connection.tools.map((tool) => [tool.name, chosen]),
-											),
-										},
-									});
-							}}
-						/>
-					) : (
-						<SettingsValue>{accessLabel[access]}</SettingsValue>
-					))}
-				{/* The name's link is the one in the tab order; this is a larger target beside the control. */}
-				<Link {...page} tabIndex={-1} aria-hidden className="grid place-items-center">
-					<ChevronRight size={16} strokeWidth={2.4} className="shrink-0 text-subtle-foreground" />
-				</Link>
+				{/* With no tools found yet, there is nothing to set. On a phone, the setting is opened to change. */}
+				{access && canManage && (
+					<AccessMenu
+						label={`${connection.name}, all tools`}
+						value={access}
+						onChange={(chosen) =>
+							actions.update.mutate({
+								connectionId: connection.id,
+								json: {
+									toolAccess: Object.fromEntries(
+										connection.tools.map((tool) => [tool.name, chosen]),
+									),
+								},
+							})
+						}
+						onCustom={() => void navigate(page)}
+						className="max-md:hidden"
+					/>
+				)}
+				{access && <AccessValue value={access} className={cn(canManage && "md:hidden")} />}
 			</span>
+			<ChevronRight
+				aria-hidden
+				size={16}
+				strokeWidth={2.4}
+				className="shrink-0 text-subtle-foreground"
+			/>
 		</article>
 	);
 }
