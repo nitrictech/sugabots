@@ -1,14 +1,10 @@
-import type {
-	Connection,
-	ConnectionAccess,
-	ConnectionTool,
-	ConnectionUpdate,
-} from "@sugabots/contracts";
-import { HttpResponse, http } from "msw";
+import type { ConnectionAccess, ConnectionTool, ConnectionUpdate } from "@sugabots/contracts";
+import { listedConnection, type TestConnection } from "@sugabots/contracts/testing";
+import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyPods } from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyPods } from "../story-app.tsx";
 
 /*
  * One connection on its own page under its pod: where it is and how it signs
@@ -27,12 +23,12 @@ function connection(
 			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
 		],
 		...over
-	}: Partial<Omit<Connection, "tools">> &
-		Pick<Connection, "name" | "handle" | "url"> & {
+	}: Partial<Omit<TestConnection, "tools">> &
+		Pick<TestConnection, "name" | "handle" | "url"> & {
 			access?: ConnectionAccess;
 			tools?: ConnectionTool[];
 		},
-): Connection {
+): TestConnection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -89,7 +85,7 @@ const linear = connection(1, {
 	],
 });
 /** Linear as a pod might set it: reads run, changes ask, and deleting is off. */
-const linearCustom: Connection = {
+const linearCustom: TestConnection = {
 	...linear,
 	tools: linear.tools.map((tool) => ({
 		...tool,
@@ -129,7 +125,8 @@ const github = connection(4, {
 	})),
 });
 
-const pagePath = (one: Connection) => `/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
+const pagePath = (one: TestConnection) =>
+	`/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
 
 const meta = preview.meta({
 	title: "Views/Connection",
@@ -138,21 +135,21 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
+		const served = [current, stripe, notion, github];
 		msw.use(
-			http.get(`${API}/pods/:podId/connections`, () =>
-				HttpResponse.json([current, stripe, notion, github]),
-			),
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
 				current = {
 					...current,
 					tools: current.tools.map((tool) => ({
 						...tool,
-						access: change.toolAccess?.[tool.name] ?? tool.access,
+						access: change.access ?? change.toolAccess?.[tool.name] ?? tool.access,
 					})),
 				};
-				return HttpResponse.json(current);
+				served[0] = current;
+				return HttpResponse.json(listedConnection(current));
 			}),
+			...connectionHandlers(served),
 			...appHandlers(),
 		);
 	},
@@ -172,7 +169,7 @@ export const Opened = meta.story({
 		await expect(canvas.getByText("Revenue pod connected by Ryan Eyes")).toBeInTheDocument();
 		await expect(canvas.queryByText("https://mcp.linear.app/mcp")).toBeNull();
 		await expect(canvas.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
-		const reading = canvas.getByRole("region", { name: "Reading" });
+		const reading = await canvas.findByRole("region", { name: "Reading" });
 		await expect(
 			within(reading).getByRole("button", { name: "Reading tools: Allow" }),
 		).toBeInTheDocument();
@@ -242,7 +239,7 @@ export const NotSignedIn = meta.story({
 		await expect(
 			await canvas.findByRole("button", { name: "Sign in" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText("No actions found yet.")).toBeInTheDocument();
+		await expect(await canvas.findByText("No actions found yet.")).toBeInTheDocument();
 	},
 });
 
@@ -263,11 +260,28 @@ export const SearchingTools = meta.story({
 	},
 });
 
+/** The connection's name at once, and a placeholder where its tools go while they load. */
+export const LoadingTools = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/pods/:podId/connections/:connectionId`, () => delay("infinite")),
+			...connectionHandlers([linearCustom]),
+			...appHandlers(),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { name: "Linear", level: 2 }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("status", { name: "Loading tools" })).toBeInTheDocument();
+	},
+});
+
 /** A member who may not manage the pod's connections: everything shown, nothing to change. */
 export const Member = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json([linear])),
+			...connectionHandlers([linear]),
 			...appHandlers({
 				role: "member",
 				pods: storyPods.map((pod) => ({

@@ -10,7 +10,7 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { connectionIn } from "./connection-reads.ts";
+import { connectionIn, connectionsIn } from "./connection-reads.ts";
 import { ConnectionRepository } from "./connection-repository.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () => {
@@ -185,6 +185,33 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		await expect(
 			connections.update(workspaceId, podId, made.id, { toolAccess: { ghost: "allow" } }),
 		).rejects.toThrow(ConnectionRepository.UnknownConnectionTool);
+	});
+
+	it("sets every tool it lists at once", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		await listTools(made.id, [lookup, edit, wipe]);
+
+		await connections.update(workspaceId, podId, made.id, { access: "ask" });
+
+		expect((await shown(made.id))?.tools.map((tool) => tool.access)).toEqual(["ask", "ask", "ask"]);
+	});
+
+	it("lists a connection's tools as counts, and gives one connection's tools without their descriptions", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		const described = { ...lookup, description: "Looks a page up by its title." };
+		await listTools(made.id, [described, edit, wipe]);
+
+		const [listed] = await runOnPostgres(
+			Effect.flatMap(Credentials.Service, (cipher) => connectionsIn(workspaceId, podId, cipher)),
+		);
+		expect(listed?.toolCounts).toEqual({ allow: 1, ask: 1, off: 1 });
+		expect(listed).not.toHaveProperty("tools");
+		expect((await shown(made.id))?.tools[0]).toEqual({
+			name: "lookup",
+			readOnly: true,
+			destructive: null,
+			access: "allow",
+		});
 	});
 
 	it("does not expose a connection through another pod", async () => {

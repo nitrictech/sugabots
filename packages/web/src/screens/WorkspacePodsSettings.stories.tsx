@@ -1,4 +1,5 @@
-import type { Connection, ConnectionAccess } from "@sugabots/contracts";
+import type { ConnectionAccess } from "@sugabots/contracts";
+import { listedConnection, type TestConnection } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -36,7 +37,12 @@ const people = [
 	removable: index > 1,
 }));
 
-function connection(n: number, name: string, url: string, access: ConnectionAccess): Connection {
+function connection(
+	n: number,
+	name: string,
+	url: string,
+	access: ConnectionAccess,
+): TestConnection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -79,7 +85,7 @@ const revenueHandlers = [
 		HttpResponse.json(params.podId === revenue.id ? people : people.slice(0, 1)),
 	),
 	http.get(`${API}/pods/:podId/connections`, ({ params }) =>
-		HttpResponse.json(params.podId === revenue.id ? connections : []),
+		HttpResponse.json(params.podId === revenue.id ? connections.map(listedConnection) : []),
 	),
 ];
 

@@ -93,15 +93,7 @@ function connection(id: string, name: string, url: string): Connection {
 		secretHeader: null,
 		hasSecret: false,
 		status: "connected",
-		tools: [
-			{
-				name: "search",
-				description: "Search",
-				readOnly: true,
-				destructive: false,
-				access: "allow",
-			},
-		],
+		toolCounts: { allow: 1, ask: 0, off: 0 },
 		lastTestedAt: null,
 		lastTestError: null,
 		connectedBy: null,

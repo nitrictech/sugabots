@@ -8,6 +8,7 @@ import {
 	connectionSchema,
 	connectionTestResultSchema,
 	connectionUpdateSchema,
+	connectionWithToolsSchema,
 	newConnectionSchema,
 	unsavedConnectionSchema,
 } from "../../connections.ts";
@@ -41,7 +42,7 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 		}),
 		HttpApiEndpoint.get("get", `${root}/:connectionId`, {
 			params: connection,
-			success: connectionSchema,
+			success: connectionWithToolsSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.patch("update", `${root}/:connectionId`, {

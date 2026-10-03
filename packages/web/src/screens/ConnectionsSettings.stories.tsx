@@ -1,9 +1,10 @@
-import type { Connection, ConnectionAccess, ConnectionTool } from "@sugabots/contracts";
+import type { ConnectionAccess, ConnectionTool } from "@sugabots/contracts";
+import type { TestConnection } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyPods } from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyPods } from "../story-app.tsx";
 
 /*
  * A pod's connections, as its settings page shows them: each app its bots
@@ -25,12 +26,12 @@ function connection(
 			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
 		],
 		...over
-	}: Partial<Omit<Connection, "tools">> &
-		Pick<Connection, "name" | "handle" | "url"> & {
+	}: Partial<Omit<TestConnection, "tools">> &
+		Pick<TestConnection, "name" | "handle" | "url"> & {
 			access?: ConnectionAccess;
 			tools?: ConnectionTool[];
 		},
-): Connection {
+): TestConnection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -50,7 +51,7 @@ function connection(
 }
 
 /** One in each state the design draws: allowed, asking, off, failing its test, and not yet signed in. */
-const connections: Connection[] = [
+const connections: TestConnection[] = [
 	connection(1, { name: "Linear", handle: "linear", url: "https://mcp.linear.app/mcp" }),
 	{
 		...connection(6, {
@@ -134,10 +135,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(
-			http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json(connections)),
-			...appHandlers(),
-		);
+		msw.use(...connectionHandlers(connections), ...appHandlers());
 	},
 	render: () => <StoryApp path={podPath} />,
 });
@@ -269,7 +267,7 @@ export const Member = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			// Before the defaults, whose own answer here is no connections.
-			http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json(connections)),
+			...connectionHandlers(connections),
 			...appHandlers({
 				role: "member",
 				pods: storyPods.map((pod) => ({

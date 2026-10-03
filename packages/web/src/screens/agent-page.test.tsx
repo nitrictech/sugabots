@@ -1,5 +1,6 @@
-import type { Connection, ConnectionAccess, Routine } from "@sugabots/contracts";
+import type { ConnectionAccess, Routine } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
+import type { TestConnection } from "@sugabots/contracts/testing";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ import {
 	mount,
 	pendingAnswer,
 	pods,
+	serveConnections,
 	triager,
 } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
@@ -65,7 +67,7 @@ async function openSlide(name: "Model" | "Instructions") {
 	fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
 }
 
-function linearConnection(over: Partial<Connection> = {}): Connection {
+function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: linear.workspaceId,
@@ -98,7 +100,7 @@ function linearConnection(over: Partial<Connection> = {}): Connection {
 /** A read, an additive change, and an overwriting one, as Linear describes them, each set as `access`. */
 function readsAndWrites(
 	access: [ConnectionAccess, ConnectionAccess, ConnectionAccess],
-): Connection["tools"] {
+): TestConnection["tools"] {
 	return [
 		{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
 		{ name: "create_issue_label", description: null, readOnly: false, destructive: false },
@@ -161,15 +163,13 @@ describe("a member", () => {
 	});
 
 	it("lists the connections inherited from the pod, leaving out those turned off", async () => {
-		client.api.connections.list.mockReturnValue(
-			Effect.succeed([
-				linearConnection(),
-				linearConnection({
-					id: "0199a3a0-0000-7000-8000-0000000000f9",
-					name: "Wiki",
-					tools: readsAndWrites(["off", "off", "off"]),
-				}),
-			]),
+		serveConnections(
+			linearConnection(),
+			linearConnection({
+				id: "0199a3a0-0000-7000-8000-0000000000f9",
+				name: "Wiki",
+				tools: readsAndWrites(["off", "off", "off"]),
+			}),
 		);
 		mount(page);
 
@@ -179,7 +179,7 @@ describe("a member", () => {
 
 	it("opens a connection's own page from its row, with the way back to the bot", async () => {
 		const connection = linearConnection({ tools: readsAndWrites(["allow", "ask", "off"]) });
-		client.api.connections.list.mockReturnValue(Effect.succeed([connection]));
+		serveConnections(connection);
 		const router = mount(page);
 
 		fireEvent.click(await screen.findByRole("link", { name: /Linear.*2 tools/ }));

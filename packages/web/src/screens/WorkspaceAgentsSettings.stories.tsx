@@ -1,9 +1,17 @@
-import type { Connection, ConnectionTool, Routine } from "@sugabots/contracts";
+import type { ConnectionTool, Routine } from "@sugabots/contracts";
+import type { TestConnection } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyBots, storyModel, storyPods } from "../story-app.tsx";
+import {
+	appHandlers,
+	connectionHandlers,
+	StoryApp,
+	storyBots,
+	storyModel,
+	storyPods,
+} from "../story-app.tsx";
 
 /*
  * Bots in settings: every bot, each under its pod's name, beside the open
@@ -57,7 +65,7 @@ function connection(
 	handle: string,
 	url: string,
 	tools: ConnectionTool[],
-): Connection {
+): TestConnection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -78,7 +86,7 @@ function connection(
 	};
 }
 
-const podTools: Connection[] = [
+const podTools: TestConnection[] = [
 	connection(1, "HubSpot", "hubspot", "https://mcp.hubspot.com/mcp", [
 		{ name: "search_contacts", description: "Find contacts", readOnly: true, destructive: false },
 		{ name: "update_deal", description: "Change a deal", readOnly: false, destructive: false },
@@ -214,7 +222,7 @@ export const InstructionsPage = meta.story({
 export const ToolsAndRoutines = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json(podTools)),
+			...connectionHandlers(podTools),
 			http.get(`${API}/agents/:agentId/routines`, () => HttpResponse.json(routines)),
 		);
 	},

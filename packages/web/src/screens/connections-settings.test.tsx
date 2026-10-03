@@ -1,10 +1,11 @@
-import type { Connection, ConnectionAccess } from "@sugabots/contracts";
+import type { ConnectionAccess } from "@sugabots/contracts";
 import { BadRequest } from "@sugabots/contracts/http";
+import { listedConnection, type TestConnection } from "@sugabots/contracts/testing";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browser } from "@/lib/connections.ts";
-import { apiAnswers, linear, mount, pods } from "@/test-api.tsx";
+import { apiAnswers, linear, mount, pods, serveConnections } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -13,7 +14,7 @@ const pod = pods[0] as (typeof pods)[number];
 const page = `/suga/settings/pods/${pod.slug}`;
 const route = client.api.connections;
 
-const wiki: Connection = {
+const wiki: TestConnection = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	workspaceId: linear.workspaceId,
 	podId: pod.id,
@@ -48,7 +49,7 @@ const wiki: Connection = {
 };
 
 /** The Wiki with every one of its tools set to `access`. */
-const wikiAt = (access: ConnectionAccess): Connection => ({
+const wikiAt = (access: ConnectionAccess): TestConnection => ({
 	...wiki,
 	tools: wiki.tools.map((tool) => ({ ...tool, access })),
 });
@@ -62,9 +63,10 @@ afterEach(cleanup);
 
 const wikiPage = `${page}/connections/${wiki.id}`;
 
-/** The connection's own page, once it has loaded. */
+/** The connection's own page, once it and its tools have loaded. */
 async function openedWiki() {
 	await screen.findByRole("heading", { name: "Wiki", level: 2 });
+	await waitFor(() => expect(screen.queryByRole("status", { name: "Loading tools" })).toBeNull());
 }
 
 /** The pod page is one page, so its Connections are there once it has loaded. */
@@ -81,7 +83,7 @@ async function openAdd() {
 describe("the Connections settings", () => {
 	it("connects a catalog app by signing in, leaving its tools to start at their defaults", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		route.connectFromCatalog.mockReturnValue(
 			Effect.succeed({
 				connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
@@ -109,9 +111,7 @@ describe("the Connections settings", () => {
 
 	it("offers to sign in a connection whose sign-in never finished", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.list.mockReturnValue(
-			Effect.succeed([{ ...wiki, auth: "oauth", signedIn: false, secretHeader: null }]),
-		);
+		serveConnections({ ...wiki, auth: "oauth", signedIn: false, secretHeader: null });
 		route.startOAuth.mockReturnValue(
 			Effect.succeed({ authorizationUrl: "https://wiki.example/authorize" }),
 		);
@@ -126,10 +126,10 @@ describe("the Connections settings", () => {
 	});
 
 	it("adds any other server by name and address", async () => {
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		route.create.mockImplementation(() => {
-			route.list.mockReturnValue(Effect.succeed([wiki]));
-			return Effect.succeed(wiki);
+			serveConnections(wiki);
+			return Effect.succeed(listedConnection(wiki));
 		});
 		mount(page);
 		await showConnections();
@@ -159,7 +159,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("tests a server by address before adding it", async () => {
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		route.testUnsaved.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 40, tools: 3 }));
 		mount(page);
 		await showConnections();
@@ -184,7 +184,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("shows only the latest result once the way to sign in changes", async () => {
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		route.connectFromCatalog.mockReturnValue(
 			Effect.fail(new BadRequest({ message: "The server didn't start a sign-in." })),
 		);
@@ -208,7 +208,7 @@ describe("the Connections settings", () => {
 
 	it("adds a server by address through its own sign-in", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		route.connectFromCatalog.mockReturnValue(
 			Effect.succeed({ connectionId: wiki.id, authorizationUrl: "https://wiki.example/authorize" }),
 		);
@@ -232,7 +232,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("opens a connection on its own page, its tools apart by whether they make changes", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("allow")]));
+		serveConnections(wikiAt("allow"));
 		const router = mount(page);
 		await showConnections();
 
@@ -259,7 +259,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("opens a connection from its row, but not from its menu", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+		serveConnections(wikiAt("ask"));
 		route.update.mockReturnValue(Effect.never);
 		const router = mount(page);
 		await showConnections();
@@ -275,7 +275,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("sets one tool on its own, showing the change before the server answers", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+		serveConnections(wikiAt("ask"));
 		route.update.mockReturnValue(Effect.never);
 		mount(wikiPage);
 		await openedWiki();
@@ -297,7 +297,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("puts a tool back as it was when changing it fails", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+		serveConnections(wikiAt("ask"));
 		route.update.mockReturnValue(Effect.fail(new BadRequest({ message: "Nope" })));
 		mount(wikiPage);
 		await openedWiki();
@@ -322,7 +322,7 @@ describe("the Connections settings", () => {
 				{ ...wipe, name: "wipe_all", access: "off" as const },
 			],
 		};
-		route.list.mockReturnValue(Effect.succeed([twoWipes]));
+		serveConnections(twoWipes);
 		route.update.mockReturnValue(Effect.never);
 		mount(wikiPage);
 		await openedWiki();
@@ -342,7 +342,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("folds a group away and opens it again", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+		serveConnections(wikiAt("ask"));
 		mount(wikiPage);
 		await openedWiki();
 
@@ -356,18 +356,14 @@ describe("the Connections settings", () => {
 	it("reads Custom on the pod's page for a connection whose tools differ, and sets them all from it", async () => {
 		const [search, wipe] = wiki.tools;
 		if (!search || !wipe) throw new Error("fixture");
-		route.list.mockReturnValue(
-			Effect.succeed([
-				{
-					...wiki,
-					tools: [
-						{ ...search, access: "allow" as const },
-						{ ...wipe, access: "off" as const },
-					],
-				},
-			]),
-		);
-		route.update.mockReturnValue(Effect.succeed(wikiAt("ask")));
+		serveConnections({
+			...wiki,
+			tools: [
+				{ ...search, access: "allow" as const },
+				{ ...wipe, access: "off" as const },
+			],
+		});
+		route.update.mockReturnValue(Effect.never);
 		mount(page);
 		await showConnections();
 
@@ -377,14 +373,13 @@ describe("the Connections settings", () => {
 		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Ask" }));
 
 		await waitFor(() =>
-			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				payload: { toolAccess: { search_pages: "ask", wipe: "ask" } },
-			}),
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { access: "ask" } }),
 		);
+		expect(await within(row).findByText("Every tool asks first")).toBeDefined();
 	});
 
 	it("opens the connection from the pod's page to set each tool, by choosing Custom", async () => {
-		route.list.mockReturnValue(Effect.succeed([wikiAt("ask")]));
+		serveConnections(wikiAt("ask"));
 		const router = mount(page);
 		await showConnections();
 
@@ -398,7 +393,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("offers nothing to set for a connection with no tools found yet", async () => {
-		route.list.mockReturnValue(Effect.succeed([{ ...wiki, tools: [] }]));
+		serveConnections({ ...wiki, tools: [] });
 		mount(page);
 		await showConnections();
 
@@ -415,8 +410,8 @@ describe("the Connections settings", () => {
 			secretHeader: null,
 			hasSecret: false,
 		};
-		route.list.mockReturnValue(Effect.succeed([failing]));
-		route.update.mockReturnValue(Effect.succeed(failing));
+		serveConnections(failing);
+		route.update.mockReturnValue(Effect.succeed(listedConnection(failing)));
 		mount(page);
 		await showConnections();
 
@@ -436,11 +431,11 @@ describe("the Connections settings", () => {
 	});
 
 	it("checks, replaces the secret of and disconnects a connection from its page's menu", async () => {
-		route.list.mockReturnValue(Effect.succeed([{ ...wiki, hasSecret: true }]));
+		serveConnections({ ...wiki, hasSecret: true });
 		route.test.mockReturnValue(Effect.succeed({ reachable: true, latencyMs: 12, tools: 2 }));
-		route.update.mockReturnValue(Effect.succeed(wiki));
+		route.update.mockReturnValue(Effect.succeed(listedConnection(wiki)));
 		route.remove.mockImplementation(() => {
-			route.list.mockReturnValue(Effect.succeed([]));
+			serveConnections();
 			return Effect.void;
 		});
 		const router = mount(wikiPage);
@@ -473,7 +468,7 @@ describe("the Connections settings", () => {
 	});
 
 	it("says so when the connection asked for is not in the pod", async () => {
-		route.list.mockReturnValue(Effect.succeed([]));
+		serveConnections();
 		mount(wikiPage);
 
 		expect(await screen.findByText("No such connection here")).toBeDefined();
@@ -481,7 +476,7 @@ describe("the Connections settings", () => {
 
 	it("lets a pod member see connections and their tools, with nothing to change", async () => {
 		apiAnswers({ role: "member" });
-		route.list.mockReturnValue(Effect.succeed([wiki]));
+		serveConnections(wiki);
 		mount(page);
 		await showConnections();
 
@@ -503,7 +498,7 @@ describe("the Connections settings", () => {
 
 describe("coming back from a connection sign-in", () => {
 	it("opens the pod page of the pod the sign-in was for", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
+		serveConnections(wiki);
 		const router = mount(`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}`);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
@@ -511,7 +506,7 @@ describe("coming back from a connection sign-in", () => {
 	});
 
 	it("says once why a sign-in for a pod did not finish", async () => {
-		route.list.mockReturnValue(Effect.succeed([wiki]));
+		serveConnections(wiki);
 		const router = mount(
 			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&oauth_error=refused`,
 		);

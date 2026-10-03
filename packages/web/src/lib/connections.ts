@@ -2,22 +2,27 @@ import type {
 	Connection,
 	ConnectionAccess,
 	ConnectionSignInFailure,
-	ConnectionToolWithAccess,
 	ConnectionUpdate,
+	ConnectionWithTools,
 	NewConnection,
 	UnsavedConnection,
 } from "@sugabots/contracts";
-import { connectionPresetFor, connectionSignInFailures } from "@sugabots/contracts";
+import {
+	connectionPresetFor,
+	connectionSignInFailures,
+	toolAccessCountsOf,
+} from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useMemo } from "react";
 import { client } from "@/api.ts";
 
-/** The connection's tools its pod's bots can use: every one not set to off. */
-export function usableTools(connection: Connection): ConnectionToolWithAccess[] {
-	return connection.tools.filter((tool) => tool.access !== "off");
+/** How many of the connection's tools its pod's bots can use: every one not set to off. */
+export function usableToolCount(connection: Connection): number {
+	return connection.toolCounts.allow + connection.toolCounts.ask;
 }
 
+/** The pod's connections, each with how many tools are at each setting but not the tools. */
 export function useConnections(podId: string) {
 	return useQuery({
 		queryKey: ["connections", podId],
@@ -25,6 +30,20 @@ export function useConnections(podId: string) {
 			Effect.runPromise(client.api.connections.list({ params: { podId } }), { signal }),
 	});
 }
+
+/** One connection with its tools, without the server's descriptions of them. */
+export function useConnectionWithTools(podId: string, connectionId: string) {
+	return useQuery({
+		queryKey: connectionKey(podId, connectionId),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.connections.get({ params: { podId, connectionId } }), {
+				signal,
+			}),
+	});
+}
+
+/** Under the pod's list, so refreshing the list refreshes every connection read from it too. */
+const connectionKey = (podId: string, connectionId: string) => ["connections", podId, connectionId];
 
 /** How a connection is named and marked wherever its tools are shown. */
 export interface ConnectionLook {
@@ -79,17 +98,35 @@ export function useConnectionActions(podId: string) {
 			mutationFn: ({ connectionId, json }: { connectionId: string; json: ConnectionUpdate }) =>
 				Effect.runPromise(connections.update({ params: { podId, connectionId }, payload: json })),
 			onMutate: async ({ connectionId, json }) => {
-				const { toolAccess } = json;
-				if (toolAccess === undefined) return undefined;
+				const chosen = choiceFor(json);
+				if (!chosen) return undefined;
 				await queryClient.cancelQueries({ queryKey: listKey });
-				const before = queryClient.getQueryData<Connection[]>(listKey);
+				const detailKey = connectionKey(podId, connectionId);
+				const before = {
+					list: queryClient.getQueryData<Connection[]>(listKey),
+					detail: queryClient.getQueryData<ConnectionWithTools>(detailKey),
+				};
+				const detail = before.detail && {
+					...before.detail,
+					tools: before.detail.tools.map((tool) => ({
+						...tool,
+						access: chosen(tool.name) ?? tool.access,
+					})),
+				};
+				if (detail) queryClient.setQueryData(detailKey, detail);
 				queryClient.setQueryData<Connection[]>(listKey, (listed) =>
-					listed?.map((one) => (one.id === connectionId ? withToolAccess(one, toolAccess) : one)),
+					listed?.map((one) => {
+						if (one.id !== connectionId) return one;
+						if (detail) return { ...one, toolCounts: toolAccessCountsOf(detail.tools) };
+						return json.access ? { ...one, toolCounts: allAt(one, json.access) } : one;
+					}),
 				);
-				return { before };
+				return { before, detailKey };
 			},
 			onError: (_failure, _change, context) => {
-				if (context?.before) queryClient.setQueryData(listKey, context.before);
+				if (!context) return;
+				queryClient.setQueryData(listKey, context.before.list);
+				queryClient.setQueryData(context.detailKey, context.before.detail);
 			},
 			onSettled: () => {
 				// This mutation still counts until its own onSettled is done.
@@ -147,18 +184,23 @@ export function useConnectionActions(podId: string) {
 	};
 }
 
-/** `connection` with each tool `toolAccess` names set as it says, as the server will once it has it. */
-function withToolAccess(
-	connection: Connection,
-	toolAccess: Record<string, ConnectionAccess>,
-): Connection {
-	return {
-		...connection,
-		tools: connection.tools.map((tool) => ({
-			...tool,
-			access: toolAccess[tool.name] ?? tool.access,
-		})),
-	};
+/**
+ * What `change` sets each tool to, by its name, as the server will once it has
+ * it, or nothing when it leaves the tools alone.
+ */
+function choiceFor(
+	change: ConnectionUpdate,
+): ((toolName: string) => ConnectionAccess | undefined) | undefined {
+	const { access, toolAccess } = change;
+	if (access) return () => access;
+	if (toolAccess) return (toolName) => toolAccess[toolName];
+	return undefined;
+}
+
+/** The connection's counts with every one of its tools at `access`. */
+function allAt(connection: Connection, access: ConnectionAccess): Connection["toolCounts"] {
+	const { allow, ask, off } = connection.toolCounts;
+	return { allow: 0, ask: 0, off: 0, [access]: allow + ask + off };
 }
 
 /**

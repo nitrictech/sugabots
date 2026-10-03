@@ -1,4 +1,10 @@
 import { handleFromName } from "./agents.ts";
+import {
+	type Connection,
+	type ConnectionToolWithAccess,
+	type ConnectionWithTools,
+	toolAccessCountsOf,
+} from "./connections.ts";
 import type { PersonParticipant } from "./threads.ts";
 
 /**
@@ -19,4 +25,20 @@ export function testPerson({
 }): PersonParticipant {
 	const handle = handleFromName(name);
 	return { kind: "person", id, name, email: email ?? `${handle}@example.com`, handle, image };
+}
+
+/** A connection for tests and stories, with every tool in full, as the server holds it. */
+export type TestConnection = Omit<Connection, "toolCounts"> & { tools: ConnectionToolWithAccess[] };
+
+/** `connection` as the pod's list gives it: how many tools are at each setting, not the tools. */
+export function listedConnection({ tools, ...connection }: TestConnection): Connection {
+	return { ...connection, toolCounts: toolAccessCountsOf(tools) };
+}
+
+/** `connection` as reading it on its own gives it: its tools, without their descriptions. */
+export function connectionWithTools(connection: TestConnection): ConnectionWithTools {
+	return {
+		...listedConnection(connection),
+		tools: connection.tools.map(({ description: _, ...tool }) => tool),
+	};
 }

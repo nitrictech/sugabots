@@ -12,7 +12,12 @@ import type {
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import {
+	connectionWithTools,
+	listedConnection,
+	type TestConnection,
+	testPerson,
+} from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, type RequestHandler } from "msw";
@@ -318,6 +323,26 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			]),
 		),
 		http.get(api("/agents/:agentId/routines"), () => HttpResponse.json([])),
+	];
+}
+
+/**
+ * Answers a pod's connection reads from `connections` in full: the list with
+ * counts, and one connection with its tools. Put them before `appHandlers`,
+ * whose own answer is no connections.
+ */
+export function connectionHandlers(connections: readonly TestConnection[]): RequestHandler[] {
+	const byId = (connectionId: unknown) => connections.find((one) => one.id === connectionId);
+	return [
+		http.get(api("/pods/:podId/connections"), () =>
+			HttpResponse.json(connections.map(listedConnection)),
+		),
+		http.get(api("/pods/:podId/connections/:connectionId"), ({ params }) => {
+			const found = byId(params.connectionId);
+			return found
+				? HttpResponse.json(connectionWithTools(found))
+				: new HttpResponse(null, { status: 404 });
+		}),
 	];
 }
 
