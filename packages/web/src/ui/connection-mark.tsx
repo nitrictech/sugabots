@@ -17,6 +17,7 @@ const sizes = {
 	sm: { box: "size-8 rounded-lg", glyph: "size-4", letters: "text-xs" },
 	tile: { box: "size-[34px] rounded-[10px]", glyph: "size-[18px]", letters: "text-[13px]" },
 	default: { box: "size-10 rounded-xl", glyph: "size-5", letters: "text-sm" },
+	lg: { box: "size-11 rounded-[13px]", glyph: "size-[22px]", letters: "text-[15px]" },
 } as const;
 
 export function ConnectionMark({

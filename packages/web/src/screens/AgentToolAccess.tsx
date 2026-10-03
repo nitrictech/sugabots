@@ -9,7 +9,7 @@ import {
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { SettingsGroup } from "@/ui/settings-page.tsx";
-import { ConnectionToolRow } from "./ConnectionsSettings.tsx";
+import { ConnectionToolRow } from "./ConnectionPage.tsx";
 
 /*
  * A connection's tools as a bot meets them. The pod's view lists what a

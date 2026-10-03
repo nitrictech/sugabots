@@ -447,7 +447,10 @@ export function SettingsListDetail({
 				{list}
 			</div>
 			<div className={cn("group/detail min-w-0 flex-1", !detailOpen && "max-md:hidden")}>
-				<CompactBackBar {...(returnTo ?? listLink)} className="md:hidden" />
+				<CompactBackBar
+					{...(returnTo ?? listLink)}
+					className="group-has-[[data-page-back]]/detail:hidden md:hidden"
+				/>
 				{returnTo && (
 					<SettingsReturnBar
 						{...returnTo}

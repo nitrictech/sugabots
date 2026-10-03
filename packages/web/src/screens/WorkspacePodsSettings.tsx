@@ -9,6 +9,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { LockKeyhole, Minus } from "lucide-react";
 import { type ReactNode, useDeferredValue, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
+import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import {
@@ -20,7 +21,7 @@ import {
 	useUpdatePod,
 } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
+import { useBackTarget, useBackToHere, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PodColourPicker } from "@/shell/LookPicker.tsx";
@@ -39,6 +40,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
+	PageBackLink,
 	SettingsAddMark,
 	SettingsAddRow,
 	SettingsControlRow,
@@ -53,6 +55,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { ConnectionPage } from "./ConnectionPage.tsx";
 import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
 
 /**
@@ -62,10 +65,13 @@ import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
  */
 export function WorkspacePodsSettings({
 	selectedPodId,
+	selectedConnectionId,
 	connectionSignInError,
 	canCreatePods,
 }: {
 	selectedPodId?: string;
+	/** One of the selected pod's connections, open on its own page in place of the pod's. */
+	selectedConnectionId?: string;
 	connectionSignInError?: string;
 	canCreatePods: boolean;
 }) {
@@ -126,7 +132,13 @@ export function WorkspacePodsSettings({
 					</SettingsListColumn>
 				}
 				detail={
-					selected ? (
+					selected && selectedConnectionId ? (
+						<PodConnection
+							key={selectedConnectionId}
+							pod={selected}
+							connectionId={selectedConnectionId}
+						/>
+					) : selected ? (
 						<PodDetails
 							key={selected.id}
 							pod={selected}
@@ -156,6 +168,28 @@ export function WorkspacePodsSettings({
 			</Dialog>
 		</>
 	);
+}
+
+/** One of the pod's connections on its own page, with Back to the pod. */
+function PodConnection({ pod, connectionId }: { pod: Pod; connectionId: string }) {
+	const connections = useConnections(pod.id);
+	const back = useBackTarget({ label: pod.name, render: <Link {...podSettingsLink(pod)} /> });
+	const connection = connections.data?.find((one) => one.id === connectionId);
+	if (connections.isPending) return null;
+	if (!connection) {
+		return (
+			<div className="grid min-h-80 place-items-center p-6">
+				<EmptyState
+					title={connections.isError ? "Could not load this connection" : "No such connection here"}
+				>
+					{connections.isError
+						? failureMessage(connections.error)
+						: "It may have been removed from this pod."}
+				</EmptyState>
+			</div>
+		);
+	}
+	return <ConnectionPage connection={connection} pod={pod} back={<PageBackLink {...back} />} />;
 }
 
 /** A pod as its tile of faces, or Personal as its lock. */
@@ -237,8 +271,7 @@ function PodDetails({
 				</SettingsGroup>
 			)}
 			<ConnectionsSettings
-				podId={pod.id}
-				podName={pod.name}
+				pod={pod}
 				canManage={may.manageConnections}
 				signInError={connectionSignInError}
 			/>
