@@ -191,6 +191,11 @@ docker compose up -d
 
 Sugabots applies any database migrations when it starts.
 
+To try changes before they're released, use `ghcr.io/nitrictech/sugabots:edge`
+instead of `:latest`. It's rebuilt each time the main branch changes, so it can
+break. Each build is also tagged `sha-` and its commit, such as
+`sha-a1b2c3d`, if you want to stay on one.
+
 ## Backups
 
 Back up two things: the database, and the `.env` file holding the keys. Keep
