@@ -37,11 +37,27 @@ interface Call {
 	credentials?: RequestCredentials;
 }
 
+/** The API's own refusal for each status, as its error body names it. */
+const REFUSALS: Record<number, string> = {
+	400: "BadRequest",
+	401: "Unauthorized",
+	403: "Forbidden",
+	404: "NotFound",
+	409: "Conflict",
+	413: "PayloadTooLarge",
+};
+
+/** A response from something in front of the API rather than the API: a proxy's error page. */
+interface NotFromApi {
+	proxyStatus: number;
+}
+
 /**
  * A `fetch` that plays one scripted response per call. A string is a body that
- * ends, which is a server hanging up; a number is that status.
+ * ends, which is a server hanging up; a number is the API refusing with that
+ * status; a `NotFromApi` is a proxy's page with its status.
  */
-function scripted(...responses: (string | number)[]) {
+function scripted(...responses: (string | number | NotFromApi)[]) {
 	const calls: Call[] = [];
 
 	const fetch = (async (url: string | URL, init?: RequestInit) => {
@@ -51,6 +67,13 @@ function scripted(...responses: (string | number)[]) {
 			credentials: init?.credentials,
 		});
 		const scene = responses[calls.length - 1] ?? Number.POSITIVE_INFINITY;
+
+		if (typeof scene === "object") {
+			return new Response("<!DOCTYPE html><title>404 - Not Found</title>", {
+				status: scene.proxyStatus,
+				headers: { "content-type": "text/html" },
+			});
+		}
 
 		if (typeof scene === "number") {
 			if (!Number.isFinite(scene)) {
@@ -64,9 +87,10 @@ function scripted(...responses: (string | number)[]) {
 			if (scene === 204) {
 				return new Response(null, { status: 204 });
 			}
-			return new Response(JSON.stringify({ message: "no" }), {
-				status: scene,
-			});
+			return Response.json(
+				{ _tag: REFUSALS[scene] ?? "InternalServerError", message: "no" },
+				{ status: scene },
+			);
 		}
 
 		return new Response(new TextEncoder().encode(scene), {
@@ -316,6 +340,20 @@ describe("failure", () => {
 		const { fetch } = scripted(404);
 
 		await expect(take(events(fetch).thread("gone"), 1)).rejects.toMatchObject({ _tag: "NotFound" });
+	});
+
+	it("waits out a proxy's 404 while the API behind it restarts", async () => {
+		// A development proxy has nothing to route to while the API is down, and
+		// says 404. Giving up on that left an open chat with no live updates
+		// until it was reloaded.
+		const { fetch, calls } = scripted(
+			{ proxyStatus: 404 },
+			{ proxyStatus: 404 },
+			frame({ event: "message.created", id: 1 }),
+		);
+
+		expect(await take(events(fetch).thread("c1"), 1)).toHaveLength(1);
+		expect(calls).toHaveLength(3);
 	});
 
 	it("waits out a rate limit instead of giving up on it", async () => {

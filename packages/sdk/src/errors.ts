@@ -49,10 +49,12 @@ export function failureForStatus(status: number, message: string, details?: unkn
 
 /** The API's own failure if `body` is one, or the one its status means. */
 export function failureFromResponse(body: unknown, status: number): ApiFailure {
-	const decoded = Schema.decodeUnknownResult(failureSchema)(body);
-	if (decoded._tag === "Success") {
-		return decoded.success;
-	}
 	// Not ours: a proxy's error page, or a body that never arrived.
-	return failureForStatus(status, `Request failed with status ${status}`);
+	return apiFailureIn(body) ?? failureForStatus(status, `Request failed with status ${status}`);
+}
+
+/** The failure `body` is, when it is one the API wrote, or `undefined`. */
+export function apiFailureIn(body: unknown): ApiFailure | undefined {
+	const decoded = Schema.decodeUnknownResult(failureSchema)(body);
+	return decoded._tag === "Success" ? decoded.success : undefined;
 }
