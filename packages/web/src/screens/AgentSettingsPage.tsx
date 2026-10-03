@@ -12,7 +12,7 @@ import { useId, useState } from "react";
 import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
 import { usableTools, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -34,7 +34,6 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { AgentModelPicker } from "./AgentModelPicker.tsx";
-import { AgentToolsDialog } from "./AgentToolAccess.tsx";
 import { AgentRoutines } from "./RoutinesSettings.tsx";
 
 /*
@@ -377,7 +376,6 @@ function Tools({
 	const backToAgent = useBackToHere(agent.name);
 	const connections = useConnections(pod.id);
 	const { agents } = useAgents();
-	const [openConnectionId, setOpenConnectionId] = useState<string>();
 	const webOff = useWebAccess().data?.enabled === false;
 	const mayManageWebSearch = useWorkspacePermissions().manageProviders;
 	const podBots =
@@ -423,24 +421,21 @@ function Tools({
 			)}
 			{reachable.map((connection) => {
 				const available = usableTools(connection).length;
-				const presetId = connectionPresetFor(connection.url)?.id;
 				return (
-					<div key={connection.id}>
-						<SettingsRow
-							icon={<ConnectionMark presetId={presetId} name={connection.name} size="sm" />}
-							label={connection.name}
-							sub={`${available} ${available === 1 ? "tool" : "tools"}`}
-							chevron
-							onClick={() => setOpenConnectionId(connection.id)}
-						/>
-						<AgentToolsDialog
-							agentName={agent.name}
-							connection={connection}
-							presetId={presetId}
-							open={openConnectionId === connection.id}
-							onOpenChange={(open) => setOpenConnectionId(open ? connection.id : undefined)}
-						/>
-					</div>
+					<SettingsRow
+						key={connection.id}
+						icon={
+							<ConnectionMark
+								presetId={connectionPresetFor(connection.url)?.id}
+								name={connection.name}
+								size="sm"
+							/>
+						}
+						label={connection.name}
+						sub={`${available} ${available === 1 ? "tool" : "tools"}`}
+						chevron
+						render={<Link {...connectionSettingsLink(pod, connection)} state={backToAgent} />}
+					/>
 				);
 			})}
 			{builtInToolCatalog.map((entry) => {
