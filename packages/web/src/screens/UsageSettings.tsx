@@ -52,6 +52,8 @@ export function UsageSettings({
 	return (
 		<SettingsPage
 			title="Usage"
+			// Wider than other settings pages, so a month's days have room to read as a chart.
+			className="max-w-[960px]"
 			headerAction={
 				month && thisMonth && <MonthStepper month={month} latest={thisMonth} onChange={setMonth} />
 			}
@@ -64,7 +66,7 @@ export function UsageSettings({
 					<Breakdown usage={usage.data} />
 				</>
 			) : (
-				<div aria-hidden className="h-[228px] animate-pulse rounded-panel bg-list" />
+				<div aria-hidden className="h-[228px] animate-pulse md:h-[310px] rounded-panel bg-list" />
 			)}
 		</SettingsPage>
 	);
@@ -123,7 +125,7 @@ function SpendSummary({ usage, today }: { usage: WorkspaceUsage; today: string }
 						? `Spend each day. The most was ${formatUsd(busiest.usd)}, on ${dayLabel(busiest.date)}.`
 						: "Spend each day. Nothing was spent."
 				}
-				className="flex h-[78px] items-end gap-[3px]"
+				className="flex h-[78px] items-end gap-[3px] md:h-[160px] md:gap-1"
 			>
 				{usage.days.map((day) => (
 					<span
