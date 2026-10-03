@@ -14,7 +14,7 @@ import { uuidSchema } from "./uuid.ts";
  *
  * A connection is the workspace's: a URL, a secret entered once and sealed or
  * an OAuth sign-in, and the tools the server was found to offer. Every bot in
- * the pod gets those tools, as far as the connection's `access` allows. Remote
+ * the pod gets those tools, as far as each tool's `access` allows. Remote
  * servers over Streamable HTTP only; nothing here spawns a process.
  */
 
@@ -37,10 +37,23 @@ export type ConnectionTool = typeof connectionToolSchema.Type;
 export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
 
-/** What the pod's bots may do with a connection's tools. */
+/**
+ * What the pod's bots may do with one of a connection's tools.
+ *
+ * - `allow`: each call runs straight away.
+ * - `ask`: each call waits for a person to allow it.
+ * - `off`: bots can't use the tool.
+ */
 export const connectionAccesses = ["off", "ask", "allow"] as const;
 export const connectionAccessSchema = Schema.Literals(connectionAccesses);
 export type ConnectionAccess = typeof connectionAccessSchema.Type;
+
+/** A connection's tool as the server described it, with what the pod's bots may do with it. */
+export const connectionToolWithAccessSchema = Schema.Struct({
+	...connectionToolSchema.fields,
+	access: connectionAccessSchema,
+});
+export type ConnectionToolWithAccess = typeof connectionToolWithAccessSchema.Type;
 
 /**
  * Where an authorization server sends the browser back after a connection's
@@ -88,13 +101,9 @@ export const connectionSchema = Schema.Struct({
 	signedIn: Schema.Boolean,
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
-	/**
-	 * What the pod's bots may do with its tools. A tool with no hints is taken
-	 * to change things, as the MCP spec has it.
-	 */
-	access: connectionAccessSchema,
 	status: providerStatusSchema,
-	tools: Schema.mutable(Schema.Array(connectionToolSchema)),
+	/** The tools the server listed when last asked, each with what the pod's bots may do with it. */
+	tools: Schema.mutable(Schema.Array(connectionToolWithAccessSchema)),
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
@@ -158,7 +167,8 @@ export const connectionUpdateSchema = Schema.Struct({
 	secretHeader: Schema.optional(Schema.NullOr(secretHeaderSchema)),
 	/** Absent leaves the stored secret alone; null removes it. */
 	secret: Schema.optional(Schema.NullOr(secretSchema)),
-	access: Schema.optional(connectionAccessSchema),
+	/** Sets the tools named, by the server's name for each. Every name must be one the connection lists. */
+	toolAccess: Schema.optional(Schema.Record(Schema.String, connectionAccessSchema)),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
 );

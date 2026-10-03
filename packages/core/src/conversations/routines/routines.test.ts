@@ -791,7 +791,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 					handle: `linear-${crypto.randomUUID().slice(0, 8)}`,
 					url: "https://linear.example.com/mcp",
 					authKind: "header",
-					access: "allow",
 					createdById: userId,
 				})
 				.returning({ id: connection.id }),

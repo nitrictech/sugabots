@@ -79,7 +79,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 	url,
 	auth: "header",
 	headers: { "x-fixture-key": "open-sesame" },
-	access: "allow",
+	toolAccess: { lookup: "allow", wipe: "allow" },
 	configurationUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),
 	configurationRevision: 1,
 	...extra,
@@ -94,7 +94,7 @@ function toolsFor(...targets: ConnectionTarget[]) {
 }
 
 describe("a turn's connection tools", () => {
-	it("runs every tool of a connection set to allow straight away, changes included", async () => {
+	it("runs a tool set to allow straight away, a change included", async () => {
 		const offered = toolsFor(target());
 
 		const set = await run(offered.forPod("w", "p"));
@@ -112,13 +112,37 @@ describe("a turn's connection tools", () => {
 		}
 	});
 
-	it("asks before every tool of a connection set to ask, reads included", async () => {
-		const offered = toolsFor(target({ access: "ask" }));
+	it("asks before each call to a tool set to ask, a read included", async () => {
+		const offered = toolsFor(target({ toolAccess: { lookup: "ask", wipe: "ask" } }));
 
 		const set = await run(offered.forPod("w", "p"));
 		try {
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, requiresApproval: true });
 			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, requiresApproval: true });
+		} finally {
+			await set.close();
+		}
+	});
+
+	it("leaves out a tool set to off", async () => {
+		const offered = toolsFor(target({ toolAccess: { lookup: "allow", wipe: "off" } }));
+
+		const set = await run(offered.forPod("w", "p"));
+		try {
+			expect(Object.keys(set.tools)).toEqual(["wiki__lookup"]);
+		} finally {
+			await set.close();
+		}
+	});
+
+	it("treats a tool the server did not list when last asked as its default says", async () => {
+		const offered = toolsFor(target({ toolAccess: {} }));
+
+		const set = await run(offered.forPod("w", "p"));
+		try {
+			// `lookup` says it only reads; `wipe` says nothing, so it may change things.
+			expect(set.tools.wiki__lookup).toMatchObject({ requiresApproval: false });
+			expect(set.tools.wiki__wipe).toMatchObject({ requiresApproval: true });
 		} finally {
 			await set.close();
 		}

@@ -1,4 +1,4 @@
-import type { Connection } from "@sugabots/contracts";
+import type { Connection, ConnectionAccess } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -36,12 +36,7 @@ const people = [
 	removable: index > 1,
 }));
 
-function connection(
-	n: number,
-	name: string,
-	url: string,
-	access: Connection["access"],
-): Connection {
+function connection(n: number, name: string, url: string, access: ConnectionAccess): Connection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -53,9 +48,8 @@ function connection(
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		access,
 		status: "connected",
-		tools: [],
+		tools: [{ name: "search", description: "Search", readOnly: true, destructive: false, access }],
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
 		createdAt: "2026-09-10T00:00:00.000Z",

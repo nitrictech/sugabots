@@ -10,7 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
-import { useConnections } from "@/lib/connections.ts";
+import { usableTools, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
@@ -34,7 +34,7 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { AgentModelPicker } from "./AgentModelPicker.tsx";
-import { AgentToolsDialog, agentToolsOf } from "./AgentToolAccess.tsx";
+import { AgentToolsDialog } from "./AgentToolAccess.tsx";
 import { AgentRoutines } from "./RoutinesSettings.tsx";
 
 /*
@@ -382,7 +382,8 @@ function Tools({
 	const mayManageWebSearch = useWorkspacePermissions().manageProviders;
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
-	const reachable = connections.data?.filter((connection) => connection.access !== "off") ?? [];
+	const reachable =
+		connections.data?.filter((connection) => usableTools(connection).length > 0) ?? [];
 
 	return (
 		<SettingsGroup
@@ -421,8 +422,7 @@ function Tools({
 				</div>
 			)}
 			{reachable.map((connection) => {
-				const tools = agentToolsOf(connection);
-				const available = tools.length;
+				const available = usableTools(connection).length;
 				const presetId = connectionPresetFor(connection.url)?.id;
 				return (
 					<div key={connection.id}>
@@ -436,7 +436,6 @@ function Tools({
 						<AgentToolsDialog
 							agentName={agent.name}
 							connection={connection}
-							tools={tools}
 							presetId={presetId}
 							open={openConnectionId === connection.id}
 							onOpenChange={(open) => setOpenConnectionId(open ? connection.id : undefined)}

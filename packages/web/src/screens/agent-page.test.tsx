@@ -1,4 +1,4 @@
-import type { Connection, Routine } from "@sugabots/contracts";
+import type { Connection, ConnectionAccess, Routine } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -77,10 +77,15 @@ function linearConnection(over: Partial<Connection> = {}): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		access: "allow",
 		status: "connected",
 		tools: [
-			{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
+			{
+				name: "list_issues",
+				description: "List issues",
+				readOnly: true,
+				destructive: false,
+				access: "allow",
+			},
 		],
 		lastTestedAt: "2026-09-19T00:00:00.000Z",
 		lastTestError: null,
@@ -89,12 +94,16 @@ function linearConnection(over: Partial<Connection> = {}): Connection {
 	};
 }
 
-/** A read, an additive change, and an overwriting one, as Linear describes them. */
-const readsAndWrites: Connection["tools"] = [
-	{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
-	{ name: "create_issue_label", description: null, readOnly: false, destructive: false },
-	{ name: "save_issue", description: null, readOnly: false, destructive: true },
-];
+/** A read, an additive change, and an overwriting one, as Linear describes them, each set as `access`. */
+function readsAndWrites(
+	access: [ConnectionAccess, ConnectionAccess, ConnectionAccess],
+): Connection["tools"] {
+	return [
+		{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
+		{ name: "create_issue_label", description: null, readOnly: false, destructive: false },
+		{ name: "save_issue", description: null, readOnly: false, destructive: true },
+	].map((tool, index) => ({ ...tool, access: access[index] as ConnectionAccess }));
+}
 
 describe("what everybody sees", () => {
 	it("lists every bot beside the open one, each under its pod", async () => {
@@ -157,7 +166,7 @@ describe("a member", () => {
 				linearConnection({
 					id: "0199a3a0-0000-7000-8000-0000000000f9",
 					name: "Wiki",
-					access: "off",
+					tools: readsAndWrites(["off", "off", "off"]),
 				}),
 			]),
 		);
@@ -167,9 +176,25 @@ describe("a member", () => {
 		expect(screen.queryByRole("button", { name: /Wiki/ })).toBeNull();
 	});
 
-	it("says every tool of a connection set to allow runs freely, changes included", async () => {
+	it("says how each tool runs, leaving out the ones turned off", async () => {
 		client.api.connections.list.mockReturnValue(
-			Effect.succeed([linearConnection({ tools: readsAndWrites })]),
+			Effect.succeed([linearConnection({ tools: readsAndWrites(["allow", "ask", "off"]) })]),
+		);
+		mount(page);
+
+		fireEvent.click(await screen.findByRole("button", { name: /Linear.*2 tools/ }));
+
+		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
+		const free = within(tools).getByRole("region", { name: "Runs freely" });
+		expect(within(free).getByText("List issues")).toBeDefined();
+		const asks = within(tools).getByRole("region", { name: "Asks first" });
+		expect(within(asks).getByText("Create issue label")).toBeDefined();
+		expect(within(tools).queryByText("Save issue")).toBeNull();
+	});
+
+	it("runs every tool freely when they are all allowed, changes included", async () => {
+		client.api.connections.list.mockReturnValue(
+			Effect.succeed([linearConnection({ tools: readsAndWrites(["allow", "allow", "allow"]) })]),
 		);
 		mount(page);
 
@@ -177,24 +202,9 @@ describe("a member", () => {
 
 		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
 		expect(within(tools).queryByRole("region", { name: "Asks first" })).toBeNull();
-		const free = within(tools).getByRole("region", { name: "Runs freely" });
-		expect(within(free).getByText("List issues")).toBeDefined();
-		expect(within(free).getByText("Create issue label")).toBeDefined();
-		expect(within(free).getByText("Save issue")).toBeDefined();
-	});
-
-	it("asks first for every tool of a connection set to ask", async () => {
-		client.api.connections.list.mockReturnValue(
-			Effect.succeed([linearConnection({ tools: readsAndWrites, access: "ask" })]),
-		);
-		mount(page);
-
-		fireEvent.click(await screen.findByRole("button", { name: /Linear.*3 tools/ }));
-
-		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
-		expect(within(tools).queryByRole("region", { name: "Runs freely" })).toBeNull();
-		const asks = within(tools).getByRole("region", { name: "Asks first" });
-		expect(within(asks).getByText("List issues")).toBeDefined();
+		expect(
+			within(within(tools).getByRole("region", { name: "Runs freely" })).getByText("Save issue"),
+		).toBeDefined();
 	});
 
 	it("may rename it but not delete it", async () => {

@@ -1,4 +1,4 @@
-import type { NewConnection } from "@sugabots/contracts";
+import type { ConnectionTool, NewConnection } from "@sugabots/contracts";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -99,38 +99,92 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		).rejects.toThrow(ConnectionRepository.ConnectionNameTaken);
 	});
 
-	it("hands a turn every connection that is not off, with what it may do", async () => {
-		const wiki = await create({
-			name: "Wiki",
-			url: "https://wiki.example.com/mcp",
+	/** Records that the connection's server listed `tools`, as a test of its configuration would. */
+	async function listTools(connectionId: string, tools: ConnectionTool[]) {
+		const target = await connections.target(workspaceId, podId, connectionId);
+		if (!target) throw new Error("no target");
+		await connections.recordTest(workspaceId, connectionId, target.configurationUpdatedAt, {
+			tools,
 		});
-		const off = await create({
-			name: "Off",
-			url: "https://off.example.com/mcp",
-		});
-		await connections.update(workspaceId, podId, wiki.id, { access: "ask" });
-		await connections.update(workspaceId, podId, off.id, { access: "off" });
+	}
+
+	const lookup: ConnectionTool = {
+		name: "lookup",
+		description: null,
+		readOnly: true,
+		destructive: null,
+	};
+	const edit: ConnectionTool = {
+		name: "edit",
+		description: null,
+		readOnly: false,
+		destructive: false,
+	};
+	const wipe: ConnectionTool = {
+		name: "wipe",
+		description: null,
+		readOnly: false,
+		destructive: true,
+	};
+
+	it("hands a turn every connection it can call, with what was chosen for its tools", async () => {
+		const wiki = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		const tracker = await create({ name: "Tracker", url: "https://tracker.example.com/mcp" });
+		await create({ name: "Linear", url: "https://mcp.linear.app/mcp", auth: "oauth" });
+		await listTools(wiki.id, [lookup, edit]);
+		await connections.update(workspaceId, podId, wiki.id, { toolAccess: { edit: "off" } });
+		await listTools(tracker.id, [lookup, wipe]);
+		await connections.update(workspaceId, podId, tracker.id, { toolAccess: { lookup: "off" } });
 
 		const targets = await connections.targetsForPod(workspaceId, podId);
 
+		// Linear is still waiting on its sign-in, and every one of Tracker's tools
+		// is off, so neither is reached.
 		expect(targets).toEqual([
-			expect.objectContaining({ connectionId: wiki.id, handle: "wiki", access: "ask" }),
+			expect.objectContaining({
+				connectionId: wiki.id,
+				handle: "wiki",
+				toolAccess: { edit: "off" },
+			}),
 		]);
 	});
 
-	it("keeps a connection that signs in off until it has", async () => {
-		const pasted = await create({
-			name: "Wiki",
-			url: "https://wiki.example.com/mcp",
-		});
-		const signsIn = await create({
-			name: "Linear",
-			url: "https://mcp.linear.app/mcp",
-			auth: "oauth",
-		});
+	it("gives a tool nobody chose for its default, and keeps a choice while its tool is not listed", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 
-		expect(pasted.access).toBe("allow");
-		expect(signsIn.access).toBe("off");
+		await listTools(made.id, [lookup, edit, wipe]);
+		expect((await shown(made.id))?.tools).toEqual([
+			expect.objectContaining({ name: "lookup", access: "allow" }),
+			expect.objectContaining({ name: "edit", access: "ask" }),
+			expect.objectContaining({ name: "wipe", access: "off" }),
+		]);
+
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { lookup: "off" } });
+		await listTools(made.id, [edit]);
+		await listTools(made.id, [lookup, edit]);
+
+		expect((await shown(made.id))?.tools).toEqual([
+			expect.objectContaining({ name: "lookup", access: "off" }),
+			expect.objectContaining({ name: "edit", access: "ask" }),
+		]);
+	});
+
+	it("sets the tools named without changing the configuration, and refuses a name it does not list", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		await listTools(made.id, [lookup, edit, wipe]);
+
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { edit: "allow" } });
+		await connections.update(workspaceId, podId, made.id, { toolAccess: { wipe: "ask" } });
+
+		expect((await shown(made.id))?.tools.map((tool) => tool.access)).toEqual([
+			"allow",
+			"allow",
+			"ask",
+		]);
+		expect((await connections.target(workspaceId, podId, made.id))?.configurationRevision).toBe(1);
+		await expect(
+			connections.update(workspaceId, podId, made.id, { toolAccess: { ghost: "allow" } }),
+		).rejects.toThrow(ConnectionRepository.UnknownConnectionTool);
 	});
 
 	it("does not expose a connection through another pod", async () => {
@@ -142,7 +196,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		expect(await shown(made.id, otherPodId)).toBeUndefined();
 		expect(await connections.target(workspaceId, otherPodId, made.id)).toBeUndefined();
 		expect(
-			await connections.update(workspaceId, otherPodId, made.id, { access: "ask" }),
+			await connections.update(workspaceId, otherPodId, made.id, { toolAccess: { lookup: "ask" } }),
 		).toBeUndefined();
 		expect(await connections.remove(workspaceId, otherPodId, made.id)).toBe(false);
 		expect((await shown(made.id))?.id).toEqual(made.id);

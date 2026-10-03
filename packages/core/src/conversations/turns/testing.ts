@@ -185,7 +185,6 @@ export async function aChatAwaitingReply(
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",
 				authKind: "header",
-				access: "allow",
 				createdById: memberId,
 			})
 			.returning({ id: connection.id }),

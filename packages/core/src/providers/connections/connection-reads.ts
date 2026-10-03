@@ -5,7 +5,8 @@ import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
 import { type ConnectionRow, connection } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { unsealOauthRecord } from "./connection-repository.ts";
+import { isSignedIn } from "./connection-repository.ts";
+import { toolAccessOf } from "./tool-access.ts";
 
 /** The pod's connections, oldest first. `cipher` opens an OAuth record to tell whether it is signed in. */
 export const connectionsIn = (workspaceId: string, podId: string, cipher: Credentials.Interface) =>
@@ -47,16 +48,18 @@ export function toConnection(row: ConnectionRow, cipher: Credentials.Interface):
 		handle: row.handle,
 		url: row.url,
 		auth: row.authKind,
-		signedIn: row.authKind === "header" || unsealOauthRecord(row, cipher)?.tokens !== undefined,
+		signedIn: isSignedIn(row, cipher),
 		secretHeader: row.secretHeader,
 		hasSecret: row.secretEncrypted !== null,
-		access: row.access,
 		status: configurationStatus({
 			missingKey: false,
 			lastTestedAt: row.lastTestedAt,
 			lastTestError: row.lastTestError,
 		}),
-		tools: row.tools,
+		tools: row.tools.map((tool) => ({
+			...tool,
+			access: toolAccessOf(row.toolAccess, tool),
+		})),
 		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		createdAt: row.createdAt.toISOString(),

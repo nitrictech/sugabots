@@ -1,4 +1,4 @@
-import type { Connection } from "@sugabots/contracts";
+import type { Connection, ConnectionAccess, ConnectionTool } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -12,9 +12,21 @@ import { appHandlers, StoryApp, storyPods } from "../story-app.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
+/** A connection whose tools are all at `access`. */
 function connection(
 	n: number,
-	over: Partial<Connection> & Pick<Connection, "name" | "handle" | "url">,
+	{
+		access = "allow",
+		tools = [
+			{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
+			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
+		],
+		...over
+	}: Partial<Omit<Connection, "tools">> &
+		Pick<Connection, "name" | "handle" | "url"> & {
+			access?: ConnectionAccess;
+			tools?: ConnectionTool[];
+		},
 ): Connection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
@@ -24,12 +36,8 @@ function connection(
 		signedIn: true,
 		secretHeader: "Authorization",
 		hasSecret: true,
-		access: "allow",
 		status: "connected",
-		tools: [
-			{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
-			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
-		],
+		tools: tools.map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
 		createdAt: "2026-09-01T00:00:00.000Z",

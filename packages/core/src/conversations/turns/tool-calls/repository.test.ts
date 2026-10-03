@@ -260,10 +260,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(acted?.mutationStarted).toBe(true);
 	});
 
-	it("runs an allowed read from a connection that asks, without counting it as a change", async () => {
-		await onDatabase((db) =>
-			db.update(connection).set({ access: "ask" }).where(eq(connection.id, connectionId)),
-		);
+	it("runs an allowed read that asked first, without counting it as a change", async () => {
 		const execution = await allowAndResume(
 			pendingCall({
 				sdkToolCallId: "sdk-read",
@@ -286,15 +283,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(resumed?.mutationStarted).toBe(false);
 	});
 
-	it("refuses an allowed call once its connection is turned off", async () => {
-		const execution = await allowAndResume(pendingCall({ sdkToolCallId: "sdk-turned-off" }));
-		await onDatabase((db) =>
-			db.update(connection).set({ access: "off" }).where(eq(connection.id, connectionId)),
-		);
-
-		await expect(approvals.beginExecution(execution)).rejects.toThrow("configuration changed");
-	});
-
 	it("refuses an allowed call after the reviewed connection configuration changes", async () => {
 		const execution = await allowAndResume(pendingCall({ sdkToolCallId: "sdk-revision" }));
 		await onDatabase((db) =>
@@ -305,6 +293,18 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		);
 
 		await expect(approvals.beginExecution(execution)).rejects.toThrow("configuration changed");
+	});
+
+	it("refuses an allowed call to a tool somebody turned off after it was allowed", async () => {
+		const execution = await allowAndResume(pendingCall({ sdkToolCallId: "sdk-turned-off" }));
+		await onDatabase((db) =>
+			db
+				.update(connection)
+				.set({ toolAccess: { create_issue: "off" } })
+				.where(eq(connection.id, connectionId)),
+		);
+
+		await expect(approvals.beginExecution(execution)).rejects.toThrow("turned off");
 	});
 
 	it("conceals a pending approval from somebody who cannot reach the pod", async () => {

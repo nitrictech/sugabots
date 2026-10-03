@@ -86,6 +86,7 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 const connectionErrors = {
 	...refusals,
 	ConnectionNameTaken: Conflict,
+	UnknownConnectionTool: BadRequest,
 	ConnectionNotFound: NotFound,
 	UrlNotAllowed: BadRequest,
 	ConnectionOAuthStartFailed: BadRequest,

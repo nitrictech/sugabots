@@ -1,4 +1,4 @@
-import type { Connection, Routine } from "@sugabots/contracts";
+import type { Connection, ConnectionTool, Routine } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -56,7 +56,7 @@ function connection(
 	name: string,
 	handle: string,
 	url: string,
-	tools: Connection["tools"],
+	tools: ConnectionTool[],
 ): Connection {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
@@ -69,9 +69,8 @@ function connection(
 		signedIn: true,
 		secretHeader: "Authorization",
 		hasSecret: true,
-		access: "allow",
 		status: "connected",
-		tools,
+		tools: tools.map((tool) => ({ ...tool, access: "allow" as const })),
 		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
 		createdAt: "2026-09-01T00:00:00.000Z",

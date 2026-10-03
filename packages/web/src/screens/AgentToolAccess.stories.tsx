@@ -1,6 +1,6 @@
 import type { Connection, ConnectionAccess } from "@sugabots/contracts";
 import preview from "#storybook/preview";
-import { AgentToolsDialog, agentToolsOf } from "./AgentToolAccess.tsx";
+import { AgentToolsDialog } from "./AgentToolAccess.tsx";
 
 function linear(access: ConnectionAccess): Connection {
 	return {
@@ -14,7 +14,6 @@ function linear(access: ConnectionAccess): Connection {
 		signedIn: true,
 		secretHeader: null,
 		hasSecret: false,
-		access,
 		status: "connected",
 		tools: [
 			{
@@ -48,7 +47,7 @@ function linear(access: ConnectionAccess): Connection {
 				readOnly: false,
 				destructive: true,
 			},
-		],
+		].map((tool) => ({ ...tool, access })),
 		lastTestedAt: "2026-09-19T00:00:00.000Z",
 		lastTestError: null,
 		createdAt: "2026-09-19T00:00:00.000Z",
@@ -62,7 +61,6 @@ const meta = preview.meta({
 	args: {
 		agentName: "Personal Assistant",
 		connection: linear("allow"),
-		tools: agentToolsOf(linear("allow")),
 		presetId: "linear",
 		open: true,
 		onOpenChange: () => {},
@@ -76,6 +74,5 @@ export const Allowed = meta.story({});
 export const Asks = meta.story({
 	args: {
 		connection: linear("ask"),
-		tools: agentToolsOf(linear("ask")),
 	},
 });
