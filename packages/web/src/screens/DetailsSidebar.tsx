@@ -11,7 +11,7 @@ import { Link } from "@tanstack/react-router";
 import { Repeat, Settings } from "lucide-react";
 import { useState } from "react";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
-import { usableTools, useConnections } from "@/lib/connections.ts";
+import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRoutines } from "@/lib/routines.ts";
@@ -181,7 +181,7 @@ function Routines({ agent }: { agent: Agent }) {
 function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
 	const connections = useConnections(pod.id);
-	const list = connections.data?.filter((connection) => usableTools(connection).length > 0) ?? [];
+	const list = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
 	if (list.length === 0) return null;
 	return (
 		<SidebarSection title="Tools" className="flex flex-wrap items-center gap-2 px-3.5 py-3">

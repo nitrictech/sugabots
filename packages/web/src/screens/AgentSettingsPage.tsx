@@ -10,7 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { useAgents, useDeleteAgent, useModels, useUpdateAgent } from "@/lib/agents.ts";
-import { usableTools, useConnections } from "@/lib/connections.ts";
+import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { agentChatLink, connectionSettingsLink, podSettingsLink } from "@/lib/links.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
@@ -380,8 +380,7 @@ function Tools({
 	const mayManageWebSearch = useWorkspacePermissions().manageProviders;
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
-	const reachable =
-		connections.data?.filter((connection) => usableTools(connection).length > 0) ?? [];
+	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
 
 	return (
 		<SettingsGroup
@@ -420,7 +419,7 @@ function Tools({
 				</div>
 			)}
 			{reachable.map((connection) => {
-				const available = usableTools(connection).length;
+				const available = usableToolCount(connection);
 				return (
 					<SettingsRow
 						key={connection.id}

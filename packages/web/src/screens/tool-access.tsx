@@ -1,4 +1,4 @@
-import type { ConnectionAccess, ConnectionToolWithAccess } from "@sugabots/contracts";
+import type { ConnectionAccess, ToolAccessCounts } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Ban, ChevronDown, CircleCheck, Ellipsis, Hand } from "lucide-react";
 import type { ReactNode } from "react";
@@ -45,23 +45,19 @@ const COUNTED: { access: ConnectionAccess; words: string }[] = [
 	{ access: "off", words: "off" },
 ];
 
-/** What `tools` amount to, as one setting, or nothing when there are none. */
-export function accessSettingOf(
-	tools: readonly Pick<ConnectionToolWithAccess, "access">[],
-): AccessSetting | undefined {
-	const [first, ...rest] = tools;
-	if (!first) return undefined;
-	return rest.every((tool) => tool.access === first.access) ? first.access : "custom";
+/** What tools at these counts amount to, as one setting, or nothing when there are none. */
+export function accessSettingOf(counts: ToolAccessCounts): AccessSetting | undefined {
+	const total = counts.allow + counts.ask + counts.off;
+	if (total === 0) return undefined;
+	return ACCESSES.find((access) => counts[access] === total) ?? "custom";
 }
 
 /**
  * What a connection's tools amount to, in a line: the setting they share, or
  * how many are at each when they differ. Undefined while it has no tools.
  */
-export function accessSummaryText(
-	tools: readonly Pick<ConnectionToolWithAccess, "access">[],
-): string | undefined {
-	switch (accessSettingOf(tools)) {
+export function accessSummaryText(counts: ToolAccessCounts): string | undefined {
+	switch (accessSettingOf(counts)) {
 		case undefined:
 			return undefined;
 		case "allow":
@@ -71,13 +67,10 @@ export function accessSummaryText(
 		case "off":
 			return "Off for every bot";
 		case "custom": {
-			const counts = COUNTED.map(({ access, words }) => ({
-				count: tools.filter((tool) => tool.access === access).length,
-				words,
-			}))
-				.filter(({ count }) => count > 0)
-				.map(({ count, words }) => `${count} ${words}`);
-			return `Custom: ${counts.join(", ")}`;
+			const parts = COUNTED.filter(({ access }) => counts[access] > 0).map(
+				({ access, words }) => `${counts[access]} ${words}`,
+			);
+			return `Custom: ${parts.join(", ")}`;
 		}
 	}
 }

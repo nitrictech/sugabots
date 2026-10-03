@@ -7,7 +7,7 @@ import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { type ConnectionRow, connection } from "../../database/schema.ts";
+import { type ConnectionRow, connection, type ToolAccess } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
@@ -165,19 +165,18 @@ export const make = Effect.gen(function* () {
 							changes.secretHeader !== undefined ||
 							changes.secret !== undefined;
 						const configurationChanged = changes.name !== undefined || connectionChanged;
-						if (changes.toolAccess) {
+						let chosen: ToolAccess | undefined;
+						if (changes.access !== undefined || changes.toolAccess !== undefined) {
 							const [current] = yield* query((db) =>
 								db
-									.select({ tools: connection.tools })
+									.select({ names: listedToolNames })
 									.from(connection)
 									.where(inPod)
 									.limit(1)
 									.for("update"),
 							);
 							if (!current) return undefined;
-							const listed = new Set(current.tools.map((tool) => tool.name));
-							const unknown = Object.keys(changes.toolAccess).filter((name) => !listed.has(name));
-							if (unknown.length > 0) return yield* new UnknownConnectionTool({ names: unknown });
+							chosen = yield* choicesFor(current.names, changes);
 						}
 						const [row] = yield* queryCatching(
 							(db) =>
@@ -194,8 +193,8 @@ export const make = Effect.gen(function* () {
 												: changes.secret === null
 													? null
 													: cipher.encrypt(changes.secret),
-										toolAccess: changes.toolAccess
-											? sql`${connection.toolAccess} || ${JSON.stringify(changes.toolAccess)}::jsonb`
+										toolAccess: chosen
+											? sql`${connection.toolAccess} || ${JSON.stringify(chosen)}::jsonb`
 											: undefined,
 										configurationRevision: configurationChanged
 											? sql`${connection.configurationRevision} + 1`
@@ -365,6 +364,26 @@ export class UnknownConnectionTool
 	}
 }
 
+/** The names of the tools the server listed when last asked, leaving their descriptions in the database. */
+const listedToolNames = sql<string[]>`jsonb_path_query_array(${connection.tools}, '$[*].name')`;
+
+/**
+ * The choices `changes` makes: `access` for every tool the server listed, or
+ * `toolAccess` for the tools it names, each of which must be listed.
+ */
+function choicesFor(
+	listed: readonly string[],
+	changes: Pick<ConnectionUpdate, "access" | "toolAccess">,
+): Effect.Effect<ToolAccess, UnknownConnectionTool> {
+	const { access, toolAccess = {} } = changes;
+	if (access) return Effect.succeed(Object.fromEntries(listed.map((name) => [name, access])));
+	const known = new Set(listed);
+	const unknown = Object.keys(toolAccess).filter((name) => !known.has(name));
+	return unknown.length > 0
+		? Effect.fail(new UnknownConnectionTool({ names: unknown }))
+		: Effect.succeed(toolAccess);
+}
+
 /** Whether the server listed tools when last asked and every one of them is off. */
 function everyToolOff(row: ConnectionRow): boolean {
 	return (
@@ -373,13 +392,16 @@ function everyToolOff(row: ConnectionRow): boolean {
 }
 
 /** Whether calls to the connection's server can be made: always for a secret, after its sign-in for OAuth. */
-export function isSignedIn(row: ConnectionRow, cipher: Credentials.Interface): boolean {
+export function isSignedIn(
+	row: Pick<ConnectionRow, "authKind" | "oauthEncrypted">,
+	cipher: Credentials.Interface,
+): boolean {
 	return row.authKind === "header" || unsealOauthRecord(row, cipher)?.tokens !== undefined;
 }
 
 /** What the OAuth client has learnt and been issued for the connection, unsealed. */
 export function unsealOauthRecord(
-	row: ConnectionRow,
+	row: Pick<ConnectionRow, "oauthEncrypted">,
 	cipher: Credentials.Interface,
 ): OAuthRecord | undefined {
 	return row.oauthEncrypted

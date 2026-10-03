@@ -5,6 +5,7 @@ import type {
 	ConnectionSignInFailure,
 	ConnectionTestResult,
 	ConnectionUpdate,
+	ConnectionWithTools,
 	NewConnection,
 	UnsavedConnection,
 } from "@sugabots/contracts";
@@ -36,7 +37,11 @@ export interface Interface {
 	) => Effect.Effect<Connection[], AuthorizationDenied, CurrentActor.Service>;
 	readonly get: (
 		input: InConnection,
-	) => Effect.Effect<Connection, AuthorizationDenied | ConnectionNotFound, CurrentActor.Service>;
+	) => Effect.Effect<
+		ConnectionWithTools,
+		AuthorizationDenied | ConnectionNotFound,
+		CurrentActor.Service
+	>;
 	/** Learns a server's tools straight away, unless it waits on a sign-in. */
 	readonly create: (
 		input: InPod & { connection: NewConnection },

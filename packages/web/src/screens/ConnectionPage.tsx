@@ -1,17 +1,21 @@
 import {
 	type Connection,
 	type ConnectionAccess,
-	type ConnectionTool,
-	type ConnectionToolWithAccess,
+	type ConnectionToolSetting,
 	connectionPresetFor,
 	connectionToolMutating,
 	type Pod,
+	toolAccessCountsOf,
 } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronDown, Ellipsis, Search } from "lucide-react";
 import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
-import { bearerAuthorization, useConnectionActions } from "@/lib/connections.ts";
+import {
+	bearerAuthorization,
+	useConnectionActions,
+	useConnectionWithTools,
+} from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { podSettingsLink } from "@/lib/links.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
@@ -63,8 +67,6 @@ export function ConnectionPage({
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
 	const preset = connectionPresetFor(connection.url);
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
@@ -72,10 +74,6 @@ export function ConnectionPage({
 		? !checked.reachable && (checked.error ?? "The server did not answer.")
 		: connection.status === "error" && (connection.lastTestError ?? "The last check failed.");
 	const error = actions.update.error ?? actions.signIn.error ?? actions.test.error;
-	const matches = (tool: ConnectionTool) =>
-		needle === "" ||
-		tool.name.toLowerCase().includes(needle) ||
-		wordsFromKey(tool.name).toLowerCase().includes(needle);
 	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
 		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 	const signIn = () => actions.signIn.mutate({ connectionId: connection.id });
@@ -207,45 +205,12 @@ export function ConnectionPage({
 				{checked?.reachable && !actions.test.isPending && <Success>Connection successful</Success>}
 				{error && <Alert>{failureMessage(error)}</Alert>}
 			</div>
-			{connection.tools.length === 0 ? (
-				<SettingsGroup label="Tools">
-					<SettingsRow label="No actions found yet." />
-				</SettingsGroup>
-			) : (
-				<div className="flex flex-col gap-5">
-					<div className="flex flex-col gap-1 px-1">
-						<h3 className="m-0 font-semibold text-[15px] text-foreground">Tool permissions</h3>
-						<p className="m-0 text-sm text-subtle-foreground">
-							Ask means the bot waits for approval first. Off means it can't use that tool at all.
-							These apply to every bot in {pod.name}.
-						</p>
-					</div>
-					{connection.tools.length > SEARCHABLE_TOOL_COUNT && (
-						<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
-							<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-							<input
-								type="search"
-								value={query}
-								onChange={(event) => setQuery(event.target.value)}
-								placeholder={`Search ${connection.tools.length} tools`}
-								aria-label="Search tools"
-								className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
-							/>
-						</label>
-					)}
-					{toolGroups(connection.tools).map((group) => (
-						<ToolGroup
-							key={group.label}
-							label={group.label}
-							tools={group.tools}
-							setting={group.setting}
-							shown={group.tools.filter(matches)}
-							canManage={canManage}
-							setToolAccess={setToolAccess}
-						/>
-					))}
-				</div>
-			)}
+			<ConnectionTools
+				pod={pod}
+				connectionId={connection.id}
+				canManage={canManage}
+				setToolAccess={setToolAccess}
+			/>
 			<DeleteDialog
 				open={removing}
 				onOpenChange={setRemoving}
@@ -329,17 +294,93 @@ function SecretForm({
 }
 
 /**
+ * The connection's tools, fetched on their own because a server can list
+ * hundreds, with a placeholder while they load.
+ */
+function ConnectionTools({
+	pod,
+	connectionId,
+	canManage,
+	setToolAccess,
+}: {
+	pod: Pod;
+	connectionId: string;
+	canManage: boolean;
+	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
+}) {
+	const detail = useConnectionWithTools(pod.id, connectionId);
+	const [query, setQuery] = useState("");
+	const needle = useDeferredValue(query.trim().toLowerCase());
+	const matches = (tool: ConnectionToolSetting) =>
+		needle === "" ||
+		tool.name.toLowerCase().includes(needle) ||
+		wordsFromKey(tool.name).toLowerCase().includes(needle);
+	if (detail.isPending) {
+		return (
+			<div role="status" aria-label="Loading tools" className="flex flex-col gap-3">
+				<div className="h-12 animate-pulse rounded-panel bg-list" />
+				<div className="h-[212px] animate-pulse rounded-panel bg-list" />
+			</div>
+		);
+	}
+	if (detail.isError) return <Alert>{failureMessage(detail.error)}</Alert>;
+	const { tools } = detail.data;
+	if (tools.length === 0) {
+		return (
+			<SettingsGroup label="Tools">
+				<SettingsRow label="No actions found yet." />
+			</SettingsGroup>
+		);
+	}
+	return (
+		<div className="flex flex-col gap-5">
+			<div className="flex flex-col gap-1 px-1">
+				<h3 className="m-0 font-semibold text-[15px] text-foreground">Tool permissions</h3>
+				<p className="m-0 text-sm text-subtle-foreground">
+					Ask means the bot waits for approval first. Off means it can't use that tool at all. These
+					apply to every bot in {pod.name}.
+				</p>
+			</div>
+			{tools.length > SEARCHABLE_TOOL_COUNT && (
+				<label className="focus-ring-within flex items-center gap-[9px] rounded-xl bg-chip px-3">
+					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
+					<input
+						type="search"
+						value={query}
+						onChange={(event) => setQuery(event.target.value)}
+						placeholder={`Search ${tools.length} tools`}
+						aria-label="Search tools"
+						className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+					/>
+				</label>
+			)}
+			{toolGroups(tools).map((group) => (
+				<ToolGroup
+					key={group.label}
+					label={group.label}
+					tools={group.tools}
+					setting={group.setting}
+					shown={group.tools.filter(matches)}
+					canManage={canManage}
+					setToolAccess={setToolAccess}
+				/>
+			))}
+		</div>
+	);
+}
+
+/**
  * The connection's tools that only read, then those that may make changes,
  * each with the setting its tools share, leaving out an empty one.
  */
 function toolGroups(
-	tools: ConnectionToolWithAccess[],
-): { label: string; tools: ConnectionToolWithAccess[]; setting: AccessSetting }[] {
+	tools: readonly ConnectionToolSetting[],
+): { label: string; tools: ConnectionToolSetting[]; setting: AccessSetting }[] {
 	return [
 		{ label: "Reading", tools: tools.filter((tool) => !connectionToolMutating(tool)) },
 		{ label: "Making changes", tools: tools.filter(connectionToolMutating) },
 	].flatMap((group) => {
-		const setting = accessSettingOf(group.tools);
+		const setting = accessSettingOf(toolAccessCountsOf(group.tools));
 		return setting ? [{ ...group, setting }] : [];
 	});
 }
@@ -359,11 +400,11 @@ function ToolGroup({
 }: {
 	label: string;
 	/** Every tool in the group, which its menu sets. */
-	tools: ConnectionToolWithAccess[];
+	tools: ConnectionToolSetting[];
 	/** What `tools` share, which its menu reads. */
 	setting: AccessSetting;
 	/** The ones the search leaves. */
-	shown: ConnectionToolWithAccess[];
+	shown: ConnectionToolSetting[];
 	canManage: boolean;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
 }) {

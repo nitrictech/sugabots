@@ -92,7 +92,7 @@ export function ConnectionsSettings({
 function lineFor(connection: Connection): string {
 	if (!connection.signedIn) return "Not signed in yet";
 	if (connection.status === "error") return connection.lastTestError ?? "The last check failed";
-	return accessSummaryText(connection.tools) ?? "No actions found yet";
+	return accessSummaryText(connection.toolCounts) ?? "No actions found yet";
 }
 
 function ConnectionRow({
@@ -119,7 +119,7 @@ function ConnectionRow({
 			? actions.signIn.mutate({ connectionId: connection.id })
 			: void navigate(page);
 	const line = error ? failureMessage(error) : lineFor(connection);
-	const access = accessSettingOf(connection.tools);
+	const access = accessSettingOf(connection.toolCounts);
 
 	return (
 		<article
@@ -156,14 +156,7 @@ function ConnectionRow({
 						label={`${connection.name}, all tools`}
 						value={access}
 						onChange={(chosen) =>
-							actions.update.mutate({
-								connectionId: connection.id,
-								json: {
-									toolAccess: Object.fromEntries(
-										connection.tools.map((tool) => [tool.name, chosen]),
-									),
-								},
-							})
+							actions.update.mutate({ connectionId: connection.id, json: { access: chosen } })
 						}
 						onCustom={() => void navigate(page)}
 						className="max-md:hidden"

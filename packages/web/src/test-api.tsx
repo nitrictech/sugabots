@@ -11,6 +11,11 @@ import {
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
+import {
+	connectionWithTools,
+	listedConnection,
+	type TestConnection,
+} from "@sugabots/contracts/testing";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
@@ -365,7 +370,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.pods.listMembers.mockReturnValue(Effect.succeed([]));
 	client.api.agents.list.mockReturnValue(Effect.succeed(agents));
 	client.api.systemAgents.list.mockReturnValue(Effect.succeed(builtInAgents));
-	client.api.connections.list.mockReturnValue(Effect.succeed([]));
+	serveConnections();
 	client.api.threads.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
@@ -429,6 +434,19 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
  * An answer a case gives later, to see what the page does while a request is
  * still in flight: the endpoint returns `effect`, which waits for `answer`.
  */
+/** Answers the pod's connection reads from `connections` in full: the list with counts, and one connection with its tools. */
+export function serveConnections(...connections: TestConnection[]): void {
+	const byId = ({ params }: { params: { connectionId: string } }) =>
+		connections.find((one) => one.id === params.connectionId);
+	client.api.connections.list.mockReturnValue(Effect.succeed(connections.map(listedConnection)));
+	client.api.connections.get.mockImplementation((input: { params: { connectionId: string } }) => {
+		const found = byId(input);
+		return found
+			? Effect.succeed(connectionWithTools(found))
+			: Effect.fail(new NotFound({ message: "No such connection" }));
+	});
+}
+
 export function pendingAnswer() {
 	const { promise, resolve } = Promise.withResolvers<Effect.Effect<unknown, unknown>>();
 	return { effect: Effect.flatten(Effect.promise(() => promise)), answer: resolve };

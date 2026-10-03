@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { handleSchema } from "./agents.ts";
 import {
 	headerNameSchema,
@@ -56,6 +56,32 @@ export const connectionToolWithAccessSchema = Schema.Struct({
 export type ConnectionToolWithAccess = typeof connectionToolWithAccessSchema.Type;
 
 /**
+ * A connection's tool as its settings show it: what the pod's bots may do with
+ * it, without the server's description, which can run to many kilobytes.
+ */
+export const connectionToolSettingSchema = connectionToolWithAccessSchema.mapFields(
+	Struct.omit(["description"]),
+);
+export type ConnectionToolSetting = typeof connectionToolSettingSchema.Type;
+
+/** How many of a connection's tools are at each setting. */
+export const toolAccessCountsSchema = Schema.Struct({
+	allow: Schema.Int,
+	ask: Schema.Int,
+	off: Schema.Int,
+});
+export type ToolAccessCounts = typeof toolAccessCountsSchema.Type;
+
+/** How many of `tools` are at each setting. */
+export function toolAccessCountsOf(
+	tools: readonly Pick<ConnectionToolWithAccess, "access">[],
+): ToolAccessCounts {
+	const counts = { allow: 0, ask: 0, off: 0 };
+	for (const tool of tools) counts[tool.access] += 1;
+	return counts;
+}
+
+/**
  * Where an authorization server sends the browser back after a connection's
  * sign-in: an API path, under `API_BASE_PATH`.
  */
@@ -102,8 +128,12 @@ export const connectionSchema = Schema.Struct({
 	secretHeader: Schema.NullOr(Schema.String),
 	hasSecret: Schema.Boolean,
 	status: providerStatusSchema,
-	/** The tools the server listed when last asked, each with what the pod's bots may do with it. */
-	tools: Schema.mutable(Schema.Array(connectionToolWithAccessSchema)),
+	/**
+	 * How many of the tools the server listed when last asked are at each
+	 * setting. The tools themselves come with one connection, not the list,
+	 * since a server can list hundreds.
+	 */
+	toolCounts: toolAccessCountsSchema,
 	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	/** The name of whoever added it, while they still have an account. */
@@ -112,6 +142,13 @@ export const connectionSchema = Schema.Struct({
 });
 
 export type Connection = typeof connectionSchema.Type;
+
+/** One connection with its tools, each with what the pod's bots may do with it. */
+export const connectionWithToolsSchema = Schema.Struct({
+	...connectionSchema.fields,
+	tools: Schema.Array(connectionToolSettingSchema),
+});
+export type ConnectionWithTools = typeof connectionWithToolsSchema.Type;
 
 const secretSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 const connectionNameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64));
@@ -169,10 +206,15 @@ export const connectionUpdateSchema = Schema.Struct({
 	secretHeader: Schema.optional(Schema.NullOr(secretHeaderSchema)),
 	/** Absent leaves the stored secret alone; null removes it. */
 	secret: Schema.optional(Schema.NullOr(secretSchema)),
+	/** Sets every tool the connection lists. */
+	access: Schema.optional(connectionAccessSchema),
 	/** Sets the tools named, by the server's name for each. Every name must be one the connection lists. */
 	toolAccess: Schema.optional(Schema.Record(Schema.String, connectionAccessSchema)),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
+	Schema.makeFilter((value) => value.access === undefined || value.toolAccess === undefined, {
+		message: "Set every tool or the tools named, not both",
+	}),
 );
 
 export type ConnectionUpdate = typeof connectionUpdateSchema.Type;

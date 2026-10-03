@@ -46,7 +46,7 @@ const wiki: Connection = {
 	secretHeader: null,
 	hasSecret: false,
 	status: "connected",
-	tools: [],
+	toolCounts: { allow: 0, ask: 0, off: 0 },
 	lastTestedAt: null,
 	lastTestError: null,
 	connectedBy: null,
