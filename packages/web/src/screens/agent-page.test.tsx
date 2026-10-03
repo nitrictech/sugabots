@@ -173,39 +173,25 @@ describe("a member", () => {
 		);
 		mount(page);
 
-		expect(await screen.findByRole("button", { name: /Linear.*1 tool/ })).toBeDefined();
-		expect(screen.queryByRole("button", { name: /Wiki/ })).toBeNull();
+		expect(await screen.findByRole("link", { name: /Linear.*1 tool/ })).toBeDefined();
+		expect(screen.queryByRole("link", { name: /Wiki/ })).toBeNull();
 	});
 
-	it("says how each tool runs, leaving out the ones turned off", async () => {
-		client.api.connections.list.mockReturnValue(
-			Effect.succeed([linearConnection({ tools: readsAndWrites(["allow", "ask", "off"]) })]),
+	it("opens a connection's own page from its row, with the way back to the bot", async () => {
+		const connection = linearConnection({ tools: readsAndWrites(["allow", "ask", "off"]) });
+		client.api.connections.list.mockReturnValue(Effect.succeed([connection]));
+		const router = mount(page);
+
+		fireEvent.click(await screen.findByRole("link", { name: /Linear.*2 tools/ }));
+
+		await screen.findByRole("heading", { name: "Linear", level: 2 });
+		expect(router.state.location.pathname).toBe(
+			`/suga/settings/pods/${suga.slug}/connections/${connection.id}`,
 		);
-		mount(page);
-
-		fireEvent.click(await screen.findByRole("button", { name: /Linear.*2 tools/ }));
-
-		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
-		const free = within(tools).getByRole("region", { name: "Runs freely" });
-		expect(within(free).getByText("List issues")).toBeDefined();
-		const asks = within(tools).getByRole("region", { name: "Asks first" });
-		expect(within(asks).getByText("Create issue label")).toBeDefined();
-		expect(within(tools).queryByText("Save issue")).toBeNull();
-	});
-
-	it("runs every tool freely when they are all allowed, changes included", async () => {
-		client.api.connections.list.mockReturnValue(
-			Effect.succeed([linearConnection({ tools: readsAndWrites(["allow", "allow", "allow"]) })]),
-		);
-		mount(page);
-
-		fireEvent.click(await screen.findByRole("button", { name: /Linear.*3 tools/ }));
-
-		const tools = await screen.findByRole("dialog", { name: "Linear tools" });
-		expect(within(tools).queryByRole("region", { name: "Asks first" })).toBeNull();
-		expect(
-			within(within(tools).getByRole("region", { name: "Runs freely" })).getByText("Save issue"),
-		).toBeDefined();
+		const back = document.querySelector<HTMLElement>("[data-page-back] a");
+		expect(back?.textContent).toBe(linear.name);
+		if (back) fireEvent.click(back);
+		await waitFor(() => expect(router.state.location.pathname).toBe(page));
 	});
 
 	it("may rename it but not delete it", async () => {

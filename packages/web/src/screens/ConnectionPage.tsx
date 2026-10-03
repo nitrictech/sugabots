@@ -440,14 +440,3 @@ function ToolGroup({
 		</section>
 	);
 }
-
-/**
- * One of a connection's tools: its name in words, and what it does, unless
- * the description only says the name again.
- */
-export function ConnectionToolRow({ tool }: { tool: ConnectionTool }) {
-	const label = wordsFromKey(tool.name);
-	const description = tool.description?.trim();
-	const says = description && description.toLowerCase() !== label.toLowerCase();
-	return <SettingsRow label={label} sub={says ? description : undefined} />;
-}

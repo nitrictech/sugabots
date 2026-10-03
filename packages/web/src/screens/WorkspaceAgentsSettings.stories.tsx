@@ -220,7 +220,7 @@ export const ToolsAndRoutines = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("button", { name: /HubSpot/ }, { timeout: 10_000 }),
+			await canvas.findByRole("link", { name: /HubSpot/ }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("Overnight outbound")).toBeInTheDocument();
 		await expect(canvas.getByText("Inbound lead")).toBeInTheDocument();
