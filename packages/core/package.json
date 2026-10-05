@@ -21,7 +21,7 @@
 		"@effect/sql-pg": "catalog:",
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@mozilla/readability": "^0.6.0",
-		"@opencode-ai/models": "^0.0.85",
+		"@opencode-ai/models": "^0.0.92",
 		"@openrouter/ai-sdk-provider": "^3.1.0",
 		"@sugabots/accounting": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
