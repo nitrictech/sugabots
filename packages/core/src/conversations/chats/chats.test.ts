@@ -172,7 +172,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(list?.items).toEqual([
 			{
 				agent: expect.objectContaining({ id: agentId }),
-				chatId: current.id,
+				chat: expect.objectContaining({ id: current.id, mainThreadId: current.mainThreadId }),
 				lastMessage: {
 					preview: "Budget review is Friday",
 					authorUserId: userId,
@@ -184,7 +184,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 			{
 				agent: expect.objectContaining({ id: recipientAgentId }),
-				chatId: null,
+				chat: null,
 				lastMessage: null,
 				waitingOn: null,
 				unread: false,

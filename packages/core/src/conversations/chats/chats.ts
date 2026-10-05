@@ -8,12 +8,12 @@ import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import type * as schema from "../../database/schema.ts";
 import { agent, pod } from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { crewOf, personAuthor, personColumns, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
+import { toChat } from "./chat.ts";
 
 /**
  * Talking to a crew agent: the current actor opens a chat with an agent in a
@@ -197,15 +197,3 @@ const hostModelOf = (agentId: string) =>
 		),
 		([row]) => row?.model ?? null,
 	);
-
-function toChat(row: schema.ChatRow): Chat {
-	return {
-		id: row.id,
-		workspaceId: row.workspaceId,
-		podId: row.podId,
-		hostAgentId: row.hostAgentId,
-		mainThreadId: row.mainThreadId,
-		createdAt: row.createdAt.toISOString(),
-		updatedAt: row.updatedAt.toISOString(),
-	};
-}

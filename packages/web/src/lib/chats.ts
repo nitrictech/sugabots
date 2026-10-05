@@ -8,6 +8,7 @@ import {
 } from "@sugabots/contracts";
 import {
 	type QueryClient,
+	queryOptions,
 	skipToken,
 	useInfiniteQuery,
 	useMutation,
@@ -23,10 +24,8 @@ import { useWorkspace } from "@/lib/workspace.ts";
 const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
-/** The conversation list for a pod, by its id: one row per bot, newest first. */
-export function useChatList(pod: string | undefined) {
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
+function chatListQuery(workspaceId: string | undefined, pod: string | undefined) {
+	return queryOptions({
 		queryKey: ["chat-list", workspaceId, pod],
 		queryFn:
 			workspaceId && pod
@@ -37,6 +36,11 @@ export function useChatList(pod: string | undefined) {
 						)
 				: skipToken,
 	});
+}
+
+/** The conversation list for a pod, by its id: one row per bot, newest first. */
+export function useChatList(pod: string | undefined) {
+	return useQuery(chatListQuery(useWorkspace().workspace?.id, pod));
 }
 
 /** How each pod stands for the rail: its unread chats, and whether any waits on the person. */
@@ -96,20 +100,34 @@ export function refreshChatMarkers(queries: QueryClient, workspaceId: string | u
 	]);
 }
 
+/**
+ * The chat with `hostAgentId` in the pod. It is read from the pod's
+ * conversation list, which the screen loads anyway, so a chat that exists
+ * costs no request of its own. Only a bot whose chat the list lacks, because
+ * it was never opened or was opened after the list loaded, has one opened
+ * with a request.
+ */
 export function useChat(podId: string | undefined, hostAgentId: string) {
+	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["chat", workspaceId, podId, hostAgentId],
 		queryFn:
 			workspaceId && podId
-				? ({ signal }) =>
-						Effect.runPromise(
-							client.api.chats.getOrCreate({
-								params: { workspace: workspaceId },
-								payload: { podId, hostAgentId },
-							}),
-							{ signal },
-						)
+				? async ({ signal }) => {
+						const list = await queries.ensureQueryData(chatListQuery(workspaceId, podId));
+						const listed = list.items.find((item) => item.agent.id === hostAgentId)?.chat;
+						return (
+							listed ??
+							Effect.runPromise(
+								client.api.chats.getOrCreate({
+									params: { workspace: workspaceId },
+									payload: { podId, hostAgentId },
+								}),
+								{ signal },
+							)
+						);
+					}
 				: skipToken,
 	});
 }

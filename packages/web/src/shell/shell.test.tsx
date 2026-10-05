@@ -326,14 +326,22 @@ describe("the conversation list", () => {
 				items: [
 					{
 						agent: linear,
-						chatId: "0199a3a0-0000-7000-8000-0000000000c1",
+						chat: {
+							id: "0199a3a0-0000-7000-8000-0000000000c1",
+							workspaceId: workspace.id,
+							podId: linear.podId,
+							hostAgentId: linear.id,
+							mainThreadId: "0199a3a0-0000-7000-8000-0000000000c2",
+							createdAt: "2026-09-18T08:00:00.000Z",
+							updatedAt: "2026-09-18T08:00:00.000Z",
+						},
 						lastMessage: {
 							preview: "File the timeout as a bug",
 							authorUserId: sam.id,
 							at: new Date().toISOString(),
 						},
 					},
-					{ agent: triager, chatId: null, lastMessage: null },
+					{ agent: triager, chat: null, lastMessage: null },
 				],
 			}),
 		);
