@@ -48,6 +48,7 @@ const details: ThreadDetails = {
 	thread,
 	routineExecution: null,
 	crew: [],
+	members: [],
 	participants: [
 		testPerson({ id: USER, name: "Sam" }),
 		{

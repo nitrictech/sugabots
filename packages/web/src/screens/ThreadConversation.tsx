@@ -73,8 +73,8 @@ export function ThreadConversation({
 	host: AgentParticipant;
 	isRunning: boolean;
 	/**
-	 * Everyone in the thread and the pod's crew: how a collaboration's other bot
-	 * is found, and who a mention can name.
+	 * Everyone in the thread and the pod's bots and people: how a
+	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: ThreadParticipant[];
 	user: SessionUser;

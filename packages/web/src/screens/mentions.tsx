@@ -1,5 +1,9 @@
 import { botColorVariables } from "@sugabots/avatars";
-import { splitAroundMentions, type ThreadParticipant } from "@sugabots/contracts";
+import {
+	splitAroundMentions,
+	type ThreadDetails,
+	type ThreadParticipant,
+} from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
 import { createContext, type ReactNode, useContext } from "react";
@@ -13,6 +17,21 @@ import { visit } from "unist-util-visit";
  * a mention inside a list item or a bold run is still a mention while one
  * inside a code span, its own node type, is left alone.
  */
+
+/**
+ * Everyone a mention in the thread can name: those in it, then the pod's bots
+ * and people who are not.
+ */
+export function mentionableIn(
+	details: Pick<ThreadDetails, "participants" | "crew" | "members">,
+): ThreadParticipant[] {
+	const joined = new Set(details.participants.map(({ id }) => id));
+	return [
+		...details.participants,
+		...details.crew.filter(({ id }) => !joined.has(id)),
+		...details.members.filter(({ id }) => !joined.has(id)),
+	];
+}
 
 function participantWithHandle(
 	mentionable: ThreadParticipant[],

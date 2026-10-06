@@ -37,6 +37,7 @@ import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
+import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
@@ -194,12 +195,9 @@ export function AgentChat({
 			</EmptyState>
 		);
 
+	const mentionable = mentionableIn(details);
 	// Anyone but yourself; naming another bot here has this chat's bot ask it.
-	// The crew is the pod's agents, so leave out those who have joined.
-	const composerMentionable = [
-		...details.participants.filter((participant) => participant.id !== user.id),
-		...details.crew.filter((member) => !details.participants.some(({ id }) => id === member.id)),
-	];
+	const composerMentionable = mentionable.filter((candidate) => candidate.id !== user.id);
 	const otherPeople = details.participants.filter(
 		(participant) => participant.kind === "person" && participant.id !== user.id,
 	);
@@ -257,7 +255,7 @@ export function AgentChat({
 										messages={group.messages}
 										host={host}
 										isRunning={false}
-										participants={[...details.participants, ...details.crew]}
+										participants={mentionable}
 										user={user}
 										dividers={false}
 										onOpenCollaboration={openThread}

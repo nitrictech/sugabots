@@ -68,6 +68,8 @@ const routineExecution: RoutineExecution = {
 	finishedAt: "2026-09-18T08:30:00.000Z",
 };
 const person = testPerson({ id: sam.id, name: sam.name });
+/** In the pod, but has not written in any of its threads. */
+const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-000000000501", name: "Robin Vale" });
 const host = {
 	kind: "agent" as const,
 	id: linear.id,
@@ -244,6 +246,7 @@ function details(
 		routineExecution: type === "routine" ? routineExecution : null,
 		participants: type === "collaboration" ? [host, collaborator] : [person, host],
 		crew: [host, collaborator],
+		members: [person, podmate],
 		messages,
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -518,15 +521,16 @@ describe("ongoing agent Chat", () => {
 		);
 	});
 
-	it("offers the pod's other bots to mention, though they never join the chat, and not you", async () => {
+	it("offers the pod's other bots and people to mention, though they never join the chat, and not you", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		fireEvent.change(composer, { target: { value: "@" } });
 
 		const list = within(await screen.findByRole("listbox"));
 		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
+		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		expect(list.getAllByRole("option")).toHaveLength(2);
+		expect(list.getAllByRole("option")).toHaveLength(3);
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {

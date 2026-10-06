@@ -160,7 +160,7 @@ export class InvalidThreadHistoryCursor
 
 /**
  * The thread, a page of its messages with their authors and the parts placed in
- * them, its participants and its pod's crew: one statement.
+ * them, its participants and its pod's crew and members: one statement.
  */
 const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 	db: Executor,
@@ -184,6 +184,7 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 						where: { systemAgentKey: { isNull: true } },
 						orderBy: { name: "asc" },
 					},
+					members: { ...personColumns, orderBy: { name: "asc" } },
 				},
 			},
 			participants: {
@@ -236,6 +237,7 @@ function toThreadDetails(
 			toParticipant(authorRow(person, participant)),
 		),
 		crew: row.pod.agents.map((crewAgent): ThreadParticipant => ({ kind: "agent", ...crewAgent })),
+		members: row.pod.members.map(toPerson),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn?.error)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest

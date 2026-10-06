@@ -38,6 +38,10 @@ export const relations = defineRelations(schema, (r) => ({
 	},
 	pod: {
 		agents: r.many.agent({ from: r.pod.id, to: r.agent.podId }),
+		members: r.many.user({
+			from: r.pod.id.through(r.podMember.podId),
+			to: r.user.id.through(r.podMember.userId),
+		}),
 	},
 	message: {
 		authorUser: r.one.user({ from: r.message.authorUserId, to: r.user.id }),
