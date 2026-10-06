@@ -5,6 +5,7 @@ import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import { UserMessage } from "../../../user-message.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
+import { REQUEST_SOFTWARE_TOOL } from "../software/tool.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
 export const READ_FILE_TOOL = "read_file";
@@ -135,7 +136,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 	return tool({
-		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
+		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}. For software the sandbox lacks, run "nix shell nixpkgs#<name> -c <command>" for this once, or call ${REQUEST_SOFTWARE_TOOL} to keep it for the pod.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",

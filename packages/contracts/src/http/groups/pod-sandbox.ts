@@ -3,7 +3,10 @@ import {
 	newSandboxHostSchema,
 	podSandboxNetworkSchema,
 	podSandboxSchema,
+	podSandboxSoftwareSchema,
 	sandboxHostSchema,
+	sandboxPackageNameSchema,
+	sandboxSoftwareChannelSchema,
 } from "../../sandbox-providers.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, refused } from "../errors.ts";
@@ -14,7 +17,8 @@ const params = { podId: uuidSchema };
 
 /**
  * A pod's sandbox: how it stands, starting it afresh or moving its work to the
- * current image, and the hosts it may reach beyond what the workspace allows.
+ * current image, the hosts it may reach beyond what the workspace allows, and
+ * the software it has beyond its image.
  */
 export class PodSandboxApi extends HttpApiGroup.make("podSandbox")
 	.add(
@@ -43,6 +47,16 @@ export class PodSandboxApi extends HttpApiGroup.make("podSandbox")
 		HttpApiEndpoint.delete("removeHost", `${root}/network/hosts/:host`, {
 			params: { ...params, host: sandboxHostSchema },
 			success: podSandboxNetworkSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("software", `${root}/software`, {
+			params,
+			success: podSandboxSoftwareSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.delete("removePackage", `${root}/software/:channel/:name`, {
+			params: { ...params, channel: sandboxSoftwareChannelSchema, name: sandboxPackageNameSchema },
+			success: podSandboxSoftwareSchema,
 			error: refused,
 		}),
 	)

@@ -13,6 +13,7 @@ import type { SearchProviderSetup } from "@sugabots/core/providers/search-provid
 import type { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import type { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import type { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
+import type { SandboxSoftware } from "@sugabots/core/sandboxes/sandbox-software";
 import type { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
@@ -41,6 +42,7 @@ export type HttpServices =
 	| SearchProviderSetup.Service
 	| SandboxProviderSetup.Service
 	| SandboxNetwork.Service
+	| SandboxSoftware.Service
 	| DesktopViewer.Service
 	| PodSandboxSetup.Service
 	| ConnectionSetup.Service

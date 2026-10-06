@@ -30,6 +30,7 @@ import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
+import { SandboxSoftware } from "@sugabots/core/sandboxes/sandbox-software";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
@@ -89,6 +90,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SearchProviderSetup.layer,
 	SandboxProviderSetup.layer,
 	SandboxNetwork.layer,
+	SandboxSoftware.layer,
 	PodSandboxSetup.layer,
 	ConnectionSetup.layer,
 	ModelTrials.layer,

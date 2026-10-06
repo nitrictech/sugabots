@@ -66,7 +66,7 @@ const meta = preview.meta({
 	title: "Views/PodSandboxSettings",
 	component: PodSandboxSettings,
 	tags: ["ai-generated"],
-	args: { podId, canManageNetwork: true },
+	args: { podId, canManageSandbox: true },
 	parameters: { layout: "fullscreen", docs: { story: { inline: false, height: "520px" } } },
 	decorators: [
 		(Story, context) => (
@@ -79,6 +79,7 @@ const meta = preview.meta({
 		msw.use(
 			answers(running),
 			http.get(`${sandboxUrl}/network`, () => HttpResponse.json(network)),
+			http.get(`${sandboxUrl}/software`, () => HttpResponse.json({ packages: [] })),
 			http.post(`${sandboxUrl}/*`, () =>
 				HttpResponse.json(
 					{ _tag: "InternalServerError", message: "This preview does not change sandboxes." },
@@ -144,7 +145,7 @@ export const NoneYet = meta.story({
 
 /** Someone who can see the pod but not change it sees how it stands, without the actions. */
 export const AsAMember = meta.story({
-	args: { canManageNetwork: false },
+	args: { canManageSandbox: false },
 	beforeEach({ msw }) {
 		msw.use(answers({ ...running, canManage: false }));
 	},

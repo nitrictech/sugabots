@@ -11,6 +11,9 @@ export const BUILT_IN_HANDLE = "";
 /** The built-in tool an agent asks with for its sandbox to reach another host. */
 export const NETWORK_REQUEST_TOOL = "request_network_access";
 
+/** The built-in tool an agent asks with for software to be installed in its sandbox for good. */
+export const SOFTWARE_REQUEST_TOOL = "request_software";
+
 /**
  * The browser tools' names start with this. They are the product's own, all
  * one app, the agent's browser, and each step is named by what it does.

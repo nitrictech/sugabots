@@ -1,3 +1,4 @@
+import type { SandboxSoftwareChannel } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
@@ -52,6 +53,24 @@ export function usePodSandboxNetwork(podId: string) {
 			mutationFn: (host: string) =>
 				Effect.runPromise(client.api.podSandbox.removeHost({ params: { podId, host } })),
 			...store,
+		}),
+	};
+}
+
+/** The software the pod's sandbox has beyond its image, and removing a package. */
+export function usePodSandboxSoftware(podId: string) {
+	const queryClient = useQueryClient();
+	const queryKey = ["pod-sandbox-software", podId];
+	return {
+		software: useQuery({
+			queryKey,
+			queryFn: ({ signal }) =>
+				Effect.runPromise(client.api.podSandbox.software({ params: { podId } }), { signal }),
+		}),
+		removePackage: useMutation({
+			mutationFn: (software: { name: string; channel: SandboxSoftwareChannel }) =>
+				Effect.runPromise(client.api.podSandbox.removePackage({ params: { podId, ...software } })),
+			onSuccess: (data) => queryClient.setQueryData(queryKey, data),
 		}),
 	};
 }

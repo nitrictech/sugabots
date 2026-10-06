@@ -193,3 +193,34 @@ export const sandboxBlockedHost = pgTable(
 	},
 	(table) => [compositePrimaryKey({ columns: [table.workspaceId, table.host] })],
 );
+
+/**
+ * A package from nixpkgs the pod's sandbox has, from a NixOS release or from
+ * unstable, at the nixpkgs commit it was first installed from. Every sandbox
+ * the pod has is given the same build, so a new one gets the pod's software
+ * back. Added by allowing an agent's request for it.
+ */
+export const sandboxPodPackage = pgTable(
+	"sandbox_pod_package",
+	{
+		workspaceId: uuid("workspace_id").notNull(),
+		podId: uuid("pod_id").notNull(),
+		/** Its attribute in nixpkgs, such as `ffmpeg` or `python3Packages.pandas`. */
+		name: text("name").notNull(),
+		channel: text("channel").$type<"stable" | "unstable">().notNull(),
+		/** The nixpkgs commit it is built from. */
+		nixpkgsRev: text("nixpkgs_rev").notNull(),
+		/** Who allowed the request for it. */
+		addedById: uuid("added_by_id").references(() => user.id, { onDelete: "set null" }),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		compositePrimaryKey({ columns: [table.podId, table.channel, table.name] }),
+		foreignKey({
+			columns: [table.podId, table.workspaceId],
+			foreignColumns: [pod.id, pod.workspaceId],
+			name: "sandbox_pod_package_pod_workspace_fkey",
+		}).onDelete("cascade"),
+		check("sandbox_pod_package_channel_check", sql`${table.channel} in ('stable', 'unstable')`),
+	],
+);

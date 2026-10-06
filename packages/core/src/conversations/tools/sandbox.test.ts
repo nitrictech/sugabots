@@ -1,9 +1,11 @@
 import type { ToolSet } from "ai";
+import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	pod,
 	sandboxAllowedHost,
+	sandboxPodPackage,
 	user,
 	workspace,
 	workspaceMember,
@@ -124,6 +126,35 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		call(tools, "run_command", { command, timeout_seconds: 30 }).then((result) =>
 			String(result.stdout).trim(),
 		);
+
+	it(
+		"gives the pod's sandbox the software it has recorded, on every command's PATH, and takes it away",
+		async () => {
+			// A NixOS 26.05 commit, which stays where it is.
+			const nixpkgsRev = "0d9e9b832d03ac387417e16ce1febf73b2e631e1";
+			await onDatabase((db) =>
+				db
+					.insert(sandboxPodPackage)
+					.values({ ...thePod, name: "hello", channel: "stable", nixpkgsRev }),
+			);
+
+			const installed = await run(
+				await toolsFor("turn-software-1", "thread-s", "agent-1"),
+				"hello",
+			);
+			await onDatabase((db) =>
+				db.delete(sandboxPodPackage).where(eq(sandboxPodPackage.podId, thePod.podId)),
+			);
+			const removed = await run(
+				await toolsFor("turn-software-2", "thread-s", "agent-1"),
+				"command -v hello || echo gone",
+			);
+
+			expect(installed).toBe("Hello, world!");
+			expect(removed).toBe("gone");
+		},
+		SLOW,
+	);
 
 	it(
 		"starts commands in the thread's folder, with the agent's home as HOME",

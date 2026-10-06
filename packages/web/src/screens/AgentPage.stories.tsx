@@ -349,11 +349,7 @@ export const Sandbox = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole(
-				"button",
-				{ name: "Sandbox desktop" },
-				{ timeout: 10_000 },
-			),
+			await canvas.findByRole("button", { name: "Sandbox desktop" }, { timeout: 10_000 }),
 		).toBeVisible();
 	},
 });
