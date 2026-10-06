@@ -10,6 +10,8 @@ import { Sandboxes } from "./sandboxes.ts";
  * - OpenSandbox: `docker compose --profile sandboxes up -d`, then
  *   OPENSANDBOX_URL=http://localhost:8090 and OPENSANDBOX_API_KEY.
  * - E2B: E2B_API_KEY, plus E2B_API_URL and E2B_SANDBOX_URL for E2B Embed.
+ * - Cloudflare: the Worker in packages/cloudflare-sandbox, deployed or under
+ *   `wrangler dev`, at CLOUDFLARE_SANDBOX_URL with CLOUDFLARE_SANDBOX_API_KEY.
  */
 const env = process.env;
 
@@ -36,6 +38,16 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 						: {}),
+				}
+			: undefined,
+	],
+	[
+		"Cloudflare",
+		env.CLOUDFLARE_SANDBOX_URL && env.CLOUDFLARE_SANDBOX_API_KEY
+			? {
+					provider: "cloudflare",
+					workerUrl: env.CLOUDFLARE_SANDBOX_URL,
+					apiKey: Redacted.make(env.CLOUDFLARE_SANDBOX_API_KEY),
 				}
 			: undefined,
 	],
@@ -243,11 +255,7 @@ describe.each(connections)("%s sandboxes", (_, connection) => {
 				await run(Effect.flatMap(provider, (p) => p.destroy(made.id)));
 
 				expect(running.state).toBe("running");
-				expect(running.image).toContain(
-					connection?.provider === "e2b"
-						? connection.template
-						: (connection as Sandboxes.OpenSandboxConnection).image,
-				);
+				expect(running.image).toContain(await run(Effect.flatMap(provider, (p) => p.image)));
 				expect(paused.state).toBe("paused");
 			},
 			SLOW,

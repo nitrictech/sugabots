@@ -52,7 +52,10 @@ export const sandboxProvider = pgTable(
 	(table) => [
 		uniqueIndex("sandbox_provider_enabled_idx").on(table.workspaceId).where(sql`${table.enabled}`),
 		uniqueIndex("sandbox_provider_id_workspace_id_idx").on(table.id, table.workspaceId),
-		check("sandbox_provider_preset_check", sql`${table.preset} in ('opensandbox', 'e2b')`),
+		check(
+			"sandbox_provider_preset_check",
+			sql`${table.preset} in ('opensandbox', 'e2b', 'cloudflare')`,
+		),
 	],
 );
 

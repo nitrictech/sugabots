@@ -1,0 +1,22 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "sugabots-sandboxes",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-15",
+	"durable_objects": {
+		"bindings": [{ "name": "SANDBOX", "class_name": "Sandbox" }]
+	},
+	"containers": [
+		{
+			"class_name": "Sandbox",
+			"scheduling_policy": "durable_object",
+			"images": { "sandbox": { "dockerfile": "./Dockerfile" } }
+		}
+	],
+	"exports": {
+		"Sandbox": { "type": "durable-object", "storage": "sqlite" }
+	},
+	"observability": { "enabled": true }
+	// API_KEY, the bearer token Sugabots sends, is a secret: `wrangler secret put API_KEY`,
+	// or `.dev.vars` for `wrangler dev`.
+}

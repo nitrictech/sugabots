@@ -62,6 +62,7 @@ export const fromOpenSandbox = (
 		// Docker keeps memory across a pause, but Kubernetes keeps only the
 		// root filesystem, and the server doesn't say which it runs on.
 		capabilities: { pauseKeeps: "disk" },
+		image: Effect.succeed(connection.image),
 		check: Effect.tryPromise({
 			try: () => manager().listSandboxInfos({ pageSize: 1 }),
 			catch: unavailable,

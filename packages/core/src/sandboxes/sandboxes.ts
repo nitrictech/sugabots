@@ -3,6 +3,7 @@ export * as Sandboxes from "./sandboxes.ts";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
+import { fromCloudflare } from "./implementations/cloudflare.ts";
 import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
 
@@ -22,6 +23,8 @@ export const make = Effect.gen(function* () {
 					return fromE2b(connection, ids);
 				case "opensandbox":
 					return fromOpenSandbox(connection, ids);
+				case "cloudflare":
+					return fromCloudflare(connection);
 			}
 		},
 	});
@@ -47,6 +50,8 @@ export interface Provider {
 	readonly templates?: TemplateBuilds;
 	/** Whether the service answers and accepts the key, without making anything. */
 	readonly check: Effect.Effect<void, Unavailable>;
+	/** What a sandbox made now would be made from, as {@link Info.image} names it. */
+	readonly image: Effect.Effect<string, Unavailable>;
 	readonly create: (spec: Spec) => Effect.Effect<Sandbox, Unavailable>;
 	/**
 	 * The sandbox with this id, resumed first if it was paused. `resumed` says
@@ -104,7 +109,7 @@ export interface Capabilities {
 }
 
 /** What a workspace's settings say about reaching its provider. */
-export type Connection = E2bConnection | OpenSandboxConnection;
+export type Connection = E2bConnection | OpenSandboxConnection | CloudflareConnection;
 
 export interface E2bConnection {
 	readonly provider: "e2b";
@@ -125,6 +130,19 @@ export interface OpenSandboxConnection {
 	readonly apiKey: Redacted.Redacted;
 	/** The image sandboxes are made from. */
 	readonly image: string;
+}
+
+export interface CloudflareConnection {
+	readonly provider: "cloudflare";
+	/**
+	 * Where the workspace deployed Sugabots' sandbox Worker
+	 * (`packages/cloudflare-sandbox`), such as
+	 * https://sugabots-sandboxes.example.workers.dev. Its deployment decides
+	 * the image.
+	 */
+	readonly workerUrl: string;
+	/** The Worker's `API_KEY` secret. */
+	readonly apiKey: Redacted.Redacted;
 }
 
 export type SandboxId = Brand.Branded<string, "SandboxId">;

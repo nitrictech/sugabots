@@ -204,3 +204,32 @@ export const E2bTemplateReady = meta.story({
 		await expect(canvas.getByText(/Sugabots' latest image/)).toBeVisible();
 	},
 });
+
+/**
+ * Cloudflare with a key but no Worker address yet: it asks for the address of
+ * the Worker the workspace deployed, and has no image to set, since the
+ * Worker's deployment decides it.
+ */
+export const CloudflareNeedsWorker = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			answers([
+				{
+					...openSandbox,
+					id: "0199a3a0-0000-7000-8000-0000000000f3",
+					preset: "cloudflare",
+					name: "Cloudflare",
+					settings: { preset: "cloudflare" },
+					hasApiKey: true,
+					status: "untested",
+				},
+			]),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByLabelText("Worker URL")).toBeVisible();
+		await expect(canvas.queryByLabelText("Image")).not.toBeInTheDocument();
+		await expect(canvas.getByText(/needs its Worker's address and API key/)).toBeVisible();
+		await expect(canvas.getByRole("switch", { name: "Bots can use a sandbox" })).toBeDisabled();
+	},
+});

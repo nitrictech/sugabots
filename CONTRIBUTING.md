@@ -21,16 +21,17 @@ lines in `.env` (see `.env.example`). For local development,
 
 ## Project layout
 
-| Directory            | Responsibility                                                                 |
-| -------------------- | ------------------------------------------------------------------------------ |
-| `packages/contracts` | Portable API schemas and shared wire types                                     |
-| `packages/core`      | Domain services, database schema and migrations, and the durable workflows     |
-| `packages/server`    | HTTP API, authentication, configuration, and process composition               |
-| `packages/workflow`  | The workflow engines (in memory, and single-runner on Postgres) and activities |
-| `packages/sdk`       | Typed API, authentication, and reconnecting SSE client                         |
-| `packages/web`       | React and Vite web app                                                         |
-| `packages/docs`      | The docs pages, which the website publishes                                    |
-| `packages/website`   | Landing page and docs, prerendered and served from Cloudflare                  |
+| Directory                     | Responsibility                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `packages/contracts`          | Portable API schemas and shared wire types                                     |
+| `packages/core`               | Domain services, database schema and migrations, and the durable workflows     |
+| `packages/server`             | HTTP API, authentication, configuration, and process composition               |
+| `packages/workflow`           | The workflow engines (in memory, and single-runner on Postgres) and activities |
+| `packages/sdk`                | Typed API, authentication, and reconnecting SSE client                         |
+| `packages/web`                | React and Vite web app                                                         |
+| `packages/docs`               | The docs pages, which the website publishes                                    |
+| `packages/website`            | Landing page and docs, prerendered and served from Cloudflare                  |
+| `packages/cloudflare-sandbox` | The Worker that runs sandboxes in a workspace's Cloudflare account             |
 
 ## Docs
 

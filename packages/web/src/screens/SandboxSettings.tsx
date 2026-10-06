@@ -35,6 +35,7 @@ import { TextEntryRow } from "./text-entry-row.tsx";
 const providerDescriptions: Record<SandboxProviderPresetId, string> = {
 	opensandbox: "Runs on your own Docker or Kubernetes",
 	e2b: "Hosted microVMs, or E2B Embed on your own server",
+	cloudflare: "Containers in your Cloudflare account, through a Worker you deploy",
 };
 
 export function SandboxSettings() {
@@ -58,7 +59,10 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 		actions.update.isPending ||
 		actions.test.isPending ||
 		actions.remove.isPending;
-	const ready = configured?.hasApiKey === true;
+	// OpenSandbox starts with its usual address; Cloudflare's Worker has none until it's given.
+	const ready =
+		configured?.hasApiKey === true &&
+		(configured.settings.preset !== "cloudflare" || configured.settings.workerUrl !== undefined);
 
 	async function act(work: () => Promise<unknown>) {
 		setError(undefined);
@@ -98,7 +102,9 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 			<SettingsGroup
 				note={
 					!ready
-						? `${preset.name} needs an API key first. Add it below.`
+						? chosen === "cloudflare"
+							? "Cloudflare needs its Worker's address and API key first. Add them below."
+							: `${preset.name} needs an API key first. Add it below.`
 						: enabled && enabled.preset !== chosen
 							? `Turning this on moves sandboxes from ${enabled.name} to ${preset.name}. Each pod gets a new one, without the old one's files.`
 							: undefined
@@ -220,6 +226,7 @@ function ProviderSettings({
 }) {
 	const preset = sandboxProviderPreset(chosen);
 	const settings: SandboxProviderSettings = provider?.settings ?? { preset: chosen };
+	const image = preset.image;
 	const [removingKey, setRemovingKey] = useState(false);
 	const [removing, setRemoving] = useState(false);
 	const [removeError, setRemoveError] = useState<string>();
@@ -236,6 +243,15 @@ function ProviderSettings({
 					onSave={(serverUrl) => onConfigure({ settings: { ...settings, serverUrl } })}
 				/>
 			)}
+			{settings.preset === "cloudflare" && (
+				<TextEntryRow
+					label="Worker URL"
+					saved={settings.workerUrl}
+					placeholder="https://sugabots-sandboxes.example.workers.dev"
+					disabled={pending}
+					onSave={(workerUrl) => onConfigure({ settings: { ...settings, workerUrl } })}
+				/>
+			)}
 			<TextEntryRow
 				label="API key"
 				secret
@@ -245,22 +261,22 @@ function ProviderSettings({
 				onSave={(apiKey) => onConfigure({ apiKey })}
 				onRemove={hasKey ? () => setRemovingKey(true) : undefined}
 			/>
-			{settings.preset === "opensandbox" && (
+			{settings.preset === "opensandbox" && image && (
 				<TextEntryRow
-					label={preset.imageLabel}
+					label={image.label}
 					saved={settings.image}
-					placeholder={preset.defaultImage}
+					placeholder={image.default}
 					disabled={pending}
 					clearable
 					onSave={(image) => onConfigure({ settings: { ...settings, image: image || undefined } })}
 				/>
 			)}
-			{settings.preset === "e2b" && (
+			{settings.preset === "e2b" && image && (
 				<>
 					<TextEntryRow
-						label={preset.imageLabel}
+						label={image.label}
 						saved={settings.template}
-						placeholder={preset.defaultImage}
+						placeholder={image.default}
 						disabled={pending}
 						clearable
 						onSave={(template) =>
@@ -385,9 +401,14 @@ function TemplateRow({ providerId }: { providerId: string }) {
 }
 
 function hint(preset: SandboxProviderPresetId): string {
-	return preset === "opensandbox"
-		? "The server's own API key, from its configuration. Leave the image empty to use the default."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both.";
+	switch (preset) {
+		case "opensandbox":
+			return "The server's own API key, from its configuration. Leave the image empty to use the default.";
+		case "e2b":
+			return "Leave the URLs empty for E2B Cloud. For E2B Embed, give both.";
+		case "cloudflare":
+			return "Deploy Sugabots' sandbox Worker to your Cloudflare account, then give its address and its API_KEY secret. Deploying it again moves new sandboxes to the latest image.";
+	}
 }
 
 /** What the last test said, once one has run, or what the provider recorded. */

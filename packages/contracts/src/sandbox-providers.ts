@@ -24,7 +24,7 @@ export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
  */
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
 
-export const sandboxProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
+export const sandboxProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b", "cloudflare"]);
 export type SandboxProviderPresetId = typeof sandboxProviderPresetIdSchema.Type;
 
 export interface SandboxProviderPreset {
@@ -34,9 +34,12 @@ export interface SandboxProviderPreset {
 	hosting: "remote" | "local";
 	/** The address a local preset is usually at. */
 	baseUrl?: string;
-	/** What sandboxes are made from: an image for OpenSandbox, a template for E2B. */
-	imageLabel: string;
-	defaultImage: string;
+	/**
+	 * What sandboxes are made from, which a workspace may change: an image for
+	 * OpenSandbox, a template for E2B. Absent for Cloudflare, where the
+	 * deployment of the workspace's Worker decides it.
+	 */
+	image?: { label: string; default: string };
 }
 
 export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
@@ -45,15 +48,18 @@ export const sandboxProviderCatalog: readonly SandboxProviderPreset[] = [
 		name: "OpenSandbox",
 		hosting: "local",
 		baseUrl: "http://localhost:8090",
-		imageLabel: "Image",
-		defaultImage: SANDBOX_IMAGE,
+		image: { label: "Image", default: SANDBOX_IMAGE },
 	},
 	{
 		id: "e2b",
 		name: "E2B",
 		hosting: "remote",
-		imageLabel: "Template",
-		defaultImage: SANDBOX_E2B_TEMPLATE,
+		image: { label: "Template", default: SANDBOX_E2B_TEMPLATE },
+	},
+	{
+		id: "cloudflare",
+		name: "Cloudflare",
+		hosting: "remote",
 	},
 ];
 
@@ -86,6 +92,11 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		apiUrl: Schema.optional(providerUrlSchema),
 		sandboxUrl: Schema.optional(providerUrlSchema),
 		template: Schema.optional(imageSchema),
+	}),
+	Schema.Struct({
+		preset: Schema.Literal("cloudflare"),
+		/** The Worker the workspace deployed from packages/cloudflare-sandbox, whose deployment decides the image. */
+		workerUrl: Schema.optional(providerUrlSchema),
 	}),
 ]);
 

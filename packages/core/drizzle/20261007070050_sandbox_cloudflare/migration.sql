@@ -1,0 +1,1 @@
+ALTER TABLE "sandbox_provider" DROP CONSTRAINT "sandbox_provider_preset_check", ADD CONSTRAINT "sandbox_provider_preset_check" CHECK ("preset" in ('opensandbox', 'e2b', 'cloudflare'));

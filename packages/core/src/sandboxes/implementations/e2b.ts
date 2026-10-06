@@ -78,6 +78,7 @@ export const fromE2b = (
 					catch: unavailable,
 				}),
 		},
+		image: Effect.succeed(connection.template),
 		check: Effect.tryPromise({
 			try: () => E2bSandbox.list({ ...options(), limit: 1 }).nextItems(),
 			catch: unavailable,

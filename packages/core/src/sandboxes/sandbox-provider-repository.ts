@@ -5,7 +5,7 @@ import type {
 	SandboxProviderSettings,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { sandboxProviderPreset } from "@sugabots/contracts";
+import { SANDBOX_E2B_TEMPLATE, SANDBOX_IMAGE, sandboxProviderPreset } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
 import { Credentials } from "../credentials/credentials.ts";
@@ -88,7 +88,6 @@ export const make = Effect.gen(function* () {
 		if (!row.apiKeyEncrypted) return undefined;
 		const apiKey = Redacted.make(cipher.decrypt(row.apiKeyEncrypted));
 		const settings = row.settings;
-		const defaultImage = sandboxProviderPreset(settings.preset).defaultImage;
 		switch (settings.preset) {
 			case "opensandbox":
 				return settings.serverUrl
@@ -96,14 +95,18 @@ export const make = Effect.gen(function* () {
 							provider: "opensandbox",
 							baseUrl: settings.serverUrl,
 							apiKey,
-							image: settings.image ?? defaultImage,
+							image: settings.image ?? SANDBOX_IMAGE,
 						}
+					: undefined;
+			case "cloudflare":
+				return settings.workerUrl
+					? { provider: "cloudflare", workerUrl: settings.workerUrl, apiKey }
 					: undefined;
 			case "e2b":
 				return {
 					provider: "e2b",
 					apiKey,
-					template: settings.template ?? defaultImage,
+					template: settings.template ?? SANDBOX_E2B_TEMPLATE,
 					...(settings.apiUrl && settings.sandboxUrl
 						? { endpoints: { apiUrl: settings.apiUrl, sandboxUrl: settings.sandboxUrl } }
 						: {}),
@@ -303,6 +306,8 @@ export function isComplete({ settings, apiKeyEncrypted }: Omit<Provider, "enable
 	switch (settings.preset) {
 		case "opensandbox":
 			return settings.serverUrl !== undefined;
+		case "cloudflare":
+			return settings.workerUrl !== undefined;
 		case "e2b":
 			// E2B Embed needs both of its addresses; E2B Cloud needs neither.
 			return (settings.apiUrl === undefined) === (settings.sandboxUrl === undefined);
@@ -317,11 +322,7 @@ function incompleteFor({ settings, apiKeyEncrypted }: Provider) {
 	return Effect.fail(
 		new SandboxProviderIncomplete({
 			missing:
-				apiKeyEncrypted === null
-					? "key"
-					: settings.preset === "opensandbox"
-						? "address"
-						: "addresses",
+				apiKeyEncrypted === null ? "key" : settings.preset === "e2b" ? "addresses" : "address",
 		}),
 	);
 }
@@ -331,7 +332,9 @@ export function addressesIn(settings: SandboxProviderSettings): string[] {
 	const addresses =
 		settings.preset === "opensandbox"
 			? [settings.serverUrl]
-			: [settings.apiUrl, settings.sandboxUrl];
+			: settings.preset === "cloudflare"
+				? [settings.workerUrl]
+				: [settings.apiUrl, settings.sandboxUrl];
 	return addresses.filter((address) => address !== undefined);
 }
 

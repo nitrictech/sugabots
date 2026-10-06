@@ -501,6 +501,13 @@ export const make = Effect.gen(function* () {
 					};
 					const configured = yield* providers.connection(row.workspaceId, row.sandboxProviderId);
 					if (!configured) return { ...present, state: "unreachable", upgradeAvailable: false };
+					// Unknown, the image can't be said to have moved on.
+					const currentImage =
+						current === undefined
+							? undefined
+							: yield* sandboxes
+									.forConnection(current.connection)
+									.image.pipe(Effect.orElseSucceed(() => undefined));
 					return yield* sandboxes
 						.forConnection(configured.connection)
 						.info(row.providerSandboxId)
@@ -513,7 +520,7 @@ export const make = Effect.gen(function* () {
 									upgradeAvailable:
 										current !== undefined &&
 										(current.id !== row.sandboxProviderId ||
-											imageOf(current.connection) !== info.image),
+											(currentImage !== undefined && currentImage !== info.image)),
 								}),
 							),
 							Effect.catchTags({
@@ -739,11 +746,6 @@ export type Status =
 	  };
 
 const COPY_STEP = { timeout: "5 minutes", maxOutputCharacters: 4_000 } as const;
-
-/** The image or template a connection makes sandboxes from. */
-function imageOf(connection: Sandboxes.Connection): string {
-	return connection.provider === "e2b" ? connection.template : connection.image;
-}
 
 /** A turn is using the sandbox, and resetting or upgrading it would pull it out from under the agent. */
 export class SandboxInUse
