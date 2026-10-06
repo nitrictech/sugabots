@@ -60,6 +60,8 @@ export interface ConnectionToolSet {
 	tools: Record<string, OfferedTool>;
 	/** Connections left out because their server couldn't be listed. */
 	unavailable: string[];
+	/** What each connection's server says about using its tools, by handle. */
+	instructions: Record<string, string>;
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
 }
@@ -186,11 +188,10 @@ export function from({
 					});
 					return listing;
 				};
-				const offered = yield* Effect.forEach(
+				const listings = yield* Effect.forEach(
 					targets,
 					(target) =>
 						Effect.tryPromise(() => loadListing(target)).pipe(
-							Effect.map((listing) => buildOfferedTools(target, listing, openSession)),
 							Effect.catch((failure) =>
 								Effect.as(
 									Effect.logError(
@@ -203,11 +204,23 @@ export function from({
 						),
 					{ concurrency: "unbounded" },
 				);
+				const listed = targets.flatMap((target, index) => {
+					const listing = listings[index];
+					return listing ? [{ target, listing }] : [];
+				});
 				return {
-					tools: Object.assign({}, ...offered),
+					tools: Object.assign(
+						{},
+						...listed.map(({ target, listing }) => buildOfferedTools(target, listing, openSession)),
+					),
 					unavailable: targets
-						.filter((_, index) => offered[index] === undefined)
+						.filter((_, index) => listings[index] === undefined)
 						.map((target) => target.handle),
+					instructions: Object.fromEntries(
+						listed.flatMap(({ target, listing }) =>
+							listing.instructions ? [[target.handle, listing.instructions]] : [],
+						),
+					),
 					close: async () => {
 						await Promise.allSettled(
 							[...sessions.values()].map((session) => session.then((open) => open.close())),
@@ -247,6 +260,7 @@ function buildOfferedTools(
 const nothingOffered: ConnectionToolSet = {
 	tools: {},
 	unavailable: [],
+	instructions: {},
 	close: async () => undefined,
 };
 

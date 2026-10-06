@@ -446,7 +446,7 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: builtIn.usable,
-				connectionTools: connectionToolsNote(connections.tools, connections.unavailable),
+				connectionTools: connectionToolsNote(connections),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
