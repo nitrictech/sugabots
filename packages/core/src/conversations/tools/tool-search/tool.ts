@@ -172,7 +172,8 @@ export function findApprovalTarget(
 }
 
 function missingArguments(schema: JSONSchema7, args: Record<string, unknown>): string[] {
-	return (schema.required ?? []).filter((name) => !Object.hasOwn(args, name));
+	const required: readonly string[] = schema.required ?? [];
+	return required.filter((name) => !Object.hasOwn(args, name));
 }
 
 /** resolveToolKey returns the key `name` means: itself, or the one key ending in it as a tool's own name. */
