@@ -242,6 +242,7 @@ const collaboration: ThreadDetails = {
 	routineExecution: null,
 	participants: [asked, asker],
 	crew: [asker, asked],
+	members: [],
 	olderMessagesCursor: null,
 	queuedSince: null,
 	reads: [],

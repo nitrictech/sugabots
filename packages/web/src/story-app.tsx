@@ -160,6 +160,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		routineExecution: null,
 		participants: [person, bot],
 		crew: [bot],
+		members: [],
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],

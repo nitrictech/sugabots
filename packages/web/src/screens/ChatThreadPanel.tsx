@@ -19,6 +19,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
 import { ChatSidebar, sidebarBarButton } from "./ChatSidebar.tsx";
+import { mentionableIn } from "./mentions.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
@@ -217,7 +218,7 @@ export function ChatThreadPanel({
 							host={host}
 							// A notice says the reply is not coming, so nobody is shown typing it.
 							isRunning={details.thread.status === "running" && notices.length === 0}
-							participants={[...details.participants, ...details.crew]}
+							participants={mentionableIn(details)}
 							user={user}
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
 							onOpenCollaboration={onOpenThread}

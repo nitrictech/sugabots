@@ -387,6 +387,8 @@ export const threadDetailsSchema = Schema.Struct({
 	 * which is wider than who has joined.
 	 */
 	crew: Schema.mutable(Schema.Array(threadParticipantSchema)),
+	/** The pod's people, whether or not they have written here: the people a mention can name. */
+	members: Schema.mutable(Schema.Array(personParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),
 	/**
