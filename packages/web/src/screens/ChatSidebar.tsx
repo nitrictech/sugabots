@@ -8,11 +8,16 @@ import { type ReactNode, useState } from "react";
  * tablet it slides over the dimmed chat from the right, and on a phone it
  * covers the chat or, as a `sheet`, rises from the bottom over it.
  */
+/** A round button in the bar at the top of a sidebar, such as its Close. */
+export const sidebarBarButton =
+	"focus-ring grid size-8 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover";
+
 export function ChatSidebar({
 	label,
 	onClose,
 	sheet = false,
 	closedFromHeader = false,
+	actions,
 	className,
 	children,
 }: {
@@ -24,6 +29,8 @@ export function ChatSidebar({
 	 * Close of its own except on a phone, where it covers the header too.
 	 */
 	closedFromHeader?: boolean;
+	/** Buttons for what the sidebar shows, beside its Close; each styled with `sidebarBarButton`. */
+	actions?: ReactNode;
 	className?: string;
 	children: ReactNode;
 }) {
@@ -63,19 +70,17 @@ export function ChatSidebar({
 				{/* A sheet closes by its dimmed backdrop on a phone; Close stays for the keyboard. */}
 				<div
 					className={cn(
-						"flex shrink-0 justify-end px-3.5 pt-3.5",
+						"flex shrink-0 items-center justify-end gap-1.5 px-3.5 pt-3.5",
 						sheet && "max-md:absolute max-md:top-2 max-md:right-2 max-md:p-0",
 						closedFromHeader && "md:hidden",
 					)}
 				>
+					{actions}
 					<button
 						type="button"
 						aria-label="Close"
 						onClick={onClose}
-						className={cn(
-							"focus-ring grid size-8 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover",
-							sheet && "max-md:not-focus-visible:sr-only",
-						)}
+						className={cn(sidebarBarButton, sheet && "max-md:not-focus-visible:sr-only")}
 					>
 						<X size={15} strokeWidth={2.4} />
 					</button>

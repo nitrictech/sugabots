@@ -5,6 +5,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, Repeat } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useAgentWithPod } from "@/lib/agents.ts";
@@ -15,8 +16,9 @@ import { useThread } from "@/lib/threads.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
-import { ChatSidebar } from "./ChatSidebar.tsx";
+import { ChatSidebar, sidebarBarButton } from "./ChatSidebar.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 
@@ -93,6 +95,10 @@ export function ChatThreadPanel({
 			label={title}
 			onClose={onClose}
 			sheet
+			actions={
+				type === "routine" &&
+				routineExecution && <RoutineHeaderActions execution={routineExecution} />
+			}
 			// Wider than Details: it holds a whole conversation, bubbles and all.
 			className="w-[520px] bg-background md:max-xl:w-[min(560px,100%)]"
 		>
@@ -109,8 +115,16 @@ export function ChatThreadPanel({
 				</EmptyState>
 			) : (
 				<>
-					{/* On a phone the sheet has less room, so the heading sits beside smaller faces. */}
-					<header className="flex shrink-0 flex-col items-center gap-1.5 px-[18px] pb-[18px] text-center max-md:flex-row max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1 max-md:px-4 max-md:pb-3 max-md:text-left">
+					{/*
+					 * On a phone the sheet has less room, so the heading sits beside smaller
+					 * faces, and leaves room for a routine's buttons floating over its right.
+					 */}
+					<header
+						className={cn(
+							"flex shrink-0 flex-col items-center gap-1.5 px-[18px] pb-[18px] text-center max-md:flex-row max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1 max-md:px-4 max-md:pb-3 max-md:text-left",
+							type === "routine" && "max-md:pr-24",
+						)}
+					>
 						{parentRoutine && (
 							<button
 								type="button"
@@ -160,9 +174,6 @@ export function ChatThreadPanel({
 								{type === "collaboration" ? (other ? `with ${other.name}` : title) : "Routine run"}
 							</p>
 						</div>
-						{type === "routine" && routineExecution && (
-							<RoutineHeaderActions execution={routineExecution} />
-						)}
 					</header>
 					<div
 						ref={timeline}
@@ -226,17 +237,19 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 	const backToChat = useBackToHere("Chat");
 	const placed = useAgentWithPod(execution.agentId);
 	return (
-		<div className="flex items-center gap-1 pt-1">
+		<>
 			{execution.trigger.kind === "webhook" && (
 				<details className="group relative">
-					<summary
-						aria-label="View webhook payload"
-						className="focus-ring grid size-[30px] cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-list hover:text-foreground [&::-webkit-details-marker]:hidden"
-					>
-						<Braces aria-hidden size={15} />
-					</summary>
-					{/* Left-aligned: it hangs from a centred header, and code reads from the left. */}
-					<div className="absolute left-1/2 z-20 mt-2 w-[min(328px,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
+					<Tooltip label="View webhook payload">
+						<summary
+							aria-label="View webhook payload"
+							className={`${sidebarBarButton} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
+						>
+							<Braces aria-hidden size={15} strokeWidth={2.4} />
+						</summary>
+					</Tooltip>
+					{/* Hangs from the sidebar's top right corner, so it opens leftwards. */}
+					<div className="absolute right-0 z-20 mt-2 w-[min(328px,calc(100vw-2rem))] overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
 						{execution.trigger.idempotencyKey && (
 							<div className="flex items-baseline gap-2 border-border border-b px-4 py-2.5 text-[13px]">
 								<span className="text-muted-foreground">Idempotency key</span>
@@ -252,17 +265,19 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 				</details>
 			)}
 			{placed && (
-				<Link
-					{...agentSettingsLink(placed)}
-					state={backToChat}
-					search={{ tab: "routines" }}
-					aria-label="View routine definition"
-					className="focus-ring grid size-[30px] place-items-center rounded-lg text-muted-foreground hover:bg-list hover:text-link"
-				>
-					<ArrowUpRight aria-hidden size={15} />
-				</Link>
+				<Tooltip label="View routine definition">
+					<Link
+						{...agentSettingsLink(placed)}
+						state={backToChat}
+						search={{ tab: "routines" }}
+						aria-label="View routine definition"
+						className={sidebarBarButton}
+					>
+						<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
+					</Link>
+				</Tooltip>
 			)}
-		</div>
+		</>
 	);
 }
 
