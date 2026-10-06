@@ -25,8 +25,12 @@ import { ConversationEvent } from "../events.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import {
+	callToolApproval,
+	connectionToolsNote,
+	findApprovalTarget,
+} from "../tools/tool-search/tool.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
-import { connectionOfferAs, connectionOfferFitting } from "./connection-offer.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
 	type PreparedTurn,
@@ -405,17 +409,13 @@ const streamReply = (
 				}
 				approvalBoundTools.add(binding.tool);
 			}
-			const offer = prepared.checkpoint
-				? connectionOfferAs(prepared.checkpoint.connectionToolMode, connections.tools)
-				: connectionOfferFitting(connections.tools, prepared.context.windowTokens);
-			yield* Effect.annotateCurrentSpan("sugabots.connection_tool_mode", offer.mode);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
 				calls: toolCalls,
 				approvals,
 				approvalBoundTools,
 				builtIn,
-				connections: offer,
+				connections: connections.tools,
 				agents,
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
@@ -444,7 +444,7 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: Object.keys(builtIn),
-				connectionTools: offer.note,
+				connectionTools: connectionToolsNote(connections.tools),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
@@ -478,7 +478,7 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: offer.toolApproval,
+				toolApproval: callToolApproval(connections.tools),
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
@@ -499,7 +499,7 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const target = offer.findApprovalTarget(request.toolCall);
+					const target = findApprovalTarget(connections.tools, request.toolCall);
 					if (!target) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
@@ -545,7 +545,6 @@ const streamReply = (
 						reply: suspendedReply,
 						modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
 						contextTokens,
-						connectionToolMode: offer.mode,
 					},
 				};
 			});

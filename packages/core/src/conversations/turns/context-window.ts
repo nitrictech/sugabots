@@ -31,13 +31,6 @@ export function contextWindowTokens(contextLength: number | null | undefined): n
  */
 const HISTORY_LIMIT_SHARE = 0.9;
 
-/** Direct tool definitions sit outside the history limit, so this leaves room for the system text and reply. */
-const DIRECT_TOOL_DEFINITIONS_SHARE = 0.05;
-
-export function directToolDefinitionsLimitTokens(windowTokens: number): number {
-	return Math.floor(windowTokens * DIRECT_TOOL_DEFINITIONS_SHARE);
-}
-
 /** The most history a turn reading with this window is shown. */
 export function historyLimitTokens(windowTokens: number): number {
 	return Math.floor(windowTokens * HISTORY_LIMIT_SHARE);

@@ -17,6 +17,7 @@ import { conversationsForTests } from "../testing.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
+import { CALL_TOOL } from "../tools/tool-search/tool.ts";
 import { type PreparedTurn, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
@@ -266,8 +267,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 							toolCall: {
 								type: "tool-call",
 								toolCallId: "sdk-1",
-								toolName: "wiki__wipe",
-								input: {},
+								toolName: CALL_TOOL,
+								input: { tool: "wiki__wipe", arguments: {} },
 							},
 						},
 					] as never,

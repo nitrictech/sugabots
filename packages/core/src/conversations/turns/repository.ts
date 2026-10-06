@@ -782,10 +782,6 @@ const SdkModelMessage = Schema.declare(
 
 const OptionalCount = Schema.optional(Schema.Int);
 
-/** Connection tools are sent `direct`, or `bridged` behind `tool_search` and `call_tool`. */
-export const ConnectionToolMode = Schema.Literals(["direct", "bridged"]);
-export type ConnectionToolMode = typeof ConnectionToolMode.Type;
-
 /** Everything a suspended turn needs to continue once its approvals are decided. */
 export const TurnCheckpoint = Schema.Struct({
 	messages: Schema.Array(SdkModelMessage),
@@ -810,8 +806,6 @@ export const TurnCheckpoint = Schema.Struct({
 	modelCalls: OptionalCount,
 	/** The prompt's size at the turn's first model call, which a resumed segment keeps. */
 	contextTokens: OptionalCount,
-	/** Kept on resuming, since the calls awaiting approval were made to those tools. */
-	connectionToolMode: ConnectionToolMode.pipe(Schema.withDecodingDefault(Effect.succeed("direct"))),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 

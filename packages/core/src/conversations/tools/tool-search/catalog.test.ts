@@ -13,7 +13,7 @@ const entry = (
 	inputSchema: { type: "object", properties, required },
 });
 
-describe("the listing of bridged connection tools", () => {
+describe("the listing of connection tools", () => {
 	it("stays within its budget however many tools its connections have, and says how many it left out", () => {
 		const many = (handle: string) =>
 			Array.from({ length: 371 }, (_, index) =>
@@ -35,7 +35,7 @@ describe("the listing of bridged connection tools", () => {
 	});
 });
 
-describe("searching bridged connection tools", () => {
+describe("searching connection tools", () => {
 	it("finds a tool by a plural of a word in its name, ignoring words every description has", () => {
 		const entries = [
 			entry("tracker", "list_issue", { description: "Lists the issues in a project." }),
