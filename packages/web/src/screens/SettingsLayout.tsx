@@ -55,7 +55,7 @@ export function SettingsLayout({
 			<main
 				className={cn(
 					// A column, so a list beside its open item fills the height, and its border with it.
-					"flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background",
+					"relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background",
 					index && "max-lg:hidden",
 				)}
 			>
