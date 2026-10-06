@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { useEffect, useEffectEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { chooseWorkspace } from "@/lib/workspace.ts";
+import { chooseWorkspace, workspacesQuery } from "@/lib/workspace.ts";
 import { AuthLayout } from "@/screens/AuthLayout.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -38,24 +38,23 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 	const [workspace, setWorkspace] = useState<string>();
 	const [error, setError] = useState<string>();
 	const [busy, setBusy] = useState(false);
-	const [accepted, setAccepted] = useState(false);
-	const resumeAcceptance = useEffectEvent(() => finishAcceptance(false));
+	/** The workspace joined, once it has been, so continuing after a failure does not accept again. */
+	const [joined, setJoined] = useState<string>();
+	const enterAccepted = useEffectEvent((workspaceId: string) => enter(workspaceId));
 
 	useEffect(() => {
 		let current = true;
-
-		void (async () => {
-			if (await resumeAcceptance()) return;
-			Effect.runPromise(client.api.workspaces.invitation({ params: { invitationId: id } })).then(
-				(invitation) => {
-					if (current) setWorkspace(invitation.workspaceName);
-				},
-				(failure: unknown) => {
-					if (current) setError(invitationFailureMessage(failure));
-				},
-			);
-		})();
-
+		Effect.runPromise(client.api.workspaces.invitation({ params: { invitationId: id } })).then(
+			(invitation) => {
+				if (!current) return;
+				// A link opened again after accepting leads back into the workspace.
+				if (invitation.status === "accepted") void enterAccepted(invitation.workspaceId);
+				else setWorkspace(invitation.workspaceName);
+			},
+			(failure: unknown) => {
+				if (current) setError(invitationFailureMessage(failure));
+			},
+		);
 		return () => {
 			current = false;
 		};
@@ -64,51 +63,42 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 	async function accept() {
 		setBusy(true);
 		setError(undefined);
+		let workspaceId: string;
 		try {
-			await Effect.runPromise(
+			({ workspaceId } = await Effect.runPromise(
 				client.api.workspaces.acceptInvitation({ params: { invitationId: id } }),
-			);
+			));
 		} catch (failure) {
 			setError(invitationFailureMessage(failure));
 			setBusy(false);
 			return;
 		}
-
-		setAccepted(true);
-		await finishAcceptance();
+		await enter(workspaceId);
 	}
 
-	async function finishAcceptance(reportFailure = true): Promise<boolean> {
-		let confirmed = false;
+	/** Opens the app on the workspace joined. */
+	async function enter(workspaceId: string) {
+		setJoined(workspaceId);
+		setBusy(true);
 		try {
-			const result = await Effect.runPromise(
-				client.api.onboarding.completeInvite({ payload: { invitationId: id } }),
-			);
-			confirmed = true;
-			setAccepted(true);
-			chooseWorkspace(result.workspaceId);
-			await queries.invalidateQueries({ queryKey: ["workspaces"] });
+			chooseWorkspace(workspaceId);
+			// Nothing here reads the list, but the page this leads to does, and
+			// it has to find the workspace just joined there to open it.
+			await queries.invalidateQueries({ queryKey: workspacesQuery.queryKey, refetchType: "all" });
 			await onDone();
-			return true;
 		} catch (failure) {
-			if (reportFailure || confirmed) {
-				setError(
-					`The invitation was accepted, but we could not continue. ${failureMessage(failure)}`,
-				);
-			}
+			setError(
+				`The invitation was accepted, but we could not continue. ${failureMessage(failure)}`,
+			);
 			setBusy(false);
-			return confirmed;
 		}
 	}
 
 	async function leave() {
+		if (joined) return enter(joined);
 		setBusy(true);
 		try {
-			if (accepted) {
-				await finishAcceptance();
-			} else {
-				await onDone();
-			}
+			await onDone();
 		} catch (failure) {
 			setError(failureMessage(failure));
 			setBusy(false);
@@ -117,7 +107,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 
 	if (error !== undefined) {
 		return (
-			<AuthLayout title={accepted ? "Invitation accepted" : "This invitation did not work"}>
+			<AuthLayout title={joined ? "Invitation accepted" : "This invitation did not work"}>
 				<Alert>{error}</Alert>
 				<Button
 					variant="outline"
@@ -126,7 +116,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 					disabled={busy}
 					className="w-full"
 				>
-					{accepted ? "Continue" : "Carry on without it"}
+					{joined ? "Continue" : "Carry on without it"}
 				</Button>
 			</AuthLayout>
 		);

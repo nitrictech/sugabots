@@ -6,21 +6,13 @@ import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** The signed-in person finishing setting up a workspace, or joining one by invitation. */
+/** The signed-in person finishing setting up a workspace. */
 export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (handlers) =>
 	Effect.gen(function* () {
 		const onboarding = yield* Onboarding.Service;
-		return handlers
-			.handle("complete", ({ payload }) =>
-				onboarding.complete(payload).pipe(asSessionUser, asHttpError(onboardingErrors)),
-			)
-			.handle("completeInvite", ({ payload }) =>
-				onboarding.completeAcceptedInvite(payload).pipe(
-					Effect.map((workspaceId) => ({ workspaceId })),
-					asSessionUser,
-					asHttpError(onboardingErrors),
-				),
-			);
+		return handlers.handle("complete", ({ payload }) =>
+			onboarding.complete(payload).pipe(asSessionUser, asHttpError(onboardingErrors)),
+		);
 	}),
 );
 
@@ -28,6 +20,4 @@ const onboardingErrors = {
 	...refusals,
 	NotReadyToFinish: BadRequest,
 	NoModelChosen: BadRequest,
-	InvitationNotAccepted: BadRequest,
-	ModelNotEnabled: BadRequest,
 };

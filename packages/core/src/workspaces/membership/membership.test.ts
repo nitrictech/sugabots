@@ -5,10 +5,13 @@ import { Accounts } from "../../accounts/accounts.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import {
 	agent,
+	modelProvider,
 	pod,
 	podMember,
+	providerModel,
 	searchProvider,
 	user,
+	workspaceDefaultModel,
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
@@ -243,6 +246,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 		expect(sent.at(-1)?.text).toContain(`${WEB_APP_URL}/invite/${invitation.id}`);
 		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
+			status: "pending",
 			workspaceName: "Nitric",
 			inviterName: "Ada",
 		});
@@ -258,6 +262,91 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					.where(and(eq(pod.workspaceId, workspace.id), eq(pod.ownerId, bob.id))),
 			),
 		).toHaveLength(1);
+	});
+
+	it("leads an invitee back in from a link already accepted, until they leave", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const invitation = await run(ada.id, (m) =>
+			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "member" } }),
+		);
+		if ("failed" in invitation) throw new Error(invitation.failed);
+		await run(bob.id, (m) => m.accept({ invitationId: invitation.id }));
+
+		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
+			status: "accepted",
+			workspaceId: workspace.id,
+		});
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+			workspaceId: workspace.id,
+		});
+		expect(await run(bob.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(2);
+
+		await run(bob.id, (m) => m.leave({ workspace: workspace.id }));
+
+		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
+			failed: "ResourceHidden",
+		});
+		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+			failed: "ResourceHidden",
+		});
+	});
+
+	it("starts somebody joining on another model the workspace offers while it does not offer its default", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const [provider] = await onDatabase((db) =>
+			db
+				.insert(modelProvider)
+				.values({
+					workspaceId: workspace.id,
+					name: "Models",
+					baseUrl: "https://models.example/v1",
+					apiFormat: "openai",
+					active: true,
+				})
+				.returning(),
+		);
+		if (!provider) throw new Error("could not create the model provider");
+		await onDatabase((db) =>
+			db.insert(providerModel).values(
+				[
+					{ modelId: "offered", enabled: true },
+					{ modelId: "switched-off", enabled: false },
+				].map((model) => ({
+					...model,
+					workspaceId: workspace.id,
+					providerId: provider.id,
+					source: "manual" as const,
+				})),
+			),
+		);
+		await onDatabase((db) =>
+			db
+				.insert(workspaceDefaultModel)
+				.values({ workspaceId: workspace.id, modelId: "switched-off" }),
+		);
+		const invitation = await run(ada.id, (m) =>
+			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "member" } }),
+		);
+		if ("failed" in invitation) throw new Error(invitation.failed);
+
+		await run(bob.id, (m) => m.accept({ invitationId: invitation.id }));
+
+		const [assistant] = await onDatabase((db) =>
+			db
+				.select({ model: agent.model })
+				.from(agent)
+				.innerJoin(pod, eq(pod.id, agent.podId))
+				.where(
+					and(
+						eq(pod.workspaceId, workspace.id),
+						eq(pod.ownerId, bob.id),
+						eq(agent.provisionedKey, "personal-assistant"),
+					),
+				),
+		);
+		expect(assistant?.model).toBe("offered");
 	});
 
 	it("refuses an invitation to anybody but the address it was sent to", async () => {

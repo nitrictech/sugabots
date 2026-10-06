@@ -70,10 +70,18 @@ export const newWorkspaceInvitationSchema = Schema.Struct({
 });
 export type NewWorkspaceInvitation = typeof newWorkspaceInvitationSchema.Type;
 
-export const invitationPreviewSchema = Schema.Struct({
-	workspaceName: Schema.String,
-	inviterName: Schema.String,
-});
+/**
+ * An invitation as the person it was sent to sees it: one still to accept, or
+ * one they have accepted already, whose link leads back into its workspace.
+ */
+export const invitationPreviewSchema = Schema.Union([
+	Schema.Struct({
+		status: Schema.Literal("pending"),
+		workspaceName: Schema.String,
+		inviterName: Schema.String,
+	}),
+	Schema.Struct({ status: Schema.Literal("accepted"), workspaceId: uuidSchema }),
+]);
 export type InvitationPreview = typeof invitationPreviewSchema.Type;
 
 export const acceptedInvitationSchema = Schema.Struct({ workspaceId: uuidSchema });
