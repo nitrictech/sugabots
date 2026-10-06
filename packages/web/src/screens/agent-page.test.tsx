@@ -328,7 +328,7 @@ describe("an admin", () => {
 			payload: { state: "paused" },
 		});
 
-		fireEvent.click(screen.getByRole("button", { name: new RegExp(webhookRoutine.name) }));
+		fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${webhookRoutine.name}`) }));
 		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }));
 		const confirm = await screen.findByRole("dialog", { name: "Reset the secret?" });
@@ -344,7 +344,9 @@ describe("an admin", () => {
 		client.api.routines.remove.mockReturnValue(Effect.void);
 		mount(page);
 
-		fireEvent.click(await screen.findByRole("button", { name: new RegExp(scheduledRoutine.name) }));
+		fireEvent.click(
+			await screen.findByRole("button", { name: new RegExp(`^${scheduledRoutine.name}`) }),
+		);
 		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Delete routine" }));
 		const confirm = await screen.findByRole("dialog", {

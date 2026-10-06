@@ -21,6 +21,9 @@ import { type BotChoice, type PlacedRoutine, RoutineDialog } from "./RoutineDial
 
 const ROUTINES_NOTE = "Routines post into the bot's chat when they run.";
 
+/** How long Run now says Starting… at least, so a quick start doesn't flash past unread. */
+const STARTING_SHOWN_MS = 1000;
+
 /** Which routine dialog is open: a new routine, or an existing one. */
 type Opened = { kind: "new" } | { kind: "edit"; placed: PlacedRoutine };
 
@@ -143,9 +146,10 @@ function RoutineDialogFor({
 }
 
 /**
- * A routine's row: what it is and when it runs, and whether it is on. The row
- * opens the routine; the switch beside it is its own control, so it is not
- * inside the row's button.
+ * A routine's row: what it is and when it runs, a way to run it now, and
+ * whether it is on. The row opens the routine; Run now and the switch beside
+ * it are their own controls, so they are not inside the row's button. A paused
+ * routine can still be run now: pausing stops only its schedule or webhook.
  */
 function RoutineRow({
 	placed,
@@ -160,6 +164,8 @@ function RoutineRow({
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;
 	const actions = useRoutineActions();
+	const [starting, setStarting] = useState(false);
+	const error = actions.update.error ?? actions.run.error;
 	const summary = showBot ? `${scheduleLabel(routine)}, ${agent.name}` : scheduleLabel(routine);
 	const details = (
 		<>
@@ -172,6 +178,20 @@ function RoutineRow({
 			</span>
 		</>
 	);
+
+	async function runNow() {
+		setStarting(true);
+		try {
+			await Promise.all([
+				actions.run.mutateAsync({ agentId: agent.id, routineId: routine.id }),
+				new Promise((resolve) => setTimeout(resolve, STARTING_SHOWN_MS)),
+			]);
+		} catch {
+			// The row shows the run's error.
+		} finally {
+			setStarting(false);
+		}
+	}
 
 	return (
 		<div className="flex min-w-0 flex-col border-border border-b last:border-b-0">
@@ -187,6 +207,18 @@ function RoutineRow({
 				) : (
 					<span className="flex min-w-0 flex-1 items-center gap-3">{details}</span>
 				)}
+				{pod.permissions.runRoutines && (
+					<Button
+						variant="link"
+						size="bare"
+						className="text-[13.5px]"
+						aria-label={`Run ${routine.name} now`}
+						disabled={starting}
+						onClick={() => void runNow()}
+					>
+						{starting ? "Starting…" : "Run now"}
+					</Button>
+				)}
 				<Toggle
 					label={`${routine.name} on`}
 					checked={routine.state === "enabled"}
@@ -200,9 +232,9 @@ function RoutineRow({
 					}
 				/>
 			</div>
-			{actions.update.error && (
+			{error && (
 				<div className="px-4 pb-3">
-					<Alert>{failureMessage(actions.update.error)}</Alert>
+					<Alert>{failureMessage(error)}</Alert>
 				</div>
 			)}
 		</div>
