@@ -21,7 +21,7 @@ import { botColors } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
 import type { BotLook } from "../src/bot-face.tsx";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
-import { sugabotsLogo } from "../src/sugabots-logo.ts";
+import { LOGO_SIZE, sugabotsLogo } from "../src/sugabots-logo.ts";
 
 function markElement(mark: FaceMark, eyesHex: string): string {
 	switch (mark.shape) {
@@ -76,31 +76,20 @@ function writeBotCrowd() {
 	writeAsset("bot-crowd.svg", width, height, faces.join(""));
 }
 
-/* A 40px rounded tile with 6px of padding and a 2px gap around a 2×2 grid of 13px dots. */
-const LOGO_PX = 40;
-const LOGO_RADIUS_PX = 14;
-const LOGO_PADDING_PX = 6;
-const LOGO_GAP_PX = 2;
-
 function sugabotsLogoElements(): string {
-	const dotPx = (LOGO_PX - LOGO_PADDING_PX * 2 - LOGO_GAP_PX) / 2;
-	const radius = dotPx / 2;
-	const centre = (cell: number) => LOGO_PADDING_PX + cell * (dotPx + LOGO_GAP_PX) + radius;
-	const dots = sugabotsLogo.bots.map((color, index) => {
-		const fill = botColors[color].face;
-		return `<circle cx="${centre(index % 2)}" cy="${centre(Math.floor(index / 2))}" r="${radius}" fill="${fill}"/>`;
-	});
-	// The tint's eye colour: solid and dark, so the dots stand out on light and dark backgrounds.
-	const tile = botColors[sugabotsLogo.tint].eyes;
-	const background = `<rect width="${LOGO_PX}" height="${LOGO_PX}" rx="${LOGO_RADIUS_PX}" fill="${tile}"/>`;
-	return background + dots.join("");
+	const { tile, dots } = sugabotsLogo;
+	const background = `<rect width="${LOGO_SIZE}" height="${LOGO_SIZE}" rx="${tile.radius}" fill="${tile.fill}"/>`;
+	const circles = dots.map(
+		({ cx, cy, r, fill }) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`,
+	);
+	return background + circles.join("");
 }
 
 /*
  * The website header's lockup (a 32px mark, an 8px gap and 20px text) scaled
  * so the mark keeps its native 40px.
  */
-const WORDMARK_SCALE = LOGO_PX / 32;
+const WORDMARK_SCALE = LOGO_SIZE / 32;
 const WORDMARK_GAP_PX = 8 * WORDMARK_SCALE;
 const WORDMARK_FONT_PX = 20 * WORDMARK_SCALE;
 /** Tailwind's `tracking-tight`, in em. */
@@ -146,17 +135,17 @@ function writeSugabotsWordmark() {
 	const pxPerUnit = WORDMARK_FONT_PX / font.unitsPerEm;
 	// Centre the font's line box on the mark, as the header's flex row does.
 	const lineHeightPx = (font.ascender - font.descender) * pxPerUnit;
-	const baselineY = (LOGO_PX - lineHeightPx) / 2 + font.ascender * pxPerUnit;
-	const textX = LOGO_PX + WORDMARK_GAP_PX;
+	const baselineY = (LOGO_SIZE - lineHeightPx) / 2 + font.ascender * pxPerUnit;
+	const textX = LOGO_SIZE + WORDMARK_GAP_PX;
 	const path = latinTextPath(font, text, textX, baselineY);
 	const width = Math.ceil(path.getBoundingBox().x2);
 	const letters = path.toPathData(2);
 	for (const [scheme, textHex] of Object.entries(WORDMARK_TEXT_HEX)) {
 		const content = `${sugabotsLogoElements()}<path d="${letters}" fill="${textHex}"/>`;
-		writeAsset(`sugabots-wordmark-${scheme}.svg`, width, LOGO_PX, content);
+		writeAsset(`sugabots-wordmark-${scheme}.svg`, width, LOGO_SIZE, content);
 	}
 }
 
 writeBotCrowd();
-writeAsset("sugabots-logo.svg", LOGO_PX, LOGO_PX, sugabotsLogoElements());
+writeAsset("sugabots-logo.svg", LOGO_SIZE, LOGO_SIZE, sugabotsLogoElements());
 writeSugabotsWordmark();
