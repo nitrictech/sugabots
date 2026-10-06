@@ -4,6 +4,7 @@ import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/in
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Effect, Logger, ManagedRuntime, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
@@ -19,6 +20,7 @@ import { ConnectionTools } from "./connections.ts";
 
 let http: Server;
 let url: string;
+let requests = 0;
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
 const lookupInput = Schema.Struct({ q: Schema.String });
@@ -55,6 +57,7 @@ function fixtureServer(): McpProtocolServer {
 
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
+		requests += 1;
 		if (request.headers["x-fixture-key"] !== "open-sesame") {
 			response.writeHead(401).end("who are you");
 			return;
@@ -152,7 +155,11 @@ describe("a turn's connection tools", () => {
 	it("leaves out a server that will not answer, and keeps the ones that do", async () => {
 		const logged: unknown[] = [];
 		const offered = toolsFor(
-			target({ handle: "locked", headers: { "x-fixture-key": "nope" } }),
+			target({
+				connectionId: "0199a3a0-0000-7000-8000-0000000000f2",
+				handle: "locked",
+				headers: { "x-fixture-key": "nope" },
+			}),
 			target(),
 		);
 
@@ -167,5 +174,77 @@ describe("a turn's connection tools", () => {
 		} finally {
 			await set.close();
 		}
+	});
+
+	describe("from one turn to the next", () => {
+		const callOptions = { toolCallId: "1", messages: [] } as never;
+
+		async function requestsDuring(turn: Promise<unknown>) {
+			const before = requests;
+			await turn;
+			return requests - before;
+		}
+
+		const turnOn = (
+			offered: ConnectionTools.Interface,
+			use: (set: ConnectionTools.ConnectionToolSet) => Promise<unknown> = async () => undefined,
+		) =>
+			Effect.gen(function* () {
+				const set = yield* offered.forPod("w", "p");
+				try {
+					return yield* Effect.promise(() => use(set));
+				} finally {
+					yield* Effect.promise(() => set.close());
+				}
+			});
+
+		it("asks a server for its tools once, then reaches it only to call one", async () => {
+			const offered = toolsFor(target());
+			await run(turnOn(offered));
+
+			expect(await requestsDuring(run(turnOn(offered)))).toBe(0);
+			let result: unknown;
+			const calling = await requestsDuring(
+				run(
+					turnOn(offered, async (set) => {
+						result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, callOptions);
+					}),
+				),
+			);
+			expect(calling).toBeGreaterThan(0);
+			expect(result).toMatchObject({ content: [{ type: "text", text: "found it" }] });
+		});
+
+		it("asks again once the connection has been edited", async () => {
+			const targets = [target()];
+			const offered = ConnectionTools.from({
+				connections: { targetsForPod: () => Effect.succeed(targets) },
+				httpClients: { for: () => fetch },
+			});
+			await run(turnOn(offered));
+			targets[0] = target({ configurationRevision: 2 });
+
+			expect(await requestsDuring(run(turnOn(offered)))).toBeGreaterThan(0);
+		});
+
+		it("asks again once its list is old, so a server's new tools are picked up", async () => {
+			const offered = toolsFor(target());
+
+			const later = await run(
+				Effect.gen(function* () {
+					yield* turnOn(offered);
+					const before = requests;
+					yield* TestClock.adjust("14 minutes");
+					yield* turnOn(offered);
+					const fresh = requests - before;
+					yield* TestClock.adjust("2 minutes");
+					yield* turnOn(offered);
+					return { fresh, old: requests - before - fresh };
+				}).pipe(Effect.provide(TestClock.layer())),
+			);
+
+			expect(later).toEqual({ fresh: 0, old: expect.any(Number) });
+			expect(later.old).toBeGreaterThan(0);
+		});
 	});
 });

@@ -234,7 +234,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			),
 		);
 
-		await segmentWith(model, { builtInTools: { forWorkspace: () => Effect.succeed({ probe }) } });
+		await segmentWith(model, {
+			builtInTools: { forWorkspace: () => Effect.succeed({ tools: { probe }, usable: ["probe"] }) },
+		});
 
 		const calls = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.turnId, prepared.turnId)),

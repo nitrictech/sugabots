@@ -1,6 +1,11 @@
-import { createMCPClient, type OAuthClientProvider, UnauthorizedError } from "@ai-sdk/mcp";
+import {
+	createMCPClient,
+	type ListToolsResult,
+	type OAuthClientProvider,
+	UnauthorizedError,
+} from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
-import type { JSONSchema7, Tool } from "ai";
+import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
 import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
@@ -35,8 +40,21 @@ interface ServerTool {
 	tool: Tool;
 }
 
+/** A server's tool list, which any later session can run its tools from. */
+export interface ServerListing {
+	tools: ServerTool[];
+	definitions: ListToolsResult;
+}
+
 export interface ServerSession {
-	tools(): Promise<ServerTool[]>;
+	list(): Promise<ServerListing>;
+	/** run calls `name` from `listing` without listing the tools again. */
+	run(
+		listing: ServerListing,
+		name: string,
+		input: unknown,
+		options: ToolExecutionOptions<unknown>,
+	): Promise<unknown>;
 	close(): Promise<void>;
 }
 
@@ -60,11 +78,12 @@ export async function connectServer(
 		},
 		initializationOptions: { timeout: timeoutMs },
 	});
+	const runnable = new WeakMap<ServerListing, Record<string, Tool>>();
 	return {
-		tools: async () => {
+		list: async () => {
 			const listed = await client.listTools({ options: { timeout: timeoutMs } });
 			const callable = client.toolsFromDefinitions(listed);
-			return listed.tools.flatMap((definition) => {
+			const tools = listed.tools.flatMap((definition) => {
 				const tool = callable[definition.name];
 				return tool
 					? [
@@ -81,6 +100,17 @@ export async function connectServer(
 						]
 					: [];
 			});
+			return { tools, definitions: listed };
+		},
+		run: async (listing, name, input, options) => {
+			let tools = runnable.get(listing);
+			if (!tools) {
+				tools = client.toolsFromDefinitions(listing.definitions);
+				runnable.set(listing, tools);
+			}
+			const execute = tools[name]?.execute;
+			if (!execute) throw new Error(`The listing has no tool called ${name}`);
+			return execute(input, options);
 		},
 		close: () => client.close().catch(() => undefined),
 	};
@@ -95,7 +125,7 @@ export async function listServerTools(
 	try {
 		const session = await connectServer(target, fetch, timeoutMs);
 		try {
-			const tools = await session.tools();
+			const { tools } = await session.list();
 			return { ok: true, tools: tools.map((tool) => tool.described) };
 		} finally {
 			await session.close();

@@ -6,6 +6,7 @@ import type { EventBus } from "../../database/events/bus.ts";
 import { UserMessage } from "../../user-message.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
+import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
@@ -27,12 +28,12 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * and leave their own records. The built-in tools do work for the agent, and
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
- * A connection tool turned off is offered all the same, and each call to it is
- * recorded as refused without reaching the server. They are reached through
- * `tool_search` and `call_tool`, and recorded as themselves.
- * `search_history` is recorded the same way, and offered only once the
- * thread has been compacted; `save_instructions` too, offered only while the
- * agent interviews its creator.
+ * Connection tools are reached through `tool_search` and `call_tool`.
+ *
+ * A tool that can't run is still offered, and its calls refused: the tools
+ * lead the provider's cached prompt, so changing them mid-thread loses the
+ * cache. Only `save_instructions` comes and goes, with an interview whose end
+ * replaces the system text anyway.
  */
 
 export interface ToolDependencies {
@@ -43,7 +44,7 @@ export interface ToolDependencies {
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
-	builtIn: ToolSet;
+	builtIn: BuiltInTools.Offered;
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
 	/** Where an interviewing agent's own instructions are saved. */
@@ -72,6 +73,8 @@ export interface ToolDependencies {
 /** What people, and the model, are told of a call to a tool the pod has turned off. */
 const TOOL_TURNED_OFF = UserMessage.of`This tool is turned off for bots in this pod.`;
 
+const TOOL_UNAVAILABLE = UserMessage.of`This tool is switched off for this bot.`;
+
 export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {
 	const tools: ToolSet = {};
 	const recording: RecordingOptions = {
@@ -86,8 +89,10 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		noteToolCall: deps.reply.noteToolCall,
 		markActed: deps.reply.markActed,
 	};
-	for (const [key, tool] of Object.entries(deps.builtIn)) {
-		tools[key] = recorded(key, tool, recording);
+	for (const [key, tool] of Object.entries(deps.builtIn.tools)) {
+		tools[key] = deps.builtIn.usable.includes(key)
+			? recorded(key, tool, recording)
+			: refused(key, tool, TOOL_UNAVAILABLE, recording);
 	}
 	const connectionTools: Record<string, Tool> = {};
 	for (const [key, offered] of Object.entries(deps.connections)) {
@@ -118,17 +123,15 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	tools[TOOL_SEARCH] = recorded(TOOL_SEARCH, toolSearchTool({ catalog }), recording);
 	// Not recorded itself: the tool it calls records the call, under its own name.
 	tools[CALL_TOOL] = callToolTool({ catalog, connectionTools });
-	if (prepared.context.compaction) {
-		tools[SEARCH_HISTORY_TOOL] = recorded(
-			SEARCH_HISTORY_TOOL,
-			searchHistoryTool({
-				threadId: prepared.context.thread.id,
-				before: prepared.context.compaction.keptFrom,
-				run: deps.run,
-			}),
-			recording,
-		);
-	}
+	tools[SEARCH_HISTORY_TOOL] = recorded(
+		SEARCH_HISTORY_TOOL,
+		searchHistoryTool({
+			threadId: prepared.context.thread.id,
+			before: prepared.context.compaction?.keptFrom,
+			run: deps.run,
+		}),
+		recording,
+	);
 	if (prepared.context.agent.interviewing) {
 		tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
 			SAVE_INSTRUCTIONS_TOOL,
@@ -140,21 +143,19 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			{ ...recording, mutating: true },
 		);
 	}
-	if (prepared.context.crew.length > 0) {
-		tools.collaborate = collaborateTool({
-			from: {
-				threadId: prepared.context.thread.id,
-				agentId: prepared.context.agent.id,
-				turnId: prepared.turnId,
-				messageId: prepared.responseMessage.id,
-			},
-			collaborations: deps.collaborations,
-			bus: deps.bus,
-			run: deps.run,
-			replyLength: deps.reply.length,
-			noteCollaboration: deps.reply.noteCollaboration,
-			signal: deps.signal,
-		});
-	}
+	tools.collaborate = collaborateTool({
+		from: {
+			threadId: prepared.context.thread.id,
+			agentId: prepared.context.agent.id,
+			turnId: prepared.turnId,
+			messageId: prepared.responseMessage.id,
+		},
+		collaborations: deps.collaborations,
+		bus: deps.bus,
+		run: deps.run,
+		replyLength: deps.reply.length,
+		noteCollaboration: deps.reply.noteCollaboration,
+		signal: deps.signal,
+	});
 	return tools;
 }
