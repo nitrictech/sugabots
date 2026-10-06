@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
 						.where(eq(workspaceMember.userId, userId))
 						.orderBy(asc(workspaceMember.createdAt)),
 				),
-			),
+			).pipe(Effect.map((rows) => rows.map(workspaceView))),
 		),
 
 		create: (input) =>
@@ -233,7 +233,7 @@ export const make = Effect.gen(function* () {
 							yield* searchProviders.provisionDefault(created.id, userId);
 							yield* modelProviders.seedPresets(created.id);
 							yield* personalPods.provision({ workspaceId: created.id, userId });
-							return created;
+							return workspaceView(created);
 						}),
 					);
 				}),
@@ -264,7 +264,7 @@ export const make = Effect.gen(function* () {
 						(failure) => (isUniqueViolation(failure) ? new SlugTaken() : undefined),
 					);
 					if (!updated) return yield* new ResourceHidden({ resource: "workspace" });
-					return updated;
+					return workspaceView(updated);
 				}),
 			),
 
@@ -664,13 +664,20 @@ export class EmailUnverified extends Data.TaggedError("EmailUnverified") impleme
 	}
 }
 
-/** A workspace as the API describes it. */
+/** The columns of a workspace the API describes, for `workspaceView`. */
 const workspaceColumns = {
 	id: workspace.id,
 	name: workspace.name,
 	slug: workspace.slug,
 	timeZone: workspace.timeZone,
+	setupCompletedAt: workspace.setupCompletedAt,
 };
+
+function workspaceView(
+	row: Omit<Workspace, "setupCompletedAt"> & { setupCompletedAt: Date | null },
+): Workspace {
+	return { ...row, setupCompletedAt: row.setupCompletedAt?.toISOString() ?? null };
+}
 
 const INVITATION_LIFETIME = Duration.days(2);
 

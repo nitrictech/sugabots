@@ -16,22 +16,13 @@ import {
 	useRouter,
 	useSearch,
 } from "@tanstack/react-router";
-import {
-	type ComponentType,
-	lazy,
-	type ReactNode,
-	Suspense,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
 import { prefetchChat, useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { useOnboarding } from "@/lib/onboarding.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import { type Session, SessionContext, useSession } from "@/lib/session.ts";
@@ -39,6 +30,7 @@ import {
 	chooseWorkspace,
 	useDeleteWorkspace,
 	useWorkspace,
+	useWorkspaceStanding,
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
@@ -198,12 +190,22 @@ const indexRoute = createRoute({
 	component: LandingRoute,
 });
 
+/**
+ * Opens the chosen workspace if it is set up, and otherwise one that is. One
+ * still being set up opens when asked for by its address or the switcher, or
+ * here when there is no other.
+ */
 function LandingRoute() {
-	const { workspace, isPending, error, refetch } = useWorkspace();
+	const { workspace: chosen, isPending, error, refetch } = useWorkspace();
+	const workspaces = useWorkspaces();
 	if (isPending) return <div className="h-full bg-list" />;
 	if (error) return <RouteLoadFailure title="Could not load your workspace" onRetry={refetch} />;
-	if (!workspace) return <Navigate to="/onboarding" replace />;
-	return <Navigate to="/$workspace/agents" params={{ workspace: workspace.slug }} replace />;
+	if (!chosen) return <Navigate to="/onboarding" replace />;
+	const landing =
+		chosen.setupCompletedAt !== null
+			? chosen
+			: (workspaces.data?.find((one) => one.setupCompletedAt !== null) ?? chosen);
+	return <Navigate to="/$workspace/agents" params={{ workspace: landing.slug }} replace />;
 }
 
 interface LoginSearch {
@@ -413,138 +415,84 @@ function InviteRoute() {
 	);
 }
 
+interface OnboardingSearch {
+	/**
+	 * The workspace being set up, by its address. Written before the workspace
+	 * is saved, so a reload while it saves picks up where it got to.
+	 */
+	workspace?: string;
+}
+
+/**
+ * Setting up a workspace, the first or another, all at this one path: every
+ * top-level path hides the workspace whose address matches it.
+ */
 const onboardingRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/onboarding",
+	validateSearch: (search: Record<string, unknown>): OnboardingSearch => ({
+		workspace: typeof search.workspace === "string" ? search.workspace : undefined,
+	}),
 	beforeLoad: requireUser,
 	component: OnboardingRoute,
 });
 
 function OnboardingRoute() {
 	const session = useSession();
-	const onboarding = useOnboarding();
-	const workspace = useWorkspace();
-
-	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-list" />;
-	if (onboarding.error || workspace.error) {
-		return (
-			<RouteLoadFailure
-				title="Could not start setup"
-				onRetry={() => Promise.all([onboarding.refetch(), workspace.refetch()])}
-			/>
-		);
-	}
-	if (onboarding.data?.completed) {
-		// The first run is done once, so somebody who has deleted every workspace since sets up another.
-		return workspace.workspace ? (
-			<Navigate to="/$workspace/agents" params={{ workspace: workspace.workspace.slug }} replace />
-		) : (
-			<Navigate to="/onboarding/new" replace />
-		);
-	}
-	return <Onboarding session={session} />;
-}
-
-/**
- * Setting up another workspace, with the same steps as the first. Under
- * `/onboarding` because any new top-level path would hide a workspace whose
- * address it is.
- */
-interface NewWorkspaceSearch {
-	/** The workspace this has made, by its address, so a reload picks up where it got to. */
-	workspace?: string;
-}
-
-const newWorkspaceRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/onboarding/new",
-	validateSearch: (search: Record<string, unknown>): NewWorkspaceSearch => ({
-		workspace: typeof search.workspace === "string" ? search.workspace : undefined,
-	}),
-	beforeLoad: requireUser,
-	component: NewWorkspaceRoute,
-});
-
-function NewWorkspaceRoute() {
-	const session = useSession();
-	const { workspace: madeSlug } = newWorkspaceRoute.useSearch();
-	const { workspace, isPending, error, refetch } = useWorkspace();
+	const { workspace: madeSlug } = onboardingRoute.useSearch();
+	const { isPending, error, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
 
 	if (isPending) return <div className="h-full bg-list" />;
 	if (error) return <RouteLoadFailure title="Could not start setup" onRetry={refetch} />;
 	return (
-		<NewWorkspaceOnboarding
+		<WorkspaceSetup
 			session={session}
-			cameFrom={workspace}
 			made={workspaces.data?.find((one) => one.slug === madeSlug)}
-			hasAnother={workspaces.data?.some((one) => one.slug !== madeSlug) ?? false}
 		/>
 	);
 }
 
 /**
- * Making the workspace chooses it, and the steps after work in the one chosen,
- * so a reload chooses it again. Cancel chooses again the one this was opened
- * from and goes back to the page it was opened on.
+ * Cancel chooses the workspace setup was opened from, or another when that is
+ * the one being set up, and goes back to the page it was opened on. Without
+ * one there is nowhere to go back to, and no Cancel.
  *
- * Cancel deletes only a workspace this page made. One the address names from
- * before, as after a reload or on coming back to setup by Back, may have been
- * finished and shared since, and stays.
+ * Cancel deletes the workspace being set up while its setup is unfinished, if
+ * the caller may delete it, as its owner may. One whose setup is finished stays.
  */
-function NewWorkspaceOnboarding({
-	session,
-	cameFrom,
-	made,
-	hasAnother,
-}: {
-	session: Session;
-	cameFrom: Workspace | undefined;
-	made: Workspace | undefined;
-	/** Whether there is a workspace besides the one being made to go back to. */
-	hasAnother: boolean;
-}) {
+function WorkspaceSetup({ session, made }: { session: Session; made: Workspace | undefined }) {
 	const router = useRouter();
-	const [returnTo] = useState(cameFrom);
-	const chosen = useWorkspace().workspace;
+	const openedFrom = useWorkspace().workspace;
+	const workspaces = useWorkspaces().data;
+	// Settled when setup opens, because making the workspace chooses it.
+	const [returnTo] = useState(() =>
+		openedFrom && openedFrom.id !== made?.id
+			? openedFrom
+			: workspaces?.find((one) => one.id !== made?.id),
+	);
 	const deleteWorkspace = useDeleteWorkspace();
-	const [leaving, setLeaving] = useState(false);
-	const madeHere = useRef<string>(undefined);
-	const choosingMade = !leaving && made !== undefined && chosen?.id !== made.id;
-
-	useEffect(() => {
-		if (choosingMade) chooseWorkspace(made.id);
-	}, [choosingMade, made]);
+	// Setup shows its steps only once the workspace being set up is chosen, so this is its standing.
+	const standing = useWorkspaceStanding();
 
 	async function cancel() {
-		setLeaving(true);
-		// One that cannot be deleted now stays, for its settings to delete; leaving still goes ahead.
-		if (made && made.id === madeHere.current) {
+		if (made?.setupCompletedAt === null && standing.data?.permissions.deleteWorkspace) {
+			// One that cannot be deleted now stays; leaving still goes ahead.
 			await deleteWorkspace.mutateAsync(made.id).catch(() => undefined);
 		}
-		// After a reload the one this came from is not known, and deleting this one leaves another chosen.
-		if (returnTo && returnTo.id !== made?.id) chooseWorkspace(returnTo.id);
+		if (returnTo) chooseWorkspace(returnTo.id);
 		if (router.history.canGoBack()) router.history.back();
 		else void router.navigate({ to: "/" });
 	}
 
-	if (choosingMade) return <div className="h-full bg-list" />;
 	return (
 		<Onboarding
 			session={session}
-			newWorkspace={{
-				made,
-				onMade: (saved) => {
-					// Before the address names one, saving it was making it.
-					if (!made) madeHere.current = saved.id;
-					void router.navigate({
-						to: "/onboarding/new",
-						search: { workspace: saved.slug },
-						replace: true,
-					});
-				},
-				onCancel: hasAnother ? () => void cancel() : undefined,
-			}}
+			workspace={made}
+			onAddress={(slug) =>
+				void router.navigate({ to: "/onboarding", search: { workspace: slug }, replace: true })
+			}
+			onCancel={returnTo ? () => void cancel() : undefined}
 		/>
 	);
 }
@@ -566,18 +514,13 @@ const workspaceIndexRoute = createRoute({
 });
 
 function ShellRoute() {
-	const onboarding = useOnboarding();
 	const workspace = useWorkspace();
 	const workspaces = useWorkspaces();
+	const standing = useWorkspaceStanding();
 
-	if (onboarding.isPending || workspace.isPending) return <div className="h-full bg-list" />;
-	if (onboarding.error || workspace.error) {
-		return (
-			<RouteLoadFailure
-				title="Could not load your workspace"
-				onRetry={() => Promise.all([onboarding.refetch(), workspace.refetch()])}
-			/>
-		);
+	if (workspace.isPending) return <div className="h-full bg-list" />;
+	if (workspace.error) {
+		return <RouteLoadFailure title="Could not load your workspace" onRetry={workspace.refetch} />;
 	}
 	if (!workspace.workspace) {
 		// Somebody in no workspace at all has one to make, not a wrong address.
@@ -587,8 +530,18 @@ function ShellRoute() {
 			<EmptyState title="No such workspace here" />
 		);
 	}
-	if (!onboarding.data?.completed) {
-		return <Navigate to="/onboarding" replace />;
+	if (workspace.workspace.setupCompletedAt === null) {
+		// Setup left part way is finished before the workspace is used, by whoever may finish it.
+		// Anybody invited part way through uses it as it is.
+		if (standing.isPending) return <div className="h-full bg-list" />;
+		if (standing.error) {
+			return <RouteLoadFailure title="Could not load your workspace" onRetry={standing.refetch} />;
+		}
+		// Finishing setup takes `workspace.providers.manage`.
+		const mayFinishSetup = standing.data?.permissions.manageProviders;
+		if (mayFinishSetup) {
+			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
+		}
 	}
 	return <Shell />;
 }
@@ -1146,7 +1099,6 @@ const routeTree = rootRoute.addChildren([
 	inviteRoute,
 	signInReturnRoute,
 	onboardingRoute,
-	newWorkspaceRoute,
 	shellRoute.addChildren([
 		workspaceIndexRoute,
 		settingsRoute,

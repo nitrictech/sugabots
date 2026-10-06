@@ -3,20 +3,15 @@ import {
 	completedInviteOnboardingSchema,
 	completeInviteOnboardingSchema,
 	completeOnboardingSchema,
-	onboardingStatusSchema,
 } from "../../onboarding.ts";
 import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
-/** Whether the signed-in person has finished setting up, and marking that they have. */
+/** The signed-in person finishing setting up a workspace, or joining one by invitation. */
 export class OnboardingApi extends HttpApiGroup.make("onboarding")
 	.add(
-		HttpApiEndpoint.get("status", "/onboarding", {
-			success: onboardingStatusSchema,
-		}),
 		HttpApiEndpoint.post("complete", "/onboarding/complete", {
 			payload: completeOnboardingSchema,
-			success: onboardingStatusSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.post("completeInvite", "/onboarding/complete-invite", {

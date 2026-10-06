@@ -49,7 +49,6 @@ export const user = pgTable(
 		email: text("email").notNull(),
 		emailVerified: boolean("email_verified").notNull().default(false),
 		image: text("image"),
-		onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
 		/** Who sent the referral link this person signed up with. */
 		referredBy: uuid("referred_by").references((): AnyPgColumn => user.id, {
 			onDelete: "set null",
@@ -145,6 +144,8 @@ export const workspace = pgTable(
 		logo: text("logo"),
 		/** An IANA time zone: where the workspace's days and months begin. */
 		timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
+		/** When its setup was finished; null while it is still being set up. */
+		setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},

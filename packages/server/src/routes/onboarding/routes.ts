@@ -6,21 +6,13 @@ import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** Whether the signed-in person has finished setting up, and marking that they have. */
+/** The signed-in person finishing setting up a workspace, or joining one by invitation. */
 export const onboardingRoutes = HttpApiBuilder.group(ServerApi, "onboarding", (handlers) =>
 	Effect.gen(function* () {
 		const onboarding = yield* Onboarding.Service;
 		return handlers
-			.handle("status", () =>
-				onboarding.isCompleted.pipe(
-					Effect.map((completed) => ({ completed })),
-					asSessionUser,
-				),
-			)
 			.handle("complete", ({ payload }) =>
-				onboarding
-					.complete(payload)
-					.pipe(Effect.as({ completed: true }), asSessionUser, asHttpError(onboardingErrors)),
+				onboarding.complete(payload).pipe(asSessionUser, asHttpError(onboardingErrors)),
 			)
 			.handle("completeInvite", ({ payload }) =>
 				onboarding.completeAcceptedInvite(payload).pipe(

@@ -23,6 +23,7 @@ const created: Workspace = {
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "Australia/Sydney",
+	setupCompletedAt: null,
 };
 
 const createWith = (create: Membership.Interface["create"], payload: unknown) =>

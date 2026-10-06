@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { CurrentActor } from "../../authorization/current-actor.ts";
 import {
 	agent,
 	modelProvider,
@@ -43,12 +42,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		});
 	const complete = (userId: string, agentId: string) =>
 		as(userId).complete({ workspaceId, podId, agentId });
-	const isCompleted = (userId: string) =>
-		runOnPostgres(
-			onboarding.isCompleted.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
-			),
-		);
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -155,12 +148,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		systemAgentId = system.id;
 	});
 
-	it("completes only for an admin's custom agent in their pod", async () => {
-		await complete(adminId, customAgentId);
-
-		expect(await isCompleted(adminId)).toBe(true);
-	});
-
 	it("does not complete for an agent with no model the workspace offers", async () => {
 		await onDatabase((db) =>
 			db.update(agent).set({ model: "not-switched-on" }).where(eq(agent.id, customAgentId)),
@@ -171,7 +158,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 			db.update(agent).set({ model: null }).where(eq(agent.id, customAgentId)),
 		);
 		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
-		expect(await isCompleted(adminId)).toBe(false);
 	});
 
 	it("makes the first bot's model the workspace's default and the Scribe's", async () => {
@@ -190,12 +176,32 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		expect(chosen?.modelId).toBe("model");
 	});
 
+	it("records when the workspace's setup was completed, the first time only", async () => {
+		const setupCompletedAt = () =>
+			onDatabase((db) =>
+				db
+					.select({ at: workspace.setupCompletedAt })
+					.from(workspace)
+					.where(eq(workspace.id, workspaceId)),
+			).then(([row]) => row?.at);
+		await expect(complete(adminId, systemAgentId)).rejects.toBeInstanceOf(
+			Onboarding.NotReadyToFinish,
+		);
+		expect(await setupCompletedAt()).toBeNull();
+
+		await complete(adminId, customAgentId);
+		const first = await setupCompletedAt();
+		await complete(adminId, customAgentId);
+
+		expect(first).toBeInstanceOf(Date);
+		expect(await setupCompletedAt()).toEqual(first);
+	});
+
 	it("does not accept a system agent or a member who may not choose the workspace's models", async () => {
 		await expect(complete(adminId, systemAgentId)).rejects.toBeInstanceOf(
 			Onboarding.NotReadyToFinish,
 		);
 		await expect(complete(memberId, customAgentId)).rejects.toBeInstanceOf(ActionForbidden);
-		expect(await isCompleted(adminId)).toBe(false);
 	});
 
 	it("completes an account from its accepted invitation", async () => {
@@ -221,7 +227,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		expect(await as(memberId).completeAcceptedInvite({ invitationId: invitation.id })).toBe(
 			workspaceId,
 		);
-		expect(await isCompleted(memberId)).toBe(true);
 		const [assistant] = await onDatabase((db) =>
 			db
 				.select({ model: agent.model })
@@ -236,6 +241,5 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		await expect(
 			as(memberId).completeAcceptedInvite({ invitationId: crypto.randomUUID() }),
 		).rejects.toBeInstanceOf(Onboarding.InvitationNotAccepted);
-		expect(await isCompleted(memberId)).toBe(false);
 	});
 });

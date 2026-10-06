@@ -306,7 +306,8 @@ const NOTHING_YET: WorkspacePermissions = {
 	deleteWorkspace: false,
 };
 
-function useWorkspaceStanding() {
+/** The caller's role in the workspace being looked at, and what it lets them do there. */
+export function useWorkspaceStanding() {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useQuery({

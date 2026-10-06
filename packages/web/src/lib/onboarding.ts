@@ -1,26 +1,24 @@
 import type { CompleteOnboarding, ProviderModel } from "@sugabots/contracts";
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { useUpdateAgent } from "@/lib/agents.ts";
+import { agentsQuery, useUpdateAgent } from "@/lib/agents.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
+import { workspacesQuery } from "@/lib/workspace.ts";
 
-/** Whether the signed-in person has finished setting up. */
-export const onboardingQuery = queryOptions({
-	queryKey: ["onboarding"],
-	queryFn: ({ signal }) => Effect.runPromise(client.api.onboarding.status(), { signal }),
-});
-
-export function useOnboarding() {
-	return useQuery(onboardingQuery);
-}
-
+/** Finishing setup makes the first bot's model the workspace's default and every system agent's. */
 export function useCompleteOnboarding() {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: (payload: CompleteOnboarding) =>
 			Effect.runPromise(client.api.onboarding.complete({ payload })),
-		onSuccess: () => queries.invalidateQueries({ queryKey: ["onboarding"] }),
+		onSuccess: (_, { workspaceId }) =>
+			Promise.all([
+				// The workspace is now set up, which the shell asks before it opens it.
+				queries.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
+				queries.invalidateQueries({ queryKey: ["models", workspaceId] }),
+				queries.invalidateQueries({ queryKey: agentsQuery(workspaceId).queryKey }),
+			]),
 	});
 }
 

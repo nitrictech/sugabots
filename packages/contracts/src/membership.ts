@@ -21,6 +21,8 @@ export const workspaceSchema = Schema.Struct({
 	 * know must not stop the workspace loading.
 	 */
 	timeZone: Schema.String,
+	/** When its setup was finished, or null while it is still being set up. */
+	setupCompletedAt: Schema.NullOr(isoTimestampSchema),
 });
 export type Workspace = typeof workspaceSchema.Type;
 

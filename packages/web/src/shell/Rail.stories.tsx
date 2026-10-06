@@ -8,18 +8,21 @@ const suga = {
 	name: "Suga",
 	slug: "suga",
 	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 const nitric = {
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 const longName = {
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	name: "The Extremely Thorough Research and Development Collective",
 	slug: "research",
 	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
 const meta = preview.meta({
@@ -114,7 +117,7 @@ export const OneWorkspace = meta.story({
 		await expect(screen.getAllByRole("menuitem")).toHaveLength(3);
 		await expect(screen.getByRole("menuitem", { name: "New workspace" })).toHaveAttribute(
 			"href",
-			"/onboarding/new",
+			"/onboarding",
 		);
 		await expect(screen.getByRole("menuitem", { name: "Suga" })).toHaveAttribute(
 			"aria-current",

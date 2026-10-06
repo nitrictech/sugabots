@@ -104,7 +104,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
 	unimplemented(PodAdministration.Service),
 	unimplemented(AgentAdministration.Service),
-	unimplemented(Onboarding.Service, { isCompleted: Effect.succeed(false) }),
+	unimplemented(Onboarding.Service),
 	unimplemented(ModelProviderSetup.Service),
 	unimplemented(SearchProviderSetup.Service),
 	unimplemented(SandboxProviderSetup.Service),

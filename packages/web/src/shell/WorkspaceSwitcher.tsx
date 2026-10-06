@@ -63,7 +63,7 @@ export function WorkspaceSwitcher({
 						</DropdownMenuItem>
 					),
 				)}
-				<DropdownMenuItem render={<Link to="/onboarding/new" />}>
+				<DropdownMenuItem render={<Link to="/onboarding" />}>
 					<Plus />
 					New workspace
 				</DropdownMenuItem>

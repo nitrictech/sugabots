@@ -88,7 +88,6 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 			setAccepted(true);
 			chooseWorkspace(result.workspaceId);
 			await queries.invalidateQueries({ queryKey: ["workspaces"] });
-			await queries.invalidateQueries({ queryKey: ["onboarding"] });
 			await onDone();
 			return true;
 		} catch (failure) {

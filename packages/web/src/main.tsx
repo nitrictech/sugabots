@@ -3,7 +3,6 @@ import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { failureMessage } from "@/lib/failure.ts";
-import { onboardingQuery } from "@/lib/onboarding.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { type Session, useSessionFromApi } from "@/lib/session.ts";
 import { reloadWhenADeployReplacesChunks } from "@/lib/stale-chunks.ts";
@@ -73,13 +72,12 @@ function SessionRouter({ session }: { session: Session }) {
 }
 
 /**
- * A query cache for one session, already holding the onboarding and workspaces
- * `/me` answered with, so the shell need not ask for them again.
+ * A query cache for one session, already holding the workspaces `/me` answered
+ * with, so the shell need not ask for them again.
  */
 function queriesStartingFrom(me: Me | undefined): QueryClient {
 	const queries = createQueryClient();
 	if (me) {
-		queries.setQueryData(onboardingQuery.queryKey, me.onboarding);
 		queries.setQueryData(workspacesQuery.queryKey, me.workspaces);
 	}
 	return queries;
