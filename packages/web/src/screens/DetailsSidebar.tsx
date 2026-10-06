@@ -88,7 +88,7 @@ export function DetailsSidebar({
 						</Expandable>
 					</SidebarSection>
 				)}
-				<Routines agent={agent} />
+				<Routines pod={pod} agent={agent} />
 				<Tools pod={pod} agent={agent} />
 			</div>
 		</ChatSidebar>
@@ -149,7 +149,9 @@ function ParticipantRow({
 	);
 }
 
-function Routines({ agent }: { agent: Agent }) {
+/** Each routine opens the bot's settings at its routines. */
+function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
+	const backToChat = useBackToHere("Chat");
 	const routines = useRoutines(agent.id);
 	const list = routines.data ?? [];
 	if (list.length === 0) return null;
@@ -157,19 +159,23 @@ function Routines({ agent }: { agent: Agent }) {
 		<SidebarSection title="Routines">
 			<Expandable items={list} shown={ROUTINES_SHOWN}>
 				{(routine) => (
-					<li
-						key={routine.id}
-						className="flex items-center gap-2.5 border-border-subtle border-b px-3.5 py-2.5 last:border-b-0"
-					>
-						<span className="grid size-7 shrink-0 place-items-center rounded-lg bg-border-strong text-soft-foreground">
-							<Repeat aria-hidden size={14} strokeWidth={2.2} />
-						</span>
-						<span className="flex min-w-0 flex-1 flex-col gap-px">
-							<span className="truncate text-[14px] text-foreground">{routine.name}</span>
-							<span className="truncate text-muted-foreground text-xs">
-								{scheduleLabel(routine)}
+					<li key={routine.id} className="border-border-subtle border-b last:border-b-0">
+						<Link
+							{...agentSettingsLink({ pod, agent })}
+							state={backToChat}
+							search={{ tab: "routines" }}
+							className="focus-ring flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-hover"
+						>
+							<span className="grid size-7 shrink-0 place-items-center rounded-lg bg-border-strong text-soft-foreground">
+								<Repeat aria-hidden size={14} strokeWidth={2.2} />
 							</span>
-						</span>
+							<span className="flex min-w-0 flex-1 flex-col gap-px">
+								<span className="truncate text-[14px] text-foreground">{routine.name}</span>
+								<span className="truncate text-muted-foreground text-xs">
+									{scheduleLabel(routine)}
+								</span>
+							</span>
+						</Link>
 					</li>
 				)}
 			</Expandable>
