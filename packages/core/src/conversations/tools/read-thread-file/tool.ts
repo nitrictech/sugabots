@@ -143,7 +143,7 @@ function readLines(
 }
 
 /** Lines as an editor numbers them: a final newline ends the last line rather than starting another. */
-function splitLines(text: string): string[] {
+export function splitLines(text: string): string[] {
 	if (text === "") return [];
 	const lines = text.split(/\r?\n/);
 	return text.endsWith("\n") ? lines.slice(0, -1) : lines;

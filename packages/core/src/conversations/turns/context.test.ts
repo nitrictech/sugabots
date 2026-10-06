@@ -226,6 +226,39 @@ describe("modelPrompt", () => {
 		expect(history).not.toContain("… (");
 	});
 
+	it("names the file a long tool result was kept as, so a later turn can read on", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const callId = "0199a3a0-0000-7000-8000-000000000023";
+		const fileId = "0199a3a0-0000-7000-8000-0000000000f1";
+		input.messages[1] = {
+			...own,
+			parts: [
+				{
+					type: "tool_call",
+					id: callId,
+					tool: "web_fetch",
+					input: { url: "https://example.com/report" },
+					output: "line\n".repeat(20_000),
+					status: "completed",
+					error: null,
+					mutating: false,
+					atOffset: 0,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+			],
+		};
+
+		const history =
+			modelPrompt(input, environment(), new Map([[callId, fileId]])).messages[2]?.content ?? "";
+
+		expect(history).toContain(`kept as file ${fileId}, which read_thread_file reads`);
+	});
+
 	it("excludes incomplete assistant output", () => {
 		const input = context();
 		const assistantMessage = input.messages[1];

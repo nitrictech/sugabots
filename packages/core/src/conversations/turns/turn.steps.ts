@@ -488,7 +488,8 @@ const streamReply = (
 				connectionTools: connectionToolsNote(connections),
 				sandbox: sandbox.note,
 			};
-			const freshPrompt = modelPrompt(prepared.context, environment);
+			const resultFiles = yield* files.resultFiles(prepared.context.thread.id);
+			const freshPrompt = modelPrompt(prepared.context, environment, resultFiles);
 			const modelInput =
 				prepared.checkpoint?.modelInput ??
 				({

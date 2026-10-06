@@ -640,7 +640,7 @@ function segmentWith(given: Given) {
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(AgentRepository.Service, {}),
-				unimplemented(ThreadFiles.Service, {}),
+				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {
