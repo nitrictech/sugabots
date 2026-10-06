@@ -55,7 +55,12 @@ export interface EventsApiOptions {
 /** First reconnect delay. Doubles up to the cap, with jitter. */
 const RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
-const MAX_EVENT_CHARS = 64 * 1024;
+/**
+ * Far above any event the server sends, so the cap only stops a broken stream
+ * from buffering without end. The largest events are tool calls, which carry
+ * the call's stored input and output, escaped again by the event's own JSON.
+ */
+const MAX_EVENT_CHARS = 1024 * 1024;
 
 export function createEventsApi({
 	baseUrl,

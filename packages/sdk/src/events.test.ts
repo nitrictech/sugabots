@@ -170,8 +170,50 @@ describe("parsing", () => {
 		]);
 	});
 
+	it("delivers a tool call whose stored output was cut down, and the events after it", async () => {
+		// The server cuts a large output to a 64,000-character preview of its
+		// JSON, which the event's own JSON escapes again.
+		const searchResults = JSON.stringify(
+			Array.from({ length: 500 }, (_, index) => ({
+				name: `crm__find_contact_${index}`,
+				description: "Find a contact by name or email.",
+				inputSchema: { type: "object", properties: { query: { type: "string" } } },
+			})),
+		);
+		const toolCallCompleted = streamEvent("tool_call.completed", {
+			threadId: "c1",
+			messageId: "m1",
+			toolCall: {
+				type: "tool_call",
+				id: "t1",
+				tool: "tool_search",
+				input: { query: "contacts" },
+				output: {
+					truncated: true,
+					characters: searchResults.length,
+					preview: searchResults.slice(0, 64_000),
+				},
+				status: "completed",
+				error: null,
+				mutating: false,
+				atOffset: 0,
+				startedAt: "2026-10-06T02:50:51.000Z",
+				finishedAt: "2026-10-06T02:50:51.027Z",
+			},
+		});
+		const { fetch } = scripted(
+			frame({ event: "tool_call.completed", id: 1, data: toolCallCompleted }) +
+				frame({ event: "message.delta", id: 2 }),
+		);
+
+		expect((await take(events(fetch).thread("c1"), 2)).map((e) => e.type)).toEqual([
+			"tool_call.completed",
+			"message.delta",
+		]);
+	});
+
 	it("bounds an unfinished frame", async () => {
-		const { fetch } = scripted(`data: ${"x".repeat(64 * 1024)}\n`);
+		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024)}\n`);
 
 		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
