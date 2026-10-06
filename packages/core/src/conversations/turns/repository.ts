@@ -38,7 +38,6 @@ import {
 	transition,
 } from "./lifecycle.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { ConnectionToolMode } from "./tools.ts";
 import { WorkAdmission } from "./work-admission.ts";
 
 /**
@@ -783,6 +782,14 @@ const SdkModelMessage = Schema.declare(
 
 const OptionalCount = Schema.optional(Schema.Int);
 
+/**
+ * How a turn offers its pod's connection tools to the model: each as a tool
+ * of its own, or `bridged` behind `tool_search` and `call_tool` when they
+ * would crowd the model's window (see `connection-offer.ts`).
+ */
+export const ConnectionToolMode = Schema.Literals(["direct", "bridged"]);
+export type ConnectionToolMode = typeof ConnectionToolMode.Type;
+
 /** Everything a suspended turn needs to continue once its approvals are decided. */
 export const TurnCheckpoint = Schema.Struct({
 	messages: Schema.Array(SdkModelMessage),
@@ -809,11 +816,10 @@ export const TurnCheckpoint = Schema.Struct({
 	contextTokens: OptionalCount,
 	/**
 	 * How the turn offered its connection tools, which a resumed segment keeps:
-	 * the calls waiting on approval were made to the tools it offered then.
-	 * Absent from a checkpoint saved before tools could be bridged, all of
-	 * which offered them directly.
+	 * the calls waiting on approval were made to those tools. A checkpoint
+	 * saved before tools could be bridged offered them directly.
 	 */
-	connectionToolMode: Schema.optional(ConnectionToolMode),
+	connectionToolMode: ConnectionToolMode.pipe(Schema.withDecodingDefault(Effect.succeed("direct"))),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 

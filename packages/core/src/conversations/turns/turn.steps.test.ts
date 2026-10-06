@@ -13,7 +13,7 @@ import { unimplemented } from "../../testing.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { ConnectionTools } from "../tools/connections.ts";
+import { ConnectionTools, type OfferedTool } from "../tools/connections.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -21,7 +21,7 @@ import {
 	ToolExecutionRefused,
 } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
-import { type NotRunnable, TurnRepository } from "./repository.ts";
+import { type NotRunnable, TurnCheckpoint, TurnRepository } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { runSegment } from "./turn.steps.ts";
 
@@ -176,6 +176,9 @@ describe("runSegment", () => {
 									mutating: true,
 									access: "ask",
 									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+									handle: "wiki",
+									description: "",
+									inputSchema: { type: "object" as const },
 									connectionRevision: 1,
 									remoteToolName: "wipe",
 								},
@@ -240,6 +243,7 @@ describe("runSegment", () => {
 				},
 				reply: reply(""),
 				modelCalls: 1,
+				connectionToolMode: "direct",
 			},
 		};
 		vi.mocked(execution.prepare).mockReturnValueOnce(Effect.succeed(resumed));
@@ -282,6 +286,9 @@ describe("runSegment", () => {
 			mutating: false,
 			access,
 			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+			handle: "wiki",
+			description: "",
+			inputSchema: { type: "object" as const },
 			connectionRevision: 1,
 			remoteToolName: name,
 		});
@@ -491,6 +498,7 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		const lookup = vi.fn(async () => ({ content: [{ type: "text", text: "found" }] }));
 		const wipe = vi.fn(async () => ({ content: [] }));
 		const offered = (
+			handle: string,
 			description: string,
 			remoteToolName: string,
 			access: ConnectionAccess,
@@ -504,6 +512,9 @@ describe("a pod whose connection tool definitions would crowd the model's window
 				),
 				execute,
 			}),
+			handle,
+			description,
+			inputSchema: { type: "object" as const, properties: { page: { type: "string" as const } } },
 			mutating: access === "ask",
 			access,
 			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
@@ -514,9 +525,9 @@ describe("a pod whose connection tool definitions would crowd the model's window
 			forPod: () =>
 				Effect.succeed({
 					tools: {
-						wiki__lookup: offered(crowding, "lookup", "allow", lookup),
-						wiki__wipe: offered("Deletes a page.", "wipe", "ask", wipe),
-						drive__lookup: offered("Looks up a file.", "lookup", "off", lookup),
+						wiki__lookup: offered("wiki", crowding, "lookup", "allow", lookup),
+						wiki__wipe: offered("wiki", "Deletes a page.", "wipe", "ask", wipe),
+						drive__lookup: offered("drive", "Looks up a file.", "lookup", "off", lookup),
 					},
 					close: async () => undefined,
 				}),
@@ -573,8 +584,8 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		expect(Object.keys(received?.tools ?? {})).not.toContain("wiki__lookup");
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain(TOOL_SEARCH);
-		expect(turnNote).toContain("- wiki (2 tools): lookup, wipe");
-		expect(turnNote).not.toContain("drive");
+		expect(turnNote).toContain("wiki__lookup");
+		expect(turnNote).not.toContain("drive__lookup");
 		expect(found).toMatchObject({
 			tools: expect.arrayContaining([
 				expect.objectContaining({ tool: "wiki__lookup", inputSchema: expect.anything() }),
@@ -617,7 +628,7 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		);
 	});
 
-	it("tells the model when a call names no tool it has, running nothing", async () => {
+	it("offers the closest tools when a call names no tool it has, running nothing", async () => {
 		let outcome: unknown;
 
 		const { lookup } = await bridgedSegment(async (input) => {
@@ -630,8 +641,73 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		expect(lookup).not.toHaveBeenCalled();
 		expect(outcome).toMatchObject({
 			status: "failed",
-			reason: expect.stringContaining(TOOL_SEARCH),
+			tools: expect.arrayContaining([expect.objectContaining({ tool: "wiki__lookup" })]),
 		});
+	});
+
+	/** The tools a segment resuming `checkpoint` on the crowded pod, or on `pod`, offers the model. */
+	async function toolsOnResuming(checkpoint: unknown, pod = crowdedPod().connectionTools) {
+		const { execution, turns } = fakes();
+		vi.mocked(execution.prepare).mockReturnValueOnce(
+			Effect.succeed({
+				...prepared,
+				checkpoint: Schema.decodeUnknownSync(TurnCheckpoint)(checkpoint),
+			}),
+		);
+		let offered: string[] = [];
+		const model = Models.fromStream((input) => {
+			offered = Object.keys(input.tools ?? {});
+			return Effect.succeed(streamed(chunks("Done")));
+		});
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				connectionTools: pod,
+				approvals: {
+					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
+					beginExecution: () => Effect.fail(new ToolExecutionRefused({ message: "unused" })),
+				},
+			}),
+		);
+		return offered;
+	}
+
+	const savedCheckpoint = {
+		messages: [],
+		approvals: [],
+		modelInput: { model: "reviewed-model", system: "reviewed", messages: [] },
+		reply: reply(""),
+		modelCalls: 1,
+	};
+
+	it("resumes a bridged turn bridged, though its pod's tools would now fit", async () => {
+		const fitting: ConnectionTools.Interface = {
+			forPod: () =>
+				Effect.map(crowdedPod().connectionTools.forPod("", ""), (opened) => ({
+					...opened,
+					tools: { wiki__wipe: opened.tools.wiki__wipe as OfferedTool },
+				})),
+		};
+
+		const offered = await toolsOnResuming(
+			{ ...savedCheckpoint, connectionToolMode: "bridged" },
+			fitting,
+		);
+
+		expect(offered).toEqual(expect.arrayContaining([TOOL_SEARCH, CALL_TOOL]));
+		expect(offered).not.toContain("wiki__wipe");
+	});
+
+	it("resumes a turn saved before tools could be bridged with its tools offered directly", async () => {
+		const offered = await toolsOnResuming(savedCheckpoint);
+
+		expect(offered).toEqual(expect.arrayContaining(["wiki__lookup", "wiki__wipe"]));
+		expect(offered).not.toContain(CALL_TOOL);
 	});
 
 	it("waits for a person to approve a call through the bridge as a call to the tool it names", async () => {
@@ -806,6 +882,9 @@ function segmentAskingApproval(
 							mutating: true,
 							access: "ask",
 							connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+							handle: "wiki",
+							description: "",
+							inputSchema: { type: "object" as const },
 							connectionRevision: 1,
 							remoteToolName: "wipe",
 						},

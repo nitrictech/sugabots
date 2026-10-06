@@ -4,39 +4,34 @@ import { type CatalogEntry, catalogListing, LISTING_CHARACTERS, searchCatalog } 
 const entry = (
 	handle: string,
 	name: string,
-	{ description = "", callable = true, properties = {} as Record<string, object> } = {},
+	{ description = "", properties = {} as Record<string, object>, required = [] as string[] } = {},
 ): CatalogEntry => ({
 	key: `${handle}__${name}`,
 	handle,
-	name,
+	remoteToolName: name,
 	description,
-	inputSchema: { type: "object", properties },
-	callable,
+	inputSchema: { type: "object", properties, required },
 });
 
 describe("the listing of bridged connection tools", () => {
-	it("stays within its budget however many tools a connection has, and says how many it left out", () => {
-		const entries = [
-			entry("notes", "list_notes"),
-			...Array.from({ length: 371 }, (_, index) =>
-				entry("reports", `run_report_${String(index).padStart(3, "0")}`),
-			),
-		];
-
-		const listing = catalogListing(entries);
+	it("stays within its budget however many tools its connections have, and says how many it left out", () => {
+		const many = (handle: string) =>
+			Array.from({ length: 371 }, (_, index) =>
+				entry(handle, `run_report_${String(index).padStart(3, "0")}`),
+			);
+		const listing = catalogListing([...many("reports"), ...many("sales")]);
 
 		expect(listing.length).toBeLessThanOrEqual(LISTING_CHARACTERS);
-		expect(listing).toContain("- notes (1 tool): list_notes");
-		expect(listing).toMatch(/^- reports \(371 tools\): run_report_000, .*, and \d+ more$/m);
+		expect(listing).toMatch(
+			/^- reports \(371 tools\): reports__run_report_000, .*, and \d+ more$/m,
+		);
+		expect(listing).toMatch(/^- sales \(371 tools\): sales__run_report_000, .*, and \d+ more$/m);
 	});
 
-	it("leaves out tools that are turned off", () => {
-		const listing = catalogListing([
-			entry("notes", "list_notes"),
-			entry("notes", "delete_note", { callable: false }),
-		]);
-
-		expect(listing).toBe("- notes (1 tool): list_notes");
+	it("names every tool of a small connection by the full name it is called by", () => {
+		expect(catalogListing([entry("notes", "list_notes")])).toBe(
+			"- notes (1 tool): notes__list_notes",
+		);
 	});
 });
 
@@ -52,26 +47,22 @@ describe("searching bridged connection tools", () => {
 		]);
 	});
 
-	it("does not find a tool that is turned off", () => {
-		const entries = [entry("tracker", "delete_issue", { callable: false })];
-
-		expect(searchCatalog(entries, "delete issue")).toEqual([]);
-	});
-
-	it("leaves out the schemas of later matches once a result holds enough of them", () => {
-		const huge = { query: { type: "string", description: "x".repeat(15_000) } };
-		const entries = [
-			entry("reports", "run_report", { properties: huge }),
-			entry("reports", "run_report_export", { properties: huge }),
-		];
+	it("gives the best matches' schemas, and only what the others require", () => {
+		const entries = ["run_report", "run_report_export", "run_report_schedule"].map((name) =>
+			entry("reports", name, {
+				description: "Runs a report. Takes a while.",
+				properties: { query: { type: "string" } },
+				required: ["query"],
+			}),
+		);
 
 		const found = searchCatalog(entries, "run report");
 
-		expect(found.map((match) => match.tool)).toEqual([
-			"reports__run_report",
-			"reports__run_report_export",
-		]);
-		expect(found[0]?.inputSchema).toBeDefined();
-		expect(found[1]?.inputSchema).toBeUndefined();
+		expect(found.slice(0, 2).every((match) => "inputSchema" in match)).toBe(true);
+		expect(found[2]).toEqual({
+			tool: "reports__run_report_schedule",
+			description: "Runs a report.",
+			required: ["query"],
+		});
 	});
 });

@@ -7,7 +7,7 @@ import type { TurnContext } from "./execution.ts";
 const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
-	connectionTools: { mode: "direct", keys: [] },
+	connectionTools: undefined,
 	...overrides,
 });
 
@@ -109,15 +109,6 @@ describe("modelPrompt", () => {
 		const noTools = instruction([]);
 		expect(noTools).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
 		expect(noTools).toContain("You cannot search the web");
-	});
-
-	it("names the connection tools on offer and how their names are made", () => {
-		const prompt = modelPrompt(
-			context(),
-			environment({ connectionTools: { mode: "direct", keys: ["wiki__search_pages"] } }),
-		).messages.at(-1);
-		expect(prompt?.content).toContain("connections you can call: wiki__search_pages.");
-		expect(prompt?.content).toContain("double underscore");
 	});
 
 	it("writes the agent's own tool calls into its history as one line each, not the whole output", () => {

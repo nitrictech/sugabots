@@ -1,89 +1,52 @@
-import { CONNECTION_TOOL_SEPARATOR } from "@sugabots/contracts";
-import { asSchema, type JSONSchema7 } from "ai";
+import type { JSONSchema7 } from "ai";
 import type { OfferedTool } from "../connections.ts";
 
 /** How many tools one search returns at most. */
 const SEARCH_RESULT_LIMIT = 5;
 
 /**
- * How much of one search's result may be input schemas: about 5,000 tokens.
- * A match past it is returned without its schema, and searching for it by
- * name returns it with its schema first.
+ * How many of a search's best matches carry their whole input schema, and
+ * how long those schemas may be together: about 3,000 tokens. The rest carry
+ * only what picks between them, so a search adds little to the turn.
  */
-const SEARCH_SCHEMA_CHARACTERS = 20_000;
+const SCHEMAS_PER_SEARCH = 2;
+const SEARCH_SCHEMA_CHARACTERS = 12_000;
 
 /** How much of the turn's note may list tools by name: about 2,000 tokens. */
 export const LISTING_CHARACTERS = 8_000;
 
-/** One connection tool as a request would define it. */
-export interface CatalogEntry {
-	/** What the model names it by: `linear__list_issues`. */
-	key: string;
-	/** The connection's handle: `linear`. */
-	handle: string;
-	/** The server's own name for it: `list_issues`. */
-	name: string;
-	description: string;
-	inputSchema: JSONSchema7;
-	/** Whether the pod's bots may call it at all. */
-	callable: boolean;
-}
+/** A connection tool the model can find and call, by the key it calls it by: `notes__list_notes`. */
+export type CatalogEntry = Pick<
+	OfferedTool,
+	"handle" | "remoteToolName" | "description" | "inputSchema"
+> & { key: string };
 
 /**
- * Every tool in `tools` as a request would define it, sorted by key so a
- * listing built from them is the same from turn to turn. Built once per turn:
- * it is both what is measured and what is searched.
+ * The tools in `tools` the pod's bots may call, sorted by key so the listing
+ * built from them is the same from turn to turn. A tool turned off is left
+ * out: it cannot be called.
  */
 export function catalogOf(tools: Readonly<Record<string, OfferedTool>>): CatalogEntry[] {
 	return Object.entries(tools)
-		.map(([key, offered]) => ({
-			key,
-			handle: key.slice(
-				0,
-				key.length - CONNECTION_TOOL_SEPARATOR.length - offered.remoteToolName.length,
-			),
-			name: offered.remoteToolName,
-			// An MCP tool's description is the server's text, never a function of the call.
-			description: typeof offered.tool.description === "string" ? offered.tool.description : "",
-			inputSchema: jsonSchemaOf(offered),
-			callable: offered.access !== "off",
-		}))
+		.filter(([, offered]) => offered.access !== "off")
+		.map(([key, offered]) => ({ ...offered, key }))
 		.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
-/** The tool's input schema as JSON Schema, as the request carries it. */
-function jsonSchemaOf(offered: OfferedTool): JSONSchema7 {
-	const schema = asSchema(offered.tool.inputSchema).jsonSchema;
-	// Only a schema built lazily is a promise; an MCP server's never is.
-	return "then" in schema ? {} : schema;
-}
-
-/** The JSON a request would carry to define `entry` as a tool of its own. */
-export function definitionJson(entry: CatalogEntry): string {
-	return JSON.stringify({
-		name: entry.key,
-		description: entry.description,
-		inputSchema: entry.inputSchema,
-	});
-}
-
-/** A match from `searchCatalog`: its schema is left out once the result's schema budget is spent. */
-export interface FoundTool {
-	tool: string;
-	description: string;
-	inputSchema?: JSONSchema7;
-}
+/** A tool a search found: the best carry their input schema, the rest the parameters they require. */
+type FoundTool =
+	| { tool: string; description: string; inputSchema: JSONSchema7 }
+	| { tool: string; description: string; required: string[] };
 
 /**
- * The callable entries that best match `query`, best first. A tool that
- * matches more of the query's words ranks above one that matches fewer;
- * among those, a word in its name counts most, then its connection, then its
- * parameters and description. Ties go by key, so a search is repeatable.
+ * The entries that best match `query`, best first. A tool that matches more
+ * of the query's words ranks above one that matches fewer; among those, a
+ * word in its name counts most, then its connection, then its parameters and
+ * description. Ties go by key, so a search is repeatable.
  */
-export function searchCatalog(entries: readonly CatalogEntry[], query: string): FoundTool[] {
-	const terms = [...new Set(wordsOf(query))].filter((word) => !STOP_WORDS.has(word));
-	const ranked = entries
-		.filter((entry) => entry.callable)
+export function searchCatalog(catalog: readonly CatalogEntry[], query: string): FoundTool[] {
+	const terms = [...new Set(wordsOf(query))].filter((word) => !STOP_WORDS.has(word)).map(stem);
+	const ranked = catalog
 		.map((entry) => ({ entry, ...matchOf(entry, terms) }))
 		.filter(({ matched }) => matched > 0)
 		.sort(
@@ -92,12 +55,16 @@ export function searchCatalog(entries: readonly CatalogEntry[], query: string): 
 		)
 		.slice(0, SEARCH_RESULT_LIMIT);
 	let schemaCharacters = 0;
-	return ranked.map(({ entry }) => {
-		const found = { tool: entry.key, description: entry.description };
+	return ranked.map(({ entry }, rank) => {
 		schemaCharacters += JSON.stringify(entry.inputSchema).length;
-		return schemaCharacters <= SEARCH_SCHEMA_CHARACTERS
-			? { ...found, inputSchema: entry.inputSchema }
-			: found;
+		if (rank < SCHEMAS_PER_SEARCH && schemaCharacters <= SEARCH_SCHEMA_CHARACTERS) {
+			return { tool: entry.key, description: entry.description, inputSchema: entry.inputSchema };
+		}
+		return {
+			tool: entry.key,
+			description: firstSentenceOf(entry.description),
+			required: entry.inputSchema.required ?? [],
+		};
 	});
 }
 
@@ -112,13 +79,13 @@ function matchOf(
 	entry: CatalogEntry,
 	terms: readonly string[],
 ): { matched: number; weight: number } {
-	const name = stemsOf(entry.name);
+	const name = stemsOf(entry.remoteToolName);
 	const handle = stemsOf(entry.handle);
 	const parameters = stemsOf(Object.keys(entry.inputSchema.properties ?? {}).join(" "));
 	const description = stemsOf(entry.description);
 	let matched = 0;
 	let weight = 0;
-	for (const term of terms.map(stem)) {
+	for (const term of terms) {
 		const termWeight =
 			(name.has(term) ? 3 : 0) +
 			(handle.has(term) ? 2 : 0) +
@@ -150,40 +117,39 @@ function stem(word: string): string {
 	return word;
 }
 
-/** Each connection with callable tools, and how many it has. */
-export function connectionsOf(
-	entries: readonly CatalogEntry[],
-): { connection: string; tools: number }[] {
-	const counts = new Map<string, number>();
-	for (const entry of entries) {
-		if (entry.callable) counts.set(entry.handle, (counts.get(entry.handle) ?? 0) + 1);
-	}
-	return [...counts].map(([connection, tools]) => ({ connection, tools }));
+function firstSentenceOf(text: string): string {
+	const end = text.search(/[.!?](\s|$)/);
+	return end < 0 ? text : text.slice(0, end + 1);
 }
 
 /**
- * One line per connection, naming as many of its callable tools as its share
- * of `LISTING_CHARACTERS` holds, so a connection with hundreds of tools cannot
- * crowd the others out: `reports (371 tools): run_report, …, and 340 more`.
- * A tool turned off is left out: it cannot be called.
+ * One line per connection, naming as many of its tools, by the full name
+ * `call_tool` takes, as its share of `LISTING_CHARACTERS` holds, so a
+ * connection with hundreds of tools cannot crowd the others out:
+ * `- reports (371 tools): reports__run_report, …, and 340 more`.
  */
-export function catalogListing(entries: readonly CatalogEntry[]): string {
-	const connections = connectionsOf(entries);
-	const share = Math.floor(LISTING_CHARACTERS / Math.max(1, connections.length));
-	return connections
-		.map(({ connection, tools }) => {
-			const head = `- ${connection} (${tools} ${tools === 1 ? "tool" : "tools"})`;
-			const names: string[] = [];
-			let length = head.length + 2;
-			for (const entry of entries) {
-				if (!entry.callable || entry.handle !== connection) continue;
-				length += entry.name.length + 2;
-				if (length > share) break;
-				names.push(entry.name);
+export function catalogListing(catalog: readonly CatalogEntry[]): string {
+	const byConnection = new Map<string, string[]>();
+	for (const entry of catalog) {
+		byConnection.set(entry.handle, [...(byConnection.get(entry.handle) ?? []), entry.key]);
+	}
+	const share = Math.floor(LISTING_CHARACTERS / Math.max(1, byConnection.size));
+	return [...byConnection]
+		.map(([connection, keys]) => {
+			const head = `- ${connection} (${keys.length} ${keys.length === 1 ? "tool" : "tools"})`;
+			const all = `${head}: ${keys.join(", ")}`;
+			// One character of each share is the line's break.
+			if (all.length < share) return all;
+			const more = `, and ${keys.length} more`;
+			const shown: string[] = [];
+			let length = head.length + 2 + more.length;
+			for (const key of keys) {
+				length += key.length + 2;
+				if (length >= share) break;
+				shown.push(key);
 			}
-			const more = tools - names.length;
-			if (names.length === 0) return head;
-			return `${head}: ${names.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+			if (shown.length === 0) return head;
+			return `${head}: ${shown.join(", ")}, and ${keys.length - shown.length} more`;
 		})
 		.join("\n");
 }

@@ -5,7 +5,7 @@ import {
 	connectionToolKey,
 	connectionToolMutating,
 } from "@sugabots/contracts";
-import type { Tool } from "ai";
+import type { JSONSchema7, Tool } from "ai";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
 import { ConnectionRepository } from "../../providers/connections/connection-repository.ts";
@@ -40,6 +40,12 @@ import {
 
 export interface OfferedTool {
 	tool: Tool;
+	/** The connection's handle, which prefixes the tool's key. */
+	handle: string;
+	/** What the server says the tool does. */
+	description: string;
+	/** The server's own input schema for it. */
+	inputSchema: JSONSchema7;
 	/** Whether a call may change something at the other end. */
 	mutating: boolean;
 	/** Whether each call runs, waits for a person to allow it, or is refused. */
@@ -122,9 +128,12 @@ export function from({
 		);
 		try {
 			const tools: Record<string, OfferedTool> = {};
-			for (const { described, tool } of await session.tools()) {
+			for (const { described, inputSchema, tool } of await session.tools()) {
 				tools[connectionToolKey(target.handle, described.name)] = {
 					tool,
+					handle: target.handle,
+					description: described.description ?? "",
+					inputSchema,
 					mutating: connectionToolMutating(described),
 					access: toolAccessOf(target.toolAccess, described),
 					connectionId: target.connectionId,

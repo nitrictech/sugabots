@@ -26,6 +26,7 @@ import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
+import { connectionOfferAs, connectionOfferFitting } from "./connection-offer.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
 	type PreparedTurn,
@@ -42,13 +43,7 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import {
-	connectionCallOf,
-	connectionOfferFor,
-	connectionToolApproval,
-	connectionToolsNote,
-	toolsForTurn,
-} from "./tools.ts";
+import { toolsForTurn } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -410,14 +405,9 @@ const streamReply = (
 				}
 				approvalBoundTools.add(binding.tool);
 			}
-			// A resumed segment offers its tools as the segment that suspended did:
-			// the calls waiting on approval were made to those tools. One saved
-			// before tools could be bridged offered them directly.
-			const offer = connectionOfferFor(
-				connections.tools,
-				prepared.context.windowTokens,
-				prepared.checkpoint ? (prepared.checkpoint.connectionToolMode ?? "direct") : undefined,
-			);
+			const offer = prepared.checkpoint
+				? connectionOfferAs(prepared.checkpoint.connectionToolMode, connections.tools)
+				: connectionOfferFitting(connections.tools, prepared.context.windowTokens);
 			yield* Effect.annotateCurrentSpan("sugabots.connection_tool_mode", offer.mode);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
@@ -454,7 +444,7 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: Object.keys(builtIn),
-				connectionTools: connectionToolsNote(offer),
+				connectionTools: offer.note,
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
@@ -488,7 +478,7 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: connectionToolApproval(offer),
+				toolApproval: offer.toolApproval,
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
@@ -509,17 +499,17 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const call = connectionCallOf(offer, request.toolCall);
-					const offered = call && connections.tools[call.tool];
-					if (!call || offered?.access !== "ask") {
+					const target = offer.approvalTargetOf(request.toolCall);
+					if (!target) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
+					const { offered } = target;
 					return Effect.map(ids.next, (id) => ({
 						id,
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
-						tool: call.tool,
-						input: call.input,
+						tool: target.key,
+						input: target.input,
 						reason: request.reason,
 						connectionId: offered.connectionId,
 						connectionRevision: offered.connectionRevision,

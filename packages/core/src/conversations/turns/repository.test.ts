@@ -64,6 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
 		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
 		modelCalls: 1,
+		connectionToolMode: "direct",
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {

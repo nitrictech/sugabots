@@ -824,6 +824,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				modelInput: { model: "test", system: "test", messages: [] },
 				reply: { content: "", collaborations: [], toolCalls: [{ id: pending.id, atOffset: 0 }] },
 				modelCalls: 1,
+				connectionToolMode: "direct",
 			},
 			[pending],
 		);

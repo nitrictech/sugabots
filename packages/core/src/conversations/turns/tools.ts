@@ -1,6 +1,6 @@
 import type { CollaborationPart } from "@sugabots/contracts";
-import type { Tool, ToolApprovalConfiguration, ToolSet } from "ai";
-import { type Effect, Schema } from "effect";
+import type { Tool, ToolSet } from "ai";
+import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { UserMessage } from "../../user-message.ts";
@@ -8,25 +8,10 @@ import type { AgentRepository } from "../../workspaces/agents/agent-repository.t
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
-import type { OfferedTool } from "../tools/connections.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import {
-	type CatalogEntry,
-	catalogListing,
-	catalogOf,
-	definitionJson,
-} from "../tools/tool-search/catalog.ts";
-import {
-	bridgedCallOf,
-	CALL_TOOL,
-	callTool,
-	TOOL_SEARCH,
-	toolSearchTool,
-} from "../tools/tool-search/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
-import type { OfferedConnectionTools } from "./context.ts";
-import { directToolDefinitionsLimitTokens, estimatedTokens } from "./context-window.ts";
+import type { ConnectionOffer } from "./connection-offer.ts";
 import type { PreparedTurn } from "./execution.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
 import type { ToolCallRepository } from "./tool-calls/repository.ts";
@@ -58,7 +43,7 @@ export interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: ToolSet;
-	/** The pod connections' tools, and whether they are offered as themselves or behind the bridge. */
+	/** The pod's connection tools, and how the model is offered them. */
 	connections: ConnectionOffer;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
@@ -83,101 +68,6 @@ export interface ToolDependencies {
 	signal: AbortSignal;
 }
 
-/**
- * How a turn offers its pod's connection tools to the model.
- *
- * `direct`: every tool is in the request, as its own tool. `bridged`: the
- * request carries `tool_search` and `call_tool` instead, and the model reads
- * a found tool's schema from the search's result. A pod whose tools fit is
- * offered them directly; one whose tools would crowd out the conversation is
- * bridged, so a server listing hundreds of tools costs a short list in the
- * turn's note rather than the model's window.
- */
-export const ConnectionToolMode = Schema.Literals(["direct", "bridged"]);
-export type ConnectionToolMode = typeof ConnectionToolMode.Type;
-
-/** A turn's connection tools, keyed `handle__tool`, and how they are offered. */
-export interface ConnectionOffer {
-	mode: ConnectionToolMode;
-	tools: Readonly<Record<string, OfferedTool>>;
-	/** Every tool as a request would define it, which a bridged turn searches. */
-	catalog: readonly CatalogEntry[];
-}
-
-/** A turn with no connection tools. */
-export const noConnectionTools: ConnectionOffer = { mode: "direct", tools: {}, catalog: [] };
-
-/**
- * How `tools` are offered to a model whose window is `windowTokens`: the mode
- * a resumed turn already chose, or else directly while their definitions fit
- * within the share of the window tools may take. A tool set to `off` counts,
- * since offered directly it is sent.
- */
-export function connectionOfferFor(
-	tools: Readonly<Record<string, OfferedTool>>,
-	windowTokens: number,
-	chosen?: ConnectionToolMode,
-): ConnectionOffer {
-	const catalog = catalogOf(tools);
-	const definitionTokens = catalog.reduce(
-		(total, entry) => total + estimatedTokens(definitionJson(entry)),
-		0,
-	);
-	const fits = definitionTokens <= directToolDefinitionsLimitTokens(windowTokens);
-	return { mode: chosen ?? (fits ? "direct" : "bridged"), tools, catalog };
-}
-
-/** Which calls wait for a person to allow them: each to a tool whose access is `ask`. */
-export function connectionToolApproval(
-	offer: ConnectionOffer,
-): ToolApprovalConfiguration<ToolSet, unknown> {
-	switch (offer.mode) {
-		case "direct":
-			return Object.fromEntries(
-				Object.entries(offer.tools)
-					.filter(([, offered]) => offered.access === "ask")
-					.map(([key]) => [key, "user-approval" as const]),
-			);
-		case "bridged":
-			return {
-				[CALL_TOOL]: (input: unknown) => {
-					const call = bridgedCallOf(input);
-					const offered = call && Object.hasOwn(offer.tools, call.tool) && offer.tools[call.tool];
-					return offered && offered.access === "ask" ? ("user-approval" as const) : undefined;
-				},
-			};
-	}
-}
-
-/** What the turn's note tells the model of its connection tools. */
-export function connectionToolsNote(offer: ConnectionOffer): OfferedConnectionTools {
-	switch (offer.mode) {
-		case "direct":
-			return { mode: "direct", keys: Object.keys(offer.tools) };
-		case "bridged":
-			return { mode: "bridged", listing: catalogListing(offer.catalog) };
-	}
-}
-
-/**
- * The connection tool a call waiting for approval is for, and its input. A
- * call through the bridge is for the tool it names, so it is approved,
- * recorded and checked on resuming as that tool.
- */
-export function connectionCallOf(
-	offer: ConnectionOffer,
-	toolCall: { toolName: string; input: unknown },
-): { tool: string; input: unknown } | undefined {
-	switch (offer.mode) {
-		case "direct":
-			return { tool: toolCall.toolName, input: toolCall.input };
-		case "bridged": {
-			const call = toolCall.toolName === CALL_TOOL ? bridgedCallOf(toolCall.input) : undefined;
-			return call && { tool: call.tool, input: call.arguments };
-		}
-	}
-}
-
 /** What people, and the model, are told of a call to a tool the pod has turned off. */
 const TOOL_TURNED_OFF = UserMessage.of`This tool is turned off for bots in this pod.`;
 
@@ -198,7 +88,12 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	for (const [key, tool] of Object.entries(deps.builtIn)) {
 		tools[key] = recorded(key, tool, recording);
 	}
-	Object.assign(tools, connectionToolsOffered(deps, recording));
+	Object.assign(
+		tools,
+		deps.connections.toolsFor(runnableConnectionTools(deps, recording), (key, tool) =>
+			recorded(key, tool, recording),
+		),
+	);
 	if (prepared.context.compaction) {
 		tools[SEARCH_HISTORY_TOOL] = recorded(
 			SEARCH_HISTORY_TOOL,
@@ -240,27 +135,8 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	return tools;
 }
 
-/** The connection tools the model is offered: each tool itself, or the bridge to them. */
-function connectionToolsOffered(deps: ToolDependencies, recording: RecordingOptions): ToolSet {
-	const connectionTools = connectionToolsForTurn(deps, recording);
-	switch (deps.connections.mode) {
-		case "direct":
-			return connectionTools;
-		case "bridged":
-			return {
-				[TOOL_SEARCH]: recorded(
-					TOOL_SEARCH,
-					toolSearchTool({ catalog: deps.connections.catalog }),
-					recording,
-				),
-				// Not recorded itself: the tool it calls records the call, under its own name.
-				[CALL_TOOL]: callTool({ callable: connectionTools }),
-			};
-	}
-}
-
 /** Each connection tool as the turn runs it: recorded, approved when it must be, or refused. */
-function connectionToolsForTurn(
+function runnableConnectionTools(
 	deps: ToolDependencies,
 	recording: RecordingOptions,
 ): Record<string, Tool> {

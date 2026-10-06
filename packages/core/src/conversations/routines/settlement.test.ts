@@ -763,5 +763,6 @@ function checkpointFor(reply: TurnCheckpoint["reply"]): TurnCheckpoint {
 		modelInput: { model: "test/model", system: "", messages: [] },
 		reply,
 		modelCalls: 1,
+		connectionToolMode: "direct",
 	};
 }

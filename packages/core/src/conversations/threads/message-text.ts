@@ -1,4 +1,5 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
+import { Option, Schema } from "effect";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 
 /** The tool an agent searches its thread's older history with. */
@@ -54,26 +55,21 @@ export function describeToolCall(call: ToolCallPart): string {
 	}
 }
 
+/** The part of a `tool_search` result its history line names: the tools it found. */
+const FoundToolNames = Schema.Struct({
+	tools: Schema.Array(Schema.Struct({ tool: Schema.String })),
+});
+
 /**
  * The tools a `tool_search` found, by name. Their schemas are left out: a
  * later turn that needs one searches again, rather than every turn carrying
  * them.
  */
 function foundToolsOf(output: unknown): string {
-	const found =
-		typeof output === "object" &&
-		output !== null &&
-		"tools" in output &&
-		Array.isArray(output.tools)
-			? output.tools.flatMap((match: unknown) =>
-					typeof match === "object" &&
-					match !== null &&
-					"tool" in match &&
-					typeof match.tool === "string"
-						? [match.tool]
-						: [],
-				)
-			: [];
+	const found = Option.match(Schema.decodeUnknownOption(FoundToolNames)(output), {
+		onNone: () => [],
+		onSome: ({ tools }) => tools.map(({ tool }) => tool),
+	});
 	return found.length > 0 ? found.join(", ") : "no tools";
 }
 
