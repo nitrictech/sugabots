@@ -12,7 +12,6 @@ const MAX_QUERY_LENGTH = 400;
 /**
  * The `web_search` built-in tool: ask the workspace's search provider.
  *
- * Offered only when the workspace has an enabled provider (`tools/built-in.ts`).
  * Results are titles, addresses and snippets; reading a result is `web_fetch`'s
  * job, so a search never costs more than the one call.
  */

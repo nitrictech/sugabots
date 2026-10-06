@@ -11,6 +11,7 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -319,7 +320,12 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(Object.keys(received?.tools ?? {})).toEqual([TOOL_SEARCH, CALL_TOOL]);
+		expect(Object.keys(received?.tools ?? {})).toEqual([
+			TOOL_SEARCH,
+			CALL_TOOL,
+			SEARCH_HISTORY_TOOL,
+			"collaborate",
+		]);
 		const approvals = received?.toolApproval as
 			| Record<string, (input: unknown) => unknown>
 			| undefined;
@@ -331,17 +337,26 @@ describe("runSegment", () => {
 		expect(turnNote).not.toContain("drive__lookup");
 	});
 
-	it("leaves out a built-in tool the agent has switched off", async () => {
+	it("still offers a built-in tool the agent has switched off, refusing each call to it", async () => {
 		const { execution, turns } = fakes();
 		const probe = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-			execute: async () => "ok",
+			execute: vi.fn(async () => "ok"),
 		});
-		const offered: string[][] = [];
+		let received: Models.StreamRequest | undefined;
+		let outcome: unknown;
 		const model = Models.fromStream((input) =>
 			Effect.sync(() => {
-				offered.push(Object.keys(input.tools ?? {}));
-				return streamed(chunks("Done"));
+				received = input;
+				return streamed(
+					(async function* () {
+						outcome = await input.tools?.probe?.execute?.(
+							{} as never,
+							{ toolCallId: "sdk-1", messages: [] } as never,
+						);
+						yield "Done";
+					})(),
+				);
 			}),
 		);
 		vi.mocked(execution.prepare).mockReturnValueOnce(
@@ -362,11 +377,17 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
-				builtInTools: { forWorkspace: () => Effect.succeed({ probe, other: probe }) },
+				builtInTools: {
+					forWorkspace: () =>
+						Effect.succeed({ tools: { probe, other: probe }, usable: ["probe", "other"] }),
+				},
 			}),
 		);
 
-		expect(offered).toEqual([["other", TOOL_SEARCH, CALL_TOOL]]);
+		expect(Object.keys(received?.tools ?? {})).toEqual(expect.arrayContaining(["probe", "other"]));
+		expect(probe.execute).not.toHaveBeenCalled();
+		expect(outcome).toMatchObject({ status: "failed" });
+		expect(received?.messages.at(-1)?.content).toContain("Built-in tools you can call: other.");
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {

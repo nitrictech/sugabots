@@ -1,5 +1,4 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
-import type { ToolSet } from "ai";
 import {
 	Cause,
 	Clock,
@@ -387,10 +386,13 @@ const streamReply = (
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
 			const now = yield* DateTime.nowAsDate;
-			const builtIn = withoutDisabled(
-				yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId),
-				prepared.context.agent.disabledTools,
-			);
+			const offeredBuiltIns = yield* builtInTools.forWorkspace(prepared.context.thread.workspaceId);
+			const builtIn = {
+				tools: offeredBuiltIns.tools,
+				usable: offeredBuiltIns.usable.filter(
+					(key) => !prepared.context.agent.disabledTools.includes(key),
+				),
+			};
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
 				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId),
@@ -443,7 +445,7 @@ const streamReply = (
 
 			const environment: TurnEnvironment = {
 				now,
-				builtInTools: Object.keys(builtIn),
+				builtInTools: builtIn.usable,
 				connectionTools: connectionToolsNote(connections.tools),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
@@ -574,11 +576,6 @@ const streamReply = (
 			);
 		}),
 	);
-
-/** The built-in tools less the ones an admin switched off for this agent. */
-function withoutDisabled(tools: ToolSet, disabled: readonly string[]): ToolSet {
-	return Object.fromEntries(Object.entries(tools).filter(([key]) => !disabled.includes(key)));
-}
 
 /** Saves the reply so far, unless it is what was last saved. */
 const saveReplySoFar = (

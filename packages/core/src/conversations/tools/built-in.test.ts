@@ -10,13 +10,15 @@ const fetchPage = async () => ({ ok: false as const, reason: UserMessage.of`unus
 const httpClients = { for: () => async () => new Response(null, { status: 503 }) };
 
 describe("the built-in tools for a workspace", () => {
-	it("offers web_fetch and web_search only with a search provider to call", async () => {
+	it("always offers web_fetch and web_search, letting them run only with a search provider to call", async () => {
 		const without = BuiltInTools.from({
 			fetchPage,
 			searchProviders: { resolve: () => Effect.undefined },
 			httpClients,
 		});
-		expect(Object.keys(await run(without.forWorkspace("w1")))).toEqual([]);
+		const offline = await run(without.forWorkspace("w1"));
+		expect(Object.keys(offline.tools)).toEqual(["web_fetch", "web_search"]);
+		expect(offline.usable).toEqual([]);
 
 		const withSearch = BuiltInTools.from({
 			fetchPage,
@@ -31,9 +33,8 @@ describe("the built-in tools for a workspace", () => {
 			},
 			httpClients,
 		});
-		expect(Object.keys(await run(withSearch.forWorkspace("w1")))).toEqual([
-			"web_fetch",
-			"web_search",
-		]);
+		const online = await run(withSearch.forWorkspace("w1"));
+		expect(Object.keys(online.tools)).toEqual(["web_fetch", "web_search"]);
+		expect(online.usable).toEqual(["web_fetch", "web_search"]);
 	});
 });

@@ -6,6 +6,7 @@ import type { Database } from "../../database/database.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
 import { searchBackend, searchEndpoint } from "../../providers/search-providers/backends.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
+import { UserMessage } from "../../user-message.ts";
 import { type FetchPage, pageFetcher } from "./web-fetch/fetch-page.ts";
 import { WEB_FETCH_TOOL, webFetchTool } from "./web-fetch/tool.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
@@ -13,16 +14,22 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 /**
  * The built-in tools offered to a workspace's crew turns.
  *
- * forWorkspace returns `web_fetch` and `web_search` while
+ * forWorkspace returns `web_fetch` and `web_search` always, so the tools a
+ * thread's turns send stay the same, but names them `usable` only while
  * `searchProviders.resolve` finds an enabled search provider with every
- * setting a search needs, and no tools otherwise. The provider's enabled flag
- * is the workspace's one setting for whether bots may use the web, and each
- * search is billed to the workspace. forWorkspace looks the provider
- * up on every call, so a provider enabled between turns applies from the next
- * turn without a restart.
+ * setting a search needs. The provider's enabled flag is the workspace's one
+ * setting for whether bots may use the web, and each search is billed to the
+ * workspace. forWorkspace looks the provider up on every call, so a provider
+ * enabled between turns applies from the next turn without a restart.
  */
 export interface Interface {
-	forWorkspace(workspaceId: string): Effect.Effect<ToolSet, never, Database>;
+	forWorkspace(workspaceId: string): Effect.Effect<Offered, never, Database>;
+}
+
+export interface Offered {
+	tools: ToolSet;
+	/** The keys of the tools that may run; a call to any other is refused. */
+	usable: readonly string[];
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BuiltInTools") {}
@@ -55,11 +62,20 @@ export interface Parts {
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
 export function from({ fetchPage, searchProviders, httpClients }: Parts): Interface {
 	const webFetch = webFetchTool({ fetchPage });
+	const offline: Offered = {
+		tools: {
+			[WEB_FETCH_TOOL]: webFetch,
+			[WEB_SEARCH_TOOL]: webSearchTool({
+				search: async () => ({ ok: false, reason: NO_SEARCH_PROVIDER }),
+			}),
+		},
+		usable: [],
+	};
 	return {
 		forWorkspace: (workspaceId) =>
-			Effect.gen(function* (): Effect.fn.Return<ToolSet, never, Database> {
+			Effect.gen(function* (): Effect.fn.Return<Offered, never, Database> {
 				const connection = yield* searchProviders.resolve(workspaceId);
-				if (!connection) return {};
+				if (!connection) return offline;
 				// The tool runs searches as promises; they log through the turn's services.
 				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
 				const search = searchBackend(
@@ -67,12 +83,17 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 					httpClients.for({ baseUrl: searchEndpoint(connection) }),
 				);
 				return {
-					[WEB_FETCH_TOOL]: webFetch,
-					[WEB_SEARCH_TOOL]: webSearchTool({ search: (request) => runPromise(search(request)) }),
+					tools: {
+						[WEB_FETCH_TOOL]: webFetch,
+						[WEB_SEARCH_TOOL]: webSearchTool({ search: (request) => runPromise(search(request)) }),
+					},
+					usable: [WEB_FETCH_TOOL, WEB_SEARCH_TOOL],
 				};
 			}),
 	};
 }
 
+const NO_SEARCH_PROVIDER = UserMessage.of`The workspace has no search provider switched on.`;
+
 /** No built-in tools at all, for a case that offers a turn none. */
-export const none: Interface = { forWorkspace: () => Effect.succeed({}) };
+export const none: Interface = { forWorkspace: () => Effect.succeed({ tools: {}, usable: [] }) };
