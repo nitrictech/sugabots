@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { agentSchema } from "./agents.ts";
+import { podSlugSchema } from "./pods.ts";
 import { routineExecutionSummarySchema, routineExecutionTriggerKindSchema } from "./routines.ts";
 import { agentParticipantSchema, messageSchema, threadParticipantSchema } from "./threads.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -31,8 +32,13 @@ export const chatSchema = Schema.Struct({
 
 export type Chat = typeof chatSchema.Type;
 
-/** The pod whose chats a list covers. */
-export const chatListQuerySchema = Schema.Struct({ pod: uuidSchema });
+/**
+ * The pod whose chats a list covers, by its id or, as an address names it,
+ * its slug.
+ */
+export const chatListQuerySchema = Schema.Struct({
+	pod: Schema.Union([uuidSchema, podSlugSchema]),
+});
 
 /**
  * One row of the conversation list: a bot, since each bot has one chat in its

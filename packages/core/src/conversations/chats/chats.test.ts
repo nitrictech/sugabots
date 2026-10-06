@@ -47,6 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	let agentId: string;
 	let recipientAgentId: string;
 	let userId: string;
+	let administratorId: string;
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -71,6 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		if (!person || !administrator || !space) throw new Error("Could not create chat test identity");
 		userId = person.id;
+		administratorId = administrator.id;
 		workspaceId = space.id;
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
@@ -191,6 +193,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				needsApproval: false,
 			},
 		]);
+	});
+
+	it("lists a pod by its slug as by its id, as an address names it", async () => {
+		const byId = await view.list({ workspace: workspaceId, pod: podId });
+		const [room] = await onDatabase((db) =>
+			db.select({ slug: pod.slug }).from(pod).where(eq(pod.id, podId)),
+		);
+
+		expect(await view.list({ workspace: workspaceId, pod: room?.slug ?? "" })).toEqual(byId);
 	});
 
 	it("previews a bot's reply as the chat shows it, without the words before a tool call", async () => {
@@ -433,6 +444,51 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			_tag: "ResourceHidden",
 		});
 		expect((await view.list({ workspace: workspaceId, pod: personal.id }))?.items).toHaveLength(1);
+	});
+
+	it("lists the person's own Personal pod by the slug every Personal pod shares", async () => {
+		const suffix = crypto.randomUUID();
+		const [mine, theirs] = await onDatabase((db) =>
+			db
+				.insert(pod)
+				.values(
+					[userId, administratorId].map((ownerId) => ({
+						workspaceId,
+						ownerId,
+						kind: "personal" as const,
+						name: "Personal",
+						slug: "personal",
+						createdById: ownerId,
+					})),
+				)
+				.returning(),
+		);
+		if (!mine || !theirs) throw new Error("Could not create Personal pods");
+		await onDatabase((db) =>
+			db.insert(agent).values(
+				[mine, theirs].map((room) => ({
+					workspaceId,
+					podId: room.id,
+					name: `Assistant ${room.id === mine.id ? "mine" : "theirs"}`,
+					handle: handleFromName(`Assistant ${room.id} ${suffix}`),
+					color: "rose" as const,
+					face: "dot" as const,
+					model: "test/model",
+					createdById: room.ownerId,
+				})),
+			),
+		);
+		const asAdministrator = onPostgresAs(administratorId)(
+			Context.get(conversations, ChatView.Service),
+		);
+
+		const listed = async (list: Promised<ChatView.Interface>) =>
+			(await list.list({ workspace: workspaceId, pod: "personal" }))?.items.map(
+				(item) => item.agent.name,
+			);
+
+		expect(await listed(view)).toEqual(["Assistant mine"]);
+		expect(await listed(asAdministrator)).toEqual(["Assistant theirs"]);
 	});
 
 	it("keeps one chat per pod and host and queues top-level messages in the main Chat", async () => {

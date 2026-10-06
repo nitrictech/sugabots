@@ -10,9 +10,13 @@ import {
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { testPerson } from "@sugabots/contracts/testing";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryHistory } from "@tanstack/react-router";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createQueryClient } from "@/lib/query.ts";
+import { workspacesQuery } from "@/lib/workspace.ts";
+import { createAppRouter } from "@/router.tsx";
 import {
 	agents,
 	apiAnswers,
@@ -23,7 +27,9 @@ import {
 	mount,
 	pendingAnswer,
 	sam,
+	TestApp,
 	triager,
+	workspace,
 } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
@@ -401,6 +407,32 @@ describe("ongoing agent Chat", () => {
 		// Both bots' faces, each a disc filling its 40-unit viewbox.
 		expect(collaboration.querySelectorAll('svg > circle[r="20"]')).toHaveLength(2);
 		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
+	});
+
+	it("asks for a chat page's pods, agents and list at once, each a single time, on its first load", async () => {
+		// Reading the chat refreshes its list; held, so only the page's first load is counted.
+		client.api.chats.markRead.mockReturnValue(pendingAnswer().effect);
+		// As /me leaves the cache when the app starts.
+		const queries = createQueryClient();
+		queries.setQueryData(workspacesQuery.queryKey, [workspace]);
+		const path = `/suga/pods/suga-team/agents/${linear.handle}`;
+		render(
+			<TestApp
+				router={createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) })}
+				queries={queries}
+				session={{ user: sam, error: undefined, refresh: vi.fn() }}
+			/>,
+		);
+
+		await screen.findByText(mainMessage.content);
+		expect(client.api.pods.list).toHaveBeenCalledOnce();
+		expect(client.api.agents.list).toHaveBeenCalledOnce();
+		// By the address's slug: it does not wait for the pods to learn the pod's id.
+		expect(client.api.chats.list).toHaveBeenCalledOnce();
+		expect(client.api.chats.list).toHaveBeenCalledWith({
+			params: { workspace: workspace.id },
+			query: { pod: "suga-team" },
+		});
 	});
 
 	it("opens a chat the pod's list does not have yet", async () => {

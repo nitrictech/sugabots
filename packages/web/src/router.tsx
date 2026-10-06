@@ -881,7 +881,7 @@ function PodIndexRoute() {
  */
 function OpenTopChat({ pod }: { pod: Pod }) {
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-	const { data: list } = useChatList(pod.id);
+	const { data: list } = useChatList(pod.slug);
 	if (!sideBySide) return null;
 	const top = list?.items[0];
 	if (!top) return null;
@@ -913,7 +913,7 @@ const agentRoute = createRoute({
 	preloadStaleTime: 0,
 	// Also run while the pointer is on a link here, so the chat is loading before the click.
 	loader: ({ context, params }) => {
-		prefetchChat(context.queries, params);
+		void prefetchChat(context.queries, params);
 		return AgentPage.preload();
 	},
 	component: () => {

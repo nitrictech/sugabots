@@ -255,9 +255,11 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.post(api("/chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
-			const pod = new URL(request.url).searchParams.get("pod");
+			// By the pod's id or its slug, as the API takes it.
+			const named = new URL(request.url).searchParams.get("pod");
+			const pod = pods.find((one) => one.id === named || one.slug === named);
 			const items: ChatListItem[] = bots
-				.filter((bot) => bot.podId === pod)
+				.filter((bot) => bot.podId === pod?.id)
 				.map((bot) => {
 					const last = messages[bot.id]?.at(-1);
 					return {

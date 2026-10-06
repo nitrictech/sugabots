@@ -4,6 +4,7 @@ import {
 	type ChatMessageItem,
 	handleFromName,
 	type NewMessage,
+	type Pod,
 	type SessionUser,
 	type ThreadDetails,
 } from "@sugabots/contracts";
@@ -29,23 +30,30 @@ import { useWorkspace, workspacesQuery } from "@/lib/workspace.ts";
 const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
-function chatListQuery(workspaceId: string | undefined, pod: string | undefined) {
+/**
+ * A pod's conversation list, by the pod's slug: what a chat page's address
+ * names, so a page can ask for it before it knows the pod's id.
+ */
+function chatListQuery(workspaceId: string | undefined, podSlug: string | undefined) {
 	return queryOptions({
-		queryKey: ["chat-list", workspaceId, pod],
+		queryKey: ["chat-list", workspaceId, podSlug],
 		queryFn:
-			workspaceId && pod
+			workspaceId && podSlug
 				? ({ signal }) =>
 						Effect.runPromise(
-							client.api.chats.list({ params: { workspace: workspaceId }, query: { pod } }),
+							client.api.chats.list({
+								params: { workspace: workspaceId },
+								query: { pod: podSlug },
+							}),
 							{ signal },
 						)
 				: skipToken,
 	});
 }
 
-/** The conversation list for a pod, by its id: one row per bot, newest first. */
-export function useChatList(pod: string | undefined) {
-	return useQuery(chatListQuery(useWorkspace().workspace?.id, pod));
+/** The conversation list for a pod, by its slug: one row per bot, newest first. */
+export function useChatList(podSlug: string | undefined) {
+	return useQuery(chatListQuery(useWorkspace().workspace?.id, podSlug));
 }
 
 /** How each pod stands for the rail: its unread chats, and whether any waits on the person. */
@@ -112,28 +120,27 @@ export function refreshChatMarkers(queries: QueryClient, workspaceId: string | u
  * it was never opened or was opened after the list loaded, has one opened
  * with a request.
  */
-export function useChat(podId: string | undefined, hostAgentId: string) {
+export function useChat(pod: Pod, hostAgentId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: chatKey(workspaceId, podId, hostAgentId),
-		queryFn:
-			workspaceId && podId
-				? async ({ signal }) => {
-						const list = await queries.ensureQueryData(chatListQuery(workspaceId, podId));
-						const listed = listedChat(list, hostAgentId);
-						return (
-							listed ??
-							Effect.runPromise(
-								client.api.chats.getOrCreate({
-									params: { workspace: workspaceId },
-									payload: { podId, hostAgentId },
-								}),
-								{ signal },
-							)
-						);
-					}
-				: skipToken,
+		queryKey: chatKey(workspaceId, pod.id, hostAgentId),
+		queryFn: workspaceId
+			? async ({ signal }) => {
+					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					const listed = listedChat(list, hostAgentId);
+					return (
+						listed ??
+						Effect.runPromise(
+							client.api.chats.getOrCreate({
+								params: { workspace: workspaceId },
+								payload: { podId: pod.id, hostAgentId },
+							}),
+							{ signal },
+						)
+					);
+				}
+			: skipToken,
 	});
 }
 
@@ -147,20 +154,28 @@ function chatKey(workspaceId: string | undefined, podId: string | undefined, hos
 }
 
 /**
- * Starts loading the chat an address names, as for a link the pointer is on,
- * so it is on screen when the click lands. It works from what the cache holds
- * already, the workspaces, their rosters and the pod's conversation list, and
- * does nothing without them: a preload should not add requests of its own to
- * find its way, nor open a chat nobody has.
+ * Starts loading the chat an address names: as its page first loads, and for a
+ * link the pointer is on, so the chat is on screen when the click lands. A page
+ * whose workspace's pods are not cached yet first asks for them, its agents and
+ * its conversation list at once, the list by the slug in the address. A failure
+ * is left for the screen's own queries to meet and show. It never opens a chat
+ * nobody has: that waits for the screen.
  */
-export function prefetchChat(
+export async function prefetchChat(
 	queries: QueryClient,
 	address: { workspace: string; pod: string; agent: string },
-): void {
+): Promise<void> {
 	const workspace = queries
 		.getQueryData(workspacesQuery.queryKey)
 		?.find((one) => one.slug === address.workspace);
 	if (!workspace) return;
+	if (!queries.getQueryData(podsQuery(workspace.id).queryKey)) {
+		await Promise.all([
+			queries.ensureQueryData(podsQuery(workspace.id)),
+			queries.ensureQueryData(agentsQuery(workspace.id)),
+			queries.ensureQueryData(chatListQuery(workspace.id, address.pod)),
+		]).catch(() => {});
+	}
 	const found = findPodAgent(
 		queries.getQueryData(podsQuery(workspace.id).queryKey),
 		queries.getQueryData(agentsQuery(workspace.id).queryKey),
@@ -168,7 +183,7 @@ export function prefetchChat(
 		address.agent,
 	);
 	if (!found) return;
-	const list = queries.getQueryData(chatListQuery(workspace.id, found.pod.id).queryKey);
+	const list = queries.getQueryData(chatListQuery(workspace.id, found.pod.slug).queryKey);
 	const chat = list && listedChat(list, found.agent.id);
 	if (!chat) return;
 	const key = chatKey(workspace.id, found.pod.id, found.agent.id);
