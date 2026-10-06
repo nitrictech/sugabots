@@ -27,10 +27,9 @@ import {
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
  * carries whether it may change something, which decides how a failed turn
- * after it is treated, and what the pod's bots may do with it. A tool set to
- * `off` is still offered, so turning one off or on leaves the tools the model
- * is sent, and the provider's cache of them, as they were; its calls are
- * refused. A tool nobody has chosen for is treated as `toolAccessOf` says.
+ * after it is treated, and what the pod's bots may do with it. A call to a
+ * tool set to `off` is refused. A tool nobody has chosen for is treated as
+ * `toolAccessOf` says.
  * A connection whose every tool is off is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
