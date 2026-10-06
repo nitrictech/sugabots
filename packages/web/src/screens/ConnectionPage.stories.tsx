@@ -125,6 +125,18 @@ const github = connection(4, {
 	})),
 });
 
+const posthog = connection(5, {
+	name: "PostHog",
+	handle: "posthog",
+	url: "https://mcp.posthog.com/mcp",
+	tools: Array.from({ length: 300 }, (_, index) => ({
+		name: `query_${index + 1}`,
+		description: `Runs query ${index + 1}`,
+		readOnly: true,
+		destructive: false,
+	})),
+});
+
 const pagePath = (one: TestConnection) =>
 	`/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
 
@@ -135,7 +147,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		// Linear keeps what it is set to, as the server would.
 		let current = linearCustom;
-		const served = [current, stripe, notion, github];
+		const served = [current, stripe, notion, github, posthog];
 		msw.use(
 			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
@@ -257,6 +269,18 @@ export const SearchingTools = meta.story({
 		await expect(within(changes).getByRole("group", { name: "Tool 12" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("group", { name: "Tool 3" })).toBeNull();
 		await expect(canvas.queryByRole("region", { name: "Reading" })).toBeNull();
+	},
+});
+
+/** Hundreds of tools: they scroll inside the settings panel, and the window itself never scrolls. */
+export const HundredsOfTools = meta.story({
+	render: () => <StoryApp path={pagePath(posthog)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("group", { name: "Query 300" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		const page = document.documentElement;
+		await expect(page.scrollHeight).toBeLessThanOrEqual(page.clientHeight);
 	},
 });
 
