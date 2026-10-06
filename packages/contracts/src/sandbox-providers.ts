@@ -244,3 +244,36 @@ export const podSandboxNetworkSchema = Schema.Struct({
 export type PodSandboxNetwork = typeof podSandboxNetworkSchema.Type;
 
 export const newSandboxHostSchema = Schema.Struct({ host: sandboxHostSchema });
+
+/** Which nixpkgs a package comes from: a NixOS release, or unstable for newer versions. */
+export const sandboxSoftwareChannelSchema = Schema.Literals(["stable", "unstable"]);
+
+export type SandboxSoftwareChannel = typeof sandboxSoftwareChannelSchema.Type;
+
+/**
+ * A package's attribute in nixpkgs, such as `ffmpeg` or
+ * `python3Packages.pandas`: names joined by dots, of letters, digits, `_`,
+ * `-` and `+`.
+ */
+export const sandboxPackageNameSchema = Schema.String.check(
+	Schema.isMaxLength(200),
+	Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_+-]*(?:\.[A-Za-z_][A-Za-z0-9_+-]*)*$/, {
+		message: "Enter a nixpkgs package name, such as ffmpeg or python3Packages.pandas",
+	}),
+);
+
+/** Software a pod's sandbox has, each package at the nixpkgs commit it was installed from. */
+export const podSandboxSoftwareSchema = Schema.Struct({
+	packages: Schema.Array(
+		Schema.Struct({
+			name: sandboxPackageNameSchema,
+			channel: sandboxSoftwareChannelSchema,
+			nixpkgsRev: Schema.String,
+			/** Who allowed the agent's request for it; null once they've left. */
+			addedByName: Schema.NullOr(Schema.String),
+			addedAt: isoTimestampSchema,
+		}),
+	),
+});
+
+export type PodSandboxSoftware = typeof podSandboxSoftwareSchema.Type;

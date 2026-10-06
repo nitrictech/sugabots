@@ -1,6 +1,7 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
+import { SandboxSoftware } from "@sugabots/core/sandboxes/sandbox-software";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -11,6 +12,7 @@ export const podSandboxRoutes = HttpApiBuilder.group(ServerApi, "podSandbox", (h
 	Effect.gen(function* () {
 		const setup = yield* PodSandboxSetup.Service;
 		const network = yield* SandboxNetwork.Service;
+		const software = yield* SandboxSoftware.Service;
 		return handlers
 			.handle("get", ({ params }) =>
 				setup.get(params.podId).pipe(asSessionUser, asHttpError(podSandboxErrors)),
@@ -32,6 +34,14 @@ export const podSandboxRoutes = HttpApiBuilder.group(ServerApi, "podSandbox", (h
 			.handle("removeHost", ({ params }) =>
 				network
 					.removePodHost({ podId: params.podId, host: params.host })
+					.pipe(asSessionUser, asHttpError(refusals)),
+			)
+			.handle("software", ({ params }) =>
+				software.podSoftware(params.podId).pipe(asSessionUser, asHttpError(refusals)),
+			)
+			.handle("removePackage", ({ params }) =>
+				software
+					.removePackage({ podId: params.podId, name: params.name, channel: params.channel })
 					.pipe(asSessionUser, asHttpError(refusals)),
 			);
 	}),

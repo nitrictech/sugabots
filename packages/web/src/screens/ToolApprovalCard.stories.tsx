@@ -150,6 +150,23 @@ export const ANetworkRequest = meta.story({
 	},
 });
 
+/** ASoftwareRequest is an agent asking for a package to be installed in its pod's sandbox, which an admin of the pod answers. */
+export const ASoftwareRequest = meta.story({
+	args: {
+		...ANetworkRequest.input.args,
+		call: {
+			...ANetworkRequest.input.args.call,
+			tool: "request_software",
+			input: { name: "ffmpeg" },
+		},
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Trip Planner wants to install software in its sandbox"),
+		).toBeInTheDocument();
+	},
+});
+
 /** ANetworkRequestNotYours is that request seen by someone who doesn't decide the pod's network access. */
 export const ANetworkRequestNotYours = meta.story({
 	args: { ...ANetworkRequest.input.args, canApprove: false },

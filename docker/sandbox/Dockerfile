@@ -82,6 +82,10 @@ COPY nix/nix.conf nix/registry.json /etc/nix/
 # Nix looks for its state here, and without it falls back to a store in the
 # user's home that needs namespaces the agents' user can't make.
 RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
+# The pod's software, on the PATH of login shells, as agents' commands run,
+# and of interactive ones, as in the dock's terminal.
+COPY nix/software-path.sh /etc/profile.d/sugabots-software.sh
+RUN echo '. /etc/profile.d/sugabots-software.sh' >> /etc/bash.bashrc
 
 COPY sugabots-desktop /usr/local/bin/sugabots-desktop
 

@@ -276,7 +276,7 @@ function PodDetails({
 				canManage={may.manageConnections}
 				signInError={connectionSignInError}
 			/>
-			<PodSandboxSettings podId={pod.id} canManageNetwork={may.manageSandbox} />
+			<PodSandboxSettings podId={pod.id} canManageSandbox={may.manageSandbox} />
 			<PodBots pod={pod} bots={bots} />
 			{shared && <Members pod={pod} canManageMembers={may.manageMembers} />}
 			{shared && may.rename && (

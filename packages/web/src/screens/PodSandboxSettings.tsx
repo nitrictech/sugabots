@@ -7,6 +7,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 import { PodSandboxNetworkSettings } from "./PodSandboxNetwork.tsx";
+import { PodSandboxSoftwareSettings } from "./PodSandboxSoftware.tsx";
 
 /*
  * The pod's sandbox, experimental: how it stands for anyone who can see the
@@ -16,11 +17,11 @@ import { PodSandboxNetworkSettings } from "./PodSandboxNetwork.tsx";
  */
 export function PodSandboxSettings({
 	podId,
-	canManageNetwork,
+	canManageSandbox,
 }: {
 	podId: string;
-	/** Whether the person may change the hosts the pod's sandbox reaches. */
-	canManageNetwork: boolean;
+	/** Whether the person may change what the pod's sandbox reaches and has installed. */
+	canManageSandbox: boolean;
 }) {
 	const sandbox = usePodSandbox(podId);
 	if (sandbox.isPending) return null;
@@ -30,7 +31,8 @@ export function PodSandboxSettings({
 	return (
 		<>
 			<SandboxGroup podId={podId} shown={shown} />
-			<PodSandboxNetworkSettings podId={podId} canManage={canManageNetwork} />
+			<PodSandboxNetworkSettings podId={podId} canManage={canManageSandbox} />
+			<PodSandboxSoftwareSettings podId={podId} canManage={canManageSandbox} />
 		</>
 	);
 }

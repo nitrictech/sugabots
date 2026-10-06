@@ -1,7 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronDown, Globe, X } from "lucide-react";
+import { ChevronDown, Globe, type LucideIcon, Package, X } from "lucide-react";
 import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -10,6 +10,7 @@ import { awaitedDeciders } from "@/lib/tool-approvals.ts";
 import {
 	connectionLabel,
 	NETWORK_REQUEST_TOOL,
+	SOFTWARE_REQUEST_TOOL,
 	splitToolKey,
 	stepLabel,
 	wordsFromKey,
@@ -68,15 +69,15 @@ export function ToolApprovalCard({
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";
 	const action = stepLabel(call.tool, name);
-	const networkRequest = call.tool === NETWORK_REQUEST_TOOL;
+	const sandboxRequest = SANDBOX_REQUESTS[call.tool];
 	const step: Step = {
 		action,
-		who: networkRequest
-			? `${agent.name} wants its sandbox to reach a new host`
+		who: sandboxRequest
+			? `${agent.name} ${sandboxRequest.wants}`
 			: `${agent.name} wants to use ${where || "a tool"}`,
 		where,
 		look,
-		networkRequest,
+		icon: sandboxRequest?.icon,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
 	// The answer stays given from when it is sent until the thread's events say
@@ -174,18 +175,25 @@ interface Step {
 	who: string;
 	where: string;
 	look: ConnectionLook | undefined;
-	/** A request for the sandbox to reach another host, which no connection makes. */
-	networkRequest: boolean;
+	/** Drawn in place of a connection's mark, for a request no connection makes. */
+	icon: LucideIcon | undefined;
 }
+
+/** The requests to change the agent's sandbox: what each asks, and its icon. */
+const SANDBOX_REQUESTS: Readonly<Record<string, { wants: string; icon: LucideIcon }>> = {
+	[NETWORK_REQUEST_TOOL]: { wants: "wants its sandbox to reach a new host", icon: Globe },
+	[SOFTWARE_REQUEST_TOOL]: { wants: "wants to install software in its sandbox", icon: Package },
+};
 
 const MARK_SIZES = {
 	md: { box: "size-6 rounded-[7px]", icon: 14 },
 	sm: { box: "size-8 rounded-lg", icon: 16 },
 } as const;
 
-/** What the step uses: the connection's mark, or a globe for a network request. */
+/** What the step uses: the connection's mark, or the icon of a sandbox request. */
 function StepMark({ step, size }: { step: Step; size: keyof typeof MARK_SIZES }) {
-	if (!step.networkRequest) {
+	const Icon = step.icon;
+	if (!Icon) {
 		return (
 			<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size={size} />
 		);
@@ -196,7 +204,7 @@ function StepMark({ step, size }: { step: Step; size: keyof typeof MARK_SIZES })
 			aria-hidden
 			className={cn("grid shrink-0 place-items-center bg-border-strong text-foreground", box)}
 		>
-			<Globe size={icon} strokeWidth={2} />
+			<Icon size={icon} strokeWidth={2} />
 		</span>
 	);
 }
