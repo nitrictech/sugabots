@@ -30,6 +30,9 @@ export function DialogForm({
  * The dialog around a form that changes as you go, such as choosing a
  * provider and then entering its key. It stays put while the steps inside it,
  * each a DialogFormStep, swap, so the dialog does not close and open again.
+ *
+ * It is never taller than the screen: a body too long to fit scrolls between
+ * the header and footer, which stay in view.
  */
 export function DialogFormFrame({
 	width = "default",
@@ -41,7 +44,10 @@ export function DialogFormFrame({
 	return (
 		<DialogContent
 			showCloseButton={false}
-			className={cn("gap-0 overflow-hidden p-0", widths[width])}
+			className={cn(
+				"flex max-h-[calc(100dvh-20px)] flex-col gap-0 overflow-hidden p-0",
+				widths[width],
+			)}
 		>
 			{children}
 		</DialogContent>
@@ -57,11 +63,10 @@ export function DialogFormStep({
 	children: ReactNode;
 }) {
 	return (
-		// `min-w-0`: the popup is a grid, and a grid item is otherwise at least
-		// as wide as its content's narrowest line. A line that does not wrap
-		// would then widen the form past the dialog, which clips it, and the
-		// right edge of every row would be cut off.
-		<form onSubmit={onSubmit} className="flex min-w-0 flex-col">
+		// `min-h-0`: a flex item is otherwise at least as tall as its content, so
+		// a long body would make the form taller than the dialog instead of
+		// scrolling inside it.
+		<form onSubmit={onSubmit} className="flex min-h-0 flex-col">
 			{children}
 		</form>
 	);
@@ -150,6 +155,11 @@ export function DialogFormFooter({
 	);
 }
 
+/**
+ * Everything between the header and footer. It is the only part of the dialog
+ * that scrolls when the dialog would be taller than the screen, so anything
+ * that can grow belongs here; content outside it is cut off.
+ */
 export function DialogFormBody({
 	gap = "default",
 	children,
@@ -159,7 +169,10 @@ export function DialogFormBody({
 }) {
 	return (
 		<div
-			className={cn("flex flex-col px-[18px] pt-1 pb-5", gap === "compact" ? "gap-3" : "gap-3.5")}
+			className={cn(
+				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-[18px] pt-1 pb-5",
+				gap === "compact" ? "gap-3" : "gap-3.5",
+			)}
 		>
 			{children}
 		</div>

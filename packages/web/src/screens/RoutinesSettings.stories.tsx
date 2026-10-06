@@ -31,7 +31,7 @@ function placed(
 	agent: Agent,
 	pod: Pod,
 	trigger: Routine["trigger"],
-	state: Routine["state"] = "enabled",
+	fields: Partial<Pick<Routine, "state" | "instructions">> = {},
 ): WorkspaceRoutine {
 	return {
 		routine: {
@@ -41,10 +41,11 @@ function placed(
 			name,
 			instructions: `${name}: look over what changed and post a short summary.`,
 			trigger,
-			state,
+			state: "enabled",
 			createdById: null,
 			createdAt: "2026-09-01T00:00:00.000Z",
 			updatedAt: "2026-09-01T00:00:00.000Z",
+			...fields,
 		},
 		agent,
 		pod: { id: pod.id, slug: pod.slug },
@@ -60,15 +61,18 @@ const cron = (expression: string): Routine["trigger"] => ({
 
 const overnight = placed(1, "Overnight outbound", growthDesk, revenue, cron("0 6 * * *"));
 const morningBrief = placed(2, "Morning brief", chief, personal, cron("0 8 * * 1-5"));
-const churnReport = placed(
-	3,
-	"Weekly churn report",
-	accountManager,
-	revenue,
-	cron("0 9 * * 1"),
-	"paused",
-);
+const churnReport = placed(3, "Weekly churn report", accountManager, revenue, cron("0 9 * * 1"), {
+	state: "paused",
+});
 const incidentIntake = placed(4, "Incident intake", oncall, engineering, { kind: "webhook" });
+const longInstructions = Array.from(
+	{ length: 60 },
+	(_, step) =>
+		`${step + 1}. Check the next stage of the pipeline and note any deal that has stalled.`,
+).join("\n");
+const pipelineReview = placed(5, "Pipeline review", growthDesk, revenue, cron("0 16 * * 5"), {
+	instructions: longInstructions,
+});
 
 function RoutinesPreview({ items, children }: { items: WorkspaceRoutine[]; children: ReactNode }) {
 	const [queryClient] = useState(() => {
@@ -206,5 +210,20 @@ export const Editing = meta.story({
 		await expect(
 			within(dialog).getByRole("button", { name: "Delete routine" }),
 		).toBeInTheDocument();
+	},
+});
+
+/** Instructions too long for the screen scroll inside the dialog, with Back still in view above them. */
+export const LongInstructions = meta.story({
+	parameters: { routines: [pipelineReview] },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /^Pipeline review/ }));
+		const form = await screen.findByRole("dialog", { name: "Edit routine" });
+		await userEvent.click(within(form).getByRole("button", { name: "Instructions" }));
+		const dialog = await screen.findByRole("dialog", { name: "Instructions" });
+
+		const back = within(dialog).getByRole("button", { name: "Back" }).getBoundingClientRect();
+		await expect(back.top).toBeGreaterThanOrEqual(0);
+		await expect(dialog.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
 	},
 });
