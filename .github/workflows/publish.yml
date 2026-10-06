@@ -2,10 +2,13 @@ name: Publish
 
 on:
   push:
+    branches: [main]
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
 
 concurrency:
   group: publish-${{ github.ref }}
+  # A newer push to main supersedes the build in progress; a release always finishes.
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
   image:
@@ -37,6 +40,7 @@ jobs:
 
       # v1.2.3 is tagged 1.2.3, 1.2, 1 and latest; a prerelease such as
       # v1.3.0-rc.1 is tagged only 1.3.0-rc.1, so it never moves latest.
+      # A push to main is tagged edge and sha-<commit>, and never latest.
       # Annotated at the index level too: a multi-arch tag points to an index,
       # and that is where registries read the description and source from.
       - id: meta
@@ -51,6 +55,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=edge,branch=main
+            type=sha,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v7
         with:
