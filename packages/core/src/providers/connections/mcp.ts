@@ -44,6 +44,8 @@ interface ServerTool {
 export interface ServerListing {
 	tools: ServerTool[];
 	definitions: ListToolsResult;
+	/** What the server says, when the session starts, about using its tools. */
+	instructions: string | undefined;
 }
 
 export interface ServerSession {
@@ -100,7 +102,7 @@ export async function connectServer(
 						]
 					: [];
 			});
-			return { tools, definitions: listed };
+			return { tools, definitions: listed, instructions: client.instructions };
 		},
 		run: async (listing, name, input, options) => {
 			let tools = runnable.get(listing);

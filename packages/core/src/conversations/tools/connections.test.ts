@@ -28,7 +28,7 @@ const lookupInput = Schema.Struct({ q: Schema.String });
 function fixtureServer(): McpProtocolServer {
 	const server = new McpProtocolServer(
 		{ name: "fixture", version: "1.0.0" },
-		{ capabilities: { tools: {} } },
+		{ capabilities: { tools: {} }, instructions: "Look things up before wiping them." },
 	);
 	server.setRequestHandler(ListToolsRequestSchema, () => ({
 		tools: [
@@ -220,6 +220,15 @@ describe("a turn's connection tools", () => {
 
 			expect(await run(turnOn(offered, async (set) => set.unavailable))).toEqual(["locked"]);
 			expect(await requestsDuring(run(turnOn(offered)))).toBe(0);
+		});
+
+		it("keeps what a server says about using its tools, with its tool list", async () => {
+			const offered = toolsFor(target());
+			await run(turnOn(offered));
+
+			expect(await run(turnOn(offered, async (set) => set.instructions))).toEqual({
+				wiki: "Look things up before wiping them.",
+			});
 		});
 
 		it("tells the model what a server said when it refused a call", async () => {
