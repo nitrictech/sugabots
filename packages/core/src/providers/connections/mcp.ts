@@ -31,7 +31,6 @@ interface ServerTarget {
 /** One of the server's tools: as the server described it, and as a model can call it. */
 interface ServerTool {
 	described: ConnectionTool;
-	/** The server's own input schema, before the client adapts it for a model. */
 	inputSchema: JSONSchema7;
 	tool: Tool;
 }

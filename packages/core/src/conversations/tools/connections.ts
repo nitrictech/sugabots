@@ -40,11 +40,9 @@ import {
 
 export interface OfferedTool {
 	tool: Tool;
-	/** The connection's handle, which prefixes the tool's key. */
 	handle: string;
-	/** What the server says the tool does. */
 	description: string;
-	/** The server's own input schema for it. */
+	/** The server's schema, before the client adapts it into `tool`. */
 	inputSchema: JSONSchema7;
 	/** Whether a call may change something at the other end. */
 	mutating: boolean;

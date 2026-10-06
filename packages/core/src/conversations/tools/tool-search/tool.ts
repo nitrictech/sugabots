@@ -2,13 +2,10 @@ import { type Tool, tool } from "ai";
 import { Option, Schema } from "effect";
 import { type CatalogEntry, catalogListing, searchCatalog } from "./catalog.ts";
 
-/** Finds connection tools for a bridged turn (see `ConnectionToolMode`). */
 export const TOOL_SEARCH = "tool_search";
-
-/** Runs a connection tool `tool_search` found, for a bridged turn. */
 export const CALL_TOOL = "call_tool";
 
-/** A JSON object; small models often send one written out as a string, which is read the same. */
+/** Small models often send the arguments object as a JSON string, so that is read too. */
 const ArgumentsObject = Schema.Record(Schema.String, Schema.Unknown);
 
 const CallToolInput = Schema.Struct({
@@ -21,10 +18,8 @@ const CallToolInput = Schema.Struct({
 	}),
 });
 
-/** The connection tool a `call_tool` call names, and the arguments it gives that tool. */
 type BridgedCall = { tool: string; arguments: Record<string, unknown> };
 
-/** What a `call_tool` input asks for, or nothing when it is not one. */
 export function bridgedCallOf(input: unknown): BridgedCall | undefined {
 	return Option.getOrUndefined(
 		Option.flatMap(Schema.decodeUnknownOption(CallToolInput)(input), ({ tool, arguments: given }) =>
@@ -40,7 +35,6 @@ function argumentsOf(
 	return Schema.decodeUnknownOption(Schema.fromJsonString(ArgumentsObject))(given);
 }
 
-/** Searches `catalog` for the tools a task needs. */
 export function toolSearchTool({ catalog }: { catalog: readonly CatalogEntry[] }) {
 	return tool({
 		description: `Find tools from this pod's connections. Give a few words for what you want to do, a connection's name, or a tool's full name. You get the best matches, each with its full name and what it does; the best ones also have their input schema. Then run one with ${CALL_TOOL}. If nothing matches, try other words, such as the action or the thing it acts on, before telling the person a connection can't do it.`,
@@ -53,7 +47,6 @@ export function toolSearchTool({ catalog }: { catalog: readonly CatalogEntry[] }
 	});
 }
 
-/** What a search tells the model: the tools found, and what to do when that is not enough. */
 function foundFor(catalog: readonly CatalogEntry[], query: string) {
 	const tools = searchCatalog(catalog, query);
 	if (tools.length === 0) {
@@ -73,10 +66,8 @@ function foundFor(catalog: readonly CatalogEntry[], query: string) {
 }
 
 /**
- * Runs the connection tool a call names. `connectionTools` holds each tool
- * as the turn would offer it directly, recording and approval included, so a
- * call through the bridge is recorded and approved as the tool it names. Like
- * a direct call, its arguments are left to the server to check.
+ * callToolTool runs calls through `connectionTools`, so each is recorded and
+ * approved as the tool it names. As with a direct call, the server checks the arguments.
  */
 export function callToolTool({
 	catalog,

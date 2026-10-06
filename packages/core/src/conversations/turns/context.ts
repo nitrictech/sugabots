@@ -23,7 +23,6 @@ export interface TurnEnvironment {
 	now: Date;
 	/** The built-in tools on offer this turn, by key, so the agent is told it has them. */
 	builtInTools: readonly string[];
-	/** What the agent is told of its pod's connection tools, when it has any (see `ConnectionOffer`). */
 	connectionTools: string | undefined;
 }
 

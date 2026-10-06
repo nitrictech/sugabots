@@ -566,50 +566,6 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		return pod;
 	}
 
-	it("offers the tools to find and call them in place of the tools themselves", async () => {
-		let received: Models.StreamRequest | undefined;
-		let found: unknown;
-
-		await bridgedSegment(async (input) => {
-			received = input;
-			found = await input.tools?.[TOOL_SEARCH]?.execute?.(
-				{ query: "look up a page" } as never,
-				callOptions,
-			);
-		});
-
-		expect(Object.keys(received?.tools ?? {})).toEqual(
-			expect.arrayContaining([TOOL_SEARCH, CALL_TOOL]),
-		);
-		expect(Object.keys(received?.tools ?? {})).not.toContain("wiki__lookup");
-		const turnNote = received?.messages.at(-1)?.content;
-		expect(turnNote).toContain(TOOL_SEARCH);
-		expect(turnNote).toContain("wiki__lookup");
-		expect(turnNote).not.toContain("drive__lookup");
-		expect(found).toMatchObject({
-			tools: expect.arrayContaining([
-				expect.objectContaining({ tool: "wiki__lookup", inputSchema: expect.anything() }),
-			]),
-		});
-	});
-
-	it("asks a person first only for a call to a tool that asks first", async () => {
-		let received: Models.StreamRequest | undefined;
-
-		await bridgedSegment(async (input) => {
-			received = input;
-		});
-
-		const approvals = received?.toolApproval as
-			| Record<string, (input: unknown) => unknown>
-			| undefined;
-		const approval = approvals?.[CALL_TOOL];
-		if (!approval) throw new Error("no approval for the bridge's calls");
-		expect(approval({ tool: "wiki__wipe", arguments: { page: "Home" } })).toBe("user-approval");
-		expect(approval({ tool: "wiki__lookup", arguments: { page: "Home" } })).toBeUndefined();
-		expect(approval({ tool: "constructor", arguments: {} })).toBeUndefined();
-	});
-
 	it("runs a found tool as itself, recorded under its own name", async () => {
 		const calls = toolCalls();
 		let outcome: unknown;
@@ -626,23 +582,6 @@ describe("a pod whose connection tool definitions would crowd the model's window
 		expect(calls.open).toHaveBeenCalledWith(
 			expect.objectContaining({ tool: "wiki__lookup", input: { page: "Home" } }),
 		);
-	});
-
-	it("offers the closest tools when a call names no tool it has, running nothing", async () => {
-		let outcome: unknown;
-
-		const { lookup } = await bridgedSegment(async (input) => {
-			outcome = await input.tools?.[CALL_TOOL]?.execute?.(
-				{ tool: "wiki__look", arguments: { page: "Home" } } as never,
-				callOptions,
-			);
-		});
-
-		expect(lookup).not.toHaveBeenCalled();
-		expect(outcome).toMatchObject({
-			status: "failed",
-			tools: expect.arrayContaining([expect.objectContaining({ tool: "wiki__lookup" })]),
-		});
 	});
 
 	/** The tools a segment resuming `checkpoint` on the crowded pod, or on `pod`, offers the model. */

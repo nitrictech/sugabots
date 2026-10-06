@@ -782,11 +782,7 @@ const SdkModelMessage = Schema.declare(
 
 const OptionalCount = Schema.optional(Schema.Int);
 
-/**
- * How a turn offers its pod's connection tools to the model: each as a tool
- * of its own, or `bridged` behind `tool_search` and `call_tool` when they
- * would crowd the model's window (see `connection-offer.ts`).
- */
+/** Connection tools are sent `direct`, or `bridged` behind `tool_search` and `call_tool`. */
 export const ConnectionToolMode = Schema.Literals(["direct", "bridged"]);
 export type ConnectionToolMode = typeof ConnectionToolMode.Type;
 
@@ -814,11 +810,7 @@ export const TurnCheckpoint = Schema.Struct({
 	modelCalls: OptionalCount,
 	/** The prompt's size at the turn's first model call, which a resumed segment keeps. */
 	contextTokens: OptionalCount,
-	/**
-	 * How the turn offered its connection tools, which a resumed segment keeps:
-	 * the calls waiting on approval were made to those tools. A checkpoint
-	 * saved before tools could be bridged offered them directly.
-	 */
+	/** Kept on resuming, since the calls awaiting approval were made to those tools. */
 	connectionToolMode: ConnectionToolMode.pipe(Schema.withDecodingDefault(Effect.succeed("direct"))),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;

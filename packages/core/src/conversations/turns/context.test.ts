@@ -1,5 +1,6 @@
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
+import { describeToolCall } from "../threads/message-text.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";
@@ -168,44 +169,23 @@ describe("modelPrompt", () => {
 	});
 
 	it("tells later turns which tools a tool search found, not their schemas", () => {
-		const input = context();
-		const own = input.messages[1];
-		if (!own) {
-			throw new Error("Context fixture has no assistant message");
-		}
-		const schema = { type: "object", properties: { page: { type: "string" } } };
-		input.messages[1] = {
-			...own,
-			content: "Looking.",
-			parts: [
-				{ type: "text", text: "Looking." },
-				{
-					type: "tool_call",
-					id: "0199a3a0-0000-7000-8000-000000000022",
-					tool: TOOL_SEARCH,
-					input: { query: "look up a page" },
-					output: {
-						tools: [
-							{ tool: "wiki__lookup", description: "Looks up a page.", inputSchema: schema },
-							{ tool: "wiki__history", description: "A page's history." },
-						],
-					},
-					status: "completed",
-					error: null,
-					mutating: false,
-					atOffset: 8,
-					startedAt: "2026-09-14T00:00:00.000Z",
-					finishedAt: "2026-09-14T00:00:01.000Z",
-				},
-			],
-		};
+		const search = {
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-000000000022",
+			tool: TOOL_SEARCH,
+			input: { query: "look up a page" },
+			output: { tools: [{ tool: "wiki__lookup", inputSchema: { type: "object" } }] },
+			status: "completed",
+			error: null,
+			mutating: false,
+			atOffset: 0,
+			startedAt: "2026-09-14T00:00:00.000Z",
+			finishedAt: "2026-09-14T00:00:01.000Z",
+		} as const;
 
-		const history = modelPrompt(input, environment()).messages[2]?.content ?? "";
-
-		expect(history).toContain(
-			'[Used tool_search with {"query":"look up a page"}: found wiki__lookup, wiki__history]',
+		expect(describeToolCall(search)).toBe(
+			'[Used tool_search with {"query":"look up a page"}: found wiki__lookup]',
 		);
-		expect(history).not.toContain("properties");
 	});
 
 	it("keeps what search_history found longer than other tools' output", () => {

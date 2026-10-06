@@ -26,9 +26,8 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
  * A connection tool turned off is offered all the same, and each call to it is
- * recorded as refused without reaching the server. When the turn bridges its
- * connection tools, `tool_search` and `call_tool` are offered in their place,
- * and a call is recorded as the tool it names.
+ * recorded as refused without reaching the server. When bridged, they are
+ * reached through `tool_search` and `call_tool`, and recorded as themselves.
  * `search_history` is recorded the same way, and offered only once the
  * thread has been compacted; `save_instructions` too, offered only while the
  * agent interviews its creator.
@@ -43,7 +42,6 @@ export interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: ToolSet;
-	/** The pod's connection tools, and how the model is offered them. */
 	connections: ConnectionOffer;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
@@ -88,11 +86,33 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	for (const [key, tool] of Object.entries(deps.builtIn)) {
 		tools[key] = recorded(key, tool, recording);
 	}
+	const connectionTools: Record<string, Tool> = {};
+	for (const [key, offered] of Object.entries(deps.connections.tools)) {
+		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
+		// An approved call is left to its approval, which refuses it if the tool
+		// was turned off since.
+		if (offered.access === "off" && !approvalBound) {
+			connectionTools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
+			continue;
+		}
+		connectionTools[key] = recorded(key, offered.tool, {
+			...recording,
+			mutating: offered.mutating || approvalBound,
+			...(offered.access === "ask" || approvalBound
+				? {
+						approval: {
+							approvals: deps.approvals,
+							connectionId: offered.connectionId,
+							connectionRevision: offered.connectionRevision,
+							remoteToolName: offered.remoteToolName,
+						},
+					}
+				: {}),
+		});
+	}
 	Object.assign(
 		tools,
-		deps.connections.toolsFor(runnableConnectionTools(deps, recording), (key, tool) =>
-			recorded(key, tool, recording),
-		),
+		deps.connections.toolsFor(connectionTools, (key, tool) => recorded(key, tool, recording)),
 	);
 	if (prepared.context.compaction) {
 		tools[SEARCH_HISTORY_TOOL] = recorded(
@@ -130,38 +150,6 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			replyLength: deps.reply.length,
 			noteCollaboration: deps.reply.noteCollaboration,
 			signal: deps.signal,
-		});
-	}
-	return tools;
-}
-
-/** Each connection tool as the turn runs it: recorded, approved when it must be, or refused. */
-function runnableConnectionTools(
-	deps: ToolDependencies,
-	recording: RecordingOptions,
-): Record<string, Tool> {
-	const tools: Record<string, Tool> = {};
-	for (const [key, offered] of Object.entries(deps.connections.tools)) {
-		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
-		// An approved call is left to its approval, which refuses it if the tool
-		// was turned off since.
-		if (offered.access === "off" && !approvalBound) {
-			tools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
-			continue;
-		}
-		tools[key] = recorded(key, offered.tool, {
-			...recording,
-			mutating: offered.mutating || approvalBound,
-			...(offered.access === "ask" || approvalBound
-				? {
-						approval: {
-							approvals: deps.approvals,
-							connectionId: offered.connectionId,
-							connectionRevision: offered.connectionRevision,
-							remoteToolName: offered.remoteToolName,
-						},
-					}
-				: {}),
 		});
 	}
 	return tools;

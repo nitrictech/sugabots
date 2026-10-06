@@ -65,6 +65,19 @@ describe("how a turn offers its pod's connection tools", () => {
 		expect(crowding.note).toContain("- wiki (1 tool): wiki__lookup");
 	});
 
+	it("asks a person first for a bridged call only when the tool it names asks first", () => {
+		const share = directToolDefinitionsLimitTokens(WINDOW_TOKENS);
+		const offer = connectionOfferFitting(
+			{ wiki__lookup: offered("lookup", "allow", share), wiki__wipe: offered("wipe", "ask") },
+			WINDOW_TOKENS,
+		);
+		const approval = (offer.toolApproval as Record<string, (input: unknown) => unknown>)[CALL_TOOL];
+
+		expect(approval?.({ tool: "wiki__wipe", arguments: {} })).toBe("user-approval");
+		expect(approval?.({ tool: "wiki__lookup", arguments: {} })).toBeUndefined();
+		expect(approval?.({ tool: "constructor", arguments: {} })).toBeUndefined();
+	});
+
 	it("says nothing of connection tools when the pod has none", () => {
 		expect(connectionOfferFitting({}, WINDOW_TOKENS).note).toBeUndefined();
 	});
