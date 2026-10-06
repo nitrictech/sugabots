@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
@@ -47,12 +48,13 @@ import { Workflows } from "./workflows.ts";
 
 /**
  * What the process owns once and every service above builds on: the pools,
- * ids, the cipher, the installation's settings and egress policy, the durable
- * events and the bus that fans them out, and the workflow engine with its
- * lanes. A service's `layer` never provides these, so there is one of each
+ * ids, blob storage, the cipher, the installation's settings and egress
+ * policy, the durable events and the bus that fans them out, and the workflow
+ * engine with its lanes. A service's `layer` never provides these, so there is one of each
  * however many services use them.
  */
 const Infrastructure = Layer.mergeAll(
+	BlobStore.layer,
 	Credentials.layer,
 	Egress.layer,
 	EventOutbox.layer,
