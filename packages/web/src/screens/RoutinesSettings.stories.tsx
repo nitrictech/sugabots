@@ -111,13 +111,16 @@ const meta = preview.meta({
 	],
 });
 
-/** Each routine with when it runs and its bot, and a switch for whether it is on. */
+/** Each routine with when it runs and its bot, a way to run it now, and a switch for whether it is on. */
 export const Listing = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("Every day at 6:00, Growth Desk")).toBeInTheDocument();
 		await expect(canvas.getByText("Weekdays at 8:00, Chief")).toBeInTheDocument();
 		await expect(canvas.getByText("When its address is called, On-call")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Weekly churn report on" })).not.toBeChecked();
+		await expect(
+			canvas.getByRole("button", { name: "Run Weekly churn report now" }),
+		).toBeInTheDocument();
 		await expect(
 			canvas.getByText("Routines post into the bot's chat when they run."),
 		).toBeInTheDocument();
@@ -194,7 +197,7 @@ export const ChoosingABot = meta.story({
 /** An existing routine opens with its bot fixed, and Delete routine at the foot. */
 export const Editing = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /Overnight outbound/ }));
+		await userEvent.click(await canvas.findByRole("button", { name: /^Overnight outbound/ }));
 		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
 
 		await expect(within(dialog).getByLabelText("Name")).toHaveValue("Overnight outbound");

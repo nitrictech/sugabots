@@ -64,6 +64,15 @@ export function useRoutineActions() {
 				Effect.runPromise(routines.remove({ params: { agentId, routineId } })),
 			onSuccess: refresh,
 		}),
+		run: useMutation({
+			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
+				Effect.runPromise(
+					routines.run({
+						params: { agentId, routineId },
+						payload: { requestId: crypto.randomUUID() },
+					}),
+				),
+		}),
 		rotateSecret: useMutation({
 			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
 				Effect.runPromise(routines.rotateSecret({ params: { agentId, routineId } })),

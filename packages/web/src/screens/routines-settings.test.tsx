@@ -130,6 +130,26 @@ describe("the workspace's routines", () => {
 		);
 	});
 
+	it("runs a paused routine now from its row", async () => {
+		client.api.routines.run.mockReturnValue(
+			Effect.succeed({
+				executionId: "0199a3a0-0000-7000-8000-0000000000e1",
+				threadId: "0199a3a0-0000-7000-8000-0000000000e2",
+				duplicate: false,
+			}),
+		);
+		mount("/suga/settings/routines");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Run Weekly churn report now" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.run).toHaveBeenCalledWith({
+				params: { agentId: researcher.id, routineId: churnReport.routine.id },
+				payload: { requestId: expect.any(String) },
+			}),
+		);
+	});
+
 	it("keeps an unfamiliar schedule until a repeat replaces it", async () => {
 		const hourly: WorkspaceRoutine = {
 			...morningBrief,
@@ -149,7 +169,7 @@ describe("the workspace's routines", () => {
 		);
 		mount("/suga/settings/routines");
 
-		fireEvent.click(await screen.findByRole("button", { name: /Morning brief/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Morning brief/ }));
 		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
 		expect(within(dialog).getByText("15 */2 * * *")).toBeDefined();
 		expect(within(dialog).getByRole("radio", { name: "Every day" })).toHaveProperty(
