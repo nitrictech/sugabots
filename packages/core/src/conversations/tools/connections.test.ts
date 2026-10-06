@@ -215,6 +215,26 @@ describe("a turn's connection tools", () => {
 			expect(result).toMatchObject({ content: [{ type: "text", text: "found it" }] });
 		});
 
+		it("names a connection it couldn't reach, and doesn't wait on it again for a minute", async () => {
+			const offered = toolsFor(target({ handle: "locked", headers: { "x-fixture-key": "nope" } }));
+
+			expect(await run(turnOn(offered, async (set) => set.unavailable))).toEqual(["locked"]);
+			expect(await requestsDuring(run(turnOn(offered)))).toBe(0);
+		});
+
+		it("tells the model what a server said when it refused a call", async () => {
+			const result = await run(
+				turnOn(toolsFor(target()), async (set) =>
+					set.tools.wiki__lookup?.tool.execute?.({}, callOptions),
+				),
+			);
+
+			expect(result).toMatchObject({
+				isError: true,
+				content: [{ type: "text", text: expect.any(String) }],
+			});
+		});
+
 		it("asks again once the connection has been edited", async () => {
 			const targets = [target()];
 			const offered = ConnectionTools.from({

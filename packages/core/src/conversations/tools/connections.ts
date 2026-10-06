@@ -58,6 +58,8 @@ export interface OfferedTool {
 
 export interface ConnectionToolSet {
 	tools: Record<string, OfferedTool>;
+	/** Connections left out because their server couldn't be listed. */
+	unavailable: string[];
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
 }
@@ -94,6 +96,9 @@ export const layer = layerNoDeps.pipe(
 /** Lets a server's changed tools reach turns without the connection being edited. */
 const LISTING_LIFETIME = Duration.minutes(15);
 
+/** Spares turns the wait for a server that just failed to answer. */
+const FAILURE_LIFETIME = Duration.minutes(1);
+
 interface KeptListing {
 	listing: ServerListing;
 	revision: number;
@@ -121,6 +126,7 @@ export function from({
 	oauth,
 }: Parts): Interface {
 	const kept = new Map<string, KeptListing>();
+	const failedAt = new Map<string, number>();
 
 	return {
 		forPod: (workspaceId, podId) =>
@@ -153,6 +159,11 @@ export function from({
 					return session;
 				};
 				const loadListing = async (target: ConnectionTarget): Promise<ServerListing> => {
+					const failure = `${target.connectionId}:${target.configurationRevision}`;
+					const failed = failedAt.get(failure);
+					if (failed !== undefined && now - failed < Duration.toMillis(FAILURE_LIFETIME)) {
+						throw new Error("The server failed to answer moments ago");
+					}
 					const known = kept.get(target.connectionId);
 					if (
 						known &&
@@ -161,7 +172,13 @@ export function from({
 					) {
 						return known.listing;
 					}
-					const listing = await (await openSession(target)).list();
+					const listing = await openSession(target)
+						.then((session) => session.list())
+						.catch((cause) => {
+							failedAt.set(failure, now);
+							throw cause;
+						});
+					failedAt.delete(failure);
 					kept.set(target.connectionId, {
 						listing,
 						revision: target.configurationRevision,
@@ -180,7 +197,7 @@ export function from({
 										`Connection ${target.handle} left out of the turn`,
 										failure.cause,
 									),
-									{},
+									undefined,
 								),
 							),
 						),
@@ -188,6 +205,9 @@ export function from({
 				);
 				return {
 					tools: Object.assign({}, ...offered),
+					unavailable: targets
+						.filter((_, index) => offered[index] === undefined)
+						.map((target) => target.handle),
 					close: async () => {
 						await Promise.allSettled(
 							[...sessions.values()].map((session) => session.then((open) => open.close())),
@@ -224,7 +244,11 @@ function buildOfferedTools(
 	return tools;
 }
 
-const nothingOffered: ConnectionToolSet = { tools: {}, close: async () => undefined };
+const nothingOffered: ConnectionToolSet = {
+	tools: {},
+	unavailable: [],
+	close: async () => undefined,
+};
 
 /** No connections at all, for a case that offers a turn none. */
 export const none: Interface = {

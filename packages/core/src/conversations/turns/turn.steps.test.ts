@@ -184,6 +184,7 @@ describe("runSegment", () => {
 									remoteToolName: "wipe",
 								},
 							},
+							unavailable: [],
 							close,
 						}),
 				},
@@ -288,7 +289,11 @@ describe("runSegment", () => {
 			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
 			handle: "wiki",
 			description: "",
-			inputSchema: { type: "object" as const },
+			inputSchema: {
+				type: "object" as const,
+				properties: { q: { type: "string" as const } },
+				required: ["q"],
+			},
 			connectionRevision: 1,
 			remoteToolName: name,
 		});
@@ -314,6 +319,7 @@ describe("runSegment", () => {
 								notes__lookup: offered("lookup", "ask"),
 								drive__lookup: offered("lookup", "off"),
 							},
+							unavailable: [],
 							close: async () => undefined,
 						}),
 				},
@@ -330,8 +336,9 @@ describe("runSegment", () => {
 			| Record<string, (input: unknown) => unknown>
 			| undefined;
 		const approval = approvals?.[CALL_TOOL];
-		expect(approval?.({ tool: "notes__lookup", arguments: {} })).toBe("user-approval");
-		expect(approval?.({ tool: "wiki__lookup", arguments: {} })).toBeUndefined();
+		expect(approval?.({ tool: "notes__lookup", arguments: { q: "x" } })).toBe("user-approval");
+		expect(approval?.({ tool: "wiki__lookup", arguments: { q: "x" } })).toBeUndefined();
+		expect(approval?.({ tool: "notes__lookup", arguments: {} })).toBeUndefined();
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain("wiki__lookup");
 		expect(turnNote).not.toContain("drive__lookup");
@@ -638,6 +645,7 @@ function segmentAskingApproval(
 							remoteToolName: "wipe",
 						},
 					},
+					unavailable: [],
 					close: async () => undefined,
 				}),
 		},
