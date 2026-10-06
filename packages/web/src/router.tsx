@@ -1,6 +1,6 @@
 import type { Pod, Workspace } from "@sugabots/contracts";
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
 import {
 	createRootRouteWithContext,
@@ -17,7 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { usePodAgent } from "@/lib/agents.ts";
-import { useChatList } from "@/lib/chats.ts";
+import { prefetchChat, useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
@@ -133,12 +133,14 @@ function lazyNamed<Name extends string, Props extends object>(
  */
 
 /**
- * What the route guards read. A route takes its context when it loads, so a
+ * What the route guards and loaders read. A route takes its context when it loads, so a
  * component reading it would not see you change, as when you rename yourself,
  * until the next navigation: components read the session with `useSession()`.
  */
 export interface RouterContext {
 	user: Session["user"];
+	/** The session's query cache, which loaders prime for the page they lead to. */
+	queries: QueryClient;
 }
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -906,7 +908,14 @@ const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
 	path: "/agents/$agent",
 	validateSearch: validateAgentSearch,
-	loader: () => AgentPage.preload(),
+	// On every hover, not once per 30 s: the query cache, not the router,
+	// decides what of the chat is still fresh.
+	preloadStaleTime: 0,
+	// Also run while the pointer is on a link here, so the chat is loading before the click.
+	loader: ({ context, params }) => {
+		prefetchChat(context.queries, params);
+		return AgentPage.preload();
+	},
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
 		const navigate = agentRoute.useNavigate();
@@ -1027,9 +1036,10 @@ export function AppRouterProvider({
 	router: ReturnType<typeof createAppRouter>;
 	session: Session;
 }) {
+	const queries = useQueryClient();
 	return (
 		<SessionContext value={session}>
-			<RouterProvider router={router} context={{ user: session.user }} />
+			<RouterProvider router={router} context={{ user: session.user, queries }} />
 		</SessionContext>
 	);
 }
