@@ -25,6 +25,11 @@ import { ConversationEvent } from "../events.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import {
+	callToolApproval,
+	connectionToolsNote,
+	findApprovalTarget,
+} from "../tools/tool-search/tool.ts";
 import { ApprovedToolCalls, type ToolApprovalsIncomplete } from "./approvals/approved-calls.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import {
@@ -404,9 +409,6 @@ const streamReply = (
 				}
 				approvalBoundTools.add(binding.tool);
 			}
-			const toolsNeedingApproval = Object.entries(connections.tools)
-				.filter(([, offered]) => offered.access === "ask")
-				.map(([key]) => key);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
 				calls: toolCalls,
@@ -442,7 +444,7 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: Object.keys(builtIn),
-				connectionTools: Object.keys(connections.tools),
+				connectionTools: connectionToolsNote(connections.tools),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
@@ -476,7 +478,7 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
+				toolApproval: callToolApproval(connections.tools),
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
@@ -497,16 +499,17 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const offered = connections.tools[request.toolCall.toolName];
-					if (offered?.access !== "ask") {
+					const target = findApprovalTarget(connections.tools, request.toolCall);
+					if (!target) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
+					const { offered } = target;
 					return Effect.map(ids.next, (id) => ({
 						id,
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
-						tool: request.toolCall.toolName,
-						input: request.toolCall.input,
+						tool: target.key,
+						input: target.input,
 						reason: request.reason,
 						connectionId: offered.connectionId,
 						connectionRevision: offered.connectionRevision,

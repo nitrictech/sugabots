@@ -14,6 +14,7 @@ import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
 	ToolApprovalsIncomplete,
@@ -145,8 +146,8 @@ describe("runSegment", () => {
 				streamed(
 					(async function* () {
 						yield "Clearing. ";
-						await input.tools?.wiki__wipe?.execute?.(
-							{} as never,
+						await input.tools?.[CALL_TOOL]?.execute?.(
+							{ tool: "wiki__wipe", arguments: {} } as never,
 							{
 								toolCallId: "sdk-1",
 								messages: [],
@@ -175,6 +176,9 @@ describe("runSegment", () => {
 									mutating: true,
 									access: "ask",
 									connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+									handle: "wiki",
+									description: "",
+									inputSchema: { type: "object" as const },
 									connectionRevision: 1,
 									remoteToolName: "wipe",
 								},
@@ -270,7 +274,7 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("tells the model which connection tools wait for a person, offering the ones turned off too", async () => {
+	it("reaches connection tools through tool search, asking first only for ones that ask", async () => {
 		const { execution, turns } = fakes();
 		const lookup = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
@@ -281,6 +285,9 @@ describe("runSegment", () => {
 			mutating: false,
 			access,
 			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+			handle: "wiki",
+			description: "",
+			inputSchema: { type: "object" as const },
 			connectionRevision: 1,
 			remoteToolName: name,
 		});
@@ -312,10 +319,16 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(received?.toolApproval).toEqual({ notes__lookup: "user-approval" });
-		expect(Object.keys(received?.tools ?? {})).toEqual(
-			expect.arrayContaining(["wiki__lookup", "notes__lookup", "drive__lookup"]),
-		);
+		expect(Object.keys(received?.tools ?? {})).toEqual([TOOL_SEARCH, CALL_TOOL]);
+		const approvals = received?.toolApproval as
+			| Record<string, (input: unknown) => unknown>
+			| undefined;
+		const approval = approvals?.[CALL_TOOL];
+		expect(approval?.({ tool: "notes__lookup", arguments: {} })).toBe("user-approval");
+		expect(approval?.({ tool: "wiki__lookup", arguments: {} })).toBeUndefined();
+		const turnNote = received?.messages.at(-1)?.content;
+		expect(turnNote).toContain("wiki__lookup");
+		expect(turnNote).not.toContain("drive__lookup");
 	});
 
 	it("leaves out a built-in tool the agent has switched off", async () => {
@@ -353,7 +366,7 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(offered).toEqual([["other"]]);
+		expect(offered).toEqual([["other", TOOL_SEARCH, CALL_TOOL]]);
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
@@ -570,8 +583,8 @@ function segmentAskingApproval(
 							toolCall: {
 								type: "tool-call",
 								toolCallId: "sdk-1",
-								toolName: "wiki__wipe",
-								input: {},
+								toolName: CALL_TOOL,
+								input: { tool: "wiki__wipe", arguments: {} },
 							},
 						},
 					] as never,
@@ -597,6 +610,9 @@ function segmentAskingApproval(
 							mutating: true,
 							access: "ask",
 							connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+							handle: "wiki",
+							description: "",
+							inputSchema: { type: "object" as const },
 							connectionRevision: 1,
 							remoteToolName: "wipe",
 						},

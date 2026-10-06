@@ -1,4 +1,6 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
+import { Option, Schema } from "effect";
+import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 
 /** The tool an agent searches its thread's older history with. */
 export const SEARCH_HISTORY_TOOL = "search_history";
@@ -43,6 +45,7 @@ export function describeToolCall(call: ToolCallPart): string {
 		case "failed":
 			return `${asked}; it failed: ${call.error ?? "no reason given"}]`;
 		case "completed":
+			if (call.tool === TOOL_SEARCH) return `${asked}: found ${foundToolNames(call.output)}]`;
 			return `${asked}: ${clipped(
 				JSON.stringify(call.output),
 				call.tool === SEARCH_HISTORY_TOOL
@@ -50,6 +53,19 @@ export function describeToolCall(call: ToolCallPart): string {
 					: DESCRIBED_OUTPUT_CHARACTERS,
 			)}]`;
 	}
+}
+
+const FoundToolNames = Schema.Struct({
+	tools: Schema.Array(Schema.Struct({ tool: Schema.String })),
+});
+
+/** foundToolNames leaves out schemas: a later turn that needs one searches again. */
+function foundToolNames(output: unknown): string {
+	const found = Option.match(Schema.decodeUnknownOption(FoundToolNames)(output), {
+		onNone: () => [],
+		onSome: ({ tools }) => tools.map(({ tool }) => tool),
+	});
+	return found.length > 0 ? found.join(", ") : "no tools";
 }
 
 function clipped(text: string, limit: number): string {

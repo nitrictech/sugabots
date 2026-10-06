@@ -5,7 +5,7 @@ import {
 	connectionToolKey,
 	connectionToolMutating,
 } from "@sugabots/contracts";
-import type { Tool } from "ai";
+import type { JSONSchema7, Tool } from "ai";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
 import { ConnectionRepository } from "../../providers/connections/connection-repository.ts";
@@ -27,10 +27,9 @@ import {
  * asked for its tools, and closed when the turn ends. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
  * carries whether it may change something, which decides how a failed turn
- * after it is treated, and what the pod's bots may do with it. A tool set to
- * `off` is still offered, so turning one off or on leaves the tools the model
- * is sent, and the provider's cache of them, as they were; its calls are
- * refused. A tool nobody has chosen for is treated as `toolAccessOf` says.
+ * after it is treated, and what the pod's bots may do with it. A call to a
+ * tool set to `off` is refused. A tool nobody has chosen for is treated as
+ * `toolAccessOf` says.
  * A connection whose every tool is off is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
@@ -40,6 +39,10 @@ import {
 
 export interface OfferedTool {
 	tool: Tool;
+	handle: string;
+	description: string;
+	/** The server's schema, before the client adapts it into `tool`. */
+	inputSchema: JSONSchema7;
 	/** Whether a call may change something at the other end. */
 	mutating: boolean;
 	/** Whether each call runs, waits for a person to allow it, or is refused. */
@@ -122,9 +125,12 @@ export function from({
 		);
 		try {
 			const tools: Record<string, OfferedTool> = {};
-			for (const { described, tool } of await session.tools()) {
+			for (const { described, inputSchema, tool } of await session.tools()) {
 				tools[connectionToolKey(target.handle, described.name)] = {
 					tool,
+					handle: target.handle,
+					description: described.description ?? "",
+					inputSchema,
 					mutating: connectionToolMutating(described),
 					access: toolAccessOf(target.toolAccess, described),
 					connectionId: target.connectionId,

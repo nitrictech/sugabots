@@ -1,6 +1,6 @@
 import { createMCPClient, type OAuthClientProvider, UnauthorizedError } from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
-import type { Tool } from "ai";
+import type { JSONSchema7, Tool } from "ai";
 import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
@@ -31,6 +31,7 @@ interface ServerTarget {
 /** One of the server's tools: as the server described it, and as a model can call it. */
 interface ServerTool {
 	described: ConnectionTool;
+	inputSchema: JSONSchema7;
 	tool: Tool;
 }
 
@@ -74,6 +75,7 @@ export async function connectServer(
 									readOnly: definition.annotations?.readOnlyHint ?? null,
 									destructive: definition.annotations?.destructiveHint ?? null,
 								},
+								inputSchema: definition.inputSchema as JSONSchema7,
 								tool,
 							},
 						]

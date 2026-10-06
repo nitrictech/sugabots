@@ -1,5 +1,5 @@
 import type { CollaborationPart } from "@sugabots/contracts";
-import type { ToolSet } from "ai";
+import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
@@ -11,6 +11,8 @@ import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
+import { buildCatalog } from "../tools/tool-search/catalog.ts";
+import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
@@ -26,7 +28,8 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
  * A connection tool turned off is offered all the same, and each call to it is
- * recorded as refused without reaching the server.
+ * recorded as refused without reaching the server. They are reached through
+ * `tool_search` and `call_tool`, and recorded as themselves.
  * `search_history` is recorded the same way, and offered only once the
  * thread has been compacted; `save_instructions` too, offered only while the
  * agent interviews its creator.
@@ -41,8 +44,8 @@ export interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: ToolSet;
-	/** The pod connections' tools, keyed `handle__tool`, each with whether it changes things. */
-	connections?: Record<string, OfferedTool>;
+	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
+	connections: Readonly<Record<string, OfferedTool>>;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
 	/** For a tool that watches for something else to happen. */
@@ -86,15 +89,16 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	for (const [key, tool] of Object.entries(deps.builtIn)) {
 		tools[key] = recorded(key, tool, recording);
 	}
-	for (const [key, offered] of Object.entries(deps.connections ?? {})) {
+	const connectionTools: Record<string, Tool> = {};
+	for (const [key, offered] of Object.entries(deps.connections)) {
 		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
 		// An approved call is left to its approval, which refuses it if the tool
 		// was turned off since.
 		if (offered.access === "off" && !approvalBound) {
-			tools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
+			connectionTools[key] = refused(key, offered.tool, TOOL_TURNED_OFF, recording);
 			continue;
 		}
-		tools[key] = recorded(key, offered.tool, {
+		connectionTools[key] = recorded(key, offered.tool, {
 			...recording,
 			mutating: offered.mutating || approvalBound,
 			...(offered.access === "ask" || approvalBound
@@ -109,6 +113,11 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 				: {}),
 		});
 	}
+	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
+	const catalog = buildCatalog(deps.connections);
+	tools[TOOL_SEARCH] = recorded(TOOL_SEARCH, toolSearchTool({ catalog }), recording);
+	// Not recorded itself: the tool it calls records the call, under its own name.
+	tools[CALL_TOOL] = callToolTool({ catalog, connectionTools });
 	if (prepared.context.compaction) {
 		tools[SEARCH_HISTORY_TOOL] = recorded(
 			SEARCH_HISTORY_TOOL,
