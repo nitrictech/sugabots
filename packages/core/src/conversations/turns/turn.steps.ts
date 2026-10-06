@@ -499,7 +499,7 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const target = offer.approvalTargetOf(request.toolCall);
+					const target = offer.findApprovalTarget(request.toolCall);
 					if (!target) {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}

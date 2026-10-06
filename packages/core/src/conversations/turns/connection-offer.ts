@@ -1,10 +1,10 @@
 import type { Tool, ToolApprovalConfiguration, ToolSet } from "ai";
 import type { OfferedTool } from "../tools/connections.ts";
-import { catalogListing, catalogOf } from "../tools/tool-search/catalog.ts";
+import { buildCatalog, catalogListing } from "../tools/tool-search/catalog.ts";
 import {
-	bridgedCallOf,
 	CALL_TOOL,
 	callToolTool,
+	parseCallToolInput,
 	TOOL_SEARCH,
 	toolSearchTool,
 } from "../tools/tool-search/tool.ts";
@@ -22,7 +22,7 @@ export interface ConnectionOffer {
 		runnable: Readonly<Record<string, Tool>>,
 		record: (key: string, tool: Tool) => Tool,
 	): ToolSet;
-	approvalTargetOf(toolCall: { toolName: string; input: unknown }): ApprovalTarget | undefined;
+	findApprovalTarget(toolCall: { toolName: string; input: unknown }): ApprovalTarget | undefined;
 }
 
 export interface ApprovalTarget {
@@ -82,12 +82,12 @@ function directOffer(tools: Readonly<Record<string, OfferedTool>>): ConnectionOf
 			keys.filter((key) => tools[key]?.access === "ask").map((key) => [key, "user-approval"]),
 		),
 		toolsFor: (runnable) => runnable,
-		approvalTargetOf: ({ toolName, input }) => askingTarget(tools, toolName, input),
+		findApprovalTarget: ({ toolName, input }) => askingTarget(tools, toolName, input),
 	};
 }
 
 function bridgedOffer(tools: Readonly<Record<string, OfferedTool>>): ConnectionOffer {
-	const catalog = catalogOf(tools);
+	const catalog = buildCatalog(tools);
 	return {
 		mode: "bridged",
 		tools,
@@ -98,7 +98,7 @@ function bridgedOffer(tools: Readonly<Record<string, OfferedTool>>): ConnectionO
 		].join("\n"),
 		toolApproval: {
 			[CALL_TOOL]: (input: unknown) => {
-				const call = bridgedCallOf(input);
+				const call = parseCallToolInput(input);
 				return call && askingTarget(tools, call.tool, call.arguments) ? "user-approval" : undefined;
 			},
 		},
@@ -107,8 +107,8 @@ function bridgedOffer(tools: Readonly<Record<string, OfferedTool>>): ConnectionO
 			// Not recorded itself: the tool it calls records the call, under its own name.
 			[CALL_TOOL]: callToolTool({ catalog, connectionTools: runnable }),
 		}),
-		approvalTargetOf: ({ toolName, input }) => {
-			const call = toolName === CALL_TOOL ? bridgedCallOf(input) : undefined;
+		findApprovalTarget: ({ toolName, input }) => {
+			const call = toolName === CALL_TOOL ? parseCallToolInput(input) : undefined;
 			return call && askingTarget(tools, call.tool, call.arguments);
 		},
 	};

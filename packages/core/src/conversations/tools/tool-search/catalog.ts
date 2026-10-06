@@ -15,8 +15,8 @@ export type CatalogEntry = Pick<
 	"handle" | "remoteToolName" | "description" | "inputSchema"
 > & { key: string };
 
-/** catalogOf returns the tools that may be called, sorted so the listing is stable across turns. */
-export function catalogOf(tools: Readonly<Record<string, OfferedTool>>): CatalogEntry[] {
+/** buildCatalog returns the tools that may be called, sorted so the listing is stable across turns. */
+export function buildCatalog(tools: Readonly<Record<string, OfferedTool>>): CatalogEntry[] {
 	return Object.entries(tools)
 		.filter(([, offered]) => offered.access !== "off")
 		.map(([key, offered]) => ({ ...offered, key }))
@@ -32,9 +32,9 @@ type FoundTool =
  * match in the tool's name weighing most. Ties go by key, so it is repeatable.
  */
 export function searchCatalog(catalog: readonly CatalogEntry[], query: string): FoundTool[] {
-	const terms = [...new Set(wordsOf(query))].filter((word) => !STOP_WORDS.has(word)).map(stem);
+	const terms = [...new Set(splitWords(query))].filter((word) => !STOP_WORDS.has(word)).map(stem);
 	const ranked = catalog
-		.map((entry) => ({ entry, ...matchOf(entry, terms) }))
+		.map((entry) => ({ entry, ...scoreMatch(entry, terms) }))
 		.filter(({ matched }) => matched > 0)
 		.sort(
 			(a, b) =>
@@ -49,7 +49,7 @@ export function searchCatalog(catalog: readonly CatalogEntry[], query: string): 
 		}
 		return {
 			tool: entry.key,
-			description: firstSentenceOf(entry.description),
+			description: firstSentence(entry.description),
 			required: entry.inputSchema.required ?? [],
 		};
 	});
@@ -61,14 +61,14 @@ const STOP_WORDS = new Set(
 	),
 );
 
-function matchOf(
+function scoreMatch(
 	entry: CatalogEntry,
 	terms: readonly string[],
 ): { matched: number; weight: number } {
-	const name = stemsOf(entry.remoteToolName);
-	const handle = stemsOf(entry.handle);
-	const parameters = stemsOf(Object.keys(entry.inputSchema.properties ?? {}).join(" "));
-	const description = stemsOf(entry.description);
+	const name = stemWords(entry.remoteToolName);
+	const handle = stemWords(entry.handle);
+	const parameters = stemWords(Object.keys(entry.inputSchema.properties ?? {}).join(" "));
+	const description = stemWords(entry.description);
 	let matched = 0;
 	let weight = 0;
 	for (const term of terms) {
@@ -83,11 +83,11 @@ function matchOf(
 	return { matched, weight };
 }
 
-function stemsOf(text: string): Set<string> {
-	return new Set(wordsOf(text).map(stem));
+function stemWords(text: string): Set<string> {
+	return new Set(splitWords(text).map(stem));
 }
 
-function wordsOf(text: string): string[] {
+function splitWords(text: string): string[] {
 	return text
 		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
 		.toLowerCase()
@@ -102,7 +102,7 @@ function stem(word: string): string {
 	return word;
 }
 
-function firstSentenceOf(text: string): string {
+function firstSentence(text: string): string {
 	const end = text.search(/[.!?](\s|$)/);
 	return end < 0 ? text : text.slice(0, end + 1);
 }

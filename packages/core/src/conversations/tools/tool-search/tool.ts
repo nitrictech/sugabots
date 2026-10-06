@@ -20,15 +20,15 @@ const CallToolInput = Schema.Struct({
 
 type BridgedCall = { tool: string; arguments: Record<string, unknown> };
 
-export function bridgedCallOf(input: unknown): BridgedCall | undefined {
+export function parseCallToolInput(input: unknown): BridgedCall | undefined {
 	return Option.getOrUndefined(
 		Option.flatMap(Schema.decodeUnknownOption(CallToolInput)(input), ({ tool, arguments: given }) =>
-			Option.map(argumentsOf(given), (args) => ({ tool, arguments: args })),
+			Option.map(parseArguments(given), (args) => ({ tool, arguments: args })),
 		),
 	);
 }
 
-function argumentsOf(
+function parseArguments(
 	given: Record<string, unknown> | string,
 ): Option.Option<Record<string, unknown>> {
 	if (typeof given !== "string") return Option.some(given);
@@ -80,7 +80,7 @@ export function callToolTool({
 		description: `Run a tool from this pod's connections by its full name, connection__tool. Pass arguments that match its input schema; if you haven't seen the schema, get it with ${TOOL_SEARCH} first. If the tool says its input is wrong, fix the arguments and call it again.`,
 		inputSchema: CallToolInput.pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async (input, options) => {
-			const call = bridgedCallOf(input);
+			const call = parseCallToolInput(input);
 			if (!call) {
 				return {
 					status: "failed",

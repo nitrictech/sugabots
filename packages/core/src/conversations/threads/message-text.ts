@@ -45,7 +45,7 @@ export function describeToolCall(call: ToolCallPart): string {
 		case "failed":
 			return `${asked}; it failed: ${call.error ?? "no reason given"}]`;
 		case "completed":
-			if (call.tool === TOOL_SEARCH) return `${asked}: found ${foundToolsOf(call.output)}]`;
+			if (call.tool === TOOL_SEARCH) return `${asked}: found ${foundToolNames(call.output)}]`;
 			return `${asked}: ${clipped(
 				JSON.stringify(call.output),
 				call.tool === SEARCH_HISTORY_TOOL
@@ -59,8 +59,8 @@ const FoundToolNames = Schema.Struct({
 	tools: Schema.Array(Schema.Struct({ tool: Schema.String })),
 });
 
-/** foundToolsOf leaves out schemas: a later turn that needs one searches again. */
-function foundToolsOf(output: unknown): string {
+/** foundToolNames leaves out schemas: a later turn that needs one searches again. */
+function foundToolNames(output: unknown): string {
 	const found = Option.match(Schema.decodeUnknownOption(FoundToolNames)(output), {
 		onNone: () => [],
 		onSome: ({ tools }) => tools.map(({ tool }) => tool),
