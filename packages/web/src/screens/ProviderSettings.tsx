@@ -31,6 +31,7 @@ import { useAgents, useModels } from "@/lib/agents.ts";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -694,13 +695,9 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const [onWhenOpened] = useState(
 		() => new Set(provider.models.filter((model) => model.enabled).map((model) => model.id)),
 	);
-	const shown = provider.models
-		.filter(
-			(model) =>
-				needle === "" ||
-				`${model.modelId} ${model.displayName ?? ""}`.toLowerCase().includes(needle),
-		)
-		.sort((a, b) => Number(onWhenOpened.has(b.id)) - Number(onWhenOpened.has(a.id)));
+	const shown = searchModels(provider.models, needle).sort(
+		(a, b) => Number(onWhenOpened.has(b.id)) - Number(onWhenOpened.has(a.id)),
+	);
 	const error = actions.setModel.error ?? actions.fetchModels.error;
 	const custom = provider.preset === null;
 

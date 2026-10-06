@@ -20,6 +20,7 @@
 		"@base-ui/react": "^1.8.0",
 		"@fontsource-variable/jetbrains-mono": "^5.3.0",
 		"@fontsource-variable/rubik": "^5.3.0",
+		"@leeoniya/ufuzzy": "^1.0.19",
 		"@noble/hashes": "^2.4.0",
 		"@sugabots/avatars": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
