@@ -34,9 +34,7 @@ interface HistorySearch {
 
 /**
  * The `search_history` tool: find what was said in this thread before the
- * part the bot reads word for word, which in a compacted thread is summarised
- * or left out. Its description stays the same whatever `before` is, so the
- * tools a thread's turns send stay the same across compactions.
+ * part the bot reads word for word, which compaction summarises or leaves out.
  */
 export function searchHistoryTool({
 	threadId,
@@ -44,10 +42,7 @@ export function searchHistoryTool({
 	run,
 }: {
 	threadId: string;
-	/**
-	 * Where the history the bot reads word for word starts; nothing from then
-	 * on is searched. Absent until the thread is compacted, when it reads all of it.
-	 */
+	/** Where the history the bot reads word for word starts, once compacted; nothing from then on is searched. */
 	before: Date | undefined;
 	run: RunEffect;
 }) {

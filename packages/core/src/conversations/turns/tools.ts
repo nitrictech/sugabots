@@ -28,14 +28,12 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * and leave their own records. The built-in tools do work for the agent, and
  * the connection tools do work at a server the workspace configured; every
  * call to either is recorded as a `tool_call` part of the reply (`calls/`).
- * Connection tools are reached through `tool_search` and `call_tool`, and
- * recorded as themselves. `search_history` is recorded the same way.
+ * Connection tools are reached through `tool_search` and `call_tool`.
  *
- * Every tool but `save_instructions` is offered whether or not it can run,
- * and a call to one that can't is refused: the tools come first in the
- * provider's cached prompt, so a change to them mid-thread would cost the
- * whole cache. `save_instructions` is offered only while the agent interviews
- * its creator, and the interview's end replaces the system text anyway.
+ * A tool that can't run is still offered, and its calls refused: the tools
+ * lead the provider's cached prompt, so changing them mid-thread loses the
+ * cache. Only `save_instructions` comes and goes, with an interview whose end
+ * replaces the system text anyway.
  */
 
 export interface ToolDependencies {
@@ -45,7 +43,7 @@ export interface ToolDependencies {
 	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
-	/** The built-in tools this installation offers, and which of them may run. */
+	/** The built-in tools this installation offers, by key. */
 	builtIn: BuiltInTools.Offered;
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
@@ -75,7 +73,6 @@ export interface ToolDependencies {
 /** What people, and the model, are told of a call to a tool the pod has turned off. */
 const TOOL_TURNED_OFF = UserMessage.of`This tool is turned off for bots in this pod.`;
 
-/** What people, and the model, are told of a call to a built-in tool this agent can't use. */
 const TOOL_UNAVAILABLE = UserMessage.of`This tool is switched off for this bot.`;
 
 export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {

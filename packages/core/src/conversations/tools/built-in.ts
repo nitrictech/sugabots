@@ -14,13 +14,13 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 /**
  * The built-in tools offered to a workspace's crew turns.
  *
- * forWorkspace returns `web_fetch` and `web_search` always, so the tools a
- * thread's turns send stay the same, but names them `usable` only while
+ * forWorkspace returns `web_fetch` and `web_search`, usable only while
  * `searchProviders.resolve` finds an enabled search provider with every
- * setting a search needs. The provider's enabled flag is the workspace's one
- * setting for whether bots may use the web, and each search is billed to the
- * workspace. forWorkspace looks the provider up on every call, so a provider
- * enabled between turns applies from the next turn without a restart.
+ * setting a search needs. The provider's enabled flag
+ * is the workspace's one setting for whether bots may use the web, and each
+ * search is billed to the workspace. forWorkspace looks the provider
+ * up on every call, so a provider enabled between turns applies from the next
+ * turn without a restart.
  */
 export interface Interface {
 	forWorkspace(workspaceId: string): Effect.Effect<Offered, never, Database>;
@@ -28,7 +28,7 @@ export interface Interface {
 
 export interface Offered {
 	tools: ToolSet;
-	/** The keys of the tools that may run; a call to any other is refused. */
+	/** Calls to tools not named here are refused. */
 	usable: readonly string[];
 }
 

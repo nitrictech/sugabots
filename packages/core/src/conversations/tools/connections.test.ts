@@ -20,7 +20,6 @@ import { ConnectionTools } from "./connections.ts";
 
 let http: Server;
 let url: string;
-/** Every request the fixture server has had, to see when a turn reaches it. */
 let requests = 0;
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
@@ -180,14 +179,12 @@ describe("a turn's connection tools", () => {
 	describe("from one turn to the next", () => {
 		const callOptions = { toolCallId: "1", messages: [] } as never;
 
-		/** How many requests the fixture server gets while `turn` runs. */
 		async function requestsDuring(turn: Promise<unknown>) {
 			const before = requests;
 			await turn;
 			return requests - before;
 		}
 
-		/** One turn's tools for `target`, closed once `use` is done with them. */
 		const turnOn = (
 			offered: ConnectionTools.Interface,
 			use: (set: ConnectionTools.ConnectionToolSet) => Promise<unknown> = async () => undefined,

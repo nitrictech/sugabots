@@ -27,14 +27,13 @@ import {
 /**
  * The tools an agent inherits from its pod for one turn.
  *
- * A connection's tool list is kept between turns while fresh and unedited,
- * so a turn that calls none of its tools never reaches its server. Its
- * session opens when a turn first needs it and closes with the turn. Each
- * tool is keyed by the connection's handle and its own name,
- * `notes__list_notes`, and carries whether it may change something, which
- * decides how a failed turn after it is treated, and what the pod's bots may
- * do with it. A call to a tool set to `off` is refused. A tool nobody has
- * chosen for is treated as `toolAccessOf` says.
+ * A connection's tool list is kept between turns while fresh and unedited;
+ * its session opens when a turn first needs it. Each tool is keyed by
+ * the connection's handle and its own name, `linear__list_issues`, and
+ * carries whether it may change something, which decides how a failed turn
+ * after it is treated, and what the pod's bots may do with it. A call to a
+ * tool set to `off` is refused. A tool nobody has chosen for is treated as
+ * `toolAccessOf` says.
  * A connection whose every tool is off is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the

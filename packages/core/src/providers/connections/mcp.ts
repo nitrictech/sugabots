@@ -33,14 +33,14 @@ interface ServerTarget {
 	authProvider?: OAuthClientProvider;
 }
 
-/** One of the server's tools. Its `tool` runs through the session that listed it. */
+/** One of the server's tools: as the server described it, and as a model can call it. */
 interface ServerTool {
 	described: ConnectionTool;
 	inputSchema: JSONSchema7;
 	tool: Tool;
 }
 
-/** A server's tool list, with the definitions a later session can run them from. */
+/** A server's tool list, which any later session can run its tools from. */
 export interface ServerListing {
 	tools: ServerTool[];
 	definitions: ListToolsResult;
@@ -48,7 +48,7 @@ export interface ServerListing {
 
 export interface ServerSession {
 	list(): Promise<ServerListing>;
-	/** run calls the tool `name` from `listing` through this session, without listing again. */
+	/** run calls `name` from `listing` without listing the tools again. */
 	run(
 		listing: ServerListing,
 		name: string,
