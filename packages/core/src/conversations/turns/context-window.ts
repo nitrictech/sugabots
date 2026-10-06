@@ -31,6 +31,19 @@ export function contextWindowTokens(contextLength: number | null | undefined): n
  */
 const HISTORY_LIMIT_SHARE = 0.9;
 
+/**
+ * The most a turn's connection tool definitions may take while each is
+ * offered as a tool of its own; past it they are bridged (see
+ * `ConnectionToolMode`). Every request carries them, outside the history
+ * limit, so with it they leave the rest of the window for the system text and
+ * the reply.
+ */
+const DIRECT_TOOL_DEFINITIONS_SHARE = 0.05;
+
+export function directToolDefinitionsLimitTokens(windowTokens: number): number {
+	return Math.floor(windowTokens * DIRECT_TOOL_DEFINITIONS_SHARE);
+}
+
 /** The most history a turn reading with this window is shown. */
 export function historyLimitTokens(windowTokens: number): number {
 	return Math.floor(windowTokens * HISTORY_LIMIT_SHARE);

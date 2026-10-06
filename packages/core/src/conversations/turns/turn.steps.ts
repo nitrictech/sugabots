@@ -42,7 +42,13 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { toolsForTurn } from "./tools.ts";
+import {
+	connectionCallOf,
+	connectionOfferFor,
+	connectionToolApproval,
+	connectionToolsNote,
+	toolsForTurn,
+} from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -404,16 +410,22 @@ const streamReply = (
 				}
 				approvalBoundTools.add(binding.tool);
 			}
-			const toolsNeedingApproval = Object.entries(connections.tools)
-				.filter(([, offered]) => offered.access === "ask")
-				.map(([key]) => key);
+			// A resumed segment offers its tools as the segment that suspended did:
+			// the calls waiting on approval were made to those tools. One saved
+			// before tools could be bridged offered them directly.
+			const offer = connectionOfferFor(
+				connections.tools,
+				prepared.context.windowTokens,
+				prepared.checkpoint ? (prepared.checkpoint.connectionToolMode ?? "direct") : undefined,
+			);
+			yield* Effect.annotateCurrentSpan("sugabots.connection_tool_mode", offer.mode);
 			const tools = toolsForTurn(prepared, {
 				collaborations,
 				calls: toolCalls,
 				approvals,
 				approvalBoundTools,
 				builtIn,
-				connections: connections.tools,
+				connections: offer,
 				agents,
 				bus: events,
 				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
@@ -442,7 +454,7 @@ const streamReply = (
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: Object.keys(builtIn),
-				connectionTools: Object.keys(connections.tools),
+				connectionTools: connectionToolsNote(offer),
 			};
 			const freshPrompt = modelPrompt(prepared.context, environment);
 			const modelInput =
@@ -476,7 +488,7 @@ const streamReply = (
 				messages: modelInput.messages,
 				continuationMessages: segmentMessages,
 				tools,
-				toolApproval: Object.fromEntries(toolsNeedingApproval.map((key) => [key, "user-approval"])),
+				toolApproval: connectionToolApproval(offer),
 				maxSteps: Math.max(1, TURN_MODEL_CALLS - (prepared.checkpoint?.modelCalls ?? 0)),
 			});
 
@@ -497,16 +509,17 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const offered = connections.tools[request.toolCall.toolName];
-					if (offered?.access !== "ask") {
+					const call = connectionCallOf(offer, request.toolCall);
+					const offered = call && connections.tools[call.tool];
+					if (!call || offered?.access !== "ask") {
 						return Effect.fail(new ApprovalForUnknownTool({ tool: request.toolCall.toolName }));
 					}
 					return Effect.map(ids.next, (id) => ({
 						id,
 						approvalId: request.approvalId,
 						sdkToolCallId: request.toolCall.toolCallId,
-						tool: request.toolCall.toolName,
-						input: request.toolCall.input,
+						tool: call.tool,
+						input: call.input,
 						reason: request.reason,
 						connectionId: offered.connectionId,
 						connectionRevision: offered.connectionRevision,
@@ -542,6 +555,7 @@ const streamReply = (
 						reply: suspendedReply,
 						modelCalls: (prepared.checkpoint?.modelCalls ?? 0) + finished.modelCalls,
 						contextTokens,
+						connectionToolMode: offer.mode,
 					},
 				};
 			});

@@ -14,6 +14,7 @@ import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
 	ToolApprovalsIncomplete,
@@ -477,6 +478,214 @@ describe("runSegment", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("a pod whose connection tool definitions would crowd the model's window", () => {
+	// One tool's description alone is past the share of the 128k-token window the cases read with.
+	const crowding = "Looks up a page in the wiki. ".repeat(2_000);
+	const callOptions = { toolCallId: "sdk-1", messages: [] } as never;
+
+	/** A pod with one huge tool to read with, one that asks first and one turned off. */
+	function crowdedPod() {
+		const lookup = vi.fn(async () => ({ content: [{ type: "text", text: "found" }] }));
+		const wipe = vi.fn(async () => ({ content: [] }));
+		const offered = (
+			description: string,
+			remoteToolName: string,
+			access: ConnectionAccess,
+			execute: () => Promise<unknown>,
+		) => ({
+			tool: tool({
+				description,
+				inputSchema: Schema.Struct({ page: Schema.String }).pipe(
+					Schema.toStandardSchemaV1,
+					Schema.toStandardJSONSchemaV1,
+				),
+				execute,
+			}),
+			mutating: access === "ask",
+			access,
+			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+			connectionRevision: 1,
+			remoteToolName,
+		});
+		const connectionTools: ConnectionTools.Interface = {
+			forPod: () =>
+				Effect.succeed({
+					tools: {
+						wiki__lookup: offered(crowding, "lookup", "allow", lookup),
+						wiki__wipe: offered("Deletes a page.", "wipe", "ask", wipe),
+						drive__lookup: offered("Looks up a file.", "lookup", "off", lookup),
+					},
+					close: async () => undefined,
+				}),
+		};
+		return { connectionTools, lookup, wipe };
+	}
+
+	/** Runs a segment on the crowded pod whose model does `act` with the tools it is offered. */
+	async function bridgedSegment(
+		act: (input: Models.StreamRequest) => Promise<void>,
+		calls = toolCalls(),
+	) {
+		const { execution, turns } = fakes();
+		const pod = crowdedPod();
+		const model = Models.fromStream((input) =>
+			Effect.sync(() =>
+				streamed(
+					(async function* () {
+						await act(input);
+						yield "Done.";
+					})(),
+				),
+			),
+		);
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: calls,
+				connectionTools: pod.connectionTools,
+			}),
+		);
+		return pod;
+	}
+
+	it("offers the tools to find and call them in place of the tools themselves", async () => {
+		let received: Models.StreamRequest | undefined;
+		let found: unknown;
+
+		await bridgedSegment(async (input) => {
+			received = input;
+			found = await input.tools?.[TOOL_SEARCH]?.execute?.(
+				{ query: "look up a page" } as never,
+				callOptions,
+			);
+		});
+
+		expect(Object.keys(received?.tools ?? {})).toEqual(
+			expect.arrayContaining([TOOL_SEARCH, CALL_TOOL]),
+		);
+		expect(Object.keys(received?.tools ?? {})).not.toContain("wiki__lookup");
+		const turnNote = received?.messages.at(-1)?.content;
+		expect(turnNote).toContain(TOOL_SEARCH);
+		expect(turnNote).toContain("- wiki (2 tools): lookup, wipe");
+		expect(turnNote).not.toContain("drive");
+		expect(found).toMatchObject({
+			tools: expect.arrayContaining([
+				expect.objectContaining({ tool: "wiki__lookup", inputSchema: expect.anything() }),
+			]),
+		});
+	});
+
+	it("asks a person first only for a call to a tool that asks first", async () => {
+		let received: Models.StreamRequest | undefined;
+
+		await bridgedSegment(async (input) => {
+			received = input;
+		});
+
+		const approvals = received?.toolApproval as
+			| Record<string, (input: unknown) => unknown>
+			| undefined;
+		const approval = approvals?.[CALL_TOOL];
+		if (!approval) throw new Error("no approval for the bridge's calls");
+		expect(approval({ tool: "wiki__wipe", arguments: { page: "Home" } })).toBe("user-approval");
+		expect(approval({ tool: "wiki__lookup", arguments: { page: "Home" } })).toBeUndefined();
+		expect(approval({ tool: "constructor", arguments: {} })).toBeUndefined();
+	});
+
+	it("runs a found tool as itself, recorded under its own name", async () => {
+		const calls = toolCalls();
+		let outcome: unknown;
+
+		const { lookup } = await bridgedSegment(async (input) => {
+			outcome = await input.tools?.[CALL_TOOL]?.execute?.(
+				{ tool: "wiki__lookup", arguments: { page: "Home" } } as never,
+				callOptions,
+			);
+		}, calls);
+
+		expect(lookup).toHaveBeenCalledWith({ page: "Home" }, callOptions);
+		expect(outcome).toEqual({ content: [{ type: "text", text: "found" }] });
+		expect(calls.open).toHaveBeenCalledWith(
+			expect.objectContaining({ tool: "wiki__lookup", input: { page: "Home" } }),
+		);
+	});
+
+	it("tells the model when a call names no tool it has, running nothing", async () => {
+		let outcome: unknown;
+
+		const { lookup } = await bridgedSegment(async (input) => {
+			outcome = await input.tools?.[CALL_TOOL]?.execute?.(
+				{ tool: "wiki__look", arguments: { page: "Home" } } as never,
+				callOptions,
+			);
+		});
+
+		expect(lookup).not.toHaveBeenCalled();
+		expect(outcome).toMatchObject({
+			status: "failed",
+			reason: expect.stringContaining(TOOL_SEARCH),
+		});
+	});
+
+	it("waits for a person to approve a call through the bridge as a call to the tool it names", async () => {
+		const { execution, turns } = fakes();
+		const pod = crowdedPod();
+		const model = Models.fromStream(() =>
+			Effect.succeed(
+				streamed(chunks("I need approval."), {
+					approvalRequests: [
+						{
+							type: "tool-approval-request",
+							approvalId: "approval-1",
+							toolCall: {
+								type: "tool-call",
+								toolCallId: "sdk-1",
+								toolName: CALL_TOOL,
+								input: { tool: "wiki__wipe", arguments: { page: "Home" } },
+							},
+						},
+					] as never,
+					responseMessages: [{ role: "assistant", content: "I need approval." }] as never,
+				}),
+			),
+		);
+
+		const outcome = await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				connectionTools: pod.connectionTools,
+			}),
+		);
+
+		expect(outcome).toEqual({ _tag: "Suspended", approvals: ["approval-1"] });
+		expect(pod.wipe).not.toHaveBeenCalled();
+		expect(turns.suspend).toHaveBeenCalledWith(
+			replyTurn,
+			expect.objectContaining({
+				connectionToolMode: "bridged",
+				approvals: [expect.objectContaining({ tool: "wiki__wipe" })],
+			}),
+			[
+				expect.objectContaining({
+					sdkToolCallId: "sdk-1",
+					tool: "wiki__wipe",
+					input: { page: "Home" },
+					remoteToolName: "wipe",
+				}),
+			],
+		);
 	});
 });
 

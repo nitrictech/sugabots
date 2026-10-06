@@ -1,12 +1,13 @@
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
+import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";
 
 const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
-	connectionTools: [],
+	connectionTools: { mode: "direct", keys: [] },
 	...overrides,
 });
 
@@ -113,7 +114,7 @@ describe("modelPrompt", () => {
 	it("names the connection tools on offer and how their names are made", () => {
 		const prompt = modelPrompt(
 			context(),
-			environment({ connectionTools: ["wiki__search_pages"] }),
+			environment({ connectionTools: { mode: "direct", keys: ["wiki__search_pages"] } }),
 		).messages.at(-1);
 		expect(prompt?.content).toContain("connections you can call: wiki__search_pages.");
 		expect(prompt?.content).toContain("double underscore");
@@ -173,6 +174,47 @@ describe("modelPrompt", () => {
 		expect(history).toContain(
 			'[Used web_search with {"query":"release"}; it failed: No search provider]',
 		);
+	});
+
+	it("tells later turns which tools a tool search found, not their schemas", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const schema = { type: "object", properties: { page: { type: "string" } } };
+		input.messages[1] = {
+			...own,
+			content: "Looking.",
+			parts: [
+				{ type: "text", text: "Looking." },
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-000000000022",
+					tool: TOOL_SEARCH,
+					input: { query: "look up a page" },
+					output: {
+						tools: [
+							{ tool: "wiki__lookup", description: "Looks up a page.", inputSchema: schema },
+							{ tool: "wiki__history", description: "A page's history." },
+						],
+					},
+					status: "completed",
+					error: null,
+					mutating: false,
+					atOffset: 8,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+			],
+		};
+
+		const history = modelPrompt(input, environment()).messages[2]?.content ?? "";
+
+		expect(history).toContain(
+			'[Used tool_search with {"query":"look up a page"}: found wiki__lookup, wiki__history]',
+		);
+		expect(history).not.toContain("properties");
 	});
 
 	it("keeps what search_history found longer than other tools' output", () => {

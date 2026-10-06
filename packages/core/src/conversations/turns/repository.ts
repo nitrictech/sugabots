@@ -38,6 +38,7 @@ import {
 	transition,
 } from "./lifecycle.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
+import { ConnectionToolMode } from "./tools.ts";
 import { WorkAdmission } from "./work-admission.ts";
 
 /**
@@ -806,6 +807,13 @@ export const TurnCheckpoint = Schema.Struct({
 	modelCalls: OptionalCount,
 	/** The prompt's size at the turn's first model call, which a resumed segment keeps. */
 	contextTokens: OptionalCount,
+	/**
+	 * How the turn offered its connection tools, which a resumed segment keeps:
+	 * the calls waiting on approval were made to the tools it offered then.
+	 * Absent from a checkpoint saved before tools could be bridged, all of
+	 * which offered them directly.
+	 */
+	connectionToolMode: Schema.optional(ConnectionToolMode),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
