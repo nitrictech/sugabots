@@ -110,7 +110,13 @@ export async function connectServer(
 			}
 			const execute = tools[name]?.execute;
 			if (!execute) throw new Error(`The listing has no tool called ${name}`);
-			return execute(input, options);
+			try {
+				return await execute(input, options);
+			} catch (cause) {
+				// The model is told why a server rejected a call, so it can correct it.
+				if (!isServerError(cause)) throw cause;
+				return { isError: true, content: [{ type: "text", text: cause.message }] };
+			}
 		},
 		close: () => client.close().catch(() => undefined),
 	};
@@ -160,4 +166,13 @@ function describe(cause: unknown, target: ServerTarget): UserMessage {
 	if (status)
 		return UserMessage.of`The server answered with an error. Try again later (HTTP ${status})`;
 	return UserMessage.of`The server could not be reached. Check the address and port, and that the server is running`;
+}
+
+/** isServerError reports whether `cause` is a server's JSON-RPC error answer, not a failure to reach it. */
+function isServerError(cause: unknown): cause is Error & { code: number } {
+	return (
+		cause instanceof Error &&
+		cause.name === "MCPClientError" &&
+		typeof (cause as { code?: unknown }).code === "number"
+	);
 }

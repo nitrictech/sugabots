@@ -1,4 +1,5 @@
 import type { JSONSchema7 } from "ai";
+import MiniSearch from "minisearch";
 import type { OfferedTool } from "../connections.ts";
 
 const SEARCH_RESULT_LIMIT = 5;
@@ -27,22 +28,32 @@ type FoundTool =
 	| { tool: string; description: string; inputSchema: JSONSchema7 }
 	| { tool: string; description: string; required: string[] };
 
-/**
- * searchCatalog returns the entries that match most of `query`'s words, a
- * match in the tool's name weighing most. Ties go by key, so it is repeatable.
- */
+/** searchCatalog returns any tool `query` names first, then MiniSearch's best matches. */
 export function searchCatalog(catalog: readonly CatalogEntry[], query: string): FoundTool[] {
-	const terms = [...new Set(splitWords(query))].filter((word) => !STOP_WORDS.has(word)).map(stem);
-	const ranked = catalog
-		.map((entry) => ({ entry, ...scoreMatch(entry, terms) }))
-		.filter(({ matched }) => matched > 0)
-		.sort(
-			(a, b) =>
-				b.matched - a.matched || b.weight - a.weight || (a.entry.key < b.entry.key ? -1 : 1),
-		)
-		.slice(0, SEARCH_RESULT_LIMIT);
+	const name = query.trim();
+	const named = catalog.filter((entry) => entry.key === name || entry.remoteToolName === name);
+	const index = new MiniSearch<CatalogEntry>({
+		idField: "key",
+		fields: ["remoteToolName", "handle", "description", "parameters"],
+		extractField: (entry, field) =>
+			field === "parameters"
+				? Object.keys(entry.inputSchema.properties ?? {}).join(" ")
+				: entry[field as keyof CatalogEntry],
+		tokenize: splitWords,
+		processTerm: (term) => (STOP_WORDS.has(term) ? null : term),
+		searchOptions: { boost: { remoteToolName: 3, handle: 2 }, prefix: true, fuzzy: 0.2 },
+	});
+	index.addAll(catalog);
+	const byKey = new Map(catalog.map((entry) => [entry.key, entry]));
+	const ranked = [
+		...named,
+		...index
+			.search(query)
+			.flatMap((result) => byKey.get(result.id) ?? [])
+			.filter((entry) => !named.includes(entry)),
+	].slice(0, SEARCH_RESULT_LIMIT);
 	let schemaCharacters = 0;
-	return ranked.map(({ entry }, rank) => {
+	return ranked.map((entry, rank) => {
 		schemaCharacters += JSON.stringify(entry.inputSchema).length;
 		if (rank < SCHEMAS_PER_SEARCH && schemaCharacters <= SEARCH_SCHEMA_CHARACTERS) {
 			return { tool: entry.key, description: entry.description, inputSchema: entry.inputSchema };
@@ -61,45 +72,13 @@ const STOP_WORDS = new Set(
 	),
 );
 
-function scoreMatch(
-	entry: CatalogEntry,
-	terms: readonly string[],
-): { matched: number; weight: number } {
-	const name = stemWords(entry.remoteToolName);
-	const handle = stemWords(entry.handle);
-	const parameters = stemWords(Object.keys(entry.inputSchema.properties ?? {}).join(" "));
-	const description = stemWords(entry.description);
-	let matched = 0;
-	let weight = 0;
-	for (const term of terms) {
-		const termWeight =
-			(name.has(term) ? 3 : 0) +
-			(handle.has(term) ? 2 : 0) +
-			(parameters.has(term) ? 1 : 0) +
-			(description.has(term) ? 1 : 0);
-		if (termWeight > 0) matched += 1;
-		weight += termWeight;
-	}
-	return { matched, weight };
-}
-
-function stemWords(text: string): Set<string> {
-	return new Set(splitWords(text).map(stem));
-}
-
+/** splitWords also splits `snake_case` and `camelCase`, which tool names use. */
 function splitWords(text: string): string[] {
 	return text
 		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
 		.toLowerCase()
 		.split(/[^a-z0-9]+/)
 		.filter((word) => word.length > 0);
-}
-
-/** stem drops a plural ending, so `issues` finds `list_issue`. */
-function stem(word: string): string {
-	if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
-	if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
-	return word;
 }
 
 function firstSentence(text: string): string {

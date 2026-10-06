@@ -65,4 +65,28 @@ describe("searching connection tools", () => {
 			required: ["query"],
 		});
 	});
+
+	it("returns a tool searched for by its full or own name first, with its schema", () => {
+		const entries = ["add_issue_comment", "create_issue", "get_issue", "list_issues"].map((name) =>
+			entry("tracker", name, { description: "Works with the tracker's issues." }),
+		);
+
+		for (const query of ["tracker__get_issue", "get_issue"]) {
+			expect(searchCatalog(entries, query)[0]).toMatchObject({
+				tool: "tracker__get_issue",
+				inputSchema: expect.anything(),
+			});
+		}
+	});
+
+	it("doesn't return a tool that shares only a common word with the search", () => {
+		const entries = [
+			entry("mail", "send_email", { description: "Sends an email message." }),
+			entry("paging", "list_incidents", { description: "Lists the incidents in a service." }),
+		];
+
+		expect(searchCatalog(entries, "send an email").map((found) => found.tool)).toEqual([
+			"mail__send_email",
+		]);
+	});
 });
