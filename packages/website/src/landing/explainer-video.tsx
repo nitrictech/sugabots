@@ -44,7 +44,7 @@ export function ExplainerVideo() {
 							<source srcSet="/sugabots-film-poster.avif" type="image/avif" />
 							<img
 								src="/sugabots-film-poster.jpg"
-								alt=""
+								alt={TITLE}
 								width={1280}
 								height={720}
 								className="size-full object-cover"

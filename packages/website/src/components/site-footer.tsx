@@ -1,7 +1,7 @@
+import { SugabotsMark } from "@sugabots/avatars";
 import { cn } from "cn";
 import { trackCallToActionClick } from "@/analytics";
 import { DiscordIcon, GitHubIcon } from "@/components/brand-icons";
-import { SiteLogo } from "@/components/site-logo";
 import { buttonVariants } from "@/components/ui/button";
 import { siteLinks } from "@/site-links";
 
@@ -21,7 +21,7 @@ export function SiteFooter({ width = "narrow" }: { width?: keyof typeof footerWi
 				)}
 			>
 				<span className="flex items-center gap-2 text-base font-extrabold tracking-tight text-foreground">
-					<SiteLogo className="size-6" />
+					<SugabotsMark className="size-6" />
 					Sugabots
 				</span>
 				{/* On phones it takes a row of its own under the logo and links. */}
