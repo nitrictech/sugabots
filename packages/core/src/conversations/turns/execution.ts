@@ -199,6 +199,8 @@ export const make = Effect.gen(function* () {
 								routing: loaded.pod.routing,
 								podName: loaded.pod.name,
 								workspaceName: loaded.workspace.name,
+								workspaceTimeZone: loaded.workspace.timeZone,
+								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
 								crew: loaded.pod.agents
 									.filter(({ id }) => id !== speaker.id)
 									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
@@ -301,6 +303,14 @@ export interface TurnContext {
 	routing: PodRouting;
 	podName: string;
 	workspaceName: string;
+	/** The workspace's timezone, which the schedules the agent sets up run in. */
+	workspaceTimeZone: string;
+	/**
+	 * The person whose message this turn answers, who the agent acts for when
+	 * it changes something on their behalf. None when it answers an agent or a
+	 * routine's trigger.
+	 */
+	askedBy: string | null;
 	/** The other crew agents in the pod, who this agent may collaborate with. */
 	crew: Array<{ id: string; name: string; handle: string; description: string | null }>;
 	participants: ThreadParticipant[];
@@ -361,7 +371,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			type: true,
 		},
 		with: {
-			workspace: { columns: { name: true } },
+			workspace: { columns: { name: true, timeZone: true } },
 			pod: {
 				columns: { name: true, routing: true },
 				with: {

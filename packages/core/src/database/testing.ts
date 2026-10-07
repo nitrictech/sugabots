@@ -2,6 +2,7 @@ import { type Context, Effect, Layer, ManagedRuntime } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
+import { Installation } from "../installation/installation.ts";
 import {
 	Database,
 	type Executor,
@@ -34,6 +35,10 @@ export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Ids.layer,
 	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
+	Layer.succeed(
+		Installation.Service,
+		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+	),
 ).pipe(Layer.provideMerge(layer));
 
 export type TestInfrastructure = Layer.Success<typeof testInfrastructure>;

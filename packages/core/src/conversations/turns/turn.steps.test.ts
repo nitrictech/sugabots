@@ -11,6 +11,7 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
@@ -18,6 +19,7 @@ import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
+import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
@@ -95,6 +97,8 @@ const prepared: PreparedTurn = {
 		compaction: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
+		workspaceTimeZone: "UTC",
+		askedBy: null,
 		crew: [],
 		participants: [],
 		messages: [],
@@ -338,6 +342,7 @@ describe("runSegment", () => {
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
 			READ_THREAD_FILE_TOOL,
+			...ROUTINE_TOOLS,
 			"collaborate",
 		]);
 		const approvals = received?.toolApproval as
@@ -463,6 +468,70 @@ describe("runSegment", () => {
 		expect(outcome).toMatchObject({ status: "failed" });
 		expect(received?.messages.at(-1)?.content).toContain("Built-in tools you can call: other.");
 	});
+
+	it.each([
+		{ disabledTools: [], called: true },
+		{ disabledTools: ["routines"], called: false },
+	])(
+		"sets up a routine for the person the turn answers unless routines are off ($disabledTools)",
+		async ({ disabledTools, called }) => {
+			const { execution, turns } = fakes();
+			const askedBy = "0199a3a0-0000-7000-8000-0000000000f1";
+			const create = vi.fn(() => Effect.fail(new BotRoutines.NobodyAsked()));
+			let outcome: unknown;
+			const model = Models.fromStream((input) =>
+				Effect.sync(() =>
+					streamed(
+						(async function* () {
+							outcome = await input.tools?.create_routine?.execute?.(
+								{
+									name: "Morning standup",
+									instructions: "Ask how everyone is going.",
+									schedule: "0 9 * * 1-5",
+									results: "post_to_chat",
+								},
+								{ toolCallId: "sdk-1", messages: [] } as never,
+							);
+							yield "Done";
+						})(),
+					),
+				),
+			);
+			vi.mocked(execution.prepare).mockReturnValueOnce(
+				Effect.succeed({
+					...prepared,
+					context: {
+						...prepared.context,
+						askedBy,
+						agent: { ...prepared.context.agent, disabledTools },
+					},
+				}),
+			);
+
+			await runWithServices(
+				segmentWith({
+					execution,
+					turns,
+					model,
+					events: eventBus(),
+					collaborations: collaborations(),
+					toolCalls: toolCalls(),
+					routines: { create },
+				}),
+			);
+
+			if (called) {
+				expect(create).toHaveBeenCalledWith(
+					{ agentId: prepared.context.agent.id, askedBy },
+					expect.objectContaining({ name: "Morning standup", schedule: "0 9 * * 1-5" }),
+				);
+				expect(outcome).toMatchObject({ refused: expect.any(String) });
+			} else {
+				expect(create).not.toHaveBeenCalled();
+				expect(outcome).toMatchObject({ status: "failed" });
+			}
+		},
+	);
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
 		const { execution, turns } = fakes();
@@ -620,6 +689,7 @@ interface Given {
 	builtInTools?: BuiltInTools.Interface;
 	connectionTools?: ConnectionTools.Interface;
 	sandboxTools?: SandboxTools.Interface;
+	routines?: Partial<BotRoutines.Interface>;
 }
 
 /**
@@ -641,6 +711,7 @@ function segmentWith(given: Given) {
 				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(AgentRepository.Service, {}),
 				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
+				unimplemented(BotRoutines.Service, given.routines ?? {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {
