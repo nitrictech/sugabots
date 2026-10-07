@@ -180,9 +180,12 @@ describe("a recorded tool", () => {
 								}),
 							),
 					},
-					connectionId: "0199a3a0-0000-7000-8000-000000000021",
-					connectionRevision: 1,
-					remoteToolName: "probe",
+					binding: {
+						kind: "connection",
+						connectionId: "0199a3a0-0000-7000-8000-000000000021",
+						connectionRevision: 1,
+						remoteToolName: "probe",
+					},
 				},
 			},
 		);

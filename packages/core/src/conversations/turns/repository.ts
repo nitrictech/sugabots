@@ -782,18 +782,30 @@ const SdkModelMessage = Schema.declare(
 
 const OptionalCount = Schema.optional(Schema.Int);
 
+/**
+ * A call the suspended turn waits on, and what it must still match to run
+ * (see `ToolCallRepository.ApprovalBinding`). A connection's call is stored
+ * flat, untagged, as checkpoints were before built-in tools asked for approval.
+ */
+const CheckpointApproval = Schema.Union([
+	Schema.Struct({
+		approvalId: Schema.String,
+		tool: Schema.String,
+		connectionId: Schema.String,
+		connectionRevision: Schema.Int,
+		remoteToolName: Schema.String,
+	}),
+	Schema.Struct({
+		approvalId: Schema.String,
+		tool: Schema.String,
+		builtIn: Schema.Literal(true),
+	}),
+]);
+
 /** Everything a suspended turn needs to continue once its approvals are decided. */
 export const TurnCheckpoint = Schema.Struct({
 	messages: Schema.Array(SdkModelMessage),
-	approvals: Schema.Array(
-		Schema.Struct({
-			approvalId: Schema.String,
-			tool: Schema.String,
-			connectionId: Schema.String,
-			connectionRevision: Schema.Int,
-			remoteToolName: Schema.String,
-		}),
-	),
+	approvals: Schema.Array(CheckpointApproval),
 	modelInput: Schema.Struct({
 		model: Schema.String,
 		system: Schema.String,

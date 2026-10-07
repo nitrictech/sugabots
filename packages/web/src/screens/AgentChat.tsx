@@ -296,7 +296,7 @@ export function AgentChat({
 										dividers={false}
 										onOpenThread={openThread}
 										podId={pod.id}
-										canApproveToolCalls={details.capabilities?.approveToolCalls}
+										approvalCapabilities={details.capabilities}
 										queued={queued}
 										showsTyping={false}
 										highlightedMessageId={jump.pointedOut}

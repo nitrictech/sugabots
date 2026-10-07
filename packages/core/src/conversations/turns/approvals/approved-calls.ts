@@ -38,9 +38,7 @@ export interface Interface {
 		tool: string;
 		input: unknown;
 		atOffset: number;
-		connectionId: string;
-		connectionRevision: number;
-		remoteToolName: string;
+		binding: ToolCallRepository.ApprovalBinding;
 	}) => Effect.Effect<ToolCallPart, ToolExecutionRefused>;
 }
 

@@ -15,6 +15,7 @@ import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "rea
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
+import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -60,7 +61,7 @@ export function ThreadConversation({
 	dividers = true,
 	onOpenThread,
 	podId,
-	canApproveToolCalls = false,
+	approvalCapabilities,
 	compact = false,
 	queued = NONE_QUEUED,
 	peopleTyping = [],
@@ -88,7 +89,8 @@ export function ThreadConversation({
 	 */
 	onOpenThread: (threadId: string) => void;
 	podId: string;
-	canApproveToolCalls?: boolean;
+	/** What the person may decide of the approvals the thread raises. */
+	approvalCapabilities?: ApprovalCapabilities;
 	/** The sidebar's narrower thread: smaller faces and words. */
 	compact?: boolean;
 	/**
@@ -143,7 +145,7 @@ export function ThreadConversation({
 								participants={participants}
 								looks={looks}
 								podId={podId}
-								canApproveToolCalls={canApproveToolCalls}
+								approvalCapabilities={approvalCapabilities}
 								compact={compact}
 								arrivedLive={watchedWritten.has(message.id)}
 								queued={queued.has(message.id)}
@@ -319,7 +321,7 @@ function MessageRow({
 	participants,
 	looks,
 	podId,
-	canApproveToolCalls,
+	approvalCapabilities,
 	compact,
 	arrivedLive,
 	queued,
@@ -335,7 +337,7 @@ function MessageRow({
 	participants: ThreadParticipant[];
 	looks: ReturnType<typeof useConnectionLooks>;
 	podId: string;
-	canApproveToolCalls: boolean;
+	approvalCapabilities: ApprovalCapabilities | undefined;
 	compact: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
@@ -450,7 +452,7 @@ function MessageRow({
 									agent={agent}
 									threadId={message.threadId}
 									podId={podId}
-									canApprove={canApproveToolCalls}
+									canApprove={mayAnswer(call, approvalCapabilities)}
 									look={looks.get(splitToolKey(call.tool).handle)}
 								/>
 							</div>
