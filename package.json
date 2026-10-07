@@ -37,7 +37,7 @@
 		"db:migrate": "bun run --cwd packages/core db:migrate",
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/server/src/seed.ts",
-		"build:sandbox": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest docker/sandbox"
+		"build:sandbox": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest docker/sandbox && node packages/core/src/conversations/tools/browser/list-tools.ts && biome format --write packages/core/src/conversations/tools/browser/playwright-tools.json"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",

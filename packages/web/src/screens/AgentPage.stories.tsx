@@ -8,6 +8,7 @@ import {
 	appHandlers,
 	chatPath,
 	StoryApp,
+	storyBots,
 	storyChatFor,
 	storyUser,
 	storyWorkspace,
@@ -306,5 +307,86 @@ export const CollaborationOnAPhone = meta.story({
 				{ timeout: 10_000 },
 			),
 		).toBeInTheDocument();
+	},
+});
+
+/** Growth Desk with the sandbox on, in a workspace that has sandboxes. */
+const sandboxHandlers = (messages: Message[]) => [
+	...appHandlers({
+		bots: storyBots.map((bot) => (bot.id === growthDesk.id ? { ...bot, usesSandbox: true } : bot)),
+		messages: { [growthDesk.id]: messages },
+	}),
+	http.get(`${import.meta.env.VITE_API_URL}/workspaces/:workspace/sandbox-providers/access`, () =>
+		HttpResponse.json({ enabled: true }),
+	),
+];
+
+/** Growth Desk's reply in progress, having opened a page in its browser. */
+const browsing: Message = {
+	...said("90", "bot", "", "2026-09-14T09:20:00.000Z"),
+	status: "streaming",
+	parts: [
+		{
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-000000000591",
+			tool: "browser_navigate",
+			input: { url: "https://example.com/pricing" },
+			output: null,
+			status: "running",
+			error: null,
+			mutating: false,
+			atOffset: 0,
+			startedAt: "2026-09-14T09:20:01.000Z",
+			finishedAt: null,
+		},
+	],
+};
+
+/** The bot's sandbox, a button at the top right of its chat that opens the desktop. */
+export const Sandbox = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...sandboxHandlers(conversation));
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("button", { name: "Sandbox desktop" }, { timeout: 10_000 }),
+		).toBeVisible();
+	},
+});
+
+/** While the bot is browsing, the button says the sandbox is in use, with a pulse. */
+export const SandboxInUse = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...sandboxHandlers([...conversation, browsing]));
+	},
+	play: async ({ canvas }) => {
+		const inUse = await canvas.findByRole(
+			"button",
+			{ name: `${growthDesk.name} is using the sandbox. Open its desktop` },
+			{ timeout: 10_000 },
+		);
+		await expect(inUse).toHaveTextContent("Sandbox in use");
+		await userEvent.click(inUse);
+		// The dialog opens in a portal, outside the story's canvas.
+		await expect(
+			await within(document.body).findByRole("heading", { name: `${growthDesk.name}'s desktop` }),
+		).toBeVisible();
+	},
+});
+
+/** The same on a phone: the pulse and a screen, at the right of the centred header. */
+export const SandboxInUseOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...sandboxHandlers([...conversation, browsing]));
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole(
+				"button",
+				{ name: `${growthDesk.name} is using the sandbox. Open its desktop` },
+				{ timeout: 10_000 },
+			),
+		).toBeVisible();
 	},
 });

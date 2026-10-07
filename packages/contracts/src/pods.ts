@@ -114,6 +114,8 @@ export const podPermissionsSchema = Schema.Struct({
 	manageConnections: Schema.Boolean,
 	/** Change what the pod's sandbox may reach and has installed, and allow its agents' requests for more. */
 	manageSandbox: Schema.Boolean,
+	/** Click and type on agents' sandbox desktops, rather than only watch them. */
+	useDesktops: Schema.Boolean,
 	/** Add, change and remove Routines, and rotate their webhook secrets. */
 	manageRoutines: Schema.Boolean,
 	runRoutines: Schema.Boolean,

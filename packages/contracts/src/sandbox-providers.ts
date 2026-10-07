@@ -159,6 +159,7 @@ export const podSandboxStateSchema = Schema.Union([
 		createdAt: isoTimestampSchema,
 		lastUsedAt: isoTimestampSchema,
 		turnsUsing: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		peopleWatching: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		/** Whether the workspace's enabled provider would make it from another image, or is another provider. */
 		upgradeAvailable: Schema.Boolean,
 	}),

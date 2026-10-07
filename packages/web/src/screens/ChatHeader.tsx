@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { activityLink, podLink } from "@/lib/links.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { ChatSandbox } from "./SandboxButton.tsx";
 
 /** The list a page covers on a phone, which its Back returns to. */
 export type BackTo = { to: "pod"; pod: Pod } | { to: "activity" };
@@ -20,9 +21,9 @@ export type ChatPlace =
 
 /**
  * The bar across the top of a bot's chat: its face and name, what it is for,
- * and, on its own page, the way into its Details: the ⓘ, or the name, which
- * is how a phone reaches them. On a phone the chat covers the list, so Back
- * returns to it.
+ * the way into its sandbox's desktop when it has one, and, on its own page,
+ * the way into its Details: the ⓘ, or the name, which is how a phone reaches
+ * them. On a phone the chat covers the list, so Back returns to it.
  */
 export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; place: ChatPlace }) {
 	const name = (
@@ -57,6 +58,7 @@ export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; plac
 			) : (
 				<span className="flex-1" />
 			)}
+			<ChatSandbox agent={agent} pod={pod} />
 			{place.kind === "own" ? (
 				<IconButton
 					label="Details"

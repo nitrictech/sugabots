@@ -3,11 +3,13 @@ export * as SandboxTools from "./sandbox.ts";
 import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
+import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import type { UserMessage } from "../../user-message.ts";
+import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	allowedHostsNote,
@@ -25,12 +27,13 @@ import {
 
 /**
  * The tools that work in a pod's sandbox: `run_command`, `read_file` and
- * `write_file`, and `request_network_access`, whose calls wait for a person,
- * to reach a host the sandbox may not. Offered to every turn, and usable
- * while the agent uses the sandbox and the workspace has an enabled sandbox
- * provider, looked up on every call, so enabling one applies from the next
- * turn. The sandbox is opened by a turn's first call to one of the tools, not
- * when the turn starts.
+ * `write_file`, and the `browser_` tools of a browser the agent drives there
+ * (see `browser/browser.ts`), and `request_network_access`, whose calls wait
+ * for a person, to reach a host the sandbox may not. Offered to every turn,
+ * and usable while the agent uses the sandbox and the workspace has an
+ * enabled sandbox provider, looked up on every call, so enabling one applies
+ * from the next turn. The sandbox is opened by a turn's first call to one of
+ * the tools, not when the turn starts.
  */
 export interface Interface {
 	/**
@@ -69,24 +72,46 @@ export const make = Effect.gen(function* () {
 	const podSandboxes = yield* PodSandboxes.Service;
 	const network = yield* SandboxNetwork.Service;
 	const operation = yield* serviceOperations<Interface>("SandboxTools");
-	const offeredIn = ({ turnId, place, openSandbox, run, blocked }: Behind) => ({
+	const offeredIn = ({
+		turnId,
+		place,
+		acceptsImages,
+		openSandbox,
+		browser,
+		run,
+		blocked,
+	}: Behind) => ({
 		tools: {
 			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
-			[READ_FILE_TOOL]: readFileTool(openSandbox, place),
+			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
 			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
+			...browserTools(browser, acceptsImages),
 		},
 		requests: {
 			[REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }),
 		},
 	});
 	return Service.of({
-		forTurn: ({ pod, turnId, threadId, agentId, usesSandbox }) =>
+		forTurn: ({ pod, turnId, threadId, agentId, model, usesSandbox }) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
 				const place = placeOf({ threadId, agentId });
+				// Whether a model takes images shapes the tools, so it is asked even without a sandbox.
+				const acceptsImages = yield* operation(
+					"forTurn",
+					modelAcceptsImages(pod.workspaceId, model),
+				);
 				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
 				if (!provider) {
 					return {
-						...offeredIn({ turnId, place, openSandbox: NEVER_OPENED, run: NEVER_RUN, blocked: [] }),
+						...offeredIn({
+							turnId,
+							place,
+							acceptsImages,
+							openSandbox: NEVER_OPENED,
+							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
+							run: NEVER_RUN,
+							blocked: [],
+						}),
 						usable: false,
 						note: NO_SANDBOX_NOTE,
 					};
@@ -117,6 +142,8 @@ export const make = Effect.gen(function* () {
 						throw Cause.squash(exit.cause);
 					}),
 				);
+				const browser = browserSession(openSandbox, place, { threadId, agentId });
+				yield* Effect.addFinalizer(() => Effect.promise(() => browser.close()));
 				const run = <A, E>(effect: Effect.Effect<A, E>) =>
 					runPromiseExit(effect).then((exit) => {
 						if (Exit.isSuccess(exit)) return exit.value;
@@ -126,7 +153,9 @@ export const make = Effect.gen(function* () {
 					...offeredIn({
 						turnId,
 						place,
+						acceptsImages,
 						openSandbox,
+						browser,
 						run,
 						blocked: blocked.map((row) => row.host),
 					}),
@@ -147,7 +176,9 @@ export const layer = layerNoDeps.pipe(
 interface Behind {
 	readonly turnId: string;
 	readonly place: Place;
+	readonly acceptsImages: boolean;
 	readonly openSandbox: OpenSandbox;
+	readonly browser: BrowserSession;
 	readonly run: RunEffect<never>;
 	/** Hosts a request is refused for without asking anyone. */
 	readonly blocked: readonly string[];
@@ -171,6 +202,8 @@ export interface Turn {
 	readonly turnId: string;
 	readonly threadId: string;
 	readonly agentId: string;
+	/** The agent's model, which decides whether results may carry images. */
+	readonly model: string;
 }
 
 /** No sandbox tools, for cases that offer none. */

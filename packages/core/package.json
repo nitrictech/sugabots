@@ -29,6 +29,7 @@
 		"@sugabots/workflow": "workspace:*",
 		"ai": "^7.0.100",
 		"cron-parser": "^5.10.1",
+		"des.js": "1.1.0",
 		"drizzle-orm": "catalog:",
 		"e2b": "2.52.0",
 		"effect": "catalog:",

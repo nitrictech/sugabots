@@ -147,3 +147,32 @@ function toProvider(row: ModelProviderRow, models: ProviderModelRow[]): ModelPro
 		})),
 	};
 }
+
+/**
+ * Whether the workspace's enabled model `modelId` takes images: it reports
+ * vision, and no admin switched that off. A model the workspace doesn't
+ * offer takes none.
+ */
+export const modelAcceptsImages = (workspaceId: string, modelId: string) =>
+	query((db) =>
+		db
+			.select({
+				capabilities: providerModel.capabilities,
+				disabledCapabilities: providerModel.disabledCapabilities,
+			})
+			.from(providerModel)
+			.where(
+				and(
+					eq(providerModel.workspaceId, workspaceId),
+					eq(providerModel.modelId, modelId),
+					eq(providerModel.enabled, true),
+				),
+			),
+	).pipe(
+		Effect.map((models) =>
+			models.some(
+				(model) =>
+					model.capabilities.includes("vision") && !model.disabledCapabilities.includes("vision"),
+			),
+		),
+	);

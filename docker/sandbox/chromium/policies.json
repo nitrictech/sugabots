@@ -1,0 +1,5 @@
+{
+	"LocalNetworkAccessBlockedForUrls": ["*"],
+	"QuicAllowed": false,
+	"EncryptedClientHelloEnabled": false
+}

@@ -10,7 +10,7 @@ export function usePodSandbox(podId: string | undefined) {
 			? ({ signal }) =>
 					Effect.runPromise(client.api.podSandbox.get({ params: { podId } }), { signal })
 			: skipToken,
-		// Turns come and go; the panel keeps up without a page reload.
+		// Turns and viewers come and go; the panel keeps up without a page reload.
 		refetchInterval: 15_000,
 	});
 }
