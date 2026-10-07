@@ -11,24 +11,32 @@
 #
 #   docker build -t sugabots .
 
+FROM --platform=$BUILDPLATFORM scratch AS manifests
+COPY package.json bun.lock /
+COPY packages/accounting/package.json /packages/accounting/
+COPY packages/avatars/package.json /packages/avatars/
+COPY packages/contracts/package.json /packages/contracts/
+COPY packages/core/package.json /packages/core/
+COPY packages/provider-logos/package.json /packages/provider-logos/
+COPY packages/sdk/package.json /packages/sdk/
+COPY packages/server/package.json /packages/server/
+COPY packages/web/package.json /packages/web/
+COPY packages/website/package.json /packages/website/
+COPY packages/workflow/package.json /packages/workflow/
+
 # Bun installs, Node runs, as in CI.
 FROM node:26-slim AS base
 COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
-COPY package.json bun.lock ./
-COPY packages/accounting/package.json packages/accounting/
-COPY packages/avatars/package.json packages/avatars/
-COPY packages/contracts/package.json packages/contracts/
-COPY packages/core/package.json packages/core/
-COPY packages/provider-logos/package.json packages/provider-logos/
-COPY packages/sdk/package.json packages/sdk/
-COPY packages/server/package.json packages/server/
-COPY packages/web/package.json packages/web/
-COPY packages/website/package.json packages/website/
-COPY packages/workflow/package.json packages/workflow/
+COPY --from=manifests / ./
+
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.2 AS builder-bun
 
 # --ignore-scripts: the root `prepare` script is editor tooling.
-FROM --platform=$BUILDPLATFORM base AS web
+FROM --platform=$BUILDPLATFORM node:26-slim AS web
+COPY --from=builder-bun /usr/local/bin/bun /usr/local/bin/bun
+WORKDIR /app
+COPY --from=manifests / ./
 RUN bun install --frozen-lockfile --ignore-scripts
 # Vite reads the web package's tsconfig, which extends the root one.
 COPY tsconfig.json tsconfig.base.json ./
