@@ -110,7 +110,48 @@ describe("the workspace's routines", () => {
 
 		await waitFor(() =>
 			expect(client.api.routines.create).toHaveBeenCalledWith(
-				expect.objectContaining({ params: { agentId: triager.id } }),
+				expect.objectContaining({
+					params: { agentId: triager.id },
+					payload: expect.objectContaining({ results: "post_to_chat" }),
+				}),
+			),
+		);
+	});
+
+	it("keeps a webhook's result in the run until it is set to post to the chat", async () => {
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+		);
+		mount("/suga/settings/routines");
+		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
+		const form = await screen.findByRole("dialog", { name: "New routine" });
+		fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Sentry issues" } });
+		fireEvent.click(within(form).getByRole("radio", { name: "Webhook" }));
+		const posted = within(form).getByRole("switch", { name: "Post result to chat" });
+		expect(posted.getAttribute("aria-checked")).toBe("false");
+		expect(within(form).getByText(/keeps the result in the run/)).toBeDefined();
+
+		fireEvent.click(posted);
+		fireEvent.click(within(form).getByRole("button", { name: "Instructions" }));
+		const slide = await screen.findByRole("dialog", { name: "Instructions" });
+		fireEvent.change(within(slide).getByLabelText("Instructions"), {
+			target: { value: "Fix what you can and tell us what you did." },
+		});
+		fireEvent.click(within(slide).getByRole("button", { name: "Back" }));
+		const ready = await screen.findByRole("dialog", { name: "New routine" });
+		expect(
+			within(ready).getByText(/whenever the address is called .* and posts the result/),
+		).toBeDefined();
+		fireEvent.click(within(ready).getByRole("button", { name: "Create" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						trigger: { kind: "webhook" },
+						results: "post_to_chat",
+					}),
+				}),
 			),
 		);
 	});

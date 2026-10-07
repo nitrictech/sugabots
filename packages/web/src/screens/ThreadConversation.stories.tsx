@@ -85,7 +85,7 @@ const meta = preview.meta({
 		participants: [host, person],
 		user,
 		podId: POD,
-		onOpenCollaboration: fn(),
+		onOpenThread: fn(),
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -105,6 +105,33 @@ const meta = preview.meta({
 			);
 		},
 	],
+});
+
+/**
+ * A routine run's result, posted in the bot's chat when the run completed,
+ * with a link under it to the run and the work behind it.
+ */
+export const RoutineResult = meta.story({
+	args: {
+		messages: [
+			{
+				...message(
+					"0199a3a0-0000-7000-8000-000000000a01",
+					host,
+					"Morning! Yesterday two PRs merged and the release branch is green. @sam-rivera you're on review today.",
+				),
+				routineResultOf: {
+					executionId: "0199a3a0-0000-7000-8000-000000000a02",
+					threadId: "0199a3a0-0000-7000-8000-000000000a03",
+					routineName: "Morning standup",
+				},
+			},
+		],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "From Morning standup" }));
+		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000a03");
+	},
 });
 
 /**

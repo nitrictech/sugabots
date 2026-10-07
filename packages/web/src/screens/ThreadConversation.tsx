@@ -4,11 +4,13 @@ import {
 	isNarration,
 	type Message,
 	type PersonParticipant,
+	type RoutineResultOf,
 	type SessionUser,
 	type ThreadParticipant,
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { cn } from "cn";
+import { ChevronRight } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
@@ -61,7 +63,7 @@ export function ThreadConversation({
 	user,
 	rightAgentId,
 	dividers = true,
-	onOpenCollaboration,
+	onOpenThread,
 	podId,
 	canApproveToolCalls = false,
 	compact = false,
@@ -88,8 +90,11 @@ export function ThreadConversation({
 	 * own, as the chat does between these messages and its activity rows.
 	 */
 	dividers?: boolean;
-	/** Opens a collaboration from its line, in the sidebar beside this conversation. */
-	onOpenCollaboration: (threadId: string) => void;
+	/**
+	 * Opens a collaboration from its line, or the run a routine's result came
+	 * from, in the sidebar beside this conversation.
+	 */
+	onOpenThread: (threadId: string) => void;
 	podId: string;
 	canApproveToolCalls?: boolean;
 	/**
@@ -196,7 +201,7 @@ export function ThreadConversation({
 										initiator={message.author}
 										recipient={recipient}
 										state={collaborationState(segment.collaboration)}
-										onOpen={() => onOpenCollaboration(segment.collaboration.threadId)}
+										onOpen={() => onOpenThread(segment.collaboration.threadId)}
 									/>
 								);
 							}
@@ -241,6 +246,7 @@ export function ThreadConversation({
 										arrivedLive={watchedWritten.has(message.id)}
 										queued={queued.has(message.id)}
 										mentionable={participants}
+										onOpenThread={onOpenThread}
 									/>
 								</Fragment>
 							);
@@ -398,6 +404,7 @@ function MessageBubble({
 	compact,
 	queued,
 	mentionable,
+	onOpenThread,
 }: {
 	message: Message;
 	/** This bubble's run of text; a message with a collaboration in it has several. */
@@ -419,6 +426,8 @@ function MessageBubble({
 	queued: boolean;
 	/** Everyone a mention in the text could name. */
 	mentionable: ThreadParticipant[];
+	/** Opens the run a routine's result came from. */
+	onOpenThread: (threadId: string) => void;
 }) {
 	// Unset until the first tap, so a screen that hovers never has the time twice.
 	const [timeShown, setTimeShown] = useState<boolean>();
@@ -541,6 +550,11 @@ function MessageBubble({
 					</span>
 				</BubbleNote>
 			)}
+			{isLast && message.routineResultOf && (
+				<BubbleNote face={face} compact={compact} className="text-subtle-foreground">
+					<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />
+				</BubbleNote>
+			)}
 			{isLast && message.status === "failed" && (
 				<BubbleNote face={face} compact={compact} className="text-destructive-text">
 					<span className="font-semibold">Reply failed.</span>
@@ -625,6 +639,26 @@ function BubbleNote({
 }) {
 	const inset = face && NOTE_INSET[face][compact ? "compact" : "regular"];
 	return <p className={cn("m-0 pt-1 text-xs", inset, className)}>{children}</p>;
+}
+
+/** Where a routine's result came from, opening the run with the work behind it. */
+function RoutineResultLink({
+	run,
+	onOpenThread,
+}: {
+	run: RoutineResultOf;
+	onOpenThread: (threadId: string) => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onOpenThread(run.threadId)}
+			className="focus-ring inline-flex items-center gap-0.5 rounded-sm font-medium transition-colors hover:text-soft-foreground"
+		>
+			From {run.routineName}
+			<ChevronRight aria-hidden size={12} strokeWidth={2.4} />
+		</button>
+	);
 }
 
 function RoutineTriggerBubble({ message, text }: { message: Message; text: string }) {

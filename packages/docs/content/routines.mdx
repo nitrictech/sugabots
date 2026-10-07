@@ -17,6 +17,20 @@ Choose **New routine**, then pick:
 - **Bot**: who does the job.
 - **Instructions**: what to do each time, written like you'd ask in the chat.
 - **When**: a **Schedule** or a **Webhook**.
+- **Post result to chat**: whether the bot's answer goes in its chat for people
+  to read, or stays inside the run.
+
+## Where the result goes
+
+With **Post result to chat** on, the bot's last reply of the run is posted in its
+chat, where anyone can answer it and carry on the conversation. Use it for
+anything people should read: a morning check-in, the week's sales, a reminder. The bot is
+told its last reply goes there, so it writes that reply for you.
+
+With it off, the result stays inside the run, for work handled out of sight,
+such as drafting a thank-you for each new order. You can still open the run to see it.
+
+New schedules start with it on, and new webhooks with it off.
 
 ## On a schedule
 
@@ -59,5 +73,7 @@ recognised as a repeat.
 ## Runs
 
 Each run shows in the bot's chat as a line like "Morning inbox sweep ran", and
-opens into a thread with everything the bot did. If a run needs an
+opens into a thread with everything the bot did. A result posted to the chat
+links back to its run, under the message. A run that fails or is stopped posts
+nothing; its line says what happened. If a run needs an
 [approval](/docs/tools-and-approvals), only an admin can answer it.

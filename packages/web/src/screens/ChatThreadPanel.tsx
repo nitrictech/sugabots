@@ -221,7 +221,7 @@ export function ChatThreadPanel({
 							participants={mentionableIn(details)}
 							user={user}
 							rightAgentId={type === "collaboration" ? mine?.id : undefined}
-							onOpenCollaboration={onOpenThread}
+							onOpenThread={onOpenThread}
 							podId={details.thread.podId}
 							canApproveToolCalls={details.capabilities?.approveToolCalls}
 							compact

@@ -267,6 +267,7 @@ describe("an admin", () => {
 				payload: {
 					name: "Weekly review",
 					instructions: "Review the week.",
+					results: "post_to_chat",
 					trigger: { kind: "cron", expression: "0 10 * * 1,4", timezone },
 				},
 			});

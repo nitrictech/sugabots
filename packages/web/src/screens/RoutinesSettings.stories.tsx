@@ -141,7 +141,10 @@ export const Empty = meta.story({
 	},
 });
 
-/** A new routine starts on a daily schedule at 9:00, and waits for a name and instructions. */
+/**
+ * A new routine starts on a daily schedule at 9:00, posting its result to the
+ * chat, and waits for a name and instructions.
+ */
 export const NewRoutine = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
@@ -150,6 +153,9 @@ export const NewRoutine = meta.story({
 		await expect(within(dialog).getByRole("radio", { name: "Every day" })).toBeChecked();
 		await expect(within(dialog).getByText("9:00")).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+		await expect(
+			within(dialog).getByRole("switch", { name: "Post result to chat" }),
+		).toHaveAttribute("aria-checked", "true");
 		await expect(
 			within(dialog).getByText(/Runs every day at 9:00 and posts the result in Growth Desk's chat/),
 		).toBeInTheDocument();
@@ -169,7 +175,7 @@ export const Weekly = meta.story({
 	},
 });
 
-/** A webhook's address is made when the routine is saved. */
+/** A webhook's address is made when the routine is saved, and its result stays in the run. */
 export const Webhook = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
@@ -178,7 +184,12 @@ export const Webhook = meta.story({
 
 		await expect(within(dialog).getByText("Made when you save")).toBeInTheDocument();
 		await expect(
-			within(dialog).getByText(/Runs whenever the address is called/),
+			within(dialog).getByRole("switch", { name: "Post result to chat" }),
+		).toHaveAttribute("aria-checked", "false");
+		await expect(
+			within(dialog).getByText(
+				/Runs whenever the address is called .* keeps the result in the run/,
+			),
 		).toBeInTheDocument();
 	},
 });

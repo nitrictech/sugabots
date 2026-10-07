@@ -107,7 +107,7 @@ function show(
 				participants={participants}
 				user={user}
 				podId={POD}
-				onOpenCollaboration={() => undefined}
+				onOpenThread={() => undefined}
 				dividers={false}
 				canApproveToolCalls={over.canApprove ?? true}
 			/>

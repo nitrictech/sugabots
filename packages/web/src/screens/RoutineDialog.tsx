@@ -5,6 +5,7 @@ import {
 	type NewRoutine,
 	type Pod,
 	type Routine,
+	type RoutineResults,
 } from "@sugabots/contracts";
 import { Check, ChevronLeft, ChevronRight, Minus, Plus, Search } from "lucide-react";
 import { type ReactNode, useDeferredValue, useId, useState } from "react";
@@ -37,6 +38,7 @@ import {
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsDanger, SettingsGroup } from "@/ui/settings-page.tsx";
 import { Textarea } from "@/ui/textarea.tsx";
+import { Toggle } from "@/ui/toggle.tsx";
 
 /** A bot a routine can belong to, with the pod it lives in. */
 export interface BotChoice {
@@ -57,6 +59,16 @@ const TRIGGER_OPTIONS = [
 ] as const;
 
 type TriggerKind = (typeof TRIGGER_OPTIONS)[number]["value"];
+
+/**
+ * Where a new routine's result goes until someone chooses: a schedule is
+ * usually something to read, such as a morning standup, and a webhook is
+ * usually work handled out of sight.
+ */
+const DEFAULT_RESULTS: Record<TriggerKind, RoutineResults> = {
+	cron: "post_to_chat",
+	webhook: "keep_in_run",
+};
 
 /** A webhook's secret, which the API hands over once: when the routine is made, or when it is reset. */
 interface Credential {
@@ -96,6 +108,9 @@ export function RoutineDialog({
 	const [instructions, setInstructions] = useState(routine?.instructions ?? "");
 	const [agentId, setAgentId] = useState(editing?.agent.id ?? choices[0]?.agent.id);
 	const [kind, setKind] = useState<TriggerKind>(routine?.trigger.kind ?? "cron");
+	// Unset until chosen, so a new routine's follows its trigger's default.
+	const [chosenResults, setChosenResults] = useState(routine?.results);
+	const results = chosenResults ?? DEFAULT_RESULTS[kind];
 	const [reading, setReading] = useState(initialReading);
 	const [credential, setCredential] = useState<Credential>();
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -115,7 +130,7 @@ export function RoutineDialog({
 		if (!bot || !ready) return;
 		const expression =
 			reading.kind === "preset" ? cronExpression(reading.schedule) : reading.expression;
-		const fields = { name, instructions };
+		const fields = { name, instructions, results };
 		const input: NewRoutine =
 			kind === "cron"
 				? { ...fields, trigger: { kind: "cron", expression, timezone } }
@@ -232,13 +247,28 @@ export function RoutineDialog({
 						<WebhookRows editing={editing} />
 					)}
 				</SettingsGroup>
+				<SettingsGroup>
+					<div className="flex items-center gap-3 px-4 py-2.5">
+						<span className="flex-1 text-[14.5px] text-foreground">Post result to chat</span>
+						<Toggle
+							label="Post result to chat"
+							checked={results === "post_to_chat"}
+							onChange={(posted) => setChosenResults(posted ? "post_to_chat" : "keep_in_run")}
+						/>
+					</div>
+				</SettingsGroup>
 				{bot && (
 					<p className="-mt-1.5 m-0 px-1 text-sm text-subtle-foreground leading-normal">
 						{!scheduleReady
 							? "Pick at least one day for it to run on."
-							: kind === "webhook"
-								? `Runs whenever the address is called with the secret, and posts the result in ${bot.agent.name}'s chat in the ${bot.pod.name} pod.`
-								: `Runs ${runsWhen(reading)} and posts the result in ${bot.agent.name}'s chat in the ${bot.pod.name} pod.`}
+							: routineSummary({
+									when:
+										kind === "webhook"
+											? "whenever the address is called with the secret"
+											: runsWhen(reading),
+									results,
+									bot,
+								})}
 					</p>
 				)}
 				{editing && (
@@ -263,6 +293,22 @@ export function RoutineDialog({
 			/>
 		</DialogForm>
 	);
+}
+
+/** What the routine does, under its fields: when it runs, and where its result goes. */
+function routineSummary({
+	when,
+	results,
+	bot,
+}: {
+	when: string;
+	results: RoutineResults;
+	bot: BotChoice;
+}): string {
+	const chat = `${bot.agent.name}'s chat in the ${bot.pod.name} pod`;
+	return results === "post_to_chat"
+		? `Runs ${when} and posts the result in ${chat}.`
+		: `Runs ${when} and keeps the result in the run, which shows in ${chat}.`;
 }
 
 /** When a schedule runs, as the middle of "Runs … and posts the result". */
