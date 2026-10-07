@@ -1,4 +1,4 @@
-import type { Pod, Workspace } from "@sugabots/contracts";
+import type { Agent, Pod, SessionUser, Workspace } from "@sugabots/contracts";
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
@@ -14,8 +14,18 @@ import {
 	useNavigate,
 	useParams,
 	useRouter,
+	useSearch,
 } from "@tanstack/react-router";
-import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+	type ComponentType,
+	lazy,
+	type ReactNode,
+	Suspense,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { validate as isUuid } from "uuid";
 import { usePodAgent } from "@/lib/agents.ts";
 import { prefetchChat, useChatList } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
@@ -32,12 +42,16 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
+import { ActivityList } from "@/shell/ActivityList.tsx";
+import { ApprovalList } from "@/shell/ApprovalList.tsx";
 import { ConversationList } from "@/shell/ConversationList.tsx";
-import { Panes, Shell } from "@/shell/Shell.tsx";
+import { ListAndPane, Panes, Shell } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
 const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
+const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
 const ResetPassword = lazyNamed(
@@ -116,6 +130,10 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace/settings     workspace settings
  *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
+ *   /$workspace/activity     what is new across the workspace: mentions, unread messages, routine runs and collaborations
+ *   /$workspace/activity/$pod/$agent   the chat, run or collaboration of the one chosen, beside them
+ *   /$workspace/approvals    every approval across the workspace
+ *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/pods/$pod    one pod's conversation list
  *   /$workspace/pods/$pod/agents/$agent       one agent's chat, by pod slug and agent handle
  *   /$workspace/settings/members/$member   one person, by membership id
@@ -777,6 +795,120 @@ function SettingsSectionRoute() {
 	);
 }
 
+/**
+ * What is new across the workspace, with the chat, run or collaboration of
+ * the one chosen beside it.
+ */
+const activityRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/activity",
+	component: ActivityRoute,
+});
+
+function ActivityRoute() {
+	const { agent } = useParams({ strict: false });
+	const { item } = useSearch({ strict: false });
+	return (
+		<ListAndPane
+			open={agent !== undefined}
+			list={(className) => <ActivityList selectedItemId={item} className={className} />}
+		>
+			<Outlet />
+		</ListAndPane>
+	);
+}
+
+const activityIndexRoute = createRoute({
+	getParentRoute: () => activityRoute,
+	path: "/",
+	component: () => (
+		<EmptyState title="Nothing open">Choose something on the left to open its chat.</EmptyState>
+	),
+});
+
+interface ActivityChatSearch extends AgentSearch {
+	/** The row the pane was opened from, which the list marks. */
+	item?: string;
+	/** A message to jump to in the chat, such as the mention the row is. */
+	message?: string;
+	/** A routine run or collaboration shown as the pane itself, in place of the chat. */
+	threadPage?: string;
+}
+
+const activityChatRoute = createRoute({
+	getParentRoute: () => activityRoute,
+	path: "/$pod/$agent",
+	validateSearch: (search: Record<string, unknown>): ActivityChatSearch => ({
+		...validateAgentSearch(search),
+		...idParam(search, "item"),
+		...idParam(search, "message"),
+		...idParam(search, "threadPage"),
+	}),
+	preloadStaleTime: 0,
+	loader: ({ context, params }) => {
+		void prefetchChat(context.queries, params);
+		return AgentPage.preload();
+	},
+	component: () => {
+		const { pod, agent } = activityChatRoute.useParams();
+		const navigate = activityChatRoute.useNavigate();
+		const search = activityChatRoute.useSearch();
+		return (
+			<PodAgentScreen podSlug={pod} handle={agent}>
+				{(found, user) => (
+					<ActivityPane
+						pod={found.pod}
+						agent={found.agent}
+						user={user}
+						threadPageId={search.threadPage}
+						focusMessageId={search.message}
+						threadId={search.thread}
+						onThreadPageChange={(threadPage) =>
+							void navigate({ search: (previous) => ({ ...previous, threadPage }) })
+						}
+						onThreadChange={(thread) =>
+							void navigate({ search: (previous) => ({ ...previous, thread }) })
+						}
+					/>
+				)}
+			</PodAgentScreen>
+		);
+	},
+});
+
+/** Every approval across the workspace, with the one chosen in full beside them. */
+const approvalsRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/approvals",
+	component: ApprovalsRoute,
+});
+
+function ApprovalsRoute() {
+	const { call } = useParams({ strict: false });
+	return (
+		<ListAndPane
+			open={call !== undefined}
+			list={(className) => <ApprovalList selectedCallId={call} className={className} />}
+		>
+			<Outlet />
+		</ListAndPane>
+	);
+}
+
+const approvalsIndexRoute = createRoute({
+	getParentRoute: () => approvalsRoute,
+	path: "/",
+	component: () => (
+		<EmptyState title="Nothing open">Choose a request to see it in full.</EmptyState>
+	),
+});
+
+const approvalRoute = createRoute({
+	getParentRoute: () => approvalsRoute,
+	path: "/$call",
+	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
+});
+
 /** Where `/` and closing settings land: the first shared pod, or Personal for somebody in none. */
 const agentsRoute = createRoute({
 	getParentRoute: () => shellRoute,
@@ -816,17 +948,15 @@ function ConversationLayout({
 	selectedAgentId: string | undefined;
 	children: React.ReactNode;
 }) {
-	// On a phone the list and the thread take turns: a chosen chat covers the list.
-	const chatOpen = selectedAgentId !== undefined;
 	return (
-		<>
-			<ConversationList
-				pod={pod}
-				selectedAgentId={selectedAgentId}
-				className={chatOpen ? "max-md:hidden" : undefined}
-			/>
-			<Panes className={chatOpen ? undefined : "max-md:hidden"}>{children}</Panes>
-		</>
+		<ListAndPane
+			open={selectedAgentId !== undefined}
+			list={(className) => (
+				<ConversationList pod={pod} selectedAgentId={selectedAgentId} className={className} />
+			)}
+		>
+			{children}
+		</ListAndPane>
 	);
 }
 
@@ -902,7 +1032,22 @@ interface AgentSearch {
 }
 
 const validateAgentSearch = (search: Record<string, unknown>): AgentSearch =>
-	typeof search.thread === "string" ? { thread: search.thread } : {};
+	idParam(search, "thread");
+
+/**
+ * `search[name]` when it is an id, and otherwise undefined. Said either way,
+ * because the router keeps the address's raw value under any name a route's
+ * validation leaves out.
+ */
+function idParam<Name extends string>(
+	search: Record<string, unknown>,
+	name: Name,
+): { [key in Name]: string | undefined } {
+	const value = search[name];
+	return { [name]: typeof value === "string" && isUuid(value) ? value : undefined } as {
+		[key in Name]: string | undefined;
+	};
+}
 
 const agentRoute = createRoute({
 	getParentRoute: () => podRoute,
@@ -919,29 +1064,37 @@ const agentRoute = createRoute({
 	component: () => {
 		const { pod, agent } = agentRoute.useParams();
 		const navigate = agentRoute.useNavigate();
+		const search = agentRoute.useSearch();
 		return (
-			<AgentChatRoute
-				podSlug={pod}
-				handle={agent}
-				search={agentRoute.useSearch()}
-				onSearchChange={(change) =>
-					void navigate({ search: (previous) => ({ ...previous, ...change }) })
-				}
-			/>
+			<PodAgentScreen podSlug={pod} handle={agent}>
+				{(found, user) => (
+					<AgentPage
+						agent={found.agent}
+						pod={found.pod}
+						user={user}
+						threadId={search.thread}
+						onThreadChange={(thread) =>
+							void navigate({ search: (previous) => ({ ...previous, thread }) })
+						}
+					/>
+				)}
+			</PodAgentScreen>
 		);
 	},
 });
 
-function AgentChatRoute({
+/**
+ * The bot at `handle` in the pod at `podSlug`, once found, for a screen of its
+ * chat; while it loads nothing, and if it cannot be found, why.
+ */
+function PodAgentScreen({
 	podSlug,
 	handle,
-	search,
-	onSearchChange,
+	children,
 }: {
 	podSlug: string;
 	handle: string;
-	search: AgentSearch;
-	onSearchChange: (change: AgentSearch) => void;
+	children: (found: { pod: Pod; agent: Agent }, user: SessionUser) => ReactNode;
 }) {
 	const { user } = useSession();
 	const { found, isPending, error } = usePodAgent(podSlug, handle);
@@ -960,15 +1113,7 @@ function AgentChatRoute({
 	return (
 		// The screen's code can arrive after its data. Without a boundary of its
 		// own, React would hide the rail and list with it while it loads.
-		<Suspense fallback={null}>
-			<AgentPage
-				agent={found.agent}
-				pod={found.pod}
-				user={user}
-				threadId={search.thread}
-				onThreadChange={(thread) => onSearchChange({ thread })}
-			/>
-		</Suspense>
+		<Suspense fallback={null}>{children(found, user)}</Suspense>
 	);
 }
 
@@ -1012,6 +1157,8 @@ const routeTree = rootRoute.addChildren([
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
 		agentsRoute,
+		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
+		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
 		podRoute.addChildren([podIndexRoute, agentRoute]),
 	]),
 ]);

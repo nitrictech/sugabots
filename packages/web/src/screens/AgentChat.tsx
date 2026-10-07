@@ -7,8 +7,18 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+	Fragment,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useEffectEvent,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { v4 as uuidv4 } from "uuid";
+import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useChatDraft } from "@/lib/chat-draft.ts";
 import {
 	useChat,
@@ -20,7 +30,7 @@ import {
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
-import { readReceipts } from "@/lib/read-receipts.ts";
+import { listNames } from "@/lib/name-list.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	usePeopleTyping,
@@ -35,11 +45,17 @@ import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
+import { ChatHeader, type ChatPlace } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { DaySeparator, separatesFrom, ThreadConversation } from "./ThreadConversation.tsx";
+import {
+	DaySeparator,
+	startsNewDay,
+	ThreadConversation,
+	typersAfter,
+} from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
@@ -50,23 +66,24 @@ export function AgentChat({
 	pod,
 	user,
 	threadId,
-	detailsOpen,
-	onDetailsClose,
+	focusMessageId,
+	place,
 	onThreadChange,
 }: {
 	agent: Agent;
 	pod: Pod;
 	user: SessionUser;
 	threadId?: string;
-	/** Whether the Details sidebar is open beside the messages. */
-	detailsOpen: boolean;
-	onDetailsClose: () => void;
+	/** A message to jump to and point out, such as the mention it was opened from. */
+	focusMessageId?: string;
+	place: ChatPlace;
 	onThreadChange: (threadId: string | undefined) => void;
 }) {
 	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
 	const mainThread = useThread(chat.data?.mainThreadId);
+	const authorLinkOf = useAuthorLinks(pod.id);
 	useThreadEvents(chat.data?.mainThreadId);
 	const notices = useThreadNotices(chat.data?.mainThreadId);
 	const optimistic = useOptimisticChatItems(chat.data?.id);
@@ -89,7 +106,6 @@ export function AgentChat({
 	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const groups = chatGroupsOf(items);
-	const lastGroup = groups.at(-1);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
 	useReadWhileShown(
@@ -97,16 +113,10 @@ export function AgentChat({
 		newest?.kind === "message" ? `${newest.message.id}:${newest.message.status}` : newest?.id,
 	);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
+	const threadActivityAt = new Map(
+		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
+	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
-	const receipts = readReceipts({
-		messages: shownMessages,
-		reads: details?.reads ?? [],
-		bots:
-			details?.participants.filter(
-				(participant): participant is AgentParticipant => participant.kind === "agent",
-			) ?? [],
-		userId: user.id,
-	});
 
 	useLayoutEffect(() => {
 		if (!chat.data || !details) return;
@@ -127,6 +137,25 @@ export function AgentChat({
 			positionedAtLatest.current = true;
 		}
 	}, [latestItemRevision]);
+
+	const jump = useJumpToMessage({
+		messageId: focusMessageId,
+		shown: shownMessages.some((message) => message.id === focusMessageId),
+		viewport,
+		older:
+			!messages.isSuccess || messages.isFetchingNextPage
+				? "loading"
+				: messages.hasNextPage
+					? "available"
+					: "none",
+		loadOlder,
+		pagesLoaded: messages.data?.pages.length ?? 0,
+		onJumped: () => {
+			// Reading back from here: new messages no longer pull the chat to its foot.
+			followingLatest.current = false;
+			positionedAtLatest.current = true;
+		},
+	});
 
 	useFollowContentGrowth(viewport, followingLatest);
 	const attachViewport = useCallback((element: HTMLDivElement | null) => {
@@ -181,34 +210,50 @@ export function AgentChat({
 		onThreadChange(nextThreadId);
 	}
 
-	if (chat.isPending) return null;
+	const header = <ChatHeader agent={agent} pod={pod} place={place} />;
+	if (chat.isPending) return <div className="flex min-w-0 flex-1 flex-col">{header}</div>;
 	if (!chat.data || chat.isError)
 		return (
-			<EmptyState title="Could not open this chat">
-				The API did not answer. Reload this page to try again.
-			</EmptyState>
+			<div className="flex min-w-0 flex-1 flex-col">
+				{header}
+				<EmptyState title="Could not open this chat">
+					The API did not answer. Reload this page to try again.
+				</EmptyState>
+			</div>
 		);
 	if (!details || !host)
-		return mainThread.isPending ? null : (
-			<EmptyState title="Could not load this chat">
-				The chat is missing its main conversation.
-			</EmptyState>
+		return (
+			<div className="flex min-w-0 flex-1 flex-col">
+				{header}
+				{!mainThread.isPending && (
+					<EmptyState title="Could not load this chat">
+						The chat is missing its main conversation.
+					</EmptyState>
+				)}
+			</div>
 		);
 
 	const mentionable = mentionableIn(details);
-	// Anyone but yourself; naming another bot here has this chat's bot ask it.
-	const composerMentionable = mentionable.filter((candidate) => candidate.id !== user.id);
+	// The people here and this chat's own bot, not yourself; the pod's other bots are not offered.
+	const composerMentionable = mentionable.filter(
+		(candidate) =>
+			candidate.id !== user.id && (candidate.kind === "person" || candidate.id === host.id),
+	);
 	const otherPeople = details.participants.filter(
 		(participant) => participant.kind === "person" && participant.id !== user.id,
 	);
 	const writingToPeople = peopleOnly && otherPeople.length > 0;
-	// Written for the people here rather than the bot: named by their pod, however many they are.
-	const composerLabel = writingToPeople ? `Message people in ${pod.name}` : `Message ${agent.name}`;
+	// Written to the people here rather than the bot: their names, with the rest counted.
+	const composerLabel = writingToPeople
+		? `Message ${listNames(otherPeople.map((person) => person.name))}`
+		: `Message ${agent.name}`;
+	const typers = typersAfter(shownMessages, peopleTyping);
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
 		<div className="flex min-h-0 flex-1 md:relative">
 			<div className="relative flex min-w-0 flex-1 flex-col">
+				{header}
 				<div
 					ref={attachViewport}
 					role="log"
@@ -218,12 +263,14 @@ export function AgentChat({
 						followingLatest.current =
 							element.scrollHeight - element.scrollTop - element.clientHeight < 48;
 					}}
-					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-[22px] pb-3"
+					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
 				>
-					{/* The same inset as the header and the composer, so the faces, the + and the header line up. */}
-					<div className="flex min-h-full w-full flex-col px-4 md:px-[22px]">
+					{/* Anchored to the bottom, so a short chat sits just above the composer. */}
+					<div className="flex min-h-full w-full flex-col justify-end">
 						{messages.isError && (
-							<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
+							<div className="px-5">
+								<Alert>Messages could not be loaded. Reload this page to try again.</Alert>
+							</div>
 						)}
 						{messages.hasNextPage && (
 							<Button
@@ -236,17 +283,7 @@ export function AgentChat({
 								{messages.isFetchingNextPage ? "Loading…" : "Load older messages"}
 							</Button>
 						)}
-						{items.length === 0 && (
-							<div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-6 text-center">
-								<AgentAvatar color={agent.color} face={agent.face} size={88} />
-								<h2 className="m-0 pt-1.5 font-bold text-[20px] text-foreground">
-									Say hello to {agent.name}
-								</h2>
-								<p className="m-0 text-[14px] text-muted-foreground">
-									Your chats with {agent.name} will show up here.
-								</p>
-							</div>
-						)}
+						{messages.isSuccess && !messages.hasNextPage && <ChatIntro agent={agent} />}
 						{groups.map((group) => (
 							<Fragment key={group.key}>
 								{group.separated && <DaySeparator at={group.at} />}
@@ -256,14 +293,15 @@ export function AgentChat({
 										host={host}
 										isRunning={false}
 										participants={mentionable}
-										user={user}
 										dividers={false}
 										onOpenThread={openThread}
 										podId={pod.id}
 										canApproveToolCalls={details.capabilities?.approveToolCalls}
 										queued={queued}
-										peopleTyping={group === lastGroup ? peopleTyping : undefined}
-										receipts={receipts}
+										showsTyping={false}
+										highlightedMessageId={jump.pointedOut}
+										threadActivityAt={threadActivityAt}
+										authorLinkOf={authorLinkOf}
 									/>
 								) : (
 									<ActivityLine
@@ -275,19 +313,20 @@ export function AgentChat({
 								)}
 							</Fragment>
 						))}
-						{lastGroup?.kind !== "messages" && anyoneTyping(peopleTyping) && (
-							<TypingIndicator typers={peopleTyping} />
+						{jump.notFound && (
+							<p role="status" className="m-0 px-5 py-2 text-center text-muted-foreground text-sm">
+								Could not find the message you opened in this chat.
+							</p>
 						)}
 						<ThreadNotices notices={notices} />
 					</div>
 				</div>
-				<div className="shrink-0 px-4 pt-2.5 pb-[18px] md:px-[22px]">
+				<div className="shrink-0 px-4 md:px-5">
 					{agent.model === null ? (
 						<AgentNotSetUp agent={agent} pod={pod} />
 					) : (
 						<ChatComposer
 							label={composerLabel}
-							placeholder={composerLabel}
 							value={draft}
 							onValueChange={setDraft}
 							onSubmit={submit}
@@ -303,6 +342,10 @@ export function AgentChat({
 							}
 						/>
 					)}
+					{/* Always its height, so nothing moves as somebody starts or stops typing. */}
+					<div className="flex h-[26px] items-center">
+						{anyoneTyping(typers) && <TypingIndicator typers={typers} className="px-1" />}
+					</div>
 				</div>
 			</div>
 			{/* One sidebar at a time: an opened collaboration or run takes Details' place. */}
@@ -313,18 +356,18 @@ export function AgentChat({
 					threadId={threadId}
 					entry={selectedEntry}
 					history={entries}
-					user={user}
-					onClose={() => onThreadChange(undefined)}
+					frame={{ kind: "sidebar", onClose: () => onThreadChange(undefined) }}
 					onOpenThread={openThread}
 				/>
 			) : (
-				detailsOpen && (
+				place.kind === "own" &&
+				place.detailsOpen && (
 					<DetailsSidebar
 						agent={agent}
 						pod={pod}
 						threadId={details.thread.id}
 						user={user}
-						onClose={onDetailsClose}
+						onClose={() => place.onDetailsChange(false)}
 					/>
 				)
 			)}
@@ -334,7 +377,7 @@ export function AgentChat({
 
 type ChatActivityItem = Extract<ChatMessageItem, { kind: "collaboration" | "routine" }>;
 
-/** A routine run, or another bot's collaboration with this one, as a centred line. */
+/** A routine run, or another bot's collaboration with this one, as a row among the messages. */
 function ActivityLine({
 	item,
 	host,
@@ -348,7 +391,14 @@ function ActivityLine({
 }) {
 	const state = activityStateOf(entry);
 	return item.kind === "routine" ? (
-		<ChatActivityRow type="routine" routineName={item.routineName} state={state} onOpen={onOpen} />
+		<ChatActivityRow
+			type="routine"
+			routineName={item.routineName}
+			triggerKind={item.triggerKind}
+			state={state}
+			at={item.createdAt}
+			onOpen={onOpen}
+		/>
 	) : (
 		<ChatActivityRow
 			type="collaboration"
@@ -356,6 +406,7 @@ function ActivityLine({
 			recipient={host}
 			inChatOf="recipient"
 			state={state}
+			at={item.createdAt}
 			onOpen={onOpen}
 		/>
 	);
@@ -370,17 +421,14 @@ type ChatGroup = { key: string; at: string; separated: boolean } & (
 /**
  * The chat's items as they are drawn: runs of messages together, so one
  * author's messages in a row read as a run, and each collaboration or routine
- * row on its own. A new day, or an hour's quiet, starts a new group behind a
- * separator.
+ * row on its own. A new day starts a new group behind a separator.
  */
 function chatGroupsOf(items: readonly ChatMessageItem[]): ChatGroup[] {
 	const groups: ChatGroup[] = [];
 	let previousAt: string | undefined;
 	for (const item of items) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
-		const separated = separatesFrom(previousAt ? { createdAt: previousAt } : undefined, {
-			createdAt: at,
-		});
+		const separated = startsNewDay(previousAt, at);
 		previousAt = at;
 		const last = groups.at(-1);
 		if (item.kind === "message") {
@@ -430,6 +478,91 @@ function chatItemRevision(item: ChatMessageItem | undefined): string {
 	if (!item) return "";
 	if (item.kind !== "message") return `${item.kind}:${item.id}`;
 	return `${item.message.id}:${item.message.status}:${item.message.content}:${JSON.stringify(item.message.parts)}`;
+}
+
+/** How many older pages a jump to a message loads looking for it, before it gives up. */
+const MAX_PAGES_TO_FIND = 10;
+/** How long a message jumped to stays pointed out. */
+const POINTED_OUT_MS = 2000;
+
+/**
+ * Jumps to `messageId` once it is shown, loading older pages until it is, up
+ * to a limit, then centres it, moves the focus to it, and points it out for a
+ * moment. Each message is jumped to once. Returns the message pointed out, if
+ * any, and whether the search gave up without finding it.
+ */
+function useJumpToMessage({
+	messageId,
+	shown,
+	viewport,
+	older,
+	loadOlder,
+	pagesLoaded,
+	onJumped,
+}: {
+	messageId: string | undefined;
+	/** Whether the message is among those loaded. */
+	shown: boolean;
+	viewport: RefObject<HTMLDivElement | null>;
+	/** Whether an older page can be loaded now, is on its way, or there is none. */
+	older: "available" | "loading" | "none";
+	loadOlder: () => Promise<void>;
+	pagesLoaded: number;
+	onJumped: () => void;
+}): { pointedOut: string | undefined; notFound: boolean } {
+	const jumped = useRef<string>(undefined);
+	const [pointedOut, setPointedOut] = useState<string>();
+	const loadOlderPage = useEffectEvent(() => void loadOlder());
+	const jumpedTo = useEffectEvent(onJumped);
+	const searchedEnough = pagesLoaded >= MAX_PAGES_TO_FIND;
+	useEffect(() => {
+		if (!messageId || jumped.current === messageId) return;
+		if (!shown) {
+			if (older === "available" && !searchedEnough) loadOlderPage();
+			return;
+		}
+		const row = [
+			...(viewport.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []),
+		].find((candidate) => candidate.dataset.messageId === messageId);
+		if (!row) return;
+		jumped.current = messageId;
+		// In the next frame, after the scroll event from the chat's first move to its
+		// foot, which would otherwise say the chat is following its latest again.
+		requestAnimationFrame(() => {
+			row.scrollIntoView({ block: "center" });
+			row.tabIndex = -1;
+			row.focus({ preventScroll: true });
+			jumpedTo();
+		});
+		setPointedOut(messageId);
+	}, [messageId, shown, viewport, older, searchedEnough]);
+	useEffect(() => {
+		if (!pointedOut) return;
+		const fade = setTimeout(() => setPointedOut(undefined), POINTED_OUT_MS);
+		return () => clearTimeout(fade);
+	}, [pointedOut]);
+	const notFound =
+		messageId !== undefined &&
+		!shown &&
+		older !== "loading" &&
+		(older === "none" || searchedEnough);
+	return { pointedOut, notFound };
+}
+
+/** The top of a chat, once there is nothing older to load: whom it is with, and what they do. */
+function ChatIntro({ agent }: { agent: Agent }) {
+	return (
+		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
+			<AgentAvatar color={agent.color} face={agent.face} size={64} />
+			<h2 className="m-0 pt-1 font-bold text-[24px] text-foreground tracking-[-0.01em]">
+				{agent.name}
+			</h2>
+			<p className="m-0 max-w-[560px] text-[14.5px] text-muted-foreground leading-[1.5]">
+				This is the start of your conversation with {agent.name}.
+				{agent.description && ` ${agent.description}`}
+			</p>
+		</div>
+	);
 }
 
 /**

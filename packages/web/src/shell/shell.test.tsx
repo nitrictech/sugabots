@@ -281,7 +281,7 @@ describe("the rail", () => {
 		const names = within(rail)
 			.getAllByRole("link")
 			.map((link) => link.getAttribute("aria-label"));
-		expect(names).toEqual(["Suga-Team", "Sales", "Personal", "Settings"]);
+		expect(names).toEqual(["Activity", "Approvals", "Suga-Team", "Sales", "Personal", "Settings"]);
 		expect(within(rail).getByRole("link", { name: "Suga-Team" }).getAttribute("aria-current")).toBe(
 			"page",
 		);
@@ -320,7 +320,7 @@ describe("the rail", () => {
 });
 
 describe("the conversation list", () => {
-	it("lists a pod's bots newest first, marking the open chat and what you last said", async () => {
+	it("lists a pod's bots newest first, marking the open chat", async () => {
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				items: [
@@ -350,7 +350,7 @@ describe("the conversation list", () => {
 		const list = await screen.findByRole("region", { name: "Suga-Team" });
 		const rows = await within(await within(list).findByRole("list")).findAllByRole("link");
 		expect(rows.map((row) => row.textContent)).toEqual([
-			expect.stringContaining("You: File the timeout as a bug"),
+			expect.stringContaining("Linear Handler"),
 			expect.stringContaining("Issue Triager"),
 		]);
 		expect(rows[0]?.getAttribute("aria-current")).toBe("page");
@@ -370,7 +370,7 @@ describe("the conversation list", () => {
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T08:00:00.000Z",
 		};
-		const unread = { lastMessage: null, waitingOn: null, unread: false, needsApproval: false };
+		const unread = { lastMessage: null, waitingOn: null, unreadMessages: 0, needsApproval: false };
 		client.api.chats.list.mockReturnValue(
 			Effect.succeed({
 				items: [
@@ -394,22 +394,6 @@ describe("the conversation list", () => {
 			expect.objectContaining({ params: { threadId: linearChat.mainThreadId } }),
 		);
 		expect(client.api.chats.getOrCreate).not.toHaveBeenCalled();
-	});
-
-	it("finds a bot by name", async () => {
-		mount("/suga/pods/suga-team");
-
-		const list = await screen.findByRole("region", { name: "Suga-Team" });
-		await within(list).findByRole("link", { name: /Linear Handler/ });
-		fireEvent.change(within(list).getByRole("searchbox", { name: "Search Suga-Team" }), {
-			target: { value: "tri" },
-		});
-
-		expect(
-			within(within(list).getByRole("list"))
-				.getAllByRole("link")
-				.map((row) => row.textContent),
-		).toEqual([expect.stringContaining("Issue Triager")]);
 	});
 
 	it("opens its pod's settings and leads back to the Chat", async () => {

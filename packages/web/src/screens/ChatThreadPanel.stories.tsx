@@ -1,4 +1,4 @@
-import type { Message, SessionUser, ThreadDetails } from "@sugabots/contracts";
+import type { Message, ThreadDetails } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn } from "storybook/test";
@@ -175,8 +175,7 @@ const meta = preview.meta({
 		chatAgentId: growthDesk.id,
 		threadId: THREAD,
 		history: [],
-		user: user as SessionUser,
-		onClose: fn(),
+		frame: { kind: "sidebar" as const, onClose: fn() },
 		onOpenThread: fn(),
 	},
 	render: (args) => (

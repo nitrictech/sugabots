@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
+	activityFeedSchema,
+	approvalInboxSchema,
 	chatHistoryPageSchema,
 	chatListQuerySchema,
 	chatListSchema,
@@ -26,6 +28,16 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		HttpApiEndpoint.get("podMarkers", "/workspaces/:workspace/chats/pod-markers", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: podChatMarkersSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("activity", "/workspaces/:workspace/chats/activity", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: activityFeedSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("approvals", "/workspaces/:workspace/chats/approvals", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: approvalInboxSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.post("getOrCreate", "/workspaces/:workspace/chats", {

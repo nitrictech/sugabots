@@ -24,7 +24,7 @@ export function MessageMarkdown({
 	return (
 		<MentionableContext value={mentionable}>
 			<Streamdown
-				className={`${BREAK_LONG_WORDS} message-markdown text-bot-text text-lg`}
+				className={`${BREAK_LONG_WORDS} message-markdown`}
 				remarkPlugins={REMARK_PLUGINS}
 				rehypePlugins={REHYPE_PLUGINS}
 				components={COMPONENTS}

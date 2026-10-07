@@ -27,8 +27,12 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	label: string;
 	children: ReactNode;
 	size?: keyof typeof sizes;
-	/** `outline` for a bordered control that sits on a card or panel. */
-	variant?: "quiet" | "outline" | "pane";
+	/**
+	 * `outline` for a bordered control that sits on a card or panel. `bar` for
+	 * one in the header bar across the top of a list, chat or sidebar: a 30px
+	 * rounded square, whatever `size`, whose icon keeps the size it is given.
+	 */
+	variant?: "quiet" | "outline" | "pane" | "bar";
 	side?: "top" | "bottom";
 	/**
 	 * Render this element instead of a `<button>`. For a link that looks like
@@ -60,8 +64,14 @@ export function IconButton({
 					? "bg-chip text-foreground hover:bg-hover"
 					: variant === "pane"
 						? "bg-chip text-foreground hover:bg-hover"
-						: "text-muted-foreground hover:bg-hover hover:text-foreground",
-				size === "lg" && variant === "pane" ? "size-[34px]" : sizes[size],
+						: variant === "bar"
+							? "rounded-[8px] text-soft-foreground hover:bg-chip"
+							: "text-muted-foreground hover:bg-hover hover:text-foreground",
+				variant === "bar"
+					? "size-[30px]"
+					: size === "lg" && variant === "pane"
+						? "size-[34px]"
+						: sizes[size],
 				className,
 			),
 			children,

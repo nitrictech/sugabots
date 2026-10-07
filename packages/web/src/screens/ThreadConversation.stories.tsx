@@ -1,16 +1,9 @@
-import type {
-	Message,
-	MessagePart,
-	SessionUser,
-	ThreadParticipant,
-	ToolCallPart,
-} from "@sugabots/contracts";
+import type { Message, MessagePart, ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ComponentProps, useEffect, useState } from "react";
-import { expect, fn, waitFor } from "storybook/test";
+import { expect, fn, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
-import { readReceipts } from "@/lib/read-receipts.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 
@@ -32,13 +25,6 @@ const jay = testPerson({
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	name: "Jay Park",
 });
-
-const user: SessionUser = {
-	id: person.id,
-	name: person.name,
-	email: "sam.rivera@example.com",
-	image: null,
-};
 
 function message(id: string, author: Message["author"], content: string): Message {
 	return {
@@ -83,7 +69,6 @@ const meta = preview.meta({
 		host,
 		isRunning: false,
 		participants: [host, person],
-		user,
 		podId: POD,
 		onOpenThread: fn(),
 	},
@@ -135,14 +120,14 @@ export const RoutineResult = meta.story({
 });
 
 /**
- * Hovering a bubble shows its time beside it (hover in the canvas to see it);
- * the full date and time, with the year, is its title.
+ * A group's first message has its time beside its author's name, and on hover
+ * the full date and time, with the year.
  */
 export const TimeOnHover = meta.story({
-	play: async ({ canvas }) => {
-		const time = canvas.getByText(/\d:\d{2}/, { selector: "time" });
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.hover(canvas.getByText(/\d:\d{2}/, { selector: "time" }));
 		// Date order and clock style follow the browser's locale; the year and seconds are what matter.
-		await expect(time.title).toMatch(/2025 at \d{1,2}:\d{2}:46/);
+		await waitFor(() => expect(screen.getByText(/2025 at \d{1,2}:\d{2}:46/)).toBeVisible());
 	},
 	args: {
 		messages: [
@@ -155,8 +140,8 @@ export const TimeOnHover = meta.story({
 });
 
 /**
- * Runs groups one author's messages: the name above the first bubble, the face
- * beside the last. Your own messages sit on the right in the accent, with no face.
+ * Runs groups one author's messages under one face and name, a bot's tagged
+ * Bot. Follow-ups show their time where the face would be, on hover.
  */
 export const Runs = meta.story({
 	args: {
@@ -189,10 +174,11 @@ export const Runs = meta.story({
 		],
 	},
 	play: async ({ canvas }) => {
-		// Two bot bubbles in a row carry the name once and the face once.
+		// Two messages in a row from one author carry the name once.
 		await expect(canvas.getAllByText("Issue Triager")).toHaveLength(1);
-		await expect(canvas.getByText("Jay Park")).toBeInTheDocument();
-		await expect(canvas.queryByText("Sam Rivera")).toBeNull();
+		await expect(canvas.getAllByText("Bot")).toHaveLength(1);
+		await expect(canvas.getAllByText("Jay Park")).toHaveLength(1);
+		await expect(canvas.getAllByText("Sam Rivera")).toHaveLength(1);
 	},
 });
 
@@ -241,11 +227,8 @@ export const QueuedBehindAReply = meta.story({
 		// The question the reply is answering is not waiting on anything.
 		const sams = canvas.getAllByRole("article", { name: /^Sam Rivera, / });
 		await expect(sams.filter((bubble) => !bubble.ariaLabel?.endsWith("queued"))).toHaveLength(1);
-		// Once for each person's run, under its last bubble.
-		const shown = canvas
-			.getAllByText("Queued")
-			.filter((note) => note.checkVisibility({ visibilityProperty: true }));
-		await expect(shown).toHaveLength(2);
+		// Once for each person's run, under its last message.
+		await expect(canvas.getAllByText("Queued")).toHaveLength(2);
 	},
 });
 
@@ -286,14 +269,14 @@ function HandingOff(props: ComponentProps<typeof ThreadConversation>) {
 	return <ThreadConversation {...props} messages={messages} queued={queued} />;
 }
 
-/** The bot takes the queued messages up: their notes fold away as it starts its next reply. */
+/** The bot takes the queued messages up: their notes go as it starts its next reply. */
 export const QueueHandOff = meta.story({
 	tags: ["ai-generated"],
 	args: { participants: [host, person, jay], messages: [] },
 	render: (args) => <HandingOff {...args} />,
 });
 
-/** A new day in the middle of a thread gets room above its separator, so it reads as a new stretch. */
+/** Each day starts under a rule naming it, so a new day in the middle of a thread reads as a new stretch. */
 export const ANewDay = meta.story({
 	args: {
 		messages: [
@@ -309,8 +292,8 @@ export const ANewDay = meta.story({
 		],
 	},
 	play: async ({ canvas }) => {
-		const separators = canvas.getAllByText(/\d:\d\d$/, { selector: "p" });
-		await expect(separators).toHaveLength(2);
+		await expect(canvas.getByText("Sep 22")).toBeInTheDocument();
+		await expect(canvas.getByText("Sep 23")).toBeInTheDocument();
 	},
 });
 
@@ -323,13 +306,9 @@ const other: Extract<ThreadParticipant, { kind: "agent" }> = {
 	face: "dot",
 };
 
-/**
- * Mirrored is a collaboration as its sidebar shows it: the chat's bot on the
- * right, the bot it asked on the left, smaller faces and bubbles, and no names.
- */
-export const Mirrored = meta.story({
+/** InTheSidebar is a collaboration as its sidebar shows it: the same rows, a little smaller. */
+export const InTheSidebar = meta.story({
 	args: {
-		rightAgentId: host.id,
 		compact: true,
 		participants: [host, other],
 		messages: [
@@ -352,24 +331,61 @@ export const Mirrored = meta.story({
 	},
 	decorators: [
 		(Story) => (
-			<div className="w-[360px] px-3.5">
+			<div className="w-[380px]">
 				<Story />
 			</div>
 		),
 	],
 	play: async ({ canvas }) => {
-		await expect(canvas.queryByText("Linear Handler")).toBeNull();
+		await expect(canvas.getAllByText("Linear Handler")).toHaveLength(1);
 	},
 });
 
 /**
- * Failures in a collaboration's sidebar: the note under each bubble lines up with
- * the bubble, clear of the smaller face, on whichever side the face is.
+ * A bot's message that asked another bot shows the collaboration as a thread
+ * line under it: both faces, when it last moved, and a tag while it needs you.
+ */
+export const CollaborationThread = meta.story({
+	args: {
+		participants: [host, person, other],
+		messages: [
+			reply("0199a3a0-0000-7000-8000-000000000311", [
+				{ type: "text", text: "Asking Linear Handler whether checkout is tracked." },
+				{
+					type: "collaboration",
+					id: "0199a3a0-0000-7000-8000-000000000312",
+					agentId: other.id,
+					agentName: other.name,
+					threadId: "0199a3a0-0000-7000-8000-000000000313",
+					brief: "Is checkout tracked?",
+					status: "pending",
+					answer: null,
+					atOffset: 51,
+				},
+			]),
+		],
+		threadActivityAt: new Map([
+			["0199a3a0-0000-7000-8000-000000000313", "2026-09-22T04:39:00.000Z"],
+		]),
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		const line = canvas.getByRole("button", {
+			name: /^Open Collaboration: Issue Triager and Linear Handler/,
+		});
+		await expect(line).toHaveTextContent("Needs approval");
+		await expect(line).toHaveTextContent("Last reply");
+		await userEvent.click(line);
+		await expect(args.onOpenThread).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000313");
+	},
+});
+
+/**
+ * Failures in a collaboration's sidebar: a note under each message says why it
+ * stopped.
  */
 export const FailedInTheSidebar = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		rightAgentId: host.id,
 		compact: true,
 		participants: [host, other],
 		messages: [
@@ -473,8 +489,8 @@ function LastReplyLandsWhileWatched(props: ComponentProps<typeof ThreadConversat
 }
 
 /**
- * A table wider than the bubble, in a reply that finishes while the thread is
- * open and grows in: it scrolls inside the bubble instead of running past its
+ * A table wider than the message, in a reply that finishes while the thread is
+ * open and grows in: it scrolls inside the message instead of running past its
  * edge, and a keyboard can reach it to scroll it.
  */
 export const WideTableArriving = meta.story({
@@ -489,7 +505,12 @@ export const WideTableArriving = meta.story({
 			message("0199a3a0-0000-7000-8000-000000000110", host, wideTableAnswer),
 		],
 	},
-	render: (args) => <LastReplyLandsWhileWatched {...args} />,
+	// As wide as the collaboration panel, too narrow for the table, which scrolls inside the message.
+	render: (args) => (
+		<div className="w-[560px]">
+			<LastReplyLandsWhileWatched {...args} />
+		</div>
+	),
 	play: async ({ canvas }) => {
 		const table = await canvas.findByRole("group", { name: "Table" });
 		await waitFor(() => expect(table.scrollWidth).toBeGreaterThan(table.clientWidth));
@@ -620,7 +641,7 @@ export const SomeoneTyping = meta.story({
 	},
 });
 
-/** TypingWithTheBot is a person typing while the bot writes its reply: both faces share one line. */
+/** TypingWithTheBot is a person typing while the bot writes its reply: both names share one line. */
 export const TypingWithTheBot = meta.story({
 	args: {
 		participants: [host, person, jay],
@@ -680,134 +701,54 @@ export const Mentions = meta.story({
 	},
 });
 
-const reader = (id: string, name: string) =>
-	testPerson({ id: `0199a3a0-0000-7000-8000-0000000009${id}`, name });
-const readers = {
-	tom: reader("01", "Tom Ortiz"),
-	sora: reader("02", "Sora Reyes"),
-	lena: reader("03", "Lena Nakamura"),
-	mika: reader("04", "Mika Kim"),
-	pat: reader("05", "Pat Adams"),
-};
-const minute = (at: number) => `2026-10-01T01:${String(at).padStart(2, "0")}:00.000Z`;
-
-/** The design's eight-person thread: who has read how far, by when they last read. */
-const readThread = [
-	{
-		...message(
-			"0199a3a0-0000-7000-8000-000000000a01",
-			host,
-			"Drafts for both Northwind replies are ready. Three lines each.",
-		),
-		createdAt: minute(1),
-	},
-	{
-		...message(
-			"0199a3a0-0000-7000-8000-000000000a02",
-			jay,
-			"Can someone sanity-check them before they go?",
-		),
-		createdAt: minute(2),
-	},
-	{
-		...message(
-			"0199a3a0-0000-7000-8000-000000000a03",
-			person,
-			"On it. The first one is the tricky one.",
-		),
-		createdAt: minute(3),
-	},
-	{
-		...message(
-			"0199a3a0-0000-7000-8000-000000000a04",
-			person,
-			"Dana hates anything that sounds like a template.",
-		),
-		createdAt: minute(4),
-	},
-];
-const readsOfThread = readReceipts({
-	messages: readThread,
-	reads: [
-		{ person: readers.tom, readThrough: minute(1), readAt: minute(1) },
-		{ person: readers.sora, readThrough: minute(2), readAt: minute(2) },
-		{ person: readers.lena, readThrough: minute(3), readAt: minute(3) },
-		{ person: readers.mika, readThrough: minute(4), readAt: minute(4) },
-		{ person: jay, readThrough: minute(4), readAt: minute(4) },
-		{ person: readers.pat, readThrough: minute(4), readAt: minute(4) },
-		// Your own read is never shown.
-		{ person, readThrough: minute(4), readAt: minute(4) },
-	],
-	bots: [host],
-	userId: user.id,
-});
-
-/**
- * ReadReceipts puts each reader's face at the right edge under the last
- * message they have read. Tom stopped at the drafts, Sora at Jay's question
- * and Lena at your first message. The bot, which has not replied since, is
- * first in the bottom row. Jay shows only there, past his own message, and
- * you never see your own face.
- */
-export const ReadReceipts = meta.story({
+/** JumpedTo is the message a chat was opened at, from Activity, pointed out for a moment. */
+export const JumpedTo = meta.story({
 	args: {
-		participants: [host, person, jay, ...Object.values(readers)],
-		messages: readThread,
-		receipts: readsOfThread,
-	},
-	play: async ({ canvas }) => {
-		await expect(canvas.getByText("Read by Tom Ortiz")).toBeInTheDocument();
-		await expect(canvas.getByText("Read by Sora Reyes")).toBeInTheDocument();
-		await expect(canvas.getByText("Read by Lena Nakamura")).toBeInTheDocument();
-		await expect(
-			canvas.getByText("Read by Issue Triager, Mika Kim, Jay Park, and Pat Adams"),
-		).toBeInTheDocument();
-		await expect(canvas.queryByText(/Sam Rivera/)).toBeNull();
+		participants: [host, person, jay],
+		messages: [
+			message("0199a3a0-0000-7000-8000-000000000b11", host, "The release branch is green."),
+			message("0199a3a0-0000-7000-8000-000000000b12", jay, "@sam-rivera can you sign it off?"),
+			message("0199a3a0-0000-7000-8000-000000000b13", host, "I'll post the notes once it's out."),
+		],
+		highlightedMessageId: "0199a3a0-0000-7000-8000-000000000b12",
 	},
 });
 
-/** ReadReceiptsInLight is the same thread in the light theme. */
-export const ReadReceiptsInLight = meta.story({
-	...ReadReceipts.input,
-	globals: { theme: "light" },
-});
-
-/** ReadReceiptsOnAPhone wraps a row too wide for the bubble column onto a second line, still at the right. */
-export const ReadReceiptsOnAPhone = meta.story({
-	args: {
-		...ReadReceipts.input.args,
-		receipts: readReceipts({
-			messages: readThread,
-			reads: Array.from({ length: 18 }, (_, index) => ({
-				person: reader(String(10 + index), `Reader ${String.fromCharCode(65 + index)}`),
-				readThrough: minute(4),
-				readAt: minute(4),
-			})),
-			bots: [host],
-			userId: user.id,
-		}),
-	},
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-});
-
-/** Tom reading a message further every second and a half, from the first message to the last. */
-function CatchingUp(args: ComponentProps<typeof ThreadConversation>) {
-	const [readUpTo, setReadUpTo] = useState(1);
-	useEffect(() => {
-		const timer = setInterval(() => setReadUpTo((at) => (at % readThread.length) + 1), 1_500);
-		return () => clearInterval(timer);
-	}, []);
-	const receipts = readReceipts({
-		messages: readThread,
-		reads: [{ person: readers.tom, readThrough: minute(readUpTo), readAt: minute(readUpTo) }],
-		bots: [host],
-		userId: user.id,
-	});
-	return <ThreadConversation {...args} receipts={receipts} />;
+function asked(id: string, tool: string, approval: ToolCallPart["approval"]): Message {
+	return reply(id, [
+		{ type: "text", text: "I'll track the checkout timeouts in Linear." },
+		{
+			...toolCall(`${id.slice(0, -1)}9`, tool),
+			input: { title: "Checkout requests time out" },
+			mutating: true,
+			status: approval?.status === "denied" ? "failed" : "completed",
+			approval,
+		},
+	]);
 }
 
-/** ReadReceiptsCatchingUp fades Tom's face in under each message he reads. */
-export const ReadReceiptsCatchingUp = meta.story({
-	args: { participants: [host, person, jay, readers.tom], messages: readThread },
-	render: (args) => <CatchingUp {...args} />,
+/**
+ * Answered approvals stay as their cards, saying which way they went and who
+ * answered, without announcing it to a screen reader as the history loads.
+ */
+export const AnsweredApprovals = meta.story({
+	args: {
+		messages: [
+			asked("0199a3a0-0000-7000-8000-000000000b21", "linear__create_issue", {
+				status: "allowed",
+				decidedByName: "Sam Rivera",
+				decidedAt: "2026-09-22T04:31:00.000Z",
+			}),
+			asked("0199a3a0-0000-7000-8000-000000000b31", "linear__update_issue", {
+				status: "denied",
+				decidedByName: "Jay Park",
+				decidedAt: "2026-09-22T04:32:00.000Z",
+			}),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/Allowed by Sam Rivera/)).toBeInTheDocument();
+		await expect(canvas.getByText(/Denied by Jay Park/)).toBeInTheDocument();
+		await expect(canvas.queryByRole("status")).toBeNull();
+	},
 });

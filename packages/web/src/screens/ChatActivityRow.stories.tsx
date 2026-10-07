@@ -1,3 +1,4 @@
+import type { RoutineExecutionTriggerKind } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
@@ -36,8 +37,14 @@ const collaboration = (state: ActivityState, onOpen = fn()) => (
 	/>
 );
 
-const routine = (state: ActivityState) => (
-	<ChatActivityRow type="routine" routineName="Overnight outbound" state={state} onOpen={fn()} />
+const routine = (state: ActivityState, triggerKind: RoutineExecutionTriggerKind = "cron") => (
+	<ChatActivityRow
+		type="routine"
+		routineName="Overnight outbound"
+		triggerKind={triggerKind}
+		state={state}
+		onOpen={fn()}
+	/>
 );
 
 /** CollaborationRunning is the host bot still talking to the other; it says nothing else meanwhile. */
@@ -80,8 +87,11 @@ export const CollaborationInTheAskedBotsChat = meta.story({
 	},
 });
 
-/** RoutineRan is a routine that posted into the chat. */
+/** RoutineRan is a scheduled routine that posted into the chat, marked with a clock. */
 export const RoutineRan = meta.story({ render: () => routine("done") });
+
+/** RoutineRanFromWebhook is a run its webhook started, marked with a hook in the clock's place. */
+export const RoutineRanFromWebhook = meta.story({ render: () => routine("done", "webhook") });
 
 /** RoutineFailed marks the failure with the one red the design allows. */
 export const RoutineFailed = meta.story({ render: () => routine("failed") });

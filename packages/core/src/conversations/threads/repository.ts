@@ -1,7 +1,8 @@
 export * as ThreadRepository from "./repository.ts";
 
 import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
-import { and, eq, lt, max, ne, sql } from "drizzle-orm";
+import { and, eq, lt, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
@@ -116,8 +117,9 @@ export interface Interface {
 	/**
 	 * Records that `userId` has read the thread `threadId` up to its newest
 	 * finished message, and tells the thread's watchers when that moved them
-	 * on. A reply still streaming is not yet read, so it is news once it is
-	 * done. Never moves anyone back.
+	 * on. Never moves past a reply still streaming, which is not yet read, so
+	 * it is news once it is done, however much was written after it began.
+	 * Never moves anyone back.
 	 */
 	readonly markRead: (userId: string, threadId: string) => Effect.Effect<void>;
 }
@@ -507,15 +509,28 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						// The newest message's own time rather than this server's clock, so
-						// a message stamped later is never counted as read.
-						const [newest] = yield* query((db) =>
-							db
-								.select({ at: max(message.createdAt) })
+						// a message stamped later is never counted as read. As text, which
+						// keeps the microseconds a `Date` would drop.
+						const [newest] = yield* query((db) => {
+							const streaming = alias(message, "streaming_message");
+							const oldestStreaming = db
+								// Through `sql`, because `min` of a timestamp column is cast to text for reading.
+								.select({ at: sql`min(${streaming.createdAt})` })
+								.from(streaming)
+								.where(and(eq(streaming.threadId, threadId), eq(streaming.status, "streaming")));
+							return db
+								.select({ at: sql<string | null>`max(${message.createdAt})::text` })
 								.from(message)
-								.where(and(eq(message.threadId, threadId), ne(message.status, "streaming"))),
-						);
-						const readThrough = newest?.at;
-						if (!readThrough) return;
+								.where(
+									and(
+										eq(message.threadId, threadId),
+										ne(message.status, "streaming"),
+										sql`${message.createdAt} < coalesce((${oldestStreaming}), 'infinity')`,
+									),
+								);
+						});
+						if (!newest?.at) return;
+						const readThrough = sql`${newest.at}::timestamptz`;
 						const [moved] = yield* query((db) =>
 							db
 								.insert(threadRead)

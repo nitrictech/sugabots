@@ -56,7 +56,7 @@ export function useChatList(podSlug: string | undefined) {
 	return useQuery(chatListQuery(useWorkspace().workspace?.id, podSlug));
 }
 
-/** How each pod stands for the rail: its unread chats, and whether any waits on the person. */
+/** How each pod stands for the rail: its unread messages, and whether any chat waits on the person. */
 export function usePodChatMarkers() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
@@ -64,6 +64,44 @@ export function usePodChatMarkers() {
 		queryFn: workspaceId
 			? ({ signal }) =>
 					Effect.runPromise(client.api.chats.podMarkers({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
+const activityFeedKey = (workspaceId: string | undefined) => ["chat-activity", workspaceId];
+const APPROVAL_INBOX = "chat-approvals";
+const approvalInboxKey = (workspaceId: string | undefined) => [APPROVAL_INBOX, workspaceId];
+
+/**
+ * What is new for the person across the workspace's chats: messages that
+ * mention them or they have not read, routine runs, and collaborations.
+ */
+export function useActivityFeed() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: activityFeedKey(workspaceId),
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.chats.activity({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+}
+
+/**
+ * The approvals across the workspace: those waiting on the person, and the
+ * latest answered.
+ */
+export function useApprovalInbox() {
+	const workspaceId = useWorkspace().workspace?.id;
+	return useQuery({
+		queryKey: approvalInboxKey(workspaceId),
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.chats.approvals({ params: { workspace: workspaceId } }), {
 						signal,
 					})
 			: skipToken,
@@ -105,11 +143,31 @@ export function useReadWhileShown(chatId: string | undefined, newest: string | u
 	}, [chatId, newest, mutate]);
 }
 
-/** Fetches again what shows which chats are unread or waiting: the lists and the rail. */
+/** Fetches again what shows which chats are unread: the lists, the rail and activity. */
 export function refreshChatMarkers(queries: QueryClient, workspaceId: string | undefined) {
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 		queries.invalidateQueries({ queryKey: ["chat-pod-markers", workspaceId] }),
+		queries.invalidateQueries({ queryKey: activityFeedKey(workspaceId) }),
+	]);
+}
+
+/**
+ * Fetches every workspace's approvals inbox again, for a request answered
+ * where only its pod is known.
+ */
+export function refreshEveryApprovalInbox(queries: QueryClient) {
+	return queries.invalidateQueries({ queryKey: [APPROVAL_INBOX] });
+}
+
+/**
+ * Fetches again everything a change in one of the workspace's threads can
+ * move: the chats' unread markers and activity, and the approvals inbox.
+ */
+export function refreshAfterThreadChange(queries: QueryClient, workspaceId: string | undefined) {
+	return Promise.all([
+		refreshChatMarkers(queries, workspaceId),
+		queries.invalidateQueries({ queryKey: approvalInboxKey(workspaceId) }),
 	]);
 }
 

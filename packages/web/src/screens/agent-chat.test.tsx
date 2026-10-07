@@ -263,7 +263,7 @@ function chatList({ listed }: { listed: boolean }) {
 				chat: listed ? chat : null,
 				lastMessage: null,
 				waitingOn: null,
-				unread: false,
+				unreadMessages: 0,
 				needsApproval: false,
 			},
 		],
@@ -400,10 +400,8 @@ describe("ongoing agent Chat", () => {
 	it("renders main messages and inline collaborations", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-		const personMessage = (await screen.findByText(mainMessage.content)).closest("article");
-		expect(personMessage?.classList.contains("items-end")).toBe(true);
-		const reply = screen.getByText(agentMessage.content).closest("article");
-		expect(reply?.classList.contains("items-start")).toBe(true);
+		expect(await screen.findByText(mainMessage.content)).toBeDefined();
+		expect(screen.getByText(agentMessage.content)).toBeDefined();
 		const collaboration = screen.getByRole("button", {
 			name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
 		});
@@ -506,7 +504,7 @@ describe("ongoing agent Chat", () => {
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
-		const composer = await screen.findByLabelText("Message people in Suga-Team");
+		const composer = await screen.findByLabelText(`Message ${jye.name}`);
 		fireEvent.change(composer, { target: { value: "Just between us" } });
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -521,16 +519,17 @@ describe("ongoing agent Chat", () => {
 		);
 	});
 
-	it("offers the pod's other bots and people to mention, though they never join the chat, and not you", async () => {
+	it("offers the pod's people and the chat's own bot to mention, not the pod's other bots or you", async () => {
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		fireEvent.change(composer, { target: { value: "@" } });
 
 		const list = within(await screen.findByRole("listbox"));
-		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
+		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
 		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
+		expect(list.queryByRole("option", { name: new RegExp(triager.name) })).toBeNull();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		expect(list.getAllByRole("option")).toHaveLength(3);
+		expect(list.getAllByRole("option")).toHaveLength(2);
 	});
 
 	it("offers no composer to an agent with no model, and says where to choose one", async () => {
@@ -797,8 +796,8 @@ describe("ongoing agent Chat", () => {
 		const follows = (first: Node, second: Node) =>
 			Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(follows(leadIn, collaboration)).toBe(true);
-		// While the collaboration runs the bot says nothing else; its line says it is talking.
-		expect(collaboration.getAttribute("aria-label")).toContain("is talking to");
+		// While the collaboration runs the bot says nothing else; its line says it is working.
+		expect(collaboration.getAttribute("aria-label")).toContain("Working");
 		expect(screen.queryByRole("status", { name: /is typing/ })).toBeNull();
 	});
 
@@ -811,16 +810,14 @@ describe("ongoing agent Chat", () => {
 		);
 
 		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
-		// Seen from the chat's bot: its request on the right, the answer it got on the left.
 		const request = within(panel).getByRole("article", { name: new RegExp(linear.name) });
 		expect(within(request).getByText(collaborationRequest.content)).toBeDefined();
-		expect(request.classList.contains("items-end")).toBe(true);
 		expect(within(panel).queryByText("The request")).toBeNull();
 		const answer = within(panel).getByRole("article", { name: new RegExp(triager.name) });
 		expect(within(answer).getByText(collaborationAnswer.content)).toBeDefined();
-		expect(answer.classList.contains("items-start")).toBe(true);
-		expect(within(panel).getByText(`with ${triager.name}`)).toBeDefined();
+		expect(within(panel).getByText(`${linear.name} and ${triager.name}`)).toBeDefined();
 		expect(within(panel).queryByRole("textbox")).toBeNull();
+		expect(within(panel).getByText(/Bots talk here on their own/)).toBeDefined();
 		await waitFor(() => expect(router.state.location.search.thread).toBe(collaborationId));
 	});
 
@@ -931,15 +928,19 @@ describe("ongoing agent Chat", () => {
 		expect(await screen.findByRole("complementary", { name: routineEntry.title })).toBeDefined();
 	});
 
-	it("uses message-focused copy when the Chat is empty", async () => {
+	it("opens with whom the chat is with, when there is nothing older", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		client.api.threads.get.mockReturnValue(
 			Effect.succeed(details(chat.mainThreadId, "Chat", "chat", [])),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 
-		expect(await screen.findByText(`Say hello to ${linear.name}`)).toBeDefined();
-		expect(screen.getByText(`Your chats with ${linear.name} will show up here.`)).toBeDefined();
+		expect(await screen.findByRole("heading", { name: linear.name, level: 2 })).toBeDefined();
+		expect(
+			screen.getByText(`This is the start of your conversation with ${linear.name}.`, {
+				exact: false,
+			}),
+		).toBeDefined();
 	});
 
 	it("opens Details from the bot's name, and leads back to the pod's list", async () => {
@@ -954,14 +955,74 @@ describe("ongoing agent Chat", () => {
 		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
 	});
 
+	it("keeps Details closed when the chat is opened again, once they were closed where they sit beside it", async () => {
+		vi.stubGlobal("matchMedia", (query: string) => ({
+			matches: true,
+			media: query,
+			onchange: null,
+			addEventListener: () => {},
+			removeEventListener: () => {},
+			addListener: () => {},
+			removeListener: () => {},
+			dispatchEvent: () => false,
+		}));
+		onTestFinished(() => {
+			vi.unstubAllGlobals();
+		});
+		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+
+		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Details", pressed: true }));
+		await waitFor(() =>
+			expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull(),
+		);
+		await leaveAndReturn(router);
+
+		expect(screen.getByRole("button", { name: "Details", pressed: false })).toBeDefined();
+		expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
+	});
+
 	it("leads from its bot's settings back to the Chat they were opened from", async () => {
 		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
 		const router = mount(chat);
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 		const details = await screen.findByRole("complementary", { name: "Details" });
 
-		fireEvent.click(within(details).getByRole("link", { name: "Settings" }));
+		fireEvent.click(within(details).getByRole("link", { name: "Bot settings" }));
 		await screen.findByRole("heading", { name: linear.name });
+		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+	});
+
+	it("leads from a person's name to their member page, and back to the Chat", async () => {
+		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
+		const router = mount(chat);
+		const messages = await screen.findByRole("log", { name: "Chat messages" });
+
+		fireEvent.click(await within(messages).findByRole("link", { name: sam.name }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				"/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1",
+			),
+		);
+		fireEvent.click(await screen.findByRole("link", { name: "Back to Chat" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
+	});
+
+	it("leads from a bot's name to its settings in the pod, and back to the Chat", async () => {
+		const chat = `/suga/pods/suga-team/agents/${linear.handle}`;
+		const router = mount(chat);
+		const messages = await screen.findByRole("log", { name: "Chat messages" });
+
+		fireEvent.click(
+			(await within(messages).findAllByRole("link", { name: linear.name }))[0] as HTMLElement,
+		);
+		await screen.findByRole("heading", { name: linear.name });
+		expect(router.state.location.pathname).toBe(
+			`/suga/settings/pods/suga-team/agents/${linear.handle}`,
+		);
 		fireEvent.click(screen.getByRole("link", { name: "Back to Chat" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(chat));
@@ -992,6 +1053,81 @@ describe("ongoing agent Chat", () => {
 			expect(screen.queryByRole("complementary", { name: collaborationEntry.title })).toBeNull(),
 		);
 		expect(router.state.location.pathname).toBe(`/suga/pods/suga-team/agents/${linear.handle}`);
+	});
+});
+
+describe("a message opened from Activity", () => {
+	const older: Message = {
+		...mainMessage,
+		id: "0199a3a0-0000-7000-8000-000000000201",
+		parts: [{ type: "text", text: "Can you look at the release?" }],
+		content: "Can you look at the release?",
+		createdAt: "2026-09-17T09:00:00.000Z",
+	};
+	const opened = (messageId: string) =>
+		`/suga/activity/suga-team/${linear.handle}?item=${messageId}&message=${messageId}`;
+
+	beforeEach(() => {
+		client.api.chats.messages.mockImplementation(({ query }: { query?: { cursor?: string } }) =>
+			Effect.succeed(
+				query?.cursor
+					? { items: [{ kind: "message", message: older }], nextCursor: null }
+					: {
+							items: [
+								{ kind: "message", message: mainMessage },
+								{ kind: "message", message: agentMessage },
+							],
+							nextCursor: "older-page",
+						},
+			),
+		);
+	});
+
+	it("loads older messages until it reaches the message, and moves the focus to it", async () => {
+		mount(opened(older.id));
+
+		const row = (await screen.findByText(older.content)).closest("[data-message-id]");
+		await waitFor(() => expect(document.activeElement).toBe(row));
+		expect(client.api.chats.messages).toHaveBeenCalledWith(
+			expect.objectContaining({ query: expect.objectContaining({ cursor: "older-page" }) }),
+		);
+	});
+
+	it("says so when the message cannot be found in the chat", async () => {
+		mount(opened("0199a3a0-0000-7000-8000-000000000299"));
+
+		expect(
+			await screen.findByText("Could not find the message you opened in this chat."),
+		).toBeDefined();
+	});
+
+	it("keeps the chat when a run is opened beside it from one of its lines", async () => {
+		mount(`${opened(mainMessage.id)}&thread=${routineId}`);
+
+		expect(await screen.findByRole("complementary", { name: routineEntry.title })).toBeDefined();
+		expect(screen.getByRole("log", { name: "Chat messages" })).toBeDefined();
+	});
+
+	it("shows a routine run chosen in Activity as a page of its own, with the way back and to its chat", async () => {
+		mount(`/suga/activity/suga-team/${linear.handle}?item=${routineId}&threadPage=${routineId}`);
+
+		expect(
+			await screen.findByRole("heading", { name: routineExecution.routineName }),
+		).toBeDefined();
+		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
+		expect(screen.getByRole("link", { name: "Back to Activity" }).getAttribute("href")).toBe(
+			"/suga/activity",
+		);
+		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(
+			`/suga/pods/suga-team/agents/${linear.handle}`,
+		);
+	});
+
+	it("ignores an address naming something other than a message", async () => {
+		mount(`/suga/activity/suga-team/${linear.handle}?item=a%22b&message=a%22b`);
+
+		expect(await screen.findByText(mainMessage.content)).toBeDefined();
+		expect(screen.queryByText("Could not find the message you opened in this chat.")).toBeNull();
 	});
 });
 
@@ -1046,23 +1182,6 @@ describe("people typing in the Chat", () => {
 
 		await vi.advanceTimersByTimeAsync(7_000);
 		await waitFor(() => expect(screen.queryByRole("status", { name: "Jye is typing" })).toBeNull());
-	});
-
-	it("shows someone under the message they have read up to as soon as they read it", async () => {
-		const updates = await watchMainThread();
-		await screen.findByText("Checking ownership.");
-		expect(screen.queryByText("Read by Jye")).toBeNull();
-
-		updates.emit(
-			streamEvent("thread.read", {
-				threadId: chat.mainThreadId,
-				person: jyeInThread,
-				readThrough: agentMessage.createdAt,
-				readAt: "2026-09-18T09:30:00.000Z",
-			}),
-		);
-
-		await screen.findByText("Read by Jye");
 	});
 
 	it("does not show you your own typing", async () => {

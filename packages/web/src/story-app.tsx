@@ -251,6 +251,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/routines"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
+		http.get(api("/workspaces/:workspace/chats/activity"), () => HttpResponse.json({ items: [] })),
+		http.get(api("/workspaces/:workspace/chats/approvals"), () =>
+			HttpResponse.json({ waiting: [], answered: [] }),
+		),
 		http.get(api("/workspaces/:workspace/chats/pod-markers"), () =>
 			HttpResponse.json({ pods: {} }),
 		),
@@ -274,7 +278,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 								}
 							: null,
 						waitingOn: null,
-						unread: false,
+						unreadMessages: 0,
 						needsApproval: false,
 					};
 				});

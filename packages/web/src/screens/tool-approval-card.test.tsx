@@ -37,18 +37,21 @@ function asking(
 }
 
 function show(call: ToolCallPart, canApprove = true) {
-	render(
-		<QueryClientProvider client={createQueryClient()}>
+	const queries = createQueryClient();
+	const card = (shown: ToolCallPart) => (
+		<QueryClientProvider client={queries}>
 			<ToolApprovalCard
-				call={call}
+				call={shown}
 				agent={agent}
 				threadId="0199a3a0-0000-7000-8000-0000000000b2"
 				podId="0199a3a0-0000-7000-8000-0000000000b1"
 				canApprove={canApprove}
 				look={{ name: "Linear", presetId: "linear" }}
 			/>
-		</QueryClientProvider>,
+		</QueryClientProvider>
 	);
+	const { rerender } = render(card(call));
+	return { recorded: (next: ToolCallPart) => rerender(card(next)) };
 }
 
 /** The card's answer as a wide screen shows it, in the card rather than the full-screen request. */
@@ -90,6 +93,22 @@ describe("an approval request", () => {
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
 		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
+	});
+
+	it("announces the answer given here once the turn records it", async () => {
+		const { recorded } = show(asking({ team: "Platform" }));
+
+		fireEvent.click(inCard(/^Allow/));
+		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
+		recorded({
+			...asking(
+				{ team: "Platform" },
+				{ status: "allowed", decidedByName: "You", decidedAt: "2026-09-18T09:01:00.000Z" },
+			),
+			status: "running",
+		});
+
+		expect(screen.getByRole("status").textContent).toContain("Allowed by You");
 	});
 
 	it("lets the answer be given again if sending it failed", async () => {
@@ -161,14 +180,12 @@ describe("an approval request", () => {
 	it("says it waits on someone with permission when the reader cannot answer", () => {
 		show(asking({ team: "Platform" }), false);
 
-		expect(screen.getByRole("status").textContent).toBe(
-			"Waiting for someone with permission to answer this.",
-		);
+		expect(screen.getByText("Waiting for someone with permission to answer this.")).toBeDefined();
 		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 
 	it.each(["allowed", "denied"] as const)(
-		"keeps the request readable once %s, with nothing left to answer",
+		"keeps the request readable once %s, and says who answered it without announcing it",
 		(status) => {
 			show(
 				asking(
@@ -180,6 +197,12 @@ describe("an approval request", () => {
 			const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
 			expect(within(card).getByText("Platform")).toBeDefined();
 			expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
+			expect(
+				within(card).getByText(`${status === "allowed" ? "Allowed" : "Denied"} by Mia Chen`, {
+					exact: false,
+				}),
+			).toBeDefined();
+			// An answer already in the history is read, not announced as it loads.
 			expect(within(card).queryByRole("status")).toBeNull();
 		},
 	);

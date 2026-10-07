@@ -26,3 +26,25 @@ export function Panes({ children, className }: { children: ReactNode; className?
 		</main>
 	);
 }
+
+/**
+ * A list column beside the pane it opens. On a phone the two take turns: while
+ * something is `open`, the pane covers the list; otherwise the list is the page.
+ * `list` is given the class that hides it while it is covered.
+ */
+export function ListAndPane({
+	open,
+	list,
+	children,
+}: {
+	open: boolean;
+	list: (className: string | undefined) => ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<>
+			{list(open ? "max-md:hidden" : undefined)}
+			<Panes className={open ? undefined : "max-md:hidden"}>{children}</Panes>
+		</>
+	);
+}

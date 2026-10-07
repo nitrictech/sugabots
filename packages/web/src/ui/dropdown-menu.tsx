@@ -4,14 +4,14 @@ import { cn } from "cn";
 import { Check } from "lucide-react";
 
 /*
- * A menu that floats over the page, drawn as the design draws every floating
- * surface: a raised panel with the dialog's shadow, and rows the size of a
- * settings row's text. It opens from a trigger, or as a context menu where the
+ * A menu that floats over the page, drawn as the design draws every popover: a
+ * raised panel edged in a strong hairline with a soft shadow, and rows the size
+ * of a settings row's text. It opens from a trigger, or as a context menu where the
  * pointer is right-clicked; both hold the same items.
  */
 
 const popupClassName =
-	"z-50 max-h-(--available-height) min-w-[8rem] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-panel bg-panel p-1.5 text-foreground shadow-dialog outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
+	"z-50 max-h-(--available-height) min-w-[8rem] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root {...props} />;
@@ -49,6 +49,9 @@ function DropdownMenuContent({
 	);
 }
 
+const itemClassName =
+	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-base outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+
 function DropdownMenuItem({
 	className,
 	variant = "default",
@@ -61,7 +64,7 @@ function DropdownMenuItem({
 			data-slot="dropdown-menu-item"
 			data-variant={variant}
 			className={cn(
-				"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-[14.5px] outline-hidden data-disabled:pointer-events-none data-highlighted:bg-hover data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+				itemClassName,
 				"data-[variant=destructive]:text-destructive-text data-[variant=destructive]:data-highlighted:bg-destructive-hover",
 				className,
 			)}
@@ -80,10 +83,7 @@ function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.
 	return (
 		<MenuPrimitive.RadioItem
 			data-slot="dropdown-menu-radio-item"
-			className={cn(
-				"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-[10px] py-2 pr-8 pl-2.5 text-[14.5px] outline-hidden data-disabled:pointer-events-none data-highlighted:bg-hover data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-				className,
-			)}
+			className={cn(itemClassName, "pr-8", className)}
 			{...props}
 		>
 			{children}
@@ -98,7 +98,7 @@ function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.
 	return (
 		<MenuPrimitive.Separator
 			data-slot="dropdown-menu-separator"
-			className={cn("-mx-1.5 my-1.5 h-px bg-border", className)}
+			className={cn("-mx-1 my-1 h-px bg-border", className)}
 			{...props}
 		/>
 	);

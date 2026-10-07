@@ -14,8 +14,13 @@ import { linkOptions } from "@tanstack/react-router";
  */
 
 interface AgentInPod {
-	pod: Pod;
-	agent: Agent;
+	pod: Pick<Pod, "slug">;
+	agent: Pick<Agent, "handle">;
+}
+
+/** What is new across the workspace. */
+export function activityLink() {
+	return linkOptions({ from: "/$workspace", to: "./activity" });
 }
 
 /** A pod's conversation list. */
@@ -54,5 +59,14 @@ export function agentSettingsLink({ pod, agent }: AgentInPod) {
 		from: "/$workspace",
 		to: "./settings/pods/$pod/agents/$agent",
 		params: { pod: pod.slug, agent: agent.handle },
+	});
+}
+
+/** A person's page among the workspace's members, by their membership's id. */
+export function memberSettingsLink(membership: { id: string }) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./settings/members/$member",
+		params: { member: membership.id },
 	});
 }

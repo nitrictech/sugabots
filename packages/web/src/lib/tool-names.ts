@@ -54,16 +54,6 @@ export function toolTitle(tool: string): string {
 }
 
 /**
- * What a chat waiting for approval of `tool` is doing: `Waiting to list issues
- * in Linear`, or `Waiting to read web pages`. Tool names, built-in or
- * connected, read as what the tool does, so they follow "to".
- */
-export function waitingText(tool: string): string {
-	const title = toolTitle(tool);
-	return `Waiting to ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
-}
-
-/**
  * A machine key written out as words: `search_issues` as `Search issues`,
  * `sentry` as `Sentry`, a tool argument's `due_date` or `dueDate` as `Due date`.
  */

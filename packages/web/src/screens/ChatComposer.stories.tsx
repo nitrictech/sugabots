@@ -1,7 +1,7 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { useEffect, useState } from "react";
-import { expect, fireEvent, fn, screen, waitFor } from "storybook/test";
+import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { ChatComposer } from "./ChatComposer.tsx";
 
@@ -31,7 +31,6 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		label: "Message Growth Desk",
-		placeholder: "Message Growth Desk",
 		value: "",
 		onValueChange: fn(),
 		onSubmit: fn(),
@@ -77,56 +76,10 @@ const meta = preview.meta({
 	},
 });
 
-/**
- * `stacked`: the draft is above both buttons, using the composer's full width.
- * `inline`: the draft sits between them.
- */
-function expectLayout(
-	canvas: { getByRole: typeof screen.getByRole },
-	layout: "stacked" | "inline",
-) {
-	const draft = canvas
-		.getByRole("textbox", { name: "Message Growth Desk" })
-		.getBoundingClientRect();
-	const attach = canvas
-		.getByRole("button", { name: "Attach files (coming soon)" })
-		.getBoundingClientRect();
-	return expect(draft.bottom <= attach.top ? "stacked" : "inline").toBe(layout);
-}
+/** Empty is the composer before anything is typed: Send stays grey until there is something to send. */
+export const Empty = meta.story({});
 
-/** Empty is the composer before anything is typed: the send button stays grey. */
-export const Empty = meta.story({
-	play: async ({ canvas }) => {
-		await expectLayout(canvas, "inline");
-	},
-});
-
-/**
- * LongPlaceholder keeps an empty draft between the buttons even when its
- * placeholder wraps, as a long pod name does on a phone.
- */
-export const LongPlaceholder = meta.story({
-	tags: ["ai-generated"],
-	args: { placeholder: "Message Customer Success Escalations Team" },
-	decorators: [
-		(Story) => (
-			<div style={{ width: 360 }}>
-				<Story />
-			</div>
-		),
-	],
-	play: async ({ canvas }) => {
-		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		const lineHeight = Number.parseFloat(getComputedStyle(input).lineHeight);
-		await expect(input.scrollHeight).toBeGreaterThanOrEqual(2 * lineHeight);
-		await expectLayout(canvas, "inline");
-	},
-});
-
-/**
- * Draft grows to fit a multi-line message instead of scrolling it out of sight,
- * taking the composer's full width with the buttons beneath it.
- */
+/** Draft grows to fit a multi-line message instead of scrolling it out of sight. */
 export const Draft = meta.story({
 	args: {
 		value: "Please summarise the customer feedback.\nHighlight anything we should act on today.",
@@ -134,71 +87,6 @@ export const Draft = meta.story({
 	play: async ({ canvas }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await expect(input.scrollHeight).toBe(input.clientHeight);
-		await expectLayout(canvas, "stacked");
-	},
-});
-
-/**
- * WrapToFullWidth moves a line too long for the row beside the buttons above
- * them, and back beside them once the draft is short again.
- */
-export const WrapToFullWidth = meta.story({
-	tags: ["ai-generated"],
-	play: async ({ canvas, userEvent }) => {
-		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		await userEvent.type(input, "Short line");
-		await expectLayout(canvas, "inline");
-		await userEvent.paste(" that keeps going".repeat(40));
-		await expectLayout(canvas, "stacked");
-		await expect(input).toHaveFocus();
-		await userEvent.clear(input);
-		await userEvent.type(input, "Short again");
-		await expectLayout(canvas, "inline");
-	},
-});
-
-/**
- * ResizeToFit measures again when the composer changes width: a line that fits
- * beside the buttons moves above them when the window narrows, and back again
- * when it widens.
- */
-export const ResizeToFit = meta.story({
-	tags: ["ai-generated"],
-	args: { value: "Please summarise the customer feedback from today." },
-	play: async ({ canvas, canvasElement }) => {
-		try {
-			canvasElement.style.width = "720px";
-			await waitFor(() => expectLayout(canvas, "inline"));
-			canvasElement.style.width = "360px";
-			await waitFor(() => expectLayout(canvas, "stacked"));
-			canvasElement.style.width = "720px";
-			await waitFor(() => expectLayout(canvas, "inline"));
-		} finally {
-			canvasElement.style.width = "";
-		}
-	},
-});
-
-/**
- * NarrowWhileTyping settles when the draft wraps in the same moment the
- * composer narrows, before the resize has been reported.
- */
-export const NarrowWhileTyping = meta.story({
-	tags: ["ai-generated"],
-	play: async ({ canvas, canvasElement }) => {
-		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		try {
-			canvasElement.style.width = "720px";
-			await waitFor(() => expectLayout(canvas, "inline"));
-			canvasElement.style.width = "360px";
-			fireEvent.change(input, {
-				target: { value: "Please summarise the customer feedback from today." },
-			});
-			await waitFor(() => expectLayout(canvas, "stacked"));
-			await expect(input).toBeInTheDocument();
-		} finally {
-			canvasElement.style.width = "";
-		}
 	},
 });
 
@@ -213,6 +101,8 @@ export const LongDraft = meta.story({
 			"Mention anyone who already has a fix in flight.",
 			"Finish with the three things you would do first.",
 			"Keep it short enough to read on a phone.",
+			"Link the tickets you used.",
+			"And note anything still unclear.",
 		].join("\n"),
 	},
 	play: async ({ canvas }) => {
@@ -296,20 +186,16 @@ export const EditMention = meta.story({
 	},
 });
 
-/**
- * AttachmentsComingSoon keeps the unfinished + reachable by keyboard and
- * pointer, announced as unavailable, so its tooltip can say why.
- */
-export const AttachmentsComingSoon = meta.story({
-	tags: ["ai-generated"],
+/** The @ starts a mention where the cursor is, opening the same list as typing `@`. */
+export const MentionButton = meta.story({
+	args: { value: "Can you ask" },
 	play: async ({ canvas, userEvent }) => {
-		const attach = canvas.getByRole("button", { name: "Attach files (coming soon)" });
-		await expect(attach).toHaveAttribute("aria-disabled", "true");
-		await userEvent.tab();
-		await expect(attach).toHaveFocus();
-		await userEvent.hover(attach);
+		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
+		await expect(canvas.getByRole("textbox", { name: "Message Growth Desk" })).toHaveValue(
+			"Can you ask @",
+		);
 		await expect(
-			await screen.findByText("Attach files (coming soon)", { selector: "div" }),
+			await canvas.findByRole("listbox", { name: "People and bots to mention" }),
 		).toBeVisible();
 	},
 });
@@ -347,68 +233,49 @@ export const SendFailed = meta.story({
 const growthDesk = { name: "Growth Desk", color: "green", face: "arc" } as const;
 
 /**
- * WithPeople is a thread with someone else in it: Tab, or the switch before
- * the send button, moves to people only and back. Tab picks a mention instead
- * while the mention list is open.
+ * WithPeople is a thread with someone else in it: the people button beside
+ * the @, or Tab, moves to people only and back. Tab
+ * picks a mention instead while the mention list is open.
  */
 export const WithPeople = meta.story({
 	args: { peopleOnly: { on: false, onChange: fn(), agent: growthDesk } },
 	play: async ({ canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		const toggle = canvas.getByRole("button", { name: "People only" });
-		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		const chip = canvas.getByRole("button", { name: "People only" });
+		await expect(chip).toHaveAttribute("aria-pressed", "false");
+		await expect(chip).not.toHaveTextContent("People only");
 		await userEvent.click(input);
 		await userEvent.keyboard("{Tab}");
-		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		await expect(chip).toHaveAttribute("aria-pressed", "true");
 		await expect(input).toHaveFocus();
 		await userEvent.keyboard("{Tab}");
-		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await expect(chip).toHaveAttribute("aria-pressed", "false");
 
 		await userEvent.type(input, "@sam");
 		await userEvent.keyboard("{Tab}");
 		await expect(input).toHaveValue("@sam-rivera ");
-		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await expect(chip).toHaveAttribute("aria-pressed", "false");
 
-		await userEvent.click(toggle);
-		await expect(toggle).toHaveAttribute("aria-pressed", "true");
+		await userEvent.click(chip);
+		await expect(chip).toHaveAttribute("aria-pressed", "true");
 	},
 });
 
 /**
- * PeopleOnly writes to the other people, which a chip beside the + shows: the
- * bot reads along but won't reply. Clicking the chip goes back to the bot.
+ * PeopleOnly writes to the other people, named in the placeholder: the chip
+ * says so, the edge steps up a grey and Send goes neutral, since the accent is
+ * the bot's. Clicking the chip goes back to the bot.
  */
 export const PeopleOnly = meta.story({
 	args: {
-		label: "Message people in Product",
-		placeholder: "Message people in Product",
+		label: "Message Jay Yu and Priya Kaur",
+		value: "Can one of you check the quote?",
 		peopleOnly: { on: true, onChange: fn(), agent: growthDesk },
 	},
-	// The chip shows on a wide screen only.
-	globals: { viewport: { value: "desktop", isRotated: false } },
 	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Back to bots" }));
+		const chip = canvas.getByRole("button", { name: "People only" });
+		await expect(chip).toHaveTextContent("People only");
+		await userEvent.click(chip);
 		await expect(args.peopleOnly?.onChange).toHaveBeenCalledWith(false);
-	},
-});
-
-/**
- * PeopleOnlyOnATablet has no room for the chip or the words, as on a phone: a
- * people icon before the send button switches, on a solid disc while the
- * message is for people only.
- */
-export const PeopleOnlyOnATablet = meta.story({
-	args: {
-		label: "Message Growth Desk",
-		placeholder: "Message Growth Desk",
-		peopleOnly: { on: false, onChange: fn(), agent: growthDesk },
-	},
-	globals: { viewport: { value: "ipad11p", isRotated: false } },
-	play: async ({ canvas, userEvent }) => {
-		const toggle = canvas.getByRole("button", { name: "People only" });
-		await userEvent.click(toggle);
-		await expect(toggle).toHaveAttribute("aria-pressed", "true");
-		// The chip beside the + is left out below a wide screen.
-		await expect(canvas.queryByRole("button", { name: "Back to bots" })).toBeNull();
 	},
 });

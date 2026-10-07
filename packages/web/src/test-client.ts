@@ -107,6 +107,8 @@ export const client = {
 		chats: {
 			list: vi.fn(),
 			podMarkers: vi.fn(),
+			approvals: vi.fn(),
+			activity: vi.fn(),
 			markRead: vi.fn(),
 			getOrCreate: vi.fn(),
 			messages: vi.fn(),

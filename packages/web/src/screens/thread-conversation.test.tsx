@@ -105,7 +105,6 @@ function show(
 				host={host}
 				isRunning={false}
 				participants={participants}
-				user={user}
 				podId={POD}
 				onOpenThread={() => undefined}
 				dividers={false}
@@ -162,7 +161,7 @@ describe("what people and bots write", () => {
 		const answered = "**Tim's bill** is high.\n\n- Look up plans";
 		show([reply([{ type: "text", text: answered }])]);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Copy message" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Copy text" }));
 
 		expect(writeText).toHaveBeenCalledWith(answered);
 		expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
@@ -280,12 +279,14 @@ describe("a reply that opens by asking another bot", () => {
 		{ type: "text", text: "Sentry Scout found 41 events." },
 	]);
 
-	it("names the bot above its message, not above the collaboration line", async () => {
+	it("puts the collaboration under the words that led to it, as a thread line", async () => {
 		show([asked], { participants: [host, helper] });
 
-		const line = await screen.findByRole("button", { name: /collaborated with Sentry Scout/ });
-		const name = screen.getByText(host.name, { selector: "div" });
-		expect(line.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		const line = await screen.findByRole("button", {
+			name: `Open Collaboration: ${host.name} and ${helper.name}, Done`,
+		});
+		const name = screen.getByText(host.name, { selector: "span" });
+		expect(name.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 });
 

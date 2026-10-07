@@ -1,24 +1,19 @@
-import type {
-	ChatHistoryEntry,
-	RoutineExecution,
-	SessionUser,
-	ThreadParticipant,
-} from "@sugabots/contracts";
+import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { cn } from "cn";
-import { ArrowUpRight, Braces, ChevronLeft, CircleAlert, Repeat } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowUpRight, Braces, ChevronLeft, CircleAlert } from "lucide-react";
+import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAgentWithPod } from "@/lib/agents.ts";
+import { useAuthorLinks } from "@/lib/author-links.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import type { ChatThreadType } from "./ChatActivityRow.tsx";
-import { ChatSidebar, sidebarBarButton } from "./ChatSidebar.tsx";
+import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
+import { ChatSidebar } from "./ChatSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { ThreadConversation } from "./ThreadConversation.tsx";
 import { ThreadNotices } from "./ThreadNotices.tsx";
@@ -26,18 +21,23 @@ import { ThreadNotices } from "./ThreadNotices.tsx";
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
 /**
- * A collaboration or routine run opened from its line, as the sidebar beside
- * the chat. A collaboration shows its two bots and their thread mirrored: the
- * chat's bot on the right, the one it asked on the left.
+ * Where a thread panel is shown: as the sidebar beside the chat, which closes,
+ * or as a page of its own where the chat would be, as Activity opens one, with
+ * a phone's Back to the list it covers and something at its header's right,
+ * such as the way to the chat itself.
  */
+export type ThreadFrame =
+	| { kind: "sidebar"; onClose: () => void }
+	| { kind: "page"; back: BackTo; trailing: ReactNode };
+
+/** A collaboration or routine run opened from its line, framed by `frame`. */
 export function ChatThreadPanel({
 	chatId,
 	chatAgentId,
 	threadId,
 	entry,
 	history,
-	user,
-	onClose,
+	frame,
 	onOpenThread,
 }: {
 	chatId: string;
@@ -46,11 +46,11 @@ export function ChatThreadPanel({
 	threadId: string;
 	entry?: ChatHistoryEntry;
 	history: ChatHistoryEntry[];
-	user: SessionUser;
-	onClose: () => void;
+	frame: ThreadFrame;
 	onOpenThread: (threadId: string) => void;
 }) {
 	const query = useThread(threadId);
+	const authorLinkOf = useAuthorLinks(query.data?.thread.podId);
 	useThreadEvents(threadId);
 	const notices = useThreadNotices(threadId);
 	const heading = useRef<HTMLHeadingElement>(null);
@@ -91,146 +91,171 @@ export function ChatThreadPanel({
 	}
 
 	const title = details?.thread.title ?? "Thread";
+	const headed = {
+		label: title,
+		heading:
+			type === "collaboration"
+				? "Collaboration"
+				: type === "routine"
+					? (routineExecution?.routineName ?? title)
+					: title,
+		subheading:
+			type === "collaboration"
+				? other && `${mine?.name} and ${other.name}`
+				: type === "routine"
+					? "Routine run"
+					: undefined,
+		headingRef: heading,
+		actions: type === "routine" && routineExecution && (
+			<RoutineHeaderActions execution={routineExecution} />
+		),
+	};
+	const body = query.isPending ? (
+		<div className="grid flex-1 place-content-center text-muted-foreground text-sm">
+			Loading thread…
+		</div>
+	) : !details ||
+		!host ||
+		!type ||
+		(details.thread.chatId !== chatId && entry?.threadId !== threadId) ? (
+		<EmptyState title="Could not load this thread">
+			{frame.kind === "sidebar"
+				? "Try closing this panel and opening it again."
+				: "Go back and open it again."}
+		</EmptyState>
+	) : (
+		<>
+			{parentRoutine && (
+				<button
+					type="button"
+					onClick={() => onOpenThread(parentRoutine.threadId)}
+					className="focus-ring mx-[18px] mt-3 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-sm"
+				>
+					<ChevronLeft aria-hidden size={14} />
+					Back to Routine
+				</button>
+			)}
+			<div
+				ref={timeline}
+				role="log"
+				aria-label="Thread messages"
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: a thread longer than the sheet scrolls, so the keyboard has to reach it too.
+				tabIndex={0}
+				className="focus-ring min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-2 pb-2"
+			>
+				{query.loadOlderError && (
+					<p role="alert" className="m-0 px-[18px] pb-3 text-destructive-text text-sm">
+						Earlier messages could not be loaded.
+					</p>
+				)}
+				{details.olderMessagesCursor && (
+					<Button
+						variant="link"
+						size="bare"
+						className="mx-auto mb-3 flex"
+						disabled={query.isLoadingOlder}
+						onClick={() => void loadOlder().catch(() => {})}
+					>
+						{query.isLoadingOlder ? "Loading…" : "Load older messages"}
+					</Button>
+				)}
+				{type === "routine" && routineExecution?.error && (
+					<p
+						role="alert"
+						className="mx-[18px] mb-4 flex items-start gap-2 rounded-lg bg-destructive-hover px-3 py-2.5 text-destructive-text text-sm"
+					>
+						<CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+						{routineExecution.error}
+					</p>
+				)}
+				<ThreadConversation
+					messages={
+						type === "routine"
+							? details.messages.filter((message) => message.author.kind !== "routine_trigger")
+							: details.messages
+					}
+					host={host}
+					// A notice says the reply is not coming, so nobody is shown typing it.
+					isRunning={details.thread.status === "running" && notices.length === 0}
+					participants={mentionableIn(details)}
+					onOpenThread={onOpenThread}
+					podId={details.thread.podId}
+					canApproveToolCalls={details.capabilities?.approveToolCalls}
+					compact
+					authorLinkOf={authorLinkOf}
+				/>
+				<ThreadNotices notices={notices} />
+			</div>
+			{frame.kind === "sidebar" && type === "collaboration" && mine && (
+				<p className="m-0 shrink-0 border-border border-t px-[18px] py-3 text-[12.5px] text-subtle-foreground leading-normal">
+					Bots talk here on their own. To weigh in, message {mine.name} in the main chat.
+				</p>
+			)}
+		</>
+	);
+	if (frame.kind === "page") {
+		return (
+			<ThreadPage {...headed} back={frame.back} trailing={frame.trailing}>
+				{body}
+			</ThreadPage>
+		);
+	}
 	return (
 		<ChatSidebar
-			label={title}
-			onClose={onClose}
+			{...headed}
+			onClose={frame.onClose}
 			sheet
-			actions={
-				type === "routine" &&
-				routineExecution && <RoutineHeaderActions execution={routineExecution} />
-			}
-			// Wider than Details: it holds a whole conversation, bubbles and all.
-			className="w-[520px] bg-background md:max-xl:w-[min(560px,100%)]"
+			// Wider than Details: it holds a whole conversation.
+			className="w-[560px] md:max-xl:w-[min(600px,100%)]"
 		>
-			{query.isPending ? (
-				<div className="grid flex-1 place-content-center text-muted-foreground text-sm">
-					Loading thread…
-				</div>
-			) : !details ||
-				!host ||
-				!type ||
-				(details.thread.chatId !== chatId && entry?.threadId !== threadId) ? (
-				<EmptyState title="Could not load this thread">
-					Try closing this panel and opening it again.
-				</EmptyState>
-			) : (
-				<>
-					{/*
-					 * On a phone the sheet has less room, so the heading sits beside smaller
-					 * faces, and leaves room for a routine's buttons floating over its right.
-					 */}
-					<header
-						className={cn(
-							"flex shrink-0 flex-col items-center gap-1.5 px-[18px] pb-[18px] text-center max-md:flex-row max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1 max-md:px-4 max-md:pb-3 max-md:text-left",
-							type === "routine" && "max-md:pr-24",
-						)}
-					>
-						{parentRoutine && (
-							<button
-								type="button"
-								onClick={() => onOpenThread(parentRoutine.threadId)}
-								className="focus-ring mb-1 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-sm max-md:mb-0 max-md:w-full"
-							>
-								<ChevronLeft aria-hidden size={14} />
-								Back to Routine
-							</button>
-						)}
-						{type === "collaboration" ? (
-							<span aria-hidden className="relative h-[60px] w-24 shrink-0 max-md:h-8 max-md:w-12">
-								<AgentAvatar
-									color={(mine ?? host).color}
-									face={(mine ?? host).face}
-									size={60}
-									className="absolute top-0 left-0 max-md:size-8"
-								/>
-								{other && (
-									<AgentAvatar
-										color={other.color}
-										face={other.face}
-										size={60}
-										className="absolute top-0 left-9 rounded-full shadow-[0_0_0_4px_var(--background)] max-md:left-4 max-md:size-8 max-md:shadow-[0_0_0_3px_var(--list)]"
-									/>
-								)}
-							</span>
-						) : (
-							<span
-								aria-hidden
-								className="grid size-[60px] shrink-0 place-items-center rounded-full bg-chip text-soft-foreground max-md:size-8"
-							>
-								<Repeat size={26} strokeWidth={2} className="max-md:size-4" />
-							</span>
-						)}
-						<div className="flex min-w-0 flex-col items-center gap-1.5 max-md:flex-1 max-md:items-start max-md:gap-0">
-							<h2
-								ref={heading}
-								tabIndex={-1}
-								className="m-0 pt-1.5 font-bold text-[19px] text-foreground outline-none max-md:truncate max-md:pt-0 max-md:text-[17px]"
-							>
-								{type === "collaboration"
-									? "Collaboration"
-									: (routineExecution?.routineName ?? title)}
-							</h2>
-							<p className="m-0 text-[13.5px] text-muted-foreground max-md:truncate">
-								{type === "collaboration" ? (other ? `with ${other.name}` : title) : "Routine run"}
-							</p>
-						</div>
-					</header>
-					<div
-						ref={timeline}
-						role="log"
-						aria-label="Thread messages"
-						// biome-ignore lint/a11y/noNoninteractiveTabindex: a thread longer than the sheet scrolls, so the keyboard has to reach it too.
-						tabIndex={0}
-						className="focus-ring min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3.5 pt-1 pb-4"
-					>
-						{query.loadOlderError && (
-							<p role="alert" className="m-0 pb-3 text-destructive-text text-sm">
-								Earlier messages could not be loaded.
-							</p>
-						)}
-						{details.olderMessagesCursor && (
-							<Button
-								variant="link"
-								size="bare"
-								className="mx-auto mb-3 flex"
-								disabled={query.isLoadingOlder}
-								onClick={() => void loadOlder().catch(() => {})}
-							>
-								{query.isLoadingOlder ? "Loading…" : "Load older messages"}
-							</Button>
-						)}
-						{type === "routine" && routineExecution?.error && (
-							<p
-								role="alert"
-								className="mb-4 flex items-start gap-2 rounded-lg bg-destructive-hover px-3 py-2.5 text-destructive-text text-sm"
-							>
-								<CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-								{routineExecution.error}
-							</p>
-						)}
-						<ThreadConversation
-							messages={
-								type === "routine"
-									? details.messages.filter((message) => message.author.kind !== "routine_trigger")
-									: details.messages
-							}
-							host={host}
-							// A notice says the reply is not coming, so nobody is shown typing it.
-							isRunning={details.thread.status === "running" && notices.length === 0}
-							participants={mentionableIn(details)}
-							user={user}
-							rightAgentId={type === "collaboration" ? mine?.id : undefined}
-							onOpenThread={onOpenThread}
-							podId={details.thread.podId}
-							canApproveToolCalls={details.capabilities?.approveToolCalls}
-							compact
-						/>
-						<ThreadNotices notices={notices} />
-					</div>
-				</>
-			)}
+			{body}
 		</ChatSidebar>
+	);
+}
+
+/** A thread as a page of its own: a header naming it, and the thread under it. */
+function ThreadPage({
+	label,
+	heading,
+	subheading,
+	headingRef,
+	actions,
+	back,
+	trailing,
+	children,
+}: {
+	label: string;
+	heading: string;
+	subheading?: string;
+	headingRef: Ref<HTMLHeadingElement>;
+	actions?: ReactNode;
+	back: BackTo;
+	trailing: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<section aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
+			<header className="relative flex h-14 shrink-0 items-center gap-2 border-border border-b pr-4 pl-5 max-md:pl-12">
+				<HeaderBack back={back} />
+				<div className="flex min-w-0 flex-1 items-baseline gap-2">
+					<h1
+						ref={headingRef}
+						tabIndex={-1}
+						className="m-0 min-w-0 shrink-0 truncate font-semibold text-[16px] text-foreground outline-none max-md:shrink"
+					>
+						{heading}
+					</h1>
+					{subheading && (
+						<span className="min-w-0 truncate text-[13.5px] text-muted-foreground">
+							{subheading}
+						</span>
+					)}
+				</div>
+				{actions}
+				{trailing}
+			</header>
+			{children}
+		</section>
 	);
 }
 
@@ -241,14 +266,14 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 		<>
 			{execution.trigger.kind === "webhook" && (
 				<details className="group relative">
-					<Tooltip label="View webhook payload">
-						<summary
-							aria-label="View webhook payload"
-							className={`${sidebarBarButton} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
-						>
-							<Braces aria-hidden size={15} strokeWidth={2.4} />
-						</summary>
-					</Tooltip>
+					<IconButton
+						label="View webhook payload"
+						variant="bar"
+						render={<summary />}
+						className="list-none [&::-webkit-details-marker]:hidden"
+					>
+						<Braces aria-hidden size={15} strokeWidth={2.4} />
+					</IconButton>
 					{/* Hangs from the sidebar's top right corner, so it opens leftwards. */}
 					<div className="absolute right-0 z-20 mt-2 w-[min(328px,calc(100vw-2rem))] overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
 						{execution.trigger.idempotencyKey && (
@@ -266,17 +291,15 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 				</details>
 			)}
 			{placed && (
-				<Tooltip label="View routine definition">
-					<Link
-						{...agentSettingsLink(placed)}
-						state={backToChat}
-						search={{ tab: "routines" }}
-						aria-label="View routine definition"
-						className={sidebarBarButton}
-					>
-						<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
-					</Link>
-				</Tooltip>
+				<IconButton
+					label="View routine definition"
+					variant="bar"
+					render={
+						<Link {...agentSettingsLink(placed)} state={backToChat} search={{ tab: "routines" }} />
+					}
+				>
+					<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
+				</IconButton>
 			)}
 		</>
 	);
