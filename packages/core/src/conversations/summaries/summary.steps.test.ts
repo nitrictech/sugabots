@@ -173,7 +173,9 @@ describe("summarise", () => {
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(ended).toEqual([{ failed: "The model provider could not answer." }]);
+		expect(ended).toEqual([
+			{ failed: "The model provider could not answer the request for this model." },
+		]);
 		expect(summaries.complete).not.toHaveBeenCalled();
 	});
 

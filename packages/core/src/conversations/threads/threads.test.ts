@@ -886,7 +886,10 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				),
 		);
 		expect(scribeTurns).toEqual([
-			{ status: "failed", error: "The model provider could not answer." },
+			{
+				status: "failed",
+				error: "The model provider could not answer the request for this model.",
+			},
 		]);
 	});
 

@@ -41,7 +41,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	const execution = onPostgres({
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
-	const providerDown = UserMessage.of`The model provider could not answer.`;
+	const providerDown = UserMessage.of`The model provider could not answer the request for this model.`;
 	let threadId: string;
 	let connectionId: string;
 	let hostId: string;
