@@ -127,9 +127,16 @@ both the web app and the API. It stores everything in PostgreSQL 18.
 
 ## On a hosting platform
 
-Platforms such as Railway, Render and Suga can run the image and provide HTTPS.
-Create a PostgreSQL 18 database, then a service from
-`ghcr.io/nitrictech/sugabots:latest`, and set these on it:
+Platforms such as [Suga](https://suga.app), [Railway](https://railway.com) and
+[Render](https://render.com) can run the image and provide HTTPS.
+
+On Suga, the
+[Sugabots template](https://dashboard.suga.app/new/template?id=sugabots)
+creates the service and its PostgreSQL 18 database for you. On other platforms,
+create a PostgreSQL 18 database, then a service from
+`ghcr.io/nitrictech/sugabots:latest`.
+
+Either way, the service needs these settings:
 
 - `DATABASE_URL`: the database's connection string
 - `PUBLIC_URL`: the service's HTTPS address

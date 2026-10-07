@@ -179,8 +179,12 @@ workspace, conversation, and saved credential.
 
 One image runs the whole application: the API, serving the built web app at
 every path outside `/api`. Any platform that builds a `Dockerfile` from a
-repository can run it, such as Railway, Render or Suga; point the service at
-the repository root and give it a PostgreSQL 18 database.
+repository can run it, such as [Suga](https://suga.app),
+[Railway](https://railway.com) or [Render](https://render.com); point the
+service at the repository root and give it a PostgreSQL 18 database. To run
+the released image instead, the
+[Sugabots template](https://dashboard.suga.app/new/template?id=sugabots) on
+Suga creates the service and its database.
 
 ```sh
 docker build -t sugabots .
