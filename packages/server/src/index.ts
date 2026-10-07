@@ -7,6 +7,7 @@ import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
+import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
@@ -24,6 +25,10 @@ import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-s
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
+import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
+import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
+import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
@@ -68,6 +73,7 @@ const Integrations = Layer.mergeAll(
 	Email.layer,
 	Models.layer,
 	BuiltInTools.layer,
+	SandboxTools.layer,
 	ConnectionTools.layer,
 );
 
@@ -79,6 +85,9 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	AgentAdministration.layer,
 	ModelProviderSetup.layer,
 	SearchProviderSetup.layer,
+	SandboxProviderSetup.layer,
+	SandboxNetwork.layer,
+	PodSandboxSetup.layer,
 	ConnectionSetup.layer,
 	ModelTrials.layer,
 	Usage.layer,
@@ -94,13 +103,15 @@ const ConversationServices = Conversations.layer.pipe(
 
 /**
  * What runs without a request: the workflows, the routine scheduler, the
- * nightly event prune, and seeding the preset providers into every workspace.
+ * nightly event prune, seeding the preset providers into every workspace, and
+ * pausing idle sandboxes.
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
 	Routines.schedulerLayer,
 	EventPruning.layer,
 	PresetSeeding.layer,
+	PodSandboxes.pauseSweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */

@@ -275,6 +275,7 @@ export const Member = meta.story({
 					permissions: {
 						...pod.permissions,
 						manageConnections: false,
+						manageSandbox: false,
 						rename: false,
 						manageMembers: false,
 					},

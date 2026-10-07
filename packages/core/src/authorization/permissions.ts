@@ -260,6 +260,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		updateAgents: may("agent.update"),
 		deleteAgents: may("agent.delete"),
 		manageConnections: may("connection.manage"),
+		manageSandbox: may("sandbox.manage"),
 		manageRoutines: may("routine.manage"),
 		runRoutines: may("routine.run"),
 	};

@@ -40,6 +40,7 @@ const placeholder = {
 	model: "claude-sonnet",
 	prompt: "",
 	disabledTools: [],
+	usesSandbox: false,
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 const enabledModel = {
