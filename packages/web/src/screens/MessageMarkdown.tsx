@@ -63,12 +63,34 @@ const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 	});
 };
 
+/* `<wbr>` after each `/` or `.` in an inline-code or link token, so a long
+ * path or URL wraps there instead of crowding the cells next to it. */
+const rehypeSoftBreaks: Plugin<[], Root> = () => (tree) => {
+	visit(tree, "element", (node, _index, parent) => {
+		const inlineCode =
+			node.tagName === "code" && !(parent?.type === "element" && parent.tagName === "pre");
+		if (!inlineCode && node.tagName !== "a") return;
+		const expanded: typeof node.children = [];
+		for (const child of node.children) {
+			if (child.type !== "text") {
+				expanded.push(child);
+				continue;
+			}
+			for (const [i, text] of child.value.split(/(?<=[/._-])/).entries()) {
+				if (i > 0) expanded.push({ type: "element", tagName: "wbr", properties: {}, children: [] });
+				expanded.push({ type: "text", value: text });
+			}
+		}
+		node.children = expanded;
+	});
+};
+
 /*
  * These replace Streamdown's own rehype plugins, its sanitiser among them, so
  * nothing strips the `<mention>` elements `remarkMentions` adds. Streamdown's
  * `allowedTags` only reaches the sanitiser when its own plugins are in use.
  */
-const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks];
+const REHYPE_PLUGINS: PluggableList = [rehypeFocusableCodeBlocks, rehypeSoftBreaks];
 
 /* Streamdown's own plugins give it tables and strikethrough; passing any replaces them. */
 const REMARK_PLUGINS: PluggableList = [...Object.values(defaultRemarkPlugins), remarkMentions];
