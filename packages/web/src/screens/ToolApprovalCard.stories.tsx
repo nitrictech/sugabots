@@ -74,7 +74,6 @@ const meta = preview.meta({
 		podId: "0199a3a0-0000-7000-8000-0000000000b1",
 		canApprove: true,
 		look: calendar,
-		endsRun: true,
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -125,7 +124,7 @@ export const ViewerCantAnswer = meta.story({
 	},
 });
 
-/** Answered keeps the request readable after the answer; the tool line above the reply says how it went. */
+/** Answered keeps the request readable after the answer, and says under it how it went and who answered. */
 export const Answered = meta.story({
 	args: { call: decided("allowed", "Ryan") },
 	play: async ({ canvas }) => {
@@ -145,9 +144,6 @@ export const BigLinearIssueUnfolded = meta.story({
 		await userEvent.click(canvas.getByRole("button", { name: "See more" }));
 	},
 });
-
-/** BotOnTheRight is the card under a bot whose messages sit on the right, as in a collaboration. */
-export const BotOnTheRight = meta.story({ args: { outgoing: true } });
 
 /** ConnectionSinceRemoved is a call to a connection the pod no longer has: the handle is written out. */
 export const ConnectionSinceRemoved = meta.story({ args: { look: undefined } });

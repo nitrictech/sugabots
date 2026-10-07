@@ -1,10 +1,10 @@
 import type { Agent, Pod, Workspace } from "@sugabots/contracts";
 import { Link, useMatchRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Hand, Plus, UserRound } from "lucide-react";
+import { Bell, Hand, Inbox, Plus, UserRound } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
-import { usePodChatMarkers } from "@/lib/chats.ts";
+import { useActivityFeed, useApprovalInbox, usePodChatMarkers } from "@/lib/chats.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
@@ -16,6 +16,7 @@ import { PodTile } from "@/shell/PodTile.tsx";
 import { PodMenuItems } from "@/shell/RailMenus.tsx";
 import { WorkspaceSwitcher } from "@/shell/WorkspaceSwitcher.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/ui/dropdown-menu.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -31,6 +32,8 @@ type Making = { kind: "pod" } | { kind: "bot"; pod: Pod };
 export function Rail() {
 	const { data: pods } = usePods();
 	const { data: markers } = usePodChatMarkers();
+	const { data: approvals } = useApprovalInbox();
+	const { data: activity } = useActivityFeed();
 	const { agents } = useAgents();
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
@@ -49,10 +52,14 @@ export function Rail() {
 				pods={(pods ?? []).map((pod) => ({
 					pod,
 					bots: crewIn(agents, pod),
-					unreadChats: markers?.pods[pod.id]?.unreadChats ?? 0,
+					unreadMessages: markers?.pods[pod.id]?.unreadMessages ?? 0,
 					needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
 				}))}
 				selected={selected}
+				waitingApprovals={approvals?.waiting.length ?? 0}
+				unreadMentions={
+					activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0
+				}
 				workspace={workspace}
 				workspaces={workspaces ?? []}
 				className={covered ? "max-md:hidden" : undefined}
@@ -87,6 +94,8 @@ export function Rail() {
 export function RailView({
 	pods,
 	selected,
+	waitingApprovals = 0,
+	unreadMentions = 0,
 	workspace,
 	workspaces = [],
 	user,
@@ -96,16 +105,20 @@ export function RailView({
 }: {
 	/**
 	 * Every pod the viewer reaches, shared and Personal, with its crew bots, how
-	 * many of its chats are unread, and whether any waits on the viewer.
+	 * many unread messages its chats hold, and whether any waits on the viewer.
 	 */
 	pods: readonly {
 		pod: Pod;
 		bots: readonly Agent[];
-		unreadChats?: number;
+		unreadMessages?: number;
 		needsApproval?: boolean;
 	}[];
-	/** A pod's slug, `settings`, or undefined when neither is open. */
+	/** A pod's slug, `activity`, `approvals`, `settings`, or undefined when none is open. */
 	selected: string | undefined;
+	/** How many approvals wait on the viewer, which the Approvals tile counts. */
+	waitingApprovals?: number;
+	/** How many mentions of the viewer are unread, which the Activity tile counts; it counts nothing else new there. */
+	unreadMentions?: number;
 	/** The workspace being looked at. */
 	workspace?: Workspace;
 	/** Every workspace the viewer belongs to, which the workspace's menu offers to switch to. */
@@ -134,7 +147,7 @@ export function RailView({
 		<nav
 			aria-label="Pods"
 			className={cn(
-				"flex w-16 shrink-0 flex-col items-center gap-3 border-border border-r bg-rail py-[18px] md:w-[76px]",
+				"flex w-16 shrink-0 flex-col items-center gap-3 border-border border-r bg-rail py-4 md:w-[72px]",
 				className,
 			)}
 		>
@@ -145,20 +158,38 @@ export function RailView({
 						workspaces={workspaces}
 						settingsBack={settingsBack}
 					/>
-					<span aria-hidden className="h-[1.5px] w-7 shrink-0 rounded-full bg-border-strong" />
+					<span aria-hidden className="h-px w-7 shrink-0 bg-border-strong" />
 				</>
 			)}
-			{shared.map(({ pod, bots, unreadChats, needsApproval }) => (
+			<RailViewTile
+				to="./activity"
+				label="Activity"
+				hint="Mentions, unread messages, routine runs and collaborations from every pod"
+				icon={<Bell aria-hidden size={19} strokeWidth={2} />}
+				count={unreadMentions}
+				selected={selected === "activity"}
+			/>
+			<RailViewTile
+				to="./approvals"
+				label="Approvals"
+				hint="Bots waiting on your OK"
+				icon={<Inbox aria-hidden size={19} strokeWidth={2} />}
+				count={waitingApprovals}
+				urgent
+				selected={selected === "approvals"}
+			/>
+			<span aria-hidden className="h-px w-7 shrink-0 bg-border-strong" />
+			{shared.map(({ pod, bots, unreadMessages, needsApproval }) => (
 				<RailItem
 					key={pod.id}
 					label={pod.name}
 					selected={selected === pod.slug}
 					pod={pod}
-					unreadChats={unreadChats}
+					unreadMessages={unreadMessages}
 					needsApproval={needsApproval}
 					menu={podMenu(pod)}
 				>
-					<PodTile bots={bots} color={pod.color} size={46} />
+					<PodTile bots={bots} color={pod.color} size={44} />
 				</RailItem>
 			))}
 
@@ -168,7 +199,7 @@ export function RailView({
 						type="button"
 						aria-label="New pod"
 						onClick={onNewPod}
-						className="focus-ring grid size-11 shrink-0 place-items-center rounded-tile border-[1.5px] border-border-dashed border-dashed text-subtle-foreground transition-colors hover:bg-hover md:size-[46px]"
+						className="focus-ring grid size-11 shrink-0 place-items-center rounded-tile border-[1.5px] border-border-dashed border-dashed text-subtle-foreground transition-colors hover:border-disabled-foreground"
 					>
 						<Plus size={16} strokeWidth={2.2} />
 					</button>
@@ -177,23 +208,23 @@ export function RailView({
 
 			{personal && (
 				<>
-					<span aria-hidden className="h-[1.5px] w-7 shrink-0 rounded-full bg-border-strong" />
+					<span aria-hidden className="h-px w-7 shrink-0 bg-border-strong" />
 					<RailItem
 						label={personal.pod.name}
 						selected={selected === personal.pod.slug}
 						pod={personal.pod}
-						unreadChats={personal.unreadChats}
+						unreadMessages={personal.unreadMessages}
 						needsApproval={personal.needsApproval}
 						menu={podMenu(personal.pod)}
 					>
 						{/* A pod like the others, with you on its corner: only you are in it. */}
 						<span className="relative">
-							<PodTile bots={personal.bots} color={personal.pod.color} size={46} />
+							<PodTile bots={personal.bots} color={personal.pod.color} size={44} />
 							<span
 								aria-hidden
-								className="absolute -right-[5px] -bottom-[5px] grid size-[22px] place-items-center rounded-full border-[2.5px] border-rail bg-tile text-soft-foreground"
+								className="absolute -right-[5px] -bottom-[5px] grid size-5 place-items-center rounded-full bg-border-strong text-person-avatar-foreground shadow-[0_0_0_3px_var(--rail)]"
 							>
-								<UserRound size={11} strokeWidth={2.6} />
+								<UserRound size={10} strokeWidth={2.6} />
 							</span>
 						</span>
 					</RailItem>
@@ -211,7 +242,10 @@ export function RailView({
 						aria-current={selected === "settings" ? "page" : undefined}
 						className="focus-ring relative flex shrink-0 items-center rounded-full"
 					>
-						<SelectionBar selected={selected === "settings"} className="-left-[14px] md:-left-5" />
+						<SelectionBar
+							selected={selected === "settings"}
+							className="-left-[14px] md:-left-[18px]"
+						/>
 						<PersonAvatar
 							person={user}
 							size={36}
@@ -227,20 +261,95 @@ export function RailView({
 	);
 }
 
-/** Which rail item the address is under: a pod's slug, or `settings`, which is you. */
+/** Which rail item the address is under: a pod's slug, `activity`, `approvals`, or `settings`, which is you. */
 function useRailSelection(): string | undefined {
 	const matchRoute = useMatchRoute();
 	const { pod } = useParams({ strict: false });
 	if (matchRoute({ to: "/$workspace/pods/$pod", fuzzy: true })) return pod;
+	if (matchRoute({ to: "/$workspace/activity", fuzzy: true })) return "activity";
+	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
 	if (matchRoute({ to: "/$workspace/settings", fuzzy: true })) return "settings";
 	return undefined;
 }
 
-/** The most unread chats a tile counts; more shows as this with a plus. */
-const MAX_COUNTED = 99;
+/**
+ * A view across every pod, under the workspace's tile: a tile with its name
+ * under it, counting what is new there. An `urgent` count fills the tile with
+ * the accent, for a decision only the viewer can make.
+ */
+function RailViewTile({
+	to,
+	label,
+	hint,
+	icon,
+	count,
+	urgent = false,
+	selected,
+}: {
+	to: "./activity" | "./approvals";
+	label: string;
+	/** What the tooltip says it holds while there is nothing to count. */
+	hint: string;
+	icon: ReactElement;
+	count: number;
+	urgent?: boolean;
+	selected: boolean;
+}) {
+	const counted = count > 0;
+	const filled = counted && urgent;
+	const countWords = urgent
+		? `${count} waiting on you`
+		: `${count} unread ${count === 1 ? "mention" : "mentions"}`;
+	return (
+		<Tooltip label={counted ? countWords : hint} side="right">
+			<Link
+				from="/$workspace"
+				to={to}
+				aria-label={counted ? `${label}, ${countWords}` : label}
+				aria-current={selected ? "page" : undefined}
+				className="focus-ring group/view relative flex w-16 shrink-0 flex-col items-center gap-1 rounded-tile"
+			>
+				<SelectionBar selected={selected} className="top-2 left-0 md:-left-1" />
+				<span
+					className={cn(
+						"relative grid size-11 place-items-center rounded-tile transition-colors",
+						filled
+							? "bg-primary text-primary-foreground"
+							: selected
+								? "bg-chip-strong text-foreground"
+								: "bg-panel text-muted-foreground group-hover/view:text-soft-foreground",
+					)}
+				>
+					{icon}
+					{counted && (
+						<CountBadge
+							count={count}
+							size="lg"
+							className={cn(
+								"absolute -top-1.5 -right-1.5 shadow-[0_0_0_3px_var(--rail)]",
+								filled && "bg-foreground text-background",
+							)}
+						/>
+					)}
+				</span>
+				<span
+					aria-hidden
+					className={cn(
+						"text-[10.5px]",
+						filled || selected
+							? "font-semibold text-foreground"
+							: "font-medium text-muted-foreground",
+					)}
+				>
+					{label}
+				</span>
+			</Link>
+		</Tooltip>
+	);
+}
 
-function unreadChatsWords(count: number): string {
-	return count === 1 ? "1 unread chat" : `${count} unread chats`;
+function unreadMessagesWords(count: number): string {
+	return count === 1 ? "1 unread message" : `${count} unread messages`;
 }
 
 /**
@@ -248,30 +357,29 @@ function unreadChatsWords(count: number): string {
  * viewer, otherwise how many are unread. Ringed in the rail's colour.
  */
 function ChatMarkerBadge({
-	unreadChats,
+	unreadMessages,
 	needsApproval,
 }: {
-	unreadChats: number;
+	unreadMessages: number;
 	needsApproval: boolean;
 }) {
 	if (needsApproval) {
 		return (
 			<span
 				aria-hidden
-				className="absolute -top-[5px] -right-[5px] z-10 grid size-[22px] place-items-center rounded-full bg-approval-marker text-white shadow-[0_0_0_3px_var(--rail)]"
+				className="absolute -top-1.5 -right-1.5 z-10 grid size-[22px] place-items-center rounded-full bg-approval-marker text-white shadow-[0_0_0_3px_var(--rail)]"
 			>
 				<Hand size={13} strokeWidth={2.4} />
 			</span>
 		);
 	}
-	if (unreadChats === 0) return null;
+	if (unreadMessages === 0) return null;
 	return (
-		<span
-			aria-hidden
-			className="absolute -top-[5px] -right-[5px] z-10 grid h-[22px] min-w-[22px] place-items-center rounded-full bg-rail-count px-1.5 font-bold text-[11.5px] text-white leading-none shadow-[0_0_0_3px_var(--rail)]"
-		>
-			{unreadChats > MAX_COUNTED ? `${MAX_COUNTED}+` : unreadChats}
-		</span>
+		<CountBadge
+			count={unreadMessages}
+			size="lg"
+			className="absolute -top-1.5 -right-1.5 z-10 shadow-[0_0_0_3px_var(--rail)]"
+		/>
 	);
 }
 
@@ -283,7 +391,7 @@ function RailItem({
 	label,
 	selected,
 	pod,
-	unreadChats = 0,
+	unreadMessages = 0,
 	needsApproval = false,
 	menu,
 	children,
@@ -292,8 +400,8 @@ function RailItem({
 	selected: boolean;
 	/** The pod it opens. */
 	pod: Pod;
-	/** How many of the pod's chats are unread, counted on the tile. */
-	unreadChats?: number;
+	/** How many unread messages the pod's chats hold, counted on the tile. */
+	unreadMessages?: number;
 	/** Whether a chat in the pod waits on the viewer, which the tile shows instead of the count. */
 	needsApproval?: boolean;
 	/** What right-clicking it offers; without it, the browser's own menu. */
@@ -303,17 +411,16 @@ function RailItem({
 	const props = {
 		"aria-label": needsApproval
 			? `${label}, waiting for your approval`
-			: unreadChats > 0
-				? `${label}, ${unreadChatsWords(unreadChats)}`
+			: unreadMessages > 0
+				? `${label}, ${unreadMessagesWords(unreadMessages)}`
 				: label,
 		"aria-current": selected ? ("page" as const) : undefined,
-		className:
-			"focus-ring relative flex shrink-0 items-center rounded-tile [&>span:last-child]:max-md:scale-[0.9565]",
+		className: "focus-ring relative flex shrink-0 items-center rounded-tile",
 	};
 	const content = (
 		<>
-			<SelectionBar selected={selected} className="-left-[10px] md:-left-[15px]" />
-			<ChatMarkerBadge unreadChats={unreadChats} needsApproval={needsApproval} />
+			<SelectionBar selected={selected} className="-left-[10px] md:-left-[14px]" />
+			<ChatMarkerBadge unreadMessages={unreadMessages} needsApproval={needsApproval} />
 			{children}
 		</>
 	);

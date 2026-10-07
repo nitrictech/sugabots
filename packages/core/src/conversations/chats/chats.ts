@@ -83,6 +83,7 @@ export const make = Effect.gen(function* () {
 				"post",
 				transaction(
 					Effect.gen(function* () {
+						const peopleOnly = input.peopleOnly ?? false;
 						const visible = yield* visibility.chat(input.chatId);
 						const sender = yield* senderOf(yield* CurrentActor.Service);
 						const author = personAuthor(sender);
@@ -102,7 +103,7 @@ export const make = Effect.gen(function* () {
 							id: posted.message.id,
 							threadId: visible.mainThreadId,
 							content: posted.message.content,
-							author: { kind: "person", peopleOnly: input.peopleOnly ?? false },
+							author: { kind: "person", peopleOnly },
 						});
 						return toMessage(posted.message, author);
 					}),

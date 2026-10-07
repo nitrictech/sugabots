@@ -13,7 +13,8 @@ import { cn } from "cn";
  * quietly introducing a second look.
  *
  * The design draws buttons as pills: the accent primary, a neutral chip for
- * everything secondary, and bare text for links and destructive actions. The rest are here to satisfy the
+ * everything secondary (`muted` where it sits on a card's fill), and bare
+ * text for links and destructive actions. The rest are here to satisfy the
  * contract and are mapped onto those so they cannot drift into a palette of
  * their own. `bare` is the one addition, for a link with no padding.
  *
@@ -35,6 +36,8 @@ export const buttonStyles = cva(
 				default:
 					"bg-primary text-primary-foreground hover:bg-primary-hover disabled:bg-chip disabled:text-disabled-foreground",
 				secondary: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
+				/** A secondary answer beside a primary one on a card, a step stronger than `secondary` so it reads on the card's fill. */
+				muted: "bg-hover text-foreground hover:bg-hover-strong disabled:text-disabled-foreground",
 				outline: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
 				ghost:
 					"font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50",

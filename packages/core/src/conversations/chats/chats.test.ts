@@ -181,7 +181,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					at: expect.any(String),
 				},
 				waitingOn: null,
-				unread: false,
+				unreadMessages: 0,
 				needsApproval: false,
 			},
 			{
@@ -189,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				chat: null,
 				lastMessage: null,
 				waitingOn: null,
-				unread: false,
+				unreadMessages: 0,
 				needsApproval: false,
 			},
 		]);
@@ -223,7 +223,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const list = await view.list({ workspace: workspaceId, pod: podId });
 
-		expect(list?.items[0]?.lastMessage?.preview).toBe("I'm still getting denied.");
+		const host = list?.items.find((item) => item.agent.id === agentId);
+		expect(host?.lastMessage?.preview).toBe("I'm still getting denied.");
 	});
 
 	describe("unread and waiting chats", () => {
@@ -251,19 +252,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				(item) => item.agent.id === agentId,
 			);
 
-		it("marks a chat unread when a bot writes after the person last read it", async () => {
+		it("counts what a bot writes after the person last read the chat", async () => {
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
 			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "Hi" });
-			expect(await hostRow()).toMatchObject({ unread: false });
+			expect(await hostRow()).toMatchObject({ unreadMessages: 0 });
 
 			await botWrites(current.mainThreadId, "Hello!", 1);
-			expect(await hostRow()).toMatchObject({ unread: true });
+			await botWrites(current.mainThreadId, "", 2);
+			await botWrites(current.mainThreadId, "How can I help?", 3);
+			expect(await hostRow()).toMatchObject({ unreadMessages: 2 });
 
 			await chats.markRead(current.id);
-			expect(await hostRow()).toMatchObject({ unread: false });
+			expect(await hostRow()).toMatchObject({ unreadMessages: 0 });
 
-			await botWrites(current.mainThreadId, "One more thing", 2);
-			expect(await hostRow()).toMatchObject({ unread: true });
+			await botWrites(current.mainThreadId, "One more thing", 4);
+			expect(await hostRow()).toMatchObject({ unreadMessages: 1 });
+		});
+
+		it("stops counting what came before the person's own reply", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await botWrites(current.mainThreadId, "Hello!", -2);
+			await botWrites(current.mainThreadId, "Anything else?", -1);
+			expect(await hostRow()).toMatchObject({ unreadMessages: 2 });
+
+			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "All good" });
+			expect(await hostRow()).toMatchObject({ unreadMessages: 0 });
 		});
 
 		it("keeps a reply that finishes after the chat was read unread", async () => {
@@ -297,7 +310,42 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.where(eq(message.id, reply.id)),
 			);
 
-			expect(await hostRow()).toMatchObject({ unread: true });
+			expect(await hostRow()).toMatchObject({ unreadMessages: 1 });
+		});
+
+		it("keeps a reply unread that began before something the person read while it was written", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content: "Hey" });
+			const [reply] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: current.mainThreadId,
+						authorAgentId: agentId,
+						kind: "text",
+						status: "streaming",
+						parts: [],
+						content: "",
+						createdAt: new Date(Date.now() + 1000),
+					})
+					.returning({ id: message.id }),
+			);
+			if (!reply) throw new Error("fixture");
+			await botWrites(current.mainThreadId, "Meanwhile, the deploy finished.", 2);
+
+			await chats.markRead(current.id);
+			await onDatabase((db) =>
+				db
+					.update(message)
+					.set({
+						status: "complete",
+						content: "Hi there",
+						parts: [{ type: "text", text: "Hi there" }],
+					})
+					.where(eq(message.id, reply.id)),
+			);
+
+			expect(await hostRow()).toMatchObject({ unreadMessages: 2 });
 		});
 
 		it("shows how far the person has read, and announces it only when they read further", async () => {
@@ -333,14 +381,30 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(Date.parse(readAgain?.readAt ?? "")).toBeGreaterThan(Date.parse(read?.readAt ?? ""));
 		});
 
-		it("counts each pod's unread chats for the rail", async () => {
+		it("adds up each pod's unread messages for the rail", async () => {
 			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const other = await chats.open({
+				workspace: workspaceId,
+				podId,
+				hostAgentId: recipientAgentId,
+			});
 			expect(await view.podMarkers(workspaceId)).toEqual({ pods: {} });
 
 			await botWrites(current.mainThreadId, "Hello!");
+			await botWrites(current.mainThreadId, "Are you there?", 1);
+			await onDatabase((db) =>
+				db.insert(message).values({
+					threadId: other.mainThreadId,
+					authorAgentId: recipientAgentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Morning" }],
+					content: "Morning",
+				}),
+			);
 
 			expect(await view.podMarkers(workspaceId)).toEqual({
-				pods: { [podId]: { unreadChats: 1, needsApproval: false } },
+				pods: { [podId]: { unreadMessages: 3, needsApproval: false } },
 			});
 		});
 
@@ -394,7 +458,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				lastMessage: { preview: "File it" },
 			});
 			expect(await view.podMarkers(workspaceId)).toEqual({
-				pods: { [podId]: { unreadChats: 0, needsApproval: true } },
+				pods: { [podId]: { unreadMessages: 0, needsApproval: true } },
 			});
 		});
 	});
@@ -924,6 +988,335 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				triggerKind: "manual",
 				triggeredAt: expect.any(String),
 			},
+		});
+	});
+
+	describe("the approvals and activity across a workspace", () => {
+		/** The host writes `content` in `threadId`, `secondsLater` after now, and returns the message. */
+		const botWrites = async (threadId: string, content: string, secondsLater = 0) => {
+			const [written] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId,
+						authorAgentId: agentId,
+						kind: "text",
+						status: "complete",
+						parts: content ? [{ type: "text", text: content }] : [],
+						content,
+						createdAt: new Date(Date.now() + secondsLater * 1000),
+					})
+					.returning(),
+			);
+			if (!written) throw new Error("fixture");
+			return written;
+		};
+
+		/** A reply in the chat that called a write and stopped for someone to approve it. */
+		const askForApproval = async (threadId: string) => {
+			const reply = await botWrites(threadId, "", 1);
+			const [asked] = await onDatabase((db) =>
+				db
+					.insert(turn)
+					.values({
+						threadId,
+						agentId,
+						triggerMessageId: reply.id,
+						status: "waiting",
+						model: "test/model",
+						startedAt: new Date(),
+					})
+					.returning({ id: turn.id }),
+			);
+			if (!asked) throw new Error("fixture");
+			const [call] = await onDatabase((db) =>
+				db
+					.insert(toolCall)
+					.values({
+						threadId,
+						messageId: reply.id,
+						turnId: asked.id,
+						tool: "linear__create_issue",
+						approvalId: `approval-${crypto.randomUUID()}`,
+						approvalStatus: "pending",
+						status: "awaiting_approval",
+						input: { title: "Checkout times out" },
+						atOffset: 0,
+					})
+					.returning({ id: toolCall.id }),
+			);
+			if (!call) throw new Error("fixture");
+			return call.id;
+		};
+
+		/** The host asks the other bot in its chat to compare the launch plans, and returns the asked bot's thread. */
+		const collaborate = async (mainThreadId: string, chatId: string) => {
+			const trigger = await botWrites(mainThreadId, "", 0);
+			const [askingTurn] = await onDatabase((db) =>
+				db
+					.insert(turn)
+					.values({
+						threadId: mainThreadId,
+						agentId,
+						triggerMessageId: trigger.id,
+						status: "done",
+						model: "test/model",
+						startedAt: new Date(),
+						finishedAt: new Date(),
+						reason: "default",
+					})
+					.returning(),
+			);
+			if (!askingTurn) throw new Error("fixture");
+			const collaborationId = crypto.randomUUID();
+			const [asking] = await onDatabase((db) =>
+				db
+					.insert(message)
+					.values({
+						threadId: mainThreadId,
+						authorAgentId: agentId,
+						kind: "text",
+						status: "complete",
+						parts: [{ type: "collaboration", collaborationId }],
+						content: "",
+						turnId: askingTurn.id,
+					})
+					.returning(),
+			);
+			const [child] = await onDatabase((db) =>
+				db
+					.insert(thread)
+					.values({
+						workspaceId,
+						podId,
+						hostAgentId: recipientAgentId,
+						chatId,
+						type: "collaboration",
+						title: "Compare the launch plans",
+						parentThreadId: mainThreadId,
+						initiatorUserId: userId,
+					})
+					.returning(),
+			);
+			if (!asking || !child) throw new Error("fixture");
+			await onDatabase((db) =>
+				db.insert(collaboration).values({
+					id: collaborationId,
+					parentThreadId: mainThreadId,
+					parentMessageId: asking.id,
+					turnId: askingTurn.id,
+					childThreadId: child.id,
+					collaboratorAgentId: recipientAgentId,
+					brief: "Compare the launch plans",
+					status: "waiting",
+					atOffset: 0,
+				}),
+			);
+			return child.id;
+		};
+
+		it("lists a call waiting on the person's decision, then among the answered once decided", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const callId = await askForApproval(current.mainThreadId);
+
+			expect(await view.approvals(workspaceId)).toEqual({
+				waiting: [
+					expect.objectContaining({
+						call: expect.objectContaining({ id: callId, tool: "linear__create_issue" }),
+						agent: expect.objectContaining({ id: agentId }),
+						podId,
+						threadId: current.mainThreadId,
+						chatAgentId: agentId,
+						inMainThread: true,
+					}),
+				],
+				answered: [],
+			});
+
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({ approvalStatus: "denied", decidedById: administratorId, decidedAt: new Date() })
+					.where(eq(toolCall.id, callId)),
+			);
+
+			const inbox = await view.approvals(workspaceId);
+			expect(inbox.waiting).toEqual([]);
+			expect(inbox.answered).toEqual([
+				expect.objectContaining({
+					call: expect.objectContaining({ id: callId }),
+					answer: expect.objectContaining({ status: "denied", decidedByName: "Chat admin" }),
+				}),
+			]);
+		});
+
+		it("lists a call waiting on the person's decision behind many they may not decide", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight filing", instructions: "File it.", trigger: { kind: "webhook" } },
+			);
+			const run = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			// A member may not decide what a routine asks, and these are older than
+			// every call the inbox would list, so they would fill it first.
+			const reply = await botWrites(run.threadId, "", 1);
+			const [asked] = await onDatabase((db) =>
+				db
+					.insert(turn)
+					.values({
+						threadId: run.threadId,
+						agentId,
+						triggerMessageId: reply.id,
+						status: "waiting",
+						model: "test/model",
+						startedAt: new Date(),
+					})
+					.returning({ id: turn.id }),
+			);
+			if (!asked) throw new Error("fixture");
+			const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+			await onDatabase((db) =>
+				db.insert(toolCall).values(
+					Array.from({ length: 101 }, () => ({
+						threadId: run.threadId,
+						messageId: reply.id,
+						turnId: asked.id,
+						tool: "linear__create_issue",
+						approvalId: `approval-${crypto.randomUUID()}`,
+						approvalStatus: "pending" as const,
+						status: "awaiting_approval" as const,
+						input: {},
+						atOffset: 0,
+						startedAt: hourAgo,
+					})),
+				),
+			);
+			const callId = await askForApproval(current.mainThreadId);
+
+			expect((await view.approvals(workspaceId)).waiting).toEqual([
+				expect.objectContaining({ call: expect.objectContaining({ id: callId }) }),
+			]);
+		});
+
+		it("lists what the person has not read, and keeps what mentions them once read", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const news = await botWrites(current.mainThreadId, "The deploy finished.", 1);
+			const mention = await botWrites(current.mainThreadId, "@chat-member can you check it?", 2);
+
+			expect((await view.activity(workspaceId)).items).toEqual([
+				expect.objectContaining({ kind: "mention", messageId: mention.id, unread: true }),
+				expect.objectContaining({
+					kind: "message",
+					messageId: news.id,
+					unread: true,
+					preview: "The deploy finished.",
+					chatAgentId: agentId,
+				}),
+			]);
+
+			await chats.markRead(current.id);
+
+			expect((await view.activity(workspaceId)).items).toEqual([
+				expect.objectContaining({ kind: "mention", messageId: mention.id, unread: false }),
+			]);
+		});
+
+		it("does not take an email address for a mention", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			await chats.markRead(current.id);
+			await botWrites(current.mainThreadId, "Mail it to ops@chat-member.example", 1);
+
+			expect((await view.activity(workspaceId)).items).toEqual([
+				expect.objectContaining({ kind: "message" }),
+			]);
+		});
+
+		it("lists a routine run in the person's chats, with the start of what it said", async () => {
+			await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", trigger: { kind: "webhook" } },
+			);
+			const accepted = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			await botWrites(accepted.threadId, "Two PRs merged.\nThe release branch is green.", 1);
+
+			expect((await view.activity(workspaceId)).items).toContainEqual(
+				expect.objectContaining({
+					kind: "routine",
+					threadId: accepted.threadId,
+					routineName: "Overnight review",
+					triggerKind: "manual",
+					agent: expect.objectContaining({ id: agentId }),
+					preview: "Two PRs merged. The release branch is green.",
+					chatAgentId: agentId,
+					unread: true,
+				}),
+			);
+		});
+
+		it("lists a collaboration in the person's chats", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const childThreadId = await collaborate(current.mainThreadId, current.id);
+
+			expect((await view.activity(workspaceId)).items).toContainEqual(
+				expect.objectContaining({
+					kind: "collaboration",
+					threadId: childThreadId,
+					initiator: expect.objectContaining({ id: agentId }),
+					recipient: expect.objectContaining({ id: recipientAgentId }),
+					status: "waiting",
+					brief: "Compare the launch plans",
+					chatAgentId: agentId,
+					unread: true,
+				}),
+			);
+		});
+
+		it("counts a routine run and a collaboration caught up with once the person writes after them", async () => {
+			const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+			const created = await routines.create(
+				{ agentId },
+				{ name: "Overnight review", instructions: "Review it.", trigger: { kind: "webhook" } },
+			);
+			const run = await routines.run({
+				agentId,
+				routineId: created.routine.id,
+				requestId: crypto.randomUUID(),
+			});
+			const childThreadId = await collaborate(current.mainThreadId, current.id);
+			const unreadOf = async () =>
+				(await view.activity(workspaceId)).items.flatMap((item) =>
+					item.kind === "routine" || item.kind === "collaboration"
+						? [{ threadId: item.threadId, unread: item.unread }]
+						: [],
+				);
+			expect(await unreadOf()).toEqual(
+				expect.arrayContaining([
+					{ threadId: run.threadId, unread: true },
+					{ threadId: childThreadId, unread: true },
+				]),
+			);
+
+			await chats.post({
+				chatId: current.id,
+				messageId: crypto.randomUUID(),
+				content: "Seen both",
+			});
+
+			expect(await unreadOf()).toEqual(
+				expect.arrayContaining([
+					{ threadId: run.threadId, unread: false },
+					{ threadId: childThreadId, unread: false },
+				]),
+			);
 		});
 	});
 });

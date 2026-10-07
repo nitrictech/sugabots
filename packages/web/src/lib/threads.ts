@@ -13,6 +13,7 @@ import {
 } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
+import { refreshEveryApprovalInbox } from "@/lib/chats.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { mergeThreadMessages } from "@/lib/thread-events.ts";
 
@@ -143,6 +144,10 @@ export function useReviewToolCall(threadId: string, podId: string) {
 			Effect.runPromise(
 				client.api.toolApprovals.decide({ params: { podId, toolCallId }, payload: { decision } }),
 			),
-		onSuccess: () => queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["thread", threadId] }),
+				refreshEveryApprovalInbox(queries),
+			]),
 	});
 }

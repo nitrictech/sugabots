@@ -20,6 +20,12 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("podMarkers", ({ params }) =>
 				view.podMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
+			.handle("activity", ({ params }) =>
+				view.activity(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("approvals", ({ params }) =>
+				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
 			.handle("getOrCreate", ({ params, payload }) =>
 				chats
 					.open({ ...payload, workspace: params.workspace })

@@ -5,36 +5,36 @@ import {
 	type Message,
 	type PersonParticipant,
 	type RoutineResultOf,
-	type SessionUser,
 	type ThreadParticipant,
 	type ToolCallPart,
 } from "@sugabots/contracts";
+import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useRef, useState } from "react";
+import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
-import type { Receipt } from "@/lib/read-receipts.ts";
 import { splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
-import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
-import { ReadReceipts } from "./ReadReceipts.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { ToolLine } from "./ToolLine.tsx";
-import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
+import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
 
 /*
- * A message is drawn as its parts, in order: text is a bubble and each
- * collaboration is the child thread it opened, at full width. So an agent that
- * writes, asks another agent, and writes again shows as a bubble, a child
- * thread, and a bubble, in the order it happened.
+ * A message is drawn as a row: its author's face and name at the head of a
+ * group, then its parts in order. Text is its words, and each collaboration is
+ * a thread line opening the child thread it started. So an agent that writes,
+ * asks another agent, and writes again shows as words, a thread line, and
+ * words, in the order it happened.
  *
  * A reply's text is drawn once it is settled, never as it streams. What the
  * agent writes on the way is often the lead-in to a tool call ("Let me find
@@ -42,17 +42,14 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  * live would show words and then take them back. Text is settled when the
  * reply finishes or when something follows it: text before a collaboration is
  * shown while the collaboration runs, so the thread reads in the order it
- * happened. While the turn runs, one line says the agent is typing, or which
- * step it is on.
+ * happened. While the turn runs, one line says the agent is typing.
  *
  * Tool calls are not drawn as parts at all. They belong to the turn rather than
- * to the transcript, so once the reply lands they leave nothing behind — the
- * step count on the message's own action bar is the way to what they did. What
- * the agent said just before a call is narration and goes with them: the thread
- * shows the answer, and the activity log how it got there. The exception is a
- * write somebody was asked to approve: it stopped the reply, and whoever
- * answered it may want to read again what they agreed to, so it stays in the
- * thread as its card, waiting or answered, mid-turn included.
+ * to the transcript: the tool line above a reply is the way to what they did.
+ * What the agent said just before a call is narration and goes with them. The
+ * exception is a write somebody was asked to approve: it stopped the reply,
+ * and whoever answered it may want to read again what they agreed to, so it
+ * stays in the thread as its card, waiting or answered, mid-turn included.
  */
 
 export function ThreadConversation({
@@ -60,8 +57,6 @@ export function ThreadConversation({
 	host,
 	isRunning,
 	participants,
-	user,
-	rightAgentId,
 	dividers = true,
 	onOpenThread,
 	podId,
@@ -69,7 +64,10 @@ export function ThreadConversation({
 	compact = false,
 	queued = NONE_QUEUED,
 	peopleTyping = [],
-	receipts,
+	showsTyping = true,
+	highlightedMessageId,
+	threadActivityAt,
+	authorLinkOf,
 }: {
 	messages: Message[];
 	host: AgentParticipant;
@@ -79,15 +77,9 @@ export function ThreadConversation({
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: ThreadParticipant[];
-	user: SessionUser;
 	/**
-	 * The bot whose messages sit on the right, as a person's own do: in a
-	 * collaboration, the bot whose chat it was opened from. None elsewhere.
-	 */
-	rightAgentId?: string;
-	/**
-	 * Day and long-gap markers between messages. Off where the caller places its
-	 * own, as the chat does between these messages and its activity rows.
+	 * Day markers between messages. Off where the caller places its own, as the
+	 * chat does between these messages and its activity rows.
 	 */
 	dividers?: boolean;
 	/**
@@ -97,10 +89,7 @@ export function ThreadConversation({
 	onOpenThread: (threadId: string) => void;
 	podId: string;
 	canApproveToolCalls?: boolean;
-	/**
-	 * The sidebar's narrower thread: smaller faces and bubbles, and no names,
-	 * since a collaboration has only its two bots and its header names them.
-	 */
+	/** The sidebar's narrower thread: smaller faces and words. */
 	compact?: boolean;
 	/**
 	 * People's messages that wait for the next reply, because one is still being
@@ -113,8 +102,14 @@ export function ThreadConversation({
 	 * or are shown after the last message on their own.
 	 */
 	peopleTyping?: readonly PersonParticipant[];
-	/** Whose faces sit under each message, by message id, for a thread that keeps reads. */
-	receipts?: ReadonlyMap<string, readonly Receipt[]>;
+	/** Off where the caller says who is typing itself, as the chat does under its composer. */
+	showsTyping?: boolean;
+	/** A message pointed out for a moment, as one jumped to is. */
+	highlightedMessageId?: string;
+	/** When each collaboration a message opened last had something in it, by its thread's id. */
+	threadActivityAt?: ReadonlyMap<string, string>;
+	/** Where an author's name leads. Names are plain text without it. */
+	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 }) {
 	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
@@ -123,163 +118,87 @@ export function ThreadConversation({
 		lastMessage !== undefined && lastMessage.author.kind === "agent" && isTyping(lastMessage);
 	const looks = useConnectionLooks(podId);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
-	const breaks = messages.map(
-		(message, index) => dividers && separatesFrom(messages[index - 1], message),
-	);
-	// Whether the current run's name is placed yet. It goes above the run's
-	// first bubble, not above a centred collaboration line that leads it.
-	let runNamed = false;
 	return (
-		<div className="flex flex-col gap-1">
+		<div className="flex flex-col">
 			{messages.map((message, index) => {
-				const divider = breaks[index];
 				const previous = messages[index - 1];
 				const next = messages[index + 1];
-				// A run is one author's messages in a row, with no marker between them.
-				const continuesRun = previous !== undefined && !divider && sameAuthor(previous, message);
-				const runContinues = next !== undefined && !breaks[index + 1] && sameAuthor(message, next);
-				const calls = message.parts.filter(
-					(part): part is ToolCallPart => part.type === "tool_call",
-				);
-				const outgoing =
-					(message.author.kind === "person" && message.author.id === user.id) ||
-					(message.author.kind === "agent" && message.author.id === rightAgentId);
-				const segments = segmentsOf(message);
-				// Tool calls draw nothing, so the message's state and its action bar
-				// belong to the last bubble rather than to the last part.
-				const lastBubble = segments.findLastIndex((segment) => segment.type === "text");
-				const mine = outgoing && message.author.kind === "person";
-				const startsRun = !continuesRun;
-				if (startsRun) runNamed = compact || mine;
-				/** The run's name, the first time something of the run sits beside the face. */
-				const nameOnce = () => {
-					if (runNamed || message.author.kind === "routine_trigger") return null;
-					runNamed = true;
-					return (
-						<div
-							className={cn(
-								"pb-[3px] font-medium text-[11.5px] text-muted-foreground",
-								outgoing ? "pr-[50px] text-right" : "pl-[50px]",
-							)}
-						>
-							{message.author.name}
-						</div>
-					);
-				};
+				const divider = dividers && startsNewDay(previous?.createdAt, message.createdAt);
+				// One note for each person's run of waiting messages, under the last of them.
+				const queuedNote =
+					queued.has(message.id) &&
+					(next === undefined ||
+						!queued.has(next.id) ||
+						startsGroup(message, next) ||
+						!sameDay(message, next));
 				return (
 					<Fragment key={message.id}>
 						{divider && <DaySeparator at={message.createdAt} />}
-						{startsRun && <span aria-hidden className="h-2.5" />}
-						{message.author.kind === "agent" && calls.length > 0 && nameOnce()}
-						{message.author.kind === "agent" && (
-							<ToolLine
-								calls={calls}
+						{message.author.kind === "routine_trigger" ? (
+							<RoutineTriggerCard message={message} />
+						) : (
+							<MessageRow
+								message={message}
+								startsGroup={divider || startsGroup(previous, message)}
+								participants={participants}
 								looks={looks}
-								className={
-									compact
-										? outgoing
-											? "items-end pr-[34px]"
-											: "pl-[34px]"
-										: outgoing
-											? "items-end pr-[50px]"
-											: "pl-[50px]"
-								}
+								podId={podId}
+								canApproveToolCalls={canApproveToolCalls}
+								compact={compact}
+								arrivedLive={watchedWritten.has(message.id)}
+								queued={queued.has(message.id)}
+								queuedNote={queuedNote}
+								highlighted={message.id === highlightedMessageId}
+								threadActivityAt={threadActivityAt}
+								authorLink={authorLinkOf?.(message.author)}
+								onOpenThread={onOpenThread}
 							/>
 						)}
-						{segments.map((segment, position) => {
-							if (segment.type === "collaboration") {
-								const recipient = participants.find(
-									(participant): participant is AgentParticipant =>
-										participant.kind === "agent" &&
-										participant.id === segment.collaboration.agentId,
-								);
-								if (message.author.kind !== "agent" || !recipient) return null;
-								return (
-									<ChatActivityRow
-										key={segment.key}
-										type="collaboration"
-										initiator={message.author}
-										recipient={recipient}
-										state={collaborationState(segment.collaboration)}
-										onOpen={() => onOpenThread(segment.collaboration.threadId)}
-									/>
-								);
-							}
-							if (segment.type === "tool_call") {
-								const call = segment.toolCall;
-								// Only an agent calls tools; the check narrows the author for the card.
-								if (message.author.kind !== "agent") return null;
-								// A reply stopped on the card has nothing after it, so the card ends the run.
-								const endsRun =
-									position === segments.length - 1 && !runContinues && !isTyping(message);
-								return (
-									<Fragment key={segment.key}>
-										{nameOnce()}
-										<ToolApprovalCard
-											call={call}
-											agent={message.author}
-											threadId={message.threadId}
-											podId={podId}
-											canApprove={canApproveToolCalls}
-											outgoing={outgoing}
-											endsRun={endsRun}
-											compact={compact}
-											look={looks.get(splitToolKey(call.tool).handle)}
-										/>
-									</Fragment>
-								);
-							}
-							const isLast = position === lastBubble;
-							const endsRun = isLast && !runContinues && !isTyping(message);
-							return (
-								<Fragment key={segment.key}>
-									{nameOnce()}
-									<MessageBubble
-										message={message}
-										text={segment.text}
-										outgoing={outgoing}
-										endsRun={endsRun}
-										isLast={isLast}
-										// A collaboration or approval card drawn after the bubble takes that space.
-										roomBelow={endsRun && next !== undefined && position === segments.length - 1}
-										compact={compact}
-										arrivedLive={watchedWritten.has(message.id)}
-										queued={queued.has(message.id)}
-										mentionable={participants}
-										onOpenThread={onOpenThread}
-									/>
-								</Fragment>
-							);
-						})}
-						<ReadReceipts
-							receipts={receipts?.get(message.id) ?? []}
-							// A row too wide wraps within the bubbles, clear of the faces beside them.
-							className={NOTE_INSET.left[compact ? "compact" : "regular"]}
-						/>
-						{message.author.kind === "agent" && isTyping(message) && (
+						{showsTyping && message.author.kind === "agent" && isTyping(message) && (
 							<TypingIndicator
 								key={`${message.id}-typing`}
 								typers={
 									message === lastMessage ? [message.author, ...peopleTyping] : [message.author]
 								}
-								outgoing={outgoing}
-								compact={compact}
 							/>
 						)}
 					</Fragment>
 				);
 			})}
-			{replyPending ? (
-				<TypingIndicator
-					typers={[host, ...peopleTyping]}
-					outgoing={host.id === rightAgentId}
-					compact={compact}
-				/>
-			) : (
-				!lastReplyTyping &&
-				anyoneTyping(peopleTyping) && <TypingIndicator typers={peopleTyping} compact={compact} />
-			)}
+			{showsTyping &&
+				(replyPending ? (
+					<TypingIndicator typers={[host, ...peopleTyping]} />
+				) : (
+					!lastReplyTyping &&
+					anyoneTyping(peopleTyping) && <TypingIndicator typers={peopleTyping} />
+				))}
 		</div>
+	);
+}
+
+/**
+ * Who is typing after `messages`: the bot writing the last of them, and the
+ * people writing in the composer.
+ */
+export function typersAfter(
+	messages: readonly Message[],
+	peopleTyping: readonly PersonParticipant[],
+): Typer[] {
+	const last = messages.at(-1);
+	if (last?.author.kind === "agent" && isTyping(last)) return [last.author, ...peopleTyping];
+	return [...peopleTyping];
+}
+
+/**
+ * Whether `message` heads a group of its own, with its author's face and name:
+ * a new author, an hour's quiet, or a message after one that opened a
+ * collaboration, whose thread line ends that group.
+ */
+function startsGroup(previous: Message | undefined, message: Message): boolean {
+	if (!previous || !sameAuthor(previous, message)) return true;
+	if (previous.parts.some((part) => part.type === "collaboration")) return true;
+	return (
+		new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() >= LONG_QUIET_MS
 	);
 }
 
@@ -298,6 +217,9 @@ function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySe
 }
 
 const NONE_QUEUED: ReadonlySet<string> = new Set();
+
+/** Screens that cannot hover, which is to say touch screens. */
+const NO_HOVER = "(hover: none)";
 
 /** How long a reply takes to grow to fit its words: longer for more of them, within bounds. */
 const REVEAL_MS = { minimum: 400, maximum: 700, perCharacter: 0.5 };
@@ -319,20 +241,6 @@ function isTyping(message: Message): boolean {
 		(part) => part.type === "tool_call" && awaitsApproval(part),
 	);
 	return message.status === "streaming" && !awaitingApproval;
-}
-
-/** A collaboration's status in the terms of its line. */
-function collaborationState(collaboration: CollaborationPart): ActivityState {
-	switch (collaboration.status) {
-		case "waiting":
-			return "running";
-		case "pending":
-			return "waiting_on_you";
-		case "answered":
-			return "done";
-		default:
-			return "failed";
-	}
 }
 
 /** The collaborator a running reply has asked and not yet heard back from. */
@@ -393,252 +301,245 @@ function segmentsOf(message: Message): Segment[] {
 	return segments;
 }
 
-function MessageBubble({
+/** How each part of a row is sized: the regular chat, or the sidebar's narrower thread. */
+const ROW = {
+	regular: { face: 36, row: "gap-3.5 px-5", words: "text-[15px] leading-[1.5]" },
+	compact: { face: 32, row: "gap-3 px-[18px]", words: "text-[14.5px] leading-[1.5]" },
+} as const;
+
+/**
+ * One message as a row: at the head of a group its author's face, name and
+ * time, then its words, any collaboration it opened as a thread line, and any
+ * call somebody was asked to approve as its card. Hovered, it lifts slightly,
+ * shows its time beside a follow-up, and offers to copy its words.
+ */
+function MessageRow({
 	message,
-	text,
-	outgoing,
-	endsRun,
-	isLast,
-	roomBelow,
-	arrivedLive,
+	startsGroup,
+	participants,
+	looks,
+	podId,
+	canApproveToolCalls,
 	compact,
+	arrivedLive,
 	queued,
-	mentionable,
+	queuedNote,
+	highlighted,
+	threadActivityAt,
+	authorLink,
 	onOpenThread,
 }: {
 	message: Message;
-	/** This bubble's run of text; a message with a collaboration in it has several. */
-	text: string;
-	outgoing: boolean;
-	/** The last bubble of its author's run, which carries the author's face. */
-	endsRun: boolean;
-	/** Whether this is the message's last bubble, where a failure shows. */
-	isLast: boolean;
-	/**
-	 * Whether another run follows, so the space that separates runs is under
-	 * this bubble and a tapped time can sit in it without moving anything.
-	 */
-	roomBelow: boolean;
+	/** Whether it heads its author's group, so it carries their face and name. */
+	startsGroup: boolean;
+	participants: ThreadParticipant[];
+	looks: ReturnType<typeof useConnectionLooks>;
+	podId: string;
+	canApproveToolCalls: boolean;
+	compact: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
-	compact: boolean;
 	/** Whether this message waits for the next reply, because one is still being written. */
 	queued: boolean;
-	/** Everyone a mention in the text could name. */
-	mentionable: ThreadParticipant[];
-	/** Opens the run a routine's result came from. */
+	/** Whether it ends a run of waiting messages, which says so once under the last of them. */
+	queuedNote: boolean;
+	/** Whether it is pointed out for a moment, as one jumped to is. */
+	highlighted: boolean;
+	threadActivityAt?: ReadonlyMap<string, string>;
+	/** Where its author's name leads. */
+	authorLink?: AuthorLink;
 	onOpenThread: (threadId: string) => void;
 }) {
-	// Unset until the first tap, so a screen that hovers never has the time twice.
-	const [timeShown, setTimeShown] = useState<boolean>();
-	if (message.author.kind === "routine_trigger") {
-		return <RoutineTriggerBubble message={message} text={text} />;
-	}
-	const agent = message.author.kind === "agent" ? message.author : undefined;
-	const mine = !agent && outgoing;
-	const face = mine ? undefined : outgoing ? "right" : "left";
-	const status = messageStatus(message, { queued });
-	// Anything else under the bubble has the space itself, so the time goes in line after it.
-	const timeFloats =
-		roomBelow && !queued && message.status !== "failed" && message.status !== "cancelled";
+	// Unset until the first tap, so a screen that hovers never has a time shown twice.
+	const [timeTapped, setTimeTapped] = useState(false);
+	const { author } = message;
+	if (author.kind === "routine_trigger") return null;
 
-	// A tap is a touch screen's hover: it shows the time, under the bubble, where the screen has room.
+	// A tap is a touch screen's hover: it shows a follow-up's time, as hovering does.
 	function toggleTimeOnTouch(event: MouseEvent) {
-		if (!window.matchMedia(NO_HOVER).matches) return;
+		if (startsGroup || !window.matchMedia(NO_HOVER).matches) return;
 		if (event.target instanceof Element && event.target.closest("a, button")) return;
-		setTimeShown((shown) => !shown);
+		setTimeTapped((shown) => !shown);
 	}
-
-	const bubble = cn(
-		compact
-			? "max-w-[380px] px-3.5 py-[9px] text-[14.5px]"
-			: "max-w-[520px] px-[15px] py-2.5 text-lg",
-		outgoing ? "rounded-[20px_20px_6px_20px]" : "rounded-[20px_20px_20px_6px]",
-		agent
-			? "bg-bot-tint text-bot-text"
-			: mine
-				? "bg-primary text-white"
-				: "bg-bubble-human text-foreground",
-	);
+	const agent = author.kind === "agent" ? author : undefined;
+	const size = ROW[compact ? "compact" : "regular"];
+	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
+	const segments = segmentsOf(message);
+	const words = segments
+		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
+		.join("\n\n");
+	const showsSomething =
+		calls.length > 0 || segments.some((segment) => segment.type !== "text" || segment.text);
+	// A reply with nothing settled yet is only its typing line, under the last message.
+	if (message.status === "streaming" && !showsSomething) return null;
 	return (
+		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
 		<article
-			aria-label={`${message.author.name}, ${status}`}
+			aria-label={`${author.name}, ${messageStatus(message, { queued })}`}
+			data-message-id={message.id}
+			onClick={toggleTimeOnTouch}
 			className={cn(
-				"group/message flex flex-col motion-reduce:animate-none",
-				outgoing ? "items-end" : "items-start",
-				arrivedLive
-					? `animate-reply-in ${outgoing ? "origin-bottom-right" : "origin-bottom-left"}`
-					: "animate-rise",
+				"group/message relative flex pb-0.5 transition-colors duration-700 motion-reduce:animate-none",
+				highlighted ? "bg-primary/15" : "hover:bg-message-hover",
+				size.row,
+				startsGroup ? "pt-3.5" : "pt-0.5",
+				!arrivedLive && "animate-rise",
 			)}
 			style={agent ? botColorVariables(agent.color) : undefined}
 		>
-			<div className={cn("flex w-full items-end gap-2", outgoing && "flex-row-reverse")}>
-				{!mine && (
-					<span className={cn("flex shrink-0", compact ? "w-[26px]" : "w-[34px]")}>
-						{endsRun &&
-							(message.author.kind === "agent" ? (
-								<AgentAvatar
-									color={message.author.color}
-									face={message.author.face}
-									size={compact ? 26 : 34}
-								/>
-							) : (
-								<PersonAvatar person={message.author} size={compact ? 26 : 34} />
-							))}
-					</span>
-				)}
-				<div
-					className={cn(
-						"relative min-w-0",
-						compact ? "max-w-[calc(100%-40px)]" : "max-w-[calc(100%-60px)]",
-					)}
-				>
-					{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a tap only puts on screen the time a screen reader already reads beside the bubble, so a keyboard has nothing to reach. */}
-					<div className={bubble} onClick={toggleTimeOnTouch}>
-						{agent && arrivedLive ? (
-							<div
-								className="reply-grow"
-								style={{ ["--reveal-duration" as string]: `${revealDurationMs(text)}ms` }}
-							>
-								<div>
-									<MessageMarkdown text={text} mentionable={mentionable} />
-								</div>
-							</div>
-						) : agent ? (
-							<MessageMarkdown text={text} mentionable={mentionable} />
+			<span className="flex shrink-0 justify-center" style={{ width: size.face }}>
+				{startsGroup ? (
+					<span aria-hidden className="mt-0.5 flex">
+						{author.kind === "agent" ? (
+							<AgentAvatar color={author.color} face={author.face} size={size.face} />
 						) : (
-							<p className="m-0 whitespace-pre-wrap break-words">
-								{textWithMentions(text, mentionable)}
-							</p>
+							<PersonAvatar person={author} size={size.face} />
 						)}
-					</div>
-					{/*
-					 * The time and the copy button show only while the bubble is hovered or holds
-					 * the focus, and take no clicks while hidden. A touch screen cannot hover, so
-					 * there they are left to screen readers and a tap shows the time.
-					 */}
-					<div
+					</span>
+				) : (
+					<span
 						className={cn(
-							"pointer-events-none absolute bottom-0 flex flex-col gap-0.5 text-subtle-foreground text-xs opacity-0 transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
-							// Stacked, so both fit the narrow margin a bubble leaves beside it, and at the
-							// bottom, where a long reply ends and the eye already is.
-							outgoing ? "right-[calc(100%+8px)] items-end" : "left-[calc(100%+8px)] items-start",
+							"text-[11px] text-subtle-foreground tabular-nums leading-[22px] transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
+							timeTapped ? "opacity-100" : "opacity-0",
 						)}
 					>
 						<MessageTime createdAt={message.createdAt} />
-						{text && <CopyIconButton label="Copy message" text={text} side="top" />}
-					</div>
-					{/* A screen reader has the time beside the bubble already; the tapped one would repeat it. */}
-					{timeFloats && timeShown !== undefined && (
-						<p
-							aria-hidden
-							className={cn(
-								"absolute top-full m-0 pt-0.5",
-								tappedTimeClass(timeShown),
-								outgoing ? "right-0" : "left-0",
-							)}
-						>
-							<MessageTime createdAt={message.createdAt} />
-						</p>
-					)}
-				</div>
-			</div>
-			{!timeFloats && timeShown !== undefined && (
-				<BubbleNote face={face} compact={compact} className={tappedTimeClass(timeShown)}>
-					<span aria-hidden>
-						<MessageTime createdAt={message.createdAt} />
 					</span>
-				</BubbleNote>
-			)}
-			{isLast && message.routineResultOf && (
-				<BubbleNote face={face} compact={compact} className="text-subtle-foreground">
-					<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />
-				</BubbleNote>
-			)}
-			{isLast && message.status === "failed" && (
-				<BubbleNote face={face} compact={compact} className="text-destructive-text">
-					<span className="font-semibold">Reply failed.</span>
-					{message.error && <span> {message.error}</span>}
-				</BubbleNote>
-			)}
-			{isLast && message.status === "cancelled" && (
-				<BubbleNote face={face} compact={compact} className="font-semibold text-subtle-foreground">
-					Reply stopped
-				</BubbleNote>
-			)}
-			{/*
-			 * One note per person's run, under its last bubble. It stays in the page while
-			 * folded, so it can fold away when the bot takes the messages up.
-			 */}
-			{endsRun && message.author.kind === "person" && (
-				<div
-					className={cn(
-						"grid",
-						// Only folding is animated: a message waiting shows it at once.
-						queued
-							? "grid-rows-[1fr]"
-							: "invisible grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity,visibility] duration-300 ease-in motion-reduce:transition-none",
-					)}
-				>
-					<div className="min-h-0 overflow-hidden">
-						<BubbleNote face={face} compact={compact} className="text-subtle-foreground">
-							Queued
-						</BubbleNote>
+				)}
+			</span>
+			<div className="flex min-w-0 flex-1 flex-col items-start">
+				{startsGroup && (
+					<div className="flex items-center gap-2 pb-px">
+						<AuthorName name={author.name} link={authorLink} />
+						{agent && (
+							<span className="rounded-[4px] bg-chip px-[5px] py-px font-semibold text-[10.5px] text-muted-foreground leading-[1.4]">
+								Bot
+							</span>
+						)}
+						<span className="text-subtle-foreground text-xs">
+							<MessageTime createdAt={message.createdAt} />
+						</span>
 					</div>
+				)}
+				{agent && <ToolLine calls={calls} looks={looks} />}
+				{segments.map((segment) => {
+					if (segment.type === "collaboration") {
+						const recipient = participants.find(
+							(participant): participant is AgentParticipant =>
+								participant.kind === "agent" && participant.id === segment.collaboration.agentId,
+						);
+						if (!agent || !recipient) return null;
+						return (
+							<CollaborationLine
+								key={segment.key}
+								initiator={agent}
+								recipient={recipient}
+								status={segment.collaboration.status}
+								lastActivityAt={threadActivityAt?.get(segment.collaboration.threadId)}
+								onOpen={() => onOpenThread(segment.collaboration.threadId)}
+							/>
+						);
+					}
+					if (segment.type === "tool_call") {
+						const call = segment.toolCall;
+						if (!agent) return null;
+						return (
+							<div key={segment.key} className="w-full max-w-[460px] pt-1.5 pb-1">
+								<ToolApprovalCard
+									call={call}
+									agent={agent}
+									threadId={message.threadId}
+									podId={podId}
+									canApprove={canApproveToolCalls}
+									look={looks.get(splitToolKey(call.tool).handle)}
+								/>
+							</div>
+						);
+					}
+					if (!segment.text) return null;
+					return (
+						<div
+							key={segment.key}
+							className={cn("min-w-0 self-stretch break-words text-body-foreground", size.words)}
+						>
+							{agent && arrivedLive ? (
+								<div
+									className="reply-grow"
+									style={{ ["--reveal-duration" as string]: `${revealDurationMs(segment.text)}ms` }}
+								>
+									<div>
+										<MessageMarkdown text={segment.text} mentionable={participants} />
+									</div>
+								</div>
+							) : agent ? (
+								<MessageMarkdown text={segment.text} mentionable={participants} />
+							) : (
+								<p className="m-0 whitespace-pre-wrap">
+									{textWithMentions(segment.text, participants)}
+								</p>
+							)}
+						</div>
+					);
+				})}
+				{message.routineResultOf && (
+					<RowNote className="text-subtle-foreground">
+						<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />
+					</RowNote>
+				)}
+				{message.status === "failed" && (
+					<RowNote className="text-destructive-text">
+						<span className="font-semibold">Reply failed.</span>
+						{message.error && <span> {message.error}</span>}
+					</RowNote>
+				)}
+				{message.status === "cancelled" && (
+					<RowNote className="font-semibold text-subtle-foreground">Reply stopped</RowNote>
+				)}
+				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
+			</div>
+			{words && (
+				<div className="pointer-events-none absolute -top-3.5 right-5 z-10 flex rounded-[8px] border border-border-strong bg-panel p-0.5 opacity-0 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only">
+					<CopyIconButton
+						label="Copy text"
+						text={words}
+						side="top"
+						className="h-7 w-[30px] rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-[15px]"
+					/>
 				</div>
 			)}
 		</article>
 	);
 }
 
-/** Screens that cannot hover, which is to say touch screens. */
-const NO_HOVER = "(hover: none)";
-
-/**
- * A time shown by a tap: one line tall, so it fits the space between runs, and
- * faded in and out rather than unfolding. `transition-discrete` holds off
- * removing it until it has faded out.
- */
-function tappedTimeClass(shown: boolean): string {
-	return cn(
-		"text-subtle-foreground text-xs leading-none transition-[opacity,display] transition-discrete duration-200 ease-out starting:opacity-0 motion-reduce:transition-none",
-		shown ? "opacity-100" : "hidden opacity-0",
+/** An author's name, leading to their page when there is one. */
+function AuthorName({ name, link }: { name: string; link: AuthorLink | undefined }) {
+	const className = "font-semibold text-[15px] text-foreground";
+	if (!link) return <span className={className}>{name}</span>;
+	const linkClassName = cn(className, "rounded-[3px] hover:underline focus-ring");
+	return link.kind === "agent" ? (
+		<Link {...link.options} className={linkClassName}>
+			{name}
+		</Link>
+	) : (
+		<Link {...link.options} className={linkClassName}>
+			{name}
+		</Link>
 	);
 }
 
 function MessageTime({ createdAt }: { createdAt: string }) {
 	return (
-		<time dateTime={createdAt} title={formatFullTimestamp(createdAt)} className="whitespace-nowrap">
-			{formatTime(createdAt)}
-		</time>
+		<Tooltip label={formatFullTimestamp(createdAt)} side="top">
+			<time dateTime={createdAt} className="whitespace-nowrap hover:underline">
+				{formatTime(createdAt)}
+			</time>
+		</Tooltip>
 	);
 }
 
-/**
- * Where a note under a bubble starts, so it lines up with the bubble rather than
- * the face beside it: the face's width (34px, or 26px compact, in `MessageBubble`)
- * and the `gap-2` between them. Change them together.
- */
-const NOTE_INSET = {
-	left: { regular: "pl-[42px]", compact: "pl-[34px]" },
-	right: { regular: "pr-[42px]", compact: "pr-[34px]" },
-};
-
-/** A line under a bubble, such as why a reply failed, clear of the bubble's face if it has one. */
-function BubbleNote({
-	face,
-	compact,
-	className,
-	children,
-}: {
-	/** The side the bubble's face is on; your own bubbles have none. */
-	face: "left" | "right" | undefined;
-	compact: boolean;
-	className: string;
-	children: ReactNode;
-}) {
-	const inset = face && NOTE_INSET[face][compact ? "compact" : "regular"];
-	return <p className={cn("m-0 pt-1 text-xs", inset, className)}>{children}</p>;
+/** A line under a message's words, such as why a reply failed. */
+function RowNote({ className, children }: { className: string; children: ReactNode }) {
+	return <p className={cn("m-0 pt-1 text-xs", className)}>{children}</p>;
 }
 
 /** Where a routine's result came from, opening the run with the work behind it. */
@@ -661,7 +562,82 @@ function RoutineResultLink({
 	);
 }
 
-function RoutineTriggerBubble({ message, text }: { message: Message; text: string }) {
+/** How a collaboration's thread line labels where it stands, when it has settled or needs somebody. */
+const COLLABORATION_TAG: Partial<Record<CollaborationPart["status"], string>> = {
+	pending: "Needs approval",
+	answered: "Done",
+	failed: "Stopped",
+};
+
+/**
+ * The collaboration a bot's message opened, as a thread under it: both bots'
+ * faces, who it was with, when it last moved, and where it stands. The whole
+ * line opens the thread beside the chat.
+ */
+function CollaborationLine({
+	initiator,
+	recipient,
+	status,
+	lastActivityAt,
+	onOpen,
+}: {
+	initiator: AgentParticipant;
+	recipient: AgentParticipant;
+	status: CollaborationPart["status"];
+	lastActivityAt?: string;
+	onOpen: () => void;
+}) {
+	const tag = COLLABORATION_TAG[status];
+	return (
+		<button
+			type="button"
+			onClick={onOpen}
+			aria-label={`Open Collaboration: ${initiator.name} and ${recipient.name}, ${tag ?? "Working"}`}
+			className="focus-ring -ml-1.5 mt-[5px] flex max-w-full items-center gap-2 rounded-[8px] border border-transparent py-1 pr-2.5 pl-1.5 transition-colors hover:border-border-strong hover:bg-panel"
+		>
+			<span aria-hidden className="flex shrink-0">
+				{[initiator, recipient].map((bot) => (
+					<AgentAvatar
+						key={bot.id}
+						color={bot.color}
+						face={bot.face}
+						size={20}
+						className="-mr-[7px] rounded-full shadow-[0_0_0_2px_var(--background)]"
+					/>
+				))}
+			</span>
+			<span className="truncate pl-2 font-semibold text-[13px] text-link">
+				Collaboration with {recipient.name}
+			</span>
+			{lastActivityAt && (
+				<span className="shrink-0 text-[12.5px] text-subtle-foreground">
+					Last reply {formatTime(lastActivityAt)}
+				</span>
+			)}
+			{tag ? (
+				<span
+					className={cn(
+						"shrink-0 rounded-[5px] px-1.5 py-px font-semibold text-[11.5px]",
+						status === "pending"
+							? "bg-primary text-primary-foreground"
+							: "bg-chip text-muted-foreground",
+					)}
+				>
+					{tag}
+				</span>
+			) : (
+				<span aria-hidden className="typing-dots typing-dots-small shrink-0 text-muted-foreground">
+					<i />
+					<i />
+					<i />
+				</span>
+			)}
+		</button>
+	);
+}
+
+/** What started a routine run, at the top of the run's thread. */
+function RoutineTriggerCard({ message }: { message: Message }) {
 	if (message.author.kind !== "routine_trigger") return null;
 	const source =
 		message.author.triggerKind === "cron"
@@ -670,43 +646,36 @@ function RoutineTriggerBubble({ message, text }: { message: Message; text: strin
 				? "Webhook trigger"
 				: "Manual run";
 	return (
-		<article aria-label={`${source} for ${message.author.routineName}`} className="px-3.5">
-			<div className="rounded-2xl border border-border-subtle bg-list px-4 py-3">
+		<article aria-label={`${source} for ${message.author.routineName}`} className="px-5 pt-3.5">
+			<div className="rounded-xl border border-border bg-list px-4 py-3">
 				<div className="pb-1 font-semibold text-muted-foreground text-xs">
 					{message.author.routineName} <span className="font-normal">{source}</span>
 				</div>
-				<p className="m-0 whitespace-pre-wrap break-words text-foreground text-md leading-relaxed">
-					{text}
+				<p className="m-0 whitespace-pre-wrap break-words text-body-foreground text-md leading-relaxed">
+					{message.content}
 				</p>
 			</div>
 		</article>
 	);
 }
 
-/** Where a run of messages starts on a new day, or after an hour's quiet: "Today 6:04". */
+/** Where the chat moves on to a new day: a rule either side of "Today", "Yesterday" or the date. */
 export function DaySeparator({ at }: { at: string }) {
 	return (
-		// Room above it between messages, so what follows reads as a new stretch of the chat.
-		<p className="m-0 pt-7 pb-3.5 text-center font-semibold text-subtle-foreground text-xs first:pt-1">
-			<span className="text-soft-foreground">{formatDay(new Date(at))}</span> {formatTime(at)}
-		</p>
+		<div className="flex items-center gap-3 px-5 pt-2.5 pb-1.5">
+			<span aria-hidden className="h-px flex-1 bg-border" />
+			<span className="font-semibold text-muted-foreground text-xs">{formatDay(new Date(at))}</span>
+			<span aria-hidden className="h-px flex-1 bg-border" />
+		</div>
 	);
 }
 
+/** An hour without a message starts a new group, with its author's face and name again. */
 const LONG_QUIET_MS = 60 * 60_000;
 
-/** Whether `current` starts on a new day or after an hour's quiet, and so wants a separator. */
-export function separatesFrom(
-	previous: { createdAt: string } | undefined,
-	current: { createdAt: string },
-): boolean {
-	if (!previous) return true;
-	const previousDate = new Date(previous.createdAt);
-	const currentDate = new Date(current.createdAt);
-	return (
-		!sameDay(previousDate, currentDate) ||
-		currentDate.getTime() - previousDate.getTime() >= LONG_QUIET_MS
-	);
+/** Whether `at` is the first thing shown, or falls on a new day from `previousAt`, and so wants a day marker. */
+export function startsNewDay(previousAt: string | undefined, at: string): boolean {
+	return previousAt === undefined || !sameDate(new Date(previousAt), new Date(at));
 }
 
 function sameAuthor(left: Message, right: Message): boolean {
@@ -731,12 +700,12 @@ const dateWithYear: Intl.DateTimeFormatOptions = {
 /** "Today", "Yesterday", or the date in `dateFormat`: by default the month and day, and the year only for another year. */
 function formatDay(date: Date, dateFormat = shortDateFor(date)): string {
 	const today = new Date();
-	if (sameDay(date, today)) {
+	if (sameDate(date, today)) {
 		return "Today";
 	}
 	const yesterday = new Date(today);
 	yesterday.setDate(today.getDate() - 1);
-	if (sameDay(date, yesterday)) {
+	if (sameDate(date, yesterday)) {
 		return "Yesterday";
 	}
 	return new Intl.DateTimeFormat(undefined, dateFormat).format(date);
@@ -757,7 +726,11 @@ function formatFullTimestamp(createdAt: string): string {
 	return `${formatDay(date, dateFormat)} at ${time}`;
 }
 
-function sameDay(left: Date, right: Date): boolean {
+function sameDay(left: { createdAt: string }, right: { createdAt: string }): boolean {
+	return sameDate(new Date(left.createdAt), new Date(right.createdAt));
+}
+
+function sameDate(left: Date, right: Date): boolean {
 	return (
 		left.getFullYear() === right.getFullYear() &&
 		left.getMonth() === right.getMonth() &&

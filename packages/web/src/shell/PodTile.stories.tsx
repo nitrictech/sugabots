@@ -11,13 +11,13 @@ const revenue: BotLook[] = [
 	{ color: "rose", face: "square" },
 ];
 
-const sizes: PodTileSize[] = [88, 72, 46, 44, 36, 28];
+const sizes: PodTileSize[] = [88, 72, 44, 36, 28];
 
 const meta = preview.meta({
 	title: "Product/PodTile",
 	component: PodTile,
 	tags: ["ai-generated"],
-	args: { bots: revenue, color: "green" as const, size: 46 as const },
+	args: { bots: revenue, color: "green" as const, size: 44 as const },
 });
 
 /** Default is a pod on the rail: its first four bots' faces, each with its own colour and eyes, on the pod's colour. */
@@ -50,7 +50,7 @@ export const Colours = meta.story({
 			{[[], revenue.slice(0, 1)].map((bots) => (
 				<div key={bots.length} className="flex gap-3">
 					{podColors.map((color) => (
-						<PodTile key={color} bots={bots} color={color} size={46} />
+						<PodTile key={color} bots={bots} color={color} size={44} />
 					))}
 				</div>
 			))}

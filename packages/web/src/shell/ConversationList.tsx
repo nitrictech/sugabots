@@ -1,22 +1,21 @@
 import type { ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Hand, Plus, Search, Settings } from "lucide-react";
+import { Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
 import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
-import { formatListTime } from "@/lib/list-time.ts";
-import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { waitingText } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { ListColumn } from "@/shell/ListColumn.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
+import { CountBadge } from "@/ui/count-badge.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 
 /**
  * The column of conversations for the pod chosen on the rail: one row per bot,
- * newest message first, with a search over their names.
+ * newest message first.
  */
 export function ConversationList({
 	pod,
@@ -28,7 +27,6 @@ export function ConversationList({
 	className?: string;
 }) {
 	const list = useChatList(pod.slug);
-	const session = useSession();
 	const [creating, setCreating] = useState(false);
 	const navigate = useNavigate();
 	const newBot = pod.permissions.createAgents ? () => setCreating(true) : undefined;
@@ -37,12 +35,7 @@ export function ConversationList({
 		hint: newBot ? undefined : "Someone who runs this pod can add one.",
 		action: newBot ? { label: "New bot", onClick: newBot } : undefined,
 	};
-	const rows = (list.data?.items ?? []).map(
-		(item): ConversationRowData => ({
-			...item,
-			fromYou: item.lastMessage?.authorUserId === session.user?.id,
-		}),
-	);
+	const rows = list.data?.items ?? [];
 
 	return (
 		<>
@@ -77,11 +70,6 @@ export interface EmptyList {
 	action?: { label: string; onClick: () => void };
 }
 
-/** A list row with whether you wrote the last message resolved. */
-export interface ConversationRowData extends ChatListItem {
-	fromYou: boolean;
-}
-
 export function ConversationListView({
 	pod,
 	rows,
@@ -92,7 +80,7 @@ export function ConversationListView({
 	className,
 }: {
 	pod: Pod;
-	rows: readonly ConversationRowData[];
+	rows: readonly ChatListItem[];
 	status: "loading" | "ready" | "failed";
 	selectedAgentId?: string;
 	/** Absent when the viewer may not make a bot here. */
@@ -102,47 +90,29 @@ export function ConversationListView({
 }) {
 	const backToChat = useBackToHere("Chat");
 	const title = pod.name;
-	const [query, setQuery] = useState("");
-	const needle = query.trim().toLowerCase();
-	const shown = needle ? rows.filter((row) => row.agent.name.toLowerCase().includes(needle)) : rows;
 	const empty = status === "ready" && rows.length === 0;
 
 	return (
-		<section
-			aria-label={title}
-			className={cn(
-				"flex min-h-0 min-w-0 flex-1 flex-col border-border border-r bg-list md:w-[280px] md:flex-none lg:w-80",
-				className,
-			)}
-		>
-			<header className="flex shrink-0 items-center gap-2.5 px-4 pt-5 pb-3">
-				<h1 className="m-0 min-w-0 flex-1 truncate font-extrabold text-[30px] text-foreground tracking-[-0.02em] md:text-xl">
-					{title}
-				</h1>
-				{onNewBot && !empty && (
-					<Tooltip label="New bot">
-						<button
-							type="button"
-							aria-label="New bot"
-							onClick={onNewBot}
-							className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
-						>
-							<Plus size={18} strokeWidth={2.4} />
-						</button>
-					</Tooltip>
-				)}
-				<Tooltip label="Pod settings">
-					<Link
-						{...podSettingsLink(pod)}
-						state={backToChat}
-						aria-label="Pod settings"
-						className="focus-ring grid size-[34px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover"
+		<ListColumn
+			title={title}
+			className={className}
+			actions={
+				<>
+					{onNewBot && !empty && (
+						<IconButton label={`New bot in ${title}`} variant="bar" onClick={onNewBot}>
+							<Plus size={17} strokeWidth={2.2} />
+						</IconButton>
+					)}
+					<IconButton
+						label="Pod settings"
+						variant="bar"
+						render={<Link {...podSettingsLink(pod)} state={backToChat} />}
 					>
-						<Settings size={17} strokeWidth={2.2} />
-					</Link>
-				</Tooltip>
-			</header>
-
+						<Settings2 size={16} strokeWidth={2} />
+					</IconButton>
+				</>
+			}
+		>
 			{empty ? (
 				// A little above the middle, as the design sets it, with the one next step under it.
 				<div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-6 pb-[18%] text-center">
@@ -168,140 +138,83 @@ export function ConversationListView({
 					)}
 				</div>
 			) : (
-				<>
-					<div className="shrink-0 px-2 pb-2.5">
-						<label className="focus-ring-within flex items-center gap-[9px] rounded-xl border border-transparent bg-chip px-2.5">
-							<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-							<input
-								type="search"
-								value={query}
-								onChange={(event) => setQuery(event.target.value)}
-								placeholder={`Search ${title}`}
-								aria-label={`Search ${title}`}
-								className="min-w-0 flex-1 bg-transparent py-[9px] text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
-							/>
-						</label>
-					</div>
-					<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-y-auto px-2 pt-0.5 pb-3">
-						{status === "failed" && (
-							<li className="px-2.5 py-3 text-muted-foreground">Could not load these chats.</li>
-						)}
-						{shown.map((row) => (
-							<li key={row.agent.id}>
-								<ConversationRow row={row} pod={pod} selected={row.agent.id === selectedAgentId} />
-							</li>
-						))}
-						{needle && status === "ready" && shown.length === 0 && (
-							<li className="px-2.5 py-3 text-muted-foreground">No bots match “{query.trim()}”.</li>
-						)}
-					</ul>
-				</>
+				<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-y-auto px-2 pt-2.5 pb-3">
+					{status === "failed" && (
+						<li className="px-2.5 py-3 text-muted-foreground">Could not load these chats.</li>
+					)}
+					{rows.map((row) => (
+						<li key={row.agent.id}>
+							<ConversationRow row={row} pod={pod} selected={row.agent.id === selectedAgentId} />
+						</li>
+					))}
+				</ul>
 			)}
-		</section>
+		</ListColumn>
 	);
 }
 
+/**
+ * A bot's chat on one line: its face and name, bright while something there is
+ * new or waits on the viewer, and at the end what does.
+ */
 function ConversationRow({
 	row,
 	pod,
 	selected,
 }: {
-	row: ConversationRowData;
+	row: ChatListItem;
 	pod: Pod;
 	selected: boolean;
 }) {
-	const { agent, lastMessage } = row;
-
+	const { agent } = row;
+	const lit = selected || row.needsApproval || row.unreadMessages > 0;
 	return (
 		<Link
 			{...agentChatLink({ pod, agent })}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				"focus-ring flex items-center gap-3 rounded-[14px] px-2.5 py-[9px] transition-colors",
+				"focus-ring flex min-h-10 items-center gap-3 rounded-tail px-2.5 transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover",
 			)}
 		>
-			<span className="relative size-11 shrink-0">
-				<AgentAvatar color={agent.color} face={agent.face} size={44} />
-				<ChatMarker needsApproval={row.needsApproval} unread={row.unread} selected={selected} />
+			<AgentAvatar color={agent.color} face={agent.face} size={26} className="shrink-0" />
+			<span
+				className={cn(
+					"min-w-0 flex-1 truncate text-[14.5px]",
+					lit ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+				)}
+			>
+				{agent.name}
 			</span>
-			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="flex items-baseline gap-2">
-					<span
-						className={cn(
-							"min-w-0 flex-1 truncate text-[14.5px] text-foreground",
-							row.unread ? "font-bold" : "font-semibold",
-						)}
-					>
-						{agent.name}
-					</span>
-					{lastMessage && (
-						// A step lighter on the chosen row, whose wash would take the faint time below AA.
-						<time
-							dateTime={lastMessage.at}
-							className={cn(
-								"shrink-0 text-xs",
-								selected ? "text-muted-foreground" : "text-subtle-foreground",
-							)}
-						>
-							{formatListTime(new Date(lastMessage.at), new Date())}
-						</time>
-					)}
-				</span>
-				<span
-					className={cn(
-						"truncate text-md",
-						row.unread ? "font-medium text-foreground" : "text-muted-foreground",
-					)}
-				>
-					{row.waitingOn
-						? waitingText(row.waitingOn)
-						: lastMessage
-							? `${row.fromYou ? "You: " : ""}${lastMessage.preview}`
-							: "No messages yet"}
-				</span>
-			</span>
+			<ChatMarker needsApproval={row.needsApproval} unreadMessages={row.unreadMessages} />
 		</Link>
 	);
 }
 
 /**
- * What a chat's face says about it, top right: a hand when it waits
- * for a decision the person may make, otherwise a dot when it is unread. Each
- * sits in the row's colour so it stands off the face.
+ * What a chat's row says of it, at the end of its preview: that it needs
+ * the viewer's decision, otherwise how many messages are unread.
  */
 function ChatMarker({
 	needsApproval,
-	unread,
-	selected,
+	unreadMessages,
 }: {
 	needsApproval: boolean;
-	unread: boolean;
-	/** Whether the row is the open chat, whose wash the ring matches. */
-	selected: boolean;
+	unreadMessages: number;
 }) {
-	const ring = selected
-		? "shadow-[0_0_0_2.5px_var(--row-selected)]"
-		: "shadow-[0_0_0_2.5px_var(--list)]";
 	if (needsApproval) {
 		return (
-			<span
-				className={cn(
-					"absolute -top-[3px] -right-[3px] grid size-[20px] place-items-center rounded-full bg-approval-marker text-white",
-					ring,
-				)}
-			>
-				<Hand aria-hidden size={12} strokeWidth={2.4} />
-				<span className="sr-only">Needs your approval</span>
+			<span className="flex h-5 shrink-0 items-center rounded-tail bg-primary px-[7px] font-semibold text-[11.5px] text-primary-foreground">
+				Needs you
 			</span>
 		);
 	}
-	if (unread) {
-		return (
-			<span className={cn("absolute top-0 right-0 size-3 rounded-full bg-unread-dot", ring)}>
-				<span className="sr-only">Unread</span>
-			</span>
-		);
-	}
-	return null;
+	if (unreadMessages === 0) return null;
+	return (
+		<CountBadge
+			count={unreadMessages}
+			label={unreadMessages === 1 ? "1 unread message" : `${unreadMessages} unread messages`}
+			size="md"
+		/>
+	);
 }

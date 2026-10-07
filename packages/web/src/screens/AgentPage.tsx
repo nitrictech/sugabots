@@ -1,113 +1,56 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
-import { useState } from "react";
-import { podLink } from "@/lib/links.ts";
-import { matchesMedia, SIDEBAR_BESIDE } from "@/lib/media.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
+import type { ReactNode } from "react";
+import { useDetailsOpen } from "@/lib/details-open.ts";
 import { AgentChat } from "./AgentChat.tsx";
+import type { BackTo } from "./ChatHeader.tsx";
 
-export function AgentPage({
-	agent,
-	pod,
-	user,
-	threadId,
-	onThreadChange,
-}: {
+interface AgentPageProps {
 	agent: Agent;
 	pod: Pod;
 	user: SessionUser;
 	threadId?: string;
+	/** A message to jump to and point out, such as the mention it was opened from. */
+	focusMessageId?: string;
+	/**
+	 * Shown away from the chat's own page, as Activity shows it: no Details,
+	 * and the header's Back and right-hand link in their places.
+	 */
+	away?: { back: BackTo; trailing: ReactNode };
 	onThreadChange: (threadId: string | undefined) => void;
-}) {
-	// Open from the start where it sits beside the chat; on a smaller screen it would cover it.
-	const [detailsOpen, setDetailsOpen] = useState(() => matchesMedia(SIDEBAR_BESIDE));
+}
 
+export function AgentPage({ away, ...chat }: AgentPageProps) {
 	return (
 		<div
-			className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-			style={botColorVariables(agent.color)}
+			className="relative flex min-h-0 flex-1 overflow-hidden"
+			style={botColorVariables(chat.agent.color)}
 		>
-			<ChatHeader
-				agent={agent}
-				pod={pod}
-				detailsOpen={detailsOpen}
-				onDetailsChange={setDetailsOpen}
-			/>
-			<AgentChat
-				key={`${pod.id}:${agent.id}`}
-				agent={agent}
-				pod={pod}
-				user={user}
-				threadId={threadId}
-				detailsOpen={detailsOpen}
-				onDetailsClose={() => setDetailsOpen(false)}
-				onThreadChange={onThreadChange}
-			/>
+			{away ? (
+				<AgentChat key={chatKey(chat)} {...chat} place={{ kind: "away", ...away }} />
+			) : (
+				<OwnPageChat {...chat} />
+			)}
 		</div>
 	);
 }
 
 /**
- * The bot's face, name and pod across the top of its chat, with the way into
- * its Details: the ⓘ, or the face and name themselves, which is how a phone
- * reaches them. On a phone the chat covers the list, so Back returns to it.
+ * The chat on its own page, with Details open or closed as this device last
+ * left them. Details stay as they are from one chat to the next.
  */
-const backClass =
-	"focus-ring absolute top-3 left-2 grid size-9 shrink-0 place-items-center rounded-full text-link md:hidden";
-
-function ChatHeader({
-	agent,
-	pod,
-	detailsOpen,
-	onDetailsChange,
-}: {
-	agent: Agent;
-	pod: Pod;
-	detailsOpen: boolean;
-	onDetailsChange: (open: boolean) => void;
-}) {
+function OwnPageChat(chat: Omit<AgentPageProps, "away">) {
+	const [detailsOpen, setDetailsOpen] = useDetailsOpen();
 	return (
-		// On a phone the design centres the bot: its face over its name, and Back to the left.
-		<header className="relative flex shrink-0 items-center gap-3 border-border-subtle border-b bg-list/70 px-[22px] py-3.5 max-md:justify-center max-md:px-12 max-md:pt-2.5 max-md:pb-2">
-			<Link {...podLink(pod)} aria-label={`Back to ${pod.name}`} className={backClass}>
-				<ChevronLeft size={24} strokeWidth={2.2} />
-			</Link>
-			{/* The name's button stretches over the face and pod too, so the whole of it opens Details. */}
-			<div className="relative flex min-w-0 flex-1 items-center gap-3 max-md:flex-none max-md:flex-col max-md:gap-1.5">
-				<AgentAvatar color={agent.color} face={agent.face} size={40} className="max-md:size-14" />
-				<div className="flex min-w-0 flex-1 flex-col gap-px max-md:items-center">
-					<h1 className="m-0 truncate font-bold text-base text-foreground max-md:font-semibold max-md:text-[14.5px]">
-						<button
-							type="button"
-							onClick={() => onDetailsChange(!detailsOpen)}
-							className="focus-ring inline-flex items-center gap-0.5 rounded-md text-left after:absolute after:inset-0 after:content-['']"
-						>
-							{agent.name}
-							<ChevronRight
-								aria-hidden
-								size={14}
-								strokeWidth={2.4}
-								className="text-subtle-foreground md:hidden"
-							/>
-						</button>
-					</h1>
-					<p className="m-0 truncate text-muted-foreground text-sm max-md:hidden">{pod.name}</p>
-				</div>
-			</div>
-			<Tooltip label="Details">
-				<button
-					type="button"
-					aria-label="Details"
-					aria-pressed={detailsOpen}
-					onClick={() => onDetailsChange(!detailsOpen)}
-					className="focus-ring grid size-9 shrink-0 place-items-center rounded-full text-soft-foreground transition-colors hover:bg-chip aria-pressed:bg-chip max-md:hidden"
-				>
-					<Info size={19} strokeWidth={2} />
-				</button>
-			</Tooltip>
-		</header>
+		<AgentChat
+			key={chatKey(chat)}
+			{...chat}
+			place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen }}
+		/>
 	);
+}
+
+/** Another chat starts fresh: its scroll, its draft's audience, and what it jumped to. */
+function chatKey({ pod, agent }: { pod: Pod; agent: Agent }): string {
+	return `${pod.id}:${agent.id}`;
 }

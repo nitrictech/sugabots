@@ -1,7 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -16,9 +16,9 @@ import { awaitsApproval } from "./tool-activity.ts";
 
 /*
  * A write a bot wants to make, held for someone to allow or deny, and what
- * became of it once they did. It sits among the bot's bubbles in the bot's
- * tint, tucked under the message above it, and says what it is asking before
- * anyone answers: who wants to use what, then the request itself.
+ * became of it once they did. It sits under the bot's words on a raised card,
+ * tucked toward them, and says what it is asking before anyone answers: who
+ * wants to use what, then the request itself.
  *
  * On a wide screen the request is in the card, folded once it runs long, and
  * is answered there. On a phone the card shows the start of it and opens the
@@ -37,9 +37,6 @@ export function ToolApprovalCard({
 	podId,
 	canApprove,
 	look,
-	outgoing = false,
-	endsRun = false,
-	compact = false,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
@@ -49,12 +46,6 @@ export function ToolApprovalCard({
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
 	look?: ConnectionLook;
-	/** Whether the asking bot's messages sit on the right, so the card sits under them there. */
-	outgoing?: boolean;
-	/** The last of its bot's run, which carries the bot's face, as a bubble would. */
-	endsRun?: boolean;
-	/** The sidebar's narrower thread, with smaller faces. */
-	compact?: boolean;
 }) {
 	const review = useReviewToolCall(threadId, podId);
 	const [reviewing, setReviewing] = useState(false);
@@ -73,33 +64,31 @@ export function ToolApprovalCard({
 	const sent = review.isPending || review.isSuccess;
 	const decide = (decision: Decision) =>
 		review.mutate({ toolCallId: call.id, decision }, { onSuccess: () => setReviewing(false) });
-	// An answered request needs no line of its own: the tool line above the
-	// reply says how it was answered, and by whom.
+	const decided = call.approval;
+	// Only an answer given here is announced; one already in the history is just read.
+	const announced = review.isSuccess;
 	const status =
 		awaitsApproval(call) && !canApprove ? (
-			<p role="status" className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
+			<p className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
 				Waiting for someone with permission to answer this.
 			</p>
+		) : decided?.status === "allowed" ? (
+			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
+				Allowed{decided.decidedByName && ` by ${decided.decidedByName}`}
+			</Outcome>
+		) : decided?.status === "denied" ? (
+			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>
+				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {agent.name} won't go
+				ahead.
+			</Outcome>
 		) : null;
 
 	return (
 		<section
 			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
-			className={cn(
-				"flex animate-rise items-end gap-2 motion-reduce:animate-none",
-				outgoing && "flex-row-reverse",
-			)}
-			style={botColorVariables(agent.color)}
+			className="flex animate-rise motion-reduce:animate-none"
 		>
-			<span className={cn("flex shrink-0", compact ? "w-[26px]" : "w-[34px]")}>
-				{endsRun && <AgentAvatar color={agent.color} face={agent.face} size={compact ? 26 : 34} />}
-			</span>
-			<div
-				className={cn(
-					"flex min-w-0 max-w-[460px] flex-1 flex-col gap-2.5 bg-bot-tint pt-2.5 pr-3 pb-3 pl-2.5 text-bot-text",
-					outgoing ? "rounded-[20px_6px_20px_20px]" : "rounded-[6px_20px_20px_20px]",
-				)}
-			>
+			<div className="flex min-w-0 max-w-[460px] flex-1 flex-col gap-2.5 rounded-[6px_20px_20px_20px] bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-[34px]">
 					<FoldedRequest input={call.input} />
@@ -157,6 +146,30 @@ export function ToolApprovalCard({
 	);
 }
 
+/**
+ * What became of an answered request, with a mark for which way it went.
+ * `announced` makes it a live region, for an answer the reader just gave.
+ */
+function Outcome({
+	announced,
+	icon,
+	children,
+}: {
+	announced: boolean;
+	icon: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<p
+			role={announced ? "status" : undefined}
+			className="m-0 flex items-start gap-1.5 text-muted-foreground text-xs leading-normal"
+		>
+			<span className="mt-[3px] flex shrink-0">{icon}</span>
+			<span>{children}</span>
+		</p>
+	);
+}
+
 /** What a card says it is asking, in its header and the full-screen request's. */
 interface Step {
 	action: string;
@@ -173,7 +186,7 @@ function StepHeading({ step }: { step: Step }) {
 				<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size="md" />
 			</span>
 			<span className="flex min-w-0 flex-col gap-0.5">
-				<span className="text-[14px] text-muted-foreground leading-[1.4]">{step.who}</span>
+				<span className="text-muted-foreground text-xs leading-[1.4]">{step.who}</span>
 				<span className="text-pretty font-medium text-[14px] leading-[1.4] [overflow-wrap:anywhere]">
 					{step.action}
 				</span>
@@ -213,7 +226,7 @@ function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 				// Unfolded, it scrolls, so a keyboard needs to reach it.
 				tabIndex={foldable && open ? 0 : undefined}
 				className={cn(
-					"focus-ring w-full min-w-0 border-current/20 border-l-2 pl-2.5",
+					"focus-ring w-full min-w-0 border-border-dashed border-l-2 pl-2.5",
 					foldable && FOLDED_CLASSES_ON_PHONE,
 					folded && FOLDED_CLASSES,
 					foldable &&
@@ -231,7 +244,7 @@ function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 					aria-expanded={open}
 					aria-controls={bodyId}
 					onClick={() => setOpen(!open)}
-					className="focus-ring flex cursor-pointer items-center gap-1 rounded-md py-0.5 font-medium text-[14px] text-link max-md:hidden"
+					className="focus-ring flex cursor-pointer items-center gap-[5px] rounded-md py-1.5 font-medium text-link text-xs max-md:hidden"
 				>
 					{open ? "See less" : "See more"}
 					<ChevronDown
@@ -354,7 +367,7 @@ function ReviewHeading({
  * refusing is not a danger. Pinned along a phone's foot they are two halves,
  * Deny first, so Allow is under the thumb.
  */
-function Answer({
+export function Answer({
 	pending,
 	error,
 	onDecide,
@@ -380,7 +393,7 @@ function Answer({
 	);
 	const deny = (
 		<Button
-			variant="secondary"
+			variant="muted"
 			disabled={pending}
 			onClick={() => onDecide("deny")}
 			aria-label={`Deny: ${actionLabel}`}
@@ -417,7 +430,7 @@ function Answer({
 type Fields = [string, unknown][];
 
 /** A value's named fields in order, or nothing when it is not a record of them. */
-function fieldsOf(value: unknown): Fields | undefined {
+export function fieldsOf(value: unknown): Fields | undefined {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const fields = Object.entries(value);
 	return fields.length > 0 ? fields : undefined;
@@ -447,7 +460,7 @@ const ENTRIES_SHOWN = 10;
  * A value laid out for reading: a record as its fields, a list of records as
  * numbered entries, anything too deep to lay out as indented JSON.
  */
-function RequestValue({ value, depth }: { value: unknown; depth: number }) {
+export function RequestValue({ value, depth }: { value: unknown; depth: number }) {
 	const fields = fieldsOf(value);
 	if (fields && depth < MAX_DEPTH) return <FieldList fields={fields} depth={depth} />;
 	if (isRecordList(value) && depth < MAX_DEPTH) return <EntryList entries={value} depth={depth} />;
@@ -469,7 +482,7 @@ function RequestValue({ value, depth }: { value: unknown; depth: number }) {
  */
 function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 	return (
-		<dl className="m-0 flex flex-col gap-3 md:grid md:grid-cols-[fit-content(8rem)_minmax(0,1fr)] md:gap-x-2.5 md:gap-y-0.5">
+		<dl className="m-0 flex flex-col gap-3 md:grid md:grid-cols-[fit-content(min(180px,40%))_minmax(0,1fr)] md:gap-x-2.5 md:gap-y-0.5">
 			{fields.map(([key, value]) => {
 				const nested = hasStructure(value);
 				return (
@@ -630,7 +643,7 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 		<p className="m-0 leading-5">
 			{Object.entries(fields).map(([key, value], index) => (
 				<Fragment key={key}>
-					{index > 0 && <span className="text-[14px] text-muted-foreground"> · </span>}
+					{index > 0 && <span className="text-[14px] text-muted-foreground">, </span>}
 					<span className="text-[14px] text-muted-foreground">{wordsFromKey(key)}</span>{" "}
 					<PlainValue value={value} />
 				</Fragment>

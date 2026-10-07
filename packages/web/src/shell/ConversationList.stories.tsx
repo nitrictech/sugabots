@@ -1,18 +1,18 @@
+import type { ChatListItem } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { storyChatFor } from "@/story-app.tsx";
-import { ConversationListView, type ConversationRowData } from "./ConversationList.tsx";
+import { ConversationListView } from "./ConversationList.tsx";
 import { accountManager, design, growthDesk, leadResearcher, revenue } from "./story-fixtures.ts";
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000).toISOString();
 
-const revenueRows: ConversationRowData[] = [
+const revenueRows: ChatListItem[] = [
 	{
 		agent: growthDesk,
 		chat: storyChatFor(growthDesk),
-		fromYou: false,
-		unread: true,
+		unreadMessages: 1,
 		needsApproval: true,
 		lastMessage: {
 			preview: "I'll send the outreach emails now:",
@@ -24,8 +24,7 @@ const revenueRows: ConversationRowData[] = [
 	{
 		agent: accountManager,
 		chat: storyChatFor(accountManager),
-		fromYou: false,
-		unread: true,
+		unreadMessages: 3,
 		needsApproval: false,
 		lastMessage: {
 			preview: "Renewal notes for Halcyon are ready",
@@ -37,8 +36,7 @@ const revenueRows: ConversationRowData[] = [
 	{
 		agent: leadResearcher,
 		chat: storyChatFor(leadResearcher),
-		fromYou: true,
-		unread: false,
+		unreadMessages: 0,
 		needsApproval: false,
 		lastMessage: {
 			preview: "Go deeper on the fintech prospects from last week's list",
@@ -71,7 +69,7 @@ const meta = preview.meta({
 	],
 });
 
-/** Default is a pod's chats, newest first, with the open one marked and a way to its settings. */
+/** Default is a pod's chats, newest first, one line each, with the open one marked, a New bot at the foot, and a way to its settings. */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: "Pod settings" })).toHaveAttribute(
@@ -82,31 +80,22 @@ export const Default = meta.story({
 });
 
 /**
- * A chat waiting for your decision carries a hand on its face and says what it
- * waits to do; one with something new a dot, with its name and preview
- * brighter. The hand wins when both apply.
+ * A chat waiting for your decision says it needs you; one with something new
+ * counts its unread messages. Both make the name brighter, and Needs you wins
+ * when both apply.
  */
 export const UnreadAndWaiting = meta.story({
 	args: { selectedAgentId: leadResearcher.id },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).toHaveTextContent(
-			"Needs your approval",
+		const growth = canvas.getByRole("link", { name: /Growth Desk/ });
+		await expect(growth).toHaveTextContent("Needs you");
+		await expect(growth).not.toHaveTextContent("unread");
+		await expect(canvas.getByRole("link", { name: /Account Manager/ })).toHaveTextContent(
+			"3 unread messages",
 		);
-		await expect(canvas.getByText("Waiting to send email in Gmail")).toBeVisible();
-		await expect(canvas.getByRole("link", { name: /Growth Desk/ })).not.toHaveTextContent("Unread");
-		await expect(canvas.getByRole("link", { name: /Account Manager/ })).toHaveTextContent("Unread");
 		await expect(canvas.getByRole("link", { name: /Lead Researcher/ })).not.toHaveTextContent(
-			"Unread",
+			"unread",
 		);
-	},
-});
-
-/** Search narrows the rows to bots whose names match. */
-export const Search = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.type(canvas.getByRole("searchbox", { name: "Search Revenue" }), "lead");
-		await expect(canvas.getAllByRole("listitem")).toHaveLength(1);
-		await expect(canvas.getByRole("link", { name: /Lead Researcher/ })).toBeVisible();
 	},
 });
 

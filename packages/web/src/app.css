@@ -20,19 +20,27 @@
 	--rail: light-dark(#eeeef1, #0b0c0f);
 	/* The conversation list column, and the grouped rows in settings. */
 	--list: light-dark(#f7f7f9, #111216);
+	/* The column beside a chat: Details, or a collaboration or run. */
+	--aside: light-dark(#fbfbfc, #0d0e11);
+	/* A card among the messages, such as an approval request. */
+	--card: light-dark(#f2f2f5, #17181d);
 	/* A raised panel: a dialog, a settings card, the composer's input. */
 	--panel: light-dark(#ffffff, #15161a);
 	/* A chip, a secondary button, the search pill. */
 	--chip: light-dark(#eeeef1, #1d1f25);
 	--hover: light-dark(#e4e4e8, #262830);
+	/* A control already filled with `--hover`, such as Deny, under the pointer. */
+	--hover-strong: light-dark(#cfd0d6, #2f323a);
 	/* Rows sit on the list column, which is already a step up, so their hover is quieter. */
 	--row-hover: light-dark(#f0f0f3, #191a1f);
+	/* A message row under the pointer, barely lifted off the chat. */
+	--message-hover: light-dark(#f8f8fa, #1a1b20);
 	/* The open conversation in the list. */
 	--row-selected: light-dark(#e8e8ed, #1d1f25);
-	/* A message from a person who isn't you. */
-	--bubble-human: light-dark(#efeff2, #24262c);
 
 	--foreground: light-dark(#16171b, #eceef2);
+	/* A message's words, a step softer than a name or a heading. */
+	--body-foreground: light-dark(#26282e, #dcdee3);
 	--soft-foreground: light-dark(#3d4048, #c9ccd3);
 	/* Light is a shade darker than the design's #646973 so it passes AA on a hover wash. */
 	--muted-foreground: light-dark(#5f646e, #9096a1);
@@ -50,6 +58,12 @@
 	--border: light-dark(#eaeaee, #1d1f25);
 	--border-strong: light-dark(#e8e8ec, #2a2c33);
 	--border-dashed: light-dark(#cfd0d6, #2f323a);
+	/* The composer's edge while a message is for people only: a step up, so the change is seen. */
+	--people-only: light-dark(#c6c8cf, #3d4049);
+	/* The send button while a message is for people only: grey, as no bot will answer it. */
+	--people-only-send: light-dark(#b4b7bf, #4a4e57);
+	/* The send button with nothing to send. */
+	--chip-strong: light-dark(#dcdee3, #23252c);
 	/*
 	 * A pod tile, and a slot in one with no bot in it. Light is a step darker
 	 * than the design's #eaeaee, which all but vanished on the rail's grey.
@@ -75,11 +89,9 @@
 	--ring: oklch(0.62 0.17 268);
 	--ring-halo: oklch(0.62 0.17 268 / 0.3);
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
-	/*
-	 * The unread dot on a chat's face, the count of unread chats on a pod's
-	 * rail tile, and the hand on either when a chat waits for your approval.
-	 */
-	--unread-dot: oklch(0.62 0.17 268);
+	/* How full a bot's short-term memory is. */
+	--meter: oklch(0.62 0.15 268);
+	/* The count of what is unread or waiting, on a rail tile, a list row or a tab, and the hand when a chat waits for your approval. */
 	--rail-count: oklch(0.56 0.17 268);
 	--approval-marker: oklch(0.56 0.17 268);
 
@@ -92,6 +104,8 @@
 	--destructive-text: light-dark(#c42d45, #f47a8a);
 	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
+	/* A dot for something that went ahead, such as an allowed request. */
+	--success: #22c55e;
 	/* Green text for something that worked. Both pass AA on a panel. */
 	--success-text: light-dark(#1a7f37, #4ade80);
 
@@ -104,6 +118,8 @@
 	--dialog-shadow:
 		0 30px 80px rgba(0, 0, 0, 0.6),
 		0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
+	/* A menu or popover, which also carries a hairline of its own. */
+	--popover-shadow: 0 12px 32px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5));
 }
 
 :root[data-theme="light"] {
@@ -119,16 +135,22 @@
 	--color-rail: var(--rail);
 	--color-list: var(--list);
 	--color-panel: var(--panel);
+	--color-card: var(--card);
+	--color-aside: var(--aside);
 	--color-chip: var(--chip);
 	--color-hover: var(--hover);
+	--color-hover-strong: var(--hover-strong);
 	--color-row-hover: var(--row-hover);
+	--color-message-hover: var(--message-hover);
 	--color-row-selected: var(--row-selected);
-	--color-bubble-human: var(--bubble-human);
 	--color-disabled-foreground: var(--disabled-foreground);
 	--color-link: var(--link);
 	--color-soft-foreground: var(--soft-foreground);
 	--color-border-strong: var(--border-strong);
 	--color-border-dashed: var(--border-dashed);
+	--color-people-only: var(--people-only);
+	--color-people-only-send: var(--people-only-send);
+	--color-chip-strong: var(--chip-strong);
 	--color-tile: var(--tile);
 	--color-tile-empty: var(--tile-empty);
 	--color-switch-on: var(--switch-on);
@@ -136,6 +158,7 @@
 	--color-destructive-hover: var(--destructive-hover);
 	--color-scrim: var(--scrim);
 	--color-foreground: var(--foreground);
+	--color-body-foreground: var(--body-foreground);
 	--color-muted-foreground: var(--muted-foreground);
 	--color-subtle-foreground: var(--subtle-foreground);
 	--color-border: var(--border);
@@ -145,11 +168,12 @@
 	--color-primary-hover: var(--primary-hover);
 	--color-primary-tint-border: var(--primary-tint-border);
 	--color-ring: var(--ring);
-	--color-unread-dot: var(--unread-dot);
+	--color-meter: var(--meter);
 	--color-rail-count: var(--rail-count);
 	--color-approval-marker: var(--approval-marker);
 	--color-warning: var(--warning);
 	--color-success-text: var(--success-text);
+	--color-success: var(--success);
 	--color-destructive: var(--destructive);
 	--color-person-avatar: var(--person-avatar);
 	--color-person-avatar-foreground: var(--person-avatar-foreground);
@@ -193,6 +217,7 @@
 	--radius-composer: 22px;
 
 	--shadow-dialog: var(--dialog-shadow);
+	--shadow-popover: var(--popover-shadow);
 }
 
 /*
@@ -331,18 +356,13 @@
 	text-underline-offset: 2px;
 }
 
-/*
- * An ID or a number inline in a bot's message, in the bot's brighter tint. The
- * mono colour alone is too close to the words around it to tell apart, so it
- * also sits on a chip, lifted off the tint and edged in its own colour.
- */
+/* An ID or a number inline in a message, in mono on a chip so it stands off the words around it. */
 .message-markdown :not(pre) > code {
-	padding: 0 0.3em;
-	border-radius: var(--radius-xs);
-	background: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
-	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bot-mono) 25%, transparent);
-	color: var(--bot-mono);
-	font: 500 13.5px var(--font-mono);
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: var(--chip);
+	color: var(--foreground);
+	font: 500 13px var(--font-mono);
 }
 
 /*

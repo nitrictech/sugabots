@@ -80,7 +80,9 @@ export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("heading", { name: growthDesk.name, level: 1 }),
+		).toBeInTheDocument();
 	},
 });
 
@@ -89,7 +91,7 @@ export const PodOpensTopChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: growthDesk.name }, { timeout: 10_000 }),
+			await canvas.findByRole("heading", { name: growthDesk.name, level: 1 }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("link", { name: new RegExp(growthDesk.name) })).toHaveAttribute(
 			"aria-current",
@@ -110,12 +112,16 @@ export const PodOnAPhone = meta.story({
 	},
 });
 
-/** A bot nobody has written to yet: its face, and Say hello. */
+/** A bot nobody has written to yet: the start of the chat, with its face and name. */
 export const FirstMessage = meta.story({
 	render: () => <StoryApp path={chatPath(chief)} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(`Say hello to ${chief.name}`, {}, { timeout: 10_000 }),
+			await canvas.findByText(
+				`This is the start of your conversation with ${chief.name}.`,
+				{ exact: false },
+				{ timeout: 10_000 },
+			),
 		).toBeInTheDocument();
 	},
 });
@@ -279,7 +285,9 @@ export const Collaboration = meta.story({
 			{ name: collaboration.thread.title },
 			{ timeout: 10_000 },
 		);
-		await expect(within(panel).getByText(`with ${linearHandler.name}`)).toBeInTheDocument();
+		await expect(
+			within(panel).getByText(`${growthDesk.name} and ${linearHandler.name}`),
+		).toBeInTheDocument();
 	},
 });
 

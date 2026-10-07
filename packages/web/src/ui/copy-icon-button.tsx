@@ -37,7 +37,15 @@ export function CopyIconButton({
 			label={result === "copied" ? "Copied" : result === "failed" ? "Couldn't copy" : label}
 			onClick={() => void copy()}
 		>
-			{result === "copied" ? <Check aria-hidden /> : <Copy aria-hidden />}
+			{result === "copied" ? (
+				// Pops in where the copy icon was.
+				<Check
+					aria-hidden
+					className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-safe:duration-200"
+				/>
+			) : (
+				<Copy aria-hidden />
+			)}
 		</IconButton>
 	);
 }

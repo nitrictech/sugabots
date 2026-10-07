@@ -5,7 +5,7 @@ import { cn } from "cn";
 /**
  * How each pod colour is drawn: the tile, a slot in it with no bot, and the
  * swatch a colour picker shows for it. One oklch recipe on each colour's hue:
- * tile L .9 C .05 light and L .36 C .065 dark, empty slot L .84 C .07 light
+ * tile L .9 C .05 light and L .33 C .07 dark, empty slot L .84 C .07 light
  * and L .45 C .07 dark, swatch L .7 C .16 in both, as vivid as a bot's face.
  */
 export const podPalettes: Record<PodColor, { tile: string; empty: string; swatch: string }> = {
@@ -21,7 +21,7 @@ export const podPalettes: Record<PodColor, { tile: string; empty: string; swatch
 
 function tint(hue: number) {
 	return {
-		tile: `light-dark(oklch(0.9 0.05 ${hue}), oklch(0.36 0.065 ${hue}))`,
+		tile: `light-dark(oklch(0.9 0.05 ${hue}), oklch(0.33 0.07 ${hue}))`,
 		empty: `light-dark(oklch(0.84 0.07 ${hue}), oklch(0.45 0.07 ${hue}))`,
 		swatch: `oklch(0.7 0.16 ${hue})`,
 	};
@@ -36,7 +36,6 @@ const geometry = {
 	30: { radius: 9, gap: 2, padding: 4 },
 	36: { radius: 11, gap: 2, padding: 4 },
 	44: { radius: 14, gap: 3, padding: 5 },
-	46: { radius: 14, gap: 3, padding: 5 },
 	72: { radius: 22, gap: 5, padding: 9 },
 	88: { radius: 26, gap: 6, padding: 10 },
 } as const;

@@ -167,10 +167,12 @@ export const Expanded = meta.story({
 	},
 });
 
-/** Beside the chat, the header's ⓘ closes it, so it has no Close of its own. */
-export const ClosedFromTheHeader = meta.story({
-	play: async ({ canvas }) => {
-		await expect(canvas.queryByRole("button", { name: "Close" })).toBeNull();
+/** Its own header names it and closes it, beside the chat as on a phone. */
+export const ClosedFromItsHeader = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByRole("heading", { name: "Details" })).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
+		await expect(args.onClose).toHaveBeenCalled();
 	},
 });
 

@@ -36,7 +36,7 @@ export function WorkspaceSwitcher({
 			<Tooltip label={current.name} side="right">
 				<DropdownMenuTrigger
 					aria-label={`Workspace: ${current.name}`}
-					className="focus-ring grid size-11 shrink-0 place-items-center rounded-tile bg-foreground font-semibold text-background text-lg transition-opacity hover:opacity-90 md:size-[46px]"
+					className="focus-ring grid size-11 shrink-0 place-items-center rounded-tile bg-foreground font-semibold text-background text-lg transition-opacity hover:opacity-90"
 				>
 					<WorkspaceInitial workspace={current} />
 				</DropdownMenuTrigger>

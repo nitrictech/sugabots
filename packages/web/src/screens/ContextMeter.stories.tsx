@@ -3,8 +3,6 @@ import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { ContextMeter } from "./ContextMeter.tsx";
 
-const NOW = new Date("2026-09-28T09:30:00.000Z");
-
 const context = (usedTokens: number, compactedAt: string | null = null): ThreadContext => ({
 	usedTokens,
 	measuredAt: "2026-09-28T09:05:00.000Z",
@@ -17,10 +15,10 @@ const meta = preview.meta({
 	title: "Product/ContextMeter",
 	component: ContextMeter,
 	tags: ["ai-generated"],
-	args: { context: context(48_200), now: NOW },
+	args: { context: context(48_200) },
 	decorators: [
 		(Story) => (
-			<div className="w-[320px] overflow-hidden rounded-panel bg-panel">
+			<div className="w-[320px] overflow-hidden rounded-xl border border-border bg-list">
 				<Story />
 			</div>
 		),
@@ -35,7 +33,6 @@ export const Filling = meta.story({
 			"19",
 		);
 		await expect(canvas.getByText("19% full")).toBeVisible();
-		await expect(canvas.queryByText(/compacted/)).toBeNull();
 		await expect(canvas.queryByText(/tokens/)).toBeNull();
 	},
 });
@@ -48,18 +45,13 @@ export const PastTheLine = meta.story({
 	},
 });
 
-/** Compacted is a chat the bot now reads as a summary and its newest messages. */
-export const Compacted = meta.story({
-	args: { context: context(71_900, "2026-09-28T08:12:00.000Z") },
-	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Last compacted at/)).toBeVisible();
-	},
-});
-
-/** CompactedSinceMeasured is a chat compacted after its latest reply, so the figure waits for the next. */
+/**
+ * CompactedSinceMeasured is a chat compacted after its latest reply, so the
+ * figure is out of date until the next one and the bar fades.
+ */
 export const CompactedSinceMeasured = meta.story({
 	args: { context: context(186_400, "2026-09-28T09:06:00.000Z") },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/Last compacted at/)).toBeVisible();
+		await expect(canvas.getByText("73% full")).toBeVisible();
 	},
 });

@@ -1,5 +1,10 @@
-import type { ChatHistoryEntry, ThreadParticipant } from "@sugabots/contracts";
-import { ChevronRight, Repeat } from "lucide-react";
+import type {
+	ChatHistoryEntry,
+	RoutineExecutionTriggerKind,
+	ThreadParticipant,
+} from "@sugabots/contracts";
+import { Clock, type LucideProps, RefreshCw, Webhook } from "lucide-react";
+import { formatClockTime } from "@/lib/list-time.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 
 export type ChatThreadType = ChatHistoryEntry["type"];
@@ -20,26 +25,27 @@ export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivitySt
 }
 
 /**
- * A centred line for something that happened in the chat around the bot's
- * messages: a collaboration with another bot, or a routine run. The whole line
- * opens it.
+ * A quiet row for something that happened in the chat around the bot's
+ * messages: a collaboration another bot asked it into, or a routine run. It
+ * lines up with the messages, its mark where their faces are, and the whole of
+ * it opens the thread.
  */
 export function ChatActivityRow(
-	props: { state: ActivityState; onOpen: () => void } & (
+	props: { state: ActivityState; at?: string; onOpen: () => void } & (
 		| {
 				type: "collaboration";
 				initiator: AgentParticipant;
 				recipient: AgentParticipant;
 				/**
-				 * Whose chat the line is in: the bot that asked, by default, or the
-				 * one it asked, whose line says it helped.
+				 * Whose chat the row is in: the bot that asked, by default, or the
+				 * one it asked, whose row says it helped.
 				 */
 				inChatOf?: "initiator" | "recipient";
 		  }
-		| { type: "routine"; routineName: string }
+		| { type: "routine"; routineName: string; triggerKind: RoutineExecutionTriggerKind }
 	),
 ) {
-	const { state, onOpen } = props;
+	const { state, at, onOpen } = props;
 	const text =
 		props.type === "collaboration"
 			? props.inChatOf === "recipient"
@@ -47,15 +53,15 @@ export function ChatActivityRow(
 				: collaborationText(props.initiator.name, props.recipient.name, state)
 			: routineText(props.routineName, state);
 	return (
-		<div className="flex justify-center py-2.5">
-			<button
-				type="button"
-				onClick={onOpen}
-				aria-label={`Open ${threadTypeLabel[props.type]}: ${text}`}
-				className="focus-ring flex min-w-0 items-center gap-[7px] rounded-md px-0.5 py-0.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
-			>
+		<button
+			type="button"
+			onClick={onOpen}
+			aria-label={`Open ${threadTypeLabel[props.type]}: ${text}`}
+			className="focus-ring group/activity flex w-full min-w-0 items-center gap-3.5 px-5 py-1.5 text-left"
+		>
+			<span aria-hidden className="grid w-9 shrink-0 place-items-center text-muted-foreground">
 				{props.type === "collaboration" ? (
-					<span aria-hidden className="relative h-[18px] w-[30px] shrink-0">
+					<span className="relative h-[18px] w-[30px]">
 						<AgentAvatar
 							color={props.initiator.color}
 							face={props.initiator.face}
@@ -70,36 +76,44 @@ export function ChatActivityRow(
 						/>
 					</span>
 				) : state === "failed" ? (
-					<span
-						aria-hidden
-						className="grid size-3.5 shrink-0 place-items-center rounded-full bg-destructive font-bold text-[10px] text-white leading-none"
-					>
+					<span className="grid size-[15px] place-items-center rounded-full bg-destructive font-bold text-[10px] text-white leading-none">
 						!
 					</span>
 				) : (
-					<Repeat aria-hidden size={13} strokeWidth={2.2} className="shrink-0" />
+					<RoutineTriggerIcon kind={props.triggerKind} size={15} strokeWidth={2.2} />
 				)}
-				<span className="min-w-0 truncate">{text}</span>
-				{state === "running" ? (
-					<span aria-hidden className="typing-dots typing-dots-small">
-						<i />
-						<i />
-						<i />
-					</span>
-				) : (
-					<ChevronRight
-						aria-hidden
-						size={10}
-						strokeWidth={3}
-						className="shrink-0 text-subtle-foreground"
-					/>
-				)}
-			</button>
-		</div>
+			</span>
+			<span className="min-w-0 truncate font-medium text-[13.5px] text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
+				{text}
+			</span>
+			{state === "running" ? (
+				<span aria-hidden className="typing-dots typing-dots-small shrink-0 text-muted-foreground">
+					<i />
+					<i />
+					<i />
+				</span>
+			) : (
+				at && (
+					<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
+						{formatClockTime(new Date(at))}
+					</time>
+				)
+			)}
+		</button>
 	);
 }
 
-function collaborationText(host: string, other: string, state: ActivityState): string {
+/** What started a routine run, as a mark: a clock for its schedule, a hook for its webhook. */
+export function RoutineTriggerIcon({
+	kind,
+	...props
+}: { kind: RoutineExecutionTriggerKind } & LucideProps) {
+	if (kind === "cron") return <Clock {...props} />;
+	if (kind === "webhook") return <Webhook {...props} />;
+	return <RefreshCw {...props} />;
+}
+
+export function collaborationText(host: string, other: string, state: ActivityState): string {
 	switch (state) {
 		case "running":
 			return `${host} is talking to ${other}`;
@@ -126,7 +140,7 @@ function helpedText(helper: string, asker: string, state: ActivityState): string
 	}
 }
 
-function routineText(name: string, state: ActivityState): string {
+export function routineText(name: string, state: ActivityState): string {
 	switch (state) {
 		case "running":
 			return `${name} is running`;

@@ -26,17 +26,14 @@ const meta = preview.meta({
 	args: { typers: [growthDesk] as const },
 });
 
-/** Typing is a bot at work on its reply: three dots in its tint, where the reply will land. */
+/** Typing is a bot at work on its reply: three moving dots and its name, where the reply will land. */
 export const Typing = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("status", { name: "Growth Desk is typing" })).toBeVisible();
 	},
 });
 
-/** OnTheRight is a bot typing on the right, as the host does in a collaboration's mirrored thread. */
-export const OnTheRight = meta.story({ args: { outgoing: true } });
-
-/** APerson is somebody else writing in the composer, in the bubble people's messages have. */
+/** APerson is somebody else writing in the composer. */
 export const APerson = meta.story({
 	args: { typers: [ana] as const },
 	play: async ({ canvas }) => {
@@ -44,7 +41,7 @@ export const APerson = meta.story({
 	},
 });
 
-/** WithTheBot is a person typing while the bot writes its reply: one bubble, their faces stacked. */
+/** WithTheBot is a person typing while the bot writes its reply: one line names them both. */
 export const WithTheBot = meta.story({
 	args: { typers: [growthDesk, ana] as const },
 	play: async ({ canvas }) => {

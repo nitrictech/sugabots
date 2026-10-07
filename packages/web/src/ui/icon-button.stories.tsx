@@ -9,7 +9,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { label: "Workspace settings", children: <Settings />, onClick: fn() },
 	argTypes: {
-		variant: { control: "select", options: ["quiet", "outline", "pane"] },
+		variant: { control: "select", options: ["quiet", "outline", "pane", "bar"] },
 		size: { control: "select", options: ["sm", "default", "lg"] },
 	},
 });
@@ -22,5 +22,10 @@ export const Outline = meta.story({ args: { variant: "outline" } });
 
 /** Pane uses a recessed background for actions inside a panel. */
 export const Pane = meta.story({ args: { variant: "pane", size: "lg" } });
+
+/** Bar sits in the header across the top of a list, chat or sidebar, such as a sidebar's Close. */
+export const Bar = meta.story({
+	args: { variant: "bar", children: <Settings size={16} strokeWidth={2} /> },
+});
 
 export const Disabled = meta.story({ args: { disabled: true } });
