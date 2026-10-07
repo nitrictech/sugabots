@@ -44,11 +44,12 @@ import { type InvalidRoutineSchedule, nextOccurrence, upcomingOccurrences } from
  */
 export interface Interface {
 	/**
-	 * Defines a routine on a crew agent. A webhook routine's secret is
-	 * returned once, here, and never again.
+	 * Defines a routine on a crew agent, as made by the actor or, with
+	 * `madeByAgent`, by the agent at the actor's request. A webhook routine's
+	 * secret is returned once, here, and never again.
 	 */
 	readonly create: (
-		owner: { agentId: string },
+		owner: { agentId: string; madeByAgent?: boolean },
 		input: NewRoutine,
 	) => Effect.Effect<
 		Defined,
@@ -163,7 +164,7 @@ export const make = Effect.gen(function* () {
 
 	return Service.of({
 		...view,
-		create: ({ agentId }, input) =>
+		create: ({ agentId, madeByAgent = false }, input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -183,6 +184,7 @@ export const make = Effect.gen(function* () {
 						workspaceId: owner.workspaceId,
 						agentId: owner.id,
 						createdById: actor.userId,
+						createdByAgentId: madeByAgent ? owner.id : null,
 						name: input.name,
 						instructions: input.instructions,
 						triggerKind: input.trigger.kind,

@@ -39,9 +39,20 @@ time of your choosing. Have a go:
 
 <RoutineBuilder />
 
-A schedule uses the timezone of whoever created the routine. If Sugabots was down when a run was due, it does one
+A schedule uses the timezone of whoever created the routine, or the workspace's
+when a bot set it up. If Sugabots was down when a run was due, it does one
 catch-up run rather than all the missed ones, and a routine never runs twice at
 the same time.
+
+## Ask the bot
+
+Admins can also ask a bot in its chat: "check in with me every morning at 9" or
+"move the inbox sweep to 10". It sets up, changes or pauses its own schedules, in
+the workspace's timezone, and links to the routine in its reply. Anyone in the
+pod can ask a bot what routines it has. Webhooks, and deleting a routine, stay
+in **Settings → Routines**.
+
+Turn **Manage its routines** off in a bot's settings to stop it.
 
 ## When something calls it
 

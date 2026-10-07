@@ -113,6 +113,7 @@ function routine(
 		state,
 		results: "keep_in_run",
 		createdById: null,
+		createdByAgentId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",
 	};

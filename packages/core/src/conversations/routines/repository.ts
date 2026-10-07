@@ -31,7 +31,8 @@ import { RoutineRuns } from "./runs.ts";
  */
 export interface Interface {
 	readonly create: (
-		definition: Definition & Pick<schema.RoutineRow, "workspaceId" | "agentId" | "createdById">,
+		definition: Definition &
+			Pick<schema.RoutineRow, "workspaceId" | "agentId" | "createdById" | "createdByAgentId">,
 	) => Effect.Effect<schema.RoutineRow, RoutineNameTaken>;
 	/** Changes a routine's definition. `undefined` when there is no such routine. */
 	readonly update: (

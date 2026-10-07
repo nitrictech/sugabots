@@ -6,6 +6,7 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../threads/message-text.ts";
+import { ROUTINES_KEY, spokenTimeZone } from "../tools/routines/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 
@@ -155,7 +156,7 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 					.filter(Boolean)
 					.join("\n")
 			: undefined,
-		...environmentInstruction(environment),
+		...environmentInstruction(context, environment),
 		"When you have said what is needed and nobody else should speak, stop. The people have the floor.",
 	]
 		.filter(Boolean)
@@ -163,20 +164,51 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 }
 
 /** The turn's environment as labelled lines, one section per fact. */
-function environmentInstruction(environment: TurnEnvironment): string[] {
+function environmentInstruction(context: TurnContext, environment: TurnEnvironment): string[] {
 	return [
-		todayInstruction(environment.now),
+		todayInstruction(environment.now, context),
 		builtInToolsInstruction(environment.builtInTools),
 		environment.connectionTools,
 	].filter((section): section is string => section !== undefined);
 }
 
-/** The current date and time, so the agent doesn't assume it's still its training cutoff. */
-function todayInstruction(now: Date): string {
+/**
+ * The current date and time, so the agent doesn't assume it's still its
+ * training cutoff, and in the workspace's timezone, which the routines it sets
+ * up run in. It names that timezone as people say it, so the agent does too.
+ */
+function todayInstruction(now: Date, context: TurnContext): string {
+	const timeZone = context.workspaceTimeZone;
+	const spoken = spokenTimeZone(timeZone);
+	const routinesOn = !context.agent.disabledTools.includes(ROUTINES_KEY);
 	return [
 		`Current time: ${currentDate.format(now)}, ${now.toISOString().slice(11, 16)} UTC.`,
-		'You don\'t know the person\'s timezone, so their date may differ from this. If an answer depends on their local date or time ("today", "tonight", whether somewhere is open now), ask or say what you assumed.',
-	].join(" ");
+		`In ${spoken} (${timeZone}), it is ${workspaceTime(now, timeZone)}.`,
+		routinesOn
+			? `Routines you set up run in ${spoken}. Say their times plainly, naming the zone once when you confirm a schedule ("8am ${spoken}"). Don't ask the person for their timezone, explain it, or call it the workspace's unless they bring it up.`
+			: undefined,
+		'You don\'t know the person\'s own timezone, which may differ from the workspace\'s, so their date may differ from this. If an answer depends on their local date or time ("today", "tonight", whether somewhere is open now), ask or say what you assumed.',
+	]
+		.filter(Boolean)
+		.join(" ");
+}
+
+/** `now` in `timeZone`, written as the UTC time is: "Friday, 25 September 2026, 13:00". */
+function workspaceTime(now: Date, timeZone: string): string {
+	const date = new Intl.DateTimeFormat("en-GB", {
+		weekday: "long",
+		day: "numeric",
+		month: "long",
+		year: "numeric",
+		timeZone,
+	}).format(now);
+	const time = new Intl.DateTimeFormat("en-GB", {
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+		timeZone,
+	}).format(now);
+	return `${date}, ${time}`;
 }
 
 /** Which built-in tools the agent has, and what to say when it can't search. */
