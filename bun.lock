@@ -47,6 +47,8 @@
       "version": "0.0.0",
       "dependencies": {
         "effect": "catalog:",
+        "mdast-util-from-markdown": "^2.0.3",
+        "mdast-util-to-string": "^4.0.0",
         "validator": "^13.15.35",
       },
       "devDependencies": {
