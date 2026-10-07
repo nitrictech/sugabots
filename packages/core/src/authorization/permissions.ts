@@ -87,7 +87,13 @@ export type PodPermission =
 	/** Decide a tool call an agent raised in ordinary conversation. */
 	| "approval.decide"
 	/** Decide a tool call an agent raised while a Routine was running. */
-	| "approval.routine.decide";
+	| "approval.routine.decide"
+	/**
+	 * Decide what the pod's sandbox may reach, within what the workspace
+	 * blocks, and what software it has: change its hosts and software, and
+	 * allow its agents' requests for more.
+	 */
+	| "sandbox.manage";
 
 /**
  * The caller.
@@ -156,6 +162,7 @@ const ADMINISTRATOR_POD_GRANTS = new Set<PodPermission>([
 	"routine.history.read",
 	"approval.decide",
 	"approval.routine.decide",
+	"sandbox.manage",
 ]);
 
 const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
