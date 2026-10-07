@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	availableRepositoriesSchema,
+	GIT_HOST_WEBHOOK_PATH,
 	GITHUB_APP_INSTALLED_PATH,
 	GITHUB_APP_MADE_PATH,
 	gitHostSchema,
@@ -13,7 +14,7 @@ import {
 } from "../../git-hosts.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { BadRequest, NotFound, refused } from "../errors.ts";
+import { BadRequest, NotFound, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 const root = "/workspaces/:workspace/git-hosts";
@@ -83,3 +84,17 @@ export class GitHostsApi extends HttpApiGroup.make("gitHosts")
 		}),
 	)
 	.middleware(Session) {}
+
+/**
+ * Where a git host delivers events. Without a session: a delivery is admitted
+ * by its signature under the host's webhook secret. Raw, since the signature
+ * is over the body exactly as sent.
+ */
+export class GitHostWebhooksApi extends HttpApiGroup.make("gitHostWebhooks").add(
+	HttpApiEndpoint.post("delivery", `${GIT_HOST_WEBHOOK_PATH}/:gitHostId`, {
+		params: { gitHostId: uuidSchema },
+		payload: Schema.Json,
+		success: HttpApiSchema.Empty(204),
+		error: Unauthorized,
+	}),
+) {}

@@ -36,6 +36,12 @@ export const workspaceSettingGroups = [
 				path: "/settings/sandboxes",
 				needs: "manageProviders",
 			},
+			{
+				id: "repositories",
+				label: "Repositories",
+				path: "/settings/repositories",
+				needs: "manageProviders",
+			},
 		],
 	},
 	{

@@ -28,6 +28,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { GitHostsSection } from "./GitHostsSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
@@ -126,6 +127,15 @@ export function WorkspaceSettings({
 								<SandboxSettings />
 							) : (
 								<Alert>Only workspace administrators can manage sandboxes.</Alert>
+							)}
+						</SettingsPage>
+					)}
+					{section === "repositories" && (
+						<SettingsPage title="Repositories" description="Where the code bots work on lives.">
+							{may.manageProviders ? (
+								<GitHostsSection />
+							) : (
+								<Alert>Only workspace administrators can manage repositories.</Alert>
 							)}
 						</SettingsPage>
 					)}

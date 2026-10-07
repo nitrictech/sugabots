@@ -1,4 +1,4 @@
-import { createSign } from "node:crypto";
+import { createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { Clock, Data, DateTime, Effect, Schema } from "effect";
 import type { EgressHttpClient } from "../providers/network/egress.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
@@ -42,13 +42,34 @@ export const READ_PERMISSIONS: Permissions = {
 	metadata: "read",
 };
 
-/** A GitHub App's manifest, as GitHub's new-app page takes it. */
+/**
+ * The events a workspace's app is sent, chosen when it is made because an
+ * existing app's events can only be changed on GitHub, by its owner. Each is
+ * covered by a read side of {@link APP_PERMISSIONS}.
+ */
+export const WEBHOOK_EVENTS = [
+	"pull_request",
+	"pull_request_review",
+	"issue_comment",
+	"check_run",
+	"check_suite",
+] as const;
+
+/**
+ * A GitHub App's manifest, as GitHub's new-app page takes it. Without a
+ * `webhookUrl` the app has no webhook and is sent no events: GitHub refuses a
+ * webhook URL it can't reach, even an inactive one.
+ */
 export function appManifest(input: {
 	name: string;
 	homepageUrl: string;
 	redirectUrl: string;
 	setupUrl: string;
+	webhookUrl: string | undefined;
 }) {
+	const webhook = input.webhookUrl
+		? { hook_attributes: { url: input.webhookUrl, active: true }, default_events: WEBHOOK_EVENTS }
+		: { default_events: [] };
 	return {
 		name: input.name,
 		url: input.homepageUrl,
@@ -57,9 +78,7 @@ export function appManifest(input: {
 		setup_on_update: true,
 		public: false,
 		default_permissions: APP_PERMISSIONS,
-		default_events: [],
-		// Sugabots doesn't take GitHub's events yet.
-		hook_attributes: { url: input.homepageUrl, active: false },
+		...webhook,
 	};
 }
 
@@ -94,9 +113,11 @@ const MadeApp = Schema.Struct({
 	slug: Schema.String,
 	name: Schema.String,
 	pem: Schema.String,
+	/** Null for an app made without a webhook. */
+	webhook_secret: Schema.NullOr(Schema.String),
 });
 
-/** Turns the code GitHub gave for an app made from a manifest into the app and its private key. */
+/** Turns the code GitHub gave for an app made from a manifest into the app, its private key and its webhook's secret. */
 export const madeApp = (http: EgressHttpClient, code: string) =>
 	call(http, "POST", `/app-manifests/${encodeURIComponent(code)}/conversions`, {}).pipe(
 		Effect.flatMap(decoded(MadeApp)),
@@ -315,4 +336,15 @@ export class GitHubFailed
 	get userMessage() {
 		return UserMessage.of`GitHub refused the workspace's app. Check that it's still installed, on GitHub.`;
 	}
+}
+
+/**
+ * Whether `signature`, GitHub's `X-Hub-Signature-256` header, is the
+ * HMAC-SHA256 of `body` under the app's webhook secret.
+ */
+export function signedDelivery(secret: string, body: string, signature: string | undefined) {
+	if (!signature) return false;
+	const expected = Buffer.from(`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`);
+	const given = Buffer.from(signature);
+	return given.length === expected.length && timingSafeEqual(given, expected);
 }

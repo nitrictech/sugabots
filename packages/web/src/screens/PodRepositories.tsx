@@ -64,7 +64,7 @@ export function RepositoriesGroup({
 						label="None yet"
 						sub={
 							available?.length === 0
-								? "Install a GitHub App in workspace settings first."
+								? "Install a GitHub App under Repositories in workspace settings first."
 								: "Bots can still clone public repositories."
 						}
 					/>

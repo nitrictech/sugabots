@@ -1,7 +1,9 @@
 export * as GitHosts from "./git-hosts.ts";
 
+import { isIP } from "node:net";
 import {
 	type AvailableRepositories,
+	GIT_HOST_WEBHOOK_PATH,
 	GITHUB_APP_INSTALLED_PATH,
 	GITHUB_APP_MADE_PATH,
 	type GitHost,
@@ -26,8 +28,9 @@ import {
 	user,
 	workspace,
 } from "../database/schema.ts";
+import { Ids } from "../ids/ids.ts";
 import { Installation } from "../installation/installation.ts";
-import { Egress } from "../providers/network/egress.ts";
+import { Egress, isPrivateAddress } from "../providers/network/egress.ts";
 import { type UserFacing, UserMessage } from "../user-message.ts";
 import { type Credential, sealed, unsealed } from "./credential.ts";
 import * as GitHub from "./github.ts";
@@ -42,7 +45,8 @@ import { type PushFailed, pushBundle } from "./push.ts";
  * Sugabots, once someone allowed it, with tokens the sandbox never holds.
  *
  * Setting up a workspace's hosts takes `workspace.providers.manage`. Seeing a
- * pod's repositories takes `pod.read`; changing them, `sandbox.manage`.
+ * pod's repositories takes `pod.read`; changing them, `connection.manage`,
+ * as they are outside services the pod's agents use, like its connections.
  */
 export interface Interface {
 	readonly list: (
@@ -61,6 +65,16 @@ export interface Interface {
 		code: string | undefined;
 		state: string | undefined;
 	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
+	/**
+	 * Admits an event a host delivered when `signature` proves it came from
+	 * the host's app. Events aren't acted on yet.
+	 */
+	readonly delivery: (input: {
+		gitHostId: string;
+		event: string | undefined;
+		body: string;
+		signature: string | undefined;
+	}) => Effect.Effect<void, DeliveryRefused>;
 	/** Records the account the app was installed on. */
 	readonly gitHubAppInstalled: (callback: {
 		installationId: number | undefined;
@@ -157,8 +171,10 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const credentials = yield* Credentials.Service;
 	const installation = yield* Installation.Service;
+	const ids = yield* Ids.Service;
 	const http = (yield* Egress.Service).providers.for({ baseUrl: GitHub.API_URL });
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
+	const webhooksReachable = reachableFromInternet(installation.publicUrl);
 
 	const managed = (workspaceRef: string) =>
 		authorization.workspace(workspaceRef, "workspace.providers.manage");
@@ -315,7 +331,9 @@ export const make = Effect.gen(function* () {
 							.from(workspace)
 							.where(eq(workspace.id, workspaceId)),
 					);
-					const state = yield* stateFor({ step: "make", workspaceId });
+					// The host's id is in its webhook's URL, so it is minted before GitHub makes the app.
+					const gitHostId = yield* ids.next;
+					const state = yield* stateFor({ step: "make", workspaceId, gitHostId });
 					const manifest = GitHub.appManifest({
 						name: `${named?.name ?? "Workspace"} Sugabots`
 							.slice(0, GitHub.MAX_APP_NAME_LENGTH)
@@ -323,6 +341,9 @@ export const make = Effect.gen(function* () {
 						homepageUrl: installation.webAppUrl,
 						redirectUrl: `${apiUrl}${GITHUB_APP_MADE_PATH}`,
 						setupUrl: `${apiUrl}${GITHUB_APP_INSTALLED_PATH}`,
+						webhookUrl: webhooksReachable
+							? `${apiUrl}${GIT_HOST_WEBHOOK_PATH}/${gitHostId}`
+							: undefined,
 					});
 					return {
 						url: GitHub.newAppUrl(organization, state),
@@ -340,8 +361,10 @@ export const make = Effect.gen(function* () {
 					CurrentActor.Service | Database
 				> {
 					const setup = yield* stateOf(state, "make");
-					if (!setup) return { kind: "failed", workspaceId: undefined, failure: "expired" };
-					const { workspaceId } = setup;
+					if (!setup?.gitHostId) {
+						return { kind: "failed", workspaceId: undefined, failure: "expired" };
+					}
+					const { workspaceId, gitHostId } = setup;
 					if (!code) return { kind: "failed", workspaceId, failure: "cancelled" };
 					const allowed = yield* managed(workspaceId).pipe(
 						Effect.as(true),
@@ -361,12 +384,14 @@ export const make = Effect.gen(function* () {
 						slug: made.value.slug,
 						privateKey: made.value.pem,
 						installationId: null,
+						webhookSecret: made.value.webhook_secret,
 					};
 					const { userId } = yield* CurrentActor.Service;
 					const [row] = yield* query((db) =>
 						db
 							.insert(gitHost)
 							.values({
+								id: gitHostId,
 								workspaceId,
 								kind: "github",
 								name: made.value.name,
@@ -378,6 +403,21 @@ export const make = Effect.gen(function* () {
 					if (!row) return { kind: "failed", workspaceId, failure: "github" };
 					const next = yield* stateFor({ step: "install", workspaceId, gitHostId: row.id });
 					return { kind: "next", url: GitHub.installAppUrl(made.value.slug, next) };
+				}),
+			),
+
+		delivery: ({ gitHostId, event, body, signature }) =>
+			operation(
+				"delivery",
+				Effect.gen(function* () {
+					const [row] = yield* query((db) =>
+						db.select().from(gitHost).where(eq(gitHost.id, gitHostId)).limit(1),
+					);
+					const secret = row && unsealed(credentials, row.credentialEncrypted).webhookSecret;
+					if (!secret || !GitHub.signedDelivery(secret, body, signature)) {
+						return yield* new DeliveryRefused();
+					}
+					yield* Effect.logDebug("Git host event received", { gitHostId, event });
 				}),
 			),
 
@@ -464,7 +504,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"availableRepositories",
 				Effect.gen(function* () {
-					const pod = podOf(yield* authorization.pod(podId, "sandbox.manage"));
+					const pod = podOf(yield* authorization.pod(podId, "connection.manage"));
 					const hosts = yield* hostsOf(pod.workspaceId);
 					const listed = yield* Effect.forEach(hosts, (row) => {
 						const app = installedApp(row);
@@ -487,7 +527,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const pod = podOf(yield* authorization.pod(podId, "sandbox.manage"));
+					const pod = podOf(yield* authorization.pod(podId, "connection.manage"));
 					const row = yield* hostOf(pod.workspaceId, gitHostId);
 					const app = row && installedApp(row);
 					if (!app) return yield* new RepositoryUnreachable({ repository });
@@ -510,7 +550,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const pod = podOf(yield* authorization.pod(podId, "sandbox.manage"));
+					const pod = podOf(yield* authorization.pod(podId, "connection.manage"));
 					yield* query((db) =>
 						db
 							.delete(podRepository)
@@ -723,6 +763,26 @@ export interface AllowedRequest {
 }
 
 const allowed = (request: Omit<AllowedRequest, typeof allowedBrand>) => request as AllowedRequest;
+
+/** A delivery for no host, or one its signature doesn't prove came from the host's app. */
+export class DeliveryRefused extends Data.TaggedError("DeliveryRefused") {}
+
+/** Names that only resolve on this machine or its network. */
+const LOCAL_NAME_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa"];
+
+/**
+ * Whether GitHub could plausibly reach `url`: not a local-only name, nor a
+ * private or reserved address. Judged from the URL alone, so a tunnel's
+ * public name passes.
+ */
+function reachableFromInternet(url: string) {
+	const hostname = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+	const family = isIP(hostname);
+	if (family === 4 || family === 6) return !isPrivateAddress(hostname, family);
+	return (
+		hostname !== "localhost" && !LOCAL_NAME_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
+	);
+}
 
 export class GitHostNotFound extends Data.TaggedError("GitHostNotFound") implements UserFacing {
 	get userMessage() {

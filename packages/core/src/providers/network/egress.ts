@@ -337,13 +337,16 @@ async function safeAddresses(
 		if (isIP(address) !== family || (family !== 4 && family !== 6)) {
 			throw new EgressRefused({ reason: "invalidAddress" });
 		}
-		const blocked =
-			family === 4
-				? blockedIpv4Addresses.check(address, "ipv4")
-				: blockedIpv6Addresses.check(address, "ipv6");
-		if (blocked) throw new EgressRefused({ reason: "privateNetwork" });
+		if (isPrivateAddress(address, family)) throw new EgressRefused({ reason: "privateNetwork" });
 		return { address, family };
 	});
+}
+
+/** Whether `address`, an IP of `family`, is in a private or reserved range egress refuses. */
+export function isPrivateAddress(address: string, family: 4 | 6) {
+	return family === 4
+		? blockedIpv4Addresses.check(address, "ipv4")
+		: blockedIpv6Addresses.check(address, "ipv6");
 }
 
 function pinnedDispatcher(hostname: string, addresses?: ResolvedAddress[]): Dispatcher {

@@ -13,6 +13,8 @@ export const GitHubAppCredential = Schema.Struct({
 	privateKey: Schema.String,
 	/** Null until the app is installed. */
 	installationId: Schema.NullOr(Schema.Int),
+	/** What GitHub signs the app's webhook deliveries with; null for an app made without a webhook. */
+	webhookSecret: Schema.NullOr(Schema.String),
 });
 export type GitHubAppCredential = typeof GitHubAppCredential.Type;
 

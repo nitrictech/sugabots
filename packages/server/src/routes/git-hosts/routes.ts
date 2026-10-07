@@ -1,5 +1,5 @@
 import { GIT_HOSTS_RETURN_PATH } from "@sugabots/contracts";
-import { BadRequest, NotFound } from "@sugabots/contracts/http";
+import { BadRequest, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { GitHosts } from "@sugabots/core/git-hosts/git-hosts";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Effect } from "effect";
@@ -86,5 +86,25 @@ export const gitHostRoutes = HttpApiBuilder.group(ServerApi, "gitHosts", (handle
 					.removeRepository({ podId: params.podId, ...payload })
 					.pipe(asSessionUser, asHttpError(refusals)),
 			);
+	}),
+);
+
+export const gitHostWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHostWebhooks", (handlers) =>
+	Effect.gen(function* () {
+		const gitHosts = yield* GitHosts.Service;
+		return handlers.handleRaw("delivery", ({ params, request }) =>
+			request.text.pipe(
+				Effect.flatMap((body) =>
+					gitHosts.delivery({
+						gitHostId: params.gitHostId,
+						event: request.headers["x-github-event"],
+						body,
+						signature: request.headers["x-hub-signature-256"],
+					}),
+				),
+				Effect.mapError(() => new Unauthorized({ message: "Invalid git host delivery" })),
+				Effect.as(HttpServerResponse.empty({ status: 204 })),
+			),
+		);
 	}),
 );

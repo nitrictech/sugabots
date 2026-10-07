@@ -13,7 +13,11 @@ import { createTestApp, identifiedBy } from "./app.test-support.ts";
  */
 
 /** Public by intent. Anything else reaching here without credentials is a bug. */
-const OPEN_ENDPOINTS = new Set(["GET /health", "POST /hooks/routines/:routineId"]);
+const OPEN_ENDPOINTS = new Set([
+	"GET /health",
+	"POST /hooks/routines/:routineId",
+	"POST /hooks/git-hosts/:gitHostId",
+]);
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspace: "0199a3a0-0000-7000-8000-000000000001",

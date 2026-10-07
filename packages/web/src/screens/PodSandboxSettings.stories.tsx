@@ -9,7 +9,6 @@ import { PodSandboxSettings } from "./PodSandboxSettings.tsx";
 
 const podId = "0199a3a0-0000-7000-8000-000000000601";
 const sandboxUrl = `${import.meta.env.VITE_API_URL}/pods/${podId}/sandbox`;
-const repositoriesUrl = `${import.meta.env.VITE_API_URL}/pods/${podId}/repositories`;
 
 const running: PodSandbox = {
 	sandbox: {
@@ -67,7 +66,7 @@ const meta = preview.meta({
 	title: "Views/PodSandboxSettings",
 	component: PodSandboxSettings,
 	tags: ["ai-generated"],
-	args: { podId, canManageSandbox: true },
+	args: { podId, canManageNetwork: true },
 	parameters: { layout: "fullscreen", docs: { story: { inline: false, height: "520px" } } },
 	decorators: [
 		(Story, context) => (
@@ -80,8 +79,6 @@ const meta = preview.meta({
 		msw.use(
 			answers(running),
 			http.get(`${sandboxUrl}/network`, () => HttpResponse.json(network)),
-			http.get(repositoriesUrl, () => HttpResponse.json({ repositories: [] })),
-			http.get(`${repositoriesUrl}/available`, () => HttpResponse.json([])),
 			http.post(`${sandboxUrl}/*`, () =>
 				HttpResponse.json(
 					{ _tag: "InternalServerError", message: "This preview does not change sandboxes." },
@@ -147,7 +144,7 @@ export const NoneYet = meta.story({
 
 /** Someone who can see the pod but not change it sees how it stands, without the actions. */
 export const AsAMember = meta.story({
-	args: { canManageSandbox: false },
+	args: { canManageNetwork: false },
 	beforeEach({ msw }) {
 		msw.use(answers({ ...running, canManage: false }));
 	},

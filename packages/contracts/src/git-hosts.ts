@@ -10,6 +10,9 @@ import { uuidSchema } from "./uuid.ts";
 export const GITHUB_APP_MADE_PATH = "/git-hosts/github/made";
 export const GITHUB_APP_INSTALLED_PATH = "/git-hosts/github/installed";
 
+/** Where, under the API, a git host sends its events: the host's id follows. */
+export const GIT_HOST_WEBHOOK_PATH = "/hooks/git-hosts";
+
 /**
  * Where the web app takes the browser back from GitHub: `workspace` names
  * the workspace, and `git_host_error`, when set, a {@link GitHostSetupFailure}.

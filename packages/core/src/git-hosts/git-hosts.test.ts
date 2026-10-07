@@ -1,4 +1,4 @@
-import { createVerify, generateKeyPairSync } from "node:crypto";
+import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
@@ -15,6 +15,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 });
 
 const INSTALLATION_ID = 7;
+const WEBHOOK_SECRET = "the-webhook-secret";
 
 /** What GitHub was asked, by path, for checks on what Sugabots sent. */
 const asked: { path: string; body: unknown }[] = [];
@@ -32,7 +33,16 @@ const github: typeof fetch = async (input, init) => {
 	const json = (value: unknown, status = 200) => Response.json(value, { status });
 	const bearer = new Headers(init?.headers).get("authorization")?.replace("Bearer ", "") ?? "";
 	if (path === "/app-manifests/the-code/conversions") {
-		return json({ id: 42, slug: "acme-sugabots", name: "Acme Sugabots", pem: privateKey }, 201);
+		return json(
+			{
+				id: 42,
+				slug: "acme-sugabots",
+				name: "Acme Sugabots",
+				pem: privateKey,
+				webhook_secret: WEBHOOK_SECRET,
+			},
+			201,
+		);
 	}
 	if (path.startsWith("/app/installations/") && init?.method === "GET") {
 		if (!signedByApp(bearer)) return json({ message: "Bad credentials" }, 401);
@@ -68,18 +78,21 @@ function signedByApp(jwt: string) {
 		.verify(publicKey, signature, "base64url");
 }
 
-const outside = Layer.mergeAll(
-	Layer.succeed(Egress.Service, {
-		providers: { for: () => github },
-		validateProviderUrl: () => Effect.void,
-		oauth: github,
-		webFetch: github,
-	}),
-	Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: "https://sugabots.example.com" }),
-	),
-);
+const servedAt = (publicUrl: string) =>
+	Layer.mergeAll(
+		Layer.succeed(Egress.Service, {
+			providers: { for: () => github },
+			validateProviderUrl: () => Effect.void,
+			oauth: github,
+			webFetch: github,
+		}),
+		Layer.succeed(Installation.Service, Installation.fromUrls({ isProduction: false, publicUrl })),
+	);
+
+const gitHostsServedAt = (publicUrl: string) =>
+	runOnPostgres(
+		Effect.provide(GitHosts.Service, GitHosts.layer.pipe(Layer.provide(servedAt(publicUrl)))),
+	);
 
 /** A workspace's GitHub App and its pods' repositories, against Postgres and a stand-in GitHub. */
 describe.skipIf(!process.env.DATABASE_URL)("git hosts, against Postgres", () => {
@@ -91,9 +104,7 @@ describe.skipIf(!process.env.DATABASE_URL)("git hosts, against Postgres", () => 
 	let agentId: string;
 
 	beforeAll(async () => {
-		gitHosts = await runOnPostgres(
-			Effect.provide(GitHosts.Service, GitHosts.layer.pipe(Layer.provide(outside))),
-		);
+		gitHosts = await gitHostsServedAt("https://sugabots.example.com");
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [space] = await onDatabase((db) =>
 			db
@@ -181,6 +192,13 @@ describe.skipIf(!process.env.DATABASE_URL)("git hosts, against Postgres", () => 
 			redirect_url: "https://sugabots.example.com/api/git-hosts/github/made",
 			setup_url: "https://sugabots.example.com/api/git-hosts/github/installed",
 			default_permissions: { contents: "write", pull_requests: "write" },
+			hook_attributes: {
+				url: expect.stringMatching(
+					/^https:\/\/sugabots\.example\.com\/api\/hooks\/git-hosts\/[0-9a-f-]{36}$/,
+				),
+				active: true,
+			},
+			default_events: expect.arrayContaining(["pull_request", "check_run"]),
 		});
 
 		const someoneElse = succeeded(
@@ -213,7 +231,44 @@ describe.skipIf(!process.env.DATABASE_URL)("git hosts, against Postgres", () => 
 		]);
 	});
 
-	it("lets someone who manages the pod's sandbox add only a repository the app reaches", async () => {
+	it("makes an app without a webhook when GitHub couldn't reach this install", async () => {
+		const local = await gitHostsServedAt("http://sugabots.localhost:3000");
+
+		const form = succeeded(
+			await as(adminId, local.startGitHubApp({ workspace: workspaceId, organization: undefined })),
+		);
+
+		const manifest = JSON.parse(form.manifest);
+		expect(manifest).not.toHaveProperty("hook_attributes");
+		expect(manifest.default_events).toEqual([]);
+	});
+
+	it("admits only deliveries signed with the app's webhook secret", async () => {
+		const [host] = succeeded(await as(adminId, gitHosts.list(workspaceId)));
+		if (!host) throw new Error("No app; the setup case runs first");
+		const body = JSON.stringify({ action: "opened" });
+		const signedWith = (secret: string) =>
+			`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+		const deliver = (gitHostId: string, signature: string | undefined) =>
+			runOnPostgres(
+				Effect.exit(gitHosts.delivery({ gitHostId, event: "pull_request", body, signature })),
+			);
+
+		const signed = await deliver(host.id, signedWith(WEBHOOK_SECRET));
+		const forged = await deliver(host.id, signedWith("a-guess"));
+		const unsigned = await deliver(host.id, undefined);
+		const nowhere = await deliver(
+			"0199a3a0-0000-7000-8000-000000000000",
+			signedWith(WEBHOOK_SECRET),
+		);
+
+		expect(Exit.isSuccess(signed)).toBe(true);
+		for (const refused of [forged, unsigned, nowhere]) {
+			expect(Exit.isFailure(refused) && refused.toString()).toContain("DeliveryRefused");
+		}
+	});
+
+	it("lets someone who manages the pod's connections add only a repository the app reaches", async () => {
 		const [host] = succeeded(await as(adminId, gitHosts.list(workspaceId)));
 		if (!host) throw new Error("No app; the setup case runs first");
 		const repository = (name: string) => ({ podId, gitHostId: host.id, repository: name });

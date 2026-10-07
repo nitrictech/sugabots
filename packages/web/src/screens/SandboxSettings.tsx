@@ -20,7 +20,6 @@ import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon, SettingsValue } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { GitHostsSection } from "./GitHostsSettings.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
@@ -145,7 +144,6 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 			/>
 			{error && <Alert>{error}</Alert>}
 			<SandboxNetworkSection />
-			<GitHostsSection />
 		</>
 	);
 }

@@ -408,7 +408,7 @@ function GitHostsReturnRoute() {
 		if (failure || !slug) return;
 		void navigate({
 			to: "/$workspace/settings/$section",
-			params: { workspace: slug, section: "sandboxes" },
+			params: { workspace: slug, section: "repositories" },
 			replace: true,
 		});
 	}, [failure, slug, navigate]);
@@ -423,10 +423,10 @@ function GitHostsReturnRoute() {
 				{slug ? (
 					<Link
 						to="/$workspace/settings/$section"
-						params={{ workspace: slug, section: "sandboxes" }}
+						params={{ workspace: slug, section: "repositories" }}
 						className="text-link underline"
 					>
-						Back to Sandboxes settings
+						Back to Repositories settings
 					</Link>
 				) : (
 					<Link to="/" className="text-link underline">
@@ -440,9 +440,10 @@ function GitHostsReturnRoute() {
 
 const GIT_HOST_SETUP_FAILURES: Record<GitHostSetupFailure, string> = {
 	expired:
-		"The link had expired, or was started by someone else. Start again from Sandboxes settings.",
+		"The link had expired, or was started by someone else. Start again from Repositories settings.",
 	github: "GitHub refused or couldn't be reached. Try again in a moment.",
-	cancelled: "It was cancelled on GitHub. Start again from Sandboxes settings when you're ready.",
+	cancelled:
+		"It was cancelled on GitHub. Start again from Repositories settings when you're ready.",
 };
 
 function gitHostSetupFailureReason(failure: string | undefined) {

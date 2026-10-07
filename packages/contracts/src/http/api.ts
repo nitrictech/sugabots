@@ -3,7 +3,7 @@ import { AgentsApi } from "./groups/agents.ts";
 import { ChatsApi } from "./groups/chats.ts";
 import { ConnectionsApi } from "./groups/connections.ts";
 import { EventsApi } from "./groups/events.ts";
-import { GitHostsApi } from "./groups/git-hosts.ts";
+import { GitHostsApi, GitHostWebhooksApi } from "./groups/git-hosts.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
@@ -44,6 +44,7 @@ export class Api extends HttpApi.make("sugabots")
 	.add(SandboxProvidersApi)
 	.add(PodSandboxApi)
 	.add(GitHostsApi)
+	.add(GitHostWebhooksApi)
 	.add(ConnectionsApi)
 	.add(EventsApi)
 	.add(ChatsApi)

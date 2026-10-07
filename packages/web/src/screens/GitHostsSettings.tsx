@@ -57,7 +57,7 @@ export function GitHostsGroup({
 		<>
 			<SettingsGroup
 				label="GitHub"
-				note="Bots read the repositories each pod picks under Sandbox in its settings, and push branches and open pull requests there once someone in the pod allows it. The workspace makes its own GitHub App for this, which you install on your account or an organization."
+				note="The workspace makes its own GitHub App, which you install on your account or an organization. Each pod then picks repositories it reaches in the pod's settings, under Repositories. Bots read them in the sandbox, and push branches and open pull requests once someone in the pod allows it."
 			>
 				{hosts.map((host) => (
 					<SettingsRow

@@ -19,7 +19,7 @@ import { agentRoutes } from "../routes/agents/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
 import { eventRoutes } from "../routes/events/routes.ts";
-import { gitHostRoutes } from "../routes/git-hosts/routes.ts";
+import { gitHostRoutes, gitHostWebhookRoutes } from "../routes/git-hosts/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
@@ -87,6 +87,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				sandboxProviderRoutes,
 				podSandboxRoutes,
 				gitHostRoutes,
+				gitHostWebhookRoutes,
 				connectionRoutes,
 				agentRoutes,
 				chatRoutes,
