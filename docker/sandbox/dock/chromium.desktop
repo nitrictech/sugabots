@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Browser
+Comment=The agent's browser
+Exec=sugabots-desktop open browser
+Icon=/usr/share/sugabots-desktop/icons/browser.svg
+StartupWMClass=sugabots-browser

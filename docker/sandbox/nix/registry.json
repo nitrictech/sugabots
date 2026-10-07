@@ -1,0 +1,13 @@
+{
+	"version": 2,
+	"flakes": [
+		{
+			"from": { "type": "indirect", "id": "nixpkgs" },
+			"to": { "type": "github", "owner": "NixOS", "repo": "nixpkgs", "ref": "nixos-26.05" }
+		},
+		{
+			"from": { "type": "indirect", "id": "nixpkgs-unstable" },
+			"to": { "type": "github", "owner": "NixOS", "repo": "nixpkgs", "ref": "nixos-unstable" }
+		}
+	]
+}

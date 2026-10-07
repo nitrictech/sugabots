@@ -12,6 +12,7 @@ bun run check           # lint, typecheck, and test
 bun run build           # build all packages
 bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
+bun run build:sandbox   # build the sandbox image, ghcr.io/nitrictech/sugabots-sandbox:latest
 ```
 
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing

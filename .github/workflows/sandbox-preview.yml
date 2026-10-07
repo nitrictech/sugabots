@@ -1,0 +1,115 @@
+name: Sandbox image preview
+
+# A pull request that changes the sandbox image gets it built and published as
+# ghcr.io/<owner>/sugabots-sandbox:pr-<number>, to try before it's merged, and
+# says how on the pull request. Closing the pull request deletes it. Pull
+# requests from forks get none: their workflows can't publish packages.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - "docker/sandbox/**"
+      - ".github/workflows/sandbox-preview.yml"
+
+concurrency:
+  group: sandbox-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/sugabots-sandbox
+  TAG: pr-${{ github.event.pull_request.number }}
+
+jobs:
+  publish:
+    name: Publish the pull request's sandbox image
+    if: |
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both platforms, as a release has, so it runs on Apple silicon too.
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/sandbox
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          cache-from: type=gha,scope=sandbox-image
+          cache-to: type=gha,scope=sandbox-image,mode=max
+
+      # One comment per pull request, updated on each push, found by its marker.
+      - name: Say how to try it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          marker="<!-- sandbox-image-preview -->"
+          body="$(cat <<EOF
+          $marker
+          **Sandbox image preview**, built from ${SHA:0:7}:
+
+          \`\`\`
+          $IMAGE:$TAG
+          \`\`\`
+
+          To try it, set a sandbox provider's image to that under Sandboxes in the workspace's settings, then Upgrade the pod's sandbox; on E2B, prepare the template again first. The tag moves with each push to this pull request, so a machine that pulled it before may need \`docker pull\` again; for this exact build, use \`$IMAGE@$DIGEST\`.
+
+          It's deleted when the pull request closes.
+          EOF
+          )"
+          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+
+  cleanup:
+    name: Delete the pull request's sandbox image
+    if: |
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+
+    steps:
+      - name: Delete the image version tagged for the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: orgs/${{ github.repository_owner }}/packages/container/sugabots-sandbox
+        run: |
+          set -euo pipefail
+          version_id=$(gh api "/$PACKAGE/versions?per_page=100" --paginate \
+            --jq ".[] | select(.metadata.container.tags[]? == \"$TAG\") | .id" | head -n1)
+          if [ -z "$version_id" ]; then
+            echo "No image version is tagged $TAG; nothing to delete."
+            exit 0
+          fi
+          echo "Deleting package version $version_id ($TAG)"
+          gh api --method DELETE "/$PACKAGE/versions/$version_id"

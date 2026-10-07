@@ -1,0 +1,207 @@
+#!/bin/bash
+# Desktops in this sandbox, each on its own display, so agents working at the
+# same time never click on each other's windows.
+#
+#   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
+#   sugabots-desktop stop display                  stop it, and its browser
+#   sugabots-desktop desktop name profile output   the desktop for `name`, without a browser
+#   sugabots-desktop session name profile output   the desktop for `name`, with its browser
+#   sugabots-desktop viewer name                   the viewer port of `name`'s desktop, if running
+#   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
+#
+# `desktop` is what Sugabots runs when a person opens an agent's desktop, and
+# `session` when the agent uses its browser. Both start the named desktop, or
+# find it running: a display with a window manager and a dock, served to VNC
+# viewers. `session` also starts the browser on it, or finds it running, and
+# prints `display=N viewer=PORT browser=PORT started=yes|no`, where `started`
+# says whether the browser had to start; `desktop` prints
+# `display=N viewer=PORT started=yes|no` for the desktop.
+#
+# The browser is Chromium driven by Playwright MCP, shown on the desktop so
+# people watching see what the agent does, with its profile under `profile`
+# and its downloads and screenshots in `output`. It lives until the desktop
+# stops, across the MCP sessions that drive it, and the dock's Browser starts
+# it if the agent hasn't. Programs that stopped, as they do when a paused
+# sandbox comes back, start again on the same display.
+#
+# Display N is served on port 5900+N to a VNC viewer, over plain VNC or a
+# WebSocket, which x11vnc accepts on the same port. Its browser's MCP server
+# is on port 8930+N, and the browser's DevTools on port 9230+N.
+set -euo pipefail
+
+# Set here rather than relied on from the image: E2B runs commands without
+# the image's ENV.
+export LANG="${LANG:-C.UTF-8}"
+
+state="${TMPDIR:-/tmp}/sugabots-desktop"
+mkdir -p "$state/sessions"
+
+free_display() {
+	local n=1
+	while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ] || [ -n "$(grep -lx "$n" "$state"/sessions/* 2>/dev/null)" ]; do
+		n=$((n + 1))
+	done
+	echo "$n"
+}
+
+# Whether every program of display N's `part`, desktop or browser, is running.
+running() {
+	local pids="$state/$1.$2.pids"
+	[ -f "$pids" ] || return 1
+	while read -r pid; do kill -0 "$pid" 2>/dev/null || return 1; done <"$pids"
+}
+
+desktop() {
+	local n="$1" log="$state/$1.log" pids="$state/$1.desktop.pids"
+	export DISPLAY=":$n"
+	rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n"
+	# -ac: any program in this sandbox may draw on it. -s 0: no screensaver,
+	# which would blank the screen after ten minutes without keyboard or mouse
+	# input, and agents drive the browser through Playwright, not the X server.
+	Xvfb "$DISPLAY" -screen 0 1280x800x24 -ac -s 0 -nolisten tcp >>"$log" 2>&1 &
+	echo $! >"$pids"
+	for _ in $(seq 50); do [ -e "/tmp/.X11-unix/X$n" ] && break; sleep 0.1; done
+	# The dock matches windows to its apps through a service on the session bus.
+	eval "$(dbus-launch --sh-syntax)"
+	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
+	hsetroot -fill /usr/share/sugabots-desktop/wallpaper.png >>"$log" 2>&1
+	openbox >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# For the dock's shadows and see-through background.
+	xcompmgr -n >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# The dock's items are read from the home it runs with.
+	mkdir -p "$HOME/.config/plank/dock1/launchers"
+	cp -n /usr/share/sugabots-desktop/plank/*.dockitem "$HOME/.config/plank/dock1/launchers/"
+	plank >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# No password: the ports are reached only through Sugabots.
+	x11vnc -display "$DISPLAY" -nopw -forever -shared -quiet -rfbport $((5900 + n)) >>"$log" 2>&1 &
+	echo $! >>"$pids"
+}
+
+browser() {
+	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
+	local devtools=$((9230 + n))
+	mkdir -p "$profile" "$output"
+	# Started here rather than by Playwright MCP, which closes a browser it
+	# launched when its last client disconnects: at the end of every turn.
+	# Maximized, so it stops at the dock. --test-type leaves out the bar
+	# warning that --no-sandbox is on, which a container needs. The profile is
+	# found through XDG_CONFIG_HOME rather than --user-data-dir, which would
+	# put its path in the windows' names, and the dock would no longer know
+	# them as the Browser's.
+	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium --no-sandbox --test-type --start-maximized \
+		--class=sugabots-browser \
+		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
+		--no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
+	echo $! >"$pids"
+	for _ in $(seq 100); do
+		curl -sf -o /dev/null "http://127.0.0.1:$devtools/json/version" && break
+		sleep 0.1
+	done
+	playwright-mcp --host 0.0.0.0 --port $((8930 + n)) --allowed-hosts '*' \
+		--cdp-endpoint "http://127.0.0.1:$devtools" \
+		--output-dir "$output" --file-paths absolute >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	for _ in $(seq 100); do
+		curl -s -o /dev/null "http://localhost:$((8930 + n))/mcp" && break
+		sleep 0.1
+	done
+}
+
+stop_part() {
+	local pids="$state/$1.$2.pids"
+	[ -f "$pids" ] || return 0
+	xargs -r kill <"$pids" 2>/dev/null || true
+	rm -f "$pids"
+}
+
+stop() {
+	local n="${1:?which display}"
+	stop_part "$n" browser
+	stop_part "$n" desktop
+}
+
+# The display of the desktop named `name`, running, with where its browser
+# keeps its profile and output recorded for the dock. Sets `desktop_started`.
+named_desktop() {
+	local name="$1" profile="$2" output="$3"
+	local file="$state/sessions/$name"
+	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
+	printf '%s\n%s\n' "$profile" "$output" >"$state/$n.browser-dirs"
+	desktop_started=no
+	if ! running "$n" desktop; then
+		# The browser can't outlive the display it was on.
+		stop "$n"
+		desktop "$n"
+		desktop_started=yes
+	fi
+}
+
+desktop_only() {
+	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	echo "display=$n viewer=$((5900 + n)) started=$desktop_started"
+}
+
+session() {
+	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	local started=no
+	if ! running "$n" browser; then
+		stop_part "$n" browser
+		browser "$n" "$2" "$3"
+		started=yes
+	fi
+	echo "display=$n viewer=$((5900 + n)) browser=$((8930 + n)) started=$started"
+}
+
+viewer() {
+	local file="$state/sessions/${1:?name}"
+	[ -f "$file" ] || exit 3
+	local n
+	n="$(cat "$file")"
+	running "$n" desktop || exit 3
+	echo $((5900 + n))
+}
+
+# What the dock opens on the desktop it runs on.
+open() {
+	local n="${DISPLAY#:}"
+	case "${1:-}" in
+	browser)
+		local profile output
+		{ read -r profile; read -r output; } <"$state/$n.browser-dirs"
+		if running "$n" browser; then
+			# The same profile reaches the running browser, which opens the window.
+			XDG_CONFIG_HOME="$profile" exec chromium --no-sandbox --test-type --new-window
+		fi
+		stop_part "$n" browser
+		browser "$n" "$profile" "$output"
+		;;
+	terminal)
+		exec lxterminal --working-directory=/workspace
+		;;
+	files) exec pcmanfm /workspace ;;
+	*)
+		echo "usage: sugabots-desktop open browser|terminal|files" >&2
+		exit 2
+		;;
+	esac
+}
+
+case "${1:-}" in
+start)
+	n="${2:-$(free_display)}"
+	desktop "$n"
+	echo "DISPLAY=:$n"
+	;;
+stop) stop "${2:-}" ;;
+desktop) desktop_only "${2:-}" "${3:-}" "${4:-}" ;;
+session) session "${2:-}" "${3:-}" "${4:-}" ;;
+viewer) viewer "${2:-}" ;;
+open) open "${2:-}" ;;
+*)
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output | session name profile output | viewer name | open browser|terminal|files" >&2
+	exit 2
+	;;
+esac
