@@ -3,9 +3,9 @@ title: Routines
 description: Jobs a bot does on a schedule, or whenever something calls it.
 ---
 
-A routine is a job for one bot: "every weekday at 9, start the standup" or "when
-Sentry reports an issue, look into it". The bot does it without being asked, in
-its chat.
+A routine is a job for one bot: "every weekday at 8, sort the inbox" or "when the
+shop gets an order, draft a thank-you". The bot does it without being asked, and
+posts what it did into its chat.
 
 Admins create and manage routines in **Settings → Routines**, and switch them on
 or off from that list. Members and viewers can see them.
@@ -24,11 +24,11 @@ Choose **New routine**, then pick:
 
 With **Post result to chat** on, the bot's last reply of the run is posted in its
 chat, where anyone can answer it and carry on the conversation. Use it for
-anything people should read: a morning standup, a check-in, a report. The bot is
+anything people should read: a morning check-in, the week's sales, a reminder. The bot is
 told its last reply goes there, so it writes that reply for you.
 
 With it off, the result stays inside the run, for work handled out of sight,
-such as fixing an issue a webhook reports. You can still open the run to see it.
+such as drafting a thank-you for each new order. You can still open the run to see it.
 
 New schedules start with it on, and new webhooks with it off.
 
@@ -72,7 +72,7 @@ recognised as a repeat.
 
 ## Runs
 
-Each run shows in the bot's chat as a line like "Morning standup ran", and
+Each run shows in the bot's chat as a line like "Morning inbox sweep ran", and
 opens into a thread with everything the bot did. A result posted to the chat
 links back to its run, under the message. A run that fails or is stopped posts
 nothing; its line says what happened. If a run needs an
