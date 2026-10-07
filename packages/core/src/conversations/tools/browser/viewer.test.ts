@@ -13,11 +13,23 @@ import {
 	workspaceMember,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { Installation } from "../../../installation/installation.ts";
+import { Egress } from "../../../providers/network/egress.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import { SandboxTools } from "../sandbox.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
+
+/** The installation and its egress, which the git tools reach GitHub through. */
+const installationLayer = Egress.layer.pipe(
+	Layer.provideMerge(
+		Layer.succeed(
+			Installation.Service,
+			Installation.fromUrls({ isProduction: false, publicUrl: "http://localhost:3000" }),
+		),
+	),
+);
 
 /**
  * Watching an agent's desktop, against Postgres and a real OpenSandbox server
@@ -54,7 +66,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			]).pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						SandboxTools.layer,
+						SandboxTools.layer.pipe(Layer.provide(installationLayer)),
 						DesktopViewer.layer,
 						PodSandboxes.layer,
 						SandboxProviderRepository.layer,

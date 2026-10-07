@@ -216,3 +216,51 @@ export const ANetworkRequestNotYours = meta.story({
 		).toBeInTheDocument();
 	},
 });
+
+/** APushRequest is an agent asking to push a commit to a branch of one of the pod's repositories. */
+export const APushRequest = meta.story({
+	args: {
+		...ANetworkRequest.input.args,
+		canApprove: true,
+		call: {
+			...ANetworkRequest.input.args.call,
+			tool: "push_branch",
+			input: {
+				repository: "acme/web",
+				branch: "sugabots/fix-login-redirect",
+				commit: "4f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39",
+				directory: "web",
+			},
+			approval: {
+				status: "pending",
+				deciders: "pod",
+				decidedByName: null,
+				decidedAt: null,
+			},
+		},
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Trip Planner wants to push a branch")).toBeInTheDocument();
+		await expect(canvas.getByText("sugabots/fix-login-redirect")).toBeInTheDocument();
+	},
+});
+
+/** APullRequestRequest is an agent asking to open a pull request for a branch it pushed. */
+export const APullRequestRequest = meta.story({
+	args: {
+		...APushRequest.input.args,
+		call: {
+			...APushRequest.input.args.call,
+			tool: "open_pull_request",
+			input: {
+				repository: "acme/web",
+				branch: "sugabots/fix-login-redirect",
+				title: "Fix the redirect after signing in",
+				body: "Signing in from a deep link sent people to the home page. This keeps the link through the sign-in, and adds a test for it.",
+			},
+		},
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Trip Planner wants to open a pull request")).toBeInTheDocument();
+	},
+});

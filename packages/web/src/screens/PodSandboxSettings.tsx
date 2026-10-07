@@ -6,21 +6,22 @@ import { usePodSandbox, usePodSandboxActions } from "@/lib/pod-sandbox.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import { PodRepositoriesSettings } from "./PodRepositories.tsx";
 import { PodSandboxNetworkSettings } from "./PodSandboxNetwork.tsx";
 
 /*
  * The pod's sandbox, experimental: how it stands for anyone who can see the
  * pod, starting it afresh or moving its work to the current image for those
- * who may change the pod, and the hosts it may reach. Hidden while the
- * workspace has no sandboxes.
+ * who may change the pod, the hosts it may reach, and the repositories its
+ * bots work on. Hidden while the workspace has no sandboxes.
  */
 export function PodSandboxSettings({
 	podId,
-	canManageNetwork,
+	canManageSandbox,
 }: {
 	podId: string;
-	/** Whether the person may change the hosts the pod's sandbox reaches. */
-	canManageNetwork: boolean;
+	/** Whether the person may change what the pod's sandbox reaches and works on. */
+	canManageSandbox: boolean;
 }) {
 	const sandbox = usePodSandbox(podId);
 	if (sandbox.isPending) return null;
@@ -30,7 +31,8 @@ export function PodSandboxSettings({
 	return (
 		<>
 			<SandboxGroup podId={podId} shown={shown} />
-			<PodSandboxNetworkSettings podId={podId} canManage={canManageNetwork} />
+			<PodSandboxNetworkSettings podId={podId} canManage={canManageSandbox} />
+			<PodRepositoriesSettings podId={podId} canManage={canManageSandbox} />
 		</>
 	);
 }

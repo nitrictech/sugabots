@@ -43,6 +43,11 @@ RUN bun install --frozen-lockfile --production --ignore-scripts --filter @sugabo
 FROM node:26-slim AS runtime
 WORKDIR /app
 
+# Agents' pushes go to their repositories from here, with git.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends git ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     PORT=3000
 

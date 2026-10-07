@@ -9,10 +9,22 @@ import {
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { Installation } from "../../installation/installation.ts";
+import { Egress } from "../../providers/network/egress.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import { SandboxTools } from "./sandbox.ts";
+
+/** The installation and its egress, which the git tools reach GitHub through. */
+const installationLayer = Egress.layer.pipe(
+	Layer.provideMerge(
+		Layer.succeed(
+			Installation.Service,
+			Installation.fromUrls({ isProduction: false, publicUrl: "http://localhost:3000" }),
+		),
+	),
+);
 
 /**
  * Where the sandbox tools work, against Postgres and a real OpenSandbox
@@ -33,7 +45,12 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 	beforeAll(async () => {
 		[sandboxTools, podSandboxes] = await runOnPostgres(
 			Effect.all([SandboxTools.Service, PodSandboxes.Service]).pipe(
-				Effect.provide(Layer.merge(SandboxTools.layer, PodSandboxes.layer)),
+				Effect.provide(
+					Layer.merge(
+						SandboxTools.layer.pipe(Layer.provide(installationLayer)),
+						PodSandboxes.layer,
+					),
+				),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

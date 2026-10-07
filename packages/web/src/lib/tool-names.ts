@@ -11,6 +11,10 @@ export const BUILT_IN_HANDLE = "";
 /** The built-in tool an agent asks with for its sandbox to reach another host. */
 export const NETWORK_REQUEST_TOOL = "request_network_access";
 
+/** The built-in tools an agent asks with to publish its work to one of the pod's repositories. */
+export const PUSH_BRANCH_TOOL = "push_branch";
+export const OPEN_PULL_REQUEST_TOOL = "open_pull_request";
+
 /**
  * The browser tools' names start with this. They are the product's own, all
  * one app, the agent's browser, and each step is named by what it does.

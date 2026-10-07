@@ -1,5 +1,9 @@
 import type { Agent, Pod, SessionUser, Workspace } from "@sugabots/contracts";
-import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
+import {
+	CONNECTION_SIGN_IN_RETURN_PATH,
+	GIT_HOSTS_RETURN_PATH,
+	type GitHostSetupFailure,
+} from "@sugabots/contracts";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
 import {
@@ -380,6 +384,71 @@ function SignInReturnRoute() {
 			</EmptyState>
 		</div>
 	);
+}
+
+/** Where GitHub's setup returns: the API names the workspace, and why it stopped when it did. */
+const gitHostsReturnRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: GIT_HOSTS_RETURN_PATH,
+	validateSearch: (search: Record<string, unknown>) => ({
+		workspace: optionalString(search.workspace),
+		git_host_error: optionalString(search.git_host_error),
+	}),
+	beforeLoad: requireUser,
+	component: GitHostsReturnRoute,
+});
+
+function GitHostsReturnRoute() {
+	const { workspace, git_host_error: failure } = gitHostsReturnRoute.useSearch();
+	const workspaces = useWorkspaces();
+	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
+	const navigate = useNavigate();
+
+	useEffect(() => {
+		if (failure || !slug) return;
+		void navigate({
+			to: "/$workspace/settings/$section",
+			params: { workspace: slug, section: "sandboxes" },
+			replace: true,
+		});
+	}, [failure, slug, navigate]);
+
+	if ((!failure && slug) || (workspace !== undefined && workspaces.isPending)) {
+		return <div className="h-full bg-list" />;
+	}
+	return (
+		<div className="grid h-full place-items-center bg-list p-6">
+			<EmptyState title="GitHub setup didn't finish">
+				<p>{gitHostSetupFailureReason(failure)}</p>
+				{slug ? (
+					<Link
+						to="/$workspace/settings/$section"
+						params={{ workspace: slug, section: "sandboxes" }}
+						className="text-link underline"
+					>
+						Back to Sandboxes settings
+					</Link>
+				) : (
+					<Link to="/" className="text-link underline">
+						Return to workspace
+					</Link>
+				)}
+			</EmptyState>
+		</div>
+	);
+}
+
+const GIT_HOST_SETUP_FAILURES: Record<GitHostSetupFailure, string> = {
+	expired:
+		"The link had expired, or was started by someone else. Start again from Sandboxes settings.",
+	github: "GitHub refused or couldn't be reached. Try again in a moment.",
+	cancelled: "It was cancelled on GitHub. Start again from Sandboxes settings when you're ready.",
+};
+
+function gitHostSetupFailureReason(failure: string | undefined) {
+	return failure && failure in GIT_HOST_SETUP_FAILURES
+		? GIT_HOST_SETUP_FAILURES[failure as GitHostSetupFailure]
+		: "The workspace it was for is no longer available to you.";
 }
 
 const inviteRoute = createRoute({
@@ -1143,6 +1212,7 @@ const routeTree = rootRoute.addChildren([
 	resetPasswordRoute,
 	inviteRoute,
 	signInReturnRoute,
+	gitHostsReturnRoute,
 	onboardingRoute,
 	newWorkspaceRoute,
 	shellRoute.addChildren([

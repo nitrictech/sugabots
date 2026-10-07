@@ -3,6 +3,7 @@ export * as SandboxTools from "./sandbox.ts";
 import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
+import { GitHosts } from "../../git-hosts/git-hosts.ts";
 import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts";
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
@@ -10,9 +11,18 @@ import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
+import {
+	OPEN_PULL_REQUEST_TOOL,
+	openPullRequest,
+	PUSH_BRANCH_TOOL,
+	pushBranch,
+	readAccessOncePerTurn,
+	repositoriesNote,
+} from "./git/tools.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
 	allowedHostsNote,
+	type GitEnvironment,
 	type OpenSandbox,
 	openOncePerTurn,
 	type Place,
@@ -28,8 +38,10 @@ import {
 /**
  * The tools that work in a pod's sandbox: `run_command`, `read_file` and
  * `write_file`, and the `browser_` tools of a browser the agent drives there
- * (see `browser/browser.ts`), and `request_network_access`, whose calls wait
- * for a person, to reach a host the sandbox may not. Offered to every turn,
+ * (see `browser/browser.ts`), and the requests whose calls wait for a person:
+ * `request_network_access`, to reach a host the sandbox may not, and
+ * `push_branch` and `open_pull_request` (see `git/tools.ts`), to publish work
+ * to the pod's repositories. Offered to every turn,
  * and usable while the agent uses the sandbox and the workspace has an
  * enabled sandbox provider, looked up on every call, so enabling one applies
  * from the next turn. The sandbox is opened by a turn's first call to one of
@@ -71,24 +83,29 @@ export const make = Effect.gen(function* () {
 	const providers = yield* SandboxProviderRepository.Service;
 	const podSandboxes = yield* PodSandboxes.Service;
 	const network = yield* SandboxNetwork.Service;
+	const gitHosts = yield* GitHosts.Service;
 	const operation = yield* serviceOperations<Interface>("SandboxTools");
 	const offeredIn = ({
 		turnId,
+		agentId,
 		place,
 		acceptsImages,
 		openSandbox,
+		gitEnvironment,
 		browser,
 		run,
 		blocked,
 	}: Behind) => ({
 		tools: {
-			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place),
+			[RUN_COMMAND_TOOL]: runCommandTool(openSandbox, place, gitEnvironment),
 			[READ_FILE_TOOL]: readFileTool(openSandbox, place, acceptsImages),
 			[WRITE_FILE_TOOL]: writeFileTool(openSandbox, place),
 			...browserTools(browser, acceptsImages),
 		},
 		requests: {
 			[REQUEST_NETWORK_ACCESS_TOOL]: requestNetworkAccess({ turnId, network, blocked, run }),
+			[PUSH_BRANCH_TOOL]: pushBranch({ turnId, place, gitHosts, openSandbox, run }),
+			[OPEN_PULL_REQUEST_TOOL]: openPullRequest({ turnId, agentId, gitHosts, run }),
 		},
 	});
 	return Service.of({
@@ -105,9 +122,11 @@ export const make = Effect.gen(function* () {
 					return {
 						...offeredIn({
 							turnId,
+							agentId,
 							place,
 							acceptsImages,
 							openSandbox: NEVER_OPENED,
+							gitEnvironment: NEVER_SIGNED_IN,
 							browser: browserSession(NEVER_OPENED, place, { threadId, agentId }),
 							run: NEVER_RUN,
 							blocked: [],
@@ -116,9 +135,13 @@ export const make = Effect.gen(function* () {
 						note: NO_SANDBOX_NOTE,
 					};
 				}
-				const [allowedHosts, blocked] = yield* operation(
+				const [allowedHosts, blocked, repositories] = yield* operation(
 					"forTurn",
-					Effect.all([allowedHostsOf(pod), blockedHostsOf(pod.workspaceId)]),
+					Effect.all([
+						allowedHostsOf(pod),
+						blockedHostsOf(pod.workspaceId),
+						gitHosts.repositoriesOf(pod),
+					]),
 				);
 				const holder: PodSandboxes.Holder = { kind: "turn", id: turnId };
 				yield* Effect.addFinalizer(() => podSandboxes.release(holder));
@@ -149,18 +172,24 @@ export const make = Effect.gen(function* () {
 						if (Exit.isSuccess(exit)) return exit.value;
 						throw Cause.squash(exit.cause);
 					});
+				const signIn = readAccessOncePerTurn(gitHosts.readAccess(pod));
+				const gitEnvironment: GitEnvironment = () => run(signIn);
 				return {
 					...offeredIn({
 						turnId,
+						agentId,
 						place,
 						acceptsImages,
 						openSandbox,
+						gitEnvironment,
 						browser,
 						run,
 						blocked: blocked.map((row) => row.host),
 					}),
 					usable: true,
-					note: allowedHostsNote(allowedHosts),
+					note: [allowedHostsNote(allowedHosts), repositoriesNote(repositories)]
+						.filter(Boolean)
+						.join("\n\n"),
 				};
 			}),
 	});
@@ -169,15 +198,22 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([PodSandboxes.layer, SandboxNetwork.layer, SandboxProviderRepository.layer]),
+	Layer.provide([
+		PodSandboxes.layer,
+		SandboxNetwork.layer,
+		SandboxProviderRepository.layer,
+		GitHosts.layer,
+	]),
 );
 
 /** What a turn's tools work through. */
 interface Behind {
 	readonly turnId: string;
+	readonly agentId: string;
 	readonly place: Place;
 	readonly acceptsImages: boolean;
 	readonly openSandbox: OpenSandbox;
+	readonly gitEnvironment: GitEnvironment;
 	readonly browser: BrowserSession;
 	readonly run: RunEffect<never>;
 	/** Hosts a request is refused for without asking anyone. */
@@ -186,6 +222,8 @@ interface Behind {
 
 // Behind tools that aren't usable, whose calls are refused before they run.
 const NEVER_OPENED: OpenSandbox = () =>
+	Promise.reject(new Error("The sandbox tools aren't usable"));
+const NEVER_SIGNED_IN: GitEnvironment = () =>
 	Promise.reject(new Error("The sandbox tools aren't usable"));
 const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The sandbox tools aren't usable"));

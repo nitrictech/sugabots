@@ -133,7 +133,14 @@ const pathIn = (place: Place) =>
 		description: `A path in the sandbox, relative to ${place.folder} unless it starts with /`,
 	});
 
-export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
+/** The environment that signs a command in to the pod's repositories; see `git/tools.ts`. */
+export type GitEnvironment = () => Promise<Readonly<Record<string, string>>>;
+
+export function runCommandTool(
+	openSandbox: OpenSandbox,
+	place: Place,
+	gitEnvironment: GitEnvironment,
+) {
 	return tool({
 		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
@@ -149,12 +156,13 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 				})
 				.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_TIMEOUT_SECONDS))),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: ({ command, timeout_seconds }) =>
-			inSandbox(openSandbox, (sandbox) =>
+		execute: async ({ command, timeout_seconds }) => {
+			const signedIn = await gitEnvironment();
+			return inSandbox(openSandbox, (sandbox) =>
 				sandbox
 					.exec(`bash -lc ${Sandboxes.shellQuoted(command)}`, {
 						cwd: place.folder,
-						env: { HOME: place.home },
+						env: { ...signedIn, HOME: place.home },
 						timeout: `${timeout_seconds} seconds`,
 						maxOutputCharacters: MAX_OUTPUT_CHARACTERS,
 					})
@@ -167,7 +175,8 @@ export function runCommandTool(openSandbox: OpenSandbox, place: Place) {
 							stderr: shown(execution.stderr),
 						})),
 					),
-			),
+			);
+		},
 	});
 }
 

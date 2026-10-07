@@ -9,6 +9,7 @@ export * from "./built-in-tools.ts";
 export * from "./chats.ts";
 export * from "./connections.ts";
 export * from "./events.ts";
+export * from "./git-hosts.ts";
 export * from "./me.ts";
 export * from "./membership.ts";
 export * from "./model-providers.ts";

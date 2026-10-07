@@ -35,6 +35,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	memberId: "0199a3a0-0000-7000-8000-00000000000c",
 	invitationId: "0199a3a0-0000-7000-8000-00000000000d",
 	host: "api.example.com",
+	gitHostId: "0199a3a0-0000-7000-8000-00000000000e",
 };
 
 function fill(pattern: string): string {

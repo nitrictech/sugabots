@@ -10,7 +10,8 @@ export const SANDBOX_REQUEST_TOOLS: readonly string[] = [REQUEST_NETWORK_ACCESS_
 /**
  * Who decides a call to `tool` that waits for approval: those who manage the
  * pod's sandbox for one of {@link SANDBOX_REQUEST_TOOLS}, and the pod's
- * approvers for everything else.
+ * approvers for everything else, pushes and pull requests among them, since
+ * those publish the pod's work rather than change its sandbox.
  */
 export function decidersOf(tool: string): ToolApprovalDeciders {
 	return SANDBOX_REQUEST_TOOLS.includes(tool) ? "sandbox-managers" : "pod";

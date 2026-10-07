@@ -79,6 +79,9 @@ const meta = preview.meta({
 			http.get(`${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/sandbox-network`, () =>
 				HttpResponse.json(network),
 			),
+			http.get(`${import.meta.env.VITE_API_URL}/workspaces/${workspace.id}/git-hosts`, () =>
+				HttpResponse.json([]),
+			),
 			http.get(`${providersUrl}/:providerId/template`, () => HttpResponse.json({ state: "ready" })),
 			http.all(`${providersUrl}*`, () =>
 				HttpResponse.json(

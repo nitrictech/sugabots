@@ -18,6 +18,7 @@ import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
+import { GitHosts } from "@sugabots/core/git-hosts/git-hosts";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
@@ -90,6 +91,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SandboxProviderSetup.layer,
 	SandboxNetwork.layer,
 	PodSandboxSetup.layer,
+	GitHosts.layer,
 	ConnectionSetup.layer,
 	ModelTrials.layer,
 	Usage.layer,
