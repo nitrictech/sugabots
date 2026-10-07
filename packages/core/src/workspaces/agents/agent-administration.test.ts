@@ -213,6 +213,38 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		);
 	});
 
+	it("lets only somebody who may manage the pod's sandbox let an agent use it", async () => {
+		const [member] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!member) throw new Error("could not create the member");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
+		);
+		await onDatabase((db) =>
+			db.insert(podMember).values({ workspaceId, podId, userId: member.id }),
+		);
+		const asMember = administrationAs(member.id);
+
+		await expect(
+			asMember.create({ podId, agent: { name: "Scout", model: OFFERED, usesSandbox: true } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		const made = await asMember.create({ podId, agent: { name: "Triage", model: OFFERED } });
+		await expect(
+			asMember.update({ agentId: made.id, changes: { usesSandbox: true } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+		expect(
+			(await administration.update({ agentId: made.id, changes: { usesSandbox: true } }))
+				.usesSandbox,
+		).toBe(true);
+		await expect(
+			asMember.update({ agentId: made.id, changes: { usesSandbox: false } }),
+		).rejects.toBeInstanceOf(ActionForbidden);
+	});
+
 	describe("in a pod the actor is not in", () => {
 		/** Sam, a member with a Personal pod holding an agent of his own. */
 		const aMemberWithPersonalAgent = async () => {

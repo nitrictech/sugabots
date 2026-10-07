@@ -121,8 +121,9 @@ export const agentSchema = Schema.Struct({
 	disabledTools: Schema.mutable(Schema.Array(Schema.String)),
 	/**
 	 * Whether it may run commands and edit files in its pod's sandbox, while
-	 * the workspace has a sandbox provider enabled. Off until an admin turns
-	 * it on, unlike the other built-in tools. Experimental.
+	 * the workspace has a sandbox provider enabled. Off until somebody who may
+	 * manage the pod's sandbox turns it on, unlike the other built-in tools,
+	 * and only they may change it. Experimental.
 	 */
 	usesSandbox: Schema.Boolean,
 	createdAt: isoTimestampSchema,
