@@ -42,6 +42,7 @@ function placed(
 			instructions: `${name}: look over what changed and post a short summary.`,
 			trigger,
 			state: "enabled",
+			results: "keep_in_run",
 			createdById: null,
 			createdAt: "2026-09-01T00:00:00.000Z",
 			updatedAt: "2026-09-01T00:00:00.000Z",

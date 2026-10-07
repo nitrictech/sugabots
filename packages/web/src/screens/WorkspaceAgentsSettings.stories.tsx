@@ -111,6 +111,7 @@ function routine(
 		instructions: "Work the overnight replies and tell me what needs me.",
 		trigger,
 		state,
+		results: "keep_in_run",
 		createdById: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",

@@ -191,6 +191,7 @@ export const make = Effect.gen(function* () {
 						nextScheduledAt: schedule,
 						webhookSecretDigest: digest,
 						state,
+						results: input.results ?? "keep_in_run",
 					});
 					return { routine: toRoutine(row), secret };
 				}),
@@ -230,6 +231,7 @@ export const make = Effect.gen(function* () {
 							name: input.name ?? current.name,
 							instructions: input.instructions ?? current.instructions,
 							state,
+							results: input.results ?? current.results,
 							triggerKind: trigger.kind,
 							cronExpression: trigger.kind === "cron" ? trigger.expression : null,
 							cronTimezone: trigger.kind === "cron" ? trigger.timezone : null,

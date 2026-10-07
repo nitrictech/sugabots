@@ -38,6 +38,13 @@ export type RoutineState = typeof routineStateSchema.Type;
 export const routineTriggerKindSchema = Schema.Literals(["cron", "webhook"]);
 export type RoutineTriggerKind = typeof routineTriggerKindSchema.Type;
 
+/**
+ * Where a run's result goes: kept in the run's own thread, or also posted in
+ * the agent's chat as the agent's last reply, for people to read and answer.
+ */
+export const routineResultsSchema = Schema.Literals(["keep_in_run", "post_to_chat"]);
+export type RoutineResults = typeof routineResultsSchema.Type;
+
 export const routineTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("cron"),
@@ -58,6 +65,7 @@ export const routineSchema = Schema.Struct({
 	instructions: routineInstructionsSchema,
 	trigger: routineTriggerSchema,
 	state: routineStateSchema,
+	results: routineResultsSchema,
 	createdById: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
@@ -85,6 +93,7 @@ const newRoutineBaseSchema = {
 	name: routineNameSchema,
 	instructions: routineInstructionsSchema,
 	state: Schema.optional(routineStateSchema),
+	results: Schema.optional(routineResultsSchema),
 };
 
 export const newRoutineSchema = Schema.Union([
@@ -112,6 +121,7 @@ export const routineUpdateSchema = Schema.Struct({
 	name: Schema.optional(routineNameSchema),
 	instructions: Schema.optional(routineInstructionsSchema),
 	state: Schema.optional(routineStateSchema),
+	results: Schema.optional(routineResultsSchema),
 	trigger: Schema.optional(
 		Schema.Union([
 			Schema.Struct({
@@ -228,6 +238,15 @@ export const routineTriggerAuthorSchema = Schema.Struct({
 });
 
 export type RoutineTriggerAuthor = typeof routineTriggerAuthorSchema.Type;
+
+/** The run whose result a message in the agent's chat is, and the thread its work is in. */
+export const routineResultOfSchema = Schema.Struct({
+	executionId: uuidSchema,
+	threadId: uuidSchema,
+	routineName: routineNameSchema,
+});
+
+export type RoutineResultOf = typeof routineResultOfSchema.Type;
 
 export const manualRoutineRunSchema = Schema.Struct({ requestId: uuidSchema });
 export type ManualRoutineRun = typeof manualRoutineRunSchema.Type;

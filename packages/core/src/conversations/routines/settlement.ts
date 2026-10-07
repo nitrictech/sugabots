@@ -1,5 +1,6 @@
 export * as RoutineSettlement from "./settlement.ts";
 
+import { textWithoutNarration } from "@sugabots/contracts";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -11,12 +12,21 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { collaboration, routineExecution, thread, turn } from "../../database/schema.ts";
+import type * as schema from "../../database/schema.ts";
+import {
+	chat,
+	collaboration,
+	message,
+	routineExecution,
+	thread,
+	turn,
+} from "../../database/schema.ts";
 import type { UserMessage } from "../../user-message.ts";
 import { Lanes, laneBusy } from "../../workflows/lanes.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { Facilitate } from "../floor/facilitate.workflow.ts";
+import { ThreadRepository } from "../threads/repository.ts";
 import { workingThreadsOf } from "../threads/tree.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { Turns } from "../turns/turns.ts";
@@ -32,7 +42,8 @@ import { RoutineRuns } from "./runs.ts";
 
 /**
  * Settles routine runs: records how a run ended once nothing in its threads
- * is running, waiting or about to start.
+ * is running, waiting or about to start. A completed run whose results are
+ * posted to the chat has its agent's last reply posted there.
  *
  * `handler` reacts to the conversation events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
@@ -70,6 +81,22 @@ export const make = Effect.gen(function* () {
 	const lanes = yield* Lanes.Service;
 	const routines = yield* RoutineRepository.Service;
 	const runs = yield* RoutineRuns.Service;
+	const threads = yield* ThreadRepository.Service;
+
+	/**
+	 * Posts the agent's last reply in the run's own thread into its chat. A
+	 * run whose agent wrote nothing to show posts nothing.
+	 */
+	const postResult = (run: schema.RoutineExecutionRow) =>
+		Effect.gen(function* () {
+			const content = (yield* lastReplyText(run)).trim();
+			if (content === "") return;
+			yield* threads.postRoutineResult({
+				threadId: yield* chatThreadOf(run.threadId),
+				run,
+				content,
+			});
+		});
 
 	/**
 	 * Cancels the work still going on in the run's threads `work`. Turns before
@@ -116,9 +143,12 @@ export const make = Effect.gen(function* () {
 				}
 				if (ending && ending !== wasEnding) yield* routines.recordEnding(run.id, ending);
 				if (yield* stillBusy(work, ending !== undefined)) return;
-				if (yield* routines.settle(run.id, settledAs(ending, yield* lastTurnIn(work)))) {
-					yield* runs.settled({ routineId: run.routineId, executionId: run.id });
+				const settled = settledAs(ending, yield* lastTurnIn(work));
+				if (!(yield* routines.settle(run.id, settled))) return;
+				if (settled.state === "completed" && run.results === "post_to_chat") {
+					yield* postResult(run);
 				}
+				yield* runs.settled({ routineId: run.routineId, executionId: run.id });
 			}),
 		);
 
@@ -202,7 +232,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Collaborations.layer, RoutineRepository.layer]),
+	Layer.provide([Collaborations.layer, RoutineRepository.layer, ThreadRepository.layer]),
 );
 
 /** The thread an event may let a routine run settle in, and how the run ends if it ends it early. */
@@ -268,6 +298,46 @@ const podOf = (threadId: string) =>
 		),
 		([row]) =>
 			row ? Effect.succeed(row.podId) : Effect.die(new Error("A routine run's thread is gone")),
+	);
+
+/** The main thread of the chat the run's thread `threadId` is in. */
+const chatThreadOf = (threadId: string) =>
+	Effect.flatMap(
+		query((db) =>
+			db
+				.select({ mainThreadId: chat.mainThreadId })
+				.from(thread)
+				.innerJoin(chat, eq(chat.id, thread.chatId))
+				.where(eq(thread.id, threadId))
+				.limit(1),
+		),
+		([row]) =>
+			row
+				? Effect.succeed(row.mainThreadId)
+				: Effect.die(new Error("A routine run's thread is not in a chat")),
+	);
+
+/**
+ * The text of the agent's last finished reply in the run's own thread, as the
+ * thread shows it. Its collaborators' threads are their work, not its answer.
+ */
+const lastReplyText = (run: schema.RoutineExecutionRow) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ parts: message.parts })
+				.from(message)
+				.where(
+					and(
+						eq(message.threadId, run.threadId),
+						eq(message.authorAgentId, run.agentId),
+						eq(message.status, "complete"),
+					),
+				)
+				.orderBy(desc(message.createdAt), desc(message.id))
+				.limit(1),
+		),
+		([row]) => (row ? textWithoutNarration(row.parts) : ""),
 	);
 
 const executionThread = (executionId: string) =>

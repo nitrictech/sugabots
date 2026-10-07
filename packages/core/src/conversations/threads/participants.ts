@@ -143,6 +143,7 @@ export const messageRelations = {
 		with: { decidedBy: { columns: { name: true } } },
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
+	routineExecution: { columns: { id: true, threadId: true, routineName: true } },
 } as const;
 
 /** Who a person is, as read with {@link personColumns}. */
@@ -155,6 +156,7 @@ export interface MessageWithRelations extends schema.MessageRow {
 	authorAgent: AgentIdentity | null;
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
+	routineExecution: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "routineName"> | null;
 }
 
 /** A message read with `messageRelations`, as the API shows it. */
@@ -163,7 +165,7 @@ export function messageFromRelations(
 	/** What people are told of why the turn behind a failed reply failed. */
 	error?: UserMessage | null,
 ): Message {
-	return toMessage(
+	const shown = toMessage(
 		stored,
 		authorRow(stored.authorUser, stored.authorAgent),
 		{
@@ -174,6 +176,17 @@ export function messageFromRelations(
 		},
 		error,
 	);
+	const run = stored.routineExecution;
+	return run
+		? {
+				...shown,
+				routineResultOf: {
+					executionId: run.id,
+					threadId: run.threadId,
+					routineName: run.routineName,
+				},
+			}
+		: shown;
 }
 
 /** Whoever a relational query found, as the row `toParticipant` reads. */

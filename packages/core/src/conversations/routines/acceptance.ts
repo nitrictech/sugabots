@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { RoutineExecutionTrigger } from "@sugabots/contracts";
+import type { RoutineExecutionTrigger, RoutineResults } from "@sugabots/contracts";
 import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
@@ -95,6 +95,7 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					trigger: input.trigger,
 					routineName: definition.routine.name,
 					instructions: definition.routine.instructions,
+					results: definition.routine.results,
 					acceptedAt,
 				});
 				yield* threads.postRoutineTrigger({
@@ -105,7 +106,11 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 						routineName: definition.routine.name,
 						triggerKind: input.trigger.kind,
 					},
-					content: triggerMessageContent(definition.routine.instructions, input.trigger),
+					content: triggerMessageContent(
+						definition.routine.instructions,
+						definition.routine.results,
+						input.trigger,
+					),
 				});
 				yield* runs.queue({ routineId: input.routineId, executionId: execution.id });
 				return { executionId: execution.id, threadId: runThread.id, duplicate: false };
@@ -144,9 +149,21 @@ const acceptedAs = (routineId: string, kind: RoutineExecutionTrigger["kind"], id
 		([row]) => row,
 	);
 
-function triggerMessageContent(instructions: string, trigger: RoutineExecutionTrigger) {
-	return `Routine instructions:\n${instructions}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
+function triggerMessageContent(
+	instructions: string,
+	results: RoutineResults,
+	trigger: RoutineExecutionTrigger,
+) {
+	const delivery = results === "post_to_chat" ? `\n\n${POSTED_RESULT_NOTE}` : "";
+	return `Routine instructions:\n${instructions}${delivery}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
+
+/**
+ * Tells the agent of a run whose result is posted to its chat that its last
+ * reply is what people will read there, so it writes that reply to them.
+ */
+const POSTED_RESULT_NOTE =
+	"When you finish, your last reply is posted in your chat for people to read and answer. Write it to them: what they need to know, or what you want to ask them. The work before it stays in this run.";
 
 function sameTrigger(left: RoutineExecutionTrigger, right: RoutineExecutionTrigger) {
 	if (left.kind !== right.kind) return false;

@@ -65,6 +65,7 @@ export interface Interface {
 			| "trigger"
 			| "routineName"
 			| "instructions"
+			| "results"
 			| "acceptedAt"
 		>,
 	) => Effect.Effect<schema.RoutineExecutionRow>;
@@ -369,11 +370,12 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** What a routine is: its name, what it tells the agent, and what starts it. */
+/** What a routine is: its name, what it tells the agent, what starts it, and where its result goes. */
 export type Definition = Pick<
 	schema.RoutineRow,
 	| "name"
 	| "instructions"
+	| "results"
 	| "triggerKind"
 	| "cronExpression"
 	| "cronTimezone"

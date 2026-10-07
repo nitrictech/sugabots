@@ -5,6 +5,7 @@ import type {
 	RoutineExecutionState,
 	RoutineExecutionTrigger,
 	RoutineExecutionTriggerKind,
+	RoutineResults,
 	RoutineState,
 	RoutineTriggerAuthor,
 	RoutineTriggerKind,
@@ -48,6 +49,7 @@ export const routine = pgTable(
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		webhookSecretDigest: text("webhook_secret_digest"),
 		state: text("state").$type<RoutineState>().notNull().default("enabled"),
+		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		deletedAt: timestamp("deleted_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
@@ -60,6 +62,7 @@ export const routine = pgTable(
 			name: "routine_agent_workspace_fkey",
 		}).onDelete("cascade"),
 		check("routine_state_valid", sql`${table.state} in ('enabled', 'paused')`),
+		check("routine_results_valid", sql`${table.results} in ('keep_in_run', 'post_to_chat')`),
 		check(
 			"routine_trigger_valid",
 			sql`(
@@ -196,6 +199,8 @@ export const routineExecution = pgTable(
 		trigger: jsonb("trigger").$type<RoutineExecutionTrigger>().notNull(),
 		routineName: text("routine_name").notNull(),
 		instructions: text("instructions").notNull(),
+		/** The routine's `results` when the run was accepted. */
+		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		state: text("state").$type<RoutineExecutionState>().notNull().default("queued"),
 		error: text("error").$type<UserMessage>(),
 		pendingTerminalState: text("pending_terminal_state").$type<"failed" | "cancelled">(),
@@ -244,6 +249,10 @@ export const routineExecution = pgTable(
 			sql`(${table.pendingTerminalState} is null and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'cancelled' and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'failed')`,
+		),
+		check(
+			"routine_execution_results_valid",
+			sql`${table.results} in ('keep_in_run', 'post_to_chat')`,
 		),
 		uniqueIndex("routine_execution_thread_idx").on(table.threadId),
 		uniqueIndex("routine_execution_trigger_identity_idx")
@@ -365,6 +374,10 @@ export const message = pgTable(
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
+		/** The routine run this message is the result of, posted in the agent's chat. */
+		routineExecutionId: uuid("routine_execution_id").references(() => routineExecution.id, {
+			onDelete: "set null",
+		}),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -373,6 +386,9 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorUserId}, ${table.authorAgentId}, ${table.routineTrigger}) = 1`,
 		),
 		index("message_thread_created_at_idx").on(table.threadId, table.createdAt),
+		uniqueIndex("message_routine_execution_idx")
+			.on(table.routineExecutionId)
+			.where(sql`${table.routineExecutionId} is not null`),
 		// What a bot's search_history tool matches against. Stemmed so "hotels"
 		// finds "hotel"; unstemmed as well, so a word the English rules drop or
 		// change (German "was", French "hôtels") still matches as written; and

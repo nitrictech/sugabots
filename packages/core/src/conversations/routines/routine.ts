@@ -60,6 +60,7 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 					}
 				: { kind: "webhook" },
 		state: row.state,
+		results: row.results,
 		createdById: row.createdById,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),

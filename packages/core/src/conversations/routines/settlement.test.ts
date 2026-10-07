@@ -1,3 +1,4 @@
+import type { RoutineResults } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,7 @@ import {
 } from "../../database/testing.ts";
 import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
+import { ChatView } from "../chats/chat-view.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -95,13 +97,14 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	});
 
 	/** A routine with one accepted manual trigger, whose run has started and asked for its turn. */
-	async function aRunningRun() {
+	async function aRunningRun(results?: RoutineResults) {
 		const created = await routines.create(
 			{ agentId },
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
 				trigger: { kind: "webhook" },
+				results,
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -191,6 +194,30 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		}
 		return { accepted, run, askingTurn, childThread, activeCollaboration, runningTurn };
 	}
+
+	/** Ends the run's turn with `content` as its reply, which completes the run. */
+	async function replyAndFinish(threadId: string, content: string) {
+		const [turnRun] = await runOnPostgres(runningTurns(threadId));
+		if (!turnRun) throw new Error("The run asked for no turn");
+		const prepared = await prepareRunnable(execution, turnRun);
+		// Freed first, so completing the turn finishes the run's work.
+		await runOnPostgres(releaseTurn(turnRun));
+		await turns.complete(
+			replyTurnOf(prepared),
+			{ content, collaborations: [], toolCalls: [] },
+			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
+		);
+	}
+
+	/** The messages posted in the agent's chat as the run's result. */
+	const resultsOf = (executionId: string) =>
+		onDatabase((db) =>
+			db
+				.select({ message, threadType: thread.type, chatId: thread.chatId })
+				.from(message)
+				.innerJoin(thread, eq(thread.id, message.threadId))
+				.where(eq(message.routineExecutionId, executionId)),
+		);
 
 	/** Marks the fixture's asking turn as running again, as a workflow holding it would. */
 	const runAgain = (turnId: string) =>
@@ -662,6 +689,94 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(completed).toBeGreaterThanOrEqual(0);
 		expect(settled).toBeGreaterThan(completed);
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
+	});
+
+	it("posts a completed run's last reply in its chat when its results go there", async () => {
+		const { accepted, run } = await aRunningRun("post_to_chat");
+		delivered = [];
+
+		await replyAndFinish(accepted.threadId, "Morning! Two PRs merged overnight.");
+
+		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
+		const posted = await resultsOf(run.executionId);
+		expect(posted).toHaveLength(1);
+		const chatId = posted[0]?.chatId;
+		if (!chatId) throw new Error("The result was posted outside a chat");
+		const page = await onPostgresAs(userId)(Context.get(conversations, ChatView.Service)).messages(
+			chatId,
+		);
+		expect(page.items).toContainEqual({
+			kind: "message",
+			message: expect.objectContaining({
+				content: "Morning! Two PRs merged overnight.",
+				routineResultOf: {
+					executionId: run.executionId,
+					threadId: accepted.threadId,
+					routineName: expect.any(String),
+				},
+			}),
+		});
+		expect(posted[0]).toMatchObject({
+			threadType: "chat",
+			message: {
+				authorAgentId: agentId,
+				status: "complete",
+				content: "Morning! Two PRs merged overnight.",
+			},
+		});
+		expect(delivered).toContainEqual(
+			expect.objectContaining({
+				event: expect.objectContaining({
+					type: "message.created",
+					message: expect.objectContaining({
+						content: "Morning! Two PRs merged overnight.",
+						routineResultOf: expect.objectContaining({
+							executionId: run.executionId,
+							threadId: accepted.threadId,
+						}),
+					}),
+				}),
+			}),
+		);
+	});
+
+	it("tells the agent its last reply goes to the chat", async () => {
+		const { accepted } = await aRunningRun("post_to_chat");
+
+		const [trigger] = await onDatabase((db) =>
+			db.select().from(message).where(eq(message.threadId, accepted.threadId)),
+		);
+
+		expect(trigger?.content).toContain("your last reply is posted in your chat");
+	});
+
+	it("keeps a run's result in the run when its results stay there", async () => {
+		const { accepted, run } = await aRunningRun();
+
+		await replyAndFinish(accepted.threadId, "Triaged and assigned.");
+
+		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
+		expect(await resultsOf(run.executionId)).toEqual([]);
+	});
+
+	it("posts nothing when the run's last reply has no text", async () => {
+		const { accepted, run } = await aRunningRun("post_to_chat");
+
+		await replyAndFinish(accepted.threadId, "  ");
+
+		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
+		expect(await resultsOf(run.executionId)).toEqual([]);
+	});
+
+	it("posts nothing for a run that failed", async () => {
+		const { accepted, run } = await aRunningRun("post_to_chat");
+
+		await announce(ended(accepted.threadId, failed(UserMessage.of`Model failed`)));
+		await finishTurnsIn(accepted.threadId);
+		await settlement.settleRun(run);
+
+		expect(await executionOf(run.executionId)).toMatchObject({ state: "failed" });
+		expect(await resultsOf(run.executionId)).toEqual([]);
 	});
 
 	it("settles a run once when its last two pieces of work finish together", async () => {

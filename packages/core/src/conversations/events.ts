@@ -21,7 +21,7 @@ import type { Turns } from "./turns/turns.ts";
  * of carries its thread's pod, so only people who reach the pod are told.
  */
 export type ConversationEvent = Data.TaggedEnum<{
-	/** A person posted a message. */
+	/** A message was posted whole: a person's, or a routine run's result. */
 	MessagePosted: {
 		readonly threadId: string;
 		readonly workspaceId: string;
