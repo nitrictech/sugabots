@@ -427,7 +427,8 @@ function Tools({
 				);
 			})}
 			{builtInToolCatalog.map((entry) => {
-				const on = !webOff && !agent.disabledTools.includes(entry.key);
+				const blocked = webOff && entry.usesWeb;
+				const on = !blocked && !agent.disabledTools.includes(entry.key);
 				return (
 					<SettingsRow
 						key={entry.key}
@@ -437,10 +438,10 @@ function Tools({
 							canChange ? (
 								<Toggle
 									checked={on}
-									disabled={webOff}
+									disabled={blocked}
 									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
 									tooltip={
-										webOff
+										blocked
 											? mayManageProviders
 												? "Disabled while web access is off for the workspace. Turn it on in Web search settings."
 												: "Disabled while web access is off for the workspace. Ask a workspace admin to enable it."

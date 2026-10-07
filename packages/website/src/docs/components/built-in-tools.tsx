@@ -1,6 +1,7 @@
 import type { BuiltInToolKey } from "@sugabots/contracts";
 import { builtInToolCatalog } from "@sugabots/contracts";
 import {
+	CalendarClockIcon,
 	FilePenIcon,
 	FileTextIcon,
 	GlobeIcon,
@@ -14,6 +15,7 @@ import { Reveal, RevealItem } from "@/components/reveal";
 const toolIcons: Record<BuiltInToolKey, LucideIcon> = {
 	web_fetch: GlobeIcon,
 	web_search: SearchIcon,
+	routines: CalendarClockIcon,
 	artifact_list: LibraryIcon,
 	artifact_read: FileTextIcon,
 	artifact_write: FilePenIcon,

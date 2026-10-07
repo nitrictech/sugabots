@@ -9,6 +9,7 @@ import { Compactions } from "./compaction/compactions.ts";
 import { ConversationEvents } from "./conversation-events.ts";
 import type { ConversationEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
+import { BotRoutines } from "./routines/bot-routines.ts";
 import { RoutineRunner } from "./routines/routine-runner.ts";
 import { Routines } from "./routines/routines.ts";
 import { RoutineSettlement } from "./routines/settlement.ts";
@@ -31,6 +32,8 @@ const services = Layer.mergeAll(
 	Collaborations.layer,
 	Routines.layer,
 	Routines.webhooksLayer,
+	// The turn's steps read it from here, for the routine tools.
+	BotRoutines.layer,
 	RoutineRunner.layer,
 	Summaries.layer,
 	Compactions.layer,
