@@ -251,7 +251,7 @@ export function AgentChat({
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
-		<div className="flex min-h-0 flex-1 md:relative">
+		<div className="flex min-h-0 min-w-0 flex-1 md:relative">
 			<div className="relative flex min-w-0 flex-1 flex-col">
 				{header}
 				<div
