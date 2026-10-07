@@ -20,7 +20,7 @@
       "name": "@sugabots/accounting",
       "version": "0.0.0",
       "dependencies": {
-        "@opencode-ai/models": "^0.0.85",
+        "@opencode-ai/models": "^0.0.92",
         "ai": "^7.0.100",
         "effect": "catalog:",
       },
@@ -63,7 +63,7 @@
         "@effect/sql-pg": "catalog:",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "@mozilla/readability": "^0.6.0",
-        "@opencode-ai/models": "^0.0.85",
+        "@opencode-ai/models": "^0.0.92",
         "@openrouter/ai-sdk-provider": "^3.1.0",
         "@sugabots/accounting": "workspace:*",
         "@sugabots/contracts": "workspace:*",
@@ -620,7 +620,7 @@
 
     "@open-draft/until": ["@open-draft/until@2.1.0", "", {}, "sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg=="],
 
-    "@opencode-ai/models": ["@opencode-ai/models@0.0.85", "", { "peerDependencies": { "effect": "4.0.0-beta.83" }, "optionalPeers": ["effect"] }, "sha512-1U65/zh8DQWly7V3n/V3vfMM+hZieIjLJKUqEwMmpsDJJV4clWmvrVVffGKvgkIP84aPxOPvLYsmUQWDbwK02g=="],
+    "@opencode-ai/models": ["@opencode-ai/models@0.0.92", "", { "peerDependencies": { "effect": "4.0.0-beta.83" }, "optionalPeers": ["effect"] }, "sha512-thjaYdPLw15Dht1h8Sz3CkaVV4/pz36sh2PfkczxIRxLB8ZR7+8/E3uR3p3hMDER7Wd18pWsvf0QOm1CiIrgdw=="],
 
     "@openrouter/ai-sdk-provider": ["@openrouter/ai-sdk-provider@3.1.0", "", { "peerDependencies": { "ai": "^7.0.0", "zod": "^3.25.76 || ^4.1.8" } }, "sha512-BQy1TA9fKrh47s9ivsO6FY5QimN7GUF0i8Qon3pkxQclEgShso0dClpcWn8OIyPLEZZPFaFKgI8TW4S/O0p0Dw=="],
 
