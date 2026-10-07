@@ -28,7 +28,7 @@ COPY packages/website/package.json packages/website/
 COPY packages/workflow/package.json packages/workflow/
 
 # --ignore-scripts: the root `prepare` script is editor tooling.
-FROM base AS web
+FROM --platform=$BUILDPLATFORM base AS web
 RUN bun install --frozen-lockfile --ignore-scripts
 # Vite reads the web package's tsconfig, which extends the root one.
 COPY tsconfig.json tsconfig.base.json ./
