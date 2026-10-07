@@ -21,6 +21,7 @@ function routine(id: string, name: string, agentId: string, expression: string):
 		instructions: `${name}, please.`,
 		trigger: { kind: "cron", expression, timezone: "UTC", nextScheduledAt: null },
 		state: "enabled",
+		results: "keep_in_run",
 		createdById: null,
 		createdAt: "2026-09-18T00:00:00.000Z",
 		updatedAt: "2026-09-18T00:00:00.000Z",

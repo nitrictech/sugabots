@@ -1,7 +1,11 @@
 import { Effect, Schema } from "effect";
 import { agentColorSchema, agentFaceSchema } from "./agents.ts";
 import { emailSchema } from "./email.ts";
-import { routineExecutionSchema, routineTriggerAuthorSchema } from "./routines.ts";
+import {
+	routineExecutionSchema,
+	routineResultOfSchema,
+	routineTriggerAuthorSchema,
+} from "./routines.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -335,6 +339,8 @@ export const messageSchema = Schema.Struct({
 	content: Schema.String,
 	/** Why a `failed` reply failed, in the provider's words where it had any. */
 	error: Schema.optional(Schema.String),
+	/** Set on a routine run's result, posted in the agent's chat when the run completed. */
+	routineResultOf: Schema.optional(routineResultOfSchema),
 	createdAt: isoTimestampSchema,
 }).check(
 	Schema.makeFilter(({ content, parts }) =>

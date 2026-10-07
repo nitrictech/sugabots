@@ -5,11 +5,19 @@ import { and, eq, lt, max, ne, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { chat, message, thread, threadParticipant, threadRead } from "../../database/schema.ts";
+import {
+	agent,
+	chat,
+	message,
+	thread,
+	threadParticipant,
+	threadRead,
+} from "../../database/schema.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import {
+	authorRow,
 	type PersonIdentity,
 	personAuthor,
 	personColumns,
@@ -75,6 +83,16 @@ export interface Interface {
 	readonly postRoutineTrigger: (input: {
 		threadId: string;
 		trigger: RoutineTriggerAuthor;
+		content: string;
+	}) => Effect.Effect<schema.MessageRow>;
+	/**
+	 * Posts a routine run's result into the agent's chat's main thread
+	 * `threadId`, as a message from the run's agent, and announces it. A run
+	 * has one result: posting a second fails.
+	 */
+	readonly postRoutineResult: (input: {
+		threadId: string;
+		run: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "agentId" | "routineName">;
 		content: string;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
@@ -349,6 +367,67 @@ export const make = Effect.gen(function* () {
 						})
 						.returning(),
 				).pipe(Effect.flatMap(writtenRow("message"))),
+			),
+
+		postRoutineResult: ({ threadId, run, content }) =>
+			operation(
+				"postRoutineResult",
+				transaction(
+					Effect.gen(function* () {
+						const [author] = yield* query((db) =>
+							db
+								.select({
+									id: agent.id,
+									name: agent.name,
+									handle: agent.handle,
+									color: agent.color,
+									face: agent.face,
+								})
+								.from(agent)
+								.where(eq(agent.id, run.agentId))
+								.limit(1),
+						);
+						if (!author) return yield* Effect.die(new Error("A routine run's agent is gone"));
+						const created = yield* query((db) =>
+							db
+								.insert(message)
+								.values({
+									threadId,
+									authorAgentId: run.agentId,
+									routineExecutionId: run.id,
+									kind: "text",
+									status: "complete",
+									parts: [{ type: "text", text: content }],
+									content,
+								})
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("message")));
+						const now = yield* DateTime.nowAsDate;
+						const placed = yield* query((db) =>
+							db
+								.update(thread)
+								.set({ updatedAt: now })
+								.where(eq(thread.id, threadId))
+								.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
+						).pipe(Effect.flatMap(writtenRow("thread")));
+						yield* emit([
+							ConversationEvent.MessagePosted({
+								threadId,
+								workspaceId: placed.workspaceId,
+								podId: placed.podId,
+								message: {
+									...toMessage(created, authorRow(null, author)),
+									routineResultOf: {
+										executionId: run.id,
+										threadId: run.threadId,
+										routineName: run.routineName,
+									},
+								},
+							}),
+						]);
+						return created;
+					}),
+				),
 			),
 
 		openSystemAgentThread: (input) =>

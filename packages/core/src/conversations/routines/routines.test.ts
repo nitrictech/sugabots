@@ -454,6 +454,34 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(execution?.instructions).toBe("Use the original instructions.");
 	});
 
+	it("keeps a run's result where the routine sent it when the run was accepted", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Morning standup",
+				instructions: "Ask the team what they are working on.",
+				trigger: { kind: "webhook" },
+			},
+		);
+		expect(created.routine.results).toBe("keep_in_run");
+		const routine = { agentId, routineId: created.routine.id };
+		const changed = await routines.update(routine, { results: "post_to_chat" });
+		expect(changed.routine.results).toBe("post_to_chat");
+		const accepted = await routines.run({ ...routine, requestId: crypto.randomUUID() });
+
+		const renamed = await routines.update(routine, { name: "Daily standup" });
+		await routines.update(routine, { results: "keep_in_run" });
+
+		expect(renamed.routine.results).toBe("post_to_chat");
+		const [execution] = await onDatabase((db) =>
+			db
+				.select({ results: routineExecution.results })
+				.from(routineExecution)
+				.where(eq(routineExecution.id, accepted.executionId)),
+		);
+		expect(execution?.results).toBe("post_to_chat");
+	});
+
 	it("bounds execution titles derived from maximum-length Routine names", async () => {
 		const created = await routines.create(
 			{ agentId },
