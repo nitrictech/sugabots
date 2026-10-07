@@ -16,6 +16,7 @@ function connection(
 ): ModelProviderRepository.ProviderEndpoint {
 	return {
 		providerId: "provider-id",
+		name: "Test provider",
 		preset: null,
 		baseUrl: "https://models.example/v1",
 		apiFormat: "openai",

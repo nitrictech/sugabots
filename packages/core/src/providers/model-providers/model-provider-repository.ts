@@ -227,6 +227,7 @@ export const make = Effect.gen(function* () {
 			}
 			return {
 				providerId: row.id,
+				name: row.name,
 				preset: row.preset,
 				baseUrl: row.baseUrl,
 				apiFormat: row.apiFormat,
@@ -627,6 +628,7 @@ export const layer = Layer.effect(Service, make);
 /** How to reach a provider: where, in which protocol, and with which credentials. */
 export interface ProviderEndpoint {
 	providerId: string;
+	name: string;
 	preset: ProviderPresetId | null;
 	baseUrl: string;
 	apiFormat: "openai" | "anthropic";

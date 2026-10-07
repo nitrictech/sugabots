@@ -68,6 +68,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 			resolve: () =>
 				Effect.succeed({
 					providerId: PROVIDER_ID,
+					name: "OpenAI",
 					preset: "openai",
 					baseUrl: "https://api.openai.com/v1",
 					apiFormat: "openai",

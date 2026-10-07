@@ -58,6 +58,7 @@ describe("models", () => {
 					resolve: () =>
 						Effect.succeed({
 							providerId: "provider-id",
+							name: "Test provider",
 							preset: null,
 							baseUrl: "https://models.example/v1",
 							apiFormat,
@@ -102,6 +103,7 @@ describe("models", () => {
 				resolve: () =>
 					Effect.succeed({
 						providerId: "provider-id",
+						name: "ChatGPT",
 						preset: "chatgpt",
 						baseUrl: "https://chatgpt.com/backend-api/codex",
 						apiFormat: "openai",
@@ -144,7 +146,9 @@ describe("models", () => {
 });
 
 describe("a failed model request", () => {
-	it("logs what the provider said, and tells people only what it means", () => {
+	const context = { provider: "OpenRouter", model: "google/gemini-3.8-flash" };
+
+	it("logs what the provider said, and names the provider and model to the person", () => {
 		const refused = new APICallError({
 			message: "Forbidden",
 			url: "https://openrouter.ai/api/v1/chat/completions",
@@ -158,12 +162,14 @@ describe("a failed model request", () => {
 			}),
 		});
 
-		const failure = Models.RequestFailed.fromCause(refused);
+		const failure = Models.RequestFailed.fromCause(refused, context);
 
 		expect(failure.message).toBe(
 			"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
 		);
-		expect(failure.userMessage).toBe("The model provider refused the request. Check its API key.");
+		expect(failure.userMessage).toBe(
+			"OpenRouter refused the request for google/gemini-3.8-flash. Check its API key in Model providers.",
+		);
 	});
 
 	it.each([
@@ -182,10 +188,10 @@ describe("a failed model request", () => {
 			responseBody: JSON.stringify(body),
 		});
 
-		expect(Models.RequestFailed.fromCause(refused)).toMatchObject({
+		expect(Models.RequestFailed.fromCause(refused, context)).toMatchObject({
 			reason: "outOfCredit",
 			userMessage:
-				"The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.",
+				"OpenRouter declined the request for google/gemini-3.8-flash because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.",
 		});
 	});
 
@@ -204,7 +210,7 @@ describe("a failed model request", () => {
 			responseBody: "{}",
 		});
 
-		expect(Models.RequestFailed.fromCause(failed).mayRetry).toBe(mayRetry);
+		expect(Models.RequestFailed.fromCause(failed, context).mayRetry).toBe(mayRetry);
 	});
 
 	it("logs the SDK's message when the body says nothing readable", () => {
@@ -216,11 +222,11 @@ describe("a failed model request", () => {
 			responseBody: "<html>upstream timed out</html>",
 		});
 
-		expect(Models.RequestFailed.fromCause(opaque)).toMatchObject({
+		expect(Models.RequestFailed.fromCause(opaque, context)).toMatchObject({
 			message: "Provider returned 502: <html>upstream timed out</html>",
-			userMessage: "The model provider could not answer.",
+			userMessage: "OpenRouter could not answer the request for google/gemini-3.8-flash.",
 		});
-		expect(Models.RequestFailed.fromCause(new Error("socket hang up")).message).toBe(
+		expect(Models.RequestFailed.fromCause(new Error("socket hang up"), context).message).toBe(
 			"socket hang up",
 		);
 	});

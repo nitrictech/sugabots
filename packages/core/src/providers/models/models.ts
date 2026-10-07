@@ -193,25 +193,14 @@ function definedFields(record: Record<string, unknown>, names: readonly string[]
 	);
 }
 
-/**
- * loggingFailure passes `text` through, calling `log` with whatever ends it
- * early, since a reader of the text alone can't say what else went wrong.
- */
-async function* loggingFailure<T>(text: AsyncIterable<T>, log: (cause: unknown) => void) {
-	try {
-		yield* text;
-	} catch (cause) {
-		log(cause);
-		throw cause;
-	}
-}
-
 /** The model could not be asked, or its provider failed the request. */
 export class RequestFailed
 	extends Data.TaggedError("ModelRequestFailed")<{
 		/** Why, for the logs. It may quote the provider's own response. */
 		readonly message: string;
 		readonly reason: RequestFailure;
+		readonly provider?: string;
+		readonly model?: string;
 		readonly cause?: unknown;
 	}>
 	implements UserFacing
@@ -221,10 +210,12 @@ export class RequestFailed
 	 * in the response body, usually as `{"error":{"message":...}}`; that
 	 * sentence is the one worth logging, ahead of the SDK's own summary.
 	 */
-	static fromCause(cause: unknown): RequestFailed {
+	static fromCause(cause: unknown, context?: { provider: string; model: string }): RequestFailed {
+		// Stream errors reach this through forEachDelta already wrapped by make(); re-wrapping would strip context.
+		if (cause instanceof RequestFailed) return cause;
 		if (!APICallError.isInstance(cause)) {
 			const message = cause instanceof Error ? cause.message : String(cause);
-			return new RequestFailed({ message, reason: "unavailable", cause });
+			return new RequestFailed({ message, reason: "unavailable", cause, ...context });
 		}
 		const status = cause.statusCode;
 		const said = providerSaid(cause.responseBody) ?? cause.message;
@@ -232,6 +223,7 @@ export class RequestFailed
 			message: `${status ? `Provider returned ${status}` : "Provider refused"}: ${said}`,
 			reason: reasonFor(status, cause.responseBody),
 			cause,
+			...context,
 		});
 	}
 
@@ -244,8 +236,19 @@ export class RequestFailed
 		return this.reason === "rateLimited" || this.reason === "unavailable";
 	}
 
-	get userMessage() {
-		return REQUEST_USER_MESSAGES[this.reason];
+	get userMessage(): UserMessage {
+		const provider = UserMessage.unchecked(this.provider ?? "The model provider");
+		const model = UserMessage.unchecked(this.model ?? "this model");
+		const messages: Record<RequestFailure, UserMessage> = {
+			noProvider: UserMessage.of`No active provider offers ${model}.`,
+			signInFailed: UserMessage.of`${provider}'s sign-in failed, so the request for ${model} couldn't be made. Sign in again in Model providers.`,
+			rejected: UserMessage.of`${provider} refused the request for ${model}. Check its API key in Model providers.`,
+			outOfCredit: UserMessage.of`${provider} declined the request for ${model} because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
+			refused: UserMessage.of`${provider} couldn't accept this request for ${model}.`,
+			rateLimited: UserMessage.of`${provider} is too busy to answer the request for ${model}. Try again shortly.`,
+			unavailable: UserMessage.of`${provider} could not answer the request for ${model}.`,
+		};
+		return messages[this.reason];
 	}
 }
 
@@ -271,16 +274,6 @@ type RequestFailure =
 	| "rateLimited"
 	| "unavailable";
 
-const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
-	noProvider: UserMessage.of`No active provider offers this model.`,
-	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
-	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
-	outOfCredit: UserMessage.of`The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
-	refused: UserMessage.of`The model provider couldn't accept this request.`,
-	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
-	unavailable: UserMessage.of`The model provider could not answer.`,
-};
-
 interface Options {
 	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewOAuthTokens">;
 	httpClients: EgressHttpClients;
@@ -299,6 +292,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				return yield* new RequestFailed({
 					message: `No active provider offers the model "${input.model}"`,
 					reason: "noProvider",
+					model: input.model,
 				});
 			}
 			const connection = yield* withSignInAccess(
@@ -312,6 +306,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 						new RequestFailed({
 							message: failure.message,
 							reason: "signInFailed",
+							provider: resolved.name,
+							model: input.model,
 							cause: failure,
 						}),
 				),
@@ -385,10 +381,17 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				stopWhen: stepCountIs(input.maxSteps),
 				maxRetries: 0,
 			});
+			const failureContext = { provider: connection.name, model: input.model };
+			async function* trackedTextStream() {
+				try {
+					yield* result.textStream;
+				} catch (cause) {
+					runLog(logModelFailure(cause, streamErrors, signal));
+					throw RequestFailed.fromCause(cause, failureContext);
+				}
+			}
 			return {
-				text: loggingFailure(result.textStream, (cause) =>
-					runLog(logModelFailure(cause, streamErrors, signal)),
-				),
+				text: trackedTextStream(),
 				finished: Effect.tryPromise({
 					try: async () => {
 						const [steps, responseMessages] = await Promise.all([
@@ -406,7 +409,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					catch: (cause) => providerFailure ?? cause,
 				}).pipe(
 					Effect.tapError((failure) => logModelFailure(failure, streamErrors, signal)),
-					Effect.mapError(RequestFailed.fromCause),
+					Effect.mapError((cause) => RequestFailed.fromCause(cause, failureContext)),
 				),
 			};
 		}),
