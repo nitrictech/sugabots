@@ -379,7 +379,7 @@ function Tools({
 	const { agents } = useAgents();
 	const webOff = useWebAccess().data?.enabled === false;
 	const sandboxOff = useSandboxAccess().data?.enabled === false;
-	const mayManageWebSearch = useWorkspacePermissions().manageProviders;
+	const mayManageProviders = useWorkspacePermissions().manageProviders;
 	const podBots =
 		agents?.filter((one) => one.podId === pod.id && one.systemAgentKey === null) ?? [];
 	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0) ?? [];
@@ -391,7 +391,7 @@ function Tools({
 				webOff && (
 					<>
 						Bots can't read or search the web while it's off for the workspace.{" "}
-						{mayManageWebSearch ? (
+						{mayManageProviders ? (
 							<Link
 								from="/$workspace"
 								to="./settings/$section"
@@ -454,7 +454,7 @@ function Tools({
 									label={`${on ? "Turn off" : "Turn on"} ${entry.name}`}
 									tooltip={
 										webOff
-											? mayManageWebSearch
+											? mayManageProviders
 												? "Disabled while web access is off for the workspace. Turn it on in Web search settings."
 												: "Disabled while web access is off for the workspace. Ask a workspace admin to enable it."
 											: `Toggle to ${on ? "disable" : "enable"} ${entry.name} for ${agent.name}`
@@ -478,14 +478,14 @@ function Tools({
 				label="Use the sandbox"
 				sub="Run commands and edit files on the pod's Linux machine. Experimental."
 				trailing={
-					canChange ? (
+					pod.permissions.manageSandbox ? (
 						<Toggle
 							checked={agent.usesSandbox && !sandboxOff}
 							disabled={sandboxOff}
 							label={`${agent.usesSandbox ? "Turn off" : "Turn on"} the sandbox`}
 							tooltip={
 								sandboxOff
-									? mayManageWebSearch
+									? mayManageProviders
 										? "Disabled until the workspace has a sandbox provider. Set one up in Sandboxes settings."
 										: "Disabled until the workspace has a sandbox provider. Ask a workspace admin to set one up."
 									: `Toggle to ${agent.usesSandbox ? "stop" : "let"} ${agent.name} use the sandbox`

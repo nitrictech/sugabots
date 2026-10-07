@@ -118,6 +118,7 @@ export const make = Effect.gen(function* () {
 				"create",
 				Effect.gen(function* () {
 					const { pod, actor } = yield* authorization.pod(podId, "agent.create");
+					if (agent.usesSandbox) yield* authorization.pod(podId, "sandbox.manage");
 					yield* modelProviders.requireEnabled(pod.workspaceId, agent.model);
 					return toAgent(
 						yield* agents.create(pod.workspaceId, {
@@ -135,6 +136,9 @@ export const make = Effect.gen(function* () {
 					const { agent } = yield* authorization.agent(agentId, "agent.update");
 					if (Object.values(changes).every((value) => value === undefined)) {
 						return yield* new EmptyAgentUpdate();
+					}
+					if (changes.usesSandbox !== undefined && changes.usesSandbox !== agent.usesSandbox) {
+						yield* authorization.agent(agentId, "sandbox.manage");
 					}
 					// A cleared model names none to check.
 					if (changes.model != null) {
