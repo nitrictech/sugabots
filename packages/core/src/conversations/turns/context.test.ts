@@ -100,7 +100,7 @@ describe("modelPrompt", () => {
 
 		const searching = instruction(["web_fetch", "web_search"]);
 		expect(searching).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
-		expect(searching).toContain("You don't know the person's timezone");
+		expect(searching).toContain("You don't know the person's own timezone");
 		expect(searching).not.toContain("You cannot search the web");
 
 		const fetchingOnly = instruction(["web_fetch"]);
@@ -110,6 +110,27 @@ describe("modelPrompt", () => {
 		const noTools = instruction([]);
 		expect(noTools).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
 		expect(noTools).toContain("You cannot search the web");
+	});
+
+	it("gives the time where its routines run, named as people say it, so it need not ask", () => {
+		const instruction = (disabledTools: string[]) =>
+			modelPrompt(
+				{
+					...context(),
+					workspaceTimeZone: "Australia/Sydney",
+					agent: { ...context().agent, disabledTools },
+				},
+				environment({ builtInTools: [] }),
+			).messages.at(-1)?.content ?? "";
+
+		expect(instruction([])).toContain(
+			"In Sydney time (Australia/Sydney), it is Friday, 25 September 2026, 13:00.",
+		);
+		expect(instruction([])).toContain(
+			'naming the zone once when you confirm a schedule ("8am Sydney time")',
+		);
+		expect(instruction([])).toContain("Don't ask the person for their timezone");
+		expect(instruction(["routines"])).not.toContain("Routines you set up");
 	});
 
 	it("writes the agent's own tool calls into its history as one line each, not the whole output", () => {
@@ -276,6 +297,8 @@ function context(): TurnContext {
 		compaction: undefined,
 		podName: "Release",
 		workspaceName: "Suga",
+		workspaceTimeZone: "UTC",
+		askedBy: null,
 		crew: [],
 		participants: [
 			testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),

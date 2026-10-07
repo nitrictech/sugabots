@@ -1,6 +1,7 @@
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
 import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
+import { Installation } from "../installation/installation.ts";
 import {
 	Database,
 	type Executor,
@@ -31,6 +32,10 @@ import {
 export const testInfrastructure = Layer.mergeAll(
 	Ids.layer,
 	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
+	Layer.succeed(
+		Installation.Service,
+		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+	),
 ).pipe(Layer.provideMerge(layer));
 
 export type TestInfrastructure = Layer.Success<typeof testInfrastructure>;

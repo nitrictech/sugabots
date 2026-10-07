@@ -5,11 +5,18 @@ import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { UserMessage } from "../../user-message.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import type { BotRoutines } from "../routines/bot-routines.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import {
+	ROUTINE_TOOL_MUTATES,
+	ROUTINE_TOOLS,
+	ROUTINES_KEY,
+	routineTools,
+} from "../tools/routines/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { buildCatalog } from "../tools/tool-search/catalog.ts";
@@ -49,6 +56,8 @@ export interface ToolDependencies {
 	connections: Readonly<Record<string, OfferedTool>>;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
+	/** The agent's own routines, read and changed for the person it is answering. */
+	routines: BotRoutines.Interface;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
@@ -132,6 +141,18 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 		}),
 		recording,
 	);
+	const routinesOff = prepared.context.agent.disabledTools.includes(ROUTINES_KEY);
+	const ownRoutines = routineTools({
+		bot: { agentId: prepared.context.agent.id, askedBy: prepared.context.askedBy },
+		timeZone: prepared.context.workspaceTimeZone,
+		routines: deps.routines,
+		run: deps.run,
+	});
+	for (const key of ROUTINE_TOOLS) {
+		tools[key] = routinesOff
+			? refused(key, ownRoutines[key], TOOL_UNAVAILABLE, recording)
+			: recorded(key, ownRoutines[key], { ...recording, mutating: ROUTINE_TOOL_MUTATES[key] });
+	}
 	if (prepared.context.agent.interviewing) {
 		tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
 			SAVE_INSTRUCTIONS_TOOL,

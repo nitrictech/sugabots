@@ -1,11 +1,12 @@
 import type { BuiltInToolKey } from "@sugabots/contracts";
 import { builtInToolCatalog } from "@sugabots/contracts";
-import { GlobeIcon, type LucideIcon, SearchIcon } from "lucide-react";
+import { CalendarClockIcon, GlobeIcon, type LucideIcon, SearchIcon } from "lucide-react";
 import { Reveal, RevealItem } from "@/components/reveal";
 
 const toolIcons: Record<BuiltInToolKey, LucideIcon> = {
 	web_fetch: GlobeIcon,
 	web_search: SearchIcon,
+	routines: CalendarClockIcon,
 };
 
 /** The tools every agent comes with, from the product's own catalog. */

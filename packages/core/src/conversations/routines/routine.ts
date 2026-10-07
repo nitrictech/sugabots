@@ -62,6 +62,7 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 		state: row.state,
 		results: row.results,
 		createdById: row.createdById,
+		createdByAgentId: row.createdByAgentId,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};

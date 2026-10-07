@@ -67,6 +67,8 @@ export const routineSchema = Schema.Struct({
 	state: routineStateSchema,
 	results: routineResultsSchema,
 	createdById: Schema.NullOr(uuidSchema),
+	/** The routine's own bot, when it made the routine at `createdById`'s request. */
+	createdByAgentId: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });

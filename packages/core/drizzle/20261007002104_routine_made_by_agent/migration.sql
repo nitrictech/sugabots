@@ -1,0 +1,2 @@
+ALTER TABLE "routine" ADD COLUMN "created_by_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "routine" ADD CONSTRAINT "routine_created_by_agent_valid" CHECK ("created_by_agent_id" is null or "created_by_agent_id" = "agent_id");

@@ -32,6 +32,7 @@ const webhookRoutine = {
 	state: "enabled",
 	results: "keep_in_run",
 	createdById: null,
+	createdByAgentId: null,
 	createdAt: "2026-09-18T00:00:00.000Z",
 	updatedAt: "2026-09-18T00:00:00.000Z",
 } satisfies Routine;
@@ -581,7 +582,7 @@ describe("an admin", () => {
 		});
 	});
 
-	it("shows the built-in tools off, and holds them off, while the workspace has no web access", async () => {
+	it("shows the web tools off, and holds them off, while the workspace has no web access", async () => {
 		client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: false }));
 		mount(page);
 
@@ -590,6 +591,9 @@ describe("an admin", () => {
 			expect(tool.getAttribute("aria-checked")).toBe("false");
 			expect(tool.hasAttribute("disabled")).toBe(true);
 		}
+		const routines = screen.getByRole("switch", { name: "Turn off Manage its routines" });
+		expect(routines.getAttribute("aria-checked")).toBe("true");
+		expect(routines.hasAttribute("disabled")).toBe(false);
 		expect(
 			screen.getByRole("link", { name: "Turn it on in Web search" }).getAttribute("href"),
 		).toMatch(/\/settings\/search$/);

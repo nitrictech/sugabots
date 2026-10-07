@@ -51,6 +51,8 @@ export const routine = pgTable(
 		state: text("state").$type<RoutineState>().notNull().default("enabled"),
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		/** Set when the routine's own agent made it, at `createdById`'s request. */
+		createdByAgentId: uuid("created_by_agent_id"),
 		deletedAt: timestamp("deleted_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
@@ -63,6 +65,10 @@ export const routine = pgTable(
 		}).onDelete("cascade"),
 		check("routine_state_valid", sql`${table.state} in ('enabled', 'paused')`),
 		check("routine_results_valid", sql`${table.results} in ('keep_in_run', 'post_to_chat')`),
+		check(
+			"routine_created_by_agent_valid",
+			sql`${table.createdByAgentId} is null or ${table.createdByAgentId} = ${table.agentId}`,
+		),
 		check(
 			"routine_trigger_valid",
 			sql`(
