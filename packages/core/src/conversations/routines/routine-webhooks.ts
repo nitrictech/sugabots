@@ -1,45 +1,75 @@
-import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { MAX_IDEMPOTENCY_KEY_CHARACTERS, type WebhookAuth } from "@sugabots/contracts";
 import { and, eq, isNull } from "drizzle-orm";
-import { Effect, Redacted } from "effect";
+import { DateTime, Effect } from "effect";
+import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { routine } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
+import { RoutineDeliveryIdTooLong } from "./routine.ts";
 import type { Routines } from "./routines.ts";
+import {
+	type Delivery,
+	deliveryAuthentic,
+	deliveryIdOf,
+	presentedSecret,
+	slackChallengeOf,
+} from "./webhook-auth.ts";
 
 /** Runs a webhook routine's caller asks for: `Routines.Webhooks`. */
 export const makeWebhooks = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Routines.WebhooksInterface>("Routines.Webhooks");
 	const acceptTrigger = yield* makeAcceptTrigger;
-	// Checked against when there is no routine, so a missing one takes as long to refuse.
-	const dummyDigest = yield* hashSecret("not-a-routine-secret");
+	const credentials = yield* Credentials.Service;
+
+	const authentic = (webhook: EnabledWebhook, delivery: Delivery, now: Date) => {
+		if (webhook.secret !== null) {
+			const secret = credentials.decrypt(webhook.secret);
+			return Effect.succeed(deliveryAuthentic(webhook.auth, secret, delivery, now));
+		}
+		const { auth, digest } = webhook;
+		const presented = auth.kind === "bearer" ? presentedSecret(auth, delivery.headers) : undefined;
+		if (presented === undefined || digest === null) return Effect.succeed(false);
+		return Effect.promise(() => verifyLegacySecret(presented, digest));
+	};
+
 	return {
-		accept: ({ routineId, secret, trigger }) =>
+		accept: ({ routineId, delivery }) =>
 			operation(
 				"accept",
 				Effect.gen(function* () {
+					const now = yield* DateTime.nowAsDate;
 					// Checked before the routine's trigger lock is taken, so a caller
-					// without the secret cannot hold up its other triggers while the
-					// deliberately slow hash runs.
+					// without the secret cannot hold up its other triggers.
 					const found = isUuid(routineId) ? yield* enabledWebhook(routineId) : undefined;
-					const valid = yield* Effect.promise(() =>
-						verifySecret(Redacted.value(secret), found?.digest ?? dummyDigest),
-					);
-					if (!valid || !found) return undefined;
+					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
+					const challenge = slackChallengeOf(found.auth, delivery.payload);
+					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
+					const idempotencyKey = deliveryIdOf(found.auth, delivery);
+					if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
+						return yield* new RoutineDeliveryIdTooLong();
+					}
 					return yield* transaction(
 						Effect.gen(function* () {
 							yield* lockTriggers(routineId);
-							// The secret may have been replaced while it was being checked.
+							// How callers are checked may have changed while this one was.
 							const current = yield* enabledWebhook(routineId);
-							if (current?.digest !== found.digest) return undefined;
-							return yield* acceptTrigger({
+							if (!current || !sameCheck(current, found)) return undefined;
+							const execution = yield* acceptTrigger({
 								workspaceId: found.workspaceId,
 								agentId: found.agentId,
 								routineId,
-								triggerIdentity: trigger.idempotencyKey,
-								trigger,
+								triggerIdentity: idempotencyKey,
+								trigger: {
+									kind: "webhook",
+									idempotencyKey,
+									payload: delivery.payload,
+									receivedAt: now.toISOString(),
+								},
 							});
+							return { kind: "run" as const, execution };
 						}),
 					).pipe(Effect.catchTag("RoutineNotFound", () => Effect.undefined));
 				}),
@@ -47,29 +77,27 @@ export const makeWebhooks = Effect.gen(function* () {
 	} satisfies Routines.WebhooksInterface;
 });
 
-const deriveKey = promisify(scrypt);
-
-/** A new webhook secret, which is shown once and stored only as {@link hashSecret}. */
-export function generateSecret() {
-	return randomBytes(32).toString("base64url");
+/** What an enabled webhook routine checks its callers with. */
+interface EnabledWebhook {
+	workspaceId: string;
+	agentId: string;
+	auth: WebhookAuth;
+	/** Sealed with `Credentials`. */
+	secret: string | null;
+	/** The hash of a bearer secret made before secrets were sealed. */
+	digest: string | null;
 }
-
-/** The stored form of `secret`, derived off the event loop since scrypt is slow on purpose. */
-export const hashSecret = (secret: string) =>
-	Effect.promise(async () => {
-		const salt = randomBytes(16);
-		const digest = Buffer.from((await deriveKey(secret, salt, 32)) as ArrayBuffer);
-		return `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`;
-	});
 
 const enabledWebhook = (routineId: string) =>
 	Effect.map(
 		query((db) =>
 			db
 				.select({
-					digest: routine.webhookSecretDigest,
 					workspaceId: routine.workspaceId,
 					agentId: routine.agentId,
+					auth: routine.webhookAuth,
+					secret: routine.webhookSecret,
+					digest: routine.webhookSecretDigest,
 				})
 				.from(routine)
 				.where(
@@ -82,10 +110,22 @@ const enabledWebhook = (routineId: string) =>
 				)
 				.limit(1),
 		),
-		([row]) => row,
+		([row]): EnabledWebhook | undefined => (row?.auth ? { ...row, auth: row.auth } : undefined),
 	);
 
-async function verifySecret(secret: string, encoded: string) {
+/** Whether two reads of a routine check callers the same way, with the same secret. */
+function sameCheck(a: EnabledWebhook, b: EnabledWebhook): boolean {
+	return (
+		a.secret === b.secret &&
+		a.digest === b.digest &&
+		JSON.stringify(a.auth) === JSON.stringify(b.auth)
+	);
+}
+
+const deriveKey = promisify(scrypt);
+
+/** Checks `secret` against an `scrypt:{salt}:{digest}` hash, off the event loop since scrypt is slow on purpose. */
+async function verifyLegacySecret(secret: string, encoded: string) {
 	const [algorithm, saltText, digestText] = encoded.split(":");
 	if (algorithm !== "scrypt" || !saltText || !digestText) return false;
 	try {
