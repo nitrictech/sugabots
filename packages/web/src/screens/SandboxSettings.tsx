@@ -18,6 +18,7 @@ import {
 } from "@/lib/sandbox-providers.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon, SettingsValue } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { SandboxNetworkSection } from "./SandboxNetworkSettings.tsx";
@@ -92,9 +93,9 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 
 	return (
 		<>
-			<Alert>
+			<Note>
 				Sandboxes are experimental. How they work, and what they keep, may change between releases.
-			</Alert>
+			</Note>
 			<SettingsGroup
 				note={
 					!ready

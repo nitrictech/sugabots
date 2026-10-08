@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { Check, Info } from "lucide-react";
+import { Check } from "lucide-react";
 import { useModels } from "@/lib/agents.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
+import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
@@ -76,28 +77,25 @@ function MoreModelsCallout({ agentName }: { agentName: string }) {
 	const may = useWorkspacePermissions();
 	const backToAgent = useBackToHere(agentName);
 	return (
-		<div className="flex items-start gap-3 rounded-panel bg-list px-4 py-3 text-[14px] text-soft-foreground leading-normal">
-			<Info aria-hidden size={16} className="mt-0.5 shrink-0 text-subtle-foreground" />
-			<p className="m-0">
-				Only models switched on for the workspace appear here.{" "}
-				{may.manageProviders ? (
-					<>
-						Add providers and switch on more in{" "}
-						<Link
-							from="/$workspace"
-							to="./settings/$section"
-							params={{ section: "providers" }}
-							state={backToAgent}
-							className="font-medium text-link"
-						>
-							Models
-						</Link>
-						.
-					</>
-				) : (
-					"To use another, ask a workspace admin to switch it on."
-				)}
-			</p>
-		</div>
+		<Note>
+			Only models switched on for the workspace appear here.{" "}
+			{may.manageProviders ? (
+				<>
+					Add providers and switch on more in{" "}
+					<Link
+						from="/$workspace"
+						to="./settings/$section"
+						params={{ section: "providers" }}
+						state={backToAgent}
+						className="font-medium text-link"
+					>
+						Models
+					</Link>
+					.
+				</>
+			) : (
+				"To use another, ask a workspace admin to switch it on."
+			)}
+		</Note>
 	);
 }
