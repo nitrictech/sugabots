@@ -5,11 +5,13 @@ import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import { UserMessage } from "../../user-message.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
+import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import { READ_FILE_TOOL } from "../tools/sandbox/tools.ts";
 import type { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
@@ -52,6 +54,8 @@ export interface ToolDependencies {
 	sandbox: SandboxTools.Offered;
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
+	/** The thread's files, which `read_thread_file` reads. */
+	files: Pick<ThreadFiles.Interface, "read">;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
 	/** For a tool that watches for something else to happen. */
@@ -161,6 +165,11 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 			before: prepared.context.compaction?.keptFrom,
 			run: deps.run,
 		}),
+		recording,
+	);
+	tools[READ_THREAD_FILE_TOOL] = recorded(
+		READ_THREAD_FILE_TOOL,
+		readThreadFileTool({ threadId: prepared.context.thread.id, files: deps.files, run: deps.run }),
 		recording,
 	);
 	if (prepared.context.agent.interviewing) {

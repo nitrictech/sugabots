@@ -11,11 +11,13 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
+import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
@@ -335,6 +337,7 @@ describe("runSegment", () => {
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
+			READ_THREAD_FILE_TOOL,
 			"collaborate",
 		]);
 		const approvals = received?.toolApproval as
@@ -637,6 +640,7 @@ function segmentWith(given: Given) {
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(AgentRepository.Service, {}),
+				unimplemented(ThreadFiles.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {
