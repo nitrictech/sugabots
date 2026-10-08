@@ -125,7 +125,7 @@ const routines: Routine[] = [
 		{ kind: "cron", expression: "0 6 * * *", timezone: "UTC", nextScheduledAt: null },
 		"enabled",
 	),
-	routine(2, "Inbound lead", { kind: "webhook" }, "paused"),
+	routine(2, "Inbound lead", { kind: "webhook", auth: { kind: "bearer" } }, "paused"),
 ];
 
 const meta = preview.meta({

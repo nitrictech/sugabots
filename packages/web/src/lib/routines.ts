@@ -75,7 +75,7 @@ export function useRoutineActions() {
 		}),
 		rotateSecret: useMutation({
 			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
-				Effect.runPromise(routines.rotateSecret({ params: { agentId, routineId } })),
+				Effect.runPromise(routines.rotateSecret({ params: { agentId, routineId }, payload: {} })),
 		}),
 	};
 }

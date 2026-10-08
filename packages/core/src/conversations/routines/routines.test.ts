@@ -1,7 +1,8 @@
+import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import type { AcceptedRoutineExecution } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
-import { Context, Effect, Redacted } from "effect";
+import { Context, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
@@ -48,6 +49,7 @@ import { RoutineRunner } from "./routine-runner.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
 import { aRoutineOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import type { Delivery } from "./webhook-auth.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async () => {
 	const conversations = await conversationsForTests(
@@ -68,6 +70,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		settleRun: Context.get(conversations, RoutineSettlement.Service).settleRun,
 	});
 	let workspaceId: string;
+	/** A JSON delivery that sends `secret` as a bearer token. */
+	const bearerDelivery = (
+		secret: string,
+		payload: unknown = {},
+		headers: Record<string, string> = {},
+	): Delivery => ({
+		headers: { authorization: `Bearer ${secret}`, ...headers },
+		body: new TextEncoder().encode(JSON.stringify(payload)),
+		payload,
+	});
 	let podId: string;
 	let agentId: string;
 	let userId: string;
@@ -193,7 +205,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(listed[0]?.pod).toEqual({ id: joined.id, slug: joined.slug });
 	});
 
-	it("creates scoped cron and webhook definitions without exposing secret hashes", async () => {
+	it("creates scoped cron and webhook definitions, and admits a webhook's callers by its secret", async () => {
 		const cron = await routines.create(
 			{ agentId },
 			{
@@ -216,54 +228,165 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				trigger: { kind: "webhook" },
 			},
 		);
-		expect(webhook.secret).toHaveLength(43);
-		const delivery = {
-			kind: "webhook" as const,
-			idempotencyKey: "definition-test",
-			payload: { event: "created" },
-			receivedAt: new Date().toISOString(),
-		};
+		expect(webhook.routine.trigger).toEqual({ kind: "webhook", auth: { kind: "bearer" } });
+		const secret = webhook.secret ?? "";
+		expect(secret).toMatch(/^rtb_/);
+		const routineId = webhook.routine.id;
+		const payload = { event: "created" };
 		expect(
 			await webhooks.accept({
-				routineId: webhook.routine.id,
-				secret: Redacted.make(webhook.secret ?? ""),
-				trigger: delivery,
+				routineId,
+				delivery: bearerDelivery(secret, payload, { "idempotency-key": "definition-test" }),
 			}),
 		).toEqual({
-			executionId: expect.any(String),
-			threadId: expect.any(String),
-			duplicate: false,
+			kind: "run",
+			execution: {
+				executionId: expect.any(String),
+				threadId: expect.any(String),
+				duplicate: false,
+			},
 		});
 		expect(
-			await webhooks.accept({
-				routineId: webhook.routine.id,
-				secret: Redacted.make("incorrect"),
-				trigger: delivery,
-			}),
+			await webhooks.accept({ routineId, delivery: bearerDelivery("incorrect", payload) }),
 		).toBeUndefined();
-		const rotatedSecret = await routines.rotateSecret({ agentId, routineId: webhook.routine.id });
+		const rotatedSecret = await routines.rotateSecret({ agentId, routineId });
 		expect(
-			await webhooks.accept({
-				routineId: webhook.routine.id,
-				secret: Redacted.make(webhook.secret ?? ""),
-				trigger: delivery,
-			}),
+			await webhooks.accept({ routineId, delivery: bearerDelivery(secret, payload) }),
 		).toBeUndefined();
 		expect(
 			await webhooks.accept({
-				routineId: webhook.routine.id,
-				secret: Redacted.make(rotatedSecret),
-				trigger: { ...delivery, idempotencyKey: "after-rotation" },
+				routineId,
+				delivery: bearerDelivery(rotatedSecret, payload, { "idempotency-key": "after-rotation" }),
 			}),
-		).toMatchObject({ duplicate: false });
+		).toMatchObject({ kind: "run", execution: { duplicate: false } });
 		expect(
-			await webhooks.accept({
-				routineId: "not-a-uuid",
-				secret: Redacted.make("incorrect"),
-				trigger: delivery,
-			}),
+			await webhooks.accept({ routineId: "not-a-uuid", delivery: bearerDelivery(rotatedSecret) }),
 		).toBeUndefined();
 		expect(await view.list({ agentId })).toHaveLength(2);
+	});
+
+	it("checks a signing routine's callers by signature, with the secret its sender made", async () => {
+		const linearSecret = "lin_wh_9f2c1e5a7b3d4f60";
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Linear issues",
+				instructions: "Triage the issue.",
+				trigger: {
+					kind: "webhook",
+					auth: { kind: "hmac", format: "body", header: "Linear-Signature", algorithm: "sha256" },
+					secret: linearSecret,
+				},
+			},
+		);
+		const routineId = created.routine.id;
+		const body = '{"action":"create","data":{"id":"ISS-1"}}';
+		const signed: Delivery = {
+			headers: {
+				"linear-signature": createHmac("sha256", linearSecret).update(body).digest("hex"),
+				"linear-delivery": "234d1a4e-b617-4388-90fe-adc3633d6b72",
+			},
+			body: new TextEncoder().encode(body),
+			payload: JSON.parse(body),
+		};
+
+		expect(await webhooks.accept({ routineId, delivery: signed })).toMatchObject({
+			kind: "run",
+			execution: { duplicate: false },
+		});
+		// Linear's retry of the same delivery lands on the first run.
+		expect(await webhooks.accept({ routineId, delivery: signed })).toMatchObject({
+			kind: "run",
+			execution: { duplicate: true },
+		});
+		expect(
+			await webhooks.accept({ routineId, delivery: bearerDelivery(linearSecret) }),
+		).toBeUndefined();
+	});
+
+	it("keeps a webhook's secret while its auth kind stays, and makes a new one when it changes", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Signups",
+				instructions: "Look up the account.",
+				trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } },
+			},
+		);
+		const addressed = { agentId, routineId: created.routine.id };
+		expect(created.secret).toMatch(/^sk_rt_/);
+
+		const renamedHeader = await routines.update(addressed, {
+			trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
+		});
+		expect(renamedHeader.secret).toBeNull();
+		expect(
+			await webhooks.accept({
+				routineId: addressed.routineId,
+				delivery: { ...bearerDelivery(""), headers: { "x-signup-key": created.secret ?? "" } },
+			}),
+		).toMatchObject({ kind: "run" });
+
+		const basic = await routines.update(addressed, {
+			trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
+		});
+		expect(basic.secret).not.toBeNull();
+		expect(basic.secret).not.toBe(created.secret);
+		const basicAuthorization = `Basic ${Buffer.from(`sugabots:${basic.secret}`).toString("base64")}`;
+		expect(
+			await webhooks.accept({
+				routineId: addressed.routineId,
+				delivery: { ...bearerDelivery(""), headers: { authorization: basicAuthorization } },
+			}),
+		).toMatchObject({ kind: "run" });
+	});
+
+	it("turns a scheduled routine into a webhook, and back", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Switching",
+				instructions: "Handle it.",
+				trigger: { kind: "cron", expression: "0 9 * * *", timezone: "UTC" },
+			},
+		);
+		const addressed = { agentId, routineId: created.routine.id };
+
+		const webhook = await routines.update(addressed, { trigger: { kind: "webhook" } });
+		expect(webhook.routine.trigger).toEqual({ kind: "webhook", auth: { kind: "bearer" } });
+		expect(webhook.secret).toMatch(/^rtb_/);
+
+		const scheduled = await routines.update(addressed, {
+			trigger: { kind: "cron", expression: "0 10 * * *", timezone: "UTC" },
+		});
+		expect(scheduled.routine.trigger).toMatchObject({ kind: "cron", expression: "0 10 * * *" });
+	});
+
+	it("still admits a bearer secret hashed before secrets were sealed", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{ name: "Old alerts", instructions: "Handle input.", trigger: { kind: "webhook" } },
+		);
+		const routineId = created.routine.id;
+		const legacySecret = randomBytes(32).toString("base64url");
+		const salt = randomBytes(16);
+		const digest = scryptSync(legacySecret, salt, 32);
+		await onDatabase((db) =>
+			db
+				.update(routine)
+				.set({
+					webhookSecret: null,
+					webhookSecretDigest: `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`,
+				})
+				.where(eq(routine.id, routineId)),
+		);
+
+		expect(
+			await webhooks.accept({ routineId, delivery: bearerDelivery(legacySecret) }),
+		).toMatchObject({ kind: "run" });
+		expect(
+			await webhooks.accept({ routineId, delivery: bearerDelivery("incorrect") }),
+		).toBeUndefined();
 	});
 
 	it("refuses a wrong webhook secret without waiting on the routine's other triggers", async () => {
@@ -290,16 +413,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		await lockHeld;
 
 		const refused = await Promise.race([
-			webhooks.accept({
-				routineId: created.routine.id,
-				secret: Redacted.make("incorrect"),
-				trigger: {
-					kind: "webhook",
-					idempotencyKey: null,
-					payload: {},
-					receivedAt: new Date().toISOString(),
-				},
-			}),
+			webhooks.accept({ routineId: created.routine.id, delivery: bearerDelivery("incorrect") }),
 			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
 		]);
 		release();
@@ -340,21 +454,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		releaseRotation();
 		await Promise.all([rotation, edit]);
 
-		const delivery = {
-			kind: "webhook" as const,
-			idempotencyKey: null,
-			payload: {},
-			receivedAt: new Date().toISOString(),
-		};
 		expect(
-			await webhooks.accept({
-				routineId: created.routine.id,
-				secret: Redacted.make(secret),
-				trigger: delivery,
-			}),
-		).toMatchObject({
-			duplicate: false,
-		});
+			await webhooks.accept({ routineId: created.routine.id, delivery: bearerDelivery(secret) }),
+		).toMatchObject({ kind: "run", execution: { duplicate: false } });
 		expect(await view.get(addressed)).toMatchObject({ name: "Renamed alerts" });
 	});
 
@@ -508,23 +610,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				trigger: { kind: "webhook" },
 			},
 		);
-		const delivery = (amount: number) => ({
-			kind: "webhook" as const,
-			idempotencyKey: "delivery-1",
-			payload: { amount },
-			receivedAt: new Date().toISOString(),
-		});
-		await webhooks.accept({
-			routineId: created.routine.id,
-			secret: Redacted.make(created.secret ?? ""),
-			trigger: delivery(1),
-		});
+		const delivery = (amount: number) =>
+			bearerDelivery(created.secret ?? "", { amount }, { "idempotency-key": "delivery-1" });
+		await webhooks.accept({ routineId: created.routine.id, delivery: delivery(1) });
 		await expect(
-			webhooks.accept({
-				routineId: created.routine.id,
-				secret: Redacted.make(created.secret ?? ""),
-				trigger: delivery(2),
-			}),
+			webhooks.accept({ routineId: created.routine.id, delivery: delivery(2) }),
 		).rejects.toThrow(RoutineTriggerConflict);
 	});
 

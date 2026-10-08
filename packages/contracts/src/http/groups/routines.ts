@@ -10,8 +10,10 @@ import {
 	routineScheduleOccurrencesSchema,
 	routineSchedulePreviewSchema,
 	routineSchema,
+	routineSecretReplacementSchema,
 	routineSecretSchema,
 	routineUpdateSchema,
+	routineWebhookChallengeSchema,
 	routineWriteResultSchema,
 	workspaceRoutineListSchema,
 } from "../../routines.ts";
@@ -74,6 +76,7 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 	}).middleware(Session),
 	HttpApiEndpoint.post("rotateSecret", "/agents/:agentId/routines/:routineId/secret", {
 		params: routine,
+		payload: routineSecretReplacementSchema,
 		success: routineSecretSchema,
 		error: refused,
 	}).middleware(Session),
@@ -84,12 +87,17 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		error: refused,
 	}).middleware(Session),
 	// Any JSON body, carried to the Routine as its trigger's payload. The
-	// Routine's secret is the bearer token; `Idempotency-Key` makes a retry
-	// land on the execution the first delivery started.
+	// caller proves it holds the Routine's secret the way the Routine's auth
+	// says. A delivery id, such as `Idempotency-Key`, makes a retry land on
+	// the execution the first delivery started. Slack's URL check is answered
+	// with its challenge, and starts nothing.
 	HttpApiEndpoint.post("webhook", "/hooks/routines/:routineId", {
 		params: { routineId: Schema.String },
 		payload: Schema.Json,
-		success: acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
+		success: [
+			acceptedRoutineWebhookSchema.pipe(HttpApiSchema.status(202)),
+			routineWebhookChallengeSchema,
+		],
 		error: [BadRequest, Unauthorized, Conflict],
 	}),
 ) {}

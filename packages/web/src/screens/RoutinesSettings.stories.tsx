@@ -65,7 +65,10 @@ const morningBrief = placed(2, "Morning brief", chief, personal, cron("0 8 * * 1
 const churnReport = placed(3, "Weekly churn report", accountManager, revenue, cron("0 9 * * 1"), {
 	state: "paused",
 });
-const incidentIntake = placed(4, "Incident intake", oncall, engineering, { kind: "webhook" });
+const incidentIntake = placed(4, "Incident intake", oncall, engineering, {
+	kind: "webhook",
+	auth: { kind: "bearer" },
+});
 const longInstructions = Array.from(
 	{ length: 60 },
 	(_, step) =>

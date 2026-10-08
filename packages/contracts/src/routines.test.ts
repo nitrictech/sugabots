@@ -35,6 +35,41 @@ describe("Routine contracts", () => {
 		).toBe("Failure");
 	});
 
+	it.each([
+		{ kind: "hmac", format: "body", header: "Linear-Signature", algorithm: "sha256" },
+		{ kind: "hmac", format: "slack" },
+		{ kind: "hmac", format: "stripe" },
+		{ kind: "api_key", header: "X-API-Key" },
+		{ kind: "bearer" },
+		{ kind: "basic", username: "sugabots" },
+	])("accepts a webhook checking callers by $kind", (auth) => {
+		expect(
+			Schema.decodeUnknownResult(newRoutineSchema)({
+				name: "Incoming",
+				instructions: "Handle it.",
+				trigger: { kind: "webhook", auth, secret: "lin_wh_0123456789abcdef" },
+			})._tag,
+		).toBe("Success");
+	});
+
+	it.each([
+		["a header name with a space", { auth: { kind: "api_key", header: "X API Key" } }],
+		["a Basic username with a colon", { auth: { kind: "basic", username: "suga:bots" } }],
+		[
+			"an HMAC format without a header",
+			{ auth: { kind: "hmac", format: "body", algorithm: "sha256" } },
+		],
+		["a secret too short to be hard to guess", { secret: "short" }],
+	])("rejects a webhook with %s", (_, webhook) => {
+		expect(
+			Schema.decodeUnknownResult(newRoutineSchema)({
+				name: "Incoming",
+				instructions: "Handle it.",
+				trigger: { kind: "webhook", ...webhook },
+			})._tag,
+		).toBe("Failure");
+	});
+
 	it("keeps webhook JSON in trigger data", () => {
 		const trigger = Schema.decodeSync(routineExecutionTriggerSchema)({
 			kind: "webhook",
