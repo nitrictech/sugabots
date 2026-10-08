@@ -1,5 +1,6 @@
 import {
 	type Agent,
+	type CalendarSchedule,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
@@ -11,21 +12,16 @@ import {
 	type WebhookAuth,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronRight, Copy, Minus, Play, Plus } from "lucide-react";
+import { Check, ChevronRight, Copy, Play } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
-	cronExpression,
-	DAY_OPTIONS,
-	DEFAULT_SCHEDULE,
-	formatTime,
-	hasDays,
-	REPEAT_OPTIONS,
+	defaultSchedule,
 	readSchedule,
-	type Schedule,
 	type ScheduleReading,
+	scheduleOfReading,
+	scheduleReady,
 	scheduleSummary,
-	stepTime,
 } from "@/lib/routine-schedule.ts";
 import { useRoutineActions } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -46,6 +42,7 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { RecentRuns } from "./RoutineRuns.tsx";
+import { ScheduleRows } from "./RoutineSchedule.tsx";
 import {
 	authNote,
 	DEFAULT_WEBHOOK_AUTH,
@@ -68,7 +65,6 @@ export interface PlacedRoutine extends BotChoice {
 }
 
 /** How far − and + move the time. */
-const TIME_STEP_MINUTES = 30;
 
 /**
  * How long a schedule rests before it saves, so stepping the time through
@@ -121,22 +117,22 @@ export function NewRoutinePage({
 	const [kind, setKind] = useState<TriggerKind>("cron");
 	// Unset until chosen, so the result follows the trigger's default.
 	const [chosenResults, setChosenResults] = useState<RoutineResults>();
-	const [reading, setReading] = useState<ScheduleReading>({
-		kind: "preset",
-		schedule: DEFAULT_SCHEDULE,
-	});
+	const [reading, setReading] = useState<ScheduleReading>(() => ({
+		kind: "picked",
+		schedule: defaultSchedule(),
+	}));
 	const [webhook, setWebhook] = useState(NEW_WEBHOOK);
 	const [page, setPage] = useState<"routine" | "instructions">("routine");
 	const actions = useRoutineActions();
 	const bot = choices.find((choice) => choice.agent.id === agentId);
 	const results = chosenResults ?? DEFAULT_RESULTS[kind];
-	const scheduleReady = kind === "webhook" || reading.kind === "other" || hasDays(reading.schedule);
+	const daysReady = kind === "webhook" || scheduleReady(reading);
 	const secretReady = kind === "cron" || pastedSecretReady(webhook.secret);
 	const ready =
 		bot !== undefined &&
 		name.trim() !== "" &&
 		instructions.trim() !== "" &&
-		scheduleReady &&
+		daysReady &&
 		secretReady;
 
 	async function create() {
@@ -144,7 +140,14 @@ export function NewRoutinePage({
 		const fields = { name, instructions, results };
 		const input: NewRoutine =
 			kind === "cron"
-				? { ...fields, trigger: { kind: "cron", ...cronTrigger(reading, localTimezone()) } }
+				? {
+						...fields,
+						trigger: {
+							kind: "cron",
+							schedule: scheduleOfReading(reading),
+							timezone: localTimezone(),
+						},
+					}
 				: { ...fields, trigger: webhookTrigger(webhook) };
 		try {
 			const created = await actions.create.mutateAsync({ agentId: bot.agent.id, json: input });
@@ -200,13 +203,14 @@ export function NewRoutinePage({
 				label="When"
 				note={
 					bot &&
-					(!scheduleReady
+					(!daysReady
 						? "Pick at least one day for it to run on."
 						: !secretReady
 							? `A pasted secret needs at least ${MIN_WEBHOOK_SECRET_CHARACTERS} characters.`
 							: whenNote({
 									trigger: kind === "cron" ? { kind } : { kind, auth: webhook.auth },
 									reading,
+									timezone: localTimezone(),
 									results,
 									bot,
 								}))
@@ -214,7 +218,10 @@ export function NewRoutinePage({
 			>
 				<TriggerRow value={kind} onChange={setKind} />
 				{kind === "cron" ? (
-					<ScheduleRows reading={reading} onChange={setReading} />
+					<ScheduleRows
+						reading={reading}
+						onChange={(schedule) => setReading({ kind: "picked", schedule })}
+					/>
 				) : (
 					<NewWebhookRows draft={webhook} onChange={setWebhook} />
 				)}
@@ -249,43 +256,44 @@ export function RoutinePage({
 	const canManage = pod.permissions.manageRoutines;
 	const actions = useRoutineActions();
 	const [page, setPage] = useState<"routine" | "instructions">("routine");
-	const [reading, setReading] = useState<ScheduleReading>(
-		routine.trigger.kind === "cron"
-			? readSchedule(routine.trigger.expression)
-			: { kind: "preset", schedule: DEFAULT_SCHEDULE },
-	);
+	// What somebody has picked here, which saves once it rests. Until then the
+	// saved schedule shows, read into its parts, and opening it saves nothing.
+	const [edited, setEdited] = useState<CalendarSchedule>();
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
-	const timezone = routine.trigger.kind === "cron" ? routine.trigger.timezone : localTimezone();
-	const savedExpression = routine.trigger.kind === "cron" ? routine.trigger.expression : undefined;
+	const scheduled = routine.trigger.kind === "cron" ? routine.trigger : undefined;
+	const reading: ScheduleReading = edited
+		? { kind: "picked", schedule: edited }
+		: scheduled
+			? readSchedule(scheduled.schedule)
+			: { kind: "picked", schedule: defaultSchedule() };
+	const timezone = scheduled?.timezone ?? localTimezone();
+	const savedSchedule = scheduled && JSON.stringify(scheduled.schedule);
 	const { mutate: update, mutateAsync: updateAsync } = actions.update;
 	const addressed = { agentId: agent.id, routineId: routine.id };
 	const save = (json: RoutineUpdate) => update({ ...addressed, json });
 
-	// A schedule saves once it rests, unless it says nothing new or names no day.
+	// A picked schedule saves once it rests, unless it says nothing new or names no day.
 	useEffect(() => {
-		if (savedExpression === undefined || reading.kind !== "preset" || !hasDays(reading.schedule)) {
-			return;
-		}
-		const expression = cronExpression(reading.schedule);
-		if (expression === savedExpression) return;
+		if (!edited || savedSchedule === undefined || JSON.stringify(edited) === savedSchedule) return;
+		if (!scheduleReady({ kind: "picked", schedule: edited })) return;
 		const timer = setTimeout(
 			() =>
 				update({
 					agentId: agent.id,
 					routineId: routine.id,
-					json: { trigger: { kind: "cron", expression, timezone } },
+					json: { trigger: { kind: "cron", schedule: edited, timezone } },
 				}),
 			SCHEDULE_SAVE_DELAY_MS,
 		);
 		return () => clearTimeout(timer);
-	}, [reading, savedExpression, timezone, update, agent.id, routine.id]);
+	}, [edited, savedSchedule, timezone, update, agent.id, routine.id]);
 
 	function changeTrigger(kind: TriggerKind) {
 		save({
 			trigger:
 				kind === "webhook"
 					? { kind: "webhook", auth: DEFAULT_WEBHOOK_AUTH }
-					: { kind: "cron", ...cronTrigger(reading, timezone) },
+					: { kind: "cron", schedule: scheduleOfReading(reading), timezone },
 		});
 	}
 
@@ -356,11 +364,12 @@ export function RoutinePage({
 			<SettingsGroup
 				label="When"
 				note={
-					routine.trigger.kind === "cron" && reading.kind === "preset" && !hasDays(reading.schedule)
+					routine.trigger.kind === "cron" && !scheduleReady(reading)
 						? "Pick at least one day for it to run on."
 						: whenNote({
 								trigger: routine.trigger,
 								reading,
+								timezone,
 								results: routine.results,
 								bot: placed,
 							})
@@ -369,7 +378,7 @@ export function RoutinePage({
 				<Editable editable={canManage}>
 					<TriggerRow value={routine.trigger.kind} onChange={changeTrigger} />
 					{routine.trigger.kind === "cron" ? (
-						<ScheduleRows reading={reading} onChange={setReading} />
+						<ScheduleRows reading={reading} onChange={setEdited} />
 					) : (
 						<WebhookRows
 							placed={placed}
@@ -404,13 +413,6 @@ function localTimezone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-/** The cron trigger a schedule reading saves as: a picked repeat, or the expression kept as it was. */
-function cronTrigger(reading: ScheduleReading, timezone: string) {
-	const expression =
-		reading.kind === "preset" ? cronExpression(reading.schedule) : reading.expression;
-	return { expression, timezone };
-}
-
 /** The trigger a routine being made saves with: its auth, and the sender's secret if one was pasted. */
 function webhookTrigger({ auth, secret }: WebhookDraft) {
 	const pasted = secret.trim();
@@ -426,15 +428,20 @@ function webhookTrigger({ auth, secret }: WebhookDraft) {
 function whenNote({
 	trigger,
 	reading,
+	timezone,
 	results,
 	bot,
 }: {
 	trigger: { kind: "cron" } | { kind: "webhook"; auth: WebhookAuth };
 	reading: ScheduleReading;
+	/** The schedule's, which the note names, since its times are in it. */
+	timezone: string;
 	results: RoutineResults;
 	bot: BotChoice;
 }): string {
-	const summary = routineSummary({ when: runsWhen(trigger.kind, reading), results, bot });
+	const when =
+		trigger.kind === "webhook" ? WEBHOOK_WHEN : `${runsWhen(reading)}, ${zoneName(timezone)}`;
+	const summary = routineSummary({ when, results, bot });
 	return trigger.kind === "webhook" ? `${summary} ${authNote(trigger.auth)}` : summary;
 }
 
@@ -454,15 +461,30 @@ function routineSummary({
 		: `Runs ${when} and keeps the result in the run, which shows in ${chat}.`;
 }
 
-/** When a routine runs, as the middle of "Runs … and posts the result". */
-function runsWhen(kind: TriggerKind, reading: ScheduleReading): string {
-	if (kind === "webhook") return "each time the address is called with valid auth";
-	if (reading.kind === "other") return "on its own schedule";
-	const summary = scheduleSummary(reading.schedule);
-	// Day names keep their capital; "Every day" and "Weekdays" start the sentence's middle.
-	return reading.schedule.repeat === "weekly"
-		? summary
-		: `${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+const WEBHOOK_WHEN = "each time the address is called with valid auth";
+
+/** When a scheduled routine runs, as the middle of "Runs … and posts the result". */
+function runsWhen(reading: ScheduleReading): string {
+	return reading.kind === "written" ? "on its own schedule" : scheduleSummary(reading.schedule);
+}
+
+/**
+ * The time zone a schedule's times are in: "your time (AEDT)" when it is
+ * this browser's, otherwise the zone's city, "Los Angeles time (PDT)", or
+ * its name alone where that is its abbreviation too, "UTC".
+ */
+function zoneName(timezone: string): string {
+	const abbreviation = new Intl.DateTimeFormat(undefined, {
+		timeZone: timezone,
+		timeZoneName: "short",
+	})
+		.formatToParts(new Date())
+		.find((part) => part.type === "timeZoneName")?.value;
+	if (timezone === localTimezone())
+		return abbreviation ? `your time (${abbreviation})` : "your time";
+	const city = (timezone.split("/").pop() ?? timezone).replaceAll("_", " ");
+	if (!abbreviation || abbreviation === city) return city;
+	return `${city} time (${abbreviation})`;
 }
 
 /**
@@ -493,7 +515,7 @@ function DuplicateButton({
 					...fields,
 					trigger: {
 						kind: "cron",
-						expression: routine.trigger.expression,
+						schedule: routine.trigger.schedule,
 						timezone: routine.trigger.timezone,
 					},
 				}
@@ -841,118 +863,6 @@ function SwitchRow({
 			<span className="flex-1 text-[14.5px] text-foreground">{label}</span>
 			<Toggle label={label} checked={checked} disabled={disabled} onChange={onChange} />
 		</div>
-	);
-}
-
-function ScheduleRows({
-	reading,
-	onChange,
-}: {
-	reading: ScheduleReading;
-	onChange: (reading: ScheduleReading) => void;
-}) {
-	const schedule = reading.kind === "preset" ? reading.schedule : undefined;
-	const change = (next: Partial<Schedule>) =>
-		onChange({ kind: "preset", schedule: { ...(schedule ?? DEFAULT_SCHEDULE), ...next } });
-	const minutes = schedule?.minutesPastMidnight ?? DEFAULT_SCHEDULE.minutesPastMidnight;
-
-	return (
-		<>
-			<SettingsChoiceRow
-				label="Repeat"
-				options={REPEAT_OPTIONS}
-				value={schedule?.repeat}
-				onChange={(repeat) =>
-					// A daily or weekday schedule has no days of its own, so Weekly starts on Monday.
-					change({
-						repeat,
-						days: schedule?.days.length ? schedule.days : DEFAULT_SCHEDULE.days,
-					})
-				}
-			/>
-			{reading.kind === "other" && (
-				<div className="flex flex-col gap-1 border-border border-b px-4 py-3">
-					<span className="text-[14.5px] text-foreground">{reading.label}</span>
-					<code className="font-mono text-[13px] text-muted-foreground">{reading.expression}</code>
-					<span className="text-sm text-subtle-foreground">Pick a repeat to replace it.</span>
-				</div>
-			)}
-			{schedule?.repeat === "weekly" && (
-				<fieldset className="m-0 grid grid-cols-7 gap-1.5 border-0 border-border border-b px-4 py-2.5">
-					<legend className="sr-only">Days</legend>
-					{DAY_OPTIONS.map((day) => {
-						const selected = schedule.days.includes(day.cron);
-						return (
-							<label
-								key={day.cron}
-								title={day.long}
-								className="focus-ring-within mx-auto grid aspect-square w-full max-w-11 cursor-pointer place-items-center rounded-full bg-chip font-medium text-[13px] text-soft-foreground transition-colors has-checked:bg-primary has-checked:text-primary-foreground"
-							>
-								<input
-									type="checkbox"
-									aria-label={day.long}
-									checked={selected}
-									onChange={() =>
-										change({
-											days: selected
-												? schedule.days.filter((value) => value !== day.cron)
-												: [...schedule.days, day.cron],
-										})
-									}
-									className="sr-only"
-								/>
-								<span aria-hidden>{day.letter}</span>
-							</label>
-						);
-					})}
-				</fieldset>
-			)}
-			{schedule && (
-				<SettingsControlRow label="Time">
-					<span className="flex flex-1 items-center justify-end gap-3">
-						<StepButton
-							label="30 minutes earlier"
-							onClick={() => change({ minutesPastMidnight: stepTime(minutes, -TIME_STEP_MINUTES) })}
-						>
-							<Minus size={14} strokeWidth={2.4} />
-						</StepButton>
-						<output
-							aria-label="Time"
-							className="w-14 text-center font-semibold text-[16px] text-foreground tabular-nums"
-						>
-							{formatTime(minutes)}
-						</output>
-						<StepButton
-							label="30 minutes later"
-							onClick={() => change({ minutesPastMidnight: stepTime(minutes, TIME_STEP_MINUTES) })}
-						>
-							<Plus size={14} strokeWidth={2.4} />
-						</StepButton>
-					</span>
-				</SettingsControlRow>
-			)}
-		</>
-	);
-}
-
-function StepButton({
-	label,
-	onClick,
-	children,
-}: {
-	label: string;
-	onClick: () => void;
-	children: ReactNode;
-}) {
-	return (
-		<button
-			type="button"
-			aria-label={label}
-			onClick={onClick}
-			className="focus-ring grid size-[30px] shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover disabled:opacity-45"
-		>
-			{children}
-		</button>
 	);
 }
 

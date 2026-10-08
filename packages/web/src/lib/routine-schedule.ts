@@ -1,110 +1,125 @@
-import type { Routine } from "@sugabots/contracts";
+import {
+	type CalendarSchedule,
+	MAX_ROUTINE_SCHEDULE_TIMES,
+	type Routine,
+	type RoutineSchedule,
+	type Weekday,
+} from "@sugabots/contracts";
 
 /*
- * A routine's schedule as people read and pick it: three repeats over the cron
- * expression the API stores, and the words for one ("Weekdays at 8:00"). A
- * cron expression the repeats cannot say is read as `other` and kept as it is
- * until somebody picks a repeat in its place.
+ * A routine's schedule as people pick and read it: every so many days, weeks
+ * or months, on some days, at some times. A schedule written as cron before
+ * schedules were picked this way is read into those parts where it says
+ * something they can say, and is otherwise kept as written, by a name, until
+ * somebody picks a repeat in its place.
  */
 
 export const DAY_OPTIONS = [
-	{ letter: "M", long: "Monday", cron: "1" },
-	{ letter: "T", long: "Tuesday", cron: "2" },
-	{ letter: "W", long: "Wednesday", cron: "3" },
-	{ letter: "T", long: "Thursday", cron: "4" },
-	{ letter: "F", long: "Friday", cron: "5" },
-	{ letter: "S", long: "Saturday", cron: "6" },
-	{ letter: "S", long: "Sunday", cron: "0" },
-] as const;
+	{ value: "mon", letter: "M", short: "Mon", long: "Monday", cron: "1" },
+	{ value: "tue", letter: "T", short: "Tue", long: "Tuesday", cron: "2" },
+	{ value: "wed", letter: "W", short: "Wed", long: "Wednesday", cron: "3" },
+	{ value: "thu", letter: "T", short: "Thu", long: "Thursday", cron: "4" },
+	{ value: "fri", letter: "F", short: "Fri", long: "Friday", cron: "5" },
+	{ value: "sat", letter: "S", short: "Sat", long: "Saturday", cron: "6" },
+	{ value: "sun", letter: "S", short: "Sun", long: "Sunday", cron: "0" },
+] as const satisfies readonly {
+	value: Weekday;
+	letter: string;
+	short: string;
+	long: string;
+	cron: string;
+}[];
 
 export const REPEAT_OPTIONS = [
-	{ value: "daily", label: "Every day" },
-	{ value: "weekdays", label: "Weekdays" },
+	{ value: "daily", label: "Daily" },
 	{ value: "weekly", label: "Weekly" },
+	{ value: "monthly", label: "Monthly" },
 ] as const;
 
-type Repeat = (typeof REPEAT_OPTIONS)[number]["value"];
+export type Repeat = CalendarSchedule["repeat"];
 
-export interface Schedule {
-	repeat: Repeat;
-	/** Cron day numbers, Sunday as "0"; only read for `weekly`. */
-	days: readonly string[];
-	minutesPastMidnight: number;
-}
+const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri"];
+const MINUTES_PER_DAY = 24 * 60;
+/** How far a time added after the last one goes: far enough to be a different part of the day. */
+const NEXT_TIME_GAP_MINUTES = 4 * 60;
+/** How far − and + move a time, and how far a new time steps aside from one already taken. */
+export const TIME_STEP_MINUTES = 30;
 
 export type ScheduleReading =
-	| { kind: "preset"; schedule: Schedule }
-	| { kind: "other"; expression: string; label: string };
+	| { kind: "picked"; schedule: CalendarSchedule }
+	| { kind: "written"; expression: string; label: string };
 
-const MINUTES_PER_DAY = 24 * 60;
-
-export const DEFAULT_SCHEDULE: Schedule = {
-	repeat: "daily",
-	days: ["1"],
-	minutesPastMidnight: 9 * 60,
-};
-
-export function readSchedule(expression: string): ScheduleReading {
-	const trimmed = expression.trim();
-	const [minute, hour, dayOfMonth, month, dayOfWeek, ...rest] = trimmed.split(/\s+/);
-	const other = (label: string): ScheduleReading => ({ kind: "other", expression: trimmed, label });
-	if (!minute || !hour || !dayOfWeek || dayOfMonth !== "*" || month !== "*" || rest.length > 0) {
-		return other("Custom schedule");
-	}
-	if (/^\d+$/.test(minute) && /^\d+-23$/.test(hour) && dayOfWeek === "*") {
-		const from = Number(hour.split("-")[0]) * 60 + Number(minute);
-		return other(`Every hour from ${formatTime(from)}`);
-	}
-	if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return other("Custom schedule");
-	const minutesPastMidnight = Number(hour) * 60 + Number(minute);
-	if (minutesPastMidnight >= MINUTES_PER_DAY) return other("Custom schedule");
-	if (dayOfWeek === "*") {
-		return { kind: "preset", schedule: { repeat: "daily", days: [], minutesPastMidnight } };
-	}
-	if (dayOfWeek === "1-5") {
-		return { kind: "preset", schedule: { repeat: "weekdays", days: [], minutesPastMidnight } };
-	}
-	const days = dayOfWeek.split(",").map((day) => (day === "7" ? "0" : day));
-	if (!days.every((day) => DAY_OPTIONS.some((option) => option.cron === day))) {
-		return other("Custom schedule");
-	}
-	return { kind: "preset", schedule: { repeat: "weekly", days, minutesPastMidnight } };
+/** Today in this browser, as `YYYY-MM-DD`, which a schedule counts its days, weeks or months from. */
+export function today(): string {
+	const now = new Date();
+	return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-export function cronExpression({ repeat, days, minutesPastMidnight }: Schedule): string {
-	const hour = Math.floor(minutesPastMidnight / 60);
-	const minute = minutesPastMidnight % 60;
-	if (repeat === "daily") return `${minute} ${hour} * * *`;
-	if (repeat === "weekdays") return `${minute} ${hour} * * 1-5`;
-	return `${minute} ${hour} * * ${orderedDays(days).join(",")}`;
+/** What a new routine runs on until somebody chooses: every day at 9:00. */
+export function defaultSchedule(): CalendarSchedule {
+	return { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() };
 }
 
-/** "Every day at 6:00", "Weekdays at 8:00", "Mondays and Thursdays at 9:00". */
-export function scheduleSummary({ repeat, days, minutesPastMidnight }: Schedule): string {
-	const time = formatTime(minutesPastMidnight);
-	if (repeat === "daily") return `Every day at ${time}`;
-	if (repeat === "weekdays") return `Weekdays at ${time}`;
-	const names = orderedDays(days).map(
-		(value) => `${DAY_OPTIONS.find((day) => day.cron === value)?.long}s`,
+/** A stored schedule, read into its parts where they can say it. */
+export function readSchedule(schedule: RoutineSchedule): ScheduleReading {
+	if (schedule.repeat !== "cron") return { kind: "picked", schedule };
+	return readCron(schedule.expression.trim());
+}
+
+/** The schedule a routine saves: the one picked, or the written one kept as it was. */
+export function scheduleOfReading(reading: ScheduleReading): RoutineSchedule {
+	return reading.kind === "picked"
+		? reading.schedule
+		: { repeat: "cron", expression: reading.expression };
+}
+
+/** Whether a picked schedule can run: a weekly one needs a day. */
+export function scheduleReady(reading: ScheduleReading): boolean {
+	return (
+		reading.kind === "written" ||
+		reading.schedule.repeat !== "weekly" ||
+		reading.schedule.days.length > 0
 	);
-	if (names.length === 0) return "Pick at least one day";
-	const last = names.pop();
-	return `${names.length > 0 ? `${names.join(", ")} and ${last}` : last} at ${time}`;
 }
 
-/** How a routine starts, in the words its row shows. */
-export function scheduleLabel(routine: Routine): string {
-	if (routine.trigger.kind === "webhook") return "When its address is called";
-	const reading = readSchedule(routine.trigger.expression);
-	return reading.kind === "preset" ? scheduleSummary(reading.schedule) : reading.label;
+/**
+ * The schedule with `repeat` picked in place of what it was. Every starts
+ * again at 1, and the count starts from today; days and times stay.
+ */
+export function withRepeat(reading: ScheduleReading, repeat: Repeat): CalendarSchedule {
+	const times = reading.kind === "picked" ? reading.schedule.times : defaultSchedule().times;
+	const base = { every: 1, times, startsOn: today() };
+	switch (repeat) {
+		case "daily":
+			return { repeat, ...base };
+		case "weekly":
+			return {
+				repeat,
+				...base,
+				days:
+					reading.kind === "picked" && reading.schedule.repeat === "weekly"
+						? reading.schedule.days
+						: ["mon"],
+			};
+		case "monthly":
+			return { repeat, ...base, dayOfMonth: Math.min(new Date().getDate(), 28) };
+	}
 }
 
-function orderedDays(days: readonly string[]): string[] {
-	return DAY_OPTIONS.map((day) => day.cron).filter((day) => days.includes(day));
+/** The time a new one starts at: some hours after the last, stepped past any taken. */
+export function nextTime(times: readonly number[]): number {
+	let time = stepTime(times[times.length - 1] ?? 9 * 60, NEXT_TIME_GAP_MINUTES);
+	while (times.includes(time)) time = stepTime(time, TIME_STEP_MINUTES);
+	return time;
 }
 
-export function hasDays(schedule: Schedule): boolean {
-	return schedule.repeat !== "weekly" || schedule.days.length > 0;
+export function canAddTime(times: readonly number[]): boolean {
+	return times.length < MAX_ROUTINE_SCHEDULE_TIMES;
+}
+
+/** Moves a time of day by `step` minutes, round the clock either way. */
+export function stepTime(minutesPastMidnight: number, step: number): number {
+	return (((minutesPastMidnight + step) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
 /** A time of day on the 24-hour clock without a leading zero, as the design writes it: "9:00", "18:30". */
@@ -114,7 +129,119 @@ export function formatTime(minutesPastMidnight: number): string {
 	return `${hour}:${String(minute).padStart(2, "0")}`;
 }
 
-/** Moves a time of day by `step` minutes, round the clock either way. */
-export function stepTime(minutesPastMidnight: number, step: number): number {
-	return (((minutesPastMidnight + step) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+/** "1st", "22nd", or "last day" for the end of the month. */
+export function formatDayOfMonth(dayOfMonth: number | "last"): string {
+	if (dayOfMonth === "last") return "last day";
+	const tens = dayOfMonth % 100;
+	const suffix =
+		tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[dayOfMonth % 10] ?? "th");
+	return `${dayOfMonth}${suffix}`;
+}
+
+/** How often, as the Every row says it: "1 day", "3 weeks". */
+export function formatEvery(schedule: CalendarSchedule): string {
+	const unit = { daily: "day", weekly: "week", monthly: "month" }[schedule.repeat];
+	return `${schedule.every} ${unit}${schedule.every === 1 ? "" : "s"}`;
+}
+
+/**
+ * When a picked schedule runs, as the middle of a sentence: "every day at
+ * 9:00", "every 2 weeks on Mon and Thu at 9:00 and 17:30", "every month on
+ * the last day at 10:00".
+ */
+export function scheduleSummary(schedule: CalendarSchedule): string {
+	const at = `at ${listOf(sortedTimes(schedule.times).map(formatTime))}`;
+	switch (schedule.repeat) {
+		case "daily":
+			return `${every(schedule.every, "day")} ${at}`;
+		case "weekly":
+			if (schedule.every === 1 && isWeekdays(schedule.days)) return `every weekday ${at}`;
+			return `${every(schedule.every, "week")} on ${listOf(orderedDays(schedule.days).map((day) => day.short))} ${at}`;
+		case "monthly":
+			return `${every(schedule.every, "month")} on the ${formatDayOfMonth(schedule.dayOfMonth)} ${at}`;
+	}
+}
+
+/**
+ * How a routine starts, short enough for a list's line: "Daily · 22:00",
+ * "Mon Wed Fri · 3 times", "Every 3 months · 10:00", "Webhook".
+ */
+export function scheduleLabel(routine: Routine): string {
+	if (routine.trigger.kind === "webhook") return "Webhook";
+	const reading = readSchedule(routine.trigger.schedule);
+	if (reading.kind === "written") return reading.label;
+	const { schedule } = reading;
+	const when =
+		schedule.times.length === 1
+			? formatTime(schedule.times[0] ?? 0)
+			: `${schedule.times.length} times`;
+	return `${repeatLabel(schedule)} · ${when}`;
+}
+
+function repeatLabel(schedule: CalendarSchedule): string {
+	if (schedule.every > 1) return `Every ${formatEvery(schedule)}`;
+	switch (schedule.repeat) {
+		case "daily":
+			return "Daily";
+		case "weekly":
+			return isWeekdays(schedule.days)
+				? "Weekdays"
+				: orderedDays(schedule.days)
+						.map((day) => day.short)
+						.join(" ");
+		case "monthly":
+			return "Monthly";
+	}
+}
+
+function every(count: number, unit: string): string {
+	return count === 1 ? `every ${unit}` : `every ${count} ${unit}s`;
+}
+
+function listOf(items: readonly string[]): string {
+	if (items.length <= 1) return items.join("");
+	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function sortedTimes(times: readonly number[]): number[] {
+	return [...times].sort((a, b) => a - b);
+}
+
+function orderedDays(days: readonly Weekday[]) {
+	return DAY_OPTIONS.filter((day) => days.includes(day.value));
+}
+
+function isWeekdays(days: readonly Weekday[]): boolean {
+	return days.length === WEEKDAYS.length && WEEKDAYS.every((day) => days.includes(day));
+}
+
+/**
+ * A cron expression in parts, where it says a time each day or on some days
+ * of the week; anything else is kept as written, by a name.
+ */
+function readCron(expression: string): ScheduleReading {
+	const [minute, hour, dayOfMonth, month, dayOfWeek, ...rest] = expression.split(/\s+/);
+	const written = (label: string): ScheduleReading => ({ kind: "written", expression, label });
+	if (!minute || !hour || !dayOfWeek || dayOfMonth !== "*" || month !== "*" || rest.length > 0) {
+		return written("Custom schedule");
+	}
+	if (/^\d+$/.test(minute) && /^\d+-23$/.test(hour) && dayOfWeek === "*") {
+		const from = Number(hour.split("-")[0]) * 60 + Number(minute);
+		return written(`Every hour from ${formatTime(from)}`);
+	}
+	if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return written("Custom schedule");
+	const time = Number(hour) * 60 + Number(minute);
+	if (time >= MINUTES_PER_DAY) return written("Custom schedule");
+	const base = { every: 1, times: [time], startsOn: today() };
+	if (dayOfWeek === "*") return { kind: "picked", schedule: { repeat: "daily", ...base } };
+	const days = dayOfWeek === "1-5" ? WEEKDAYS : cronDays(dayOfWeek);
+	if (!days) return written("Custom schedule");
+	return { kind: "picked", schedule: { repeat: "weekly", ...base, days } };
+}
+
+function cronDays(field: string): Weekday[] | undefined {
+	const days = field
+		.split(",")
+		.map((day) => DAY_OPTIONS.find((option) => option.cron === (day === "7" ? "0" : day))?.value);
+	return days.every((day): day is Weekday => day !== undefined) ? days : undefined;
 }

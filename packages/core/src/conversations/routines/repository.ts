@@ -382,6 +382,7 @@ export type Definition = Pick<
 	| "results"
 	| "triggerKind"
 	| "cronExpression"
+	| "schedule"
 	| "cronTimezone"
 	| "nextScheduledAt"
 	| "webhookAuth"

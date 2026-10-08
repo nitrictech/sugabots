@@ -4,6 +4,7 @@ import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { today } from "@/lib/routine-schedule.ts";
 import { agents, apiAnswers, jye, linear, mount, pods, sam, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
@@ -21,7 +22,12 @@ function routine(id: string, name: string, agentId: string, expression: string):
 		agentId,
 		name,
 		instructions: `${name}, please.`,
-		trigger: { kind: "cron", expression, timezone: "UTC", nextScheduledAt: null },
+		trigger: {
+			kind: "cron",
+			schedule: { repeat: "cron", expression },
+			timezone: "UTC",
+			nextScheduledAt: null,
+		},
 		state: "enabled",
 		results: "keep_in_run",
 		createdById: null,
@@ -73,8 +79,8 @@ describe("the workspace's routines", () => {
 		mount("/suga/settings/routines");
 
 		const list = await screen.findByRole("navigation", { name: "Workspace routines" });
-		expect(within(list).getByText(`Weekdays at 8:00, ${linear.name}`)).toBeDefined();
-		expect(within(list).getByText(`Mondays at 9:00, ${researcher.name}`)).toBeDefined();
+		expect(within(list).getByText(`Weekdays · 8:00, ${linear.name}`)).toBeDefined();
+		expect(within(list).getByText(`Mon · 9:00, ${researcher.name}`)).toBeDefined();
 		expect(within(list).getByText("Paused")).toBeDefined();
 		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
 		const nav = screen.getByRole("navigation", { name: "Settings" });
@@ -103,7 +109,9 @@ describe("the workspace's routines", () => {
 		fireEvent.click(screen.getByRole("button", { name: "30 minutes later" }));
 		expect(
 			screen.getByText(
-				`Runs Mondays and Thursdays at 10:00 and posts the result in ${triager.name}'s chat in the ${suga.name} pod.`,
+				new RegExp(
+					`^Runs every week on Mon and Thu at 10:00, your time \\(.+\\) and posts the result in ${triager.name}'s chat in the ${suga.name} pod\\.$`,
+				),
 			),
 		).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
@@ -115,11 +123,67 @@ describe("the workspace's routines", () => {
 					name: "Triage sweep",
 					instructions: "Sweep the queue.",
 					results: "post_to_chat",
-					trigger: { kind: "cron", expression: "0 10 * * 1,4", timezone },
+					trigger: {
+						kind: "cron",
+						schedule: {
+							repeat: "weekly",
+							every: 1,
+							days: ["mon", "thu"],
+							times: [10 * 60],
+							startsOn: today(),
+						},
+						timezone,
+					},
 				},
 			}),
 		);
 		await waitFor(() => expect(router.state.location.pathname).toBe(routinePage(morningBrief)));
+	});
+
+	it("makes a routine that runs at several times on the last day of every third month", async () => {
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+		);
+		mount("/suga/settings/routines/new");
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Quarter close" } });
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
+			target: { value: "Close the quarter." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
+		while (screen.getByRole("status", { name: "On the" }).textContent !== "last day") {
+			fireEvent.click(screen.getByRole("button", { name: "A day later" }));
+		}
+		fireEvent.click(screen.getByRole("button", { name: "Further apart" }));
+		fireEvent.click(screen.getByRole("button", { name: "Further apart" }));
+		fireEvent.click(screen.getByRole("button", { name: "+ Add a time" }));
+
+		expect(screen.getByRole("status", { name: "Every" }).textContent).toBe("3 months");
+		expect(
+			screen.getByText(/^Runs every 3 months on the last day at 9:00 and 13:00, your time/),
+		).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						trigger: {
+							kind: "cron",
+							schedule: {
+								repeat: "monthly",
+								every: 3,
+								dayOfMonth: "last",
+								times: [9 * 60, 13 * 60],
+								startsOn: today(),
+							},
+							timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+						},
+					}),
+				}),
+			),
+		);
 	});
 
 	it("starts a routine made from a bot's settings on that bot", async () => {
@@ -381,7 +445,11 @@ describe("the workspace's routines", () => {
 					instructions: morningBrief.routine.instructions,
 					results: morningBrief.routine.results,
 					state: "paused",
-					trigger: { kind: "cron", expression: "0 8 * * 1-5", timezone: "UTC" },
+					trigger: {
+						kind: "cron",
+						schedule: { repeat: "cron", expression: "0 8 * * 1-5" },
+						timezone: "UTC",
+					},
 				},
 			}),
 		);
@@ -458,7 +526,19 @@ describe("the workspace's routines", () => {
 		await waitFor(() =>
 			expect(client.api.routines.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id, routineId: morningBrief.routine.id },
-				payload: { trigger: { kind: "cron", expression: "0 9 * * 1-5", timezone: "UTC" } },
+				payload: {
+					trigger: {
+						kind: "cron",
+						schedule: {
+							repeat: "weekly",
+							every: 1,
+							days: ["mon", "tue", "wed", "thu", "fri"],
+							times: [9 * 60],
+							startsOn: today(),
+						},
+						timezone: "UTC",
+					},
+				},
 			}),
 		);
 		expect(client.api.routines.update).toHaveBeenCalledTimes(1);
@@ -471,7 +551,7 @@ describe("the workspace's routines", () => {
 				...morningBrief.routine,
 				trigger: {
 					kind: "cron",
-					expression: "15 */2 * * *",
+					schedule: { repeat: "cron", expression: "15 */2 * * *" },
 					timezone: "UTC",
 					nextScheduledAt: null,
 				},
@@ -484,13 +564,19 @@ describe("the workspace's routines", () => {
 		mount(routinePage(hourly));
 
 		expect(await screen.findByText("15 */2 * * *")).toBeDefined();
-		expect(screen.getByRole("radio", { name: "Every day" })).toHaveProperty("checked", false);
-		fireEvent.click(screen.getByRole("radio", { name: "Every day" }));
+		expect(screen.getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
+		fireEvent.click(screen.getByRole("radio", { name: "Daily" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.update).toHaveBeenCalledWith({
 				params: { agentId: linear.id, routineId: hourly.routine.id },
-				payload: { trigger: { kind: "cron", expression: "0 9 * * *", timezone: "UTC" } },
+				payload: {
+					trigger: {
+						kind: "cron",
+						schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
+						timezone: "UTC",
+					},
+				},
 			}),
 		);
 	});
@@ -550,7 +636,7 @@ describe("the workspace's routines", () => {
 		mount(routinePage(morningBrief));
 
 		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
-		expect(screen.getByRole("radio", { name: "Weekdays" }).matches(":disabled")).toBe(true);
+		expect(screen.getByRole("radio", { name: "Weekly" }).matches(":disabled")).toBe(true);
 		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete routine" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
