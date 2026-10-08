@@ -160,7 +160,7 @@ const decide = (
 	model: Models.Interface,
 ): Effect.Effect<
 	FacilitatorDecision,
-	Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer,
+	Models.RequestFailure | Models.AnswerTimedOut | Models.UnusableAnswer,
 	Database
 > =>
 	Effect.gen(function* () {

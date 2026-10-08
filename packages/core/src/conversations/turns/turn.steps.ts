@@ -1,5 +1,5 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
 	Cause,
@@ -144,7 +144,6 @@ export const runSegment = (
 	});
 
 const finished: SegmentOutcome = { _tag: "Finished" };
-const retry: SegmentOutcome = { _tag: "Retry" };
 
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
@@ -158,7 +157,7 @@ type StreamOutcome =
 
 /** Why a reply stopped streaming before the model finished, other than being cancelled. */
 type TurnFailure =
-	| Models.RequestFailed
+	| Models.RequestFailure
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -260,20 +259,26 @@ const generateReply = (
 			 * Logs the failure and records what people are told of it; the turn
 			 * runs again only while that is safe and could help. A reply without
 			 * an answer does not: running it again would repeat every tool call it
-			 * made. Nor does a request the provider refused, which it would refuse again.
+			 * made. Nor does a model request that would fail the same way again.
 			 */
-			const failed = (failure: TurnFailure) =>
-				logTurnFailure(prepared, failure.message).pipe(
+			const failed = (failure: TurnFailure) => {
+				const request: DomainError | undefined = Models.isRequestFailure(failure)
+					? failure
+					: undefined;
+				return logTurnFailure(prepared, failure.message).pipe(
 					Effect.andThen(
 						turns.fail(replyTurn, draft, {
 							userMessage: failure.userMessage,
 							mayRunAgain:
-								!(failure instanceof ReplyWithoutAnswer) &&
-								!(failure instanceof Models.RequestFailed && !failure.mayRetry),
+								!(failure instanceof ReplyWithoutAnswer) && (request?.isRetryable ?? true),
 						}),
 					),
-					Effect.map((willRetry) => (willRetry ? retry : finished)),
+					Effect.map(
+						(willRetry): SegmentOutcome =>
+							willRetry ? { _tag: "Retry", after: request?.retryAfter } : finished,
+					),
 				);
+			};
 
 			if (Exit.isSuccess(streamed)) {
 				if (streamed.value.kind === "suspended") {
@@ -355,7 +360,7 @@ const streamReply = (
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
-	| Models.RequestFailed
+	| Models.RequestFailure
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged

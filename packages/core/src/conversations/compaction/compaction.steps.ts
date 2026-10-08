@@ -87,4 +87,4 @@ const generate = (
 /**
  * Why a compaction failed.
  */
-type CompactionFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
+type CompactionFailure = Models.RequestFailure | Models.AnswerTimedOut | Models.UnusableAnswer;

@@ -64,7 +64,10 @@ export const SegmentOutcome = Schema.Union([
 		/** The approvals the turn waits for, each decided through `approvalDecided`. */
 		approvals: Schema.Array(Schema.String),
 	}),
-	Schema.TaggedStruct("Retry", {}),
+	Schema.TaggedStruct("Retry", {
+		/** How long the provider asked to be left, when it said; the turn waits at least `RETRY_DELAY`. */
+		after: Schema.optional(Schema.DurationFromMillis),
+	}).pipe(Schema.encodeKeys({ after: "afterMillis" })),
 ]);
 export type SegmentOutcome = typeof SegmentOutcome.Type;
 
@@ -115,7 +118,10 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 				const outcome = yield* turnActivities.activity("segment", request, run);
 				if (outcome._tag === "Finished") return;
 				if (outcome._tag === "Retry") {
-					yield* DurableClock.sleep({ name: `retry/${run}`, duration: RETRY_DELAY });
+					yield* DurableClock.sleep({
+						name: `retry/${run}`,
+						duration: Duration.max(RETRY_DELAY, outcome.after ?? Duration.zero),
+					});
 					continue;
 				}
 				const cancelled = yield* waitForApprovals(run, outcome.approvals);

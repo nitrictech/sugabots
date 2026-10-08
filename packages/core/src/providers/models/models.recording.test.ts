@@ -5,6 +5,7 @@ import type { ModelRequests } from "../../accounting/model-requests.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import { Models } from "./models.ts";
+import { resolvedModel } from "./testing.ts";
 
 /** The fake provider never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -66,15 +67,17 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 		modelProviders: {
 			renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 			resolve: () =>
-				Effect.succeed({
-					providerId: PROVIDER_ID,
-					preset: "openai",
-					baseUrl: "https://api.openai.com/v1",
-					apiFormat: "openai",
-					apiKey: "secret",
-					headers: {},
-					configurationUpdatedAt: new Date(0),
-				}),
+				Effect.succeed(
+					resolvedModel({
+						providerId: PROVIDER_ID,
+						preset: "openai",
+						baseUrl: "https://api.openai.com/v1",
+						apiFormat: "openai",
+						apiKey: "secret",
+						headers: {},
+						configurationUpdatedAt: new Date(0),
+					}),
+				),
 		},
 		httpClients: {
 			for: () => async (_url, init) => {
