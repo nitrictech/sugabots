@@ -202,3 +202,29 @@ export const Opened = meta.story({
 		).toHaveAttribute("aria-current", "page");
 	},
 });
+
+/** More unread messages than fit, as a busy workspace has. */
+const longFeed: ActivityFeed = {
+	items: Array.from({ length: 40 }, (_, index) => ({
+		...(feed.items[1] as MessageItem),
+		messageId: `0199a3a0-0000-7000-8000-000000000a${String(index).padStart(2, "0")}`,
+		preview: `Renewal notes ${index + 1} are ready.`,
+		at: minutesAgo(index * 10),
+	})),
+};
+
+/** A feed longer than the window scrolls within its column, and the page itself stays put. */
+export const LongFeed = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/activity`, () => HttpResponse.json(longFeed)),
+		);
+	},
+	play: async ({ canvas, canvasElement }) => {
+		await expect(
+			await canvas.findByText("Renewal notes 40 are ready.", {}, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		const page = canvasElement.ownerDocument.documentElement;
+		await expect(page.scrollHeight).toBeLessThanOrEqual(page.clientHeight);
+	},
+});

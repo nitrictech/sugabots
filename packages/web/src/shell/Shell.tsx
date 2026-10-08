@@ -10,8 +10,9 @@ export function Shell() {
 	useWorkspaceEvents();
 	useVisibleHeight();
 
+	// Relative, so `sr-only` text deep in a long list can't lengthen the page.
 	return (
-		<div className="flex h-[var(--visible-height,100dvh)] min-w-0 overflow-hidden bg-background">
+		<div className="relative flex h-[var(--visible-height,100dvh)] min-w-0 overflow-hidden bg-background">
 			<Rail />
 			<Outlet />
 		</div>
