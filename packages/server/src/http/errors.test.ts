@@ -55,7 +55,7 @@ describe("asHttpError", () => {
 				_tag: "ProviderRateLimited",
 				userMessage: "Acme Models is limiting how often this workspace can ask it.",
 				isRetryable: true,
-				retryAfter: 120_000,
+				retryAfterMillis: 120_000,
 			},
 		});
 	});
