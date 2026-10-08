@@ -237,133 +237,33 @@ describe("an admin", () => {
 		expect(await screen.findByRole("button", { name: "New routine" })).toBeDefined();
 	});
 
-	it("saves a weekly schedule as cron in the detected timezone", async () => {
-		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: scheduledRoutine, secret: null }),
-		);
-		mount(page);
-		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.change(within(dialog).getByLabelText("Name"), {
-			target: { value: "Weekly review" },
-		});
-		fireEvent.click(within(dialog).getByRole("button", { name: "Instructions" }));
-		const slide = await screen.findByRole("dialog", { name: "Instructions" });
-		fireEvent.change(within(slide).getByLabelText("Instructions"), {
-			target: { value: "Review the week." },
-		});
-		fireEvent.click(within(slide).getByRole("button", { name: "Back" }));
-		const form = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.click(within(form).getByRole("radio", { name: "Weekly" }));
-		fireEvent.click(within(form).getByRole("checkbox", { name: "Thursday" }));
-		fireEvent.click(within(form).getByRole("button", { name: "Later" }));
-		fireEvent.click(within(form).getByRole("button", { name: "Later" }));
-		expect(within(form).getByText(/Runs Mondays and Thursdays at 10:00/)).toBeDefined();
-		fireEvent.click(within(form).getByRole("button", { name: "Create" }));
+	it("starts a new routine on this bot", async () => {
+		const router = mount(page);
 
-		await waitFor(() => {
-			expect(client.api.routines.create).toHaveBeenCalledWith({
-				params: { agentId: linear.id },
-				payload: {
-					name: "Weekly review",
-					instructions: "Review the week.",
-					results: "post_to_chat",
-					trigger: { kind: "cron", expression: "0 10 * * 1,4", timezone },
-				},
-			});
-		});
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "New routine" })).toBeNull());
+		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/routines/new"));
+		expect(router.state.location.search).toEqual({ agent: linear.id });
 	});
 
-	it("shows a new webhook routine's address and secret once, before closing", async () => {
-		const secret = "whsec_0123456789abcdef0123456789abcdef";
-		client.api.routines.create.mockReturnValue(Effect.succeed({ routine: webhookRoutine, secret }));
-		mount(page);
-		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.change(within(dialog).getByLabelText("Name"), {
-			target: { value: webhookRoutine.name },
-		});
-		fireEvent.click(within(dialog).getByRole("button", { name: "Instructions" }));
-		const slide = await screen.findByRole("dialog", { name: "Instructions" });
-		fireEvent.change(within(slide).getByLabelText("Instructions"), {
-			target: { value: webhookRoutine.instructions },
-		});
-		fireEvent.click(within(slide).getByRole("button", { name: "Back" }));
-		const form = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.click(within(form).getByRole("radio", { name: "Webhook" }));
-		fireEvent.click(within(form).getByRole("button", { name: "Create" }));
-
-		const ready = await screen.findByRole("dialog", { name: "Webhook ready" });
-		expect(
-			within(ready).getByText(new RegExp(`/hooks/routines/${webhookRoutine.id}$`)),
-		).toBeDefined();
-		expect(within(ready).queryByText(secret)).toBeNull();
-		fireEvent.click(within(ready).getByRole("button", { name: "Show" }));
-		expect(within(ready).getByText(secret)).toBeDefined();
-		fireEvent.click(within(ready).getByRole("button", { name: "Done" }));
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Webhook ready" })).toBeNull());
-	});
-
-	it("shows scheduled Routines in plain language", async () => {
+	it("shows scheduled Routines in plain language, each opening its page", async () => {
 		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine]));
 		mount(page);
 
-		expect(await screen.findByText("Weekdays at 9:00")).toBeDefined();
+		const row = await screen.findByRole("link", { name: /^Morning brief/ });
+		expect(within(row).getByText("Weekdays at 9:00")).toBeDefined();
+		expect(row.getAttribute("href")).toBe(`/suga/settings/routines/${scheduledRoutine.id}`);
 		expect(screen.queryByText(scheduledRoutine.trigger.expression)).toBeNull();
 	});
 
-	it("says when a Routine could not be paused, or its secret reset", async () => {
-		client.api.routines.list.mockReturnValue(Effect.succeed([webhookRoutine]));
-		client.api.routines.update.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
-		);
-		client.api.routines.rotateSecret.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: userText`Rotation unavailable` })),
+	it("marks a paused Routine", async () => {
+		client.api.routines.list.mockReturnValue(
+			Effect.succeed([{ ...webhookRoutine, state: "paused" as const }]),
 		);
 		mount(page);
 
-		fireEvent.click(await screen.findByRole("switch", { name: `${webhookRoutine.name} on` }));
-		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
-		expect(client.api.routines.update).toHaveBeenCalledWith({
-			params: { agentId: linear.id, routineId: webhookRoutine.id },
-			payload: { state: "paused" },
-		});
-
-		fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${webhookRoutine.name}`) }));
-		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
-		fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }));
-		const confirm = await screen.findByRole("dialog", { name: "Reset the secret?" });
-		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
-		fireEvent.click(within(confirm).getByRole("button", { name: "Reset" }));
-		await waitFor(() =>
-			expect(within(confirm).getByRole("alert").textContent).toContain("Rotation unavailable"),
-		);
-	});
-
-	it("deletes a Routine from its dialog after asking", async () => {
-		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine]));
-		client.api.routines.remove.mockReturnValue(Effect.void);
-		mount(page);
-
-		fireEvent.click(
-			await screen.findByRole("button", { name: new RegExp(`^${scheduledRoutine.name}`) }),
-		);
-		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
-		fireEvent.click(within(dialog).getByRole("button", { name: "Delete routine" }));
-		const confirm = await screen.findByRole("dialog", {
-			name: `Delete ${scheduledRoutine.name}?`,
-		});
-		expect(client.api.routines.remove).not.toHaveBeenCalled();
-		fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
-
-		await waitFor(() =>
-			expect(client.api.routines.remove).toHaveBeenCalledWith({
-				params: { agentId: linear.id, routineId: scheduledRoutine.id },
-			}),
-		);
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit routine" })).toBeNull());
+		const row = await screen.findByRole("link", { name: /^Triage intake/ });
+		expect(within(row).getByText("Paused")).toBeDefined();
 	});
 
 	it("discards the previous bot's draft instructions when another bot is opened", async () => {

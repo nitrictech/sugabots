@@ -140,6 +140,8 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
+ *   /$workspace/settings/routines/$routine   one routine, by id
+ *   /$workspace/settings/routines/new   a routine being made, for `?agent=` when one is chosen
  *
  * An agent's address names its pod, because a handle is unique only within
  * one, and uses the handle rather than the name, so renaming an agent keeps
@@ -636,6 +638,43 @@ const settingsPodConnectionRoute = createRoute({
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsPodConnectionRoute,
 });
+
+/** One routine, by its id. */
+const settingsRoutineRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/routines/$routine",
+	loader: () => WorkspaceSettings.preload(),
+	component: SettingsRoutineRoute,
+});
+
+function SettingsRoutineRoute() {
+	const { routine } = settingsRoutineRoute.useParams();
+	return (
+		<SettingsLayout>
+			<WorkspaceSettings section="routines" selectedRoutineId={routine} />
+		</SettingsLayout>
+	);
+}
+
+/** A routine being made, for the bot `?agent=` names when it was started from that bot. */
+const settingsNewRoutineRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/routines/new",
+	validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
+		agent: optionalString(search.agent),
+	}),
+	loader: () => WorkspaceSettings.preload(),
+	component: SettingsNewRoutineRoute,
+});
+
+function SettingsNewRoutineRoute() {
+	const { agent } = settingsNewRoutineRoute.useSearch();
+	return (
+		<SettingsLayout>
+			<WorkspaceSettings section="routines" newRoutine={{ agentId: agent }} />
+		</SettingsLayout>
+	);
+}
 
 /** One model provider, by its id. */
 const settingsProviderRoute = createRoute({
@@ -1210,6 +1249,8 @@ const routeTree = rootRoute.addChildren([
 		settingsRoute,
 		settingsSectionRoute,
 		settingsMemberRoute,
+		settingsNewRoutineRoute,
+		settingsRoutineRoute,
 		settingsPodAgentRoute,
 		settingsPodConnectionRoute,
 		settingsPodRoute,

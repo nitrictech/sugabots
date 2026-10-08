@@ -1,4 +1,6 @@
 import type { Routine, WorkspaceRoutine } from "@sugabots/contracts";
+import { InternalServerError } from "@sugabots/contracts/http";
+import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,105 +66,118 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+const routinePage = (one: WorkspaceRoutine) => `/suga/settings/routines/${one.routine.id}`;
+
 describe("the workspace's routines", () => {
-	it("lists every routine with when it runs and its bot, and whether it is on", async () => {
+	it("lists every routine with when it runs and its bot, beside the first one", async () => {
 		mount("/suga/settings/routines");
 
-		expect(await screen.findByText(`Weekdays at 8:00, ${linear.name}`)).toBeDefined();
-		expect(screen.getByText(`Mondays at 9:00, ${researcher.name}`)).toBeDefined();
-		expect(
-			screen.getByRole("switch", { name: "Morning brief on" }).getAttribute("aria-checked"),
-		).toBe("true");
-		expect(
-			screen.getByRole("switch", { name: "Weekly churn report on" }).getAttribute("aria-checked"),
-		).toBe("false");
+		const list = await screen.findByRole("navigation", { name: "Workspace routines" });
+		expect(within(list).getByText(`Weekdays at 8:00, ${linear.name}`)).toBeDefined();
+		expect(within(list).getByText(`Mondays at 9:00, ${researcher.name}`)).toBeDefined();
+		expect(within(list).getByText("Paused")).toBeDefined();
+		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
 		const nav = screen.getByRole("navigation", { name: "Settings" });
 		expect(within(nav).getByRole("link", { name: "Routines, 2" })).toBeDefined();
 	});
 
-	it("makes a routine for the bot chosen from the picker", async () => {
+	it("makes a routine for the bot chosen, then opens it", async () => {
+		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secret: null }),
 		);
-		mount("/suga/settings/routines");
-		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
-		const form = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Triage sweep" } });
-		fireEvent.click(within(form).getByRole("button", { name: "Bot" }));
-
-		const picker = await screen.findByRole("dialog", { name: "Bot" });
-		expect(within(picker).getByRole("heading", { name: suga.name })).toBeDefined();
-		expect(within(picker).getByRole("heading", { name: sales.name })).toBeDefined();
-		fireEvent.click(within(picker).getByRole("button", { name: triager.name }));
-
-		const back = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.click(within(back).getByRole("button", { name: "Instructions" }));
-		const slide = await screen.findByRole("dialog", { name: "Instructions" });
-		fireEvent.change(within(slide).getByLabelText("Instructions"), {
+		const router = mount("/suga/settings/routines/new");
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
+		fireEvent.click(screen.getByRole("button", { name: /^Bot/ }));
+		expect(screen.getByRole("heading", { name: suga.name })).toBeDefined();
+		expect(screen.getByRole("heading", { name: sales.name })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: triager.name }));
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
 			target: { value: "Sweep the queue." },
 		});
-		fireEvent.click(within(slide).getByRole("button", { name: "Back" }));
-		const ready = await screen.findByRole("dialog", { name: "New routine" });
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Weekly" }));
+		fireEvent.click(screen.getByRole("checkbox", { name: "Thursday" }));
+		fireEvent.click(screen.getByRole("button", { name: "30 minutes later" }));
+		fireEvent.click(screen.getByRole("button", { name: "30 minutes later" }));
 		expect(
-			within(ready).getByText(new RegExp(`in ${triager.name}'s chat in the ${suga.name} pod`)),
+			screen.getByText(
+				`Runs Mondays and Thursdays at 10:00 and posts the result in ${triager.name}'s chat in the ${suga.name} pod.`,
+			),
 		).toBeDefined();
-		fireEvent.click(within(ready).getByRole("button", { name: "Create" }));
+		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
-			expect(client.api.routines.create).toHaveBeenCalledWith(
-				expect.objectContaining({
-					params: { agentId: triager.id },
-					payload: expect.objectContaining({ results: "post_to_chat" }),
-				}),
-			),
+			expect(client.api.routines.create).toHaveBeenCalledWith({
+				params: { agentId: triager.id },
+				payload: {
+					name: "Triage sweep",
+					instructions: "Sweep the queue.",
+					results: "post_to_chat",
+					trigger: { kind: "cron", expression: "0 10 * * 1,4", timezone },
+				},
+			}),
 		);
+		await waitFor(() => expect(router.state.location.pathname).toBe(routinePage(morningBrief)));
 	});
 
-	it("keeps a webhook's result in the run until it is set to post to the chat", async () => {
-		client.api.routines.create.mockReturnValue(
-			Effect.succeed({ routine: morningBrief.routine, secret: null }),
-		);
-		mount("/suga/settings/routines");
-		fireEvent.click(await screen.findByRole("button", { name: "New routine" }));
-		const form = await screen.findByRole("dialog", { name: "New routine" });
-		fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Sentry issues" } });
-		fireEvent.click(within(form).getByRole("radio", { name: "Webhook" }));
-		const posted = within(form).getByRole("switch", { name: "Post result to chat" });
-		expect(posted.getAttribute("aria-checked")).toBe("false");
-		expect(within(form).getByText(/keeps the result in the run/)).toBeDefined();
+	it("starts a routine made from a bot's settings on that bot", async () => {
+		mount(`/suga/settings/routines/new?agent=${researcher.id}`);
 
-		fireEvent.click(posted);
-		fireEvent.click(within(form).getByRole("button", { name: "Instructions" }));
-		const slide = await screen.findByRole("dialog", { name: "Instructions" });
-		fireEvent.change(within(slide).getByLabelText("Instructions"), {
-			target: { value: "Fix what you can and tell us what you did." },
+		const bot = await screen.findByRole("button", { name: /^Bot/ });
+		expect(within(bot).getByText(researcher.name)).toBeDefined();
+	});
+
+	it("shows a new webhook routine's secret on its page, once", async () => {
+		const secret = "rtb_0123456789abcdef0123456789abcdef";
+		const webhook: WorkspaceRoutine = {
+			...morningBrief,
+			routine: { ...morningBrief.routine, trigger: { kind: "webhook", auth: { kind: "bearer" } } },
+		};
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: webhook.routine, secret }),
+		);
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		mount("/suga/settings/routines/new");
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
+			target: { value: "Fix what you can." },
 		});
-		fireEvent.click(within(slide).getByRole("button", { name: "Back" }));
-		const ready = await screen.findByRole("dialog", { name: "New routine" });
-		expect(
-			within(ready).getByText(/whenever the address is called .* and posts the result/),
-		).toBeDefined();
-		fireEvent.click(within(ready).getByRole("button", { name: "Create" }));
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Webhook" }));
+		const posted = screen.getByRole("switch", { name: "Post result to chat" });
+		expect(posted.getAttribute("aria-checked")).toBe("false");
+		expect(screen.getByText(/keeps the result in the run/)).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
 						trigger: { kind: "webhook" },
-						results: "post_to_chat",
+						results: "keep_in_run",
 					}),
 				}),
 			),
 		);
+		expect(
+			await screen.findByText(new RegExp(`/hooks/routines/${webhook.routine.id}$`)),
+		).toBeDefined();
+		expect(screen.queryByText(secret)).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Show" }));
+		expect(screen.getByText(secret)).toBeDefined();
 	});
 
-	it("turns a routine back on from its row", async () => {
+	it("turns a routine back on from its page", async () => {
 		client.api.routines.update.mockReturnValue(
 			Effect.succeed({ routine: { ...churnReport.routine, state: "enabled" }, secret: null }),
 		);
-		mount("/suga/settings/routines");
+		mount(routinePage(churnReport));
 
-		fireEvent.click(await screen.findByRole("switch", { name: "Weekly churn report on" }));
+		expect(await screen.findByText("Paused. It only runs when you press Run now.")).toBeDefined();
+		fireEvent.click(screen.getByRole("switch", { name: "Runs on its own" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.update).toHaveBeenCalledWith({
@@ -172,7 +187,7 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("runs a paused routine now from its row", async () => {
+	it("runs a paused routine now", async () => {
 		client.api.routines.run.mockReturnValue(
 			Effect.succeed({
 				executionId: "0199a3a0-0000-7000-8000-0000000000e1",
@@ -180,9 +195,9 @@ describe("the workspace's routines", () => {
 				duplicate: false,
 			}),
 		);
-		mount("/suga/settings/routines");
+		mount(routinePage(churnReport));
 
-		fireEvent.click(await screen.findByRole("button", { name: "Run Weekly churn report now" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Run now" }));
 
 		await waitFor(() =>
 			expect(client.api.routines.run).toHaveBeenCalledWith({
@@ -190,6 +205,45 @@ describe("the workspace's routines", () => {
 				payload: { requestId: expect.any(String) },
 			}),
 		);
+	});
+
+	it("saves instructions from their own page, then goes back to the routine", async () => {
+		client.api.routines.update.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+		);
+		mount(routinePage(morningBrief));
+		fireEvent.click(await screen.findByRole("button", { name: /^Instructions/ }));
+		const instructions = await screen.findByLabelText("Instructions");
+		expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+		fireEvent.change(instructions, { target: { value: "  Brief the team.  " } });
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+				payload: { instructions: "Brief the team." },
+			}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Morning brief" }));
+		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
+	});
+
+	it("saves a schedule once it rests", async () => {
+		client.api.routines.update.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+		);
+		mount(routinePage(morningBrief));
+
+		fireEvent.click(await screen.findByRole("button", { name: "30 minutes later" }));
+		fireEvent.click(screen.getByRole("button", { name: "30 minutes later" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+				payload: { trigger: { kind: "cron", expression: "0 9 * * 1-5", timezone: "UTC" } },
+			}),
+		);
+		expect(client.api.routines.update).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps an unfamiliar schedule until a repeat replaces it", async () => {
@@ -209,25 +263,82 @@ describe("the workspace's routines", () => {
 		client.api.routines.update.mockReturnValue(
 			Effect.succeed({ routine: hourly.routine, secret: null }),
 		);
-		mount("/suga/settings/routines");
+		mount(routinePage(hourly));
 
-		fireEvent.click(await screen.findByRole("button", { name: /^Morning brief/ }));
-		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
-		expect(within(dialog).getByText("15 */2 * * *")).toBeDefined();
-		expect(within(dialog).getByRole("radio", { name: "Every day" })).toHaveProperty(
-			"checked",
-			false,
-		);
-		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+		expect(await screen.findByText("15 */2 * * *")).toBeDefined();
+		expect(screen.getByRole("radio", { name: "Every day" })).toHaveProperty("checked", false);
+		fireEvent.click(screen.getByRole("radio", { name: "Every day" }));
 
 		await waitFor(() =>
-			expect(client.api.routines.update).toHaveBeenCalledWith(
-				expect.objectContaining({
-					payload: expect.objectContaining({
-						trigger: { kind: "cron", expression: "15 */2 * * *", timezone: "UTC" },
-					}),
-				}),
+			expect(client.api.routines.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: hourly.routine.id },
+				payload: { trigger: { kind: "cron", expression: "0 9 * * *", timezone: "UTC" } },
+			}),
+		);
+	});
+
+	it("says when a change or a secret reset fails", async () => {
+		const webhook: WorkspaceRoutine = {
+			...morningBrief,
+			routine: { ...morningBrief.routine, trigger: { kind: "webhook", auth: { kind: "bearer" } } },
+		};
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		client.api.routines.update.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
+		);
+		client.api.routines.rotateSecret.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: userText`Rotation unavailable` })),
+		);
+		mount(routinePage(webhook));
+
+		fireEvent.click(await screen.findByRole("switch", { name: "Runs on its own" }));
+		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
+
+		fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+		const confirm = await screen.findByRole("dialog", { name: "Reset the secret?" });
+		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
+		fireEvent.click(within(confirm).getByRole("button", { name: "Reset" }));
+		await waitFor(() =>
+			expect(within(confirm).getByRole("alert").textContent).toContain("Rotation unavailable"),
+		);
+	});
+
+	it("deletes a routine after asking, then goes back to the list", async () => {
+		client.api.routines.remove.mockReturnValue(Effect.void);
+		const router = mount(routinePage(morningBrief));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Delete routine" }));
+		const confirm = await screen.findByRole("dialog", { name: "Delete Morning brief?" });
+		expect(client.api.routines.remove).not.toHaveBeenCalled();
+		fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.remove).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+			}),
+		);
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/routines"));
+	});
+
+	it("shows a routine its viewer may not manage without a way to change it", async () => {
+		client.api.pods.list.mockReturnValue(
+			Effect.succeed(
+				pods.map((pod) => ({
+					...pod,
+					permissions: { ...pod.permissions, manageRoutines: false, runRoutines: false },
+				})),
 			),
 		);
+		mount(routinePage(morningBrief));
+
+		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
+		expect(screen.getByRole("radio", { name: "Weekdays" }).matches(":disabled")).toBe(true);
+		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete routine" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(true);
+		expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 	});
 });
