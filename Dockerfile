@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 #
 # The API and the built web app in one image, listening on $PORT. Needs
 # DATABASE_URL; applies pending migrations on start unless
@@ -13,16 +13,7 @@
 
 FROM --platform=$BUILDPLATFORM scratch AS manifests
 COPY package.json bun.lock /
-COPY packages/accounting/package.json /packages/accounting/
-COPY packages/avatars/package.json /packages/avatars/
-COPY packages/contracts/package.json /packages/contracts/
-COPY packages/core/package.json /packages/core/
-COPY packages/provider-logos/package.json /packages/provider-logos/
-COPY packages/sdk/package.json /packages/sdk/
-COPY packages/server/package.json /packages/server/
-COPY packages/web/package.json /packages/web/
-COPY packages/website/package.json /packages/website/
-COPY packages/workflow/package.json /packages/workflow/
+COPY --parents packages/*/package.json /
 
 # Bun installs, Node runs, as in CI.
 FROM node:26-slim AS base
@@ -55,11 +46,8 @@ ENV NODE_ENV=production \
     PORT=3000
 
 COPY --from=server /app ./
-COPY packages/accounting packages/accounting
-COPY packages/contracts packages/contracts
-COPY packages/core packages/core
-COPY packages/server packages/server
-COPY packages/workflow packages/workflow
+# The web app arrives built, below; the website is served elsewhere.
+COPY --exclude=web --exclude=website packages packages
 COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh
 COPY --from=web /app/packages/web/dist packages/web/dist
 
