@@ -47,7 +47,9 @@ import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { ActivityList } from "@/shell/ActivityList.tsx";
 import { ApprovalList } from "@/shell/ApprovalList.tsx";
 import { ConversationList } from "@/shell/ConversationList.tsx";
+import { PageFailure } from "@/shell/PageFailure.tsx";
 import { ListAndPane, Panes, Shell } from "@/shell/Shell.tsx";
+import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
 const AgentPage = lazyNamed(() => import("@/screens/AgentPage.tsx"), "AgentPage");
@@ -595,9 +597,9 @@ function RouteLoadFailure({ title, onRetry }: { title: string; onRetry: () => Pr
 	return (
 		<div className="grid h-full place-items-center bg-list p-6">
 			<EmptyState title={title}>
-				<button type="button" className="text-link underline" onClick={() => void onRetry()}>
+				<Button variant="outline" onClick={() => void onRetry()}>
 					Try again
-				</button>
+				</Button>
 			</EmptyState>
 		</div>
 	);
@@ -1169,6 +1171,9 @@ export function createAppRouter(options?: { history?: RouterHistory }) {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
+		// A boundary for every route, so a failed page is replaced inside its parent and the rail
+		// stays. The router's own boundary is above the root.
+		defaultErrorComponent: PageFailure,
 		// Tests mount the real tree over a memory history, so a route's guards
 		// and search params are exercised rather than mocked around.
 		...options,
