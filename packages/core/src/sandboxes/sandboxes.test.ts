@@ -1,3 +1,4 @@
+import { SANDBOX_E2B_DEFAULT_SIZE } from "@sugabots/contracts";
 import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Ids } from "../ids/ids.ts";
@@ -33,6 +34,7 @@ const connections: ReadonlyArray<[string, Sandboxes.Connection | undefined]> = [
 					provider: "e2b",
 					apiKey: Redacted.make(env.E2B_API_KEY),
 					template: "base",
+					size: SANDBOX_E2B_DEFAULT_SIZE,
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 						: {}),
@@ -300,6 +302,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 			provider: "e2b",
 			apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 			template: `sugabots-test-${Date.now()}`,
+			size: { cpuCount: 2, memoryGiB: 2 },
 			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 				: {}),
@@ -316,10 +319,16 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 		}
 		const made = await run(provider.create(SPEC));
 		const python = await run(made.exec("python3 --version", EXEC));
+		const cpus = await run(made.exec("nproc", EXEC));
+		const tmpMount = await run(
+			made.exec("findmnt --noheadings --output FSTYPE --target /tmp", EXEC),
+		);
 		await run(provider.destroy(made.id));
 
 		expect(status).toBe("ready");
 		expect(python.stdout.text).toContain("Python 3.13");
+		expect(cpus.stdout.text.trim()).toBe("2");
+		expect(tmpMount.stdout.text.trim()).not.toBe("tmpfs");
 	}, 600_000);
 
 	it("says so when the workspace's template hasn't been built", async () => {
@@ -329,6 +338,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 					provider: "e2b",
 					apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
 					template: "sugabots-never-built",
+					size: SANDBOX_E2B_DEFAULT_SIZE,
 					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 						: {}),

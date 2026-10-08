@@ -32,6 +32,8 @@ const AGENT_USER = "user";
  */
 const IDLE_BACKSTOP = Duration.minutes(30);
 
+const MIB_PER_GIB = 1024;
+
 /** How far past its own timeout a command may run before the call gives up on E2B. */
 const EXEC_GRACE = Duration.seconds(15);
 
@@ -61,9 +63,13 @@ export const fromE2b = (
 				Effect.tryPromise({
 					try: async (): Promise<Sandboxes.TemplateBuild> => {
 						const { templateId, buildId } = await Template.buildInBackground(
-							Template().fromImage(image).runCmd(WITHOUT_SUDO, { user: "root" }),
+							Template().fromImage(image).runCmd([WITHOUT_SUDO, TMP_ON_DISK], { user: "root" }),
 							connection.template,
-							options(),
+							{
+								...options(),
+								cpuCount: connection.size.cpuCount,
+								memoryMB: connection.size.memoryGiB * MIB_PER_GIB,
+							},
 						);
 						return { templateId, buildId };
 					},
@@ -244,6 +250,13 @@ const ALL_ADDRESSES = "0.0.0.0/0";
  * back in the sudo group whenever a sandbox starts.
  */
 const WITHOUT_SUDO = `sed -i '/^${AGENT_USER} .*NOPASSWD/d' /etc/sudoers && chmod u-s /usr/bin/sudo`;
+
+/**
+ * Keeps `/tmp` on disk. Debian 13's systemd mounts it as tmpfs sized at half
+ * the sandbox's memory, and tmpfs pages can only leave memory for swap, so a
+ * repository cloned or installed there starves every program in the sandbox.
+ */
+const TMP_ON_DISK = "ln -sf /dev/null /etc/systemd/system/tmp.mount";
 
 /** A refusal about the file itself, which the agent can do something about. */
 function fileFailure(path: string, cause: unknown): Sandboxes.FileFailed | undefined {

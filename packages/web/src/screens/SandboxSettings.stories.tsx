@@ -204,3 +204,31 @@ export const E2bTemplateReady = meta.story({
 		await expect(canvas.getByText(/Sugabots' latest image/)).toBeVisible();
 	},
 });
+
+/** E2B sized beyond its default; a size that isn't a whole number is refused before it's saved. */
+export const E2bCustomSize = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			answers([
+				{
+					...openSandbox,
+					id: "0199a3a0-0000-7000-8000-0000000000f2",
+					preset: "e2b",
+					name: "E2B",
+					settings: { preset: "e2b", cpuCount: 4, memoryGiB: 8 },
+					hasApiKey: true,
+					status: "connected",
+				},
+			]),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const vcpus = await canvas.findByLabelText("vCPUs");
+		await expect(vcpus).toHaveValue("4");
+		await expect(canvas.getByLabelText("Memory")).toHaveValue("8 GiB");
+
+		await userEvent.clear(vcpus);
+		await userEvent.type(vcpus, "2.5{Enter}");
+		await expect(await canvas.findByText(/whole number of vCPUs/)).toBeVisible();
+	},
+});

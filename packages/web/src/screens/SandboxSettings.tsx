@@ -1,12 +1,16 @@
 import {
+	SANDBOX_E2B_DEFAULT_SIZE,
 	type SandboxProvider,
 	type SandboxProviderPresetId,
 	type SandboxProviderSettings,
 	type SandboxProviderTestResult,
 	type SandboxProviderUpdate,
+	sandboxE2bCpuCountSchema,
+	sandboxE2bMemoryGiBSchema,
 	sandboxProviderCatalog,
 	sandboxProviderPreset,
 } from "@sugabots/contracts";
+import { Schema } from "effect";
 import { Check } from "lucide-react";
 import { useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
@@ -138,6 +142,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 						: undefined
 				}
 				onConfigure={configure}
+				onInvalid={setError}
 				onTest={() => configured && act(() => actions.test.mutateAsync(configured.id))}
 				onRemove={async () => {
 					if (configured) await actions.remove.mutateAsync(configured.id);
@@ -208,6 +213,7 @@ function ProviderSettings({
 	pending,
 	testResult,
 	onConfigure,
+	onInvalid,
 	onTest,
 	onRemove,
 }: {
@@ -216,6 +222,8 @@ function ProviderSettings({
 	pending: boolean;
 	testResult: SandboxProviderTestResult | undefined;
 	onConfigure: (changes: SandboxProviderUpdate) => Promise<void>;
+	/** Says why a typed value can't be saved. */
+	onInvalid: (message: string) => void;
 	onTest: () => void;
 	onRemove: () => Promise<unknown>;
 }) {
@@ -287,6 +295,36 @@ function ProviderSettings({
 						onSave={(sandboxUrl) =>
 							onConfigure({ settings: { ...settings, sandboxUrl: sandboxUrl || undefined } })
 						}
+					/>
+					<TextEntryRow
+						label="vCPUs"
+						saved={settings.cpuCount?.toString()}
+						placeholder={String(SANDBOX_E2B_DEFAULT_SIZE.cpuCount)}
+						disabled={pending}
+						clearable
+						onSave={(typed) => {
+							const cpuCount = wholeNumber(typed);
+							if (typed && !Schema.is(sandboxE2bCpuCountSchema)(cpuCount)) {
+								onInvalid("Enter a whole number of vCPUs, from 1 to 64.");
+								return Promise.resolve();
+							}
+							return onConfigure({ settings: { ...settings, cpuCount } });
+						}}
+					/>
+					<TextEntryRow
+						label="Memory"
+						saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
+						placeholder={`${SANDBOX_E2B_DEFAULT_SIZE.memoryGiB} GiB`}
+						disabled={pending}
+						clearable
+						onSave={(typed) => {
+							const memoryGiB = wholeNumber(typed.replace(/\s*GiB$/i, ""));
+							if (typed && !Schema.is(sandboxE2bMemoryGiBSchema)(memoryGiB)) {
+								onInvalid("Enter a whole number of GiB, from 1 to 64.");
+								return Promise.resolve();
+							}
+							return onConfigure({ settings: { ...settings, memoryGiB } });
+						}}
 					/>
 				</>
 			)}
@@ -388,7 +426,12 @@ function TemplateRow({ providerId }: { providerId: string }) {
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
 		? "The server's own API key, from its configuration. Leave the image empty to use the default."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both.";
+		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's sandbox is reset.";
+}
+
+/** A number typed into a row, or undefined when the row was emptied. */
+function wholeNumber(typed: string): number | undefined {
+	return typed === "" ? undefined : Number(typed);
 }
 
 /** What the last test said, once one has run, or what the provider recorded. */

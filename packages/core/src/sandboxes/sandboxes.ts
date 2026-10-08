@@ -116,6 +116,8 @@ export interface E2bConnection {
 	readonly endpoints?: { readonly apiUrl: string; readonly sandboxUrl: string };
 	/** The template sandboxes are made from. */
 	readonly template: string;
+	/** What the template is built with, so every sandbox made from it has. */
+	readonly size: { readonly cpuCount: number; readonly memoryGiB: number };
 }
 
 export interface OpenSandboxConnection {
