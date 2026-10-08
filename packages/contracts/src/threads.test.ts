@@ -244,4 +244,14 @@ describe("messagePreview", () => {
 		expect(preview.length).toBeLessThanOrEqual(MESSAGE_PREVIEW_CHARACTERS);
 		expect(preview).toMatch(/ word…$/);
 	});
+
+	it("reads Markdown as the text it renders", () => {
+		expect(messagePreview("[**SUGA-1974**](https://example.com) is _done_")).toBe(
+			"SUGA-1974 is done",
+		);
+	});
+
+	it("skips lines that render no text", () => {
+		expect(messagePreview("---\n## Weekly `report`")).toBe("Weekly report");
+	});
 });
