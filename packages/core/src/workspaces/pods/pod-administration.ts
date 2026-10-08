@@ -1,6 +1,7 @@
 export * as PodAdministration from "./pod-administration.ts";
 
 import type { Pod, PodColor, PodMember, PodUpdate } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, creatorStanding } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -9,7 +10,7 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
 import { FACILITATE_SYSTEM_AGENT } from "../agents/system-agents.ts";
 import { PersonalPods } from "./personal-pods.ts";
@@ -253,14 +254,14 @@ export class FacilitatorNotSetUp
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Choose a model for the Facilitator before a pod can route through it`;
+		return userText`Choose a model for the Facilitator before a pod can route through it`;
 	}
 }
 
 /** A pod update that names nothing to change. */
 export class EmptyPodUpdate extends Data.TaggedError("EmptyPodUpdate") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Nothing to change`;
+		return userText`Nothing to change`;
 	}
 }
 
@@ -271,8 +272,8 @@ export class PersonalPodMembershipFixed
 {
 	get userMessage() {
 		return this.attempted === "add"
-			? UserMessage.of`Personal pods cannot have other members`
-			: UserMessage.of`Personal pod membership cannot be changed`;
+			? userText`Personal pods cannot have other members`
+			: userText`Personal pod membership cannot be changed`;
 	}
 }
 
@@ -282,19 +283,19 @@ export class AdministratorInEverySharedPod
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Administrators are in every shared pod`;
+		return userText`Administrators are in every shared pod`;
 	}
 }
 
 /** Only a member of the pod's workspace can be added to it. */
 export class NotInWorkspace extends Data.TaggedError("NotInWorkspace") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`That person is not in this workspace`;
+		return userText`That person is not in this workspace`;
 	}
 }
 
 export class NotInPod extends Data.TaggedError("NotInPod") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`That person is not in this pod`;
+		return userText`That person is not in this pod`;
 	}
 }

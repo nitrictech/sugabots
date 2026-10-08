@@ -1,5 +1,6 @@
+import { type UserText, userText } from "@sugabots/errors";
 import { Clock, Data, Effect, Schema } from "effect";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import {
 	type DiscoveredModel,
@@ -41,14 +42,14 @@ class SignInLapsed extends Data.TaggedError("SignInLapsed")<{
 }> {}
 /** It answered with something that is not a model list. */
 class InvalidModelList extends Data.TaggedError("InvalidModelList")<{
-	readonly reason: UserMessage;
+	readonly reason: UserText;
 }> {}
 
 /** Asking the provider which models it offers failed; `message` is what went wrong, for the logs. */
 export class ModelDiscoveryFailed
 	extends Data.TaggedError("ModelDiscoveryFailed")<{
 		readonly message: string;
-		readonly userMessage: UserMessage;
+		readonly userMessage: UserText;
 	}>
 	implements UserFacing {}
 
@@ -63,15 +64,15 @@ type ProviderFailure =
  * What a person should be told. Each failure gets its own sentence, in our
  * words: the provider's status text and the network's errors go unquoted.
  */
-function describe(failure: ProviderFailure): UserMessage {
+function describe(failure: ProviderFailure): UserText {
 	switch (failure._tag) {
 		case "ConnectionMissing":
-			return UserMessage.of`Add an API key before connecting`;
+			return userText`Add an API key before connecting`;
 		case "ProviderRejected":
 			if (failure.status === 401) {
-				return UserMessage.of`The provider rejected the API key. Replace it with a valid key and try again.`;
+				return userText`The provider rejected the API key. Replace it with a valid key and try again.`;
 			}
-			return UserMessage.of`Provider returned ${failure.status}`;
+			return userText`Provider returned ${failure.status}`;
 		case "InvalidModelList":
 			return failure.reason;
 		case "SignInLapsed":
@@ -79,7 +80,7 @@ function describe(failure: ProviderFailure): UserMessage {
 		case "ProviderUnreachable":
 			return failure.cause instanceof EgressRefused
 				? failure.cause.userMessage
-				: UserMessage.of`Connection failed`;
+				: userText`Connection failed`;
 	}
 }
 
@@ -110,7 +111,7 @@ export function testProvider(
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
-): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserMessage }> {
+): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserText }> {
 	const attempt = Effect.gen(function* () {
 		const started = yield* Clock.currentTimeMillis;
 		const connection = yield* requireConnection(providers, workspaceId, providerId);
@@ -234,12 +235,12 @@ function requestModels(
 		const listing = Schema.decodeUnknownResult(dialect.listing)(yield* readJson(response));
 		if (listing._tag === "Failure") {
 			return yield* new InvalidModelList({
-				reason: UserMessage.of`Provider returned an invalid model list`,
+				reason: userText`Provider returned an invalid model list`,
 			});
 		}
 		if (listing.success.length > MAX_MODELS) {
 			return yield* new InvalidModelList({
-				reason: UserMessage.of`Provider returned more than ${MAX_MODELS} models`,
+				reason: userText`Provider returned more than ${MAX_MODELS} models`,
 			});
 		}
 		const listed = distinctById(
@@ -286,7 +287,7 @@ function readJson(response: Response): Effect.Effect<unknown, ProviderFailure> {
 			if (bytes > MAX_MODEL_RESPONSE_BYTES) {
 				yield* Effect.promise(() => reader.cancel());
 				return yield* new InvalidModelList({
-					reason: UserMessage.of`Provider model response is too large`,
+					reason: userText`Provider model response is too large`,
 				});
 			}
 			text += decoder.decode(chunk.value, { stream: true });
@@ -295,7 +296,7 @@ function readJson(response: Response): Effect.Effect<unknown, ProviderFailure> {
 		return yield* Effect.try({
 			try: () => JSON.parse(text) as unknown,
 			catch: () =>
-				new InvalidModelList({ reason: UserMessage.of`Provider returned an invalid model list` }),
+				new InvalidModelList({ reason: userText`Provider returned an invalid model list` }),
 		});
 	});
 }

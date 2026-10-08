@@ -16,6 +16,7 @@ import {
 	listedConnection,
 	type TestConnection,
 } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
@@ -365,7 +366,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.onboarding.completeInvite.mockImplementation(() =>
 		client.api.workspaces.acceptInvitation.mock.calls.length > 0
 			? Effect.succeed({ workspaceId: WORKSPACE })
-			: Effect.fail(new BadRequest({ message: "Pending" })),
+			: Effect.fail(new BadRequest({ message: userText`Pending` })),
 	);
 	const inPod = administersWorkspace(role)
 		? ADMIN_IN_POD
@@ -400,13 +401,15 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		});
 	});
 	client.api.chats.getOrCreate.mockReturnValue(
-		Effect.fail(new NotFound({ message: "No chat fixture" })),
+		Effect.fail(new NotFound({ message: userText`No chat fixture` })),
 	);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.threads.get.mockReturnValue(Effect.fail(new NotFound({ message: "No such thread" })));
+	client.api.threads.get.mockReturnValue(
+		Effect.fail(new NotFound({ message: userText`No such thread` })),
+	);
 	client.api.threads.activity.mockReturnValue(
-		Effect.fail(new NotFound({ message: "No such thread" })),
+		Effect.fail(new NotFound({ message: userText`No such thread` })),
 	);
 	client.api.workspaceAccess.mockReturnValue(
 		Effect.succeed({
@@ -453,7 +456,7 @@ export function serveConnections(...connections: TestConnection[]): void {
 		const found = byId(input);
 		return found
 			? Effect.succeed(connectionWithTools(found))
-			: Effect.fail(new NotFound({ message: "No such connection" }));
+			: Effect.fail(new NotFound({ message: userText`No such connection` }));
 	});
 }
 

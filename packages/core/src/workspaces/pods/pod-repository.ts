@@ -7,13 +7,14 @@ import {
 	type PodColor,
 	type PodUpdate,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { pod, podMember, workspaceMember } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { podColorOf } from "./pod.ts";
 
 /**
@@ -324,7 +325,7 @@ export class PodSlugTaken
 		return `A pod with the slug "${this.slug}" already exists in this workspace`;
 	}
 	get userMessage() {
-		return UserMessage.of`A pod with that address already exists in this workspace`;
+		return userText`A pod with that address already exists in this workspace`;
 	}
 }
 
@@ -337,7 +338,7 @@ export class PodGone
 		return `No pod with the id "${this.podId}"`;
 	}
 	get userMessage() {
-		return UserMessage.of`No such pod`;
+		return userText`No such pod`;
 	}
 }
 
@@ -355,7 +356,7 @@ export class PersonalPodFixed
 	}
 	get userMessage() {
 		return this.attempted === "rename"
-			? UserMessage.of`A Personal pod's name, address and colour cannot be changed`
-			: UserMessage.of`Personal pods cannot be deleted`;
+			? userText`A Personal pod's name, address and colour cannot be changed`
+			: userText`Personal pods cannot be deleted`;
 	}
 }

@@ -1,5 +1,6 @@
 export * as RoutineRepository from "./repository.ts";
 
+import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
@@ -12,7 +13,7 @@ import {
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { routine, routineExecution, thread } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import type { Turns } from "../turns/turns.ts";
@@ -92,7 +93,7 @@ export interface Interface {
 	 * Records a run that has not ended as failed, telling people
 	 * `userMessage`, and announces it. Does nothing once the run has ended.
 	 */
-	readonly fail: (executionId: string, userMessage: UserMessage) => Effect.Effect<void>;
+	readonly fail: (executionId: string, userMessage: UserText) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -389,7 +390,7 @@ export type Settled = Turns.Ended | { readonly state: "completed" };
 
 export class RoutineNameTaken extends Data.TaggedError("RoutineNameTaken") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`A Routine with that name already exists`;
+		return userText`A Routine with that name already exists`;
 	}
 }
 
@@ -418,4 +419,4 @@ export function endingOf(run: schema.RoutineExecutionRow): Turns.Ended | undefin
 }
 
 /** What people are told about a run whose workflow failed; the cause goes only to the logs. */
-export const RUN_STOPPED_UNEXPECTEDLY = UserMessage.of`The routine run stopped unexpectedly`;
+export const RUN_STOPPED_UNEXPECTEDLY = userText`The routine run stopped unexpectedly`;

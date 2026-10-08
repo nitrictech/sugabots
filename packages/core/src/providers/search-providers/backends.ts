@@ -1,8 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { EXA_FREE_SEARCH_URL } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { Data, Effect, Schema } from "effect";
-import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 import type { SearchConnection } from "./search-connection.ts";
@@ -24,9 +24,7 @@ interface SearchResult {
 	published: string | null;
 }
 
-export type SearchOutcome =
-	| { ok: true; results: SearchResult[] }
-	| { ok: false; reason: UserMessage };
+export type SearchOutcome = { ok: true; results: SearchResult[] } | { ok: false; reason: UserText };
 
 export interface SearchRequest {
 	query: string;
@@ -99,13 +97,11 @@ function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): Sea
 				},
 			});
 			if (!response.ok) {
-				return refused(UserMessage.of`Brave Search answered HTTP ${response.status}`);
+				return refused(userText`Brave Search answered HTTP ${response.status}`);
 			}
 			const parsed = Schema.decodeUnknownResult(braveResponse)(await response.json());
 			if (parsed._tag === "Failure") {
-				return refused(
-					UserMessage.of`Brave Search answered with something that is not a result list`,
-				);
+				return refused(userText`Brave Search answered with something that is not a result list`);
 			}
 			return {
 				ok: true,
@@ -152,11 +148,11 @@ function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): Searc
 				}),
 			});
 			if (!response.ok) {
-				return refused(UserMessage.of`Exa answered HTTP ${response.status}`);
+				return refused(userText`Exa answered HTTP ${response.status}`);
 			}
 			const parsed = Schema.decodeUnknownResult(exaResponse)(await response.json());
 			if (parsed._tag === "Failure") {
-				return refused(UserMessage.of`Exa answered with something that is not a result list`);
+				return refused(userText`Exa answered with something that is not a result list`);
 			}
 			return {
 				ok: true,
@@ -197,11 +193,11 @@ function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): Se
 				body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
 			});
 			if (!response.ok) {
-				return refused(UserMessage.of`Tavily answered HTTP ${response.status}`);
+				return refused(userText`Tavily answered HTTP ${response.status}`);
 			}
 			const parsed = Schema.decodeUnknownResult(tavilyResponse)(await response.json());
 			if (parsed._tag === "Failure") {
-				return refused(UserMessage.of`Tavily answered with something that is not a result list`);
+				return refused(userText`Tavily answered with something that is not a result list`);
 			}
 			return {
 				ok: true,
@@ -250,7 +246,7 @@ function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
 				if (result.isError) {
 					// Exa's text is its own and may say anything, so it goes to the logs.
 					throw new SearchRefused({
-						userMessage: UserMessage.of`Exa refused the search`,
+						userMessage: userText`Exa refused the search`,
 						detail: text,
 					});
 				}
@@ -321,15 +317,15 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 			});
 			if (response.status === 403) {
 				return refused(
-					UserMessage.of`SearXNG refused the request; its JSON format may be off in settings.yml`,
+					userText`SearXNG refused the request; its JSON format may be off in settings.yml`,
 				);
 			}
 			if (!response.ok) {
-				return refused(UserMessage.of`SearXNG answered HTTP ${response.status}`);
+				return refused(userText`SearXNG answered HTTP ${response.status}`);
 			}
 			const parsed = Schema.decodeUnknownResult(searxngResponse)(await response.json());
 			if (parsed._tag === "Failure") {
-				return refused(UserMessage.of`SearXNG answered with something that is not a result list`);
+				return refused(userText`SearXNG answered with something that is not a result list`);
 			}
 			return {
 				ok: true,
@@ -344,7 +340,7 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 	};
 }
 
-function refused(reason: UserMessage): SearchOutcome {
+function refused(reason: UserText): SearchOutcome {
 	return { ok: false, reason };
 }
 
@@ -353,7 +349,7 @@ function refused(reason: UserMessage): SearchOutcome {
  * `answer` logs what it said and tells the caller only `userMessage`.
  */
 class SearchRefused extends Data.TaggedError("SearchRefused")<{
-	readonly userMessage: UserMessage;
+	readonly userMessage: UserText;
 	readonly detail: string;
 }> {}
 
@@ -374,15 +370,11 @@ function answer(
 	}).pipe(
 		Effect.catch(({ cause }) => {
 			if (signal?.aborted) {
-				return Effect.succeed(
-					refused(UserMessage.of`The turn was stopped before the search answered`),
-				);
+				return Effect.succeed(refused(userText`The turn was stopped before the search answered`));
 			}
 			if (timeout.aborted) {
 				return Effect.succeed(
-					refused(
-						UserMessage.of`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`,
-					),
+					refused(userText`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`),
 				);
 			}
 			if (cause instanceof EgressRefused) return Effect.succeed(refused(cause.userMessage));
@@ -396,7 +388,7 @@ function answer(
 			// the logs, and the model is told only that the search did not answer.
 			return Effect.as(
 				Effect.logError(`Searching with ${service} failed`, cause),
-				refused(UserMessage.of`${service} could not be searched`),
+				refused(userText`${service} could not be searched`),
 			);
 		}),
 	);

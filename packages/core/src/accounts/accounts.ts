@@ -1,13 +1,14 @@
 export * as Accounts from "./accounts.ts";
 
 import { randomBytes } from "node:crypto";
+import { userText } from "@sugabots/errors";
 import { and, eq, gt } from "drizzle-orm";
 import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { Database, query } from "../database/database.ts";
 import { user, workspaceInvite } from "../database/schema.ts";
 import { Installation } from "../installation/installation.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 
 /** Who may have an account here. */
 export interface Interface {
@@ -92,7 +93,7 @@ export interface Admission {
 
 export class SignUpClosed extends Data.TaggedError("SignUpClosed") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Signups are invite only. Ask a member to invite you.`;
+		return userText`Signups are invite only. Ask a member to invite you.`;
 	}
 }
 
@@ -101,13 +102,13 @@ export class ReferralLinkInvalid
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This invite link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
+		return userText`This invite link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
 	}
 }
 
 export class ReferralsOff extends Data.TaggedError("ReferralsOff") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`This installation does not sign people up by referral.`;
+		return userText`This installation does not sign people up by referral.`;
 	}
 }
 

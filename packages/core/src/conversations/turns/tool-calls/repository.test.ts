@@ -1,3 +1,4 @@
+import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -19,7 +20,6 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
@@ -210,7 +210,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	it("closes a failed call with the error and no output", async () => {
 		const opened = await calls.open(from(0));
 
-		const closed = await calls.close(opened.id, { error: UserMessage.of`Host did not resolve` });
+		const closed = await calls.close(opened.id, { error: userText`Host did not resolve` });
 
 		expect(closed).toMatchObject({ status: "failed", output: null, error: "Host did not resolve" });
 	});
@@ -407,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await turns.fail(
 			replyTurnOf(prepared),
 			{ content: "", collaborations: [], toolCalls: [] },
-			{ userMessage: UserMessage.of`provider down`, mayRunAgain: true },
+			{ userMessage: userText`provider down`, mayRunAgain: true },
 		);
 
 		await prepareRunnable(execution, prepared.run);

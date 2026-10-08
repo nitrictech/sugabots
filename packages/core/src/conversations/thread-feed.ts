@@ -1,11 +1,11 @@
 export * as ThreadFeed from "./thread-feed.ts";
 
 import { streamEvent, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { Effect } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
 import { PodAudience } from "../database/events/pod-audience.ts";
-import type { UserMessage } from "../user-message.ts";
 import { type CollaborationChange, ConversationEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
@@ -148,7 +148,7 @@ function onThread(threadId: string, event: PendingEvent["event"]): PendingEvent 
 }
 
 /** Tells the thread's watchers why a reply they may be waiting for is not coming. */
-function notice(threadId: string, userMessage: UserMessage): PendingEvent {
+function notice(threadId: string, userMessage: UserText): PendingEvent {
 	return onThread(threadId, streamEvent("thread.notice", { threadId, notice: userMessage }));
 }
 

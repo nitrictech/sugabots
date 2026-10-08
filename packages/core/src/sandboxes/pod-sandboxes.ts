@@ -1,11 +1,12 @@
 export * as PodSandboxes from "./pod-sandboxes.ts";
 
+import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
 import { Database, query, serviceOperations } from "../database/database.ts";
 import { sandboxLease, sandbox as sandboxTable } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import { allowedHostsOf } from "./allowed-hosts.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
@@ -571,7 +572,7 @@ export const make = Effect.gen(function* () {
 							);
 							if (!configured) {
 								return yield* new UpgradeFailed({
-									reason: UserMessage.of`The sandbox's provider has lost its settings, so its work can't be copied. Reset it instead.`,
+									reason: userText`The sandbox's provider has lost its settings, so its work can't be copied. Reset it instead.`,
 								});
 							}
 							const from = sandboxes.forConnection(configured.connection);
@@ -602,7 +603,7 @@ export const make = Effect.gen(function* () {
 									SandboxStopped: () =>
 										Effect.fail(
 											new UpgradeFailed({
-												reason: UserMessage.of`The sandbox has stopped, so its work can't be copied to another provider. Have an agent use it once to start it again, then upgrade.`,
+												reason: userText`The sandbox has stopped, so its work can't be copied to another provider. Have an agent use it once to start it again, then upgrade.`,
 											}),
 										),
 								}),
@@ -614,14 +615,14 @@ export const make = Effect.gen(function* () {
 							);
 							if (packed.exitCode !== 0) {
 								return yield* new UpgradeFailed({
-									reason: UserMessage.of`The sandbox's work couldn't be packed up to copy.`,
+									reason: userText`The sandbox's work couldn't be packed up to copy.`,
 								});
 							}
 							const archive = yield* old.downloadFile(archivePath).pipe(
 								Effect.catchTag("SandboxFileFailed", () =>
 									Effect.fail(
 										new UpgradeFailed({
-											reason: UserMessage.of`The sandbox's work couldn't be read to copy.`,
+											reason: userText`The sandbox's work couldn't be read to copy.`,
 										}),
 									),
 								),
@@ -641,7 +642,7 @@ export const make = Effect.gen(function* () {
 											? moveRecord(row.id, provider.id, fresh.id)
 											: Effect.fail(
 													new UpgradeFailed({
-														reason: UserMessage.of`The work couldn't be unpacked in the new sandbox. The old one is untouched.`,
+														reason: userText`The work couldn't be unpacked in the new sandbox. The old one is untouched.`,
 													}),
 												),
 									),
@@ -751,20 +752,20 @@ export class SandboxInUse
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`An agent is using the sandbox right now. Try again when it has finished.`;
+		return userText`An agent is using the sandbox right now. Try again when it has finished.`;
 	}
 }
 
 /** The pod has no sandbox to upgrade, or its provider lost it. */
 export class NoSandbox extends Data.TaggedError("NoSandbox") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`This pod has no sandbox to upgrade. Its next one is made from the current image.`;
+		return userText`This pod has no sandbox to upgrade. Its next one is made from the current image.`;
 	}
 }
 
 /** An upgrade stopped before the pod moved; its old sandbox is untouched. */
 export class UpgradeFailed
-	extends Data.TaggedError("UpgradeFailed")<{ reason: UserMessage }>
+	extends Data.TaggedError("UpgradeFailed")<{ reason: UserText }>
 	implements UserFacing
 {
 	get userMessage() {

@@ -26,7 +26,22 @@
 		"plugins": [
 			{
 				"name": "@effect/language-service",
-				"ignoreEffectWarningsInTscExitCode": true
+				"ignoreEffectWarningsInTscExitCode": true,
+				"overrides": [
+					{
+						// Code that uses DomainError: a caught error must become a typed class.
+						// Keep this list the same as the DomainError override in biome.json.
+						"include": ["packages/server/src/http/errors.ts"],
+						"options": {
+							"diagnosticSeverity": {
+								"unknownInEffectCatch": "error",
+								"globalErrorInEffectCatch": "error",
+								"globalErrorInEffectFailure": "error",
+								"anyUnknownInErrorContext": "error"
+							}
+						}
+					}
+				]
 			}
 		]
 	}

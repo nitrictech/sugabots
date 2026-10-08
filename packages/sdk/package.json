@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@sugabots/contracts": "workspace:*",
+		"@sugabots/errors": "workspace:*",
 		"better-auth": "catalog:",
 		"effect": "catalog:",
 		"eventsource-parser": "^4.1.0"

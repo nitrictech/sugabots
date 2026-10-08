@@ -4,10 +4,11 @@
  * each step does lives behind `FacilitateSteps`, implemented in
  * `facilitator.ts`.
  */
+import { userText } from "@sugabots/errors";
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, Data, Duration, Effect, Schema } from "effect";
 import { DurableClock, Workflow } from "effect/unstable/workflow";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 
 export const FacilitateRequest = Schema.Struct({
@@ -84,7 +85,7 @@ export class FacilitationFailed
 		return `Facilitation failed ${MAX_ATTEMPTS} times`;
 	}
 	get userMessage() {
-		return UserMessage.of`The Facilitator could not choose who speaks next`;
+		return userText`The Facilitator could not choose who speaks next`;
 	}
 }
 

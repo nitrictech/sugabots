@@ -1,3 +1,4 @@
+import { userText } from "@sugabots/errors";
 import { tool } from "ai";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, Schema } from "effect";
@@ -9,7 +10,6 @@ import { agent, message, toolCall, turn, user } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -42,7 +42,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	const execution = onPostgres({
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
-	const providerDown = UserMessage.of`The model provider could not answer.`;
+	const providerDown = userText`The model provider could not answer.`;
 	let threadId: string;
 	let connectionId: string;
 	let hostId: string;
@@ -201,7 +201,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		expect(outcome).toEqual({ _tag: "Finished" });
 		expect(await storedTurn()).toMatchObject({
 			status: "failed",
-			error: UserMessage.of`The reply stopped before answering.`,
+			error: userText`The reply stopped before answering.`,
 		});
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "message.failed", willRetry: false }),

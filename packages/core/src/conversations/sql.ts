@@ -14,6 +14,7 @@ import type {
 	ToolApprovalStatus,
 	ToolCallStatus,
 } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
@@ -30,7 +31,6 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import type { UserMessage } from "../user-message.ts";
 import { agent, pod, user, workspace } from "../workspaces/sql.ts";
 
 export const routine = pgTable(
@@ -202,9 +202,9 @@ export const routineExecution = pgTable(
 		/** The routine's `results` when the run was accepted. */
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		state: text("state").$type<RoutineExecutionState>().notNull().default("queued"),
-		error: text("error").$type<UserMessage>(),
+		error: text("error").$type<UserText>(),
 		pendingTerminalState: text("pending_terminal_state").$type<"failed" | "cancelled">(),
-		pendingTerminalError: text("pending_terminal_error").$type<UserMessage>(),
+		pendingTerminalError: text("pending_terminal_error").$type<UserText>(),
 		acceptedAt: stamp("accepted_at"),
 		startedAt: timestamp("started_at", { withTimezone: true }),
 		finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -343,7 +343,7 @@ export const turn = pgTable(
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
 		// Why this agent got the turn, for reading a routing decision back later.
 		reason: text("reason").$type<TurnReason>(),
-		error: text("error").$type<UserMessage>(),
+		error: text("error").$type<UserText>(),
 		startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
 		finishedAt: timestamp("finished_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
@@ -504,7 +504,7 @@ export const toolCall = pgTable(
 		input: jsonb("input").$type<JsonValue>().notNull(),
 		output: jsonb("output").$type<JsonValue>(),
 		status: text("status").$type<ToolCallStatus>().notNull().default("running"),
-		error: text("error").$type<UserMessage>(),
+		error: text("error").$type<UserText>(),
 		/** Whether the tool may have changed something at the other end. */
 		mutating: boolean("mutating").notNull().default(false),
 		/** Where in the reply's text the call was made. */

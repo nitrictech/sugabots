@@ -1,4 +1,5 @@
 import type { RoutineResults } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,6 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -74,7 +74,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	/** An event ending the thread's routine run early, as `outcome`. */
 	const ended = (threadId: string, outcome: Turns.Ended) =>
 		ConversationEvent.TurnAbandoned({ threadId, agentId, outcome });
-	const failed = (error: UserMessage): Turns.Ended => ({ state: "failed", error });
+	const failed = (error: UserText): Turns.Ended => ({ state: "failed", error });
 	const executionOf = async (executionId: string) => {
 		const [row] = await onDatabase((db) =>
 			db.select().from(routineExecution).where(eq(routineExecution.id, executionId)),
@@ -275,7 +275,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 	it.each([
 		{
-			outcome: failed(UserMessage.of`Model failed`),
+			outcome: failed(userText`Model failed`),
 			collaborationStatus: "waiting" as const,
 		},
 		{ outcome: { state: "cancelled" } as const, collaborationStatus: "pending" as const },
@@ -427,7 +427,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await announce(
 			ConversationEvent.FacilitationFailed({
 				threadId: fixture.childThread.id,
-				userMessage: UserMessage.of`Model failed`,
+				userMessage: userText`Model failed`,
 			}),
 		);
 		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({ state: "running" });
@@ -437,7 +437,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await announce(ConversationEvent.LaneReleased({ threadId: fixture.childThread.id }));
 		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({
 			state: "failed",
-			error: UserMessage.of`Model failed`,
+			error: userText`Model failed`,
 		});
 	});
 
@@ -477,7 +477,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const fixture = await aRunWithCollaboration("waiting");
 		await runAgain(fixture.askingTurn.id);
 
-		await announce(ended(fixture.childThread.id, failed(UserMessage.of`Child model failed`)));
+		await announce(ended(fixture.childThread.id, failed(userText`Child model failed`)));
 
 		const [stopping] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
@@ -509,7 +509,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await settlement.settleRun(fixture.run)).toBe(true);
 		expect(await executionOf(fixture.accepted.executionId)).toMatchObject({
 			state: "failed",
-			error: UserMessage.of`Child model failed`,
+			error: userText`Child model failed`,
 			pendingTerminalState: null,
 			pendingTerminalError: null,
 			finishedAt: expect.any(Date),
@@ -544,7 +544,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		const [childRun] = await runOnPostgres(runningTurns(fixture.childThread.id));
 		if (!childRun) throw new Error("Could not start settlement test child turn");
 
-		await announce(ended(fixture.childThread.id, failed(UserMessage.of`Child model failed`)));
+		await announce(ended(fixture.childThread.id, failed(userText`Child model failed`)));
 
 		expect(await execution.prepare(childRun)).toMatchObject({
 			_tag: "NotRunnable",
@@ -582,7 +582,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await announce(
 			ConversationEvent.FacilitationFailed({
 				threadId: accepted.threadId,
-				userMessage: UserMessage.of`Model failed`,
+				userMessage: userText`Model failed`,
 			}),
 		);
 		letGo();
@@ -604,7 +604,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 		expect(await executionOf(run.executionId)).toMatchObject({
 			state: "failed",
-			error: UserMessage.of`Model failed`,
+			error: userText`Model failed`,
 		});
 	});
 
@@ -771,7 +771,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	it("posts nothing for a run that failed", async () => {
 		const { accepted, run } = await aRunningRun("post_to_chat");
 
-		await announce(ended(accepted.threadId, failed(UserMessage.of`Model failed`)));
+		await announce(ended(accepted.threadId, failed(userText`Model failed`)));
 		await finishTurnsIn(accepted.threadId);
 		await settlement.settleRun(run);
 

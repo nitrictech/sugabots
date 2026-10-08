@@ -7,7 +7,7 @@ import { ModelDiscoveryFailed } from "@sugabots/core/providers/model-providers/r
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
-import { UserMessage } from "@sugabots/core/user-message";
+import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -149,7 +149,7 @@ describe("model provider routes", () => {
 				Effect.fail(
 					new ModelDiscoveryFailed({
 						message: "The provider could not be reached: getaddrinfo ENOTFOUND 10.0.0.7",
-						userMessage: UserMessage.of`Connection failed`,
+						userMessage: userText`Connection failed`,
 					}),
 				),
 		}).request(`${root}/${PROVIDER_ID}/fetch-models`, { method: "POST", headers });

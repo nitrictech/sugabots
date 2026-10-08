@@ -2,6 +2,7 @@ import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contract
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import { Installation } from "@sugabots/core/installation/installation";
+import { userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -168,7 +169,7 @@ function defectsAsInternal<E, R>(
 			Effect.as(
 				failureResponse(
 					InternalServerError,
-					new InternalServerError({ message: "Internal server error" }),
+					new InternalServerError({ message: userText`Internal server error` }),
 					500,
 				),
 			),
@@ -179,19 +180,15 @@ function defectsAsInternal<E, R>(
 /** A path no route matches answers `NotFound` in the API's error shape, like any other. */
 function unknownRouteAsNotFound<E, R>(
 	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-): Effect.Effect<
-	HttpServerResponse.HttpServerResponse,
-	E,
-	R | HttpServerRequest.HttpServerRequest
-> {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> {
 	return Effect.catchIf(
 		effect,
 		(error) => HttpServerError.isHttpServerError(error) && error.reason._tag === "RouteNotFound",
 		() =>
-			Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
+			Effect.succeed(
 				failureResponse(
 					NotFound,
-					new NotFound({ message: `No route for ${request.method} ${request.url}` }),
+					new NotFound({ message: userText`There is nothing at this address.` }),
 					404,
 				),
 			),

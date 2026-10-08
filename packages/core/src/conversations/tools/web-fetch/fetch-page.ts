@@ -1,5 +1,5 @@
+import { type UserText, userText } from "@sugabots/errors";
 import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { readablePage } from "./readable.ts";
 
 /**
@@ -43,7 +43,7 @@ interface FetchedPage {
 /** Why a page was not fetched, as the model reads it and people see it among the reply's tool calls. */
 export interface Refusal {
 	ok: false;
-	reason: UserMessage;
+	reason: UserText;
 }
 
 type PageOutcome = { ok: true; page: FetchedPage } | Refusal;
@@ -88,7 +88,7 @@ export function pageFetcher({
 					await response.body?.cancel();
 					if (!location) {
 						return refused(
-							UserMessage.of`The server answered HTTP ${response.status} without saying where to go`,
+							userText`The server answered HTTP ${response.status} without saying where to go`,
 						);
 					}
 					const next = webUrl(location, current);
@@ -100,28 +100,28 @@ export function pageFetcher({
 				}
 				if (!response.ok) {
 					await response.body?.cancel();
-					return refused(UserMessage.of`The server answered HTTP ${response.status}`);
+					return refused(userText`The server answered HTTP ${response.status}`);
 				}
 				return await readPage(response, requested, current, { maxBytes, maxCharacters });
 			}
-			return refused(UserMessage.of`Gave up after ${MAX_REDIRECTS} redirects`);
+			return refused(userText`Gave up after ${MAX_REDIRECTS} redirects`);
 		} catch (cause) {
 			if (signal?.aborted) {
-				return refused(UserMessage.of`The turn was stopped before the page arrived`);
+				return refused(userText`The turn was stopped before the page arrived`);
 			}
 			if (timeout.aborted) {
-				return refused(UserMessage.of`No answer within ${timeoutMs / 1000} seconds`);
+				return refused(userText`No answer within ${timeoutMs / 1000} seconds`);
 			}
 			if (cause instanceof EgressRefused) return refused(cause.userMessage);
 			// Anything else is a fault on our side or the network's: its details go to
 			// the logs, and the model is told only that the page did not arrive.
 			console.error(`Fetching ${requested} failed`, cause);
-			return refused(UserMessage.of`The page could not be fetched`);
+			return refused(userText`The page could not be fetched`);
 		}
 	};
 }
 
-function refused(reason: UserMessage): Refusal {
+function refused(reason: UserText): Refusal {
 	return { ok: false, reason };
 }
 
@@ -130,10 +130,10 @@ function webUrl(value: string, base?: URL): { ok: true; url: URL } | Refusal {
 	try {
 		url = new URL(value, base);
 	} catch {
-		return refused(UserMessage.of`The URL is not valid`);
+		return refused(userText`The URL is not valid`);
 	}
 	if (url.protocol !== "https:" && url.protocol !== "http:") {
-		return refused(UserMessage.of`Only http and https addresses can be fetched`);
+		return refused(userText`Only http and https addresses can be fetched`);
 	}
 	url.protocol = "https:";
 	return { ok: true, url };
@@ -166,12 +166,12 @@ async function readPage(
 	if (!kind) {
 		await response.body?.cancel();
 		// The media type is the server's own words, so it is not repeated.
-		return refused(UserMessage.of`The page is of a type that cannot be read as text`);
+		return refused(userText`The page is of a type that cannot be read as text`);
 	}
 	const bytes = await readUpTo(response, limits.maxBytes);
 	if (!bytes) {
 		return refused(
-			UserMessage.of`The page is larger than ${Math.round(limits.maxBytes / 1024 / 1024)} MB`,
+			userText`The page is larger than ${Math.round(limits.maxBytes / 1024 / 1024)} MB`,
 		);
 	}
 	const body = decode(bytes, charset);

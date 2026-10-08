@@ -1,5 +1,6 @@
 export * as DesktopViewer from "./viewer.ts";
 
+import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer, type Scope } from "effect";
 import type { AuthorizationDenied } from "../../../authorization/access.ts";
@@ -12,7 +13,6 @@ import { Ids } from "../../../ids/ids.ts";
 import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { placeOf } from "../sandbox/tools.ts";
 import { DesktopUnavailable, startDesktop } from "./browser.ts";
 
@@ -122,6 +122,6 @@ export const layer = layerNoDeps.pipe(
 	]),
 );
 
-const NOT_IN_THIS_THREAD = UserMessage.of`This agent has no desktop in this thread.`;
-const NO_SANDBOX = UserMessage.of`This agent doesn't use the pod's sandbox, so it has no desktop.`;
-const SANDBOXES_OFF = UserMessage.of`Sandboxes are switched off for this workspace, so there's no desktop to open.`;
+const NOT_IN_THIS_THREAD = userText`This agent has no desktop in this thread.`;
+const NO_SANDBOX = userText`This agent doesn't use the pod's sandbox, so it has no desktop.`;
+const SANDBOXES_OFF = userText`Sandboxes are switched off for this workspace, so there's no desktop to open.`;

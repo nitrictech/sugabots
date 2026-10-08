@@ -1,4 +1,5 @@
 import { InternalServerError, Unauthorized } from "@sugabots/contracts/http";
+import { userText } from "@sugabots/errors";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Data, Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -24,7 +25,9 @@ afterEach(() => {
 it("keeps an authenticated user during a transient refresh failure", async () => {
 	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.user).toEqual(sam));
-	client.api.me.mockReturnValue(Effect.fail(new InternalServerError({ message: "Unavailable" })));
+	client.api.me.mockReturnValue(
+		Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
+	);
 
 	await act(async () => {
 		await expect(result.current.refresh()).rejects.toMatchObject({ _tag: "InternalServerError" });
@@ -36,7 +39,7 @@ it("keeps an authenticated user during a transient refresh failure", async () =>
 
 it("can retry an initial transient session failure", async () => {
 	client.api.me
-		.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: "Unavailable" })))
+		.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: userText`Unavailable` })))
 		.mockReturnValueOnce(Effect.succeed(meAsSam));
 	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.error).toMatchObject({ _tag: "InternalServerError" }));
@@ -59,7 +62,7 @@ it("discovers a cookie session without checking for a local token", async () => 
 });
 
 it("clears authentication when the API rejects the session", async () => {
-	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: "Expired" })));
+	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: userText`Expired` })));
 	const { result } = renderHook(useSessionFromApi);
 
 	await waitFor(() => expect(result.current.user).toBeNull());
@@ -70,7 +73,7 @@ it("clears authentication when the API rejects the session", async () => {
 it("forgets the last answer on signing out", async () => {
 	const { result } = renderHook(useSessionFromApi);
 	await waitFor(() => expect(result.current.me).toEqual(meAsSam));
-	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: "Signed out" })));
+	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: userText`Signed out` })));
 
 	await act(() => result.current.refresh());
 

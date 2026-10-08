@@ -1,6 +1,7 @@
 import { systemAgentKeySchema } from "@sugabots/contracts";
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { userText } from "@sugabots/errors";
 import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -24,7 +25,7 @@ export const systemAgentRoutes = HttpApiBuilder.group(ServerApi, "systemAgents",
 				Effect.gen(function* () {
 					const key = Schema.decodeUnknownOption(systemAgentKeySchema)(params.key);
 					if (key._tag === "None") {
-						return yield* new NotFound({ message: "No such built-in agent" });
+						return yield* new NotFound({ message: userText`No such built-in agent` });
 					}
 					return yield* agents
 						.setSystemAgentModel({

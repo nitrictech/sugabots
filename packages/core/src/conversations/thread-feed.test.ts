@@ -5,13 +5,13 @@ import {
 	workspaceChannel,
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { transaction } from "../database/database.ts";
 import type { PendingEvent } from "../database/events/outbox.ts";
 import { PodAudience } from "../database/events/pod-audience.ts";
 import { noDatabase } from "../database/testing.ts";
-import { UserMessage } from "../user-message.ts";
 import { ConversationEvent } from "./events.ts";
 import { ThreadFeed } from "./thread-feed.ts";
 
@@ -89,7 +89,7 @@ describe("the thread feed", () => {
 	])(
 		"fails the reply with what people are told (will retry: $willRetry)",
 		({ willRetry, listsChange }) => {
-			const userMessage = UserMessage.of`The model could not be reached`;
+			const userMessage = userText`The model could not be reached`;
 
 			expect(
 				sent(
@@ -185,8 +185,8 @@ describe("the thread feed", () => {
 	});
 
 	it("tells the thread why a reply it asked for is not coming", () => {
-		const noModel = UserMessage.of`Ada has no model chosen, so it cannot reply.`;
-		const noChoice = UserMessage.of`The Facilitator could not choose who speaks next`;
+		const noModel = userText`Ada has no model chosen, so it cannot reply.`;
+		const noChoice = userText`The Facilitator could not choose who speaks next`;
 
 		expect(
 			sent(

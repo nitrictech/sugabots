@@ -4,8 +4,9 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { Clock, Data, Effect, Schema } from "effect";
-import { type UserFacing, UserMessage } from "../../../user-message.ts";
+import type { UserFacing } from "../../../user-message.ts";
 import type { EgressHttpClient, EgressHttpClients } from "../../network/egress.ts";
 import type { ModelProviderRepository } from "../model-provider-repository.ts";
 import { chatgpt } from "./chatgpt.ts";
@@ -83,7 +84,7 @@ function signInTo(service: SignInServiceId): SubscriptionSignIn {
 
 export class ProviderSignInFailed
 	extends Data.TaggedError("ProviderSignInFailed")<{
-		readonly userMessage: UserMessage;
+		readonly userMessage: UserText;
 		readonly cause?: unknown;
 	}>
 	implements UserFacing
@@ -128,7 +129,7 @@ export function withSignInAccess(
 		);
 		if (!tokens) {
 			return yield* new ProviderSignInFailed({
-				userMessage: UserMessage.of`Sign in to ${signInServiceNames[service]} again`,
+				userMessage: userText`Sign in to ${signInServiceNames[service]} again`,
 			});
 		}
 		return {
@@ -161,7 +162,7 @@ export function postToSignIn(
 				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 			}),
 		catch: (cause) =>
-			new ProviderSignInFailed({ userMessage: UserMessage.of`Could not reach ${service}`, cause }),
+			new ProviderSignInFailed({ userMessage: userText`Could not reach ${service}`, cause }),
 	});
 }
 
@@ -175,7 +176,7 @@ export function decodeSignInBody<A>(
 		try: () => response.json(),
 		catch: (cause) =>
 			new ProviderSignInFailed({
-				userMessage: UserMessage.of`${service} answered unreadably`,
+				userMessage: userText`${service} answered unreadably`,
 				cause,
 			}),
 	}).pipe(
@@ -184,7 +185,7 @@ export function decodeSignInBody<A>(
 			cause instanceof ProviderSignInFailed
 				? cause
 				: new ProviderSignInFailed({
-						userMessage: UserMessage.of`${service} answered unexpectedly`,
+						userMessage: userText`${service} answered unexpectedly`,
 						cause,
 					}),
 		),

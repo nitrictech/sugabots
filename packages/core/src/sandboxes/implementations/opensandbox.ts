@@ -5,9 +5,9 @@ import {
 	type SandboxInfo,
 	SandboxManager,
 } from "@alibaba-group/opensandbox";
+import { userText } from "@sugabots/errors";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
-import { UserMessage } from "../../user-message.ts";
 import { Sandboxes } from "../sandboxes.ts";
 
 /**
@@ -243,7 +243,7 @@ function allowRules(hosts: readonly string[]) {
 	return hosts.map((host) => ({ action: "allow" as const, target: host }));
 }
 
-const MADE_WITHOUT_NETWORK_RULES = UserMessage.of`The pod's sandbox was made before sandboxes had network rules, so it can't be kept to them. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
+const MADE_WITHOUT_NETWORK_RULES = userText`The pod's sandbox was made before sandboxes had network rules, so it can't be kept to them. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
 
 async function run(
 	sandbox: OpenSandbox,
@@ -311,12 +311,12 @@ function isNotFound(cause: unknown) {
 function fileFailure(path: string, cause: unknown): Sandboxes.FileFailed | undefined {
 	if (!(cause instanceof SandboxApiException)) return undefined;
 	if (cause.statusCode === 404) {
-		return new Sandboxes.FileFailed({ path, reason: UserMessage.of`No such file` });
+		return new Sandboxes.FileFailed({ path, reason: userText`No such file` });
 	}
 	if (cause.statusCode === 400 || cause.statusCode === 403) {
 		return new Sandboxes.FileFailed({
 			path,
-			reason: UserMessage.of`The path is a directory, or can't be written`,
+			reason: userText`The path is a directory, or can't be written`,
 		});
 	}
 	return undefined;

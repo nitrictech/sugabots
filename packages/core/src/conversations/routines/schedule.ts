@@ -1,6 +1,7 @@
+import { type UserText, userText } from "@sugabots/errors";
 import { CronExpressionParser } from "cron-parser";
 import { Data, Effect } from "effect";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 
 /** A schedule that cannot run. People are told what to fix in our words, not the cron parser's. */
 export class InvalidRoutineSchedule
@@ -21,10 +22,10 @@ export class InvalidRoutineSchedule
 
 type ScheduleProblem = "notFiveFields" | "unknownTimeZone" | "unparseable";
 
-const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserMessage> = {
-	notFiveFields: UserMessage.of`Use a five-field cron expression`,
-	unknownTimeZone: UserMessage.of`That time zone is not recognised`,
-	unparseable: UserMessage.of`That cron expression is invalid`,
+const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserText> = {
+	notFiveFields: userText`Use a five-field cron expression`,
+	unknownTimeZone: userText`That time zone is not recognised`,
+	unparseable: userText`That cron expression is invalid`,
 };
 
 function requireRunnable(expression: string, timezone: string) {
