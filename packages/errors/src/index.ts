@@ -16,8 +16,10 @@ export type UserText = typeof userTextSchema.Type;
 
 export const UserText = {
 	/**
-	 * Treats `text` as user text without checking it. Only for text we show
-	 * as it is, like the auth library's error messages.
+	 * Treats `text` as user text without checking it, for code not yet moved to
+	 * `DomainError`. Each call can show people text we didn't write, so review
+	 * every one. It goes once the last caller has moved: names become
+	 * `DisplayName`s, and the auth library's errors map to our own words.
 	 */
 	unchecked: (text: string) => text as UserText,
 	/**
