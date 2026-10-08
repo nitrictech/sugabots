@@ -2,6 +2,7 @@ export * as ToolCallRepository from "./repository.ts";
 
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { and, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
@@ -20,7 +21,6 @@ import {
 	turn,
 	user,
 } from "../../../database/schema.ts";
-import type { UserMessage } from "../../../user-message.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
@@ -103,7 +103,7 @@ export interface Interface {
 	 */
 	readonly abandonUnfinished: (
 		turnIds: readonly string[],
-		userMessage: UserMessage,
+		userMessage: UserText,
 	) => Effect.Effect<void>;
 	/** Forgets a reply's calls, for a retry that starts the reply again. */
 	readonly forgetReply: (messageId: string) => Effect.Effect<void>;
@@ -388,7 +388,7 @@ export const layer = Layer.effect(Service, make);
 /** Stored inputs and outputs are cut at this many characters of JSON. */
 export const MAX_STORED_JSON_CHARACTERS = 64_000;
 
-export type ToolCallOutcome = { output: unknown } | { error: UserMessage };
+export type ToolCallOutcome = { output: unknown } | { error: UserText };
 
 /**
  * What an approved call must still match when it runs, beyond its tool and

@@ -1,5 +1,6 @@
 export * as Onboarding from "./onboarding.ts";
 
+import { userText } from "@sugabots/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
@@ -17,7 +18,7 @@ import {
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
@@ -197,14 +198,14 @@ export const layer = layerNoDeps.pipe(
 /** The pod and agent named are not ones this person may finish onboarding with. */
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Finish creating your pod and agent first`;
+		return userText`Finish creating your pod and agent first`;
 	}
 }
 
 /** The first agent runs on no model, or on one the workspace does not offer. */
 export class NoModelChosen extends Data.TaggedError("NoModelChosen") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Choose a model for your first bot first`;
+		return userText`Choose a model for your first bot first`;
 	}
 }
 
@@ -214,7 +215,7 @@ export class InvitationNotAccepted
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The invitation has not been accepted by this account`;
+		return userText`The invitation has not been accepted by this account`;
 	}
 }
 

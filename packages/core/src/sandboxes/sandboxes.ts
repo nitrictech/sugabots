@@ -1,8 +1,9 @@
 export * as Sandboxes from "./sandboxes.ts";
 
+import { type UserText, userText } from "@sugabots/errors";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
 
@@ -242,12 +243,12 @@ export class Unavailable
 		provider: Connection["provider"];
 		cause: unknown;
 		/** What went wrong, when the provider said something people can act on. */
-		reason?: UserMessage;
+		reason?: UserText;
 	}>
 	implements UserFacing
 {
 	get userMessage() {
-		return this.reason ?? UserMessage.of`The sandbox provider didn't answer. Try again shortly.`;
+		return this.reason ?? userText`The sandbox provider didn't answer. Try again shortly.`;
 	}
 }
 
@@ -271,7 +272,7 @@ export class Stopped extends Data.TaggedError("SandboxStopped")<{
 /** A refusal about the file itself, which the agent can do something about. */
 export class FileFailed extends Data.TaggedError("SandboxFileFailed")<{
 	path: string;
-	reason: UserMessage;
+	reason: UserText;
 }> {}
 
 /** Keeps the last `limit` characters of output as it arrives. */
@@ -370,7 +371,7 @@ export function writeFileThroughStaging(
 				: Effect.fail(
 						new FileFailed({
 							path,
-							reason: UserMessage.of`The path is a directory, or can't be written`,
+							reason: userText`The path is a directory, or can't be written`,
 						}),
 					),
 		),
@@ -387,13 +388,13 @@ const SIZE_LINE_CHARACTERS = 32;
 function readRefusal(exitCode: number | null) {
 	switch (exitCode) {
 		case READ_EXIT.missing:
-			return UserMessage.of`No such file`;
+			return userText`No such file`;
 		case READ_EXIT.notRegular:
-			return UserMessage.of`It isn't a regular file, such as a directory or a device`;
+			return userText`It isn't a regular file, such as a directory or a device`;
 		case READ_EXIT.unreadable:
-			return UserMessage.of`You don't have permission to read it`;
+			return userText`You don't have permission to read it`;
 		default:
-			return UserMessage.of`It couldn't be read`;
+			return userText`It couldn't be read`;
 	}
 }
 

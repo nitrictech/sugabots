@@ -2,13 +2,14 @@ export * as ConnectionRepository from "./connection-repository.ts";
 
 import type { ConnectionTool, ConnectionUpdate, NewConnection } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import { type ConnectionRow, connection, type ToolAccess } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { ConnectionTarget } from "./connection-target.ts";
 import type { OAuthRecord } from "./oauth.ts";
@@ -340,14 +341,14 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** What a test found: the server's tools, or why it could not be asked. */
-export type TestOutcome = { tools: ConnectionTool[] } | { error: UserMessage };
+export type TestOutcome = { tools: ConnectionTool[] } | { error: UserText };
 
 export class ConnectionNameTaken
 	extends Data.TaggedError("ConnectionNameTaken")
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`A connection with that name already exists in this pod`;
+		return userText`A connection with that name already exists in this pod`;
 	}
 }
 
@@ -360,7 +361,7 @@ export class UnknownConnectionTool
 	}
 
 	get userMessage() {
-		return UserMessage.of`The connection no longer lists some of those tools. Check the connection to refresh them.`;
+		return userText`The connection no longer lists some of those tools. Check the connection to refresh them.`;
 	}
 }
 

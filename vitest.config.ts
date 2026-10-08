@@ -28,6 +28,14 @@ export default defineConfig({
 			},
 			{
 				test: {
+					name: "errors",
+					root: "packages/errors",
+					environment: "node",
+					include: ["src/**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "contracts",
 					root: "packages/contracts",
 					environment: "node",

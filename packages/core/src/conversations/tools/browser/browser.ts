@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { Data, Effect } from "effect";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { type UserFacing, UserMessage } from "../../../user-message.ts";
+import type { UserFacing } from "../../../user-message.ts";
 import { type Image, type OpenSandbox, type Place, withImages } from "../sandbox/tools.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
@@ -22,7 +23,7 @@ export interface BrowserResult {
 
 interface Failed {
 	status: "failed";
-	error: UserMessage;
+	error: UserText;
 }
 
 /** A desktop and browser for one agent in one thread, started on first use. */
@@ -35,8 +36,8 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
-const IMAGE_BEFORE_PASSWORDS = UserMessage.of`This sandbox's image is from before desktops had passwords. Upgrade the pod's sandbox to open its desktop.`;
-const NO_BROWSER = UserMessage.of`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
+const IMAGE_BEFORE_PASSWORDS = userText`This sandbox's image is from before desktops had passwords. Upgrade the pod's sandbox to open its desktop.`;
+const NO_BROWSER = userText`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** The session's name for an agent in a thread: one desktop and browser each. */
 export function sessionName(turn: { threadId: string; agentId: string }) {
@@ -148,7 +149,7 @@ const desktopCommand = (
 
 /** There is no desktop to reach, for `reason`. */
 export class DesktopUnavailable
-	extends Data.TaggedError("DesktopUnavailable")<{ reason: UserMessage }>
+	extends Data.TaggedError("DesktopUnavailable")<{ reason: UserText }>
 	implements UserFacing
 {
 	get userMessage() {
@@ -162,10 +163,10 @@ export function browserSession(
 	turn: { threadId: string; agentId: string },
 ): BrowserSession {
 	const name = sessionName(turn);
-	let connecting: Promise<{ client: Client; note?: UserMessage } | Failed> | undefined;
+	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
 	let told = false;
 
-	const connect = async (): Promise<{ client: Client; note?: UserMessage } | Failed> => {
+	const connect = async (): Promise<{ client: Client; note?: UserText } | Failed> => {
 		const { sandbox } = await openSandbox();
 		const browser = await Effect.runPromise(
 			startBrowser(sandbox, place, turn).pipe(
@@ -185,7 +186,7 @@ export function browserSession(
 		return browser.started
 			? {
 					client,
-					note: UserMessage.of`Your browser has just started, on your own desktop in the sandbox. Tabs from before, if any, are gone.`,
+					note: userText`Your browser has just started, on your own desktop in the sandbox. Tabs from before, if any, are gone.`,
 				}
 			: { client };
 	};
@@ -219,7 +220,7 @@ export function browserSession(
 	};
 }
 
-function toBrowserResult(content: unknown, note: UserMessage | undefined): BrowserResult {
+function toBrowserResult(content: unknown, note: UserText | undefined): BrowserResult {
 	const parts = Array.isArray(content) ? (content as Array<Record<string, unknown>>) : [];
 	const text = parts
 		.filter((part) => part.type === "text" && typeof part.text === "string")

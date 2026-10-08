@@ -1,9 +1,9 @@
+import { userText } from "@sugabots/errors";
 import { jsonSchema, tool } from "ai";
 import { Effect, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { ToolExecutionRefused } from "../approvals/approved-calls.ts";
 import { recorded, refused } from "./recorded.ts";
 import type { ToolCallRepository } from "./repository.ts";
@@ -47,7 +47,7 @@ describe("a refused tool", () => {
 	it("refuses every call, recording why without running it", async () => {
 		const calls = fakeCalls();
 		const execute = vi.fn(async () => "ran");
-		const refusal = UserMessage.of`This tool is turned off for bots in this pod.`;
+		const refusal = userText`This tool is turned off for bots in this pod.`;
 		const off = refused("wiki__wipe", tool({ inputSchema: jsonSchema({}), execute }), refusal, {
 			calls,
 			run,

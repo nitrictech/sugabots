@@ -1,4 +1,5 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
 	Cause,
@@ -18,7 +19,7 @@ import { type Database, effectRunner, transaction } from "../../database/databas
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Models } from "../../providers/models/models.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -176,7 +177,7 @@ class TurnTimedOut extends Data.TaggedError("TurnTimedOut") implements UserFacin
 		return `Turn exceeded ${Duration.format(TURN_TIMEOUT)}`;
 	}
 	get userMessage() {
-		return UserMessage.of`The reply took too long and was stopped.`;
+		return userText`The reply took too long and was stopped.`;
 	}
 }
 class ApprovedToolChanged
@@ -187,7 +188,7 @@ class ApprovedToolChanged
 		return `Approved tool ${this.tool} no longer has the reviewed configuration`;
 	}
 	get userMessage() {
-		return UserMessage.of`A tool changed after it was approved, so it was not run.`;
+		return userText`A tool changed after it was approved, so it was not run.`;
 	}
 }
 /** The process running the turn stopped before the reply finished. */
@@ -196,7 +197,7 @@ class TurnInterrupted extends Data.TaggedError("TurnInterrupted") implements Use
 		return "Turn interrupted by its process stopping";
 	}
 	get userMessage() {
-		return UserMessage.of`The reply was interrupted.`;
+		return userText`The reply was interrupted.`;
 	}
 }
 /** A defect ended the turn rather than a failure it expects; the defect itself is logged. */
@@ -220,7 +221,7 @@ class ApprovalForUnknownTool
 		return `Approval requested for unknown tool ${this.tool}`;
 	}
 	get userMessage() {
-		return UserMessage.of`The reply asked to run a tool it was not offered.`;
+		return userText`The reply asked to run a tool it was not offered.`;
 	}
 }
 
@@ -230,7 +231,7 @@ class ReplyWithoutAnswer extends Data.TaggedError("ReplyWithoutAnswer") implemen
 		return "Model finished without an answer";
 	}
 	get userMessage() {
-		return UserMessage.of`The reply stopped before answering.`;
+		return userText`The reply stopped before answering.`;
 	}
 }
 

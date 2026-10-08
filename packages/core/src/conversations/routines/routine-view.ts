@@ -1,12 +1,13 @@
 import type { WorkspaceRoutine } from "@sugabots/contracts";
 import { DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { agent, pod, routine, routineExecution } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { crewOf } from "../threads/participants.ts";
@@ -142,7 +143,7 @@ export class InvalidRoutineExecutionCursor
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That Routine execution cursor is invalid`;
+		return userText`That Routine execution cursor is invalid`;
 	}
 }
 

@@ -1,7 +1,7 @@
+import { type UserText, userText } from "@sugabots/errors";
 import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
-import { UserMessage } from "../../../user-message.ts";
 import type { ApprovedToolCalls } from "../approvals/approved-calls.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
@@ -34,17 +34,17 @@ export interface RecordingOptions {
 /** What the model is told when a tool did not give a result, in place of the result. */
 export interface ToolFailedResult {
 	status: "failed";
-	error: UserMessage;
+	error: UserText;
 }
 
 /** What people, and the model, are told of a tool that threw. */
-const TOOL_THREW = UserMessage.of`The tool failed before it finished.`;
+const TOOL_THREW = userText`The tool failed before it finished.`;
 
 /**
  * What the model is told of an approved call that may no longer run, such as
  * one whose connection changed after it was approved.
  */
-const APPROVAL_NO_LONGER_APPLIES = UserMessage.of`The tool was not run: its approval no longer applies.`;
+const APPROVAL_NO_LONGER_APPLIES = userText`The tool was not run: its approval no longer applies.`;
 
 /**
  * A tool whose every call is written down: opened with its input before it
@@ -123,7 +123,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 export function refused(
 	key: string,
 	tool: Tool,
-	reason: UserMessage,
+	reason: UserText,
 	options: Pick<RecordingOptions, "calls" | "run" | "from" | "replyLength" | "noteToolCall">,
 ): Tool {
 	const { calls, run, from, replyLength, noteToolCall } = options;

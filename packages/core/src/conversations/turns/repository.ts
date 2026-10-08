@@ -1,6 +1,7 @@
 export * as TurnRepository from "./repository.ts";
 
 import { type Message, messagePartsFor } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import type { ModelMessage } from "ai";
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
@@ -21,7 +22,6 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
-import type { UserMessage } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { type ParticipantRow, toMessage } from "../threads/participants.ts";
@@ -93,7 +93,7 @@ export interface Interface {
 	readonly fail: (
 		turn: ReplyTurn,
 		draft: ReplyDraft,
-		failure: { userMessage: UserMessage; mayRunAgain: boolean },
+		failure: { userMessage: UserText; mayRunAgain: boolean },
 	) => Effect.Effect<boolean>;
 	/** Stops the run short, keeping the reply written so far. */
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
@@ -101,7 +101,7 @@ export interface Interface {
 		turnId: string,
 		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
-	readonly failSystemAgentTurn: (turnId: string, userMessage: UserMessage) => Effect.Effect<void>;
+	readonly failSystemAgentTurn: (turnId: string, userMessage: UserText) => Effect.Effect<void>;
 	/** Asks the turn to stop, and says who has to be told. */
 	readonly requestCancel: (turnId: string) => Effect.Effect<CancelRequest>;
 	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
@@ -117,7 +117,7 @@ export interface Interface {
 	 */
 	readonly abandon: (
 		owner: string,
-		outcome: { status: "failed" | "cancelled"; userMessage: UserMessage },
+		outcome: { status: "failed" | "cancelled"; userMessage: UserText },
 	) => Effect.Effect<Ended | undefined>;
 	/**
 	 * Records that a mutating tool crossed its dispatch boundary, so the turn
@@ -176,7 +176,7 @@ export const make = Effect.gen(function* () {
 	 * how it ended. A system agent's turn has no reply, so there is nothing to
 	 * announce.
 	 */
-	const endRun = (turnId: string, state: TurnState, userMessage: UserMessage) =>
+	const endRun = (turnId: string, state: TurnState, userMessage: UserText) =>
 		Effect.gen(function* () {
 			const ended = endedAs(state);
 			const [reply] = yield* query((db) =>
@@ -869,7 +869,7 @@ function stateOf(row: {
 	cancelRequested: boolean;
 	runs: number;
 	mutationStarted: boolean;
-	error: UserMessage | null;
+	error: UserText | null;
 	checkpointed: boolean;
 }): TurnState {
 	const facts = {

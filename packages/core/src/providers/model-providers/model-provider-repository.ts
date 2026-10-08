@@ -13,6 +13,7 @@ import {
 	providerPreset,
 	seededPresets,
 } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -24,7 +25,7 @@ import {
 	providerModel,
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 import { OAuthTokens } from "./sign-in/sign-in.ts";
@@ -84,7 +85,7 @@ export interface Interface {
 		workspaceId: string,
 		providerId: string,
 		testedAt: Date,
-		outcome: { error: UserMessage } | { activateOnSuccess: boolean },
+		outcome: { error: UserText } | { activateOnSuccess: boolean },
 	) => Effect.Effect<void>;
 	readonly addModels: (
 		workspaceId: string,
@@ -647,7 +648,7 @@ export class ModelProviderNameConflict
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`A model provider with that name already exists`;
+		return userText`A model provider with that name already exists`;
 	}
 }
 
@@ -660,7 +661,7 @@ export class ModelNotEnabled
 		return `This workspace does not offer the model "${this.model}"`;
 	}
 	get userMessage() {
-		return UserMessage.of`This workspace does not offer that model`;
+		return userText`This workspace does not offer that model`;
 	}
 }
 

@@ -1,6 +1,7 @@
 export * as TurnExecution from "./execution.ts";
 
 import type { Message, PodRouting, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import { UserText, userText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -12,7 +13,6 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { type TurnReason, threadCompaction } from "../../database/schema.ts";
-import { UserMessage } from "../../user-message.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -81,7 +81,7 @@ export const make = Effect.gen(function* () {
 	const refuseRun = (
 		run: TurnRun,
 		reason: string,
-		ending: { status: "failed" | "cancelled"; userMessage: UserMessage },
+		ending: { status: "failed" | "cancelled"; userMessage: UserText },
 	) =>
 		Effect.gen(function* () {
 			const ended = yield* turns.abandon(run.executionId, ending);
@@ -133,7 +133,7 @@ export const make = Effect.gen(function* () {
 						if (model === null) {
 							return yield* refuseRun(run, "The agent has no model chosen", {
 								status: "failed",
-								userMessage: UserMessage.of`${UserMessage.unchecked(speaker.name)} has no model chosen, so it cannot reply. Choose one in its settings.`,
+								userMessage: userText`${UserText.unchecked(speaker.name)} has no model chosen, so it cannot reply. Choose one in its settings.`,
 							});
 						}
 						if (loaded.type === "chat" && request.reason === "facilitator") {
@@ -334,7 +334,7 @@ const MAX_HISTORY_MESSAGES = 1_000;
 const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
 
 /** What people are told when an agent asked to reply in a thread is not in its pod. */
-const NOT_IN_POD = UserMessage.of`The agent asked to reply is not in this pod, so it cannot reply.`;
+const NOT_IN_POD = userText`The agent asked to reply is not in this pod, so it cannot reply.`;
 
 function notRunnable(reason: string, ended?: Ended): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended };

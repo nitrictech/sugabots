@@ -6,11 +6,11 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import { agent, message, user } from "../../database/schema.ts";
-import type { UserMessage } from "../../user-message.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
@@ -87,7 +87,7 @@ export function toMessage(
 	author: ParticipantRow,
 	placed: PlacedPartsOf = {},
 	/** What people are told of why the turn behind a failed reply failed. */
-	error?: UserMessage | null,
+	error?: UserText | null,
 ): Message {
 	const parts = row.parts.flatMap((part): MessagePart[] => {
 		if (part.type === "text") {
@@ -163,7 +163,7 @@ export interface MessageWithRelations extends schema.MessageRow {
 export function messageFromRelations(
 	stored: MessageWithRelations,
 	/** What people are told of why the turn behind a failed reply failed. */
-	error?: UserMessage | null,
+	error?: UserText | null,
 ): Message {
 	const shown = toMessage(
 		stored,

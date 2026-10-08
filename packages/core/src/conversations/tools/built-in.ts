@@ -1,12 +1,12 @@
 export * as BuiltInTools from "./built-in.ts";
 
+import { userText } from "@sugabots/errors";
 import type { ToolSet } from "ai";
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
 import { searchBackend, searchEndpoint } from "../../providers/search-providers/backends.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
-import { UserMessage } from "../../user-message.ts";
 import { type FetchPage, pageFetcher } from "./web-fetch/fetch-page.ts";
 import { WEB_FETCH_TOOL, webFetchTool } from "./web-fetch/tool.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
@@ -93,7 +93,7 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 	};
 }
 
-const NO_SEARCH_PROVIDER = UserMessage.of`The workspace has no search provider switched on.`;
+const NO_SEARCH_PROVIDER = userText`The workspace has no search provider switched on.`;
 
 /** No built-in tools at all, for a case that offers a turn none. */
 export const none: Interface = { forWorkspace: () => Effect.succeed({ tools: {}, usable: [] }) };

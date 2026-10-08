@@ -10,6 +10,7 @@ export * as Models from "./models.ts";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { type UserText, userText } from "@sugabots/errors";
 import {
 	APICallError,
 	type AssistantModelMessage,
@@ -26,7 +27,7 @@ import { Context, Data, Duration, Effect, Layer, Ref, Schedule, type Scope } fro
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
@@ -271,14 +272,14 @@ type RequestFailure =
 	| "rateLimited"
 	| "unavailable";
 
-const REQUEST_USER_MESSAGES: Record<RequestFailure, UserMessage> = {
-	noProvider: UserMessage.of`No active provider offers this model.`,
-	signInFailed: UserMessage.of`The model provider's sign-in failed. Sign in again.`,
-	rejected: UserMessage.of`The model provider refused the request. Check its API key.`,
-	outOfCredit: UserMessage.of`The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
-	refused: UserMessage.of`The model provider couldn't accept this request.`,
-	rateLimited: UserMessage.of`The model provider is busy. Try again shortly.`,
-	unavailable: UserMessage.of`The model provider could not answer.`,
+const REQUEST_USER_MESSAGES: Record<RequestFailure, UserText> = {
+	noProvider: userText`No active provider offers this model.`,
+	signInFailed: userText`The model provider's sign-in failed. Sign in again.`,
+	rejected: userText`The model provider refused the request. Check its API key.`,
+	outOfCredit: userText`The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
+	refused: userText`The model provider couldn't accept this request.`,
+	rateLimited: userText`The model provider is busy. Try again shortly.`,
+	unavailable: userText`The model provider could not answer.`,
 };
 
 interface Options {
@@ -601,7 +602,7 @@ export class UnusableAnswer
 		return this.reason;
 	}
 	get userMessage() {
-		return UserMessage.of`The model's answer could not be used.`;
+		return userText`The model's answer could not be used.`;
 	}
 }
 
@@ -614,7 +615,7 @@ export class AnswerTimedOut
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The model did not answer in time.`;
+		return userText`The model did not answer in time.`;
 	}
 }
 

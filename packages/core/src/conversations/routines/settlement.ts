@@ -1,6 +1,7 @@
 export * as RoutineSettlement from "./settlement.ts";
 
 import { textWithoutNarration } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -21,7 +22,6 @@ import {
 	thread,
 	turn,
 } from "../../database/schema.ts";
-import type { UserMessage } from "../../user-message.ts";
 import { Lanes, laneBusy } from "../../workflows/lanes.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
@@ -265,7 +265,7 @@ function settlementFor(
 /** settledAs returns how a run whose work is over ends: as it was ending, or else as its last turn did. */
 function settledAs(
 	ending: Turns.Ended | undefined,
-	lastTurn: { status: string; error: UserMessage | null } | undefined,
+	lastTurn: { status: string; error: UserText | null } | undefined,
 ): RoutineRepository.Settled {
 	if (ending) return ending;
 	if (lastTurn?.status === "failed") {

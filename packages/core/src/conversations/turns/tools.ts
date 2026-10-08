@@ -1,9 +1,9 @@
 import type { CollaborationPart } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import { UserMessage } from "../../user-message.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
@@ -76,11 +76,11 @@ export interface ToolDependencies {
 }
 
 /** What people, and the model, are told of a call to a tool the pod has turned off. */
-const TOOL_TURNED_OFF = UserMessage.of`This tool is turned off for bots in this pod.`;
+const TOOL_TURNED_OFF = userText`This tool is turned off for bots in this pod.`;
 
-const TOOL_UNAVAILABLE = UserMessage.of`This tool is switched off for this bot.`;
+const TOOL_UNAVAILABLE = userText`This tool is switched off for this bot.`;
 
-const NO_SANDBOX = UserMessage.of`This bot has no sandbox to work in.`;
+const NO_SANDBOX = userText`This bot has no sandbox to work in.`;
 
 export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): ToolSet {
 	const tools: ToolSet = {};

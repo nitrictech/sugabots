@@ -1,4 +1,5 @@
 import { BadRequest, PayloadTooLarge, ValidateRequest } from "@sugabots/contracts/http";
+import { userText } from "@sugabots/errors";
 import { ByteSize, Effect, SchemaIssue } from "effect";
 import {
 	HttpIncomingMessage,
@@ -24,7 +25,7 @@ export const validateRequestLayer = HttpApiMiddleware.layerSchemaErrorTransform(
 			? Effect.die(error)
 			: Effect.fail(
 					new BadRequest({
-						message: "That is not a valid request",
+						message: userText`That is not a valid request`,
 						details: issues(error.cause.issue).issues,
 					}),
 				),
@@ -67,7 +68,7 @@ export const limitJsonBody = <E, R>(
 function tooLarge() {
 	return failureResponse(
 		PayloadTooLarge,
-		new PayloadTooLarge({ message: "JSON body exceeds the 64 KiB limit" }),
+		new PayloadTooLarge({ message: userText`JSON body exceeds the 64 KiB limit` }),
 		413,
 	);
 }

@@ -1,6 +1,7 @@
 import { MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
+import { userText } from "@sugabots/errors";
 import { DateTime, Effect, Redacted, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser, bearerToken } from "../../auth/middleware.ts";
@@ -63,16 +64,18 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 					Effect.gen(function* () {
 						if (!isJson(request.headers["content-type"])) {
 							return yield* new BadRequest({
-								message: "Routine webhooks require a JSON content type",
+								message: userText`Routine webhooks require a JSON content type`,
 							});
 						}
 						const payload = yield* request.text.pipe(
 							Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))),
-							Effect.mapError(() => new BadRequest({ message: "That is not a valid request" })),
+							Effect.mapError(
+								() => new BadRequest({ message: userText`That is not a valid request` }),
+							),
 						);
 						const idempotencyKey = request.headers["idempotency-key"]?.trim() || null;
 						if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
-							return yield* new BadRequest({ message: "Idempotency-Key is too long" });
+							return yield* new BadRequest({ message: userText`Idempotency-Key is too long` });
 						}
 						const secret = bearerToken(request.headers.authorization);
 						const receivedAt = DateTime.formatIso(yield* DateTime.now);
@@ -87,7 +90,9 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 									.pipe(asHttpError(routineErrors))
 							: undefined;
 						if (!accepted) {
-							return yield* new Unauthorized({ message: "Invalid Routine webhook credentials" });
+							return yield* new Unauthorized({
+								message: userText`Invalid Routine webhook credentials`,
+							});
 						}
 						return { executionId: accepted.executionId, duplicate: accepted.duplicate };
 					}),

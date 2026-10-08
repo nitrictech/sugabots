@@ -9,6 +9,7 @@ import type {
 	NewConnection,
 	UnsavedConnection,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -16,7 +17,7 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import type { PodPermission } from "../../authorization/permissions.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { connectionIn, connectionsIn } from "./connection-reads.ts";
@@ -425,7 +426,7 @@ export class ConnectionNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`No such connection`;
+		return userText`No such connection`;
 	}
 }
 
@@ -439,12 +440,12 @@ export class ConnectionOAuthStartFailed
 {
 	get userMessage() {
 		if (this.reason === "registration_unsupported") {
-			return UserMessage.of`Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.`;
+			return userText`Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.`;
 		}
 		if (this.reason === "unreachable") {
-			return UserMessage.of`Sugabots couldn't reach the server to start signing in. Check the address and that the server is running, then try again.`;
+			return userText`Sugabots couldn't reach the server to start signing in. Check the address and that the server is running, then try again.`;
 		}
-		return UserMessage.of`The server didn't start a sign-in. Try again, or connect it with an access token from the server instead.`;
+		return userText`The server didn't start a sign-in. Try again, or connect it with an access token from the server instead.`;
 	}
 }
 
@@ -453,7 +454,7 @@ export class ConnectionDoesNotUseOAuth
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This connection uses a secret, not OAuth`;
+		return userText`This connection uses a secret, not OAuth`;
 	}
 }
 
@@ -462,6 +463,6 @@ export class ConnectionNeededNoSignIn
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This server doesn't need a sign-in, so nothing was added. Connect it without one instead.`;
+		return userText`This server doesn't need a sign-in, so nothing was added. Connect it without one instead.`;
 	}
 }

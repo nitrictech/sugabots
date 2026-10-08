@@ -1,5 +1,6 @@
 import type { ModelProvider, ProviderModel, SessionUser } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
+import { UserText, userText } from "@sugabots/errors";
 import { failureForStatus } from "@sugabots/sdk";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -248,7 +249,7 @@ describe("the workspace choice", () => {
 
 	it("says so when the address is already taken, and stays on the step", async () => {
 		client.api.workspaces.create.mockReturnValue(
-			Effect.fail(new Conflict({ message: "already exists" })),
+			Effect.fail(new Conflict({ message: userText`already exists` })),
 		);
 		const router = mount(linearPage);
 
@@ -857,7 +858,7 @@ describe("routes", () => {
 		client.auth.signUp.mockRejectedValue(
 			failureForStatus(
 				403,
-				"Signups are invite only. Ask a member to invite you.",
+				UserText.unchecked("Signups are invite only. Ask a member to invite you."),
 				"SIGN_UP_CLOSED",
 			),
 		);
@@ -872,7 +873,7 @@ describe("routes", () => {
 
 	it("asks an unverified account to open its link when it logs in", async () => {
 		client.auth.signIn.mockRejectedValue(
-			failureForStatus(403, "Email not verified", "EMAIL_NOT_VERIFIED"),
+			failureForStatus(403, UserText.unchecked("Email not verified"), "EMAIL_NOT_VERIFIED"),
 		);
 		mount("/", null);
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
@@ -904,7 +905,9 @@ describe("routes", () => {
 			Effect.fail(
 				failureForStatus(
 					403,
-					"Email verification required to view or list invitations for the session email",
+					UserText.unchecked(
+						"Email verification required to view or list invitations for the session email",
+					),
 					"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
 				),
 			),
@@ -982,7 +985,9 @@ describe("routes", () => {
 	});
 
 	it("distinguishes a failed agent roster from an unknown agent", async () => {
-		client.api.agents.list.mockReturnValue(Effect.fail(new Forbidden({ message: "Unavailable" })));
+		client.api.agents.list.mockReturnValue(
+			Effect.fail(new Forbidden({ message: userText`Unavailable` })),
+		);
 		mount(linearPage);
 
 		expect(await screen.findByText("Could not load this agent")).toBeDefined();
@@ -1056,7 +1061,7 @@ describe("creating a pod", () => {
 
 	it("says so when the address is already taken, and keeps the form open", async () => {
 		client.api.pods.create.mockReturnValue(
-			Effect.fail(new Conflict({ message: "already exists" })),
+			Effect.fail(new Conflict({ message: userText`already exists` })),
 		);
 
 		mount("/suga/settings/pods");
@@ -1167,7 +1172,7 @@ describe("creating an agent", () => {
 
 	it("keeps a duplicate-name error in the creation form", async () => {
 		client.api.agents.create.mockReturnValue(
-			Effect.fail(new Conflict({ message: "already exists" })),
+			Effect.fail(new Conflict({ message: userText`already exists` })),
 		);
 		mount(`/suga/settings/pods/${pods[0]?.slug}`);
 		(await screen.findByRole("button", { name: "New bot" })).click();
@@ -1500,7 +1505,7 @@ describe("workspace settings", () => {
 
 	it("replaces a key, and says where a connection test failed", async () => {
 		client.api.modelProviders.test.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Provider unavailable" })),
+			Effect.fail(new InternalServerError({ message: userText`Provider unavailable` })),
 		);
 		mount(providerPage(openai));
 
@@ -1528,7 +1533,7 @@ describe("workspace settings", () => {
 		};
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([custom]));
 		client.api.modelProviders.addModel.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Could not add model" })),
+			Effect.fail(new InternalServerError({ message: userText`Could not add model` })),
 		);
 		mount(providerPage(custom));
 		fireEvent.click(await screen.findByRole("button", { name: "Add model" }));
@@ -1908,7 +1913,9 @@ describe("your profile", () => {
 
 	it("puts your name back, and says why, when the change is refused", async () => {
 		const refusal = "That name can't be used.";
-		client.auth.updateName.mockRejectedValue(failureForStatus(400, refusal, "INVALID_NAME"));
+		client.auth.updateName.mockRejectedValue(
+			failureForStatus(400, UserText.unchecked(refusal), "INVALID_NAME"),
+		);
 		mount("/suga/settings/profile", sam);
 
 		const name = await screen.findByRole("textbox", { name: "Name" });
@@ -2056,7 +2063,7 @@ describe("pod settings", () => {
 
 	it("says so when a pod with threads cannot be deleted", async () => {
 		client.api.pods.remove.mockReturnValue(
-			Effect.fail(new Conflict({ message: "The pod still has threads" })),
+			Effect.fail(new Conflict({ message: userText`The pod still has threads` })),
 		);
 		mount(podPage);
 

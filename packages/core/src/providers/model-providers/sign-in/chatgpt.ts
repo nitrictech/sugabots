@@ -1,5 +1,5 @@
+import { userText } from "@sugabots/errors";
 import { Clock, Effect, Schema } from "effect";
-import { UserMessage } from "../../../user-message.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	decodeSignInBody,
@@ -64,7 +64,7 @@ export const chatgpt: SubscriptionSignIn = {
 			);
 			if (!response.ok) {
 				return yield* new ProviderSignInFailed({
-					userMessage: UserMessage.of`ChatGPT refused to start a sign-in (${response.status})`,
+					userMessage: userText`ChatGPT refused to start a sign-in (${response.status})`,
 				});
 			}
 			const code = yield* decodeSignInBody(response, SERVICE, DeviceCodeResponse);
@@ -90,7 +90,7 @@ export const chatgpt: SubscriptionSignIn = {
 			if (response.status === 403 || response.status === 404) return undefined;
 			if (!response.ok) {
 				return yield* new ProviderSignInFailed({
-					userMessage: UserMessage.of`ChatGPT sign-in failed (${response.status})`,
+					userMessage: userText`ChatGPT sign-in failed (${response.status})`,
 				});
 			}
 			const authorized = yield* decodeSignInBody(response, SERVICE, DeviceTokenResponse);
@@ -136,7 +136,7 @@ function requestTokens(
 		const response = yield* postToSignIn(http, SERVICE, `${ISSUER}/oauth/token`, { form });
 		if (!response.ok) {
 			return yield* new ProviderSignInFailed({
-				userMessage: UserMessage.of`ChatGPT would not issue a token (${response.status}); sign in again`,
+				userMessage: userText`ChatGPT would not issue a token (${response.status}); sign in again`,
 			});
 		}
 		const tokens = yield* decodeSignInBody(response, SERVICE, TokenResponse);

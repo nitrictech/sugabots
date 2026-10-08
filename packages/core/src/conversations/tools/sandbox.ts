@@ -1,5 +1,6 @@
 export * as SandboxTools from "./sandbox.ts";
 
+import type { UserText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect";
 import { type RunEffect, serviceOperations } from "../../database/database.ts";
@@ -8,7 +9,6 @@ import { allowedHostsOf, blockedHostsOf } from "../../sandboxes/allowed-hosts.ts
 import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
-import type { UserMessage } from "../../user-message.ts";
 import { type BrowserSession, browserSession, browserTools } from "./browser/browser.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 import {
@@ -62,7 +62,7 @@ export interface Offered {
  */
 export interface Request {
 	readonly tool: Tool;
-	readonly refusal: (input: unknown) => UserMessage | undefined;
+	readonly refusal: (input: unknown) => UserText | undefined;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/SandboxTools") {}

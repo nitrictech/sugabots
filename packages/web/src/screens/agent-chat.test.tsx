@@ -10,6 +10,7 @@ import {
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { testPerson } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -291,7 +292,7 @@ function chatAnswers() {
 	client.api.threads.activity.mockImplementation(({ params }: { params: { threadId: string } }) =>
 		params.threadId === chat.mainThreadId
 			? Effect.succeed(chatActivity)
-			: Effect.fail(new NotFound({ message: "No such thread" })),
+			: Effect.fail(new NotFound({ message: userText`No such thread` })),
 	);
 	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
 		switch (params.threadId) {
@@ -569,7 +570,7 @@ describe("ongoing agent Chat", () => {
 			Effect.succeed({ items: [], nextCursor: null }),
 		);
 		client.api.chats.send.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Nope" })),
+			Effect.fail(new InternalServerError({ message: userText`Nope` })),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		const composer = (await screen.findByLabelText(
@@ -1325,7 +1326,7 @@ describe("a thread open beside the Chat", () => {
 	});
 
 	it("says when the thread could not be loaded", async () => {
-		answerThread(() => Effect.fail(new Forbidden({ message: "Unavailable" })));
+		answerThread(() => Effect.fail(new Forbidden({ message: userText`Unavailable` })));
 		mount(threadPage);
 
 		expect(await screen.findByText("Could not load this thread")).toBeDefined();
@@ -1446,7 +1447,7 @@ describe("a thread open beside the Chat", () => {
 	it("says when older messages could not be loaded, and lets you try again", async () => {
 		answerThread((request) =>
 			request.query?.cursor
-				? Effect.fail(new InternalServerError({ message: "History unavailable" }))
+				? Effect.fail(new InternalServerError({ message: userText`History unavailable` }))
 				: Effect.succeed({ ...collaboration, olderMessagesCursor: "older-page" }),
 		);
 		mount(threadPage);

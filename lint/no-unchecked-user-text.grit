@@ -1,0 +1,10 @@
+language js(typescript)
+
+or {
+	`UserText.unchecked($_)` as $unchecked,
+	`$_.schema.make($_)` as $unchecked,
+	`$_ as UserText` as $unchecked,
+	`$_ as DisplayName` as $unchecked
+} where {
+	register_diagnostic(span=$unchecked, message="Write user text with `userText`, and get display names with `DisplayName.fromRecord`. Text made any other way isn't checked.")
+}

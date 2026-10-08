@@ -8,6 +8,7 @@ import {
 	PayloadTooLarge,
 	Unauthorized,
 } from "@sugabots/contracts/http";
+import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
 
 const failureSchema = Schema.Union([
@@ -27,7 +28,7 @@ export const isApiFailure = Schema.is(failureSchema);
  * The failure a status means, for the parts of the API the generated client
  * does not decode: better-auth's routes, and the event streams.
  */
-export function failureForStatus(status: number, message: string, details?: unknown): ApiFailure {
+export function failureForStatus(status: number, message: UserText, details?: unknown): ApiFailure {
 	const fields = { message, details };
 	switch (status) {
 		case 400:
@@ -54,5 +55,5 @@ export function failureFromResponse(body: unknown, status: number): ApiFailure {
 		return decoded.success;
 	}
 	// Not ours: a proxy's error page, or a body that never arrived.
-	return failureForStatus(status, `Request failed with status ${status}`);
+	return failureForStatus(status, userText`Request failed with status ${status}`);
 }

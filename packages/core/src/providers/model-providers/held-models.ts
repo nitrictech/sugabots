@@ -1,8 +1,9 @@
+import { UserText, userText } from "@sugabots/errors";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
 import { agent, providerModel, workspace } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { offeredModels } from "./model-provider-reads.ts";
 import { defaultModelOf, ModelNotEnabled } from "./model-provider-repository.ts";
 
@@ -159,7 +160,7 @@ export class ModelInUse
 		const one = names.length === 1 && !workspaceDefault;
 		// System agents' names are ours; a model id is the provider's name for a
 		// model an administrator switched on.
-		const subject = UserMessage.unchecked(LIST.format(names));
-		return UserMessage.of`${subject} ${one ? "uses" : "use"} ${UserMessage.unchecked(this.modelId)}. Choose another model for ${one ? "it" : "them"} under Models → Default first.`;
+		const subject = UserText.unchecked(LIST.format(names));
+		return userText`${subject} ${one ? "uses" : "use"} ${UserText.unchecked(this.modelId)}. Choose another model for ${one ? "it" : "them"} under Models → Default first.`;
 	}
 }
