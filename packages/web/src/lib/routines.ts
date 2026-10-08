@@ -19,6 +19,31 @@ export function useWorkspaceRoutines(workspaceId: string | undefined) {
 	});
 }
 
+/** How many of a routine's latest runs its page shows. */
+export const RECENT_RUN_COUNT = 5;
+
+/** How often the runs are read again while one has not ended, so its status stays current. */
+const RUN_POLL_MS = 3_000;
+
+/** A routine's latest runs, newest first, read again while one is queued or running. */
+export function useRecentRuns({ agentId, routineId }: { agentId: string; routineId: string }) {
+	return useQuery({
+		queryKey: [ROUTINES_KEY, "runs", routineId],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(
+				client.api.routines.executions({
+					params: { agentId, routineId },
+					query: { limit: RECENT_RUN_COUNT },
+				}),
+				{ signal },
+			),
+		refetchInterval: (query) =>
+			query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
+				? RUN_POLL_MS
+				: false,
+	});
+}
+
 export function useRoutines(agentId: string) {
 	return useQuery({
 		queryKey: [ROUTINES_KEY, "agent", agentId],
@@ -95,6 +120,7 @@ export function useRoutineActions() {
 						payload: { requestId: crypto.randomUUID() },
 					}),
 				),
+			onSuccess: refresh,
 		}),
 		rotateSecret: useMutation({
 			mutationFn: ({

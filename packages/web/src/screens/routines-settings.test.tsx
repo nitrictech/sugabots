@@ -1,10 +1,10 @@
-import type { Routine, WorkspaceRoutine } from "@sugabots/contracts";
+import type { Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agents, apiAnswers, linear, mount, pods, triager } from "@/test-api.tsx";
+import { agents, apiAnswers, jye, linear, mount, pods, sam, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -276,6 +276,79 @@ describe("the workspace's routines", () => {
 			}),
 		);
 		expect(await screen.findByText(/^8f7422•+$/)).toBeDefined();
+	});
+
+	it("shows a routine's latest runs: how each went, what started it, and how long it took", async () => {
+		const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
+		const run = (
+			n: number,
+			fields: Pick<RoutineExecution, "trigger" | "state"> & Partial<RoutineExecution>,
+		): RoutineExecution => ({
+			id: `0199a3a0-0000-7000-8000-0000000003${n}0`,
+			routineId: morningBrief.routine.id,
+			workspaceId: linear.workspaceId,
+			agentId: linear.id,
+			threadId: `0199a3a0-0000-7000-8000-0000000003${n}1`,
+			routineName: "Morning brief",
+			instructions: "Brief us.",
+			error: null,
+			acceptedAt: at(60 * n),
+			startedAt: at(60 * n),
+			finishedAt: null,
+			...fields,
+		});
+		const manual = (userId: string) => ({
+			kind: "manual" as const,
+			requestedAt: at(0),
+			requestedByUserId: userId,
+			requestId: "0199a3a0-0000-7000-8000-0000000003ff",
+		});
+		client.api.routines.executions.mockReturnValue(
+			Effect.succeed({
+				items: [
+					run(1, { trigger: manual(sam.id), state: "running" }),
+					run(2, {
+						trigger: manual(jye.id),
+						state: "completed",
+						startedAt: at(120),
+						finishedAt: at(106),
+					}),
+					run(3, {
+						trigger: { kind: "cron", scheduledAt: at(180), acceptedAt: at(180) },
+						state: "failed",
+						error: "HubSpot timed out",
+						finishedAt: at(170),
+					}),
+				],
+				nextCursor: null,
+			}),
+		);
+		mount(routinePage(morningBrief));
+
+		const runs = await screen.findByRole("region", { name: "Recent runs" });
+		const [running, completed, failed] = within(runs).getAllByRole("link");
+		expect(within(running as HTMLElement).getByText("Run by you")).toBeDefined();
+		expect(within(running as HTMLElement).getByText("Running…")).toBeDefined();
+		expect(within(running as HTMLElement).getByText(/^Today, /)).toBeDefined();
+		expect(within(completed as HTMLElement).getByText("Run by Jye")).toBeDefined();
+		expect(within(completed as HTMLElement).getByText("14s")).toBeDefined();
+		expect(within(failed as HTMLElement).getByText("HubSpot timed out")).toBeDefined();
+		expect(within(failed as HTMLElement).getByRole("img", { name: "Failed" })).toBeDefined();
+		expect(completed?.getAttribute("href")).toContain(
+			"thread=0199a3a0-0000-7000-8000-000000000321",
+		);
+		expect(client.api.routines.executions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				params: { agentId: linear.id, routineId: morningBrief.routine.id },
+				query: { limit: 5 },
+			}),
+		);
+	});
+
+	it("says a routine that has never run can be tried with Run now", async () => {
+		mount(routinePage(morningBrief));
+
+		expect(await screen.findByText("No runs yet. Run now to try it.")).toBeDefined();
 	});
 
 	it("turns a routine back on from its page", async () => {
