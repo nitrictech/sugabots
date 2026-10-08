@@ -1,4 +1,4 @@
-import type { NewRoutine, RoutineUpdate } from "@sugabots/contracts";
+import type { NewRoutine, RoutineUpdate, RoutineWriteResult } from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
@@ -29,10 +29,33 @@ export function useRoutines(agentId: string) {
 	});
 }
 
+/**
+ * Webhook secrets made or replaced in this tab, by routine. The API returns a
+ * secret only when it makes one, so it is kept in memory, never stored, to
+ * show on the routine's page until the tab closes or it goes unread a while.
+ */
+const SHOWN_SECRET_KEY = "routine-secret";
+
+/** The webhook secret made for the routine in this tab, if one was. */
+export function useShownSecret(routineId: string): string | undefined {
+	return useQuery<string>({
+		queryKey: [SHOWN_SECRET_KEY, routineId],
+		queryFn: skipToken,
+		staleTime: Number.POSITIVE_INFINITY,
+	}).data;
+}
+
 /** Each change names the bot its routine belongs to, since routines are addressed through their bot. */
 export function useRoutineActions() {
 	const queries = useQueryClient();
 	const refresh = () => queries.invalidateQueries({ queryKey: [ROUTINES_KEY] });
+	const keepSecret = (routineId: string, secret: string | null) => {
+		if (secret) queries.setQueryData([SHOWN_SECRET_KEY, routineId], secret);
+	};
+	const written = (result: RoutineWriteResult) => {
+		keepSecret(result.routine.id, result.secret);
+		return refresh();
+	};
 	const { routines } = client.api;
 
 	return {
@@ -45,7 +68,7 @@ export function useRoutineActions() {
 						typeof routines.create
 					>[0]),
 				),
-			onSuccess: refresh,
+			onSuccess: written,
 		}),
 		update: useMutation({
 			mutationFn: ({
@@ -57,7 +80,7 @@ export function useRoutineActions() {
 				routineId: string;
 				json: RoutineUpdate;
 			}) => Effect.runPromise(routines.update({ params: { agentId, routineId }, payload: json })),
-			onSuccess: refresh,
+			onSuccess: written,
 		}),
 		remove: useMutation({
 			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
@@ -76,6 +99,7 @@ export function useRoutineActions() {
 		rotateSecret: useMutation({
 			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
 				Effect.runPromise(routines.rotateSecret({ params: { agentId, routineId }, payload: {} })),
+			onSuccess: ({ secret }, { routineId }) => keepSecret(routineId, secret),
 		}),
 	};
 }

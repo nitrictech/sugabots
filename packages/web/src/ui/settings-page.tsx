@@ -592,12 +592,15 @@ export function SettingsListRow({
 	picture,
 	label,
 	sub,
+	trailing,
 	selected,
 	render,
 }: {
 	picture: ReactNode;
 	label: ReactNode;
 	sub?: ReactNode;
+	/** What sits at the row's end, such as Paused. */
+	trailing?: ReactNode;
 	/**
 	 * `true` for the item the address names. `"wide"` for the one open only
 	 * because none was chosen: open beside the list on a wide screen, and not on
@@ -626,6 +629,7 @@ export function SettingsListRow({
 						<span className="truncate font-medium text-[14.5px] text-foreground">{label}</span>
 						{sub && <span className="truncate text-muted-foreground text-sm">{sub}</span>}
 					</span>
+					{trailing}
 				</>
 			),
 		},
