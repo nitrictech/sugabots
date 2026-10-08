@@ -1,0 +1,57 @@
+name: IndexNow
+
+# Tells search engines which pages of sugabots.ai a deploy changed. The website
+# deploys through Cloudflare's Workers Builds, outside these workflows; GitHub
+# hears of it as a check run on the deployed commit. GitHub only runs the main
+# branch's copy of this file for check runs.
+on:
+  check_run:
+    types: [completed]
+  # Sends every page: the first submission, or a resubmission after a deploy's
+  # failed. A failed Workers build's changes are never sent either, since the
+  # next deploy sends only its own push's. Not scheduled, since IndexNow asks
+  # to be sent only pages that changed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  submit-changed:
+    name: Submit changed pages
+    # Workers Builds also builds each pull request's preview, under the same check name.
+    if: >-
+      github.event_name == 'check_run' &&
+      github.event.check_run.name == 'Workers Builds: sugabots-website' &&
+      github.event.check_run.conclusion == 'success' &&
+      github.event.check_run.check_suite.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.check_run.head_sha }}
+          # A push can bring in many commits, so the script needs the history back to its start.
+          fetch-depth: 0
+          persist-credentials: false
+      # Reads the version from package.json's packageManager.
+      - uses: oven-sh/setup-bun@v2
+      - name: Submit changed pages to IndexNow
+        working-directory: packages/website
+        env:
+          BASE_SHA: ${{ github.event.check_run.check_suite.before }}
+          HEAD_SHA: ${{ github.event.check_run.head_sha }}
+        run: bun scripts/submit-indexnow.ts --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  submit-all:
+    name: Submit every page
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # Reads the version from package.json's packageManager.
+      - uses: oven-sh/setup-bun@v2
+      - name: Submit every page to IndexNow
+        working-directory: packages/website
+        run: bun scripts/submit-indexnow.ts --all
