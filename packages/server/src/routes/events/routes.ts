@@ -4,6 +4,7 @@ import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { toPerson } from "@sugabots/core/conversations/threads/participants";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { PodAudience } from "@sugabots/core/database/events/pod-audience";
+import { userText } from "@sugabots/errors";
 import {
 	Clock,
 	Context,
@@ -82,7 +83,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 			Effect.gen(function* () {
 				const channel = yield* channelFor();
 				if (!channel) {
-					return yield* new NotFound({ message: "No such stream" });
+					return yield* new NotFound({ message: userText`No such stream` });
 				}
 				if (request.method === "HEAD") {
 					return HttpServerResponse.empty({
@@ -111,7 +112,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 				Effect.gen(function* () {
 					const channel = yield* access.thread(params.threadId);
 					if (!channel) {
-						return yield* new NotFound({ message: "No such thread" });
+						return yield* new NotFound({ message: userText`No such thread` });
 					}
 					const user = yield* CurrentUser;
 					const typing = streamEvent("person.typing", {

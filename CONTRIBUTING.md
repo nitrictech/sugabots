@@ -23,6 +23,7 @@ lines in `.env` (see `.env.example`). For local development,
 
 | Directory            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
+| `packages/errors`    | `DomainError`, user text, and what of a failure may leave the system           |
 | `packages/contracts` | Portable API schemas and shared wire types                                     |
 | `packages/core`      | Domain services, database schema and migrations, and the durable workflows     |
 | `packages/server`    | HTTP API, authentication, configuration, and process composition               |
@@ -31,6 +32,10 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/web`       | React and Vite web app                                                         |
 | `packages/docs`      | The docs pages, which the website publishes                                    |
 | `packages/website`   | Landing page and docs, prerendered and served from Cloudflare                  |
+
+When an area's errors are all `DomainError`s, add its path to two lists: the
+`biome.json` override that runs the rules in `lint/`, and the Effect language
+service override in `tsconfig.base.json`.
 
 ## Docs
 

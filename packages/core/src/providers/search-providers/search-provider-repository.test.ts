@@ -1,4 +1,5 @@
 import type { NewSearchProvider } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { workspace } from "../../database/schema.ts";
 import {
@@ -8,7 +9,6 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { searchProviderOf, toSearchProvider } from "./search-provider-reads.ts";
 import { SearchProviderRepository } from "./search-provider-repository.ts";
 
@@ -131,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 		await providers.recordTest(
 			workspaceId,
 			connection.configurationUpdatedAt,
-			UserMessage.of`Brave Search answered HTTP ${401}`,
+			userText`Brave Search answered HTTP ${401}`,
 		);
 		expect(await shown()).toMatchObject({
 			status: "error",

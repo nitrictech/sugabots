@@ -46,6 +46,7 @@
       "name": "@sugabots/contracts",
       "version": "0.0.0",
       "dependencies": {
+        "@sugabots/errors": "workspace:*",
         "effect": "catalog:",
         "mdast-util-from-markdown": "^2.0.3",
         "mdast-util-to-string": "^4.0.0",
@@ -70,6 +71,7 @@
         "@openrouter/ai-sdk-provider": "^3.1.0",
         "@sugabots/accounting": "workspace:*",
         "@sugabots/contracts": "workspace:*",
+        "@sugabots/errors": "workspace:*",
         "@sugabots/workflow": "workspace:*",
         "ai": "^7.0.100",
         "cron-parser": "^5.10.1",
@@ -92,6 +94,13 @@
       "name": "@sugabots/docs",
       "version": "0.0.0",
     },
+    "packages/errors": {
+      "name": "@sugabots/errors",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+    },
     "packages/provider-logos": {
       "name": "@sugabots/provider-logos",
       "version": "0.0.0",
@@ -111,6 +120,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@sugabots/contracts": "workspace:*",
+        "@sugabots/errors": "workspace:*",
         "better-auth": "catalog:",
         "effect": "catalog:",
         "eventsource-parser": "^4.1.0",
@@ -123,6 +133,7 @@
         "@effect/platform-node": "catalog:",
         "@sugabots/contracts": "workspace:*",
         "@sugabots/core": "workspace:*",
+        "@sugabots/errors": "workspace:*",
         "@sugabots/workflow": "workspace:*",
         "better-auth": "catalog:",
         "drizzle-orm": "catalog:",
@@ -145,6 +156,7 @@
         "@novnc/novnc": "1.7.0",
         "@sugabots/avatars": "workspace:*",
         "@sugabots/contracts": "workspace:*",
+        "@sugabots/errors": "workspace:*",
         "@sugabots/provider-logos": "workspace:*",
         "@sugabots/sdk": "workspace:*",
         "@tanstack/react-query": "^5.102.8",
@@ -919,6 +931,8 @@
     "@sugabots/core": ["@sugabots/core@workspace:packages/core"],
 
     "@sugabots/docs": ["@sugabots/docs@workspace:packages/docs"],
+
+    "@sugabots/errors": ["@sugabots/errors@workspace:packages/errors"],
 
     "@sugabots/provider-logos": ["@sugabots/provider-logos@workspace:packages/provider-logos"],
 

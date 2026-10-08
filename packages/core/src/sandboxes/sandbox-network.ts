@@ -1,6 +1,7 @@
 export * as SandboxNetwork from "./sandbox-network.ts";
 
 import type { PodSandboxNetwork, SandboxNetworkSettings } from "@sugabots/contracts";
+import { UserText, userText } from "@sugabots/errors";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
@@ -15,7 +16,7 @@ import {
 	toolCall,
 	user,
 } from "../database/schema.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import {
 	addedHostsOf,
 	blockedHostsOf,
@@ -352,14 +353,14 @@ export class HostBlocked
 	get userMessage() {
 		const host = hostName(this.host);
 		return this.by === this.host
-			? UserMessage.of`${host} is blocked for this workspace's sandboxes.`
-			: UserMessage.of`${host} would reach ${hostName(this.by)}, which is blocked for this workspace's sandboxes.`;
+			? userText`${host} is blocked for this workspace's sandboxes.`
+			: userText`${host} would reach ${hostName(this.by)}, which is blocked for this workspace's sandboxes.`;
 	}
 }
 
 /** A host as people read it. Hosts are domain names, checked by `sandboxHostSchema` on the way in. */
 export function hostName(host: string) {
-	return UserMessage.unchecked(host);
+	return UserText.unchecked(host);
 }
 
 const namesOf = (userIds: ReadonlyArray<string | null>) => {

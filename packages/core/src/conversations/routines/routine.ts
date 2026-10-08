@@ -1,11 +1,12 @@
 import type { Routine } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Authorization } from "../../authorization/authorization.ts";
 import type { PodPermission } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
 import { routine } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 
 /** A routine, by the crew agent it belongs to and its own id. */
 export interface OnAgent {
@@ -69,7 +70,7 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 
 export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`No such Routine`;
+		return userText`No such Routine`;
 	}
 }
 
@@ -78,7 +79,7 @@ export class RoutineTriggerConflict
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That trigger identity was already used with different data`;
+		return userText`That trigger identity was already used with different data`;
 	}
 }
 
@@ -87,6 +88,6 @@ export class RoutineTriggerRejected
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That Routine cannot accept this trigger`;
+		return userText`That Routine cannot accept this trigger`;
 	}
 }

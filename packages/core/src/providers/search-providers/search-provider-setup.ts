@@ -7,12 +7,13 @@ import type {
 	SearchProviderUpdate,
 } from "@sugabots/contracts";
 import { searchProviderPreset } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { searchBackend, searchEndpoint } from "./backends.ts";
@@ -158,7 +159,7 @@ export const make = Effect.gen(function* () {
 						return {
 							reachable: false,
 							latencyMs: 0,
-							error: UserMessage.of`Add an API key before testing`,
+							error: userText`Add an API key before testing`,
 						};
 					}
 					const started = yield* Clock.currentTimeMillis;
@@ -190,7 +191,7 @@ export class SearchProviderNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This workspace has no search provider`;
+		return userText`This workspace has no search provider`;
 	}
 }
 

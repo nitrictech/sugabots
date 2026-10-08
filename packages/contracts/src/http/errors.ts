@@ -1,3 +1,4 @@
+import { PublicError, UserText } from "@sugabots/errors";
 import { Schema } from "effect";
 
 /**
@@ -10,28 +11,34 @@ import { Schema } from "effect";
  * class.
  */
 
+/** What went wrong, for people to read. */
+const message = UserText.schema;
+
 /**
  * Anything machine-readable behind the message: the fields that failed
  * validation, or the code better-auth refused with.
  */
 const details = Schema.optional(Schema.Unknown);
 
+/** The `DomainError` behind the status, when there is one. */
+const error = Schema.optional(PublicError);
+
 export class BadRequest extends Schema.TaggedError<BadRequest>()(
 	"BadRequest",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 400 },
 ) {}
 
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
 	"Unauthorized",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 401 },
 ) {}
 
 /** The caller can see the thing, and may not do this to it. */
 export class Forbidden extends Schema.TaggedError<Forbidden>()(
 	"Forbidden",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 403 },
 ) {}
 
@@ -41,7 +48,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()(
  */
 export class NotFound extends Schema.TaggedError<NotFound>()(
 	"NotFound",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 404 },
 ) {}
 
@@ -53,20 +60,20 @@ export const refused = [NotFound, Forbidden] as const;
 
 export class Conflict extends Schema.TaggedError<Conflict>()(
 	"Conflict",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 409 },
 ) {}
 
 export class PayloadTooLarge extends Schema.TaggedError<PayloadTooLarge>()(
 	"PayloadTooLarge",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 413 },
 ) {}
 
 /** Something went wrong on the server. The message says nothing about what. */
 export class InternalServerError extends Schema.TaggedError<InternalServerError>()(
 	"InternalServerError",
-	{ message: Schema.String, details },
+	{ message, details, error },
 	{ httpApiStatus: 500 },
 ) {}
 

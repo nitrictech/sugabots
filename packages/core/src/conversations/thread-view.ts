@@ -10,6 +10,7 @@ import type {
 	ThreadSummary,
 } from "@sugabots/contracts";
 import { DEFAULT_THREAD_HISTORY_LIMIT } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
@@ -25,7 +26,7 @@ import { type Executor, query, serviceOperations } from "../database/database.ts
 import type * as schema from "../database/schema.ts";
 import { thread, threadCompaction, threadSummary, turn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
 import { respondingIn } from "./floor/floor.ts";
@@ -154,7 +155,7 @@ export class InvalidThreadHistoryCursor
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That thread history cursor is invalid`;
+		return userText`That thread history cursor is invalid`;
 	}
 }
 

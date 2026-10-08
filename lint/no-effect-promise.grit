@@ -1,0 +1,5 @@
+language js(typescript)
+
+`Effect.promise($_)` as $call where {
+	register_diagnostic(span=$call, message="`Effect.promise` turns a rejection into a defect, which nobody can explain to the person who saw it. Use `Effect.tryPromise` and catch into a `DomainError` class.")
+}

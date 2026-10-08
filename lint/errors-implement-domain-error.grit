@@ -1,0 +1,19 @@
+language js(typescript)
+
+or {
+	`class $name extends $base { $_ }` as $class where {
+		$base <: or {
+			contains `Schema.TaggedError`,
+			contains `Schema.Error`
+		},
+		not $class <: contains `implements DomainError`,
+		register_diagnostic(span=$name, message="This error class must implement `DomainError` from `@sugabots/errors`, so it has a user message, a retry flag and a severity.")
+	},
+	or {
+		`Data.TaggedError`,
+		`Data.Error`,
+		`class $_ extends Error { $_ }`
+	} as $other where {
+		register_diagnostic(span=$other, message="Declare errors with `Schema.TaggedError`, implementing `DomainError` from `@sugabots/errors`.")
+	}
+}

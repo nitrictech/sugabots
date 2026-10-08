@@ -1,6 +1,7 @@
 export * as Chats from "./chats.ts";
 
 import type { Chat, Message } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
@@ -9,7 +10,7 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { agent, pod } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { crewOf, personAuthor, personColumns, toMessage } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
@@ -140,7 +141,7 @@ export class ChatPlacementRejected
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The agent and pod are not available for this chat`;
+		return userText`The agent and pod are not available for this chat`;
 	}
 }
 
@@ -153,7 +154,7 @@ export class ChatAgentHasNoModel
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This agent has no model chosen, so it cannot answer yet`;
+		return userText`This agent has no model chosen, so it cannot answer yet`;
 	}
 }
 

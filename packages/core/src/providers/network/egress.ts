@@ -2,6 +2,7 @@ export * as Egress from "./egress.ts";
 
 import { lookup as nodeLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
+import { type UserText, userText } from "@sugabots/errors";
 import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import {
 	Agent,
@@ -10,7 +11,7 @@ import {
 	fetch as undiciFetch,
 } from "undici";
 import { Installation } from "../../installation/installation.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 
 /** The clients the API reaches the outside world with, each under this installation's egress policy. */
 export interface Interface {
@@ -265,16 +266,16 @@ type EgressRefusal =
 	| "fragment"
 	| "notHttps";
 
-const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserMessage> = {
-	outsideBaseUrl: UserMessage.of`That address isn't under the provider's address, so Sugabots won't send the provider's key there. Use an address that starts with the provider's address.`,
-	unresolved: UserMessage.of`Sugabots couldn't find a server with that name. Check the address is spelled correctly, and that the name can be looked up from wherever Sugabots runs.`,
-	invalidAddress: UserMessage.of`That server's name points to an address Sugabots can't connect to. Check the address, or the server's DNS records.`,
-	privateNetwork: UserMessage.of`That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
-	invalidUrl: UserMessage.of`That isn't a complete web address. Check it starts with https:// and has no spaces.`,
-	notHttp: UserMessage.of`Sugabots only connects to web addresses. Use one that starts with https://.`,
-	credentials: UserMessage.of`That address has a username or password in it, which Sugabots won't send in an address. Remove them, and give the credential as an access token instead.`,
-	fragment: UserMessage.of`That address has a # part, which is never sent to the server. Remove the # and everything after it.`,
-	notHttps: UserMessage.of`That address uses plain HTTP, which this installation doesn't connect to, so keys and messages aren't sent unencrypted. Use the server's https:// address, or ask whoever runs Sugabots to allow plain HTTP.`,
+const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserText> = {
+	outsideBaseUrl: userText`That address isn't under the provider's address, so Sugabots won't send the provider's key there. Use an address that starts with the provider's address.`,
+	unresolved: userText`Sugabots couldn't find a server with that name. Check the address is spelled correctly, and that the name can be looked up from wherever Sugabots runs.`,
+	invalidAddress: userText`That server's name points to an address Sugabots can't connect to. Check the address, or the server's DNS records.`,
+	privateNetwork: userText`That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
+	invalidUrl: userText`That isn't a complete web address. Check it starts with https:// and has no spaces.`,
+	notHttp: userText`Sugabots only connects to web addresses. Use one that starts with https://.`,
+	credentials: userText`That address has a username or password in it, which Sugabots won't send in an address. Remove them, and give the credential as an access token instead.`,
+	fragment: userText`That address has a # part, which is never sent to the server. Remove the # and everything after it.`,
+	notHttps: userText`That address uses plain HTTP, which this installation doesn't connect to, so keys and messages aren't sent unencrypted. Use the server's https:// address, or ask whoever runs Sugabots to allow plain HTTP.`,
 };
 
 function requireUrlUnderBase(value: string, baseUrl: string) {

@@ -1,9 +1,9 @@
 import { posix } from "node:path";
+import { UserText, userText } from "@sugabots/errors";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL } from "../network-access/tool.ts";
 
 export const RUN_COMMAND_TOOL = "run_command";
@@ -70,7 +70,7 @@ export function openOncePerTurn(open: () => Promise<PodSandboxes.Opened>): OpenS
 /** What the agent is told when a tool couldn't do its work. */
 interface Failed {
 	status: "failed";
-	error: UserMessage;
+	error: UserText;
 }
 
 /** Runs `work` in the pod's sandbox, turning a refusal it can act on into a result. */
@@ -79,7 +79,7 @@ async function inSandbox<A>(
 	work: (
 		sandbox: Sandboxes.Sandbox,
 	) => Effect.Effect<A, Sandboxes.Unavailable | Sandboxes.FileFailed>,
-): Promise<(A & { note?: UserMessage }) | Failed> {
+): Promise<(A & { note?: UserText }) | Failed> {
 	let opened: PodSandboxes.Opened;
 	try {
 		opened = await openSandbox();
@@ -98,7 +98,7 @@ async function inSandbox<A>(
 				SandboxFileFailed: (failure) =>
 					Effect.succeed<Failed>({
 						status: "failed",
-						error: UserMessage.of`${failure.reason}: ${UserMessage.unchecked(failure.path)}`,
+						error: userText`${failure.reason}: ${UserText.unchecked(failure.path)}`,
 					}),
 			}),
 		),
@@ -106,12 +106,12 @@ async function inSandbox<A>(
 }
 
 /** What the agent needs to know about how its sandbox came back, if anything. */
-function arrivalNote(arrival: PodSandboxes.Opened["arrival"]): UserMessage | undefined {
+function arrivalNote(arrival: PodSandboxes.Opened["arrival"]): UserText | undefined {
 	switch (arrival) {
 		case "rebooted":
-			return UserMessage.of`The sandbox was paused since it was last used. Its files are kept, but programs that were running have stopped.`;
+			return userText`The sandbox was paused since it was last used. Its files are kept, but programs that were running have stopped.`;
 		case "replaced":
-			return UserMessage.of`This is a new sandbox: the pod's earlier one is gone, and its files with it, including any work that wasn't pushed.`;
+			return userText`This is a new sandbox: the pod's earlier one is gone, and its files with it, including any work that wasn't pushed.`;
 		case "made":
 		case "running":
 		case "resumed":

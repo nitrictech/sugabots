@@ -1,5 +1,5 @@
+import { userText } from "@sugabots/errors";
 import { Clock, Effect, Schema } from "effect";
-import { UserMessage } from "../../../user-message.ts";
 import {
 	decodeSignInBody,
 	type OAuthTokens,
@@ -61,7 +61,7 @@ export const xai: SubscriptionSignIn = {
 			});
 			if (!response.ok) {
 				return yield* new ProviderSignInFailed({
-					userMessage: UserMessage.of`xAI refused to start a sign-in (${response.status})`,
+					userMessage: userText`xAI refused to start a sign-in (${response.status})`,
 				});
 			}
 			const code = yield* decodeSignInBody(response, SERVICE, DeviceCodeResponse);
@@ -94,10 +94,10 @@ export const xai: SubscriptionSignIn = {
 			return yield* new ProviderSignInFailed({
 				userMessage:
 					error === "access_denied"
-						? UserMessage.of`The xAI sign-in was declined`
+						? userText`The xAI sign-in was declined`
 						: error === "expired_token"
-							? UserMessage.of`This sign-in has expired; start again`
-							: UserMessage.of`xAI sign-in failed (${response.status})`,
+							? userText`This sign-in has expired; start again`
+							: userText`xAI sign-in failed (${response.status})`,
 			});
 		}),
 
@@ -113,7 +113,7 @@ export const xai: SubscriptionSignIn = {
 			});
 			if (!response.ok) {
 				return yield* new ProviderSignInFailed({
-					userMessage: UserMessage.of`xAI would not issue a token (${response.status}); sign in again`,
+					userMessage: userText`xAI would not issue a token (${response.status}); sign in again`,
 				});
 			}
 			const next = yield* decodeSignInBody(response, SERVICE, TokenResponse);
@@ -136,7 +136,7 @@ function tokensFrom(
 	const refresh = response.refresh_token ?? previousRefresh;
 	if (!refresh) {
 		return Effect.fail(
-			new ProviderSignInFailed({ userMessage: UserMessage.of`xAI gave no refresh token` }),
+			new ProviderSignInFailed({ userMessage: userText`xAI gave no refresh token` }),
 		);
 	}
 	return Effect.succeed({

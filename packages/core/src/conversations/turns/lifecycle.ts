@@ -1,6 +1,6 @@
+import { type UserText, userText } from "@sugabots/errors";
 import { Data } from "effect";
 import type { TurnStatus } from "../../database/schema.ts";
-import { UserMessage } from "../../user-message.ts";
 
 /**
  * A turn's lifecycle, as a pure transition function.
@@ -20,16 +20,16 @@ import { UserMessage } from "../../user-message.ts";
 export const MAX_TURN_RUNS = 3;
 
 /** What people are told of a cancelled turn's tool calls that were cut short. */
-export const TURN_CANCELLED = UserMessage.of`Turn cancelled`;
+export const TURN_CANCELLED = userText`Turn cancelled`;
 
 /** What people are told of a turn's tool calls cut short because its routine run ended. */
-export const ROUTINE_EXECUTION_ENDED = UserMessage.of`Routine execution ended`;
+export const ROUTINE_EXECUTION_ENDED = userText`Routine execution ended`;
 
 /** What people are told of a turn a defect ended, rather than a failure it expects. */
-export const TURN_STOPPED_UNEXPECTEDLY = UserMessage.of`The reply stopped unexpectedly.`;
+export const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
 
 /** What people are told of a system agent's turn cut short by its process stopping. */
-export const SYSTEM_TURN_INTERRUPTED = UserMessage.of`It was interrupted before it finished.`;
+export const SYSTEM_TURN_INTERRUPTED = userText`It was interrupted before it finished.`;
 
 /** What the lifecycle knows of a turn besides its status. */
 interface TurnFacts {
@@ -48,7 +48,7 @@ export type TurnState = TurnFacts &
 	(
 		| { readonly status: Exclude<TurnStatus, "failed"> }
 		/** `userMessage` is what people are told went wrong. */
-		| { readonly status: "failed"; readonly userMessage: UserMessage }
+		| { readonly status: "failed"; readonly userMessage: UserText }
 	);
 
 /**
@@ -56,7 +56,7 @@ export type TurnState = TurnFacts &
  * belonged to settles.
  */
 export type Ended =
-	| { readonly state: "failed"; readonly error: UserMessage }
+	| { readonly state: "failed"; readonly error: UserText }
 	| { readonly state: "cancelled" };
 
 export type TurnEvent = Data.TaggedEnum<{
@@ -69,7 +69,7 @@ export type TurnEvent = Data.TaggedEnum<{
 	/** The reply stopped to wait for people to decide tool approvals. */
 	Suspend: Record<never, never>;
 	Complete: Record<never, never>;
-	Fail: { readonly userMessage: UserMessage };
+	Fail: { readonly userMessage: UserText };
 	/** The run stopped short, as a person asked. */
 	Cancel: Record<never, never>;
 	/**
@@ -77,7 +77,7 @@ export type TurnEvent = Data.TaggedEnum<{
 	 * not run. `userMessage` is what people are told of it and of its
 	 * unfinished tool calls.
 	 */
-	Abandon: { readonly status: "failed" | "cancelled"; readonly userMessage: UserMessage };
+	Abandon: { readonly status: "failed" | "cancelled"; readonly userMessage: UserText };
 	/** A person asked the turn to stop. */
 	RequestCancel: Record<never, never>;
 	/** The workflow of a waiting turn heard the cancellation, and stops waiting. */
@@ -98,7 +98,7 @@ export type FollowUp = Data.TaggedEnum<{
 	 * The turn ended mid-run: its reply and unfinished tool calls end with it,
 	 * and people are told `userMessage` of the calls.
 	 */
-	End: { readonly userMessage: UserMessage };
+	End: { readonly userMessage: UserText };
 	/** Tell the waiting turn's workflow; recording the cancellation is its job. */
 	SignalOwner: { readonly owner: string };
 	/** Tell the workflow running the turn to stop. */
@@ -197,7 +197,7 @@ export function endedAs(state: TurnState): Ended {
 }
 
 /** Told when the lifecycle finds a turn stopped with a mutating call it may have made. */
-const UNCERTAIN_MUTATION = UserMessage.of`The reply stopped after a tool that can make changes may have run, so it was not started again. Check what the tool did before asking again.`;
+const UNCERTAIN_MUTATION = userText`The reply stopped after a tool that can make changes may have run, so it was not started again. Check what the tool did before asking again.`;
 
 const ended = refused("The turn has already ended");
 
@@ -213,7 +213,7 @@ function reopen(state: TurnState, owner: string | null, uncertainMutation: boole
 		);
 	}
 	if (state.runs >= MAX_TURN_RUNS) {
-		const gaveUp = UserMessage.of`The turn stopped ${state.runs} times before it could finish`;
+		const gaveUp = userText`The turn stopped ${state.runs} times before it could finish`;
 		return next(failed(state, gaveUp), FollowUp.End({ userMessage: gaveUp }));
 	}
 	if (state.checkpointed) {
@@ -239,7 +239,7 @@ function factsOf(state: TurnState): TurnFacts {
 }
 
 /** The turn ended as failed, which drops its checkpoint. */
-function failed(state: TurnState, userMessage: UserMessage): TurnState {
+function failed(state: TurnState, userMessage: UserText): TurnState {
 	return { ...factsOf(state), status: "failed", userMessage, checkpointed: false };
 }
 

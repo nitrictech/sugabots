@@ -7,6 +7,7 @@ import type {
 	SystemAgent,
 	SystemAgentKey,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -15,7 +16,7 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { serviceOperations } from "../../database/database.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { systemAgents, visibleCrewAgents } from "./agent-reads.ts";
 import { AgentRepository } from "./agent-repository.ts";
@@ -204,6 +205,6 @@ export const layer = layerNoDeps.pipe(
 /** An agent update that names nothing to change. */
 export class EmptyAgentUpdate extends Data.TaggedError("EmptyAgentUpdate") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Nothing to change`;
+		return userText`Nothing to change`;
 	}
 }

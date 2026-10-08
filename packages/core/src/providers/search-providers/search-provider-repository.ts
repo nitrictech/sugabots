@@ -2,12 +2,13 @@ export * as SearchProviderRepository from "./search-provider-repository.ts";
 
 import type { NewSearchProvider, SearchProviderUpdate } from "@sugabots/contracts";
 import { DEFAULT_SEARCH_PRESET, searchProviderPreset } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchConnection } from "./search-connection.ts";
 
@@ -43,7 +44,7 @@ export interface Interface {
 	readonly recordTest: (
 		workspaceId: string,
 		testedAt: Date,
-		error?: UserMessage,
+		error?: UserText,
 	) => Effect.Effect<void>;
 	/** How to search, enabled or not, for a test; nothing while a required key is missing. */
 	readonly connection: (workspaceId: string) => Effect.Effect<SearchConnection | undefined>;
@@ -229,6 +230,6 @@ export class SearchProviderApiKeyRequired
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Add an API key before enabling search`;
+		return userText`Add an API key before enabling search`;
 	}
 }

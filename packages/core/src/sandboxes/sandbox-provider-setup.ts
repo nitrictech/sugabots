@@ -8,6 +8,7 @@ import type {
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
 import { SANDBOX_IMAGE } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
@@ -15,7 +16,7 @@ import type { CurrentActor } from "../authorization/current-actor.ts";
 import { serviceOperations } from "../database/database.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import { pinnedToDigest } from "./image-digest.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
 import { toSandboxProvider } from "./sandbox-provider-reads.ts";
@@ -239,7 +240,7 @@ export const make = Effect.gen(function* () {
 						return {
 							reachable: false,
 							latencyMs: 0,
-							error: UserMessage.of`Add the provider's settings before testing`,
+							error: userText`Add the provider's settings before testing`,
 						};
 					}
 					const started = yield* Clock.currentTimeMillis;
@@ -247,7 +248,7 @@ export const make = Effect.gen(function* () {
 						Effect.as(undefined),
 						Effect.catchTag("SandboxUnavailable", () =>
 							Effect.succeed(
-								UserMessage.of`The provider didn't answer, or refused the key. Check its address and key.`,
+								userText`The provider didn't answer, or refused the key. Check its address and key.`,
 							),
 						),
 					);
@@ -282,7 +283,7 @@ export const layer = layerNoDeps.pipe(
 /** The provider takes images as they are, or lacks the settings to build a template with. */
 export class NoTemplates extends Data.TaggedError("NoTemplates") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`This provider has no template to prepare. Add its key first, if it needs one.`;
+		return userText`This provider has no template to prepare. Add its key first, if it needs one.`;
 	}
 }
 
@@ -291,7 +292,7 @@ export class SandboxProviderNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This workspace has no such sandbox provider`;
+		return userText`This workspace has no such sandbox provider`;
 	}
 }
 
@@ -307,7 +308,7 @@ export class SandboxesNotDestroyed
 {
 	get userMessage() {
 		return this.cause === "incomplete"
-			? UserMessage.of`This provider still has sandboxes, and needs its settings to remove them. Restore its key or address, then remove it.`
-			: UserMessage.of`This provider's sandboxes couldn't be removed because it didn't answer. Try again when it's reachable.`;
+			? userText`This provider still has sandboxes, and needs its settings to remove them. Restore its key or address, then remove it.`
+			: userText`This provider's sandboxes couldn't be removed because it didn't answer. Try again when it's reachable.`;
 	}
 }

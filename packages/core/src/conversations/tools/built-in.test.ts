@@ -1,12 +1,12 @@
+import { userText } from "@sugabots/errors";
 import { Effect, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { BuiltInTools } from "./built-in.ts";
 
 const run = effectRunner(ManagedRuntime.make(noDatabase));
-const fetchPage = async () => ({ ok: false as const, reason: UserMessage.of`unused` });
+const fetchPage = async () => ({ ok: false as const, reason: userText`unused` });
 const httpClients = { for: () => async () => new Response(null, { status: 503 }) };
 
 describe("the built-in tools for a workspace", () => {

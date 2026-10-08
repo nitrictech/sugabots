@@ -1,4 +1,5 @@
 import { handleFromName, workspaceChannel } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -19,7 +20,6 @@ import {
 	workspaceMember,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
-import { UserMessage } from "../../../user-message.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
@@ -452,7 +452,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
 				{ content: "", collaborations: [], toolCalls: [], acted: true },
-				{ userMessage: UserMessage.of`The model could not be reached`, mayRunAgain: true },
+				{ userMessage: userText`The model could not be reached`, mayRunAgain: true },
 			);
 
 			expect(willRetry).toBe(false);
@@ -466,7 +466,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
 				{ content: "", collaborations: [], toolCalls: [] },
-				{ userMessage: UserMessage.of`The model could not be reached`, mayRunAgain: true },
+				{ userMessage: userText`The model could not be reached`, mayRunAgain: true },
 			);
 
 			expect(willRetry).toBe(true);

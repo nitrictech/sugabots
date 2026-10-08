@@ -18,13 +18,14 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { Clock, Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
@@ -575,7 +576,7 @@ type SignInAttempt = typeof SignInAttempt.Type;
 export interface TestOutcome {
 	reachable: boolean;
 	latencyMs: number;
-	error?: UserMessage;
+	error?: UserText;
 }
 
 export class ModelProviderNotFound
@@ -583,7 +584,7 @@ export class ModelProviderNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`No such model provider`;
+		return userText`No such model provider`;
 	}
 }
 
@@ -602,8 +603,8 @@ export class ProviderModelsRequireCredential
 {
 	get userMessage() {
 		return this.missing === "api-key"
-			? UserMessage.of`Add an API key before managing models`
-			: UserMessage.of`Sign in with ${signInServiceNames[this.missing]} before managing models`;
+			? userText`Add an API key before managing models`
+			: userText`Sign in with ${signInServiceNames[this.missing]} before managing models`;
 	}
 }
 
@@ -615,8 +616,8 @@ export class ProviderActivationRequiresCredential
 {
 	get userMessage() {
 		return this.missing === "api-key"
-			? UserMessage.of`Add an API key before activating this provider`
-			: UserMessage.of`Sign in with ${signInServiceNames[this.missing]} before activating this provider`;
+			? userText`Add an API key before activating this provider`
+			: userText`Sign in with ${signInServiceNames[this.missing]} before activating this provider`;
 	}
 }
 
@@ -625,7 +626,7 @@ export class ModelProviderRemovalNotAllowed
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Only custom providers can be removed`;
+		return userText`Only custom providers can be removed`;
 	}
 }
 
@@ -634,7 +635,7 @@ export class ProviderModelAlreadyConfigured
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That model is already configured in this workspace`;
+		return userText`That model is already configured in this workspace`;
 	}
 }
 
@@ -643,7 +644,7 @@ export class FetchedModelCapabilitiesImmutable
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The provider says what this model can do; switch capabilities off instead`;
+		return userText`The provider says what this model can do; switch capabilities off instead`;
 	}
 }
 
@@ -652,7 +653,7 @@ export class ProviderModelNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`No such provider model`;
+		return userText`No such provider model`;
 	}
 }
 
@@ -661,7 +662,7 @@ export class ProviderModelRemovalNotAllowed
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`Only manually added models can be removed`;
+		return userText`Only manually added models can be removed`;
 	}
 }
 
@@ -670,7 +671,7 @@ export class ProviderSignInNotOffered
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This provider takes an API key, not a sign-in`;
+		return userText`This provider takes an API key, not a sign-in`;
 	}
 }
 
@@ -679,6 +680,6 @@ export class ProviderSignInAttemptInvalid
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This sign-in has expired; start again`;
+		return userText`This sign-in has expired; start again`;
 	}
 }

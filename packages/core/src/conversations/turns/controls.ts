@@ -1,3 +1,4 @@
+import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { mayDecideApprovals, ResourceHidden } from "../../authorization/access.ts";
@@ -6,7 +7,7 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import { thread, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
 import { TurnRepository } from "./repository.ts";
@@ -122,7 +123,7 @@ export class ToolApprovalNotFound
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`No such pending tool approval`;
+		return userText`No such pending tool approval`;
 	}
 }
 export class ToolApprovalConflict
@@ -130,7 +131,7 @@ export class ToolApprovalConflict
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That tool approval has already been decided`;
+		return userText`That tool approval has already been decided`;
 	}
 }
 export class ToolApprovalForbidden
@@ -138,6 +139,6 @@ export class ToolApprovalForbidden
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`You are not allowed to make that decision`;
+		return userText`You are not allowed to make that decision`;
 	}
 }

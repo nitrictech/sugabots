@@ -1,6 +1,7 @@
 import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
+import { userText } from "@sugabots/errors";
 import { Effect, Result, Schema, SchemaIssue } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -28,8 +29,8 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 						return yield* new BadRequest({
 							message:
 								proposedSlug === PERSONAL_POD_SLUG
-									? `"${PERSONAL_POD_SLUG}" is reserved for your Personal pod. Choose another name.`
-									: "That name cannot be a pod's address",
+									? userText`"${PERSONAL_POD_SLUG}" is reserved for your Personal pod. Choose another name.`
+									: userText`That name cannot be a pod's address`,
 							details: slugIssues(slug.failure.issue).issues,
 						});
 					}

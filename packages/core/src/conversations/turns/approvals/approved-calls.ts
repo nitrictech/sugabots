@@ -1,12 +1,13 @@
 export * as ApprovedToolCalls from "./approved-calls.ts";
 
 import type { ToolCallPart } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import type { ToolApprovalResponse, ToolModelMessage } from "ai";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
 import { toolCall } from "../../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../../user-message.ts";
+import type { UserFacing } from "../../../user-message.ts";
 import { toToolCallPart } from "../../threads/tool-calls.ts";
 import { TurnRepository } from "../repository.ts";
 import { ToolCallRepository } from "../tool-calls/repository.ts";
@@ -124,7 +125,7 @@ export class ToolApprovalsIncomplete
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`The reply could not continue: its tool approvals were not all decided.`;
+		return userText`The reply could not continue: its tool approvals were not all decided.`;
 	}
 }
 /** An approved tool call may no longer run, so it was not started. */
