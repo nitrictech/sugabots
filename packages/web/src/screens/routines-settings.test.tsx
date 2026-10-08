@@ -351,6 +351,43 @@ describe("the workspace's routines", () => {
 		expect(await screen.findByText("No runs yet. Run now to try it.")).toBeDefined();
 	});
 
+	it("duplicates a routine, paused and with a name of its own, then opens the copy", async () => {
+		const copyOf = (n: number, name: string): WorkspaceRoutine => ({
+			...morningBrief,
+			routine: {
+				...morningBrief.routine,
+				id: `0199a3a0-0000-7000-8000-0000000000f${n}`,
+				name,
+				state: "paused",
+			},
+		});
+		const firstCopy = copyOf(1, "Morning brief copy");
+		const secondCopy = copyOf(2, "Morning brief copy 2");
+		let items = [morningBrief, firstCopy];
+		client.api.routines.listInWorkspace.mockImplementation(() => Effect.succeed({ items }));
+		client.api.routines.create.mockImplementation(() => {
+			items = [...items, secondCopy];
+			return Effect.succeed({ routine: secondCopy.routine, secret: null });
+		});
+		const router = mount(routinePage(morningBrief));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith({
+				params: { agentId: linear.id },
+				payload: {
+					name: "Morning brief copy 2",
+					instructions: morningBrief.routine.instructions,
+					results: morningBrief.routine.results,
+					state: "paused",
+					trigger: { kind: "cron", expression: "0 8 * * 1-5", timezone: "UTC" },
+				},
+			}),
+		);
+		await waitFor(() => expect(router.state.location.pathname).toBe(routinePage(secondCopy)));
+	});
+
 	it("turns a routine back on from its page", async () => {
 		client.api.routines.update.mockReturnValue(
 			Effect.succeed({ routine: { ...churnReport.routine, state: "enabled" }, secret: null }),

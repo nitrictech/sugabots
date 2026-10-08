@@ -11,7 +11,7 @@ import {
 	type WebhookAuth,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronRight, Minus, Play, Plus } from "lucide-react";
+import { Check, ChevronRight, Copy, Minus, Play, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -235,9 +235,14 @@ export function NewRoutinePage({
  */
 export function RoutinePage({
 	placed,
+	siblingNames,
+	onDuplicated,
 	onDeleted,
 }: {
 	placed: PlacedRoutine;
+	/** The names of its bot's routines, which a copy's name must not repeat. */
+	siblingNames: readonly string[];
+	onDuplicated: (copy: Routine) => void;
 	onDeleted: () => void;
 }) {
 	const { routine, agent, pod } = placed;
@@ -305,7 +310,18 @@ export function RoutinePage({
 					? "Paused. It only runs when you press Run now."
 					: `${agent.name} · ${pod.name} pod`
 			}
-			headerAction={pod.permissions.runRoutines && <RunNowButton placed={placed} />}
+			headerAction={
+				<div className="flex gap-2">
+					{canManage && (
+						<DuplicateButton
+							placed={placed}
+							siblingNames={siblingNames}
+							onDuplicated={onDuplicated}
+						/>
+					)}
+					{pod.permissions.runRoutines && <RunNowButton placed={placed} />}
+				</div>
+			}
 		>
 			{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
 			<SettingsGroup>
@@ -447,6 +463,76 @@ function runsWhen(kind: TriggerKind, reading: ScheduleReading): string {
 	return reading.schedule.repeat === "weekly"
 		? summary
 		: `${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+}
+
+/**
+ * Makes a copy of the routine on the same bot, paused so the two don't both
+ * run, and opens it. A webhook copy has its own address and a new secret, so
+ * a secret its sender made has to be pasted into it again.
+ */
+function DuplicateButton({
+	placed,
+	siblingNames,
+	onDuplicated,
+}: {
+	placed: PlacedRoutine;
+	siblingNames: readonly string[];
+	onDuplicated: (copy: Routine) => void;
+}) {
+	const { routine, agent } = placed;
+	const actions = useRoutineActions();
+	const fields = {
+		name: copyName(routine.name, siblingNames),
+		instructions: routine.instructions,
+		results: routine.results,
+		state: "paused" as const,
+	};
+	const copy: NewRoutine =
+		routine.trigger.kind === "cron"
+			? {
+					...fields,
+					trigger: {
+						kind: "cron",
+						expression: routine.trigger.expression,
+						timezone: routine.trigger.timezone,
+					},
+				}
+			: { ...fields, trigger: { kind: "webhook", auth: routine.trigger.auth } };
+
+	return (
+		<div className="flex flex-col items-end gap-1">
+			<Button
+				variant="secondary"
+				disabled={actions.create.isPending}
+				onClick={() =>
+					actions.create
+						.mutateAsync({ agentId: agent.id, json: copy })
+						.then((created) => onDuplicated(created.routine))
+						.catch(() => {})
+				}
+			>
+				<Copy aria-hidden />
+				Duplicate
+			</Button>
+			{actions.create.error && (
+				<span role="alert" className="text-destructive-text text-sm">
+					{failureMessage(actions.create.error)}
+				</span>
+			)}
+		</div>
+	);
+}
+
+/**
+ * "{name} copy", or "{name} copy 2" and on when that is taken, shortened to
+ * fit a routine's name.
+ */
+function copyName(name: string, taken: readonly string[]): string {
+	for (let number = 1; ; number++) {
+		const suffix = number === 1 ? " copy" : ` copy ${number}`;
+		const candidate = `${name.slice(0, MAX_ROUTINE_NAME_CHARACTERS - suffix.length)}${suffix}`;
+		if (!taken.includes(candidate)) return candidate;
+	}
 }
 
 function RunNowButton({ placed }: { placed: PlacedRoutine }) {
