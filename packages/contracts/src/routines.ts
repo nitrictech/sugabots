@@ -9,6 +9,11 @@ export const MAX_ROUTINE_INSTRUCTIONS_CHARACTERS = 20_000;
 export const MAX_CRON_EXPRESSION_CHARACTERS = 200;
 export const MAX_TIMEZONE_CHARACTERS = 100;
 export const MAX_IDEMPOTENCY_KEY_CHARACTERS = 200;
+export const MAX_ROUTINE_SCHEDULE_TIMES = 8;
+export const MAX_EVERY_DAYS = 30;
+export const MAX_EVERY_WEEKS = 12;
+export const MAX_EVERY_MONTHS = 12;
+const MINUTES_PER_DAY = 24 * 60;
 export const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
 export const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
 export const MIN_WEBHOOK_SECRET_CHARACTERS = 16;
@@ -101,10 +106,76 @@ export const webhookSecretSchema = Schema.Trim.check(
 	Schema.isMaxLength(MAX_WEBHOOK_SECRET_CHARACTERS),
 );
 
+const minutesPastMidnightSchema = Schema.Int.check(
+	Schema.isBetween({ minimum: 0, maximum: MINUTES_PER_DAY - 1 }),
+);
+
+/** The times of day a schedule runs at, as minutes past midnight, each once. */
+const scheduleTimesSchema = Schema.Array(minutesPastMidnightSchema).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_ROUTINE_SCHEDULE_TIMES),
+	Schema.makeFilter((times: readonly number[]) => new Set(times).size === times.length, {
+		expected: "each time once",
+	}),
+);
+
+export const weekdaySchema = Schema.Literals(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+export type Weekday = typeof weekdaySchema.Type;
+
+/** A calendar date, as `YYYY-MM-DD`. */
+const calendarDateSchema = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/));
+
+const everySchema = (maximum: number) =>
+	Schema.Int.check(Schema.isBetween({ minimum: 1, maximum }));
+
+/**
+ * When a scheduled routine runs, in its time zone: every `every` days, weeks
+ * or months counted from `startsOn`, at each of `times`; on `days` of those
+ * weeks, or on `dayOfMonth` of those months. A `cron` schedule is a cron
+ * expression kept as it was written, for routines made before schedules were
+ * picked this way.
+ */
+export const routineScheduleSchema = Schema.Union([
+	Schema.Struct({
+		repeat: Schema.Literal("daily"),
+		every: everySchema(MAX_EVERY_DAYS),
+		times: scheduleTimesSchema,
+		startsOn: calendarDateSchema,
+	}),
+	Schema.Struct({
+		repeat: Schema.Literal("weekly"),
+		every: everySchema(MAX_EVERY_WEEKS),
+		days: Schema.Array(weekdaySchema).check(
+			Schema.isMinLength(1),
+			Schema.makeFilter((days: readonly Weekday[]) => new Set(days).size === days.length, {
+				expected: "each day once",
+			}),
+		),
+		times: scheduleTimesSchema,
+		startsOn: calendarDateSchema,
+	}),
+	Schema.Struct({
+		repeat: Schema.Literal("monthly"),
+		every: everySchema(MAX_EVERY_MONTHS),
+		/** 1 to 28, so it falls in every month, or the month's last day. */
+		dayOfMonth: Schema.Union([
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 28 })),
+			Schema.Literal("last"),
+		]),
+		times: scheduleTimesSchema,
+		startsOn: calendarDateSchema,
+	}),
+	Schema.Struct({ repeat: Schema.Literal("cron"), expression: cronExpressionSchema }),
+]);
+export type RoutineSchedule = typeof routineScheduleSchema.Type;
+
+/** A schedule picked by its parts rather than written as cron. */
+export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
+
 export const routineTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("cron"),
-		expression: cronExpressionSchema,
+		schedule: routineScheduleSchema,
 		timezone: timezoneSchema,
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
@@ -155,8 +226,14 @@ const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
 	auth: Schema.optional(webhookAuthSchema),
 	secret: Schema.optional(webhookSecretSchema),
-	expression: Schema.optional(Schema.Never),
+	schedule: Schema.optional(Schema.Never),
 	timezone: Schema.optional(Schema.Never),
+});
+
+const scheduledTriggerInputSchema = Schema.Struct({
+	kind: Schema.Literal("cron"),
+	schedule: routineScheduleSchema,
+	timezone: timezoneSchema,
 });
 
 const newRoutineBaseSchema = {
@@ -167,14 +244,7 @@ const newRoutineBaseSchema = {
 };
 
 export const newRoutineSchema = Schema.Union([
-	Schema.Struct({
-		...newRoutineBaseSchema,
-		trigger: Schema.Struct({
-			kind: Schema.Literal("cron"),
-			expression: cronExpressionSchema,
-			timezone: timezoneSchema,
-		}),
-	}),
+	Schema.Struct({ ...newRoutineBaseSchema, trigger: scheduledTriggerInputSchema }),
 	Schema.Struct({ ...newRoutineBaseSchema, trigger: webhookTriggerInputSchema }),
 ]);
 
@@ -185,16 +255,7 @@ export const routineUpdateSchema = Schema.Struct({
 	instructions: Schema.optional(routineInstructionsSchema),
 	state: Schema.optional(routineStateSchema),
 	results: Schema.optional(routineResultsSchema),
-	trigger: Schema.optional(
-		Schema.Union([
-			Schema.Struct({
-				kind: Schema.Literal("cron"),
-				expression: cronExpressionSchema,
-				timezone: timezoneSchema,
-			}),
-			webhookTriggerInputSchema,
-		]),
-	),
+	trigger: Schema.optional(Schema.Union([scheduledTriggerInputSchema, webhookTriggerInputSchema])),
 });
 
 export type RoutineUpdate = typeof routineUpdateSchema.Type;
@@ -344,7 +405,7 @@ export const routineWriteResultSchema = Schema.Struct({
 export type RoutineWriteResult = typeof routineWriteResultSchema.Type;
 
 export const routineSchedulePreviewSchema = Schema.Struct({
-	expression: cronExpressionSchema,
+	schedule: routineScheduleSchema,
 	timezone: timezoneSchema,
 });
 export type RoutineSchedulePreview = typeof routineSchedulePreviewSchema.Type;

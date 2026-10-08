@@ -1,4 +1,4 @@
-import type { Routine } from "@sugabots/contracts";
+import type { Routine, RoutineSchedule } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -55,7 +55,7 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 			row.triggerKind === "cron"
 				? {
 						kind: "cron",
-						expression: row.cronExpression ?? "",
+						schedule: scheduleOf(row),
 						timezone: row.cronTimezone ?? "",
 						nextScheduledAt: row.nextScheduledAt?.toISOString() ?? null,
 					}
@@ -66,6 +66,11 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
+}
+
+/** A scheduled routine's schedule: picked by its parts, or written as cron. */
+export function scheduleOf(row: schema.RoutineRow): RoutineSchedule {
+	return row.schedule ?? { repeat: "cron", expression: row.cronExpression ?? "" };
 }
 
 export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {

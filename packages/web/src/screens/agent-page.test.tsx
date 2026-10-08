@@ -41,7 +41,7 @@ const scheduledRoutine = {
 	name: "Morning brief",
 	trigger: {
 		kind: "cron",
-		expression: "0 9 * * 1-5",
+		schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
 		timezone: "America/Los_Angeles",
 		nextScheduledAt: "2026-09-21T09:00:00.000Z",
 	},
@@ -251,9 +251,9 @@ describe("an admin", () => {
 		mount(page);
 
 		const row = await screen.findByRole("link", { name: /^Morning brief/ });
-		expect(within(row).getByText("Weekdays at 9:00")).toBeDefined();
+		expect(within(row).getByText("Weekdays · 9:00")).toBeDefined();
 		expect(row.getAttribute("href")).toBe(`/suga/settings/routines/${scheduledRoutine.id}`);
-		expect(screen.queryByText(scheduledRoutine.trigger.expression)).toBeNull();
+		expect(screen.queryByText(scheduledRoutine.trigger.schedule.expression)).toBeNull();
 	});
 
 	it("marks a paused Routine", async () => {

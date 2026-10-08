@@ -10,7 +10,11 @@ const ID = "0199a3a0-0000-7000-8000-000000000001";
 
 describe("Routine contracts", () => {
 	it.each([
-		{ kind: "cron", expression: "0 9 * * 1-5", timezone: "Australia/Sydney" },
+		{
+			kind: "cron",
+			schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
+			timezone: "Australia/Sydney",
+		},
 		{ kind: "webhook" },
 	])("accepts a complete $kind trigger", (trigger) => {
 		expect(
@@ -23,7 +27,7 @@ describe("Routine contracts", () => {
 	});
 
 	it.each([
-		{ kind: "cron", expression: "0 9 * * 1-5" },
+		{ kind: "cron", schedule: { repeat: "cron", expression: "0 9 * * 1-5" } },
 		{ kind: "webhook", expression: "0 9 * * 1-5", timezone: "UTC" },
 	])("rejects an incomplete or mixed $kind trigger", (trigger) => {
 		expect(

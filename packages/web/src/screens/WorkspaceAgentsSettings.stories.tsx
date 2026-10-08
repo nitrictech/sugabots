@@ -122,7 +122,12 @@ const routines: Routine[] = [
 	routine(
 		1,
 		"Overnight outbound",
-		{ kind: "cron", expression: "0 6 * * *", timezone: "UTC", nextScheduledAt: null },
+		{
+			kind: "cron",
+			schedule: { repeat: "cron", expression: "0 6 * * *" },
+			timezone: "UTC",
+			nextScheduledAt: null,
+		},
 		"enabled",
 	),
 	routine(2, "Inbound lead", { kind: "webhook", auth: { kind: "bearer" } }, "paused"),
