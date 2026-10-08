@@ -121,7 +121,10 @@ export const Opened = meta.story({
 			{ timeout: 10_000 },
 		);
 		await expect(page).toHaveTextContent("Acme Retail");
-		await expect(canvas.getByRole("link", { name: "Open in Growth Desk" })).toBeInTheDocument();
+		// The link waits for the pods and bots too, which can answer after the request.
+		await expect(
+			await canvas.findByRole("link", { name: "Open in Growth Desk" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
 	},
 });
 
