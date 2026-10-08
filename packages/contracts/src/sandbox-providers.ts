@@ -24,6 +24,24 @@ export const SANDBOX_IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
  */
 export const SANDBOX_E2B_TEMPLATE = "sugabots-sandbox";
 
+/**
+ * The size of an E2B workspace's sandboxes unless it sets another: room to
+ * install a repository's dependencies and run its checks. E2B's own default,
+ * 1 GiB, runs out doing that, and the sandbox stalls rather than failing.
+ */
+export const SANDBOX_E2B_DEFAULT_SIZE = { cpuCount: 2, memoryGiB: 4 } as const;
+
+/**
+ * Bounds for an E2B sandbox's size. The account's plan sets the real limit,
+ * which E2B enforces when the template is built.
+ */
+export const sandboxE2bCpuCountSchema = Schema.Int.check(
+	Schema.isBetween({ minimum: 1, maximum: 64 }),
+);
+export const sandboxE2bMemoryGiBSchema = Schema.Int.check(
+	Schema.isBetween({ minimum: 1, maximum: 64 }),
+);
+
 export const sandboxProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
 export type SandboxProviderPresetId = typeof sandboxProviderPresetIdSchema.Type;
 
@@ -70,8 +88,8 @@ const imageSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(
 
 /**
  * A provider's settings, by preset. A provider may be saved before it has
- * every address it needs; it can't be enabled until it has. An image or
- * template left out follows the preset's default, so a new default reaches
+ * every address it needs; it can't be enabled until it has. An image,
+ * template or size left out follows the default, so a new default reaches
  * every provider not set to something else.
  */
 export const sandboxProviderSettingsSchema = Schema.Union([
@@ -86,6 +104,9 @@ export const sandboxProviderSettingsSchema = Schema.Union([
 		apiUrl: Schema.optional(providerUrlSchema),
 		sandboxUrl: Schema.optional(providerUrlSchema),
 		template: Schema.optional(imageSchema),
+		/** What the template is built with, so every sandbox made from it has. */
+		cpuCount: Schema.optional(sandboxE2bCpuCountSchema),
+		memoryGiB: Schema.optional(sandboxE2bMemoryGiBSchema),
 	}),
 ]);
 

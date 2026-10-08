@@ -5,7 +5,7 @@ import type {
 	SandboxProviderSettings,
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
-import { sandboxProviderPreset } from "@sugabots/contracts";
+import { SANDBOX_E2B_DEFAULT_SIZE, sandboxProviderPreset } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
 import { Credentials } from "../credentials/credentials.ts";
@@ -104,6 +104,10 @@ export const make = Effect.gen(function* () {
 					provider: "e2b",
 					apiKey,
 					template: settings.template ?? defaultImage,
+					size: {
+						cpuCount: settings.cpuCount ?? SANDBOX_E2B_DEFAULT_SIZE.cpuCount,
+						memoryGiB: settings.memoryGiB ?? SANDBOX_E2B_DEFAULT_SIZE.memoryGiB,
+					},
 					...(settings.apiUrl && settings.sandboxUrl
 						? { endpoints: { apiUrl: settings.apiUrl, sandboxUrl: settings.sandboxUrl } }
 						: {}),
