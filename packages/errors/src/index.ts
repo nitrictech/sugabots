@@ -73,11 +73,7 @@ export function userText<const Parts extends ReadonlyArray<string | number>>(
 		) as UserText;
 }
 
-/**
- * The part of an error that may be shown outside the system. API responses
- * and saved failures use this shape.
- */
-export const PublicError = Schema.Struct({
+const publicErrorFields = Schema.Struct({
 	/** Which error, such as `ProviderDisabled`. */
 	_tag: Schema.String,
 	/**
@@ -90,6 +86,14 @@ export const PublicError = Schema.Struct({
 	/** How long to wait before retrying, if the other side said. */
 	retryAfter: Schema.optional(Schema.DurationFromMillis),
 });
+
+/**
+ * The part of an error that may be shown outside the system. API responses
+ * and saved failures use this shape.
+ */
+export const PublicError = publicErrorFields.pipe(
+	Schema.encodeKeys({ retryAfter: "retryAfterMillis" }),
+);
 export type PublicError = typeof PublicError.Type;
 
 /**
@@ -111,7 +115,7 @@ export interface DomainError extends PublicError, Cause.YieldableError {
 	readonly [ErrorReporter.severity]: LogLevel.Severity;
 }
 
-const publicFields = Object.keys(PublicError.fields) as ReadonlyArray<keyof PublicError>;
+const publicFields = Object.keys(publicErrorFields.fields) as ReadonlyArray<keyof PublicError>;
 
 /**
  * The {@link PublicError} fields of `error`. Drops an infinite `retryAfter`,
