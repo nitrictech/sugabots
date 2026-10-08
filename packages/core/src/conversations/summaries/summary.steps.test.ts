@@ -1,3 +1,4 @@
+import { DisplayName } from "@sugabots/errors";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../database/database.ts";
@@ -62,7 +63,7 @@ describe("summarise", () => {
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(ended).toEqual([{ failed: "The model did not answer in time." }]);
+			expect(ended).toEqual([{ failed: "The model didn't answer in time. Try again." }]);
 			expect(summaries.complete).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
@@ -112,7 +113,7 @@ describe("summarise", () => {
 		// whole summary being retried over one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(ended).toEqual([{ failed: "The model's answer could not be used." }]);
+		expect(ended).toEqual([{ failed: "The model answered in a form we couldn't use. Try again." }]);
 	});
 
 	it("takes the answer as soon as one of the asks comes back usable", async () => {
@@ -158,11 +159,12 @@ describe("summarise", () => {
 
 	it("does not re-ask a provider that is down, and records the failure", async () => {
 		const { summaries, turns, ended } = fakes();
-		const stream = vi.fn(() =>
-			Effect.fail(
-				new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
-			),
-		);
+		const unreachable = new Models.ProviderUnreachable({
+			provider: DisplayName.fromRecord("Test provider"),
+			model: DisplayName.fromRecord("test-model"),
+			cause: new Error("ECONNREFUSED"),
+		});
+		const stream = vi.fn(() => Effect.fail(unreachable));
 
 		await runWithServices(
 			summarise(request, Models.fromStream(stream)).pipe(
@@ -173,7 +175,7 @@ describe("summarise", () => {
 		// Asking again would cost the same and fail the same way. The thread's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
-		expect(ended).toEqual([{ failed: "The model provider could not answer." }]);
+		expect(ended).toEqual([{ failed: unreachable.userMessage }]);
 		expect(summaries.complete).not.toHaveBeenCalled();
 	});
 

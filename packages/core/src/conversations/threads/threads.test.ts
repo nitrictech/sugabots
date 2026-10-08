@@ -1,4 +1,5 @@
 import { handleFromName, threadChannel } from "@sugabots/contracts";
+import { DisplayName } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -861,9 +862,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
 			{ contextCapacity: 128_000, readKeptFrom: null, answeredCollaboration: false },
 		);
-		const providerDown = Models.fromStream(() =>
-			Effect.fail(new Models.RequestFailed({ message: "provider down", reason: "unavailable" })),
-		);
+		const unreachable = new Models.ProviderUnreachable({
+			provider: DisplayName.fromRecord("Test provider"),
+			model: DisplayName.fromRecord("test-model"),
+			cause: new Error("ECONNREFUSED"),
+		});
+		const providerDown = Models.fromStream(() => Effect.fail(unreachable));
 
 		await runOnPostgres(
 			summarise(
@@ -885,9 +889,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 					and(eq(thread.parentThreadId, details.thread.id), eq(thread.systemAgentKey, "summarise")),
 				),
 		);
-		expect(scribeTurns).toEqual([
-			{ status: "failed", error: "The model provider could not answer." },
-		]);
+		expect(scribeTurns).toEqual([{ status: "failed", error: unreachable.userMessage }]);
 	});
 
 	it("requests cancellation only once while an authorized turn remains active", async () => {

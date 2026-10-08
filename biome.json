@@ -46,7 +46,10 @@
 	},
 	"overrides": [
 		{
-			"includes": ["packages/server/src/http/errors.ts"],
+			"includes": [
+				"packages/core/src/providers/models/**/*.ts",
+				"packages/server/src/http/errors.ts"
+			],
 			"plugins": [
 				"./lint/errors-implement-domain-error.grit",
 				"./lint/no-effect-promise.grit",

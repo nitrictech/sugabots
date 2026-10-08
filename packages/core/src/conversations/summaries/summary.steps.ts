@@ -142,4 +142,4 @@ function stripFence(text: string): string {
 }
 
 /** Why a summary failed. */
-type SummaryFailure = Models.RequestFailed | Models.AnswerTimedOut | Models.UnusableAnswer;
+type SummaryFailure = Models.RequestFailure | Models.AnswerTimedOut | Models.UnusableAnswer;
