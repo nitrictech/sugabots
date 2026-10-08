@@ -494,17 +494,12 @@ describe("ongoing agent Chat", () => {
 	});
 
 	it("keeps writing to people only after a message is sent", async () => {
-		const jyeInThread = testPerson({ id: jye.id, name: jye.name });
-		const withJye = details(chat.mainThreadId, "Chat", "chat", [mainMessage, agentMessage]);
-		client.api.threads.get.mockReturnValue(
-			Effect.succeed({ ...withJye, participants: [...withJye.participants, jyeInThread] }),
-		);
 		client.api.chats.send.mockReturnValue(
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
 		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
 		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
-		const composer = await screen.findByLabelText(`Message ${jye.name}`);
+		const composer = await screen.findByLabelText(`Message ${podmate.name}`);
 		fireEvent.change(composer, { target: { value: "Just between us" } });
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -517,6 +512,13 @@ describe("ongoing agent Chat", () => {
 		expect(screen.getByRole("button", { name: "People only" }).getAttribute("aria-pressed")).toBe(
 			"true",
 		);
+	});
+
+	it("offers writing to people only before anyone else has written in the chat", async () => {
+		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		fireEvent.click(await screen.findByRole("button", { name: "People only" }));
+
+		expect(await screen.findByLabelText(`Message ${podmate.name}`)).toBeTruthy();
 	});
 
 	it("offers the pod's people and the chat's own bot to mention, not the pod's other bots or you", async () => {

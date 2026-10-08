@@ -239,8 +239,9 @@ export function AgentChat({
 		(candidate) =>
 			candidate.id !== user.id && (candidate.kind === "person" || candidate.id === host.id),
 	);
-	const otherPeople = details.participants.filter(
-		(participant) => participant.kind === "person" && participant.id !== user.id,
+	// The pod's people, not only those who have written here, so a new bot's chat can start people-only.
+	const otherPeople = mentionable.filter(
+		(candidate) => candidate.kind === "person" && candidate.id !== user.id,
 	);
 	const writingToPeople = peopleOnly && otherPeople.length > 0;
 	// Written to the people here rather than the bot: their names, with the rest counted.
