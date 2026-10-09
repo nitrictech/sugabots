@@ -21,12 +21,17 @@ describe("modelPrompt", () => {
 			"You are Host Agent (@host-agent), an agent in pod Release of workspace Suga",
 		);
 		expect(prompt.system).toContain("Check facts carefully.");
-		// The history, then one trailing instruction with everything that varies
-		// between turns, so the prefix the provider caches never changes shape.
+		// The history, marked where it ends, then one trailing instruction with
+		// everything that varies between turns, so the prefix the provider caches
+		// never changes shape.
 		expect(prompt.messages.slice(0, -1)).toEqual([
 			{ role: "user", content: "Sam (@sam): Check the release" },
 			{ role: "assistant", content: "I am checking it." },
-			{ role: "user", content: "Reviewer (@reviewer) (agent): Migration is present." },
+			{
+				role: "user",
+				content: "Reviewer (@reviewer) (agent): Migration is present.",
+				cacheBreakpoint: true,
+			},
 		]);
 		const instruction = prompt.messages.at(-1);
 		expect(instruction?.role).toBe("user");

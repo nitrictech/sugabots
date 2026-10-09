@@ -5,6 +5,7 @@ import {
 	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
+import type { ModelMessage } from "ai";
 import { Data, Effect, Schema, SchemaGetter } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -19,8 +20,9 @@ import type { EgressHttpClient } from "../../network/egress.ts";
  * to a provider never asks which one it is.
  *
  * Discovery, how a provider lists its models and what it says about them, is
- * what a dialect covers so far. A header a provider wants on every request,
- * or an option its completions take, belongs here too as the need arrives.
+ * most of what a dialect covers; the rest is the options its requests take. A
+ * header a provider wants on every request belongs here too as the need
+ * arrives.
  */
 
 export interface DiscoveredModel {
@@ -40,6 +42,9 @@ export interface ProviderIdentity {
 	baseUrl: string;
 	apiFormat: ProviderApiFormat;
 }
+
+/** Options for one provider's SDK, keyed by the provider they are for. */
+export type ProviderOptions = NonNullable<ModelMessage["providerOptions"]>;
 
 export interface ProviderDialect {
 	/** Named in tests and in what a person is told. */
@@ -69,6 +74,13 @@ export interface ProviderDialect {
 		model: DiscoveredModel,
 		http: EgressHttpClient,
 	): Effect.Effect<DiscoveredModel, ModelInspectionFailed>;
+	/**
+	 * The options that mark the end of a prompt prefix later requests repeat,
+	 * for a model that caches only the prefixes a request marks. Absent, or
+	 * undefined for a model, where the provider caches prefixes by itself or
+	 * not at all.
+	 */
+	cacheBreakpoint?(modelId: string): ProviderOptions | undefined;
 }
 
 export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
