@@ -65,6 +65,11 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
+/**
+ * The longest a turn waits for a rate-limited provider before running again.
+ * Past it, the turn ends and its message tells people when to try.
+ */
+const MAX_RETRY_WAIT = Duration.minutes(1);
 /** How many model calls a turn may make, across its segments. */
 const TURN_MODEL_CALLS = 20;
 
@@ -259,18 +264,24 @@ const generateReply = (
 			 * Logs the failure and records what people are told of it; the turn
 			 * runs again only while that is safe and could help. A reply without
 			 * an answer does not: running it again would repeat every tool call it
-			 * made. Nor does a model request that would fail the same way again.
+			 * made. Nor does a model request that would fail the same way again,
+			 * or that asks to be left longer than the turn should wait.
 			 */
 			const failed = (failure: TurnFailure) => {
 				const request: DomainError | undefined = Models.isRequestFailure(failure)
 					? failure
 					: undefined;
+				const waitsTooLong =
+					request?.retryAfter !== undefined &&
+					Duration.isGreaterThan(request.retryAfter, MAX_RETRY_WAIT);
 				return logTurnFailure(prepared, failure.message).pipe(
 					Effect.andThen(
 						turns.fail(replyTurn, draft, {
 							userMessage: failure.userMessage,
 							mayRunAgain:
-								!(failure instanceof ReplyWithoutAnswer) && (request?.isRetryable ?? true),
+								!(failure instanceof ReplyWithoutAnswer) &&
+								(request?.isRetryable ?? true) &&
+								!waitsTooLong,
 						}),
 					),
 					Effect.map(

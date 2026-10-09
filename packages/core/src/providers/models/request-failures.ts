@@ -9,8 +9,8 @@ export interface RequestContext {
 	readonly model: DisplayName;
 }
 
-const context = { provider: DisplayName.schema, model: DisplayName.schema };
-const wrapped = { ...context, cause: Schema.Defect() };
+const requestFields = { provider: DisplayName.schema, model: DisplayName.schema };
+const requestFieldsWithCause = { ...requestFields, cause: Schema.Defect() };
 
 /** No provider in the workspace offers the model, or the one that does is switched off. */
 export class ModelNotOffered
@@ -27,9 +27,30 @@ export class ModelNotOffered
 	}
 }
 
+/** The provider that offers the model has no API key or sign-in yet. */
+export class ProviderCredentialsMissing
+	extends Schema.TaggedError<ProviderCredentialsMissing>()(
+		"ProviderCredentialsMissing",
+		requestFields,
+	)
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `${this.provider} has no API key or sign-in`;
+	}
+	get userMessage() {
+		return userText`${this.provider}, which provides ${this.model}, has no API key or sign-in. A workspace admin can add one in Models.`;
+	}
+}
+
 /** The provider's sign-in couldn't be renewed. */
 export class ProviderOAuthRefreshFailed
-	extends Schema.TaggedError<ProviderOAuthRefreshFailed>()("ProviderOAuthRefreshFailed", wrapped)
+	extends Schema.TaggedError<ProviderOAuthRefreshFailed>()(
+		"ProviderOAuthRefreshFailed",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -45,7 +66,7 @@ export class ProviderOAuthRefreshFailed
 /** The network policy refused the provider's address before anything was sent. */
 export class ProviderAddressRefused
 	extends Schema.TaggedError<ProviderAddressRefused>()("ProviderAddressRefused", {
-		...context,
+		...requestFields,
 		cause: Schema.instanceOf(EgressRefused),
 	})
 	implements DomainError
@@ -62,7 +83,7 @@ export class ProviderAddressRefused
 
 /** No connection could be made: refused, no such host, or no answer in time. */
 export class ProviderUnreachable
-	extends Schema.TaggedError<ProviderUnreachable>()("ProviderUnreachable", wrapped)
+	extends Schema.TaggedError<ProviderUnreachable>()("ProviderUnreachable", requestFieldsWithCause)
 	implements DomainError
 {
 	readonly isRetryable = true;
@@ -77,7 +98,10 @@ export class ProviderUnreachable
 
 /** The connection dropped after it was made, partway through the response. */
 export class ProviderConnectionLost
-	extends Schema.TaggedError<ProviderConnectionLost>()("ProviderConnectionLost", wrapped)
+	extends Schema.TaggedError<ProviderConnectionLost>()(
+		"ProviderConnectionLost",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = true;
@@ -90,9 +114,12 @@ export class ProviderConnectionLost
 	}
 }
 
-/** The provider answered 401 or 403. */
+/** The provider answered 401: it doesn't accept the key or sign-in. */
 export class ProviderCredentialsRejected
-	extends Schema.TaggedError<ProviderCredentialsRejected>()("ProviderCredentialsRejected", wrapped)
+	extends Schema.TaggedError<ProviderCredentialsRejected>()(
+		"ProviderCredentialsRejected",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -105,9 +132,30 @@ export class ProviderCredentialsRejected
 	}
 }
 
-/** The provider wants payment: a 402, or a 429 for an exhausted quota. */
+/**
+ * The key is fine, but the provider won't let the account use the model: a
+ * 403, such as for the account's region or an age check.
+ */
+export class ProviderAccessDenied
+	extends Schema.TaggedError<ProviderAccessDenied>()("ProviderAccessDenied", requestFieldsWithCause)
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return describe(this.cause);
+	}
+	get userMessage() {
+		return userText`${this.provider} won't let this workspace use ${this.model}, for example because of a setting on the account or where it's used from. A workspace admin can check the account with ${this.provider}, or you can choose another model.`;
+	}
+}
+
+/** The provider wants payment: a 402, a 429 for an exhausted quota, or a 400 saying so. */
 export class ProviderQuotaExhausted
-	extends Schema.TaggedError<ProviderQuotaExhausted>()("ProviderQuotaExhausted", wrapped)
+	extends Schema.TaggedError<ProviderQuotaExhausted>()(
+		"ProviderQuotaExhausted",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -123,7 +171,7 @@ export class ProviderQuotaExhausted
 /** The provider answered 429 for asking too often. */
 export class ProviderRateLimited
 	extends Schema.TaggedError<ProviderRateLimited>()("ProviderRateLimited", {
-		...wrapped,
+		...requestFieldsWithCause,
 		retryAfter: Schema.optional(Schema.Duration),
 	})
 	implements DomainError
@@ -144,7 +192,10 @@ export class ProviderRateLimited
 
 /** The provider doesn't recognise the model: a 404. */
 export class ProviderModelNotFound
-	extends Schema.TaggedError<ProviderModelNotFound>()("ProviderModelNotFound", wrapped)
+	extends Schema.TaggedError<ProviderModelNotFound>()(
+		"ProviderModelNotFound",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -161,7 +212,7 @@ export class ProviderModelNotFound
 export class ProviderContextLengthExceeded
 	extends Schema.TaggedError<ProviderContextLengthExceeded>()(
 		"ProviderContextLengthExceeded",
-		wrapped,
+		requestFieldsWithCause,
 	)
 	implements DomainError
 {
@@ -177,7 +228,10 @@ export class ProviderContextLengthExceeded
 
 /** The provider refused the request itself: any other 4xx. */
 export class ProviderRejectedRequest
-	extends Schema.TaggedError<ProviderRejectedRequest>()("ProviderRejectedRequest", wrapped)
+	extends Schema.TaggedError<ProviderRejectedRequest>()(
+		"ProviderRejectedRequest",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = false;
@@ -186,13 +240,13 @@ export class ProviderRejectedRequest
 		return describe(this.cause);
 	}
 	get userMessage() {
-		return userText`${this.provider} didn't accept the request for ${this.model}. This is a problem on our end, and we've logged it. If it keeps happening, choose another model.`;
+		return userText`${this.provider} didn't accept the request for ${this.model}. We've logged what it said. If it keeps happening, choose another model.`;
 	}
 }
 
 /** The provider failed or timed out on its side: a 5xx or a 408. */
 export class ProviderServerError
-	extends Schema.TaggedError<ProviderServerError>()("ProviderServerError", wrapped)
+	extends Schema.TaggedError<ProviderServerError>()("ProviderServerError", requestFieldsWithCause)
 	implements DomainError
 {
 	readonly isRetryable = true;
@@ -207,7 +261,10 @@ export class ProviderServerError
 
 /** A failure none of the others describe, such as a response the SDK couldn't read. */
 export class ProviderRequestFailed
-	extends Schema.TaggedError<ProviderRequestFailed>()("ProviderRequestFailed", wrapped)
+	extends Schema.TaggedError<ProviderRequestFailed>()(
+		"ProviderRequestFailed",
+		requestFieldsWithCause,
+	)
 	implements DomainError
 {
 	readonly isRetryable = true;
@@ -223,11 +280,13 @@ export class ProviderRequestFailed
 /** Why asking a model failed. */
 export const RequestFailure = Schema.Union([
 	ModelNotOffered,
+	ProviderCredentialsMissing,
 	ProviderOAuthRefreshFailed,
 	ProviderAddressRefused,
 	ProviderUnreachable,
 	ProviderConnectionLost,
 	ProviderCredentialsRejected,
+	ProviderAccessDenied,
 	ProviderQuotaExhausted,
 	ProviderRateLimited,
 	ProviderModelNotFound,
@@ -248,6 +307,7 @@ const NOT_CONNECTED = new Set([
 	"EAI_AGAIN",
 	"EHOSTUNREACH",
 	"ENETUNREACH",
+	"ETIMEDOUT",
 	"UND_ERR_CONNECT_TIMEOUT",
 ]);
 
@@ -255,7 +315,6 @@ const NOT_CONNECTED = new Set([
 const CONNECTION_DROPPED = new Set([
 	"ECONNRESET",
 	"EPIPE",
-	"ETIMEDOUT",
 	"UND_ERR_SOCKET",
 	"UND_ERR_BODY_TIMEOUT",
 	"UND_ERR_HEADERS_TIMEOUT",
@@ -268,12 +327,12 @@ export function classifyRequestFailure(cause: unknown, context: RequestContext):
 		return classifyStatus(cause.statusCode, cause, fields);
 	}
 	const refused = findInChain(cause, (link) => link instanceof EgressRefused);
-	if (refused instanceof EgressRefused) {
+	if (refused) {
 		return refused.reason === "unresolved"
 			? new ProviderUnreachable(fields)
 			: new ProviderAddressRefused({ ...context, cause: refused });
 	}
-	const code = findErrorCode(cause);
+	const code = findInChain(cause, hasErrorCode)?.code;
 	if (code && NOT_CONNECTED.has(code)) return new ProviderUnreachable(fields);
 	if (code && CONNECTION_DROPPED.has(code)) return new ProviderConnectionLost(fields);
 	return new ProviderRequestFailed(fields);
@@ -285,29 +344,44 @@ function classifyStatus(
 	fields: RequestContext & { cause: unknown },
 ): RequestFailure {
 	const code = errorCode(cause.responseBody);
-	if (status === 401 || status === 403) return new ProviderCredentialsRejected(fields);
-	// OpenAI, and the servers that copy its errors, report an exhausted quota as a 429.
-	if (status === 402 || (status === 429 && code === "insufficient_quota")) {
+	if (status === 401) return new ProviderCredentialsRejected(fields);
+	if (status === 403) return new ProviderAccessDenied(fields);
+	// OpenAI, and the servers that copy its errors, report an exhausted quota as a
+	// 429; Anthropic reports one as a 400.
+	if (
+		status === 402 ||
+		(status === 429 && code === "insufficient_quota") ||
+		(status === 400 && providerSays(cause, /credit balance is too low/i))
+	) {
 		return new ProviderQuotaExhausted(fields);
 	}
 	if (status === 429) {
-		return new ProviderRateLimited({ ...fields, retryAfter: retryAfter(cause.responseHeaders) });
+		return new ProviderRateLimited({
+			...fields,
+			retryAfter: parseRetryAfter(cause.responseHeaders),
+		});
 	}
 	if (status === 404) return new ProviderModelNotFound(fields);
-	if (status === 413 || code === "context_length_exceeded" || saysPromptTooLong(cause)) {
+	if (
+		status === 413 ||
+		code === "context_length_exceeded" ||
+		providerSays(cause, /prompt is too long|maximum context length/i)
+	) {
 		return new ProviderContextLengthExceeded(fields);
 	}
 	if (status === 408 || status >= 500) return new ProviderServerError(fields);
 	return new ProviderRejectedRequest(fields);
 }
 
-/** Anthropic reports a prompt over the model's window as a 400 saying so. */
-function saysPromptTooLong(cause: APICallError): boolean {
-	return /prompt is too long/i.test(providerSaid(cause.responseBody) ?? "");
+/** Whether the provider's own sentence about the failure matches `pattern`. */
+function providerSays(cause: APICallError, pattern: RegExp): boolean {
+	return pattern.test(providerSaid(cause.responseBody) ?? "");
 }
 
 /** How long a 429 asks to be left: `retry-after-ms`, which OpenAI sends, or `retry-after` in seconds. */
-function retryAfter(headers: Record<string, string> | undefined): Duration.Duration | undefined {
+function parseRetryAfter(
+	headers: Record<string, string> | undefined,
+): Duration.Duration | undefined {
 	const milliseconds = Number(headers?.["retry-after-ms"]);
 	if (Number.isFinite(milliseconds) && milliseconds > 0) return Duration.millis(milliseconds);
 	const seconds = Number(headers?.["retry-after"]);
@@ -317,7 +391,8 @@ function retryAfter(headers: Record<string, string> | undefined): Duration.Durat
 /** How many causes deep the classifier looks, so a cycle can't run forever. */
 const MAX_CAUSE_DEPTH = 5;
 
-function findInChain(error: unknown, matches: (link: unknown) => boolean): unknown {
+/** The first of `error` and the errors it was caused by that `matches`. */
+function findInChain<T>(error: unknown, matches: (link: unknown) => link is T): T | undefined {
 	for (let link = error, depth = 0; link !== undefined && depth < MAX_CAUSE_DEPTH; depth++) {
 		if (matches(link)) return link;
 		link = link instanceof Error ? link.cause : undefined;
@@ -325,24 +400,28 @@ function findInChain(error: unknown, matches: (link: unknown) => boolean): unkno
 	return undefined;
 }
 
-/** The first socket or undici error code in `error`'s cause chain. */
-function findErrorCode(error: unknown): string | undefined {
-	const withCode = findInChain(
-		error,
-		(link) =>
-			typeof link === "object" &&
-			link !== null &&
-			typeof (link as { code?: unknown }).code === "string",
+/** Whether `link` carries a socket or undici error code, such as `ECONNREFUSED`. */
+function hasErrorCode(link: unknown): link is { code: string } {
+	return (
+		typeof link === "object" &&
+		link !== null &&
+		typeof (link as { code?: unknown }).code === "string"
 	);
-	return (withCode as { code?: string } | undefined)?.code;
 }
 
 /** What the provider said about a failed request, for the logs: its own sentence when it gave one. */
 function describe(cause: unknown): string {
-	if (!APICallError.isInstance(cause))
-		return cause instanceof Error ? cause.message : String(cause);
-	const said = providerSaid(cause.responseBody) ?? cause.message;
-	return `${cause.statusCode ? `Provider returned ${cause.statusCode}` : "Provider refused"}: ${said}`;
+	if (APICallError.isInstance(cause)) {
+		const said = providerSaid(cause.responseBody) ?? cause.message;
+		return cause.statusCode ? `Provider returned ${cause.statusCode}: ${said}` : said;
+	}
+	if (cause instanceof Error) return cause.message;
+	// An error reported mid-stream is often a plain object, such as `{ type: "overloaded_error" }`.
+	try {
+		return JSON.stringify(cause) ?? String(cause);
+	} catch {
+		return String(cause);
+	}
 }
 
 /** errorCode returns the `code`, else the `type`, of the error in an OpenAI-style error `body`. */

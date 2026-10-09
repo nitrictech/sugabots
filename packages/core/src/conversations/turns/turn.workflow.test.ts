@@ -81,6 +81,23 @@ describe("the turn workflow", () => {
 		expect(abandon).not.toHaveBeenCalled();
 	});
 
+	it("waits as long as a rate-limited provider asked before running again", async () => {
+		segment.mockReturnValueOnce(Effect.succeed({ _tag: "Retry", after: Duration.seconds(30) }));
+		await runtime.runPromise(Turn.execute(request(), { discard: true }));
+		await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
+
+		let waitedSeconds = 0;
+		await vi.waitFor(
+			async () => {
+				await runtime.runPromise(TestClock.adjust(Duration.seconds(1)));
+				waitedSeconds++;
+				expect(segment).toHaveBeenCalledTimes(2);
+			},
+			{ timeout: 5_000, interval: 1 },
+		);
+		expect(waitedSeconds).toBeGreaterThanOrEqual(30);
+	});
+
 	it("keeps the lane until every approval is decided, in whatever order", async () => {
 		segment.mockReturnValueOnce(
 			Effect.succeed({ _tag: "Suspended", approvals: ["first", "second"] }),

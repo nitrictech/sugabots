@@ -45,6 +45,7 @@ import {
 	classifyRequestFailure,
 	isRequestFailure,
 	ModelNotOffered,
+	ProviderCredentialsMissing,
 	ProviderOAuthRefreshFailed,
 	type RequestContext,
 	type RequestFailure,
@@ -249,6 +250,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				provider: resolved.providerName,
 				model: resolved.modelName,
 			};
+			if (!resolved.endpoint) return yield* new ProviderCredentialsMissing(context);
 			const connection = yield* withSignInAccess(
 				modelProviders,
 				httpClients,
@@ -513,7 +515,7 @@ export class UnusableAnswer
 		return this.reason;
 	}
 	get userMessage() {
-		return userText`The model answered in a form we couldn't use. Try again.`;
+		return userText`The model answered in a form we couldn't use.`;
 	}
 }
 
@@ -531,7 +533,7 @@ export class AnswerTimedOut
 		return `The ${this.purpose} answer timed out`;
 	}
 	get userMessage() {
-		return userText`The model didn't answer in time. Try again.`;
+		return userText`The model didn't answer in time.`;
 	}
 }
 

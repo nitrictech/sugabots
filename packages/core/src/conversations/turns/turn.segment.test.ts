@@ -1,7 +1,7 @@
 import { DisplayName, userText } from "@sugabots/errors";
 import { tool } from "ai";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -186,6 +186,25 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			Models.fromStream(() =>
 				Effect.fail(
 					new Models.ProviderQuotaExhausted({ ...testProvider, cause: new Error("402") }),
+				),
+			),
+		);
+
+		expect(outcome).toEqual({ _tag: "Finished" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.failed", willRetry: false }),
+		);
+	});
+
+	it("fails the turn for good when the provider asks to be left too long", async () => {
+		const outcome = await segmentWith(
+			Models.fromStream(() =>
+				Effect.fail(
+					new Models.ProviderRateLimited({
+						...testProvider,
+						retryAfter: Duration.minutes(5),
+						cause: new Error("429"),
+					}),
 				),
 			),
 		);
