@@ -14,6 +14,7 @@ import {
 	facilitateLane,
 } from "../floor/facilitate.workflow.ts";
 import { lanesForTests } from "../testing.ts";
+import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
 import { TurnRepository } from "./repository.ts";
@@ -38,6 +39,7 @@ export const turnInternalsForTests = Layer.mergeAll(
 	ToolCallRepository.layer,
 	ApprovedToolCalls.layer,
 	AgentRepository.layer,
+	ThreadFiles.layer,
 );
 
 /*
