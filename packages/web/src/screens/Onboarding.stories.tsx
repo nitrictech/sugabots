@@ -14,6 +14,8 @@ const workspace = {
 	id: WORKSPACE,
 	name: "Nitric",
 	slug: "nitric",
+	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 const user = {
@@ -88,7 +90,7 @@ const meta = preview.meta({
 	component: Onboarding,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { session },
+	args: { session, workspace, onAddress: fn() },
 });
 
 /** The welcome, before signing in: a bot of every colour, and the way in. */
@@ -106,8 +108,9 @@ export const Welcome = meta.story({
 	},
 });
 
-/** Naming the workspace, which Continue waits on. */
+/** Naming the first workspace, which Continue waits on. With none to go back to, there is no Cancel. */
 export const Workspace = meta.story({
+	args: { workspace: undefined },
 	render: (args) => (
 		<Preview stage="new">
 			<div className="h-screen">
@@ -120,6 +123,7 @@ export const Workspace = meta.story({
 			await canvas.findByRole("heading", { name: "Name your workspace" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Continue" })).toBeDisabled();
+		await expect(canvas.queryByRole("button", { name: "Cancel" })).toBeNull();
 		await expect(canvas.getByLabelText("Workspace name")).toHaveAttribute(
 			"placeholder",
 			"e.g. Ryan's bots",
@@ -129,7 +133,7 @@ export const Workspace = meta.story({
 
 /** Naming another workspace, from a workspace already set up, which Cancel returns to. */
 export const AnotherWorkspace = meta.story({
-	args: { newWorkspace: { made: undefined, onMade: fn(), onCancel: fn() } },
+	args: { workspace: undefined, onCancel: fn() },
 	render: (args) => (
 		<Preview stage="model">
 			<div className="h-screen">
@@ -144,7 +148,7 @@ export const AnotherWorkspace = meta.story({
 		await expect(canvas.getByLabelText("Workspace name")).toHaveValue("");
 		await expect(canvas.queryByRole("button", { name: "Back" })).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
-		await expect(args.newWorkspace?.onCancel).toHaveBeenCalled();
+		await expect(args.onCancel).toHaveBeenCalled();
 	},
 });
 

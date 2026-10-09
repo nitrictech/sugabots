@@ -6,7 +6,6 @@ import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/da
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,7 +44,7 @@ async function appWith(
 	sent: Email.Message[],
 ) {
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layer, Membership.layer, Onboarding.layer).pipe(
+		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
 			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
 				Layer.succeed(
@@ -81,7 +80,6 @@ async function appWith(
 		Effect.all({
 			authentication: Authentication.Service,
 			membership: Membership.Service,
-			onboarding: Onboarding.Service,
 			accounts: Accounts.Service,
 		}),
 	);
@@ -90,7 +88,6 @@ async function appWith(
 			Layer.mergeAll(
 				Layer.succeed(Authentication.Service, services.authentication),
 				Layer.succeed(Membership.Service, services.membership),
-				Layer.succeed(Onboarding.Service, services.onboarding),
 				Layer.succeed(Accounts.Service, services.accounts),
 				installationWithWebAppAt(ORIGIN),
 			),
@@ -300,7 +297,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("answers who someone is, their onboarding and their workspaces in one request", async () => {
+	it("answers who someone is and their workspaces in one request", async () => {
 		const email = `boot-${crypto.randomUUID().slice(0, 8)}@example.com`;
 		const token = await signUp("Boot Strap", email);
 
@@ -309,7 +306,6 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			user: expect.objectContaining({ name: "Boot Strap", email }),
-			onboarding: { completed: false },
 			workspaces: [],
 		});
 	});

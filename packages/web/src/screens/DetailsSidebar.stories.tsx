@@ -122,7 +122,15 @@ const meta = preview.meta({
 				client.setQueryData(["connections", revenue.id], connections);
 				client.setQueryData(
 					["workspaces"],
-					[{ id: WORKSPACE, name: "Nitric", slug: "nitric", timeZone: "UTC" }],
+					[
+						{
+							id: WORKSPACE,
+							name: "Nitric",
+							slug: "nitric",
+							timeZone: "UTC",
+							setupCompletedAt: "2026-09-01T00:00:00.000Z",
+						},
+					],
 				);
 				client.setQueryData(
 					["built-in-agents", WORKSPACE],

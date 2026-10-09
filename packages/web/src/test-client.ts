@@ -60,7 +60,6 @@ export const client = {
 			resetLink: vi.fn(),
 		},
 		onboarding: {
-			status: vi.fn(),
 			complete: vi.fn(),
 			completeInvite: vi.fn(),
 		},

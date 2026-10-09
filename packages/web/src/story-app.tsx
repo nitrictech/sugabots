@@ -52,6 +52,7 @@ export const storyWorkspace = {
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
 /** Every pod, with the viewer as the Personal pod's owner, and every bot. */
@@ -198,7 +199,6 @@ export interface StoryAppData {
 	messages?: Record<string, Message[]>;
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
-	onboarded?: boolean;
 	/** The viewer's referral link, where the installation signs people up by referral. */
 	referralLink?: string;
 }
@@ -230,7 +230,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			]),
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
-		http.get(api("/onboarding"), () => HttpResponse.json({ completed: data.onboarded ?? true })),
 		http.get(api("/referral-link"), () => HttpResponse.json({ url: data.referralLink ?? null })),
 		http.get(api("/workspaces/:workspace/me"), () =>
 			HttpResponse.json({

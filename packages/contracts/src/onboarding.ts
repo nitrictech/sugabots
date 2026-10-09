@@ -1,9 +1,6 @@
 import { Schema } from "effect";
 import { uuidSchema } from "./uuid.ts";
 
-export const onboardingStatusSchema = Schema.Struct({ completed: Schema.Boolean });
-export type OnboardingStatus = typeof onboardingStatusSchema.Type;
-
 export const completeOnboardingSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	podId: uuidSchema,

@@ -64,7 +64,13 @@ export const jye: SessionUser = {
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 
-export const workspace = { id: WORKSPACE, name: "Suga Workspace", slug: "suga", timeZone: "UTC" };
+export const workspace = {
+	id: WORKSPACE,
+	name: "Suga Workspace",
+	slug: "suga",
+	timeZone: "UTC",
+	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+};
 
 /** Every pod permission, as an admin gets them. */
 const ADMIN_IN_POD: PodPermissions = {
@@ -361,7 +367,6 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			},
 		]),
 	);
-	client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
 	client.api.onboarding.completeInvite.mockImplementation(() =>
 		client.api.workspaces.acceptInvitation.mock.calls.length > 0
 			? Effect.succeed({ workspaceId: WORKSPACE })

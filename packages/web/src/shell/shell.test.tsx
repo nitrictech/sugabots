@@ -64,6 +64,7 @@ describe("the workspace choice", () => {
 		name: "Nitric",
 		slug: "nitric",
 		timeZone: "UTC",
+		setupCompletedAt: "2026-09-01T00:00:00.000Z",
 	};
 
 	it("keeps a workspace choice in memory when storage is unavailable", async () => {
@@ -129,7 +130,7 @@ describe("the workspace choice", () => {
 		expect(router.state.location.search).toEqual({ workspace: "nitric" });
 	});
 
-	it("sets up every step of a workspace for somebody who deleted all of theirs", async () => {
+	it("keeps somebody with no workspace out of the shell, setting one up with nowhere to cancel to", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.workspaces.create.mockImplementation(() => {
 			client.api.workspaces.list.mockReturnValue(Effect.succeed([other]));
@@ -138,20 +139,133 @@ describe("the workspace choice", () => {
 		const router = mount(linearPage);
 
 		const name = await screen.findByLabelText("Workspace name");
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding/new"));
-		// There is no workspace to go back to.
+		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
+		expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
 		fireEvent.change(name, { target: { value: "Nitric" } });
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
-		expect(router.state.location.pathname).toBe("/onboarding/new");
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+	});
+
+	it("takes somebody who may finish an unfinished workspace's setup back into it", async () => {
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
+		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
+		);
+		const router = mount("/");
+
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
+		expect(router.state.location.pathname).toBe("/onboarding");
+		expect(router.state.location.search).toEqual({ workspace: workspace.slug });
+	});
+
+	it("finishes an unfinished workspace's setup into its chat, not back into setup", async () => {
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
+		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
+		const named = { ...personalAssistant, name: "Chief", handle: "chief" };
+		client.api.agents.update.mockImplementation(() => {
+			client.api.agents.list.mockReturnValue(Effect.succeed([named]));
+			return Effect.succeed(named);
+		});
+		client.api.onboarding.complete.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(
+				Effect.succeed([{ ...workspace, setupCompletedAt: "2026-10-09T00:00:00.000Z" }]),
+			);
+			return Effect.void;
+		});
+		const router = mount("/");
+
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Chief" } });
+		fireEvent.click(screen.getByRole("button", { name: "Create bot" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Start chatting" }));
+
+		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(router.state.location.pathname).toBe("/suga/pods/personal/agents/chief");
+	});
+
+	it("says so, rather than opening an unfinished workspace, when it cannot tell who may finish it", async () => {
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
+		);
+		client.api.workspaceAccess.mockReturnValueOnce(
+			Effect.fail(new Forbidden({ message: "Unavailable" })),
+		);
+		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
+		client.api.agents.list.mockReturnValue(
+			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
+		);
+		const router = mount("/");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+		expect(screen.queryByRole("navigation", { name: "Pods" })).toBeNull();
+
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
+		expect(router.state.location.pathname).toBe("/onboarding");
+	});
+
+	it("opens an unfinished workspace as it is for somebody invited part way", async () => {
+		apiAnswers({ role: "member" });
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
+		);
+		const router = mount(linearPage);
+
+		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(router.state.location.pathname).toBe(linearPage);
+	});
+
+	it("cancels an unfinished workspace's setup into another workspace, keeping it for an admin, who may not delete it", async () => {
+		const unfinished = { ...other, setupCompletedAt: null };
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, unfinished]));
+		const router = mount(`/${unfinished.slug}/agents`);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga\//));
+		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
+	});
+
+	it("opens a workspace that is set up from the root, rather than the one being set up", async () => {
+		const unfinished = { ...other, setupCompletedAt: null };
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, unfinished]));
+		chooseWorkspace(unfinished.id);
+		const router = mount("/");
+
+		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
+		expect(router.state.location.pathname).toMatch(/^\/suga\//);
+	});
+
+	it("comes back to a workspace whose save a reload interrupted", async () => {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
+		client.api.workspaces.create.mockReturnValue(Effect.never);
+		const router = mount("/onboarding");
+		fireEvent.change(await screen.findByLabelText("Workspace name"), {
+			target: { value: "Nitric" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+		await waitFor(() => expect(router.state.location.search).toEqual({ workspace: "nitric" }));
+
+		// The server saves it while the page reloads.
+		cleanup();
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([other]));
+		mount(router.state.location.href);
+
+		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
+		expect(client.api.workspaces.create).toHaveBeenCalledOnce();
 	});
 
 	it("picks setting up a new workspace back up after a reload", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-		mount("/onboarding/new?workspace=nitric");
+		mount("/onboarding?workspace=nitric");
 
 		expect(await screen.findByRole("button", { name: "Cancel" })).toBeDefined();
 		await waitFor(() => expect(localStorage.getItem("sugabots-workspace")).toBe(other.id));
@@ -159,27 +273,30 @@ describe("the workspace choice", () => {
 		expect(client.api.workspaces.create).not.toHaveBeenCalled();
 	});
 
-	it("keeps a workspace it did not make itself when cancelled", async () => {
-		// Setup reached again by its address may be for a workspace finished and shared since.
+	it("keeps a workspace whose setup is finished when its owner cancels setting it up", async () => {
+		// Setup reached by its address, from a bookmark or Back, for a workspace set up since.
+		apiAnswers({ role: "owner" });
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-		const router = mount("/onboarding/new?workspace=nitric");
+		const router = mount("/onboarding?workspace=nitric");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding/new"));
+		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding"));
 		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
 	});
 
 	it("asks before leaving a workspace made but not set up", async () => {
-		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-		const router = mount("/onboarding/new?workspace=nitric");
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([workspace, { ...other, setupCompletedAt: null }]),
+		);
+		const router = mount("/onboarding?workspace=nitric");
 		await screen.findByRole("button", { name: "Cancel" });
 
 		void router.navigate({ to: linearPage });
 		const dialog = await screen.findByRole("dialog", { name: "Leave setup?" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave setup?" })).toBeNull());
-		expect(router.state.location.pathname).toBe("/onboarding/new");
+		expect(router.state.location.pathname).toBe("/onboarding");
 
 		void router.navigate({ to: linearPage });
 		fireEvent.click(
@@ -202,10 +319,12 @@ describe("the workspace choice", () => {
 		expect(client.api.workspaces.create).not.toHaveBeenCalled();
 	});
 
-	it("deletes the workspace it made when cancelled, and goes back to where it came from", async () => {
+	it("deletes the workspace it made when its owner cancels, and goes back to where it came from", async () => {
+		apiAnswers({ role: "owner" });
+		const made = { ...other, setupCompletedAt: null };
 		client.api.workspaces.create.mockImplementation(() => {
-			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-			return Effect.succeed(other);
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, made]));
+			return Effect.succeed(made);
 		});
 		client.api.workspaces.delete.mockReturnValue(Effect.void);
 		const router = mount(linearPage);
@@ -218,6 +337,21 @@ describe("the workspace choice", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(linearPage));
 		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
 		expect(localStorage.getItem("sugabots-workspace")).toBe(workspace.id);
+	});
+
+	it("deletes an unfinished workspace when its owner cancels setting it up after a reload", async () => {
+		apiAnswers({ role: "owner" });
+		client.api.workspaces.list.mockReturnValue(
+			Effect.succeed([workspace, { ...other, setupCompletedAt: null }]),
+		);
+		client.api.workspaces.delete.mockReturnValue(Effect.void);
+		const router = mount("/onboarding?workspace=nitric");
+
+		await screen.findByRole("heading", { name: "Connect a provider" });
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding"));
+		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
 	});
 
 	it("lets the owner delete a workspace, then opens another", async () => {
@@ -246,7 +380,7 @@ describe("the workspace choice", () => {
 		expect(screen.queryByRole("button", { name: "Delete workspace" })).toBeNull();
 	});
 
-	it("says so when the address is already taken, and stays on the step", async () => {
+	it("says so when the address is already taken, and stays on the step without it", async () => {
 		client.api.workspaces.create.mockReturnValue(
 			Effect.fail(new Conflict({ message: "already exists" })),
 		);
@@ -257,6 +391,7 @@ describe("the workspace choice", () => {
 
 		expect(await screen.findByText("That workspace address is already taken.")).toBeDefined();
 		expect(screen.getByRole("heading", { name: "Name your workspace" })).toBeDefined();
+		expect(router.state.location.search).toEqual({});
 	});
 
 	async function startNewWorkspace(router: ReturnType<typeof mount>) {
@@ -265,7 +400,7 @@ describe("the workspace choice", () => {
 			await within(rail).findByRole("button", { name: `Workspace: ${workspace.name}` }),
 		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: "New workspace" }));
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding/new"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
 		await screen.findByRole("heading", { name: "Name your workspace" });
 		return screen.getByLabelText("Workspace name");
 	}
@@ -630,18 +765,7 @@ describe("routes", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/agents"));
 	});
 
-	it("keeps a signed-in user without a workspace out of the shell", async () => {
-		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
-		const router = mount(linearPage);
-
-		expect(await screen.findByRole("heading", { name: "Name your workspace" })).toBeDefined();
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
-		expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
-	});
-
 	it("walks a new workspace from its first bot to its chat", async () => {
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const named = {
@@ -654,8 +778,8 @@ describe("routes", () => {
 			client.api.agents.list.mockReturnValue(Effect.succeed([named]));
 			return Effect.succeed(named);
 		});
-		client.api.onboarding.complete.mockReturnValue(Effect.succeed({ completed: true }));
-		const router = mount(linearPage);
+		client.api.onboarding.complete.mockReturnValue(Effect.void);
+		const router = mount(`/onboarding?workspace=${workspace.slug}`);
 
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
@@ -679,7 +803,6 @@ describe("routes", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
 
 		expect(await screen.findByRole("heading", { name: "Chief is ready" })).toBeDefined();
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: true }));
 		fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
 
 		await waitFor(() =>
@@ -688,14 +811,13 @@ describe("routes", () => {
 	});
 
 	it("invites the addresses typed, and says how many it will send", async () => {
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, name: "Chief" }]),
 		);
 		client.api.agents.update.mockReturnValue(Effect.succeed(personalAssistant));
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount(linearPage);
+		mount(`/onboarding?workspace=${workspace.slug}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Create bot" }));
 		const emails = await screen.findByLabelText("Email addresses");
@@ -718,19 +840,17 @@ describe("routes", () => {
 	});
 
 	it("starts at the model step while the first bot has no model, and will not skip it", async () => {
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
-		mount(linearPage);
+		mount(`/onboarding?workspace=${workspace.slug}`);
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 	});
 
 	it("adds the first provider from the Models picker, then switches on the model chosen for the first bot", async () => {
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.pods.list.mockReturnValue(Effect.succeed([personalPod]));
 		client.api.agents.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		client.api.modelProviders.listEnabledModels.mockReturnValue(
@@ -766,7 +886,7 @@ describe("routes", () => {
 		client.api.agents.update.mockReturnValue(
 			Effect.succeed({ ...personalAssistant, model: "mistral/large" }),
 		);
-		mount(linearPage);
+		mount(`/onboarding?workspace=${workspace.slug}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Choose a provider" }));
 		const picker = await screen.findByRole("dialog", { name: "Add provider" });
@@ -1748,7 +1868,6 @@ describe("workspace settings", () => {
 			.mockReturnValue({ ...browserOptions, timeZone: "Australia/Sydney" });
 		onTestFinished(() => browser.mockRestore());
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.workspaces.create.mockReturnValue(
 			Effect.succeed({
 				id: "0199a3a0-0000-7000-8000-0000000000f9",
@@ -1774,7 +1893,6 @@ describe("workspace settings", () => {
 
 	it("keeps a rejected workspace name and creation form open", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
-		client.api.onboarding.status.mockReturnValue(Effect.succeed({ completed: false }));
 		client.api.workspaces.create.mockReturnValue(Effect.die(new Error("Offline")));
 		mount("/suga/settings");
 		const name = await screen.findByLabelText("Workspace name");

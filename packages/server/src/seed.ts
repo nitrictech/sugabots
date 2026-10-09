@@ -10,6 +10,7 @@ import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { and, eq, type SQL } from "drizzle-orm";
@@ -67,6 +68,8 @@ const seed = Effect.gen(function* () {
 			Effect.map((created) => created.id),
 			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
 		);
+	// The seed stands in for setting it up, so it opens straight into the app.
+	yield* Onboarding.recordSetupCompleted(workspaceId);
 
 	const personal = yield* personalPods.provision({ workspaceId, userId: person.id });
 	const supportId = yield* pods

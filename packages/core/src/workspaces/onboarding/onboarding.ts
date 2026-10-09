@@ -11,6 +11,7 @@ import {
 	pod,
 	podMember,
 	user,
+	workspace,
 	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
@@ -22,23 +23,24 @@ import { AgentRepository } from "../agents/agent-repository.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
 /**
- * The current actor finishing their first run through the product.
+ * The current actor finishing setting up a workspace, or joining one by
+ * invitation.
  *
- * Both writes are transactional and both lock the row they depend on, because
- * the check and the write have to agree: two tabs finishing onboarding at once
- * must not both decide they were the one that did it.
+ * Both are transactional and lock the row they check, so the check still holds
+ * when the writes that follow it land.
  */
 export interface Interface {
-	readonly isCompleted: Effect.Effect<boolean, never, CurrentActor.Service>;
 	/**
-	 * Marks onboarding done, once `podId` and `agentId` are a pod the actor is
-	 * in and its crew agent, and that agent runs on a model the workspace
-	 * offers. Finishing settles the first agent and the model the workspace
-	 * runs it on, so it takes `workspace.providers.manage`.
+	 * Finishes setting up `workspaceId`, once `podId` and `agentId` are a pod the
+	 * actor is in and its crew agent, and that agent runs on a model the
+	 * workspace offers. Finishing settles the first agent and the model the
+	 * workspace runs it on, so it takes `workspace.providers.manage`.
 	 *
 	 * That model also becomes the workspace's default and every system agent's:
 	 * it is the one model the person setting the workspace up has chosen, and
 	 * the system agents have to run on something.
+	 *
+	 * The first time, it records when the workspace's setup was completed.
 	 */
 	readonly complete: (input: {
 		workspaceId: string;
@@ -50,10 +52,9 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Marks onboarding done for an actor who joined through `invitationId`,
-	 * pointing their Personal Assistant at the workspace's default model, or
-	 * another it offers while it does not offer that one. Returns the workspace
-	 * they joined.
+	 * Sets up an actor who joined through `invitationId`, pointing their
+	 * Personal Assistant at the workspace's default model, or another it offers
+	 * while it does not offer that one. Returns the workspace they joined.
 	 */
 	readonly completeAcceptedInvite: (input: {
 		invitationId: string;
@@ -74,19 +75,6 @@ export const make = Effect.gen(function* () {
 	const agents = yield* AgentRepository.Service;
 
 	return Service.of({
-		isCompleted: operation(
-			"isCompleted",
-			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
-				query((db) =>
-					db
-						.select({ completedAt: user.onboardingCompletedAt })
-						.from(user)
-						.where(eq(user.id, userId))
-						.limit(1),
-				),
-			).pipe(Effect.map(([row]) => row?.completedAt != null)),
-		),
-
 		complete: ({ workspaceId, podId, agentId }) =>
 			operation(
 				"complete",
@@ -132,7 +120,7 @@ export const make = Effect.gen(function* () {
 								agents.setAllSystemAgentModels(resolved, model),
 							]),
 						).pipe(Effect.catchTag("ModelNotEnabled", () => Effect.fail(new NoModelChosen())));
-						yield* markCompleted(actor.userId);
+						yield* recordSetupCompleted(resolved);
 					}),
 				),
 			),
@@ -175,7 +163,6 @@ export const make = Effect.gen(function* () {
 						} else {
 							yield* personalPods.provision({ workspaceId, userId });
 						}
-						yield* markCompleted(userId);
 						return workspaceId;
 					}),
 				),
@@ -218,7 +205,13 @@ export class InvitationNotAccepted
 	}
 }
 
-const markCompleted = (userId: string) =>
+/** Records that `workspaceId`'s setup is complete, unless it already was. */
+export const recordSetupCompleted = (workspaceId: string) =>
 	Effect.flatMap(DateTime.nowAsDate, (now) =>
-		query((db) => db.update(user).set({ onboardingCompletedAt: now }).where(eq(user.id, userId))),
+		query((db) =>
+			db
+				.update(workspace)
+				.set({ setupCompletedAt: now })
+				.where(and(eq(workspace.id, workspaceId), isNull(workspace.setupCompletedAt))),
+		),
 	);

@@ -10,7 +10,7 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 class Unreachable extends Data.TaggedError("Unreachable") {}
 
-const meAsSam = { user: sam, onboarding: { completed: true }, workspaces: [] };
+const meAsSam = { user: sam, workspaces: [] };
 
 beforeEach(() => {
 	client.api.me.mockReturnValue(Effect.succeed(meAsSam));
