@@ -1,4 +1,4 @@
-import type { Agent, Pod, SessionUser, Workspace } from "@sugabots/contracts";
+import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
 import { CONNECTION_SIGN_IN_RETURN_PATH } from "@sugabots/contracts";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
@@ -191,20 +191,22 @@ const indexRoute = createRoute({
 });
 
 /**
- * Opens the chosen workspace if it is set up, and otherwise one that is. One
- * still being set up opens when asked for by its address or the switcher, or
- * here when there is no other.
+ * Opens the chosen workspace, unless that would take the caller into its setup
+ * and another is set up. One left part way then opens when asked for by its
+ * address or the switcher, or here when there is no other.
  */
 function LandingRoute() {
 	const { workspace: chosen, isPending, error, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
+	const standing = useWorkspaceStanding();
 	if (isPending) return <div className="h-full bg-list" />;
 	if (error) return <RouteLoadFailure title="Could not load your workspace" onRetry={refetch} />;
 	if (!chosen) return <Navigate to="/onboarding" replace />;
-	const landing =
-		chosen.setupCompletedAt !== null
-			? chosen
-			: (workspaces.data?.find((one) => one.setupCompletedAt !== null) ?? chosen);
+	if (chosen.setupCompletedAt === null && standing.isPending) {
+		return <div className="h-full bg-list" />;
+	}
+	const setUp = workspaces.data?.find((one) => one.setupCompletedAt !== null);
+	const landing = setUp && opensIntoSetup(chosen, standing.data?.permissions) ? setUp : chosen;
 	return <Navigate to="/$workspace/agents" params={{ workspace: landing.slug }} replace />;
 }
 
@@ -537,13 +539,23 @@ function ShellRoute() {
 		if (standing.error) {
 			return <RouteLoadFailure title="Could not load your workspace" onRetry={standing.refetch} />;
 		}
-		// Finishing setup takes `workspace.providers.manage`.
-		const mayFinishSetup = standing.data?.permissions.manageProviders;
-		if (mayFinishSetup) {
+		if (opensIntoSetup(workspace.workspace, standing.data?.permissions)) {
 			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
 		}
 	}
 	return <Shell />;
+}
+
+/**
+ * Whether opening `workspace` takes the caller into its setup instead: it is
+ * still being set up, and they may finish it, which takes
+ * `workspace.providers.manage`.
+ */
+function opensIntoSetup(
+	workspace: Workspace,
+	permissions: WorkspacePermissions | undefined,
+): boolean {
+	return workspace.setupCompletedAt === null && permissions?.manageProviders === true;
 }
 
 function RouteLoadFailure({ title, onRetry }: { title: string; onRetry: () => Promise<unknown> }) {

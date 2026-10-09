@@ -8,16 +8,11 @@ import { Invite } from "./Invite.tsx";
 
 /*
  * The other end of an invitation, once signed in: whose workspace it is and
- * Accept, or why it will not work. It first tries to finish an invitation
- * already accepted, which a fresh one refuses, then reads the invitation.
+ * Accept, or why it will not work.
  */
 
 const API = import.meta.env.VITE_API_URL;
 const ID = "0199a3a0-0000-7000-8000-0000000000e1";
-
-const notYetAccepted = http.post(`${API}/onboarding/complete-invite`, () =>
-	HttpResponse.json({ _tag: "BadRequest", message: "No accepted invitation" }, { status: 400 }),
-);
 
 function Cache({ children }: { children: ReactNode }) {
 	const [client] = useState(() => createQueryClient());
@@ -43,9 +38,8 @@ const meta = preview.meta({
 export const Invited = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			notYetAccepted,
 			http.get(`${API}/invitations/:invitationId`, () =>
-				HttpResponse.json({ workspaceName: "Nitric", inviterName: "Jay Young" }),
+				HttpResponse.json({ status: "pending", workspaceName: "Nitric", inviterName: "Jay Young" }),
 			),
 		);
 	},
@@ -61,7 +55,6 @@ export const Invited = meta.story({
 export const WrongAccount = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			notYetAccepted,
 			http.get(`${API}/invitations/:invitationId`, () =>
 				HttpResponse.json(
 					{ _tag: "Forbidden", message: "This invitation was sent to a different address" },

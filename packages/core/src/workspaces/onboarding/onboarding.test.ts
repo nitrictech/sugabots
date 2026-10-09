@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
@@ -10,7 +10,6 @@ import {
 	user,
 	workspace,
 	workspaceDefaultModel,
-	workspaceInvite,
 	workspaceMember,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
@@ -22,7 +21,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let memberEmail: string;
 	let podId: string;
 	let customAgentId: string;
 	let systemAgentId: string;
@@ -38,7 +36,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	const as = (userId: string) =>
 		onPostgresAs(userId)({
 			complete: onboarding.complete,
-			completeAcceptedInvite: onboarding.completeAcceptedInvite,
 		});
 	const complete = (userId: string, agentId: string) =>
 		as(userId).complete({ workspaceId, podId, agentId });
@@ -66,7 +63,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		workspaceId = madeWorkspace.id;
 		adminId = admin.id;
 		memberId = member.id;
-		memberEmail = member.email;
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
 				{ workspaceId, userId: adminId, role: "admin" },
@@ -202,44 +198,5 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 			Onboarding.NotReadyToFinish,
 		);
 		await expect(complete(memberId, customAgentId)).rejects.toBeInstanceOf(ActionForbidden);
-	});
-
-	it("completes an account from its accepted invitation", async () => {
-		// A workspace people are invited into has been set up, so it has a default.
-		await onDatabase((db) =>
-			db.insert(workspaceDefaultModel).values({ workspaceId, modelId: "model" }),
-		);
-		const [invitation] = await onDatabase((db) =>
-			db
-				.insert(workspaceInvite)
-				.values({
-					workspaceId,
-					email: memberEmail,
-					role: "member",
-					status: "accepted",
-					inviterId: adminId,
-					expiresAt: new Date(Date.now() + 60_000),
-				})
-				.returning(),
-		);
-		if (!invitation) throw new Error("could not create invitation");
-
-		expect(await as(memberId).completeAcceptedInvite({ invitationId: invitation.id })).toBe(
-			workspaceId,
-		);
-		const [assistant] = await onDatabase((db) =>
-			db
-				.select({ model: agent.model })
-				.from(agent)
-				.innerJoin(pod, eq(pod.id, agent.podId))
-				.where(and(eq(pod.ownerId, memberId), eq(agent.provisionedKey, "personal-assistant"))),
-		);
-		expect(assistant?.model).toBe("model");
-	});
-
-	it("refuses an invitation this account has not accepted", async () => {
-		await expect(
-			as(memberId).completeAcceptedInvite({ invitationId: crypto.randomUUID() }),
-		).rejects.toBeInstanceOf(Onboarding.InvitationNotAccepted);
 	});
 });

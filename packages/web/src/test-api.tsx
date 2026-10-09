@@ -10,7 +10,7 @@ import {
 	type SystemAgent,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
-import { BadRequest, NotFound } from "@sugabots/contracts/http";
+import { NotFound } from "@sugabots/contracts/http";
 import {
 	connectionWithTools,
 	listedConnection,
@@ -367,10 +367,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			},
 		]),
 	);
-	client.api.onboarding.completeInvite.mockImplementation(() =>
-		client.api.workspaces.acceptInvitation.mock.calls.length > 0
-			? Effect.succeed({ workspaceId: WORKSPACE })
-			: Effect.fail(new BadRequest({ message: "Pending" })),
+	client.api.workspaces.acceptInvitation.mockReturnValue(
+		Effect.succeed({ workspaceId: WORKSPACE }),
 	);
 	const inPod = administersWorkspace(role)
 		? ADMIN_IN_POD

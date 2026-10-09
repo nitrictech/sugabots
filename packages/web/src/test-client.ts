@@ -61,7 +61,6 @@ export const client = {
 		},
 		onboarding: {
 			complete: vi.fn(),
-			completeInvite: vi.fn(),
 		},
 		systemAgents: {
 			list: vi.fn(),

@@ -12,7 +12,7 @@ import type {
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
@@ -40,6 +40,7 @@ import { user, workspace, workspaceInvite, workspaceMember } from "../../databas
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
+import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
@@ -123,10 +124,18 @@ export interface Interface {
 	readonly cancelInvitation: (
 		input: ForInvitation,
 	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
-	/** For the person the invitation was sent to. */
+	/**
+	 * For the person the invitation was sent to: one still to accept, or one
+	 * they have accepted and whose workspace they are still in.
+	 */
 	readonly invitation: (
 		input: ForInvitation,
 	) => Effect.Effect<InvitationPreview, ResourceHidden | NotTheInvitee, CurrentActor.Service>;
+	/**
+	 * Lets the invitee in, with their Personal pod. Accepting again, as a
+	 * second tab or a reload does, answers with the workspace and changes
+	 * nothing.
+	 */
 	readonly accept: (
 		input: ForInvitation,
 	) => Effect.Effect<
@@ -159,6 +168,25 @@ export const make = Effect.gen(function* () {
 	const searchProviders = yield* SearchProviderRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
 	const ids = yield* Ids.Service;
+
+	/**
+	 * The Personal pod of somebody joining, its assistant on the workspace's
+	 * default model, or on another the workspace offers while it does not offer
+	 * that one.
+	 */
+	const provisionJoining = (workspaceId: string, userId: string) =>
+		Effect.gen(function* () {
+			const { models, defaultModel } = yield* offeredModels(workspaceId);
+			// The default goes unoffered while a failed test has its provider off.
+			const model = models.some((offered) => offered.modelId === defaultModel)
+				? defaultModel
+				: models[0]?.modelId;
+			if (!model) return yield* personalPods.provision({ workspaceId, userId });
+			return yield* personalPods.provisionWithModel({ workspaceId, userId, model }).pipe(
+				// Switched off since it was read: start on none, as while the workspace offers none.
+				Effect.catchTag("ModelNotEnabled", () => personalPods.provision({ workspaceId, userId })),
+			);
+		});
 
 	const sendInvitation = (
 		invitationId: string,
@@ -556,7 +584,12 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const invitation = yield* invitationFor(userId, input.invitationId);
-					return { workspaceName: invitation.workspaceName, inviterName: invitation.inviterName };
+					if (invitation.status === "accepted") return invitation;
+					return {
+						status: "pending" as const,
+						workspaceName: invitation.workspaceName,
+						inviterName: invitation.inviterName,
+					};
 				}),
 			),
 
@@ -567,6 +600,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const { userId } = yield* CurrentActor.Service;
 						const invitation = yield* invitationFor(userId, input.invitationId);
+						if (invitation.status === "accepted") return { workspaceId: invitation.workspaceId };
 						if (accounts.requireEmailVerification && !invitation.inviteeVerified) {
 							return yield* new EmailUnverified();
 						}
@@ -586,7 +620,7 @@ export const make = Effect.gen(function* () {
 									.where(eq(workspaceInvite.id, input.invitationId));
 							}),
 						);
-						yield* personalPods.provision({ workspaceId: invitation.workspaceId, userId });
+						yield* provisionJoining(invitation.workspaceId, userId);
 						return { workspaceId: invitation.workspaceId };
 					}),
 				),
@@ -738,9 +772,11 @@ function deleteMember(memberId: string) {
 }
 
 /**
- * A pending, unexpired invitation, locked for an enclosing transaction, when
- * `userId` is the person it was sent to. Anything else is hidden, so a link
- * cannot be probed.
+ * The invitation `invitationId`, locked for an enclosing transaction, when
+ * `userId` is the person it was sent to: pending and unexpired, or accepted
+ * while they are still in its workspace, so its link leads back in. Anything
+ * else is hidden, so a link cannot be probed, and leaving a workspace ends
+ * what its link can do.
  */
 function invitationFor(userId: string, invitationId: string) {
 	return Effect.gen(function* () {
@@ -748,6 +784,8 @@ function invitationFor(userId: string, invitationId: string) {
 		const [invitation] = yield* query((db) =>
 			db
 				.select({
+					status: workspaceInvite.status,
+					stillIn: workspaceMember.id,
 					workspaceId: workspaceInvite.workspaceId,
 					email: workspaceInvite.email,
 					role: workspaceInvite.role,
@@ -757,16 +795,27 @@ function invitationFor(userId: string, invitationId: string) {
 				.from(workspaceInvite)
 				.innerJoin(workspace, eq(workspace.id, workspaceInvite.workspaceId))
 				.innerJoin(user, eq(user.id, workspaceInvite.inviterId))
+				.leftJoin(
+					workspaceMember,
+					and(
+						eq(workspaceMember.workspaceId, workspaceInvite.workspaceId),
+						eq(workspaceMember.userId, userId),
+					),
+				)
 				.where(
 					and(
 						eq(workspaceInvite.id, invitationId),
-						eq(workspaceInvite.status, "pending"),
-						gt(workspaceInvite.expiresAt, now),
+						or(
+							and(eq(workspaceInvite.status, "pending"), gt(workspaceInvite.expiresAt, now)),
+							eq(workspaceInvite.status, "accepted"),
+						),
 					),
 				)
 				.for("update", { of: workspaceInvite }),
 		);
-		if (!invitation) return yield* new ResourceHidden({ resource: "invitation" });
+		const hidden = new ResourceHidden({ resource: "invitation" });
+		if (!invitation) return yield* hidden;
+		if (invitation.status === "accepted" && invitation.stillIn === null) return yield* hidden;
 		const [invitee] = yield* query((db) =>
 			db
 				.select({ email: user.email, emailVerified: user.emailVerified })
@@ -774,7 +823,17 @@ function invitationFor(userId: string, invitationId: string) {
 				.where(eq(user.id, userId)),
 		);
 		if (invitee?.email.toLowerCase() !== invitation.email) return yield* new NotTheInvitee();
-		return { ...invitation, inviteeVerified: invitee.emailVerified };
+		if (invitation.status === "accepted") {
+			return { status: "accepted" as const, workspaceId: invitation.workspaceId };
+		}
+		return {
+			status: "pending" as const,
+			workspaceId: invitation.workspaceId,
+			role: invitation.role,
+			workspaceName: invitation.workspaceName,
+			inviterName: invitation.inviterName,
+			inviteeVerified: invitee.emailVerified,
+		};
 	});
 }
 

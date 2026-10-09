@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
-import { chooseWorkspace } from "@/lib/workspace.ts";
+import { chooseWorkspace, workspacesQuery } from "@/lib/workspace.ts";
 import { createAppRouter } from "@/router.tsx";
 import {
 	agents,
@@ -203,7 +203,7 @@ describe("the workspace choice", () => {
 		client.api.agents.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
-		const router = mount("/");
+		const router = mount(`/${workspace.slug}/agents`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
 		expect(screen.queryByRole("navigation", { name: "Pods" })).toBeNull();
@@ -242,6 +242,17 @@ describe("the workspace choice", () => {
 
 		expect(await screen.findByRole("navigation", { name: "Pods" })).toBeDefined();
 		expect(router.state.location.pathname).toMatch(/^\/suga\//);
+	});
+
+	it("opens an unfinished workspace from the root for somebody invited part way, who has their own", async () => {
+		apiAnswers({ role: "member" });
+		const joined = { ...other, setupCompletedAt: null };
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, joined]));
+		chooseWorkspace(joined.id);
+		const router = mount("/");
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+		expect(screen.queryByRole("heading", { name: "Connect a provider" })).toBeNull();
 	});
 
 	it("comes back to a workspace whose save a reload interrupted", async () => {
@@ -921,10 +932,7 @@ describe("routes", () => {
 
 	it("still honours the older ?invite= link shape", async () => {
 		client.api.workspaces.invitation.mockReturnValue(
-			Effect.succeed({
-				workspaceName: "Nitric",
-				inviterName: "Sam",
-			}),
+			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
 		);
 
 		const router = mount("/?invite=an-invitation");
@@ -1039,12 +1047,8 @@ describe("routes", () => {
 
 	it("does not retry an accepted invitation when continuing initially fails", async () => {
 		client.api.workspaces.invitation.mockReturnValue(
-			Effect.succeed({
-				workspaceName: "Nitric",
-				inviterName: "Sam",
-			}),
+			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
 		);
-		client.api.workspaces.acceptInvitation.mockReturnValue(Effect.succeed(undefined));
 		const refresh = vi
 			.fn<() => Promise<void>>()
 			.mockRejectedValueOnce(new Error("Offline"))
@@ -1065,9 +1069,44 @@ describe("routes", () => {
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
 
-	it("resumes an accepted invitation after the page was reloaded", async () => {
-		client.api.onboarding.completeInvite.mockReturnValue(
-			Effect.succeed({ workspaceId: workspace.id }),
+	it("opens the workspace just joined, though the list the session started with lacks it", async () => {
+		const joined = {
+			id: "0199a3a0-0000-7000-8000-0000000000f9",
+			name: "Nitric",
+			slug: "nitric",
+			timeZone: "UTC",
+			setupCompletedAt: "2026-09-01T00:00:00.000Z",
+		};
+		client.api.workspaces.invitation.mockReturnValue(
+			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
+		);
+		client.api.workspaces.acceptInvitation.mockImplementation(() => {
+			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, joined]));
+			return Effect.succeed({ workspaceId: joined.id });
+		});
+		// As main.tsx starts a session: with the workspaces /me answered with.
+		const queries = createQueryClient();
+		queries.setQueryData(workspacesQuery.queryKey, [workspace]);
+		const router = createAppRouter({
+			history: createMemoryHistory({ initialEntries: ["/invite/an-invitation"] }),
+		});
+		render(
+			<TestApp
+				router={router}
+				queries={queries}
+				session={{ user: sam, error: undefined, refresh: vi.fn().mockResolvedValue(undefined) }}
+			/>,
+		);
+
+		await screen.findByText("You have been invited to Nitric.");
+		fireEvent.click(screen.getByRole("button", { name: "Accept invite" }));
+
+		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric\//));
+	});
+
+	it("leads back into the workspace from an invitation already accepted", async () => {
+		client.api.workspaces.invitation.mockReturnValue(
+			Effect.succeed({ status: "accepted", workspaceId: workspace.id }),
 		);
 		const refresh = vi.fn().mockResolvedValue(undefined);
 		const router = mount("/invite/an-invitation", sam, refresh);
