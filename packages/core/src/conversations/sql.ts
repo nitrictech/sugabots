@@ -96,6 +96,10 @@ export const routine = pgTable(
 	],
 );
 
+/**
+ * Deleting a thread, by any route including its workspace's, pod's or host
+ * agent's cascade, queues its blobs for deletion: see `blob_deletion`.
+ */
 export const thread = pgTable(
 	"thread",
 	{
@@ -523,6 +527,27 @@ export const toolCall = pgTable(
 );
 
 export type ToolCallRow = typeof toolCall.$inferSelect;
+
+/**
+ * A file in a thread, which its agents can read. Its bytes are in the blob
+ * store, under the thread's folder (see `thread-files/thread-files.ts`).
+ */
+export const threadFile = pgTable(
+	"thread_file",
+	{
+		id: primaryKey(),
+		threadId: uuid("thread_id")
+			.notNull()
+			.references(() => thread.id, { onDelete: "cascade" }),
+		/** The call whose result this is. */
+		toolCallId: uuid("tool_call_id").references(() => toolCall.id, { onDelete: "set null" }),
+		contentType: text("content_type").notNull(),
+		/** In bytes. */
+		size: integer("size").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [index("thread_file_thread_idx").on(table.threadId)],
+);
 
 export const threadSummary = pgTable("thread_summary", {
 	threadId: uuid("thread_id")

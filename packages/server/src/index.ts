@@ -2,6 +2,7 @@ import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
+import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
@@ -107,13 +108,14 @@ const ConversationServices = Conversations.layer.pipe(
 
 /**
  * What runs without a request: the workflows, the routine scheduler, the
- * nightly event prune, seeding the preset providers into every workspace, and
- * pausing idle sandboxes.
+ * nightly event prune, deleting queued blobs, seeding the preset providers
+ * into every workspace, and pausing idle sandboxes.
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
 	Routines.schedulerLayer,
 	EventPruning.layer,
+	BlobDeletions.layer,
 	PresetSeeding.layer,
 	PodSandboxes.pauseSweepLayer,
 );

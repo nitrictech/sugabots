@@ -60,9 +60,10 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 
 ## File storage
 
-| Variable              | Default    | Description                                                                                                                            |
-| --------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `BLOB_STORE_PROVIDER` | `postgres` | Where files are kept, such as tool results too large to hand a model whole. `postgres` keeps them in the database, up to 100 MiB each. |
+| Variable                | Default                | Description                                                                                                                                     |
+| ----------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BLOB_STORE_PROVIDER`   | `postgres`             | Where files are kept, such as tool results too large to hand a model whole. `postgres` keeps them in the database, up to 100 MiB each.          |
+| `THREAD_FILE_MAX_BYTES` | The blob store's limit | The largest file a thread keeps, in bytes, when lower than what the blob store keeps.                                                           |
 
 ## Web app
 
