@@ -6,6 +6,7 @@ import {
 	type SearchOutcome,
 	type SearchRequest,
 } from "../../providers/search-providers/backends.ts";
+import { artifactTools } from "./artifacts/tool.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
 import { webSearchTool } from "./web-search/tool.ts";
@@ -133,5 +134,23 @@ describe("native Effect tool schemas through the AI SDK", () => {
 	it("rejects invalid search input", async () => {
 		const schema = asSchema(webSearchTool({ search: unexpectedExecution }).inputSchema);
 		expect(await schema.validate?.({ query: "x", count: 0 })).toMatchObject({ success: false });
+	});
+
+	it.each(
+		Object.entries(
+			artifactTools({
+				by: { workspaceId: "workspace", podId: "pod", agentId: "agent", threadId: "thread" },
+				authoring: {
+					list: unexpectedExecution,
+					read: unexpectedExecution,
+					create: unexpectedExecution,
+					replace: unexpectedExecution,
+					replaceSection: unexpectedExecution,
+				},
+				run: unexpectedExecution,
+			}),
+		),
+	)("gives %s an object input schema, as providers require", async (_name, artifactTool) => {
+		expect(await asSchema(artifactTool.inputSchema).jsonSchema).toMatchObject({ type: "object" });
 	});
 });

@@ -73,7 +73,8 @@ export class ResourceHidden
 			| "chat"
 			| "turn"
 			| "member"
-			| "invitation";
+			| "invitation"
+			| "artifact";
 	}>
 	implements UserFacing
 {

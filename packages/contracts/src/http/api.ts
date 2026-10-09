@@ -1,5 +1,6 @@
 import { HttpApi } from "effect/unstable/httpapi";
 import { AgentsApi } from "./groups/agents.ts";
+import { ArtifactsApi } from "./groups/artifacts.ts";
 import { ChatsApi } from "./groups/chats.ts";
 import { ConnectionsApi } from "./groups/connections.ts";
 import { EventsApi } from "./groups/events.ts";
@@ -43,6 +44,7 @@ export class Api extends HttpApi.make("sugabots")
 	.add(SandboxProvidersApi)
 	.add(PodSandboxApi)
 	.add(ConnectionsApi)
+	.add(ArtifactsApi)
 	.add(EventsApi)
 	.add(ChatsApi)
 	.add(ThreadsApi)

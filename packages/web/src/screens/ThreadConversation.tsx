@@ -21,6 +21,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { ArtifactCards } from "./ArtifactCards.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
@@ -60,6 +61,7 @@ export function ThreadConversation({
 	participants,
 	dividers = true,
 	onOpenThread,
+	onOpenArtifact,
 	podId,
 	approvalCapabilities,
 	compact = false,
@@ -88,6 +90,8 @@ export function ThreadConversation({
 	 * from, in the sidebar beside this conversation.
 	 */
 	onOpenThread: (threadId: string) => void;
+	/** Opens an artifact a reply wrote, from its card. Without it, no cards are drawn. */
+	onOpenArtifact?: (artifactId: string) => void;
 	podId: string;
 	/** What the person may decide of the approvals the thread raises. */
 	approvalCapabilities?: ApprovalCapabilities;
@@ -154,6 +158,7 @@ export function ThreadConversation({
 								threadActivityAt={threadActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
 								onOpenThread={onOpenThread}
+								onOpenArtifact={onOpenArtifact}
 							/>
 						)}
 						{showsTyping && message.author.kind === "agent" && isTyping(message) && (
@@ -330,6 +335,7 @@ function MessageRow({
 	threadActivityAt,
 	authorLink,
 	onOpenThread,
+	onOpenArtifact,
 }: {
 	message: Message;
 	/** Whether it heads its author's group, so it carries their face and name. */
@@ -351,6 +357,7 @@ function MessageRow({
 	/** Where its author's name leads. */
 	authorLink?: AuthorLink;
 	onOpenThread: (threadId: string) => void;
+	onOpenArtifact?: (artifactId: string) => void;
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
@@ -483,6 +490,15 @@ function MessageRow({
 						</div>
 					);
 				})}
+				{agent && onOpenArtifact && (
+					<ArtifactCards
+						calls={calls}
+						podId={podId}
+						botName={agent.name}
+						onOpen={onOpenArtifact}
+						className="pt-2"
+					/>
+				)}
 				{message.routineResultOf && (
 					<RowNote className="text-subtle-foreground">
 						<RoutineResultLink run={message.routineResultOf} onOpenThread={onOpenThread} />

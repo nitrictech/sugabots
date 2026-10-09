@@ -16,6 +16,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
+import { artifactRoutes } from "../routes/artifacts/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
 import { eventRoutes } from "../routes/events/routes.ts";
@@ -86,6 +87,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				sandboxProviderRoutes,
 				podSandboxRoutes,
 				connectionRoutes,
+				artifactRoutes,
 				agentRoutes,
 				chatRoutes,
 				routineRoutes,

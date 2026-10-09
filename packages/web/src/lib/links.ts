@@ -28,6 +28,24 @@ export function podLink(pod: Pod) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod", params: { pod: pod.slug } });
 }
 
+/** A pod's artifacts. */
+export function artifactsLink(pod: Pod) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts",
+		params: { pod: pod.slug },
+	});
+}
+
+export function artifactLink(pod: Pod, artifactId: string, search: { version?: number } = {}) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts/$artifact",
+		params: { pod: pod.slug, artifact: artifactId },
+		search,
+	});
+}
+
 export function podSettingsLink(pod: Pod) {
 	return linkOptions({
 		from: "/$workspace",
