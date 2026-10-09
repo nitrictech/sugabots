@@ -6,7 +6,7 @@ import type {
 	SessionUser,
 	ThreadParticipant,
 } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
 	Fragment,
 	type RefObject,
@@ -29,7 +29,7 @@ import {
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, artifactLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import {
@@ -79,6 +79,8 @@ export function AgentChat({
 	place: ChatPlace;
 	onThreadChange: (threadId: string | undefined) => void;
 }) {
+	const navigate = useNavigate();
+	const openArtifact = (artifactId: string) => void navigate(artifactLink(pod, artifactId));
 	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
@@ -296,6 +298,7 @@ export function AgentChat({
 										participants={mentionable}
 										dividers={false}
 										onOpenThread={openThread}
+										onOpenArtifact={openArtifact}
 										podId={pod.id}
 										approvalCapabilities={details.capabilities}
 										queued={queued}
@@ -359,6 +362,7 @@ export function AgentChat({
 					history={entries}
 					frame={{ kind: "sidebar", onClose: () => onThreadChange(undefined) }}
 					onOpenThread={openThread}
+					onOpenArtifact={openArtifact}
 				/>
 			) : (
 				place.kind === "own" &&

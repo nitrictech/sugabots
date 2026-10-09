@@ -2,6 +2,7 @@ import { type ConnectionAccess, streamEvent, threadChannel } from "@sugabots/con
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { Artifacts } from "../../artifacts/artifacts.ts";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -13,6 +14,7 @@ import { unimplemented } from "../../testing.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
+import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -333,7 +335,7 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(Object.keys(received?.tools ?? {})).toEqual([
+		expect(Object.keys(received?.tools ?? {}).filter((key) => !ARTIFACT_TOOLS.has(key))).toEqual([
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
@@ -461,7 +463,7 @@ describe("runSegment", () => {
 		expect(Object.keys(received?.tools ?? {})).toEqual(expect.arrayContaining(["probe", "other"]));
 		expect(probe.execute).not.toHaveBeenCalled();
 		expect(outcome).toMatchObject({ status: "failed" });
-		expect(received?.messages.at(-1)?.content).toContain("Built-in tools you can call: other.");
+		expect(received?.messages.at(-1)?.content).toMatch(/Built-in tools you can call: other[,.]/);
 	});
 
 	it("leaves a defect while preparing to the workflow, which ends the turn", async () => {
@@ -641,6 +643,7 @@ function segmentWith(given: Given) {
 				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(AgentRepository.Service, {}),
 				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
+				unimplemented(Artifacts.Authoring, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {

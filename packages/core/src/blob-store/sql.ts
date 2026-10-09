@@ -8,9 +8,10 @@ import type { BlobStore } from "./blob-store.ts";
  * unreachable, so the work survives a crash and is never queued for a delete
  * that rolled back.
  *
- * Rows come from database triggers as well as from code: deleting a `thread`,
- * however it happens, queues its folder (see the `thread_blob_deletion`
- * trigger in the `thread_files` migration).
+ * Rows come from database triggers as well as from code: deleting a `thread`
+ * or an `artifact`, however it happens, queues its folder (see the
+ * `thread_blob_deletion` and `artifact_blob_deletion` triggers in the
+ * `thread_files` and `artifacts` migrations).
  */
 export const blobDeletion = pgTable("blob_deletion", {
 	id: primaryKey(),

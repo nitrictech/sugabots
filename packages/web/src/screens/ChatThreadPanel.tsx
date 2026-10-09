@@ -39,6 +39,7 @@ export function ChatThreadPanel({
 	history,
 	frame,
 	onOpenThread,
+	onOpenArtifact,
 }: {
 	chatId: string;
 	/** The bot whose chat this opened from, which a collaboration draws on the right. */
@@ -48,6 +49,7 @@ export function ChatThreadPanel({
 	history: ChatHistoryEntry[];
 	frame: ThreadFrame;
 	onOpenThread: (threadId: string) => void;
+	onOpenArtifact?: (artifactId: string) => void;
 }) {
 	const query = useThread(threadId);
 	const authorLinkOf = useAuthorLinks(query.data?.thread.podId);
@@ -179,6 +181,7 @@ export function ChatThreadPanel({
 					isRunning={details.thread.status === "running" && notices.length === 0}
 					participants={mentionableIn(details)}
 					onOpenThread={onOpenThread}
+					onOpenArtifact={onOpenArtifact}
 					podId={details.thread.podId}
 					approvalCapabilities={details.capabilities}
 					compact

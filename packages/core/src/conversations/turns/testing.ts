@@ -1,6 +1,7 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
+import { Artifacts } from "../../artifacts/artifacts.ts";
 import { query } from "../../database/database.ts";
 import { agent, connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
@@ -40,6 +41,7 @@ export const turnInternalsForTests = Layer.mergeAll(
 	ApprovedToolCalls.layer,
 	AgentRepository.layer,
 	ThreadFiles.layer,
+	Artifacts.authoringLayer,
 );
 
 /*

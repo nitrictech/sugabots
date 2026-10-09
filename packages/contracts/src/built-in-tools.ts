@@ -6,7 +6,15 @@ import { Schema } from "effect";
  * 005). The keys are what the model calls and what a `tool_call` records;
  * the names and descriptions are for the agent's settings page.
  */
-export const builtInToolKeySchema = Schema.Literals(["web_fetch", "web_search"]);
+export const builtInToolKeySchema = Schema.Literals([
+	"web_fetch",
+	"web_search",
+	"artifact_list",
+	"artifact_read",
+	"artifact_create",
+	"artifact_replace",
+	"document_replace_section",
+]);
 export type BuiltInToolKey = typeof builtInToolKeySchema.Type;
 
 export interface BuiltInToolEntry {
@@ -26,5 +34,30 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 		key: "web_search",
 		name: "Search the web",
 		description: "Searches through the workspace's search provider, when one is switched on.",
+	},
+	{
+		key: "artifact_list",
+		name: "List artifacts",
+		description: "Lists the documents and HTML pages kept in the bot's pod.",
+	},
+	{
+		key: "artifact_read",
+		name: "Read artifacts",
+		description: "Reads a document or HTML page kept in the bot's pod.",
+	},
+	{
+		key: "artifact_create",
+		name: "Create artifacts",
+		description: "Makes a document or HTML page the pod keeps.",
+	},
+	{
+		key: "artifact_replace",
+		name: "Rewrite artifacts",
+		description: "Saves a new version of a document or HTML page.",
+	},
+	{
+		key: "document_replace_section",
+		name: "Edit document sections",
+		description: "Rewrites one section of a document, as a new version.",
 	},
 ];
