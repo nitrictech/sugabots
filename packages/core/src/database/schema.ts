@@ -1,4 +1,5 @@
 export * from "../accounting/sql.ts";
+export * from "../blob-store/implementations/postgres.sql.ts";
 export * from "../conversations/sql.ts";
 export * from "../providers/sql.ts";
 export * from "../sandboxes/sql.ts";
