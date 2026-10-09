@@ -36,7 +36,9 @@ export interface TurnEnvironment {
  * thread now, why this agent has the floor, the turn's environment) goes in one
  * trailing instruction after the history, where a change costs nothing. A
  * compacted thread starts its history with the Compaction agent's summary, which
- * changes only when the thread is compacted again.
+ * changes only when the thread is compacted again. The history's last message
+ * is marked as the end of that shared prefix, for providers that cache only
+ * what a request marks.
  */
 export function modelPrompt(
 	context: TurnContext,
@@ -65,13 +67,19 @@ export function modelPrompt(
 		.filter(Boolean)
 		.join("\n\n");
 
+	const history = [
+		...(context.compaction ? [compactionSummary(context.compaction)] : []),
+		...context.messages
+			.filter((message) => message.status === "complete")
+			.flatMap((message) => promptMessagesFor(message, context.agent.id, resultFiles)),
+	];
+	const lastInHistory = history.at(-1);
 	return {
 		system,
 		messages: [
-			...(context.compaction ? [compactionSummary(context.compaction)] : []),
-			...context.messages
-				.filter((message) => message.status === "complete")
-				.flatMap((message) => promptMessagesFor(message, context.agent.id, resultFiles)),
+			...(lastInHistory
+				? history.with(-1, { ...lastInHistory, cacheBreakpoint: true as const })
+				: history),
 			{ role: "user" as const, content: turnInstruction(context, environment) },
 		],
 	};

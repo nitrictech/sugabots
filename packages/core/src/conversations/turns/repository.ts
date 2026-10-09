@@ -810,7 +810,11 @@ export const TurnCheckpoint = Schema.Struct({
 		model: Schema.String,
 		system: Schema.String,
 		messages: Schema.Array(
-			Schema.Struct({ role: Schema.Literals(["user", "assistant"]), content: Schema.String }),
+			Schema.Struct({
+				role: Schema.Literals(["user", "assistant"]),
+				content: Schema.String,
+				cacheBreakpoint: Schema.optional(Schema.Literal(true)),
+			}),
 		),
 	}),
 	reply: ReplyDraft,

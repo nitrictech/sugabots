@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
+import type { ProviderIdentity } from "../model-providers/dialects/index.ts";
 import { Models } from "./models.ts";
 
 /** The fake provider never queries, so nothing here reaches the database. */
@@ -56,8 +57,17 @@ const reply = () =>
 type Recorded = ModelRequests.Started &
 	Partial<Omit<ModelRequests.Ending, "outcome">> & { outcome: ModelRequests.Outcome };
 
-/** A model over an OpenAI provider that answers with `responses`, one per request. */
-function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Response>) {
+const OPENAI = {
+	preset: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	apiFormat: "openai",
+} satisfies ProviderIdentity;
+
+/** A model over `provider`, OpenAI's unless given, that answers with `responses`, one per request. */
+function modelAnswering(
+	responses: Array<(recorded: readonly Recorded[]) => Response>,
+	provider: ProviderIdentity = OPENAI,
+) {
 	const recorded: Recorded[] = [];
 	/** Each request's body, as the provider was sent it. */
 	const sent: Array<Record<string, unknown>> = [];
@@ -68,9 +78,7 @@ function modelAnswering(responses: Array<(recorded: readonly Recorded[]) => Resp
 			resolve: () =>
 				Effect.succeed({
 					providerId: PROVIDER_ID,
-					preset: "openai",
-					baseUrl: "https://api.openai.com/v1",
-					apiFormat: "openai",
+					...provider,
 					apiKey: "secret",
 					headers: {},
 					configurationUpdatedAt: new Date(0),
@@ -207,4 +215,76 @@ describe("a response at its step limit", () => {
 			},
 		]);
 	});
+});
+
+describe("prompt caching", () => {
+	const marked = { type: "ephemeral" };
+	const turn: Models.StreamRequest = {
+		...input,
+		messages: [
+			{ role: "user", content: "Earlier." },
+			{ role: "assistant", content: "Noted.", cacheBreakpoint: true },
+			{ role: "user", content: "[Turn] Look it up." },
+		],
+	};
+
+	it("marks the system text, the history's end and each step's newest message for Anthropic", async () => {
+		const { model, sent } = modelAnswering([() => new Response("Unavailable", { status: 503 })], {
+			preset: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			apiFormat: "anthropic",
+		});
+
+		await answer(model, { ...turn, model: "claude-test" });
+
+		expect(sent[0]).toMatchObject({
+			system: [{ text: input.system, cache_control: marked }],
+			messages: [
+				{ role: "user", content: [{ text: "Earlier." }] },
+				{ role: "assistant", content: [{ text: "Noted.", cache_control: marked }] },
+				{ role: "user", content: [{ text: "[Turn] Look it up.", cache_control: marked }] },
+			],
+		});
+	});
+
+	it("moves the newest message's mark on each step, keeping the history's", async () => {
+		const { model, sent } = modelAnswering([toolCall, reply], {
+			preset: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			apiFormat: "openai",
+		});
+
+		await answer(model, { ...turn, model: "anthropic/claude-test" });
+
+		/** Which of a request's messages are marked, on the message or on one of its parts. */
+		const markedMessages = (body: Record<string, unknown> = {}) =>
+			(body.messages as Array<{ content: unknown; cache_control?: unknown }>).map(
+				(message) =>
+					message.cache_control !== undefined ||
+					(Array.isArray(message.content) &&
+						message.content.some((part) => part.cache_control !== undefined)),
+			);
+		// System text, history, turn.
+		expect(markedMessages(sent[0])).toEqual([true, false, true, true]);
+		// The turn's mark has moved to the tool result.
+		expect(markedMessages(sent[1])).toEqual([true, false, true, false, false, true]);
+	});
+
+	it.each([
+		["OpenAI", OPENAI, "gpt-test"],
+		[
+			"OpenRouter's other models",
+			{ preset: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" },
+			"openai/gpt-test",
+		],
+	] satisfies Array<[string, ProviderIdentity, string]>)(
+		"leaves requests to %s unmarked, since they cache by themselves",
+		async (_name, provider, modelId) => {
+			const { model, sent } = modelAnswering([toolCall, reply], provider);
+
+			await answer(model, { ...turn, model: modelId });
+
+			expect(JSON.stringify(sent)).not.toContain("cache_control");
+		},
+	);
 });
