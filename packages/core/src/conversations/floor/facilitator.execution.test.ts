@@ -1,3 +1,4 @@
+import { DisplayName } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Database, transactional } from "../../database/database.ts";
@@ -47,7 +48,7 @@ const scope: FacilitatorScope = {
 };
 
 const unavailable = Models.fromStream(() =>
-	Effect.fail(new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" })),
+	Effect.fail(new Models.ModelNotOffered({ model: DisplayName.fromRecord("test-model") })),
 );
 
 describe("an attempt at facilitation", () => {

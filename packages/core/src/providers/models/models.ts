@@ -10,7 +10,7 @@ export * as Models from "./models.ts";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { type UserText, userText } from "@sugabots/errors";
+import { DisplayName, type DomainError, userText } from "@sugabots/errors";
 import {
 	APICallError,
 	type AssistantModelMessage,
@@ -23,15 +23,35 @@ import {
 	type ToolResultPart,
 	type ToolSet,
 } from "ai";
-import { Context, Data, Duration, Effect, Layer, Ref, Schedule, type Scope } from "effect";
+import {
+	Context,
+	Duration,
+	Effect,
+	ErrorReporter,
+	Layer,
+	Ref,
+	Schedule,
+	Schema,
+	type Scope,
+} from "effect";
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
+import {
+	classifyRequestFailure,
+	isRequestFailure,
+	ModelNotOffered,
+	ProviderCredentialsMissing,
+	ProviderOAuthRefreshFailed,
+	type RequestContext,
+	type RequestFailure,
+} from "./request-failures.ts";
+
+export * from "./request-failures.ts";
 
 /** What asking a model once is about: which model, for which workspace, and what it is told. */
 export interface Prompt {
@@ -79,7 +99,7 @@ export interface Streamed {
 	 * so nothing exists until the caller asks, which is what keeps an aborted
 	 * response from leaving a rejection nobody handles.
 	 */
-	finished: Effect.Effect<Finished, RequestFailed>;
+	finished: Effect.Effect<Finished, RequestFailure>;
 }
 
 /**
@@ -112,11 +132,11 @@ export interface Interface {
 	 * closing its scope aborts the request, along with any tool call still
 	 * running inside it.
 	 */
-	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailed, Database | Scope.Scope>;
+	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailure, Database | Scope.Scope>;
 	/** Asks for one whole answer, in a single model call. */
 	answer(
 		request: AnswerRequest,
-	): Effect.Effect<Answer, RequestFailed | AnswerTimedOut | UnusableAnswer, Database>;
+	): Effect.Effect<Answer, RequestFailure | AnswerTimedOut | UnusableAnswer, Database>;
 }
 
 /**
@@ -195,92 +215,19 @@ function definedFields(record: Record<string, unknown>, names: readonly string[]
 }
 
 /**
- * loggingFailure passes `text` through, calling `log` with whatever ends it
- * early, since a reader of the text alone can't say what else went wrong.
+ * failingWith passes `text` through, and throws `fail(cause)` for whatever
+ * ends it early, so a reader of the text sees only a classified failure.
  */
-async function* loggingFailure<T>(text: AsyncIterable<T>, log: (cause: unknown) => void) {
+async function* failingWith<T>(
+	text: AsyncIterable<T>,
+	fail: (cause: unknown) => RequestFailure,
+): AsyncGenerator<T> {
 	try {
 		yield* text;
 	} catch (cause) {
-		log(cause);
-		throw cause;
+		throw fail(cause);
 	}
 }
-
-/** The model could not be asked, or its provider failed the request. */
-export class RequestFailed
-	extends Data.TaggedError("ModelRequestFailed")<{
-		/** Why, for the logs. It may quote the provider's own response. */
-		readonly message: string;
-		readonly reason: RequestFailure;
-		readonly cause?: unknown;
-	}>
-	implements UserFacing
-{
-	/**
-	 * A request that failed with `cause`. A refused request carries its reason
-	 * in the response body, usually as `{"error":{"message":...}}`; that
-	 * sentence is the one worth logging, ahead of the SDK's own summary.
-	 */
-	static fromCause(cause: unknown): RequestFailed {
-		if (!APICallError.isInstance(cause)) {
-			const message = cause instanceof Error ? cause.message : String(cause);
-			return new RequestFailed({ message, reason: "unavailable", cause });
-		}
-		const status = cause.statusCode;
-		const said = providerSaid(cause.responseBody) ?? cause.message;
-		return new RequestFailed({
-			message: `${status ? `Provider returned ${status}` : "Provider refused"}: ${said}`,
-			reason: reasonFor(status, cause.responseBody),
-			cause,
-		});
-	}
-
-	/**
-	 * Whether the same request may work if sent again: the provider was busy,
-	 * timed out or failed. A refusal, such as a rejected key, no credit or a
-	 * request it couldn't accept, would only be refused again.
-	 */
-	get mayRetry(): boolean {
-		return this.reason === "rateLimited" || this.reason === "unavailable";
-	}
-
-	get userMessage() {
-		return REQUEST_USER_MESSAGES[this.reason];
-	}
-}
-
-/** reasonFor names why a provider answered a request with `status` and `body`. */
-function reasonFor(status: number | undefined, body: string | undefined): RequestFailure {
-	if (status === 401 || status === 403) return "rejected";
-	// OpenAI, and the servers that copy its errors, report an exhausted quota as a 429.
-	if (status === 402 || (status === 429 && errorCode(body) === "insufficient_quota")) {
-		return "outOfCredit";
-	}
-	if (status === 429) return "rateLimited";
-	// A timed-out request may go through next time; any other 4xx is a problem with the request itself.
-	if (status !== undefined && status >= 400 && status < 500 && status !== 408) return "refused";
-	return "unavailable";
-}
-
-type RequestFailure =
-	| "noProvider"
-	| "signInFailed"
-	| "rejected"
-	| "outOfCredit"
-	| "refused"
-	| "rateLimited"
-	| "unavailable";
-
-const REQUEST_USER_MESSAGES: Record<RequestFailure, UserText> = {
-	noProvider: userText`No active provider offers this model.`,
-	signInFailed: userText`The model provider's sign-in failed. Sign in again.`,
-	rejected: userText`The model provider refused the request. Check its API key.`,
-	outOfCredit: userText`The model provider declined the request because of a billing issue, such as no credit left on the account or this bot's API key. A workspace admin can check with the provider.`,
-	refused: userText`The model provider couldn't accept this request.`,
-	rateLimited: userText`The model provider is busy. Try again shortly.`,
-	unavailable: userText`The model provider could not answer.`,
-};
 
 interface Options {
 	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewOAuthTokens">;
@@ -297,26 +244,19 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			const signal = yield* Effect.abortSignal;
 			const resolved = yield* modelProviders.resolve(input.workspaceId, input.model);
 			if (!resolved) {
-				return yield* new RequestFailed({
-					message: `No active provider offers the model "${input.model}"`,
-					reason: "noProvider",
-				});
+				return yield* new ModelNotOffered({ model: DisplayName.fromRecord(input.model) });
 			}
+			const context: RequestContext = {
+				provider: resolved.providerName,
+				model: resolved.modelName,
+			};
+			if (!resolved.endpoint) return yield* new ProviderCredentialsMissing(context);
 			const connection = yield* withSignInAccess(
 				modelProviders,
 				httpClients,
 				input.workspaceId,
-				resolved,
-			).pipe(
-				Effect.mapError(
-					(failure) =>
-						new RequestFailed({
-							message: failure.message,
-							reason: "signInFailed",
-							cause: failure,
-						}),
-				),
-			);
+				resolved.endpoint,
+			).pipe(Effect.mapError((cause) => new ProviderOAuthRefreshFailed({ ...context, cause })));
 			const fetch = httpClients.for(connection);
 			const ledger = yield* streamLedger({
 				requests,
@@ -386,10 +326,14 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				stopWhen: stepCountIs(input.maxSteps),
 				maxRetries: 0,
 			});
+			/** Logs what ended the request, and names it for whoever reads the response. */
+			const classified = (cause: unknown) => {
+				const failure = providerFailure ?? cause;
+				runLog(logModelFailure(failure, streamErrors, signal));
+				return classifyRequestFailure(failure, context);
+			};
 			return {
-				text: loggingFailure(result.textStream, (cause) =>
-					runLog(logModelFailure(cause, streamErrors, signal)),
-				),
+				text: failingWith(result.textStream, classified),
 				finished: Effect.tryPromise({
 					try: async () => {
 						const [steps, responseMessages] = await Promise.all([
@@ -404,11 +348,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 							responseMessages,
 						};
 					},
-					catch: (cause) => providerFailure ?? cause,
-				}).pipe(
-					Effect.tapError((failure) => logModelFailure(failure, streamErrors, signal)),
-					Effect.mapError(RequestFailed.fromCause),
-				),
+					catch: classified,
+				}),
 			};
 		}),
 	);
@@ -444,10 +385,7 @@ export function fromStream(stream: Interface["stream"]): Interface {
 			).pipe(
 				Effect.timeoutOrElse({
 					duration: request.timeout,
-					orElse: () =>
-						Effect.fail(
-							new AnswerTimedOut({ message: `The ${request.activity.purpose} answer timed out` }),
-						),
+					orElse: () => Effect.fail(new AnswerTimedOut({ purpose: request.activity.purpose })),
 				}),
 			),
 	};
@@ -538,34 +476,6 @@ export const layer = Layer.effect(
 	}),
 ).pipe(Layer.provide(ModelProviderRepository.layer));
 
-/** errorCode returns the `code`, else the `type`, of the error in an OpenAI-style error `body`. */
-function errorCode(body: string | undefined): string | undefined {
-	if (!body) return undefined;
-	try {
-		const { error } = JSON.parse(body) as { error?: { code?: unknown; type?: unknown } };
-		const code = error?.code ?? error?.type;
-		return typeof code === "string" ? code : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function providerSaid(body: string | undefined): string | undefined {
-	if (!body) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(body);
-		if (typeof parsed !== "object" || parsed === null) return undefined;
-		const error = (parsed as { error?: unknown }).error;
-		const message =
-			typeof error === "object" && error !== null
-				? (error as { message?: unknown }).message
-				: (parsed as { message?: unknown }).message;
-		return typeof message === "string" && message ? message : undefined;
-	} catch {
-		return body.length <= 300 ? body : undefined;
-	}
-}
-
 /**
  * Reads the model's text one delta at a time and runs `onDelta` for each.
  *
@@ -576,15 +486,16 @@ function providerSaid(body: string | undefined): string | undefined {
 export const forEachDelta = <E, R>(
 	text: AsyncIterable<string>,
 	onDelta: (delta: string) => Effect.Effect<void, E, R>,
-): Effect.Effect<void, E | RequestFailed, R> => {
+): Effect.Effect<void, E | RequestFailure, R> => {
 	const iterator = text[Symbol.asyncIterator]();
-	const next = Effect.callback<IteratorResult<string>, RequestFailed>((resume) => {
+	// `make` ends its text with a classified failure, so anything else is a bug.
+	const next = Effect.callback<IteratorResult<string>, RequestFailure>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
-			(cause) => resume(Effect.fail(RequestFailed.fromCause(cause))),
+			(cause: unknown) => resume(isRequestFailure(cause) ? Effect.fail(cause) : Effect.die(cause)),
 		);
 	});
-	const loop: Effect.Effect<void, E | RequestFailed, R> = Effect.flatMap(next, (result) =>
+	const loop: Effect.Effect<void, E | RequestFailure, R> = Effect.flatMap(next, (result) =>
 		result.done ? Effect.void : Effect.andThen(onDelta(result.value), loop),
 	);
 	return loop;
@@ -592,30 +503,37 @@ export const forEachDelta = <E, R>(
 
 /** The model answered, but not in a shape we can use. */
 export class UnusableAnswer
-	extends Data.TaggedError("UnusableAnswer")<{
+	extends Schema.TaggedError<UnusableAnswer>()("UnusableAnswer", {
 		/** What was wrong with the answer. */
-		readonly reason: string;
-	}>
-	implements UserFacing
+		reason: Schema.String,
+	})
+	implements DomainError
 {
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
 	override get message() {
 		return this.reason;
 	}
 	get userMessage() {
-		return userText`The model's answer could not be used.`;
+		return userText`The model answered in a form we couldn't use.`;
 	}
 }
 
 /** The model did not finish answering within the time allowed. */
 export class AnswerTimedOut
-	extends Data.TaggedError("AnswerTimedOut")<{
-		/** Which answer, and the limit it ran past. */
-		readonly message: string;
-	}>
-	implements UserFacing
+	extends Schema.TaggedError<AnswerTimedOut>()("AnswerTimedOut", {
+		/** What the answer was for, such as a summary. */
+		purpose: Schema.String,
+	})
+	implements DomainError
 {
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The ${this.purpose} answer timed out`;
+	}
 	get userMessage() {
-		return userText`The model did not answer in time.`;
+		return userText`The model didn't answer in time.`;
 	}
 }
 

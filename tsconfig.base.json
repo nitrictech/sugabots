@@ -31,7 +31,10 @@
 					{
 						// Code that uses DomainError: a caught error must become a typed class.
 						// Keep this list the same as the DomainError override in biome.json.
-						"include": ["packages/server/src/http/errors.ts"],
+						"include": [
+							"packages/core/src/providers/models/**/*.ts",
+							"packages/server/src/http/errors.ts"
+						],
 						"options": {
 							"diagnosticSeverity": {
 								"unknownInEffectCatch": "error",

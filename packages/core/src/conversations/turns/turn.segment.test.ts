@@ -1,7 +1,7 @@
-import { userText } from "@sugabots/errors";
+import { DisplayName, userText } from "@sugabots/errors";
 import { tool } from "ai";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -42,7 +42,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	const execution = onPostgres({
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
-	const providerDown = userText`The model provider could not answer.`;
+	const testProvider = {
+		provider: DisplayName.fromRecord("Test provider"),
+		model: DisplayName.fromRecord("test-model"),
+	};
+	const providerDown = new Models.ProviderServerError({
+		...testProvider,
+		cause: new Error("provider down"),
+	});
 	let threadId: string;
 	let connectionId: string;
 	let hostId: string;
@@ -143,16 +150,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	});
 
 	it("records a failed run, which the workflow runs again", async () => {
-		const outcome = await segmentWith(
-			Models.fromStream(() =>
-				Effect.fail(new Models.RequestFailed({ message: "provider down", reason: "unavailable" })),
-			),
-		);
+		const outcome = await segmentWith(Models.fromStream(() => Effect.fail(providerDown)));
 
 		expect(outcome).toEqual({ _tag: "Retry" });
-		expect(await storedTurn()).toMatchObject({ status: "failed", error: providerDown });
+		expect(await storedTurn()).toMatchObject({ status: "failed", error: providerDown.userMessage });
 		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: true, error: providerDown }),
+			expect.objectContaining({
+				type: "message.failed",
+				willRetry: true,
+				error: providerDown.userMessage,
+			}),
 		);
 	});
 
@@ -165,11 +172,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				.where(eq(turn.id, prepared.turnId)),
 		);
 
-		const outcome = await segmentWith(
-			Models.fromStream(() =>
-				Effect.fail(new Models.RequestFailed({ message: "provider down", reason: "unavailable" })),
-			),
-		);
+		const outcome = await segmentWith(Models.fromStream(() => Effect.fail(providerDown)));
 
 		expect(outcome).toEqual({ _tag: "Finished" });
 		expect(await storedTurn()).toMatchObject({ status: "failed", runs: MAX_TURN_RUNS });
@@ -182,7 +185,26 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		const outcome = await segmentWith(
 			Models.fromStream(() =>
 				Effect.fail(
-					new Models.RequestFailed({ message: "Provider returned 402", reason: "outOfCredit" }),
+					new Models.ProviderQuotaExhausted({ ...testProvider, cause: new Error("402") }),
+				),
+			),
+		);
+
+		expect(outcome).toEqual({ _tag: "Finished" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({ type: "message.failed", willRetry: false }),
+		);
+	});
+
+	it("fails the turn for good when the provider asks to be left too long", async () => {
+		const outcome = await segmentWith(
+			Models.fromStream(() =>
+				Effect.fail(
+					new Models.ProviderRateLimited({
+						...testProvider,
+						retryAfter: Duration.minutes(5),
+						cause: new Error("429"),
+					}),
 				),
 			),
 		);

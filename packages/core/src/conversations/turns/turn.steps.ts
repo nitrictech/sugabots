@@ -1,5 +1,5 @@
 import { streamEvent, threadChannel } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
 	Cause,
@@ -65,6 +65,11 @@ const MESSAGE_FLUSH_CHARACTERS = 500;
  */
 const CANCELLATION_CHECK_INTERVAL = Duration.seconds(15);
 const TURN_TIMEOUT = Duration.minutes(10);
+/**
+ * The longest a turn waits for a rate-limited provider before running again.
+ * Past it, the turn ends and its message tells people when to try.
+ */
+const MAX_RETRY_WAIT = Duration.minutes(1);
 /** How many model calls a turn may make, across its segments. */
 const TURN_MODEL_CALLS = 20;
 
@@ -144,7 +149,6 @@ export const runSegment = (
 	});
 
 const finished: SegmentOutcome = { _tag: "Finished" };
-const retry: SegmentOutcome = { _tag: "Retry" };
 
 const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
 
@@ -158,7 +162,7 @@ type StreamOutcome =
 
 /** Why a reply stopped streaming before the model finished, other than being cancelled. */
 type TurnFailure =
-	| Models.RequestFailed
+	| Models.RequestFailure
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
@@ -260,20 +264,32 @@ const generateReply = (
 			 * Logs the failure and records what people are told of it; the turn
 			 * runs again only while that is safe and could help. A reply without
 			 * an answer does not: running it again would repeat every tool call it
-			 * made. Nor does a request the provider refused, which it would refuse again.
+			 * made. Nor does a model request that would fail the same way again,
+			 * or that asks to be left longer than the turn should wait.
 			 */
-			const failed = (failure: TurnFailure) =>
-				logTurnFailure(prepared, failure.message).pipe(
+			const failed = (failure: TurnFailure) => {
+				const request: DomainError | undefined = Models.isRequestFailure(failure)
+					? failure
+					: undefined;
+				const waitsTooLong =
+					request?.retryAfter !== undefined &&
+					Duration.isGreaterThan(request.retryAfter, MAX_RETRY_WAIT);
+				return logTurnFailure(prepared, failure.message).pipe(
 					Effect.andThen(
 						turns.fail(replyTurn, draft, {
 							userMessage: failure.userMessage,
 							mayRunAgain:
 								!(failure instanceof ReplyWithoutAnswer) &&
-								!(failure instanceof Models.RequestFailed && !failure.mayRetry),
+								(request?.isRetryable ?? true) &&
+								!waitsTooLong,
 						}),
 					),
-					Effect.map((willRetry) => (willRetry ? retry : finished)),
+					Effect.map(
+						(willRetry): SegmentOutcome =>
+							willRetry ? { _tag: "Retry", after: request?.retryAfter } : finished,
+					),
 				);
+			};
 
 			if (Exit.isSuccess(streamed)) {
 				if (streamed.value.kind === "suspended") {
@@ -355,7 +371,7 @@ const streamReply = (
 	reply: Ref.Ref<ReplyDraft>,
 ): Effect.Effect<
 	StreamOutcome,
-	| Models.RequestFailed
+	| Models.RequestFailure
 	| ToolApprovalsIncomplete
 	| TurnTimedOut
 	| ApprovedToolChanged
