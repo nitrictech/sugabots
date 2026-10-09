@@ -38,7 +38,12 @@ export interface TurnEnvironment {
  * compacted thread starts its history with the Compaction agent's summary, which
  * changes only when the thread is compacted again.
  */
-export function modelPrompt(context: TurnContext, environment: TurnEnvironment): ModelPrompt {
+export function modelPrompt(
+	context: TurnContext,
+	environment: TurnEnvironment,
+	/** The thread files kept as tool calls' results, by call id, so the history names them. */
+	resultFiles: ReadonlyMap<string, string> = new Map(),
+): ModelPrompt {
 	const system = [
 		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
@@ -66,7 +71,7 @@ export function modelPrompt(context: TurnContext, environment: TurnEnvironment):
 			...(context.compaction ? [compactionSummary(context.compaction)] : []),
 			...context.messages
 				.filter((message) => message.status === "complete")
-				.flatMap((message) => promptMessagesFor(message, context.agent.id)),
+				.flatMap((message) => promptMessagesFor(message, context.agent.id, resultFiles)),
 			{ role: "user" as const, content: turnInstruction(context, environment) },
 		],
 	};
@@ -88,12 +93,16 @@ function compactionSummary(compaction: TurnCompaction): Models.PromptMessage {
 	};
 }
 
-function promptMessagesFor(message: Message, currentAgentId: string): Models.PromptMessage[] {
+function promptMessagesFor(
+	message: Message,
+	currentAgentId: string,
+	resultFiles: ReadonlyMap<string, string>,
+): Models.PromptMessage[] {
 	const authored = authoredMessage(message, currentAgentId);
 	const records = message.parts.flatMap((part): string[] => {
 		if (part.type === "text") return [];
 		if (part.type === "collaboration") return [describeCollaboration(part)];
-		return [describeToolCall(part)];
+		return [describeToolCall(part, resultFiles.get(part.id))];
 	});
 	if (records.length === 0) return authored ? [authored] : [];
 

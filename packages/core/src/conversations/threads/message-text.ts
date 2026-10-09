@@ -1,5 +1,6 @@
 import type { CollaborationPart, Message, ToolCallPart } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
+import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 
 /** The tool an agent searches its thread's older history with. */
@@ -33,9 +34,10 @@ export function messageTextWithPlacedParts(message: Message): string {
 /**
  * A tool call as one bracketed line. The full output stays on its row: a
  * fetched page replayed in every later turn would fill the context with pages
- * the agent has already read.
+ * the agent has already read. `resultFile` is the thread file the result was
+ * kept as when it was too long to give whole, which the agent can read on.
  */
-export function describeToolCall(call: ToolCallPart): string {
+export function describeToolCall(call: ToolCallPart, resultFile?: string): string {
 	const asked = `[Used ${call.tool} with ${clipped(JSON.stringify(call.input), DESCRIBED_INPUT_CHARACTERS)}`;
 	switch (call.status) {
 		case "awaiting_approval":
@@ -51,7 +53,7 @@ export function describeToolCall(call: ToolCallPart): string {
 				call.tool === SEARCH_HISTORY_TOOL
 					? DESCRIBED_HISTORY_SEARCH_CHARACTERS
 					: DESCRIBED_OUTPUT_CHARACTERS,
-			)}]`;
+			)}${resultFile ? `; the result is kept as file ${resultFile}, which ${READ_THREAD_FILE_TOOL} reads` : ""}]`;
 	}
 }
 

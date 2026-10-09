@@ -54,8 +54,8 @@ export interface ToolDependencies {
 	sandbox: SandboxTools.Offered;
 	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
-	/** The thread's files, which `read_thread_file` reads. */
-	files: Pick<ThreadFiles.Interface, "read">;
+	/** The thread's files: where long tool results are kept, and what `read_thread_file` reads. */
+	files: Pick<ThreadFiles.Interface, "read" | "write">;
 	/** Where an interviewing agent's own instructions are saved. */
 	agents: Pick<AgentRepository.Interface, "finishInterview">;
 	/** For a tool that watches for something else to happen. */
@@ -90,6 +90,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): To
 	const tools: ToolSet = {};
 	const recording: RecordingOptions = {
 		calls: deps.calls,
+		files: deps.files,
 		run: deps.run,
 		from: {
 			threadId: prepared.context.thread.id,

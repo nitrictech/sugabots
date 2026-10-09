@@ -2,7 +2,9 @@ import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { UserMessage } from "../../../user-message.ts";
+import type { ThreadFiles } from "../../thread-files/thread-files.ts";
 import type { ApprovedToolCalls } from "../approvals/approved-calls.ts";
+import { forModel } from "./large-results.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
@@ -14,6 +16,8 @@ export interface RecordingTurn {
 
 export interface RecordingOptions {
 	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
+	/** Where a result too long to give the model whole is kept, for it to read on. */
+	files: Pick<ThreadFiles.Interface, "write">;
 	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
 	from: RecordingTurn;
@@ -40,6 +44,8 @@ export interface ToolFailedResult {
 /** What people, and the model, are told of a tool that threw. */
 const TOOL_THREW = UserMessage.of`The tool failed before it finished.`;
 
+const RESULT_NOT_GIVEN = UserMessage.of`The tool finished, but its result could not be given to you.`;
+
 /**
  * What the model is told of an approved call that may no longer run, such as
  * one whose connection changed after it was approved.
@@ -49,6 +55,10 @@ const APPROVAL_NO_LONGER_APPLIES = UserMessage.of`The tool was not run: its appr
 /**
  * A tool whose every call is written down: opened with its input before it
  * runs, closed with its output or error after.
+ *
+ * The call's row keeps the whole output. The model is given it whole too,
+ * unless it is longer than `MAX_RESULT_CHARACTERS`: then it is kept as a
+ * file in the thread and the model gets its start (see `large-results.ts`).
  *
  * A tool that throws is recorded as failed and the model is told so as an
  * ordinary result, so the agent can recover or explain rather than
@@ -63,6 +73,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 	}
 	const {
 		calls,
+		files,
 		run,
 		from,
 		replyLength,
@@ -99,11 +110,11 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 				return { status: "failed", error: APPROVAL_NO_LONGER_APPLIES } satisfies ToolFailedResult;
 			}
 			await run(noteToolCall({ id: opened.id, atOffset, mutating }));
+			let output: unknown;
 			try {
 				if (mutating && markActed) await run(markActed());
-				const output = await execute(input, callOptions);
+				output = await execute(input, callOptions);
 				await run(calls.close(opened.id, { output }));
-				return output;
 			} catch (cause) {
 				// A tool with a failure worth explaining returns it as its result. A
 				// throw is a fault in the tool or its connection: what was thrown
@@ -111,6 +122,16 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 				await run(Effect.logError(`Tool ${key} threw`, cause));
 				await run(calls.close(opened.id, { error: TOOL_THREW }));
 				return { status: "failed", error: TOOL_THREW } satisfies ToolFailedResult;
+			}
+			try {
+				return await run(
+					forModel(output, { files, threadId: from.threadId, toolCallId: opened.id }),
+				);
+			} catch (cause) {
+				// The call is already closed with its output, which stays: only
+				// the model goes without it.
+				await run(Effect.logError(`Giving tool ${key}'s result to the model failed`, cause));
+				return { status: "failed", error: RESULT_NOT_GIVEN } satisfies ToolFailedResult;
 			}
 		},
 	};
