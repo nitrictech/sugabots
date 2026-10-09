@@ -132,7 +132,11 @@ export interface Interface {
 		workspaceId: string,
 		providerId: string,
 	) => Effect.Effect<ProviderEndpoint | undefined>;
-	/** How to reach whichever provider offers `modelId`, while the workspace offers it. */
+	/**
+	 * The provider that offers `modelId` while the workspace offers it, with the
+	 * names people know both by, and how to reach it if it has the key or
+	 * sign-in it needs.
+	 */
 	readonly resolve: (
 		workspaceId: string,
 		modelId: string,
@@ -575,10 +579,9 @@ export const make = Effect.gen(function* () {
 							.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
 							.where(and(offeredIn(workspaceId), eq(providerModel.modelId, modelId))),
 					);
-					const reached = row && (yield* endpoint(workspaceId, row.providerId));
-					if (!reached) return undefined;
+					if (!row) return undefined;
 					return {
-						endpoint: reached,
+						endpoint: yield* endpoint(workspaceId, row.providerId),
 						providerName: DisplayName.fromRecord(row.providerName),
 						modelName: DisplayName.fromRecord(row.modelName ?? modelId),
 					};
@@ -637,7 +640,8 @@ export const layer = Layer.effect(Service, make);
 
 /** The provider that offers a model, and the names people know both by. */
 export interface ResolvedModel {
-	endpoint: ProviderEndpoint;
+	/** Nothing while the provider lacks the key or sign-in its preset needs. */
+	endpoint: ProviderEndpoint | undefined;
 	providerName: DisplayName;
 	modelName: DisplayName;
 }

@@ -35,6 +35,7 @@ vi.mock("ai", async (importOriginal) => ({
 }));
 
 import { APICallError } from "ai";
+import type { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { Models } from "./models.ts";
 import { resolvedModel } from "./testing.ts";
 
@@ -93,6 +94,70 @@ describe("models", () => {
 			expect(createProvider).toHaveBeenCalledWith(expect.objectContaining({ fetch: httpClient }));
 		},
 	);
+
+	const endpoint = {
+		providerId: "provider-id",
+		preset: null,
+		baseUrl: "https://models.example/v1",
+		apiFormat: "openai" as const,
+		apiKey: "secret",
+		headers: {},
+		configurationUpdatedAt: new Date(),
+	};
+	const modelResolving = (resolved: ModelProviderRepository.ResolvedModel) =>
+		Models.make({
+			modelProviders: {
+				renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+				resolve: () => Effect.succeed(resolved),
+			},
+			httpClients: { for: () => vi.fn<typeof fetch>() },
+			requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
+			registry: emptyRegistry,
+		});
+	const ask = (model: Models.Interface) =>
+		Effect.scoped(
+			Effect.flatMap(
+				model.stream({
+					workspaceId: "workspace-id",
+					activity: { purpose: "provider-check" },
+					model: "model-id",
+					system: "",
+					messages: [],
+					maxSteps: 1,
+				}),
+				(streamed) => streamed.finished,
+			),
+		);
+
+	it("says a provider has no key, rather than that the model was switched off", async () => {
+		const model = modelResolving({ ...resolvedModel(endpoint), endpoint: undefined });
+
+		const failure = await run(Effect.flip(ask(model)));
+
+		expect(failure).toMatchObject({ _tag: "ProviderCredentialsMissing", isRetryable: false });
+	});
+
+	it("names a failure the provider reports partway through the response", async () => {
+		sdk.streamText.mockImplementationOnce(((options: { onError: (event: unknown) => void }) => {
+			options.onError({
+				error: new APICallError({
+					message: "Service Unavailable",
+					url: "https://models.example/v1/chat/completions",
+					requestBodyValues: {},
+					statusCode: 503,
+				}),
+			});
+			return {
+				textStream: [],
+				steps: Promise.resolve([]),
+				responseMessages: Promise.resolve([]),
+			};
+		}) as never);
+
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+
+		expect(failure).toMatchObject({ _tag: "ProviderServerError", isRetryable: true });
+	});
 
 	it("asks the Codex backend the way Codex does for a ChatGPT subscription", async () => {
 		const tokens = {
@@ -182,11 +247,11 @@ describe("a failed model request", () => {
 		);
 
 		expect(failure).toMatchObject({
-			_tag: "ProviderCredentialsRejected",
+			_tag: "ProviderAccessDenied",
 			message:
 				"Provider returned 403: This model requires you to complete the following before use: 18+ age confirmation.",
 			userMessage:
-				"OpenRouter didn't accept the workspace's API key. A workspace admin can update it in Models.",
+				"OpenRouter won't let this workspace use Gemini 3.8 Flash, for example because of a setting on the account or where it's used from. A workspace admin can check the account with OpenRouter, or you can choose another model.",
 			isRetryable: false,
 		});
 	});
@@ -194,6 +259,10 @@ describe("a failed model request", () => {
 	it.each([
 		["a 402", answered(402, { error: { message: "Insufficient balance" } })],
 		["an exhausted quota", answered(429, { error: { code: "insufficient_quota" } })],
+		[
+			"Anthropic's low credit",
+			answered(400, { error: { message: "Your credit balance is too low to access the API." } }),
+		],
 	])("says plainly when a provider wants payment, for %s", (_, refused) => {
 		expect(Models.classifyRequestFailure(refused, context)).toMatchObject({
 			_tag: "ProviderQuotaExhausted",
@@ -203,6 +272,8 @@ describe("a failed model request", () => {
 
 	it.each([
 		[400, "ProviderRejectedRequest", false],
+		[401, "ProviderCredentialsRejected", false],
+		[403, "ProviderAccessDenied", false],
 		[404, "ProviderModelNotFound", false],
 		[408, "ProviderServerError", true],
 		[413, "ProviderContextLengthExceeded", false],
@@ -215,15 +286,18 @@ describe("a failed model request", () => {
 		});
 	});
 
-	it("knows a prompt over the model's window from the provider's words", () => {
-		const tooLong = answered(400, { error: { message: "prompt is too long: 210000 tokens" } });
+	it.each([
+		"prompt is too long: 210000 tokens",
+		"This endpoint's maximum context length is 131072 tokens.",
+	])("knows a prompt over the model's window from the provider's words: %s", (said) => {
+		const tooLong = answered(400, { error: { message: said } });
 
 		expect(Models.classifyRequestFailure(tooLong, context)._tag).toBe(
 			"ProviderContextLengthExceeded",
 		);
 	});
 
-	it("waits as long as a rate-limited provider asks, and says how long", () => {
+	it("reads how long a rate-limited provider asks to be left, and says so", () => {
 		const failure = Models.classifyRequestFailure(
 			answered(429, {}, { "retry-after": "90" }),
 			context,
@@ -241,6 +315,7 @@ describe("a failed model request", () => {
 		["ECONNREFUSED", "ProviderUnreachable"],
 		["ENOTFOUND", "ProviderUnreachable"],
 		["UND_ERR_CONNECT_TIMEOUT", "ProviderUnreachable"],
+		["ETIMEDOUT", "ProviderUnreachable"],
 		["ECONNRESET", "ProviderConnectionLost"],
 		["UND_ERR_SOCKET", "ProviderConnectionLost"],
 	])("tells a connection never made from one that dropped: %s", (code, tag) => {

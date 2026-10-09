@@ -63,7 +63,7 @@ describe("summarise", () => {
 			await execution;
 			expect(signal?.aborted).toBe(true);
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(ended).toEqual([{ failed: "The model didn't answer in time. Try again." }]);
+			expect(ended).toEqual([{ failed: "The model didn't answer in time." }]);
 			expect(summaries.complete).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
@@ -113,7 +113,7 @@ describe("summarise", () => {
 		// whole summary being retried over one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
-		expect(ended).toEqual([{ failed: "The model answered in a form we couldn't use. Try again." }]);
+		expect(ended).toEqual([{ failed: "The model answered in a form we couldn't use." }]);
 	});
 
 	it("takes the answer as soon as one of the asks comes back usable", async () => {
