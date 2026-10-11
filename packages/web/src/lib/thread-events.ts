@@ -16,6 +16,7 @@ import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
+import { refreshArtifactsAfter } from "@/lib/artifacts.ts";
 import { refreshAfterThreadChange } from "@/lib/chats.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
@@ -289,6 +290,7 @@ async function applyThreadEvent(
 		messageId = update.messageId;
 		const { toolCall } = update;
 		applyMessage = (message) => withPlacedPart(message, toolCall);
+		refreshArtifactsAfter(queries, toolCall);
 	} else if (update.type === "message.failed") {
 		messageId = update.messageId;
 		const { error } = update;

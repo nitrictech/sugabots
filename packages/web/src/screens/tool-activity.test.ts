@@ -75,6 +75,12 @@ describe("a reply's tool line", () => {
 			"Used Web search and Acme crm for 4s",
 		);
 	});
+
+	it("names the artifact tools together, as one app", () => {
+		expect(
+			toolLineText([call("artifact_edit"), call("artifact_read"), call("artifact_write")], looks),
+		).toBe("Used Artifacts for 6s");
+	});
 });
 
 describe("how tools are worded", () => {

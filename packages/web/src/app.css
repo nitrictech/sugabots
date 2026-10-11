@@ -22,6 +22,8 @@
 	--list: light-dark(#f7f7f9, #111216);
 	/* The column beside a chat: Details, or a collaboration or run. */
 	--aside: light-dark(#fbfbfc, #0d0e11);
+	/* Behind a page opened beside a chat, such as an artifact. */
+	--stage: light-dark(#f3f3f5, #08090b);
 	/* A card among the messages, such as an approval request. */
 	--card: light-dark(#f2f2f5, #17181d);
 	/* A raised panel: a dialog, a settings card, the composer's input. */
@@ -137,6 +139,7 @@
 	--color-panel: var(--panel);
 	--color-card: var(--card);
 	--color-aside: var(--aside);
+	--color-stage: var(--stage);
 	--color-chip: var(--chip);
 	--color-hover: var(--hover);
 	--color-hover-strong: var(--hover-strong);

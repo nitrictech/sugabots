@@ -11,6 +11,7 @@ import {
 	Outlet,
 	RouterProvider,
 	redirect,
+	useMatchRoute,
 	useNavigate,
 	useParams,
 	useRouter,
@@ -34,7 +35,9 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
+import type { OpenedArtifact } from "@/screens/AgentChat.tsx";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
+import { ArtifactPage, ArtifactsPage } from "@/screens/Artifacts.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { ActivityList } from "@/shell/ActivityList.tsx";
 import { ApprovalList } from "@/shell/ApprovalList.tsx";
@@ -836,6 +839,12 @@ const activityChatRoute = createRoute({
 						onThreadChange={(thread) =>
 							void navigate({ search: (previous) => ({ ...previous, thread }) })
 						}
+						artifact={openedArtifactOf(search)}
+						onArtifactChange={(opened) =>
+							void navigate({
+								search: (previous) => ({ ...previous, ...artifactSearchOf(opened) }),
+							})
+						}
 					/>
 				)}
 			</PodAgentScreen>
@@ -905,21 +914,32 @@ function AgentsRoute() {
 	return <Navigate {...podLink(first)} replace />;
 }
 
-/** A conversation list beside the thread it opens. */
+/**
+ * A conversation list beside the thread, or the artifacts, it opens. The list
+ * is tucked away while something is open large beside the thread.
+ */
 function ConversationLayout({
 	pod,
 	selectedAgentId,
+	artifactsOpen,
+	listTuckedAway,
 	children,
 }: {
 	pod: Pod;
 	selectedAgentId: string | undefined;
+	artifactsOpen: boolean;
+	listTuckedAway: boolean;
 	children: React.ReactNode;
 }) {
 	return (
 		<ListAndPane
-			open={selectedAgentId !== undefined}
+			open={selectedAgentId !== undefined || artifactsOpen}
 			list={(className) => (
-				<ConversationList pod={pod} selectedAgentId={selectedAgentId} className={className} />
+				<ConversationList
+					pod={pod}
+					selectedAgentId={selectedAgentId}
+					className={listTuckedAway ? "hidden" : className}
+				/>
 			)}
 		>
 			{children}
@@ -937,6 +957,9 @@ const podRoute = createRoute({
 function PodRoute() {
 	const { pod: podSlug } = podRoute.useParams();
 	const { agent: handle } = useParams({ strict: false });
+	const { artifact: stagedArtifact } = useSearch({ strict: false });
+	const matchRoute = useMatchRoute();
+	const artifactsOpen = Boolean(matchRoute({ to: artifactsRoute.fullPath, fuzzy: true }));
 	const { data: pods, isPending, error } = usePods();
 	const { found } = usePodAgent(podSlug, handle ?? "");
 	const pod = findPod(pods, podSlug);
@@ -953,7 +976,12 @@ function PodRoute() {
 		);
 	}
 	return (
-		<ConversationLayout pod={pod} selectedAgentId={found?.agent.id}>
+		<ConversationLayout
+			pod={pod}
+			selectedAgentId={found?.agent.id}
+			artifactsOpen={artifactsOpen}
+			listTuckedAway={stagedArtifact !== undefined}
+		>
 			<Outlet />
 		</ConversationLayout>
 	);
@@ -993,13 +1021,62 @@ function preloadChatScreenForWideLayout() {
 	if (matchesMedia(SIDE_BY_SIDE)) AgentPage.preload();
 }
 
+const artifactsRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/artifacts",
+	component: () => {
+		const pod = findPod(usePods().data, artifactsRoute.useParams().pod);
+		return pod ? <ArtifactsPage pod={pod} /> : null;
+	},
+});
+
+interface ArtifactSearch {
+	/** An earlier version to show; the current one when absent. */
+	version?: number;
+}
+
+const validateArtifactSearch = (search: Record<string, unknown>): ArtifactSearch =>
+	typeof search.version === "number" && Number.isInteger(search.version) && search.version > 0
+		? { version: search.version }
+		: {};
+
+const artifactRoute = createRoute({
+	getParentRoute: () => podRoute,
+	path: "/artifacts/$artifact",
+	validateSearch: validateArtifactSearch,
+	component: () => {
+		const { pod: podSlug, artifact } = artifactRoute.useParams();
+		const { version } = artifactRoute.useSearch();
+		const pod = findPod(usePods().data, podSlug);
+		return pod ? <ArtifactPage pod={pod} artifactId={artifact} version={version} /> : null;
+	},
+});
+
 interface AgentSearch {
 	/** A collaboration or routine thread open beside the chat. */
 	thread?: string;
+	/** An artifact open large beside the chat, in place of the conversation list. */
+	artifact?: string;
+	/** An earlier version of `artifact` to show; the current one when absent. */
+	version?: number;
 }
 
-const validateAgentSearch = (search: Record<string, unknown>): AgentSearch =>
-	idParam(search, "thread");
+const validateAgentSearch = (search: Record<string, unknown>): AgentSearch => {
+	const { artifact } = idParam(search, "artifact");
+	return {
+		...idParam(search, "thread"),
+		...(artifact ? { artifact, ...validateArtifactSearch(search) } : {}),
+	};
+};
+
+/** The artifact `search` opens beside a chat, and the search that opens `opened`. */
+const openedArtifactOf = (search: AgentSearch): OpenedArtifact | undefined =>
+	search.artifact ? { artifactId: search.artifact, version: search.version } : undefined;
+
+const artifactSearchOf = (opened: OpenedArtifact | undefined): AgentSearch => ({
+	artifact: opened?.artifactId,
+	version: opened?.version,
+});
 
 /**
  * `search[name]` when it is an id, and otherwise undefined. Said either way,
@@ -1042,6 +1119,12 @@ const agentRoute = createRoute({
 						threadId={search.thread}
 						onThreadChange={(thread) =>
 							void navigate({ search: (previous) => ({ ...previous, thread }) })
+						}
+						artifact={openedArtifactOf(search)}
+						onArtifactChange={(opened) =>
+							void navigate({
+								search: (previous) => ({ ...previous, ...artifactSearchOf(opened) }),
+							})
 						}
 					/>
 				)}
@@ -1125,7 +1208,7 @@ const routeTree = rootRoute.addChildren([
 		agentsRoute,
 		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
-		podRoute.addChildren([podIndexRoute, agentRoute]),
+		podRoute.addChildren([podIndexRoute, agentRoute, artifactsRoute, artifactRoute]),
 	]),
 ]);
 

@@ -3,7 +3,13 @@ import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { chief, growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
+import {
+	accountManager,
+	chief,
+	growthDesk,
+	linearHandler,
+	revenue,
+} from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
@@ -388,5 +394,103 @@ export const SandboxInUseOnAPhone = meta.story({
 				{ timeout: 10_000 },
 			),
 		).toBeVisible();
+	},
+});
+
+const pricing = {
+	id: "0199a3a0-0000-7000-8000-0000000005f1",
+	podId: revenue.id,
+	kind: "document",
+	title: "Competitor pricing",
+	version: 1,
+	createdBy: { agentId: growthDesk.id, name: growthDesk.name },
+	createdAt: "2026-09-18T06:08:00.000Z",
+	updatedAt: "2026-09-18T06:08:00.000Z",
+} as const;
+
+const pricingContent = `# Competitor pricing
+
+| Company | Monthly | Annual |
+| --- | --- | --- |
+| Ledgerly | $29 | $290 |
+| Tallyhq | $35 | $336 |
+| Northpass | $24 | $240 |
+`;
+
+/** Growth Desk's reply that made the pricing document. */
+const madePricing: Message = {
+	...said("95", "bot", "Here's the pricing, monthly and annual.", "2026-09-18T06:08:00.000Z"),
+	parts: [
+		{
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-000000000596",
+			tool: "artifact_write",
+			input: {},
+			output: {
+				status: "written",
+				artifactId: pricing.id,
+				kind: pricing.kind,
+				title: pricing.title,
+				version: pricing.version,
+			},
+			status: "completed",
+			error: null,
+			mutating: true,
+			atOffset: 0,
+			startedAt: "2026-09-18T06:07:30.000Z",
+			finishedAt: "2026-09-18T06:08:00.000Z",
+		},
+		{ type: "text", text: "Here's the pricing, monthly and annual." },
+	],
+};
+
+const artifactHandlers = () => {
+	const artifacts = `${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId`;
+	const shown = {
+		...pricing,
+		content: pricingContent,
+		shownVersion: { number: 1, author: pricing.createdBy, createdAt: pricing.createdAt },
+	};
+	return [
+		...appHandlers({ messages: { [growthDesk.id]: [...conversation, madePricing] } }),
+		http.get(artifacts, () => HttpResponse.json(shown)),
+		http.get(`${artifacts}/versions/:version`, () => HttpResponse.json(shown)),
+		http.get(`${artifacts}/versions`, () => HttpResponse.json([shown.shownVersion])),
+	];
+};
+
+/**
+ * An artifact the bot made, as a card in its reply. Opening it shows it large
+ * beside the chat, in the room the pod's list had, and Close brings the list back.
+ */
+export const Artifact = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...artifactHandlers());
+	},
+	play: async ({ canvas }) => {
+		const card = await canvas.findByRole("article", { name: pricing.title }, { timeout: 10_000 });
+		await userEvent.click(
+			within(card).getAllByRole("button", { name: `Open ${pricing.title}` })[0] as HTMLElement,
+		);
+		const stage = await canvas.findByRole("region", { name: pricing.title });
+		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: new RegExp(accountManager.name) })).toBeNull();
+		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
+		await expect(
+			await canvas.findByRole("link", { name: new RegExp(accountManager.name) }),
+		).toBeVisible();
+	},
+});
+
+/** On a phone the opened artifact covers the chat. */
+export const ArtifactOnAPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...artifactHandlers());
+	},
+	render: () => <StoryApp path={`${chatPath(growthDesk)}?artifact=${pricing.id}`} />,
+	play: async ({ canvas }) => {
+		const stage = await canvas.findByRole("region", { name: pricing.title }, { timeout: 10_000 });
+		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
 	},
 });
