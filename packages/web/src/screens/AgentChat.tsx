@@ -49,6 +49,7 @@ import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatHeader, type ChatPlace } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
+import { DesktopStage } from "./DesktopViewer.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 import { mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
@@ -70,11 +71,13 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  */
 const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
-/** An artifact open large beside a chat, at its current version when `version` is absent. */
-export interface OpenedArtifact {
-	artifactId: string;
-	version?: number;
-}
+/**
+ * What is open large beside a chat: an artifact, at its current version when
+ * `version` is absent, or the bot's sandbox desktop.
+ */
+export type Staged =
+	| { kind: "artifact"; artifactId: string; version?: number }
+	| { kind: "desktop" };
 
 export function AgentChat({
 	agent,
@@ -84,8 +87,8 @@ export function AgentChat({
 	focusMessageId,
 	place,
 	onThreadChange,
-	artifact,
-	onArtifactChange,
+	staged,
+	onStagedChange,
 }: {
 	agent: Agent;
 	pod: Pod;
@@ -96,10 +99,11 @@ export function AgentChat({
 	place: ChatPlace;
 	onThreadChange: (threadId: string | undefined) => void;
 	/** Open large beside the chat, in place of any sidebar. */
-	artifact?: OpenedArtifact;
-	onArtifactChange: (artifact: OpenedArtifact | undefined) => void;
+	staged?: Staged;
+	onStagedChange: (staged: Staged | undefined) => void;
 }) {
-	const openArtifact = (artifactId: string) => onArtifactChange({ artifactId });
+	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
+	const openDesktop = () => onStagedChange({ kind: "desktop" });
 	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
@@ -231,7 +235,15 @@ export function AgentChat({
 		onThreadChange(nextThreadId);
 	}
 
-	const header = <ChatHeader agent={agent} pod={pod} place={place} />;
+	const header = (
+		<ChatHeader
+			agent={agent}
+			pod={pod}
+			place={place}
+			staged={staged !== undefined}
+			onOpenDesktop={openDesktop}
+		/>
+	);
 	if (chat.isPending) return <div className="flex min-w-0 flex-1 flex-col">{header}</div>;
 	if (!chat.data || chat.isError)
 		return (
@@ -277,7 +289,7 @@ export function AgentChat({
 			<div
 				className={cn(
 					"relative flex min-w-0 flex-1 flex-col",
-					artifact && "md:w-[400px] md:flex-none md:border-border md:border-r",
+					staged && "md:w-[440px] md:flex-none md:border-border md:border-r",
 				)}
 			>
 				{header}
@@ -326,6 +338,8 @@ export function AgentChat({
 										dividers={false}
 										onOpenThread={openThread}
 										onOpenArtifact={openArtifact}
+										onOpenDesktop={openDesktop}
+										previews={!staged}
 										podId={pod.id}
 										approvalCapabilities={details.capabilities}
 										queued={queued}
@@ -379,14 +393,21 @@ export function AgentChat({
 					</div>
 				</div>
 			</div>
-			{/* One beside the chat at a time: an open artifact, else a thread, else Details. */}
-			{artifact ? (
+			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
+			{staged?.kind === "artifact" ? (
 				<ArtifactStage
 					pod={pod}
-					artifactId={artifact.artifactId}
-					version={artifact.version}
-					onVersionChange={(version) => onArtifactChange({ ...artifact, version })}
-					onClose={() => onArtifactChange(undefined)}
+					artifactId={staged.artifactId}
+					version={staged.version}
+					onVersionChange={(version) => onStagedChange({ ...staged, version })}
+					onClose={() => onStagedChange(undefined)}
+				/>
+			) : staged?.kind === "desktop" ? (
+				<DesktopStage
+					threadId={details.thread.id}
+					agent={agent}
+					mayUse={pod.permissions.useDesktops}
+					onClose={() => onStagedChange(undefined)}
 				/>
 			) : threadId ? (
 				<ChatThreadPanel

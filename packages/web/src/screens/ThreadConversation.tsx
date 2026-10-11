@@ -16,12 +16,13 @@ import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/tool-approvals.ts";
-import { splitToolKey } from "@/lib/tool-names.ts";
+import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ArtifactCards } from "./ArtifactCards.tsx";
+import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { textWithMentions } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
@@ -62,6 +63,8 @@ export function ThreadConversation({
 	dividers = true,
 	onOpenThread,
 	onOpenArtifact,
+	onOpenDesktop,
+	previews = true,
 	podId,
 	approvalCapabilities,
 	compact = false,
@@ -92,6 +95,16 @@ export function ThreadConversation({
 	onOpenThread: (threadId: string) => void;
 	/** Opens an artifact a reply wrote, from its card. Without it, no cards are drawn. */
 	onOpenArtifact?: (artifactId: string) => void;
+	/**
+	 * Opens the bot's desktop from its screen, shown live in a reply while the
+	 * reply uses the browser. Without it, no screen is shown.
+	 */
+	onOpenDesktop?: () => void;
+	/**
+	 * Whether replies show what they made: a card for each artifact, the
+	 * desktop live. Off while one is open large beside the conversation.
+	 */
+	previews?: boolean;
 	podId: string;
 	/** What the person may decide of the approvals the thread raises. */
 	approvalCapabilities?: ApprovalCapabilities;
@@ -159,6 +172,8 @@ export function ThreadConversation({
 								authorLink={authorLinkOf?.(message.author)}
 								onOpenThread={onOpenThread}
 								onOpenArtifact={onOpenArtifact}
+								onOpenDesktop={onOpenDesktop}
+								previews={previews}
 							/>
 						)}
 						{showsTyping && message.author.kind === "agent" && isTyping(message) && (
@@ -336,6 +351,8 @@ function MessageRow({
 	authorLink,
 	onOpenThread,
 	onOpenArtifact,
+	onOpenDesktop,
+	previews,
 }: {
 	message: Message;
 	/** Whether it heads its author's group, so it carries their face and name. */
@@ -358,6 +375,8 @@ function MessageRow({
 	authorLink?: AuthorLink;
 	onOpenThread: (threadId: string) => void;
 	onOpenArtifact?: (artifactId: string) => void;
+	onOpenDesktop?: () => void;
+	previews: boolean;
 }) {
 	// Unset until the first tap, so a screen that hovers never has a time shown twice.
 	const [timeTapped, setTimeTapped] = useState(false);
@@ -490,7 +509,21 @@ function MessageRow({
 						</div>
 					);
 				})}
-				{agent && onOpenArtifact && (
+				{agent &&
+					previews &&
+					onOpenDesktop &&
+					message.status === "streaming" &&
+					calls.some((call) => call.tool.startsWith(BROWSER_TOOL_PREFIX)) && (
+						<div className="w-full max-w-[460px] pt-2 pb-1.5">
+							<LiveDesktopCard
+								threadId={message.threadId}
+								agentId={agent.id}
+								agentName={agent.name}
+								onOpen={onOpenDesktop}
+							/>
+						</div>
+					)}
+				{agent && previews && onOpenArtifact && (
 					<ArtifactCards
 						calls={calls}
 						podId={podId}

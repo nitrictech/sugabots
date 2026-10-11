@@ -1,49 +1,122 @@
 import type RFB from "@novnc/novnc";
+import type { Agent } from "@sugabots/contracts";
+import { Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
+import { Stage, StageMark } from "@/shell/Stage.tsx";
 import { Button } from "@/ui/button.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog.tsx";
 
 /**
- * An agent's desktop in a thread, live: where the browser it drives is shown,
- * and where the person can click and type too if the pod lets them use
- * desktops, or else only watch. Opening it starts the desktop,
- * and the sandbox if it was paused, so the first connection can take a few
- * seconds; it comes over a WebSocket the API relays from the sandbox.
+ * An agent's desktop opened beside its chat, live: where the browser it
+ * drives is shown. Opening it starts the desktop, and the sandbox if it was
+ * paused, so the first connection can take a few seconds; it comes over a
+ * WebSocket the API relays from the sandbox. The person watches until they
+ * take over, if the pod lets them use desktops, and can hand control back.
  */
-export function DesktopViewerDialog({
+export function DesktopStage({
+	threadId,
+	agent,
+	mayUse,
+	onClose,
+}: {
+	threadId: string;
+	agent: Agent;
+	/** Whether the person holds the pod's `useDesktops`, and so may take over. */
+	mayUse: boolean;
+	onClose: () => void;
+}) {
+	const [inControl, setInControl] = useState(false);
+	const agentUsing = useDesktopInUse(threadId, agent.id);
+	return (
+		<Stage
+			label={`${agent.name}'s desktop`}
+			icon={
+				<StageMark>
+					<Monitor strokeWidth={2} />
+				</StageMark>
+			}
+			title={`${agent.name}'s desktop`}
+			byline="Live from the sandbox"
+			onClose={onClose}
+		>
+			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
+				{/* As large as the room allows, keeping the desktop's 16:10 shape, up to its own 1280 pixels across. */}
+				<div className="w-[min(1280px,100%,calc((100dvh-13rem)*1.6))]">
+					<DesktopScreen threadId={threadId} agentId={agent.id} viewOnly={!inControl} />
+				</div>
+				<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-sm">
+					<AgentAvatar color={agent.color} face={agent.face} size={22} className="shrink-0" />
+					<span className="min-w-0 text-soft-foreground">
+						{!mayUse ? (
+							<>You can watch what {agent.name} does here.</>
+						) : inControl ? (
+							<>
+								<b className="font-semibold text-foreground">You</b> have control. What you do here
+								is real.
+							</>
+						) : agentUsing ? (
+							<>
+								<b className="font-semibold text-foreground">{agent.name}</b> has control
+							</>
+						) : (
+							<>Watching</>
+						)}
+					</span>
+					{mayUse && (
+						<Button
+							size="sm"
+							variant={inControl ? "secondary" : "default"}
+							onClick={() => setInControl(!inControl)}
+						>
+							{inControl ? "Hand back" : "Take over"}
+						</Button>
+					)}
+				</div>
+			</div>
+		</Stage>
+	);
+}
+
+/**
+ * The agent's screen in the reply that is using it, watch-only, so people see
+ * the browser at work without leaving the chat. Clicking it opens the desktop
+ * beside the chat.
+ */
+export function LiveDesktopCard({
 	threadId,
 	agentId,
 	agentName,
-	viewOnly,
-	open,
-	onOpenChange,
+	onOpen,
 }: {
 	threadId: string;
 	agentId: string;
 	agentName: string;
-	/** Whether the person may only watch: they don't hold the pod's `useDesktops`. */
-	viewOnly: boolean;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
+	onOpen: () => void;
 }) {
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent
-				// As large as the window allows, keeping the desktop's 16:10 shape and
-				// leaving room for the title, up to its own 1280 pixels across.
-				className="w-[min(1280px,calc(100vw-2rem),calc((100dvh-9rem)*1.6))] max-w-none gap-3 sm:max-w-none"
-			>
-				<DialogTitle>{agentName}'s desktop</DialogTitle>
-				<DialogDescription>
-					{viewOnly
-						? "Live from the sandbox. You can watch what the agent does here."
-						: "Live from the sandbox. You can use it too, with the agent's browser and sessions, so what you do here is real."}
-				</DialogDescription>
-				{open && <DesktopScreen threadId={threadId} agentId={agentId} viewOnly={viewOnly} />}
-			</DialogContent>
-		</Dialog>
+		<article
+			aria-label={`${agentName}'s screen`}
+			className="overflow-hidden rounded-[12px] border border-border bg-panel"
+		>
+			<div className="relative">
+				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly />
+				<button
+					type="button"
+					onClick={onOpen}
+					aria-label={`Open ${agentName}'s desktop`}
+					className="focus-ring absolute inset-0 cursor-zoom-in"
+				/>
+			</div>
+			<p className="m-0 flex items-center gap-2 px-3 py-2 text-[12.5px] text-muted-foreground">
+				<span aria-hidden className="relative flex size-2">
+					<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
+					<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
+				</span>
+				{agentName} is using its browser
+			</p>
+		</article>
 	);
 }
 
@@ -74,6 +147,8 @@ export function DesktopScreen({
 	viewOnly: boolean;
 }) {
 	const screen = useRef<HTMLDivElement>(null);
+	const connected = useRef<RFB | undefined>(undefined);
+	const viewOnlyNow = useRef(viewOnly);
 	const [standing, setStanding] = useState<Standing>("connecting");
 	const [attempt, setAttempt] = useState(0);
 	const lastUsedAt = useRef(Date.now());
@@ -82,6 +157,11 @@ export function DesktopScreen({
 	useEffect(() => {
 		agentUsingNow.current = agentUsing;
 	}, [agentUsing]);
+	// Taking over or handing back switches input on the open connection, without reconnecting.
+	useEffect(() => {
+		viewOnlyNow.current = viewOnly;
+		if (connected.current) connected.current.viewOnly = viewOnly;
+	}, [viewOnly]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: a new attempt reconnects.
 	useEffect(() => {
@@ -109,8 +189,9 @@ export function DesktopScreen({
 			if (unmounted) return;
 			const opened = new RFBClient(element, desktopUrl(threadId, agentId));
 			viewer = opened;
+			connected.current = opened;
 			opened.scaleViewport = true;
-			opened.viewOnly = viewOnly;
+			opened.viewOnly = viewOnlyNow.current;
 			opened.background = "var(--color-background)";
 			opened.addEventListener("connect", () => setStanding("connected"));
 			opened.addEventListener("disconnect", () => {
@@ -122,8 +203,9 @@ export function DesktopScreen({
 			clearInterval(idleCheck);
 			for (const event of INPUT_EVENTS) element.removeEventListener(event, used, { capture: true });
 			viewer?.disconnect();
+			connected.current = undefined;
 		};
-	}, [threadId, agentId, viewOnly, attempt]);
+	}, [threadId, agentId, attempt]);
 
 	return (
 		<div className="relative aspect-[16/10] w-full overflow-hidden rounded-panel bg-list">
@@ -144,7 +226,7 @@ export function DesktopScreen({
 
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
 	connecting: "Starting the desktop…",
-	ended: "The desktop couldn't be reached. Close this and open it again to retry.",
+	ended: "The desktop couldn't be reached. Close it and open it again to retry.",
 	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the sandbox can pause.`,
 };
 
