@@ -27,7 +27,8 @@ import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
 import { type UserFacing, UserMessage } from "../../user-message.ts";
-import { type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
+import type { ProviderOptions } from "../model-providers/dialects/dialect.ts";
+import { dialectFor, type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
 import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
@@ -43,6 +44,13 @@ export interface Prompt {
 export interface PromptMessage {
 	role: "user" | "assistant";
 	content: string;
+	/**
+	 * Whether later requests repeat the prompt up to and including this
+	 * message, as a turn's history is repeated by the thread's next turn. A
+	 * provider that caches only the prefixes a request marks is told to cache
+	 * it; one that caches by itself needs no telling.
+	 */
+	cacheBreakpoint?: true;
 }
 
 /** A response streamed as it arrives, with tools the model may call along the way. */
@@ -326,6 +334,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				connection,
 			});
 			const codex = connection.preset === "chatgpt";
+			const breakpoint = dialectFor(connection).cacheBreakpoint?.(input.model);
+			const markNewest = breakpoint ? newestMessageBreakpoint(breakpoint) : undefined;
 			// The SDK does not throw a provider's error into the text stream: it
 			// reports it here and ends the stream, and whatever is asked of the
 			// result afterwards fails with "No output generated". Keeping the
@@ -350,8 +360,17 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 								},
 							},
 						}
-					: { system: input.system }),
-				messages: [...input.messages, ...(input.continuationMessages ?? [])],
+					: {
+							system: breakpoint
+								? withBreakpoint({ role: "system", content: input.system }, breakpoint)
+								: input.system,
+						}),
+				messages: [
+					...input.messages.map(({ cacheBreakpoint, ...message }) =>
+						cacheBreakpoint && breakpoint ? withBreakpoint(message, breakpoint) : message,
+					),
+					...(input.continuationMessages ?? []),
+				],
 				tools: input.tools,
 				toolApproval: input.toolApproval,
 				abortSignal: signal,
@@ -379,9 +398,13 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				// with nothing said, so the last round is told to answer. The note
 				// rides on the newest tool result, which no provider has cached yet:
 				// changing the tools or system text instead would cost the cache
-				// every earlier call built.
-				prepareStep: ({ stepNumber, messages }) =>
-					stepNumber === input.maxSteps - 1 ? { messages: withLastStepNote(messages) } : undefined,
+				// every earlier call built. Every other step marks its newest message
+				// for the next step to read up to from the cache; the last has no
+				// next step to read it.
+				prepareStep: ({ stepNumber, messages }) => {
+					if (stepNumber === input.maxSteps - 1) return { messages: withLastStepNote(messages) };
+					return markNewest ? { messages: markNewest(messages) } : undefined;
+				},
 				stopWhen: stepCountIs(input.maxSteps),
 				maxRetries: 0,
 			});
@@ -487,6 +510,36 @@ function noted(output: ToolResultPart["output"]): ToolResultPart["output"] {
 				reason: output.reason ? `${output.reason}\n\n${LAST_STEP_NOTE}` : LAST_STEP_NOTE,
 			};
 	}
+}
+
+/**
+ * Marks each step's newest message with `breakpoint`, taking it off the
+ * message the step before marked. The SDK sends each step the messages the
+ * step before was sent, so a mark left behind would count against the four
+ * Anthropic allows a request.
+ */
+function newestMessageBreakpoint(breakpoint: ProviderOptions) {
+	let marked: { index: number; unmarked: ModelMessage } | undefined;
+	return (messages: ModelMessage[]): ModelMessage[] => {
+		const restored = marked ? messages.with(marked.index, marked.unmarked) : messages;
+		const index = restored.length - 1;
+		const newest = restored[index];
+		if (!newest) return restored;
+		marked = { index, unmarked: newest };
+		return restored.with(index, withBreakpoint(newest, breakpoint));
+	};
+}
+
+/** `message` with `breakpoint`'s options added to whatever options it has for the same provider. */
+function withBreakpoint<Message extends ModelMessage>(
+	message: Message,
+	breakpoint: ProviderOptions,
+): Message {
+	const providerOptions = { ...message.providerOptions };
+	for (const [provider, options] of Object.entries(breakpoint)) {
+		providerOptions[provider] = { ...providerOptions[provider], ...options };
+	}
+	return { ...message, providerOptions };
 }
 
 function languageModel(

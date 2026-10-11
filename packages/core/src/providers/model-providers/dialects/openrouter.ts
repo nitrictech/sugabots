@@ -13,15 +13,24 @@ const names = Schema.Array(Schema.String).pipe(
 	Schema.catchDecoding(() => Effect.succeedSome([])),
 );
 
+/** How OpenRouter's ids for Anthropic's models start, as in `anthropic/claude-sonnet-4.5`. */
+const ANTHROPIC_MODELS = "anthropic/";
+
 /**
  * OpenRouter's listing says what each model takes in, gives out, and accepts
- * as parameters, so nothing is left to the registry.
+ * as parameters, so nothing is left to the registry. Its Anthropic models,
+ * like Anthropic's own, cache only the prompt prefixes a request marks;
+ * the rest cache by themselves or not at all.
  */
 export const openrouter: ProviderDialect = {
 	name: "OpenRouter",
 	// The public /models endpoint accepts invalid keys; /models/user requires authentication.
 	listingUrl: (root) => `${root}/models/user`,
 	authorization: openaiCompatible.authorization,
+	cacheBreakpoint: (modelId) =>
+		modelId.startsWith(ANTHROPIC_MODELS)
+			? { openrouter: { cacheControl: { type: "ephemeral" } } }
+			: undefined,
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,

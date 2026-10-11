@@ -9,13 +9,15 @@ import {
 /**
  * Anthropic keys with a header of its own and pages its listing, twenty models
  * at a time unless asked for more. The listing has no capabilities, so the
- * registry supplies them.
+ * registry supplies them. Its models cache only the prompt prefixes a
+ * request marks.
  */
 export const anthropic: ProviderDialect = {
 	name: "Anthropic",
 	discoveryRoot: (baseUrl) => (baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`),
 	listingUrl: (root) => `${root}/models?limit=1000`,
 	authorization: (apiKey) => ({ "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01" }),
+	cacheBreakpoint: () => ({ anthropic: { cacheControl: { type: "ephemeral" } } }),
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,
