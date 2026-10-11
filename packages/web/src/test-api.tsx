@@ -87,6 +87,7 @@ const ADMIN_IN_POD: PodPermissions = {
 	useDesktops: true,
 	manageRoutines: true,
 	runRoutines: true,
+	deleteArtifacts: true,
 };
 
 /** What a member gets in a shared pod they have joined. */
@@ -101,6 +102,7 @@ const MEMBER_IN_POD: PodPermissions = {
 	manageSandbox: false,
 	manageRoutines: false,
 	runRoutines: false,
+	deleteArtifacts: false,
 };
 
 /** What a viewer gets there: nothing they could change. */

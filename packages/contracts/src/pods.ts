@@ -119,6 +119,8 @@ export const podPermissionsSchema = Schema.Struct({
 	/** Add, change and remove Routines, and rotate their webhook secrets. */
 	manageRoutines: Schema.Boolean,
 	runRoutines: Schema.Boolean,
+	/** Delete what the pod's bots have made: its documents and pages. */
+	deleteArtifacts: Schema.Boolean,
 });
 
 export type PodPermissions = typeof podPermissionsSchema.Type;
