@@ -231,6 +231,15 @@ describe("prompt caching", () => {
 		],
 	};
 
+	/** Which of a request's messages are marked, on the message or on one of its parts. */
+	const markedMessages = (body: Record<string, unknown> = {}) =>
+		(body.messages as Array<{ content: unknown; cache_control?: unknown }>).map(
+			(message) =>
+				message.cache_control !== undefined ||
+				(Array.isArray(message.content) &&
+					message.content.some((part) => part.cache_control !== undefined)),
+		);
+
 	it("marks the system text, the history's end and each step's newest message for Anthropic", async () => {
 		const { model, sent } = modelAnswering([() => new Response("Unavailable", { status: 503 })], {
 			preset: "anthropic",
@@ -259,18 +268,36 @@ describe("prompt caching", () => {
 
 		await answer(model, { ...turn, model: "anthropic/claude-test" });
 
-		/** Which of a request's messages are marked, on the message or on one of its parts. */
-		const markedMessages = (body: Record<string, unknown> = {}) =>
-			(body.messages as Array<{ content: unknown; cache_control?: unknown }>).map(
-				(message) =>
-					message.cache_control !== undefined ||
-					(Array.isArray(message.content) &&
-						message.content.some((part) => part.cache_control !== undefined)),
-			);
 		// System text, history, turn.
 		expect(markedMessages(sent[0])).toEqual([true, false, true, true]);
 		// The turn's mark has moved to the tool result.
 		expect(markedMessages(sent[1])).toEqual([true, false, true, false, false, true]);
+	});
+
+	it("marks only the last of several tool results, keeping within Anthropic's four marks", async () => {
+		const parallelToolCalls = () =>
+			streamed(
+				{
+					tool_calls: ["call-1", "call-2", "call-3"].map((id, index) => ({
+						index,
+						id,
+						type: "function",
+						function: { name: "lookup", arguments: "{}" },
+					})),
+				},
+				"tool_calls",
+				{ prompt_tokens: 1_000, completion_tokens: 20 },
+			);
+		const { model, sent } = modelAnswering([parallelToolCalls, reply], {
+			preset: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			apiFormat: "openai",
+		});
+
+		await answer(model, { ...turn, model: "anthropic/claude-test" });
+
+		// System text, history, turn, the tool calls, then one message per result.
+		expect(markedMessages(sent[1])).toEqual([true, false, true, false, false, false, false, true]);
 	});
 
 	it.each([

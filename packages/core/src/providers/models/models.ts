@@ -275,6 +275,8 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				connection,
 			});
 			const codex = connection.preset === "chatgpt";
+			// Anthropic allows a request four marks. This spends three: the system
+			// text, the history's end and each step's newest message.
 			const breakpoint = dialectFor(connection).cacheBreakpoint?.(input.model);
 			const markNewest = breakpoint ? newestMessageBreakpoint(breakpoint) : undefined;
 			// The SDK does not throw a provider's error into the text stream: it
@@ -308,7 +310,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 						}),
 				messages: [
 					...input.messages.map(({ cacheBreakpoint, ...message }) =>
-						cacheBreakpoint && breakpoint ? withBreakpoint(message, breakpoint) : message,
+						cacheBreakpoint && breakpoint ? markedMessage(message, breakpoint) : message,
 					),
 					...(input.continuationMessages ?? []),
 				],
@@ -465,20 +467,41 @@ function newestMessageBreakpoint(breakpoint: ProviderOptions) {
 		const newest = restored[index];
 		if (!newest) return restored;
 		marked = { index, unmarked: newest };
-		return restored.with(index, withBreakpoint(newest, breakpoint));
+		return restored.with(index, markedMessage(newest, breakpoint));
 	};
 }
 
-/** `message` with `breakpoint`'s options added to whatever options it has for the same provider. */
-function withBreakpoint<Message extends ModelMessage>(
-	message: Message,
+/**
+ * `message` marked with `breakpoint`. A tool message is marked on its last
+ * result only, since OpenRouter sends each result as its own message and
+ * would copy a mark on the message onto every one, passing Anthropic's four
+ * after parallel tool calls. One with no results is left unmarked.
+ */
+function markedMessage(message: ModelMessage, breakpoint: ProviderOptions): ModelMessage {
+	if (message.role !== "tool") return withBreakpoint(message, breakpoint);
+	const resultAt = message.content.findLastIndex((part) => part.type === "tool-result");
+	const result = message.content[resultAt];
+	if (result?.type !== "tool-result") return message;
+	return {
+		...message,
+		content: message.content.with(resultAt, withBreakpoint(result, breakpoint)),
+	};
+}
+
+/**
+ * `marked`, a message or one of its parts, with `breakpoint`'s options added to
+ * whatever options it has for the same provider. A message that may be a tool
+ * message is marked through {@link markedMessage} instead.
+ */
+function withBreakpoint<Marked extends ModelMessage | ToolResultPart>(
+	marked: Marked,
 	breakpoint: ProviderOptions,
-): Message {
-	const providerOptions = { ...message.providerOptions };
+): Marked {
+	const providerOptions = { ...marked.providerOptions };
 	for (const [provider, options] of Object.entries(breakpoint)) {
 		providerOptions[provider] = { ...providerOptions[provider], ...options };
 	}
-	return { ...message, providerOptions };
+	return { ...marked, providerOptions };
 }
 
 function languageModel(
