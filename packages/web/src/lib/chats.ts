@@ -108,6 +108,36 @@ export function useApprovalInbox() {
 	});
 }
 
+/** How much in the workspace is waiting for the person. */
+export type AttentionCounts = {
+	/** Messages that mention the person and that they have not read. */
+	unreadMentions: number;
+	/** Approvals waiting on the person. */
+	waitingApprovals: number;
+	/** Messages the person has not read in any chat, mentions among them. */
+	unreadMessages: number;
+};
+
+/**
+ * How much in the workspace is waiting for the person, which the rail and the
+ * app's badge count. Unread mentions come from the activity feed, so they are
+ * counted among its latest items only.
+ */
+export function useAttentionCounts(): AttentionCounts {
+	const { data: markers } = usePodChatMarkers();
+	const { data: approvals } = useApprovalInbox();
+	const { data: activity } = useActivityFeed();
+	return {
+		unreadMentions:
+			activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0,
+		waitingApprovals: approvals?.waiting.length ?? 0,
+		unreadMessages: Object.values(markers?.pods ?? {}).reduce(
+			(total, pod) => total + pod.unreadMessages,
+			0,
+		),
+	};
+}
+
 /**
  * Records that the person has read the chat up to its newest message, and
  * clears its dot and its count on the rail.

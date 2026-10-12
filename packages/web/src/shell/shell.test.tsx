@@ -1,4 +1,10 @@
-import type { ModelProvider, ProviderModel, SessionUser } from "@sugabots/contracts";
+import {
+	type ApprovalRequest,
+	type ModelProvider,
+	type ProviderModel,
+	type SessionUser,
+	streamEvent,
+} from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { UserText, userText } from "@sugabots/errors";
 import { failureForStatus } from "@sugabots/sdk";
@@ -13,6 +19,7 @@ import {
 	agents,
 	apiAnswers,
 	builtInAgents,
+	controlledEventStream,
 	facilitator,
 	jye,
 	linear,
@@ -2228,5 +2235,127 @@ describe("pod settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
 		expect(await screen.findByRole("alert")).toBeDefined();
+	});
+});
+
+describe("the app's badge", () => {
+	const pod = pods[0] as (typeof pods)[number];
+	const waitingApproval: ApprovalRequest = {
+		call: {
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-0000000004c1",
+			tool: "linear__update_issue",
+			input: { team: "Platform" },
+			output: null,
+			status: "awaiting_approval",
+			error: null,
+			mutating: true,
+			atOffset: 0,
+			startedAt: "2026-09-18T09:00:00.000Z",
+			finishedAt: null,
+			approval: { status: "pending", decidedByName: null, decidedAt: null },
+		},
+		agent: {
+			kind: "agent",
+			id: linear.id,
+			name: linear.name,
+			handle: linear.handle,
+			color: linear.color,
+			face: linear.face,
+		},
+		podId: pod.id,
+		threadId: "0199a3a0-0000-7000-8000-0000000004b1",
+		chatAgentId: linear.id,
+		inMainThread: true,
+	};
+
+	/** The Badging API, which only Chromium browsers have. */
+	function badging() {
+		const setAppBadge = vi.fn(() => Promise.resolve());
+		const clearAppBadge = vi.fn(() => Promise.resolve());
+		Object.defineProperties(navigator, {
+			setAppBadge: { configurable: true, value: setAppBadge },
+			clearAppBadge: { configurable: true, value: clearAppBadge },
+		});
+		onTestFinished(() => {
+			Reflect.deleteProperty(navigator, "setAppBadge");
+			Reflect.deleteProperty(navigator, "clearAppBadge");
+		});
+		return { setAppBadge, clearAppBadge };
+	}
+
+	/** The title `index.html` gives the page. */
+	function pageTitle() {
+		const before = document.title;
+		document.title = "Sugabots";
+		onTestFinished(() => {
+			document.title = before;
+		});
+	}
+
+	/** Running as an installed app, which Chrome and Edge report as standalone display. */
+	function installedApp() {
+		const matchMedia = window.matchMedia;
+		vi.stubGlobal("matchMedia", (query: string) => ({
+			...matchMedia(query),
+			matches: query === "(display-mode: standalone)",
+		}));
+		onTestFinished(() => {
+			vi.unstubAllGlobals();
+		});
+	}
+
+	it("counts approvals waiting on you on the app's icon and in the title", async () => {
+		const { setAppBadge } = badging();
+		pageTitle();
+		client.api.chats.approvals.mockReturnValue(
+			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
+		);
+		mount(linearPage);
+
+		await waitFor(() => expect(document.title).toBe("(1) Sugabots"));
+		expect(setAppBadge).toHaveBeenCalledWith(1);
+	});
+
+	it("puts the count after the app's name in an installed window, which would otherwise repeat the name", async () => {
+		installedApp();
+		pageTitle();
+		client.api.chats.approvals.mockReturnValue(
+			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
+		);
+		mount(linearPage);
+
+		await waitFor(() => expect(document.title).toBe("Sugabots (1)"));
+	});
+
+	it("shows a dot for unread messages that are not for you", async () => {
+		const { setAppBadge } = badging();
+		pageTitle();
+		client.api.chats.podMarkers.mockReturnValue(
+			Effect.succeed({ pods: { [pod.id]: { unreadMessages: 2, needsApproval: false } } }),
+		);
+		mount(linearPage);
+
+		await waitFor(() => expect(setAppBadge).toHaveBeenCalledWith());
+		expect(document.title).toBe("• Sugabots");
+	});
+
+	it("clears the icon and the title once nothing is waiting", async () => {
+		const { clearAppBadge } = badging();
+		pageTitle();
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		client.api.chats.approvals.mockReturnValue(
+			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
+		);
+		mount(linearPage);
+		await waitFor(() => expect(document.title).toBe("(1) Sugabots"));
+		clearAppBadge.mockClear();
+
+		client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
+		updates.emit(streamEvent("thread.changed", { threadId: waitingApproval.threadId }));
+
+		await waitFor(() => expect(document.title).toBe("Sugabots"));
+		expect(clearAppBadge).toHaveBeenCalled();
 	});
 });

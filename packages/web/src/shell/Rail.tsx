@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Bell, Hand, Inbox, Plus, UserRound } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
-import { useActivityFeed, useApprovalInbox, usePodChatMarkers } from "@/lib/chats.ts";
+import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
 import { agentChatLink, podLink } from "@/lib/links.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
@@ -32,8 +32,7 @@ type Making = { kind: "pod" } | { kind: "bot"; pod: Pod };
 export function Rail() {
 	const { data: pods } = usePods();
 	const { data: markers } = usePodChatMarkers();
-	const { data: approvals } = useApprovalInbox();
-	const { data: activity } = useActivityFeed();
+	const { unreadMentions, waitingApprovals } = useAttentionCounts();
 	const { agents } = useAgents();
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
@@ -56,10 +55,8 @@ export function Rail() {
 					needsApproval: markers?.pods[pod.id]?.needsApproval ?? false,
 				}))}
 				selected={selected}
-				waitingApprovals={approvals?.waiting.length ?? 0}
-				unreadMentions={
-					activity?.items.filter((item) => item.kind === "mention" && item.unread).length ?? 0
-				}
+				waitingApprovals={waitingApprovals}
+				unreadMentions={unreadMentions}
 				workspace={workspace}
 				workspaces={workspaces ?? []}
 				className={covered ? "max-md:hidden" : undefined}
