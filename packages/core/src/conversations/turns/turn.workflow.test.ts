@@ -83,7 +83,8 @@ describe("the turn workflow", () => {
 
 	it("waits as long as a rate-limited provider asked before running again", async () => {
 		segment.mockReturnValueOnce(Effect.succeed({ _tag: "Retry", after: Duration.seconds(30) }));
-		await runtime.runPromise(Turn.execute(request(), { discard: true }));
+		const asked = request();
+		await runtime.runPromise(Turn.execute(asked, { discard: true }));
 		await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
 
 		let waitedSeconds = 0;
@@ -96,6 +97,7 @@ describe("the turn workflow", () => {
 			{ timeout: 5_000, interval: 1 },
 		);
 		expect(waitedSeconds).toBeGreaterThanOrEqual(30);
+		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
 	});
 
 	it("keeps the lane until every approval is decided, in whatever order", async () => {
