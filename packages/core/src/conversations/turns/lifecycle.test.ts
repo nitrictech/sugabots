@@ -1,5 +1,5 @@
+import { userText } from "@sugabots/errors";
 import { describe, expect, it } from "vitest";
-import { UserMessage } from "../../user-message.ts";
 import {
 	FollowUp,
 	MAX_TURN_RUNS,
@@ -17,7 +17,7 @@ import {
  */
 
 const owner = "workflow-execution-1";
-const providerDown = UserMessage.of`The model provider could not answer.`;
+const providerDown = userText`The model provider could not answer.`;
 
 const facts = {
 	owner,
@@ -147,7 +147,7 @@ describe("ending a run", () => {
 	});
 
 	it("abandons an active turn, ending its reply and calls", () => {
-		const stopped = UserMessage.of`The reply stopped unexpectedly.`;
+		const stopped = userText`The reply stopped unexpectedly.`;
 		expect(
 			transition(
 				turn({ status: "waiting" }),

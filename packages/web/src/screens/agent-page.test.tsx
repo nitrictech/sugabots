@@ -1,6 +1,7 @@
 import type { ConnectionAccess, Routine } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
 import type { TestConnection } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -316,10 +317,10 @@ describe("an admin", () => {
 	it("says when a Routine could not be paused, or its secret reset", async () => {
 		client.api.routines.list.mockReturnValue(Effect.succeed([webhookRoutine]));
 		client.api.routines.update.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Update unavailable" })),
+			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
 		);
 		client.api.routines.rotateSecret.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Rotation unavailable" })),
+			Effect.fail(new InternalServerError({ message: userText`Rotation unavailable` })),
 		);
 		mount(page);
 
@@ -400,7 +401,7 @@ describe("an admin", () => {
 
 	it("puts the name back and says why when a rename is refused", async () => {
 		client.api.agents.update.mockReturnValue(
-			Effect.fail(new Conflict({ message: "An agent with that name already exists" })),
+			Effect.fail(new Conflict({ message: userText`An agent with that name already exists` })),
 		);
 		mount(page);
 
@@ -448,7 +449,7 @@ describe("an admin", () => {
 		fireEvent.blur(description);
 		expect(client.api.agents.update).toHaveBeenCalledOnce();
 
-		update.answer(Effect.fail(new InternalServerError({ message: "Unavailable" })));
+		update.answer(Effect.fail(new InternalServerError({ message: userText`Unavailable` })));
 		expect(await screen.findByRole("alert")).toBeDefined();
 	});
 
@@ -507,7 +508,7 @@ describe("an admin", () => {
 
 	it("keeps rejected instructions open with their draft", async () => {
 		client.api.agents.update.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Unavailable" })),
+			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
 		await openSlide("Instructions");
@@ -541,7 +542,7 @@ describe("an admin", () => {
 
 	it("says when a model could not be chosen, and keeps the one in use", async () => {
 		client.api.agents.update.mockReturnValue(
-			Effect.fail(new InternalServerError({ message: "Unavailable" })),
+			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
 		await openSlide("Model");

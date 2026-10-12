@@ -1,4 +1,5 @@
 import { InternalServerError } from "@sugabots/contracts/http";
+import { UserText, userText } from "@sugabots/errors";
 import { createAuthClient } from "better-auth/client";
 import { failureForStatus, isApiFailure } from "./errors.ts";
 import type { TokenStore } from "./tokens.ts";
@@ -114,11 +115,18 @@ async function orThrow<T>(
 
 	if (error) {
 		const status = error.status ?? 500;
-		const message = error.message ?? error.statusText ?? `Request failed with status ${status}`;
-		throw failureForStatus(status, message, error.code);
+		// better-auth's own words, which the sign-in screens show as they are.
+		const message = error.message ?? error.statusText;
+		throw failureForStatus(
+			status,
+			message === undefined
+				? userText`Request failed with status ${status}`
+				: UserText.unchecked(message),
+			error.code,
+		);
 	}
 	if (data === null) {
-		throw new InternalServerError({ message: "The auth service returned no data" });
+		throw new InternalServerError({ message: userText`The auth service returned no data` });
 	}
 
 	return data;

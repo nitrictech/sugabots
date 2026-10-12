@@ -6,6 +6,7 @@ import {
 	Unauthorized,
 } from "@sugabots/contracts/http";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
@@ -48,7 +49,7 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 			if (!headers.origin || !trusted.has(headers.origin)) {
 				return failureResponse(
 					Forbidden,
-					new Forbidden({ message: "Untrusted request origin" }),
+					new Forbidden({ message: userText`Untrusted request origin` }),
 					403,
 				);
 			}
@@ -70,14 +71,14 @@ export const sessionLayer = Layer.effect(
 					if (authorization !== undefined) {
 						const token = bearerToken(authorization);
 						if (!token) {
-							return yield* new Unauthorized({ message: "Invalid Authorization header" });
+							return yield* new Unauthorized({ message: userText`Invalid Authorization header` });
 						}
 						headers = new Headers({ authorization: `Bearer ${token}` });
 					}
 
 					const holder = yield* identify(headers);
 					if (!holder) {
-						return yield* new Unauthorized({ message: "Invalid or expired session" });
+						return yield* new Unauthorized({ message: userText`Invalid or expired session` });
 					}
 					if (!Cookies.isEmpty(holder.refreshedCookies)) {
 						yield* HttpEffect.appendPreResponseHandler((_request, response) =>

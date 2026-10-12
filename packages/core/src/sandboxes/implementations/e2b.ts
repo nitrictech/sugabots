@@ -1,3 +1,4 @@
+import { userText } from "@sugabots/errors";
 import {
 	CommandExitError,
 	type ConnectionOpts,
@@ -9,7 +10,6 @@ import {
 } from "e2b";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
-import { UserMessage } from "../../user-message.ts";
 import { Sandboxes } from "../sandboxes.ts";
 
 /**
@@ -261,7 +261,7 @@ const TMP_ON_DISK = "ln -sf /dev/null /etc/systemd/system/tmp.mount";
 /** A refusal about the file itself, which the agent can do something about. */
 function fileFailure(path: string, cause: unknown): Sandboxes.FileFailed | undefined {
 	if (cause instanceof FileNotFoundError) {
-		return new Sandboxes.FileFailed({ path, reason: UserMessage.of`No such file` });
+		return new Sandboxes.FileFailed({ path, reason: userText`No such file` });
 	}
 	return undefined;
 }
@@ -271,7 +271,7 @@ function toArrayBuffer(content: Uint8Array): ArrayBuffer {
 	return content.slice().buffer as ArrayBuffer;
 }
 
-const MISSING_TEMPLATE = UserMessage.of`The workspace's E2B template isn't ready. A workspace admin can prepare it under Sandboxes in the workspace's settings.`;
+const MISSING_TEMPLATE = userText`The workspace's E2B template isn't ready. A workspace admin can prepare it under Sandboxes in the workspace's settings.`;
 
 /** E2B's answer to making a sandbox from a template it doesn't have. */
 function isMissingTemplate(cause: unknown) {

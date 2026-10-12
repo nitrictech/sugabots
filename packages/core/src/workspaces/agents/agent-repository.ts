@@ -7,6 +7,7 @@ import {
 	type NewAgent,
 	type SystemAgentKey,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq, isNotNull, isNull, type SQL } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import {
@@ -18,7 +19,7 @@ import {
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { agent, pod } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import {
@@ -357,8 +358,8 @@ export class AgentNameTaken
 	}
 	get userMessage() {
 		return this.field === "name"
-			? UserMessage.of`Another agent in this pod already has that name`
-			: UserMessage.of`Another agent in this pod already has that handle`;
+			? userText`Another agent in this pod already has that name`
+			: userText`Another agent in this pod already has that handle`;
 	}
 }
 
@@ -371,7 +372,7 @@ export class AgentGone
 		return `No agent with the id "${this.agentId}"`;
 	}
 	get userMessage() {
-		return UserMessage.of`No such agent`;
+		return userText`No such agent`;
 	}
 }
 
@@ -381,7 +382,7 @@ export class PodOutsideWorkspace
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`That is not a pod in this workspace`;
+		return userText`That is not a pod in this workspace`;
 	}
 }
 
@@ -395,7 +396,7 @@ export class SystemAgentImmutable
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`A system agent is configured for the workspace, not in a pod`;
+		return userText`A system agent is configured for the workspace, not in a pod`;
 	}
 }
 
@@ -409,7 +410,7 @@ export class SystemAgentMissing
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`This workspace has no ${this.key} agent`;
+		return userText`This workspace has no ${this.key} agent`;
 	}
 }
 

@@ -46,6 +46,14 @@
 	},
 	"overrides": [
 		{
+			"includes": ["packages/server/src/http/errors.ts"],
+			"plugins": [
+				"./lint/errors-implement-domain-error.grit",
+				"./lint/no-effect-promise.grit",
+				"./lint/no-unchecked-user-text.grit"
+			]
+		},
+		{
 			"includes": [
 				"packages/**/src/**",
 				"!packages/core/src/conversations/turns/**",

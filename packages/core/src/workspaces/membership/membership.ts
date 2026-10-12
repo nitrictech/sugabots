@@ -12,6 +12,7 @@ import type {
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
@@ -43,7 +44,7 @@ import { Installation } from "../../installation/installation.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
 import { PersonalPods } from "../pods/personal-pods.ts";
 
@@ -642,7 +643,7 @@ export const layer = layerNoDeps.pipe(
 
 export class SlugTaken extends Data.TaggedError("SlugTaken") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`That address is taken by another workspace`;
+		return userText`That address is taken by another workspace`;
 	}
 }
 
@@ -652,7 +653,7 @@ export class SlugShapedLikeUuid
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`A workspace address cannot be shaped like a UUID`;
+		return userText`A workspace address cannot be shaped like a UUID`;
 	}
 }
 
@@ -663,38 +664,38 @@ export class SlugShapedLikeUuid
  */
 export class TimeZoneUnknown extends Data.TaggedError("TimeZoneUnknown") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`That time zone isn't one the server knows`;
+		return userText`That time zone isn't one the server knows`;
 	}
 }
 
 /** The owner cannot be demoted, removed or leave: ownership has to be handed on first. */
 export class OwnerStays extends Data.TaggedError("OwnerStays") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`The owner stays until they transfer ownership to somebody else`;
+		return userText`The owner stays until they transfer ownership to somebody else`;
 	}
 }
 
 export class AlreadyMember extends Data.TaggedError("AlreadyMember") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`They are already in this workspace`;
+		return userText`They are already in this workspace`;
 	}
 }
 
 export class AlreadyInvited extends Data.TaggedError("AlreadyInvited") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`They have already been invited`;
+		return userText`They have already been invited`;
 	}
 }
 
 export class NotTheInvitee extends Data.TaggedError("NotTheInvitee") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`This invitation was sent to a different address`;
+		return userText`This invitation was sent to a different address`;
 	}
 }
 
 export class EmailUnverified extends Data.TaggedError("EmailUnverified") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Verify your email address before accepting this invitation`;
+		return userText`Verify your email address before accepting this invitation`;
 	}
 }
 

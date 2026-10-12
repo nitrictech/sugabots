@@ -6,13 +6,14 @@ import type {
 	SandboxProviderUpdate,
 } from "@sugabots/contracts";
 import { SANDBOX_E2B_DEFAULT_SIZE, sandboxProviderPreset } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
 import { Credentials } from "../credentials/credentials.ts";
 import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
 import { type SandboxProviderRow, sandboxProvider } from "../database/schema.ts";
 import { stillConfiguredAs } from "../providers/tested-configuration.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import type { Sandboxes } from "./sandboxes.ts";
 
 /**
@@ -46,7 +47,7 @@ export interface Interface {
 		workspaceId: string,
 		providerId: string,
 		testedAt: Date,
-		error?: UserMessage,
+		error?: UserText,
 	) => Effect.Effect<void>;
 	/** Remembers the template build Sugabots last started for the provider, until its settings or key change. */
 	readonly recordTemplateBuild: (
@@ -358,10 +359,10 @@ export class SandboxProviderIncomplete
 }
 
 const MISSING_SETTING = {
-	key: UserMessage.of`Add an API key before enabling this provider`,
-	address: UserMessage.of`Add the server's address before enabling this provider`,
-	addresses: UserMessage.of`E2B Embed needs both its API and sandbox addresses`,
-} satisfies Record<SandboxProviderIncomplete["missing"], UserMessage>;
+	key: userText`Add an API key before enabling this provider`,
+	address: userText`Add the server's address before enabling this provider`,
+	addresses: userText`E2B Embed needs both its API and sandbox addresses`,
+} satisfies Record<SandboxProviderIncomplete["missing"], UserText>;
 
 /** Settings for another preset than the provider's, which is fixed when it's made. */
 export class SandboxProviderPresetFixed
@@ -369,6 +370,6 @@ export class SandboxProviderPresetFixed
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`A provider's type can't be changed. Add a provider of the other type instead.`;
+		return userText`A provider's type can't be changed. Add a provider of the other type instead.`;
 	}
 }

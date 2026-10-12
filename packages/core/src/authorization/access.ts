@@ -1,11 +1,12 @@
 import type { ToolApprovalDeciders, WorkspaceRole } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
 import { agent, pod, podMember, thread, workspace, workspaceMember } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import {
 	type Actor,
 	mayInPod,
@@ -78,7 +79,7 @@ export class ResourceHidden
 	implements UserFacing
 {
 	get userMessage() {
-		return UserMessage.of`No such ${this.resource}`;
+		return userText`No such ${this.resource}`;
 	}
 }
 
@@ -93,7 +94,7 @@ export class ActionForbidden
 		return `Lacks the ${this.permission} permission`;
 	}
 	get userMessage() {
-		return UserMessage.of`You are not allowed to do that`;
+		return userText`You are not allowed to do that`;
 	}
 }
 

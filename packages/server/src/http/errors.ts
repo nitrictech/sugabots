@@ -1,15 +1,20 @@
 import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
 import type { UserFacing } from "@sugabots/core/user-message";
+import { type DomainError, type PublicError, toPublicError, type UserText } from "@sugabots/errors";
 import { Effect, Schema } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 
 /** One of the API's failure classes, such as `NotFound`. */
-type ApiFailureClass = new (fields: { readonly message: string }) => ApiFailure;
+type ApiFailureClass = new (fields: {
+	readonly message: UserText;
+	readonly error?: PublicError;
+}) => ApiFailure;
 
 /**
  * Turns a service's own errors into the API's, choosing each one's class, and
- * so its status, by its tag. The response carries the error's `userMessage`
- * and nothing else, so its internal `message` never reaches a client.
+ * so its status, by its tag. The response carries the error's `userMessage`,
+ * plus its {@link toPublicError} fields for a `DomainError`. Its internal
+ * `message` and `cause` never reach a client.
  * Failures already in the API's terms pass through, for a route that answers
  * one refusal itself (with `details`, say).
  *
@@ -21,7 +26,13 @@ type ApiFailureClass = new (fields: { readonly message: string }) => ApiFailure;
  */
 export const asHttpError =
 	<const Statuses extends Record<string, ApiFailureClass>>(statuses: Statuses) =>
-	<A, E extends (UserFacing & { readonly _tag: keyof Statuses & string }) | ApiFailure, R>(
+	<
+		A,
+		E extends
+			| ((DomainError | UserFacing) & { readonly _tag: keyof Statuses & string })
+			| ApiFailure,
+		R,
+	>(
 		effect: Effect.Effect<A, E, R>,
 	): Effect.Effect<
 		A,
@@ -31,7 +42,10 @@ export const asHttpError =
 		Effect.mapError(effect, (failure) => {
 			if (!("userMessage" in failure)) return failure as Extract<E, ApiFailure>;
 			const Failure = statuses[failure._tag] as Statuses[Exclude<E, ApiFailure>["_tag"]];
-			return new Failure({ message: failure.userMessage }) as InstanceType<typeof Failure>;
+			return new Failure({
+				message: failure.userMessage,
+				...(isDomainError(failure) ? { error: toPublicError(failure) } : {}),
+			}) as InstanceType<typeof Failure>;
 		});
 
 /**
@@ -41,6 +55,11 @@ export const asHttpError =
  * `Forbidden`.
  */
 export const refusals = { ResourceHidden: NotFound, ActionForbidden: Forbidden };
+
+/** Whether `failure` is a `DomainError` rather than an older `UserFacing` error. */
+function isDomainError(failure: DomainError | UserFacing): failure is DomainError {
+	return "isRetryable" in failure;
+}
 
 /**
  * A failure as a response, for the router-level middleware that answers

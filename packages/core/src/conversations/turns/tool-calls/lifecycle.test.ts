@@ -1,5 +1,5 @@
+import { userText } from "@sugabots/errors";
 import { describe, expect, it } from "vitest";
-import { UserMessage } from "../../../user-message.ts";
 import { DENIED_OUTPUT, ToolCallEvent, type ToolCallState, transition } from "./lifecycle.ts";
 
 /**
@@ -9,7 +9,7 @@ import { DENIED_OUTPUT, ToolCallEvent, type ToolCallState, transition } from "./
 
 const sam = "0199a3a0-0000-7000-8000-000000000001";
 const alex = "0199a3a0-0000-7000-8000-000000000002";
-const turnCancelled = UserMessage.of`Turn cancelled`;
+const turnCancelled = userText`Turn cancelled`;
 
 const running: ToolCallState = {
 	status: "running",
@@ -38,7 +38,7 @@ describe("closing a call", () => {
 				state: { ...running, status: "completed", output: { ok: true } },
 			},
 		);
-		const timedOut = UserMessage.of`The tool timed out.`;
+		const timedOut = userText`The tool timed out.`;
 		expect(transition(running, ToolCallEvent.Close({ outcome: { error: timedOut } }))).toEqual({
 			_tag: "Next",
 			state: { ...running, status: "failed", error: timedOut },

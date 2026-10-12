@@ -2,12 +2,13 @@ export * as PodSandboxSetup from "./pod-sandbox-setup.ts";
 
 import type { PodSandbox } from "@sugabots/contracts";
 import { sandboxProviderPreset } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { serviceOperations } from "../database/database.ts";
-import { type UserFacing, UserMessage } from "../user-message.ts";
+import type { UserFacing } from "../user-message.ts";
 import { PodSandboxes } from "./pod-sandboxes.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import type { Sandboxes } from "./sandboxes.ts";
@@ -127,6 +128,6 @@ export const layer = layerNoDeps.pipe(
 /** No sandbox provider is enabled, so there's nothing to make a new sandbox with. */
 export class NoSandboxProvider extends Data.TaggedError("NoSandboxProvider") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`Enable a sandbox provider in the workspace's settings first.`;
+		return userText`Enable a sandbox provider in the workspace's settings first.`;
 	}
 }

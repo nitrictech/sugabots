@@ -1,6 +1,7 @@
 export * as ThreadRepository from "./repository.ts";
 
 import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
@@ -14,7 +15,7 @@ import {
 	threadParticipant,
 	threadRead,
 } from "../../database/schema.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import {
@@ -580,6 +581,6 @@ export class MessageIdConflict extends Data.TaggedError("MessageIdConflict") imp
 		return "A message id was reused for a different message";
 	}
 	get userMessage() {
-		return UserMessage.of`That message ID is already used by a different message`;
+		return userText`That message ID is already used by a different message`;
 	}
 }

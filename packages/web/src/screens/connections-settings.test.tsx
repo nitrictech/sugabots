@@ -1,6 +1,7 @@
 import type { ConnectionAccess } from "@sugabots/contracts";
 import { BadRequest } from "@sugabots/contracts/http";
 import { listedConnection, type TestConnection } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -186,7 +187,7 @@ describe("the Connections settings", () => {
 	it("shows only the latest result once the way to sign in changes", async () => {
 		serveConnections();
 		route.connectFromCatalog.mockReturnValue(
-			Effect.fail(new BadRequest({ message: "The server didn't start a sign-in." })),
+			Effect.fail(new BadRequest({ message: userText`The server didn't start a sign-in.` })),
 		);
 		mount(page);
 		await showConnections();
@@ -298,7 +299,7 @@ describe("the Connections settings", () => {
 
 	it("puts a tool back as it was when changing it fails", async () => {
 		serveConnections(wikiAt("ask"));
-		route.update.mockReturnValue(Effect.fail(new BadRequest({ message: "Nope" })));
+		route.update.mockReturnValue(Effect.fail(new BadRequest({ message: userText`Nope` })));
 		mount(wikiPage);
 		await openedWiki();
 

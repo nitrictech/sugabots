@@ -5,8 +5,8 @@ import {
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
 import type { ConnectionTool } from "@sugabots/contracts";
+import { type UserText, userText } from "@sugabots/errors";
 import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
-import { UserMessage } from "../../user-message.ts";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 
@@ -24,7 +24,7 @@ import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 
 type ServerTools =
 	| { ok: true; tools: ConnectionTool[] }
-	| { ok: false; reason: UserMessage; cause: unknown };
+	| { ok: false; reason: UserText; cause: unknown };
 
 interface ServerTarget {
 	url: string;
@@ -148,26 +148,24 @@ export async function listServerTools(
  * `target` sent. Only the HTTP status and content type are taken from the SDK's
  * error message, because the rest of it can quote the server's response.
  */
-function describe(cause: unknown, target: ServerTarget): UserMessage {
+function describe(cause: unknown, target: ServerTarget): UserText {
 	if (cause instanceof EgressRefused) return cause.userMessage;
-	if (cause instanceof UnauthorizedError) return UserMessage.of`Sign in again to reconnect`;
+	if (cause instanceof UnauthorizedError) return userText`Sign in again to reconnect`;
 	const message = cause instanceof Error ? cause.message : String(cause);
 	const status = Number(/\bHTTP (\d{3})\b/.exec(message)?.[1]);
-	if (status === 401 && target.authProvider) return UserMessage.of`Sign in again to reconnect`;
+	if (status === 401 && target.authProvider) return userText`Sign in again to reconnect`;
 	if (status === 401 && Object.keys(target.headers).length > 0) {
-		return UserMessage.of`The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)`;
+		return userText`The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)`;
 	}
-	if (status === 401)
-		return UserMessage.of`The server needs an access token or a sign-in (HTTP 401)`;
+	if (status === 401) return userText`The server needs an access token or a sign-in (HTTP 401)`;
 	if (status === 403) {
-		return UserMessage.of`The server refused access. Check what the token or account is allowed to do (HTTP 403)`;
+		return userText`The server refused access. Check what the token or account is allowed to do (HTTP 403)`;
 	}
 	if (status === 404 || status === 405 || /Unexpected content type/.test(message)) {
-		return UserMessage.of`Nothing answers as an MCP server at that address. Check the path, which often ends in /mcp`;
+		return userText`Nothing answers as an MCP server at that address. Check the path, which often ends in /mcp`;
 	}
-	if (status)
-		return UserMessage.of`The server answered with an error. Try again later (HTTP ${status})`;
-	return UserMessage.of`The server could not be reached. Check the address and port, and that the server is running`;
+	if (status) return userText`The server answered with an error. Try again later (HTTP ${status})`;
+	return userText`The server could not be reached. Check the address and port, and that the server is running`;
 }
 
 /** isServerError reports whether `cause` is a server's JSON-RPC error answer, not a failure to reach it. */

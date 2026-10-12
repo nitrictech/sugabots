@@ -25,6 +25,7 @@
 		"@novnc/novnc": "1.7.0",
 		"@sugabots/avatars": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
+		"@sugabots/errors": "workspace:*",
 		"@sugabots/provider-logos": "workspace:*",
 		"@sugabots/sdk": "workspace:*",
 		"@tanstack/react-query": "^5.102.8",

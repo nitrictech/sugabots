@@ -4,8 +4,8 @@ import type {
 	PersonParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { Data } from "effect";
-import type { UserMessage } from "../user-message.ts";
 import type { TurnReason } from "./sql.ts";
 import type { Turns } from "./turns/turns.ts";
 
@@ -80,7 +80,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly agentId: string;
 		readonly messageId: string;
 		/** What people are told went wrong. */
-		readonly userMessage: UserMessage;
+		readonly userMessage: UserText;
 		readonly willRetry: boolean;
 	};
 	/** The turn was cancelled, or found stopped and ended as cancelled, keeping the reply written so far. */
@@ -117,7 +117,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * Every attempt at choosing who speaks after a message in the thread
 	 * failed. `userMessage` says so in words fit for people.
 	 */
-	FacilitationFailed: { readonly threadId: string; readonly userMessage: UserMessage };
+	FacilitationFailed: { readonly threadId: string; readonly userMessage: UserText };
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
 	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */

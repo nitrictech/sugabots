@@ -23,6 +23,7 @@ import {
 	PERSONAL_POD_SLUG,
 	textWithoutNarration,
 } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import {
 	and,
 	asc,
@@ -67,7 +68,7 @@ import {
 	user,
 } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { type UserFacing, UserMessage } from "../../user-message.ts";
+import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import { respondingIn } from "../floor/floor.ts";
@@ -357,7 +358,7 @@ export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibi
 
 export class InvalidChatCursor extends Data.TaggedError("InvalidChatCursor") implements UserFacing {
 	get userMessage() {
-		return UserMessage.of`That chat cursor is invalid`;
+		return userText`That chat cursor is invalid`;
 	}
 }
 

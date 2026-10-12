@@ -1,5 +1,6 @@
 import { resetEvent, type StreamEvent, streamEventSchema } from "@sugabots/contracts";
 import { type ApiFailure, InternalServerError } from "@sugabots/contracts/http";
+import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
 import { createParser } from "eventsource-parser";
 import { failureFromResponse } from "./errors.ts";
@@ -159,7 +160,7 @@ class StreamRefused {
 }
 
 /** A successful response that is not a usable stream. Reconnecting would get the same. */
-function malformed(message: string, status: number): StreamRefused {
+function malformed(message: UserText, status: number): StreamRefused {
 	return new StreamRefused(new InternalServerError({ message }), status);
 }
 
@@ -197,10 +198,10 @@ async function connect(
 	}
 	const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
 	if (contentType !== "text/event-stream") {
-		throw malformed("The event stream returned an invalid content type", response.status);
+		throw malformed(userText`The event stream returned an invalid content type`, response.status);
 	}
 	if (!response.body) {
-		throw malformed("The event stream returned no body", response.status);
+		throw malformed(userText`The event stream returned no body`, response.status);
 	}
 
 	return readMessages(response.body);
@@ -238,7 +239,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 				buffered = buffered.slice(lineEnd + delimiterLength);
 				eventChars += line.length;
 				if (eventChars > MAX_EVENT_CHARS) {
-					throw malformed("The event stream frame exceeded the size limit", 200);
+					throw malformed(userText`The event stream frame exceeded the size limit`, 200);
 				}
 
 				parser.feed(line);
@@ -251,7 +252,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 			}
 
 			if (eventChars + buffered.length > MAX_EVENT_CHARS) {
-				throw malformed("The event stream frame exceeded the size limit", 200);
+				throw malformed(userText`The event stream frame exceeded the size limit`, 200);
 			}
 		}
 	} finally {

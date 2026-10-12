@@ -1,10 +1,10 @@
+import { UserText, userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { agent, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { UserMessage } from "../../user-message.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -33,7 +33,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
 	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
-	const providerDown = UserMessage.of`The model provider could not answer.`;
+	const providerDown = userText`The model provider could not answer.`;
 	let threadId: string;
 	let prepared: PreparedTurn;
 
@@ -96,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	it("does not run a failed turn again when its failure rules that out", async () => {
-		const told = UserMessage.of`The reply stopped before answering.`;
+		const told = userText`The reply stopped before answering.`;
 
 		expect(
 			await turns.fail(replyTurnOf(prepared), emptyReply, {
@@ -188,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			atOffset: 0,
 		});
 		delivered = [];
-		const stopped = UserMessage.of`The reply stopped unexpectedly.`;
+		const stopped = userText`The reply stopped unexpectedly.`;
 
 		expect(
 			await turns.abandon(prepared.run.executionId, { status: "failed", userMessage: stopped }),
@@ -231,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 					.returning({ name: agent.name }),
 			);
 			if (!host) throw new Error("no host");
-			return UserMessage.of`${UserMessage.unchecked(host.name)} has no model chosen, so it cannot reply. Choose one in its settings.`;
+			return userText`${UserText.unchecked(host.name)} has no model chosen, so it cannot reply. Choose one in its settings.`;
 		};
 
 		it("fails the turn it was running, saying why", async () => {

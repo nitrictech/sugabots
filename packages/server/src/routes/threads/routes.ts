@@ -1,6 +1,7 @@
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
 import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
+import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -29,7 +30,7 @@ export const threadRoutes = HttpApiBuilder.group(ServerApi, "threads", (handlers
 						.cancel(params.turnId)
 						.pipe(asSessionUser, asHttpError(threadErrors));
 					if (!cancelled) {
-						return yield* new NotFound({ message: "No active turn" });
+						return yield* new NotFound({ message: userText`No active turn` });
 					}
 				}),
 			);

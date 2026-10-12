@@ -1,6 +1,6 @@
 import type { JsonValue, ToolApprovalStatus, ToolCallStatus } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { Data, Schema } from "effect";
-import type { UserMessage } from "../../../user-message.ts";
 
 /**
  * A tool call's lifecycle, as a pure transition function.
@@ -41,18 +41,18 @@ export interface ToolCallState {
 	/** Who made the decision. */
 	readonly decidedById: string | null;
 	readonly output: JsonValue | null;
-	readonly error: UserMessage | null;
+	readonly error: UserText | null;
 }
 
 export type ToolCallEvent = Data.TaggedEnum<{
 	/** The tool returned, or threw. */
-	Close: { readonly outcome: { output: JsonValue } | { error: UserMessage } };
+	Close: { readonly outcome: { output: JsonValue } | { error: UserText } };
 	/** The decision was recorded. */
 	Decide: { readonly decision: ApprovalDecision };
 	/** The allowed call began running. */
 	BeginExecution: Record<never, never>;
 	/** The call's turn ended before it finished; `userMessage` is what people are told of it. */
-	Abandon: { readonly userMessage: UserMessage };
+	Abandon: { readonly userMessage: UserText };
 }>;
 
 export const ToolCallEvent = Data.taggedEnum<ToolCallEvent>();
