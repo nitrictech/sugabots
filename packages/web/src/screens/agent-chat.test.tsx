@@ -697,6 +697,64 @@ describe("ongoing agent Chat", () => {
 		expect(messages.scrollTop).toBe(1_100);
 	});
 
+	describe("reading the chat", () => {
+		function windowFocused(focused: boolean) {
+			const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(focused);
+			onTestFinished(() => hasFocus.mockRestore());
+			return hasFocus;
+		}
+
+		it("leaves the chat unread while another window has focus, and reads it on coming back", async () => {
+			const hasFocus = windowFocused(false);
+			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+			await screen.findByText(mainMessage.content);
+			expect(client.api.chats.markRead).not.toHaveBeenCalled();
+
+			hasFocus.mockReturnValue(true);
+			fireEvent.focus(window);
+
+			await waitFor(() =>
+				expect(client.api.chats.markRead).toHaveBeenCalledWith({ params: { chatId: chat.id } }),
+			);
+		});
+
+		it("leaves a reply unread while scrolled back through the chat, and reads it at the latest message", async () => {
+			windowFocused(true);
+			const updates = controlledEventStream();
+			client.events.thread.mockReturnValue(updates.stream);
+			mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+			const messages = await screen.findByRole("log", { name: "Chat messages" });
+			await waitFor(() => expect(client.api.chats.markRead).toHaveBeenCalled());
+			Object.defineProperties(messages, {
+				scrollHeight: { configurable: true, value: 1_200 },
+				clientHeight: { configurable: true, value: 400 },
+			});
+			messages.scrollTop = 200;
+			fireEvent.scroll(messages);
+			client.api.chats.markRead.mockClear();
+
+			updates.emit(
+				streamEvent("message.created", {
+					threadId: chat.mainThreadId,
+					message: {
+						...agentMessage,
+						id: "0199a3a0-0000-7000-8000-000000000120",
+						content: "The deploy finished.",
+						parts: [{ type: "text", text: "The deploy finished." }],
+						createdAt: "2026-09-18T09:20:00.000Z",
+					},
+				}),
+			);
+			await screen.findByText("The deploy finished.");
+			expect(client.api.chats.markRead).not.toHaveBeenCalled();
+
+			messages.scrollTop = 800;
+			fireEvent.scroll(messages);
+
+			await waitFor(() => expect(client.api.chats.markRead).toHaveBeenCalledOnce());
+		});
+	});
+
 	describe("messages waiting for the next reply", () => {
 		const writing: Message = {
 			...agentMessage,
