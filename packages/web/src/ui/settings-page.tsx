@@ -280,7 +280,7 @@ export function SettingsNameRow({
 						if (event.key === "Escape") setDraft(name);
 					}}
 					maxLength={maxLength}
-					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsControlRow>
 			{error && (
