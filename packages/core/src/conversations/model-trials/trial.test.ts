@@ -1,3 +1,4 @@
+import { DisplayName } from "@sugabots/errors";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
@@ -8,13 +9,11 @@ import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial 
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
 function scripted(
-	answer: (input: Models.StreamRequest) => string | Models.RequestFailed,
+	answer: (input: Models.StreamRequest) => string | Models.RequestFailure,
 ): Models.Interface {
 	return Models.fromStream((input) => {
 		const next = answer(input);
-		return next instanceof Models.RequestFailed
-			? Effect.fail(next)
-			: Effect.succeed(streamed(chunks(next)));
+		return typeof next !== "string" ? Effect.fail(next) : Effect.succeed(streamed(chunks(next)));
 	});
 }
 
@@ -73,9 +72,7 @@ describe("trying a model on the facilitator", () => {
 
 	it("counts a model that cannot answer at all as a failure, not an error", async () => {
 		const report = await trial(
-			scripted(
-				() => new Models.RequestFailed({ message: "provider unavailable", reason: "unavailable" }),
-			),
+			scripted(() => new Models.ModelNotOffered({ model: DisplayName.fromRecord("test-model") })),
 			"facilitate",
 		);
 

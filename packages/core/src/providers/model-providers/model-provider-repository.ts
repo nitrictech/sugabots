@@ -13,7 +13,7 @@ import {
 	providerPreset,
 	seededPresets,
 } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import { DisplayName, type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -132,11 +132,15 @@ export interface Interface {
 		workspaceId: string,
 		providerId: string,
 	) => Effect.Effect<ProviderEndpoint | undefined>;
-	/** How to reach whichever provider offers `modelId`, while the workspace offers it. */
+	/**
+	 * The provider that offers `modelId` while the workspace offers it, with the
+	 * names people know both by, and how to reach it if it has the key or
+	 * sign-in it needs.
+	 */
 	readonly resolve: (
 		workspaceId: string,
 		modelId: string,
-	) => Effect.Effect<ProviderEndpoint | undefined>;
+	) => Effect.Effect<ResolvedModel | undefined>;
 	/**
 	 * Whether the workspace offers a model: it is switched on, at a provider that
 	 * is. The one rule for what an agent may run on.
@@ -566,12 +570,21 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const [row] = yield* query((db) =>
 						db
-							.select({ providerId: modelProvider.id })
+							.select({
+								providerId: modelProvider.id,
+								providerName: modelProvider.name,
+								modelName: providerModel.displayName,
+							})
 							.from(providerModel)
 							.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
 							.where(and(offeredIn(workspaceId), eq(providerModel.modelId, modelId))),
 					);
-					return row ? yield* endpoint(workspaceId, row.providerId) : undefined;
+					if (!row) return undefined;
+					return {
+						endpoint: yield* endpoint(workspaceId, row.providerId),
+						providerName: DisplayName.fromRecord(row.providerName),
+						modelName: DisplayName.fromRecord(row.modelName ?? modelId),
+					};
 				}),
 			),
 
@@ -624,6 +637,14 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
+
+/** The provider that offers a model, and the names people know both by. */
+export interface ResolvedModel {
+	/** Nothing while the provider lacks the key or sign-in its preset needs. */
+	endpoint: ProviderEndpoint | undefined;
+	providerName: DisplayName;
+	modelName: DisplayName;
+}
 
 /** How to reach a provider: where, in which protocol, and with which credentials. */
 export interface ProviderEndpoint {
