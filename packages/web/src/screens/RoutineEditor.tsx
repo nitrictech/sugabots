@@ -3,20 +3,19 @@ import {
 	type CalendarSchedule,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
-	MIN_WEBHOOK_SECRET_CHARACTERS,
 	type NewRoutine,
 	type Pod,
 	type Routine,
 	type RoutineResults,
 	type RoutineUpdate,
-	type WebhookAuth,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronRight, Copy, Play } from "lucide-react";
+import { Check, ChevronRight, Copy, Ellipsis, Play, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	defaultSchedule,
+	readingLabel,
 	readSchedule,
 	type ScheduleReading,
 	scheduleOfReading,
@@ -29,10 +28,15 @@ import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
+import {
 	PageBackLink,
 	SettingsChoiceRow,
 	SettingsControlRow,
-	SettingsDanger,
 	SettingsFieldLabel,
 	SettingsGroup,
 	SettingsNameRow,
@@ -42,15 +46,17 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { RecentRuns } from "./RoutineRuns.tsx";
-import { ScheduleRows } from "./RoutineSchedule.tsx";
+import { ScheduleGroups } from "./RoutineSchedule.tsx";
 import {
 	authNote,
 	DEFAULT_WEBHOOK_AUTH,
 	NEW_WEBHOOK,
-	NewWebhookRows,
-	pastedSecretReady,
+	NewWebhookGroups,
+	NO_SECRET_NOTE,
+	SECRET_TOO_SHORT_NOTE,
+	secretReady,
 	type WebhookDraft,
-	WebhookRows,
+	WebhookGroups,
 } from "./RoutineWebhook.tsx";
 
 /** A bot a routine can belong to, with the pod it lives in. */
@@ -63,8 +69,6 @@ export interface BotChoice {
 export interface PlacedRoutine extends BotChoice {
 	routine: Routine;
 }
-
-/** How far − and + move the time. */
 
 /**
  * How long a schedule rests before it saves, so stepping the time through
@@ -81,6 +85,9 @@ const TRIGGER_OPTIONS = [
 ] as const;
 
 type TriggerKind = (typeof TRIGGER_OPTIONS)[number]["value"];
+
+/** The page a routine shows: its own, or one of the parts that open from it. */
+type RoutineSubpage = "routine" | "instructions" | "trigger";
 
 /**
  * Where a new routine's result goes until someone chooses: a schedule is
@@ -122,18 +129,15 @@ export function NewRoutinePage({
 		schedule: defaultSchedule(),
 	}));
 	const [webhook, setWebhook] = useState(NEW_WEBHOOK);
-	const [page, setPage] = useState<"routine" | "instructions">("routine");
+	const [page, setPage] = useState<RoutineSubpage>("routine");
 	const actions = useRoutineActions();
 	const bot = choices.find((choice) => choice.agent.id === agentId);
 	const results = chosenResults ?? DEFAULT_RESULTS[kind];
 	const daysReady = kind === "webhook" || scheduleReady(reading);
-	const secretReady = kind === "cron" || pastedSecretReady(webhook.secret);
+	const secretSet = kind === "cron" || secretReady(webhook.auth, webhook.secret);
+	const secretless = webhook.secret.trim() === "";
 	const ready =
-		bot !== undefined &&
-		name.trim() !== "" &&
-		instructions.trim() !== "" &&
-		daysReady &&
-		secretReady;
+		bot !== undefined && name.trim() !== "" && instructions.trim() !== "" && daysReady && secretSet;
 
 	async function create() {
 		if (!bot || !ready) return;
@@ -157,16 +161,42 @@ export function NewRoutinePage({
 		}
 	}
 
+	const notReady = !daysReady ? PICK_A_DAY_NOTE : !secretSet ? SECRET_TOO_SHORT_NOTE : undefined;
+	const back = () => setPage("routine");
+	const backLink = (
+		<PageBackLink
+			label={name.trim() || "New routine"}
+			render={<button type="button" onClick={back} />}
+		/>
+	);
+	if (page === "trigger") {
+		return (
+			<TriggerPage
+				back={backLink}
+				kind={kind}
+				onChangeKind={setKind}
+				action={<Button onClick={back}>Done</Button>}
+			>
+				{kind === "cron" ? (
+					<ScheduleGroups
+						reading={reading}
+						note={notReady ?? scheduleNote(reading, localTimezone())}
+						onChange={(schedule) => setReading({ kind: "picked", schedule })}
+					/>
+				) : (
+					<NewWebhookGroups
+						draft={webhook}
+						note={notReady ?? (secretless ? NO_SECRET_NOTE : authNote(webhook.auth))}
+						onChange={setWebhook}
+					/>
+				)}
+			</TriggerPage>
+		);
+	}
 	if (page === "instructions") {
-		const back = () => setPage("routine");
 		return (
 			<InstructionsPage
-				back={
-					<PageBackLink
-						label={name.trim() || "New routine"}
-						render={<button type="button" onClick={back} />}
-					/>
-				}
+				back={backLink}
 				botName={bot?.agent.name}
 				value={instructions}
 				onChange={setInstructions}
@@ -191,40 +221,19 @@ export function NewRoutinePage({
 			}
 		>
 			{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
-			<SettingsGroup>
+			<SettingsGroup note={notReady}>
 				<NameInputRow value={name} onChange={setName} />
 				<BotRow chosen={bot} choices={choices} onChoose={setAgentId} />
-				<InstructionsRow
+				<OpensRow
+					label="Instructions"
 					value={instructions.trim() === "" ? "Add" : "Edit"}
 					onOpen={() => setPage("instructions")}
 				/>
-			</SettingsGroup>
-			<SettingsGroup
-				label="When"
-				note={
-					bot &&
-					(!daysReady
-						? "Pick at least one day for it to run on."
-						: !secretReady
-							? `A pasted secret needs at least ${MIN_WEBHOOK_SECRET_CHARACTERS} characters.`
-							: whenNote({
-									trigger: kind === "cron" ? { kind } : { kind, auth: webhook.auth },
-									reading,
-									timezone: localTimezone(),
-									results,
-									bot,
-								}))
-				}
-			>
-				<TriggerRow value={kind} onChange={setKind} />
-				{kind === "cron" ? (
-					<ScheduleRows
-						reading={reading}
-						onChange={(schedule) => setReading({ kind: "picked", schedule })}
-					/>
-				) : (
-					<NewWebhookRows draft={webhook} onChange={setWebhook} />
-				)}
+				<OpensRow
+					label="Trigger"
+					value={triggerValue(kind, reading)}
+					onOpen={() => setPage("trigger")}
+				/>
 			</SettingsGroup>
 			<SettingsGroup>
 				<ResultsRow results={results} onChange={setChosenResults} />
@@ -255,7 +264,7 @@ export function RoutinePage({
 	const { routine, agent, pod } = placed;
 	const canManage = pod.permissions.manageRoutines;
 	const actions = useRoutineActions();
-	const [page, setPage] = useState<"routine" | "instructions">("routine");
+	const [page, setPage] = useState<RoutineSubpage>("routine");
 	// What somebody has picked here, which saves once it rests. Until then the
 	// saved schedule shows, read into its parts, and opening it saves nothing.
 	const [edited, setEdited] = useState<CalendarSchedule>();
@@ -297,48 +306,72 @@ export function RoutinePage({
 		});
 	}
 
-	if (page === "instructions") {
+	const backLink = (
+		<PageBackLink
+			label={routine.name}
+			render={<button type="button" onClick={() => setPage("routine")} />}
+		/>
+	);
+	if (page === "trigger") {
 		return (
-			<RoutineInstructions
-				placed={placed}
-				back={
-					<PageBackLink
-						label={routine.name}
-						render={<button type="button" onClick={() => setPage("routine")} />}
+			<TriggerPage
+				back={backLink}
+				editable={canManage}
+				kind={routine.trigger.kind}
+				onChangeKind={changeTrigger}
+				error={actions.update.error ? failureMessage(actions.update.error) : undefined}
+			>
+				{routine.trigger.kind === "cron" ? (
+					<ScheduleGroups
+						reading={reading}
+						note={scheduleReady(reading) ? scheduleNote(reading, timezone) : PICK_A_DAY_NOTE}
+						onChange={setEdited}
 					/>
-				}
-			/>
+				) : (
+					<WebhookGroups
+						placed={placed}
+						auth={routine.trigger.auth}
+						onChangeAuth={(auth) => save({ trigger: { kind: "webhook", auth } })}
+					/>
+				)}
+			</TriggerPage>
 		);
+	}
+	if (page === "instructions") {
+		return <RoutineInstructions placed={placed} back={backLink} />;
 	}
 	return (
 		<SettingsPage
 			title={routine.name}
-			description={
-				routine.state === "paused"
-					? "Paused. It only runs when you press Run now."
-					: `${agent.name} · ${pod.name} pod`
-			}
 			headerAction={
 				<div className="flex gap-2">
+					{pod.permissions.runRoutines && <RunNowButton placed={placed} />}
 					{canManage && (
-						<DuplicateButton
-							placed={placed}
-							siblingNames={siblingNames}
-							onDuplicated={onDuplicated}
+						<RoutineMenu
+							pending={actions.create.isPending}
+							onDuplicate={() =>
+								actions.create
+									.mutateAsync({ agentId: agent.id, json: copyOf(routine, siblingNames) })
+									.then((created) => onDuplicated(created.routine))
+									.catch(() => {})
+							}
+							onDelete={() => setConfirmingDelete(true)}
 						/>
 					)}
-					{pod.permissions.runRoutines && <RunNowButton placed={placed} />}
 				</div>
 			}
 		>
 			{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
+			{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 			<SettingsGroup>
 				<SwitchRow
-					label="Runs on its own"
+					label="On"
 					checked={routine.state === "enabled"}
 					disabled={!canManage}
 					onChange={(on) => save({ state: on ? "enabled" : "paused" })}
 				/>
+			</SettingsGroup>
+			<SettingsGroup>
 				{canManage ? (
 					<SettingsNameRow
 						key={routine.name}
@@ -356,37 +389,16 @@ export function RoutinePage({
 					</SettingsControlRow>
 				)}
 				<BotRow chosen={placed} />
-				<InstructionsRow
+				<OpensRow
+					label="Instructions"
 					value={canManage ? "Edit" : "View"}
 					onOpen={() => setPage("instructions")}
 				/>
-			</SettingsGroup>
-			<SettingsGroup
-				label="When"
-				note={
-					routine.trigger.kind === "cron" && !scheduleReady(reading)
-						? "Pick at least one day for it to run on."
-						: whenNote({
-								trigger: routine.trigger,
-								reading,
-								timezone,
-								results: routine.results,
-								bot: placed,
-							})
-				}
-			>
-				<Editable editable={canManage}>
-					<TriggerRow value={routine.trigger.kind} onChange={changeTrigger} />
-					{routine.trigger.kind === "cron" ? (
-						<ScheduleRows reading={reading} onChange={setEdited} />
-					) : (
-						<WebhookRows
-							placed={placed}
-							auth={routine.trigger.auth}
-							onChangeAuth={(auth) => save({ trigger: { kind: "webhook", auth } })}
-						/>
-					)}
-				</Editable>
+				<OpensRow
+					label="Trigger"
+					value={triggerValue(routine.trigger.kind, reading)}
+					onOpen={() => setPage("trigger")}
+				/>
 			</SettingsGroup>
 			<SettingsGroup>
 				<Editable editable={canManage}>
@@ -394,17 +406,12 @@ export function RoutinePage({
 				</Editable>
 			</SettingsGroup>
 			<RecentRuns placed={placed} />
-			{canManage && (
-				<>
-					<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete routine</SettingsDanger>
-					<DeleteRoutine
-						placed={placed}
-						open={confirmingDelete}
-						onOpenChange={setConfirmingDelete}
-						onDeleted={onDeleted}
-					/>
-				</>
-			)}
+			<DeleteRoutine
+				placed={placed}
+				open={confirmingDelete}
+				onOpenChange={setConfirmingDelete}
+				onDeleted={onDeleted}
+			/>
 		</SettingsPage>
 	);
 }
@@ -413,59 +420,28 @@ function localTimezone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-/** The trigger a routine being made saves with: its auth, and the sender's secret if one was pasted. */
+/** The trigger a routine being made saves with: its auth and its secret. */
 function webhookTrigger({ auth, secret }: WebhookDraft) {
-	const pasted = secret.trim();
-	return pasted === ""
-		? { kind: "webhook" as const, auth }
-		: { kind: "webhook" as const, auth, secret: pasted };
+	const trimmed = secret.trim();
+	return { kind: "webhook" as const, auth, secret: trimmed === "" ? null : trimmed };
+}
+
+const PICK_A_DAY_NOTE = "Pick at least one day for it to run on.";
+
+/** What starts the routine, as its Trigger row says it: "Daily at 22:00", "Webhook". */
+function triggerValue(kind: TriggerKind, reading: ScheduleReading): string {
+	if (kind === "webhook") return "Webhook";
+	return scheduleReady(reading) ? readingLabel(reading) : "Pick a day";
 }
 
 /**
- * The note under When: what the routine does, and for a webhook, what a
- * caller must send to run it.
+ * The note under a schedule: when it runs, and in which time zone, the
+ * schedule's own, since its times are in it.
  */
-function whenNote({
-	trigger,
-	reading,
-	timezone,
-	results,
-	bot,
-}: {
-	trigger: { kind: "cron" } | { kind: "webhook"; auth: WebhookAuth };
-	reading: ScheduleReading;
-	/** The schedule's, which the note names, since its times are in it. */
-	timezone: string;
-	results: RoutineResults;
-	bot: BotChoice;
-}): string {
+function scheduleNote(reading: ScheduleReading, timezone: string): string {
 	const when =
-		trigger.kind === "webhook" ? WEBHOOK_WHEN : `${runsWhen(reading)}, ${zoneName(timezone)}`;
-	const summary = routineSummary({ when, results, bot });
-	return trigger.kind === "webhook" ? `${summary} ${authNote(trigger.auth)}` : summary;
-}
-
-/** What the routine does, under its When: when it runs, and where its result goes. */
-function routineSummary({
-	when,
-	results,
-	bot,
-}: {
-	when: string;
-	results: RoutineResults;
-	bot: BotChoice;
-}): string {
-	const chat = `${bot.agent.name}'s chat in the ${bot.pod.name} pod`;
-	return results === "post_to_chat"
-		? `Runs ${when} and posts the result in ${chat}.`
-		: `Runs ${when} and keeps the result in the run, which shows in ${chat}.`;
-}
-
-const WEBHOOK_WHEN = "each time the address is called with valid auth";
-
-/** When a scheduled routine runs, as the middle of "Runs … and posts the result". */
-function runsWhen(reading: ScheduleReading): string {
-	return reading.kind === "written" ? "on its own schedule" : scheduleSummary(reading.schedule);
+		reading.kind === "written" ? "on its own schedule" : scheduleSummary(reading.schedule);
+	return `Runs ${when}, ${zoneName(timezone)}.`;
 }
 
 /**
@@ -487,62 +463,58 @@ function zoneName(timezone: string): string {
 	return `${city} time (${abbreviation})`;
 }
 
-/**
- * Makes a copy of the routine on the same bot, paused so the two don't both
- * run, and opens it. A webhook copy has its own address and a new secret, so
- * a secret its sender made has to be pasted into it again.
- */
-function DuplicateButton({
-	placed,
-	siblingNames,
-	onDuplicated,
+/** What else can be done with a routine, behind ⋯ beside Run now. */
+function RoutineMenu({
+	pending,
+	onDuplicate,
+	onDelete,
 }: {
-	placed: PlacedRoutine;
-	siblingNames: readonly string[];
-	onDuplicated: (copy: Routine) => void;
+	/** While a copy is being made, so it is made once. */
+	pending: boolean;
+	onDuplicate: () => void;
+	onDelete: () => void;
 }) {
-	const { routine, agent } = placed;
-	const actions = useRoutineActions();
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger render={<Button variant="secondary" size="icon" aria-label="More" />}>
+				<Ellipsis aria-hidden />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-52">
+				<DropdownMenuItem disabled={pending} onClick={onDuplicate}>
+					<Copy aria-hidden size={16} />
+					Duplicate
+				</DropdownMenuItem>
+				<DropdownMenuItem variant="destructive" onClick={onDelete}>
+					<Trash2 aria-hidden size={16} />
+					Delete routine
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/**
+ * A copy of the routine on the same bot, paused so the two don't both run.
+ * A webhook copy has its own address and a new secret, so a secret its
+ * sender made has to be pasted into it again.
+ */
+function copyOf(routine: Routine, siblingNames: readonly string[]): NewRoutine {
 	const fields = {
 		name: copyName(routine.name, siblingNames),
 		instructions: routine.instructions,
 		results: routine.results,
 		state: "paused" as const,
 	};
-	const copy: NewRoutine =
-		routine.trigger.kind === "cron"
-			? {
-					...fields,
-					trigger: {
-						kind: "cron",
-						schedule: routine.trigger.schedule,
-						timezone: routine.trigger.timezone,
-					},
-				}
-			: { ...fields, trigger: { kind: "webhook", auth: routine.trigger.auth } };
-
-	return (
-		<div className="flex flex-col items-end gap-1">
-			<Button
-				variant="secondary"
-				disabled={actions.create.isPending}
-				onClick={() =>
-					actions.create
-						.mutateAsync({ agentId: agent.id, json: copy })
-						.then((created) => onDuplicated(created.routine))
-						.catch(() => {})
-				}
-			>
-				<Copy aria-hidden />
-				Duplicate
-			</Button>
-			{actions.create.error && (
-				<span role="alert" className="text-destructive-text text-sm">
-					{failureMessage(actions.create.error)}
-				</span>
-			)}
-		</div>
-	);
+	return routine.trigger.kind === "cron"
+		? {
+				...fields,
+				trigger: {
+					kind: "cron",
+					schedule: routine.trigger.schedule,
+					timezone: routine.trigger.timezone,
+				},
+			}
+		: { ...fields, trigger: { kind: "webhook", auth: routine.trigger.auth } };
 }
 
 /**
@@ -693,21 +665,57 @@ function BotRow({
 	);
 }
 
-/** The routine's instructions, as a row that opens them on a page of their own. */
-function InstructionsRow({
-	value,
-	onOpen,
-}: {
-	value: "Add" | "Edit" | "View";
-	onOpen: () => void;
-}) {
+/** A row that opens a page of its own, with its value at the end, as a bot's Model and Instructions do. */
+function OpensRow({ label, value, onOpen }: { label: string; value: string; onOpen: () => void }) {
 	return (
 		<SettingsRow
-			label="Instructions"
+			label={label}
 			trailing={<SettingsValue>{value}</SettingsValue>}
 			chevron
 			onClick={onOpen}
 		/>
+	);
+}
+
+/**
+ * What starts the routine, on a page of its own: its type, a schedule or a
+ * webhook, then that type's groups.
+ */
+function TriggerPage({
+	back,
+	editable = true,
+	kind,
+	onChangeKind,
+	error,
+	action,
+	children,
+}: {
+	back: ReactNode;
+	/** False for somebody who may see the trigger without changing it. */
+	editable?: boolean;
+	kind: TriggerKind;
+	onChangeKind: (kind: TriggerKind) => void;
+	error?: string;
+	/** What finishes it, under it: Done for a routine not made yet; an existing one saves as it changes. */
+	action?: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<SettingsPage back={back} title="Trigger">
+			{error && <Alert>{error}</Alert>}
+			<Editable editable={editable}>
+				<SettingsGroup>
+					<SettingsChoiceRow
+						label="Type"
+						options={TRIGGER_OPTIONS}
+						value={kind}
+						onChange={onChangeKind}
+					/>
+				</SettingsGroup>
+				{children}
+			</Editable>
+			{action && <div className="flex justify-end">{action}</div>}
+		</SettingsPage>
 	);
 }
 
@@ -810,23 +818,6 @@ function Editable({ editable, children }: { editable: boolean; children: ReactNo
 		<fieldset disabled={!editable} className="contents">
 			{children}
 		</fieldset>
-	);
-}
-
-function TriggerRow({
-	value,
-	onChange,
-}: {
-	value: TriggerKind;
-	onChange: (kind: TriggerKind) => void;
-}) {
-	return (
-		<SettingsChoiceRow
-			label="Trigger"
-			options={TRIGGER_OPTIONS}
-			value={value}
-			onChange={onChange}
-		/>
 	);
 }
 

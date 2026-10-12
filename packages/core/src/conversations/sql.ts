@@ -90,7 +90,7 @@ export const routine = pgTable(
 				and ${table.cronTimezone} is null
 				and ${table.nextScheduledAt} is null
 				and ${table.webhookAuth} is not null
-				and (${table.webhookSecret} is null) <> (${table.webhookSecretDigest} is null)
+				and (${table.webhookSecret} is null or ${table.webhookSecretDigest} is null)
 				and (${table.webhookSecretDigest} is null or ${table.webhookAuth}->>'kind' = 'bearer')
 			)`,
 		),

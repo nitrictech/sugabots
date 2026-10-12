@@ -1,4 +1,9 @@
-import type { NewRoutine, RoutineUpdate, RoutineWriteResult } from "@sugabots/contracts";
+import type {
+	NewRoutine,
+	RoutineCurrentSecret,
+	RoutineUpdate,
+	RoutineWriteResult,
+} from "@sugabots/contracts";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
@@ -54,31 +59,43 @@ export function useRoutines(agentId: string) {
 	});
 }
 
-/**
- * Webhook secrets made or replaced in this tab, by routine. The API returns a
- * secret only when it makes one, so it is kept in memory, never stored, to
- * show on the routine's page until the tab closes or it goes unread a while.
- */
-const SHOWN_SECRET_KEY = "routine-secret";
+/** Webhook secrets, by routine, kept out of `ROUTINES_KEY` so refreshing the lists doesn't read them again. */
+const SECRET_KEY = "routine-secret";
 
-/** The webhook secret made for the routine in this tab, if one was. */
-export function useShownSecret(routineId: string): string | undefined {
-	return useQuery<string>({
-		queryKey: [SHOWN_SECRET_KEY, routineId],
-		queryFn: skipToken,
-		staleTime: Number.POSITIVE_INFINITY,
-	}).data;
+/**
+ * A webhook routine's current secret, for somebody who manages it. Nothing
+ * is read for anybody else, since the API would refuse them.
+ */
+export function useRoutineSecret({
+	agentId,
+	routineId,
+	canManage,
+}: {
+	agentId: string;
+	routineId: string;
+	canManage: boolean;
+}) {
+	return useQuery({
+		queryKey: [SECRET_KEY, routineId],
+		queryFn: canManage
+			? ({ signal }) =>
+					Effect.runPromise(client.api.routines.getSecret({ params: { agentId, routineId } }), {
+						signal,
+					})
+			: skipToken,
+	});
 }
 
 /** Each change names the bot its routine belongs to, since routines are addressed through their bot. */
 export function useRoutineActions() {
 	const queries = useQueryClient();
 	const refresh = () => queries.invalidateQueries({ queryKey: [ROUTINES_KEY] });
-	const keepSecret = (routineId: string, secret: string | null) => {
-		if (secret) queries.setQueryData([SHOWN_SECRET_KEY, routineId], secret);
-	};
+	const keepSecret = (routineId: string, current: RoutineCurrentSecret) =>
+		queries.setQueryData([SECRET_KEY, routineId], current);
 	const written = (result: RoutineWriteResult) => {
-		keepSecret(result.routine.id, result.secret);
+		// A write that returns no secret kept the one it had, or was left without.
+		if (result.secret) keepSecret(result.routine.id, { kind: "set", secret: result.secret });
+		else void queries.invalidateQueries({ queryKey: [SECRET_KEY, result.routine.id] });
 		return refresh();
 	};
 	const { routines } = client.api;
@@ -130,13 +147,14 @@ export function useRoutineActions() {
 			}: {
 				agentId: string;
 				routineId: string;
-				/** A secret its sender made, such as Slack's signing secret; a new one is made without it. */
-				secret?: string;
+				/** Null leaves the routine without one, so its address alone runs it. */
+				secret: string | null;
 			}) =>
 				Effect.runPromise(
 					routines.rotateSecret({ params: { agentId, routineId }, payload: { secret } }),
 				),
-			onSuccess: ({ secret }, { routineId }) => keepSecret(routineId, secret),
+			onSuccess: ({ secret }, { routineId }) =>
+				keepSecret(routineId, secret === null ? { kind: "none" } : { kind: "set", secret }),
 		}),
 	};
 }

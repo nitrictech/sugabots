@@ -47,6 +47,9 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 						.run({ ...params, requestId: payload.requestId })
 						.pipe(asSessionUser, asHttpError(routineErrors)),
 				)
+				.handle("getSecret", ({ params }) =>
+					routines.getSecret(params).pipe(asSessionUser, asHttpError(routineErrors)),
+				)
 				.handle("rotateSecret", ({ params, payload }) =>
 					routines.rotateSecret(params, payload.secret).pipe(
 						Effect.map((secret) => ({ secret })),
@@ -110,4 +113,5 @@ const routineErrors = {
 	RoutineNotFound: NotFound,
 	RoutineTriggerConflict: Conflict,
 	RoutineTriggerRejected: BadRequest,
+	WebhookSecretTooShort: BadRequest,
 };

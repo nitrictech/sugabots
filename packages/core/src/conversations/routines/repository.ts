@@ -47,9 +47,10 @@ export interface Interface {
 	readonly remove: (scope: Scope) => Effect.Effect<boolean>;
 	/**
 	 * Replaces a webhook routine's secret with `sealed`, a secret sealed with
-	 * `Credentials`. `false` when there is no such webhook routine.
+	 * `Credentials`, or null for none. `false` when there is no such webhook
+	 * routine.
 	 */
-	readonly replaceWebhookSecret: (scope: Scope, sealed: string) => Effect.Effect<boolean>;
+	readonly replaceWebhookSecret: (scope: Scope, sealed: string | null) => Effect.Effect<boolean>;
 	/**
 	 * The enabled cron routine due soonest at `now`, locked until the
 	 * transaction ends. One another transaction holds is skipped.

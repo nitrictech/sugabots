@@ -1,4 +1,8 @@
-import type { Routine, RoutineSchedule } from "@sugabots/contracts";
+import {
+	MIN_WEBHOOK_SECRET_CHARACTERS,
+	type Routine,
+	type RoutineSchedule,
+} from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -94,6 +98,16 @@ export class RoutineTriggerRejected
 {
 	get userMessage() {
 		return userText`That Routine cannot accept this trigger`;
+	}
+}
+
+/** A secret made up for a generic webhook too short to be hard to guess. */
+export class WebhookSecretTooShort
+	extends Data.TaggedError("WebhookSecretTooShort")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`A secret needs at least ${MIN_WEBHOOK_SECRET_CHARACTERS} characters`;
 	}
 }
 

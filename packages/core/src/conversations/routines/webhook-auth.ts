@@ -1,5 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { WebhookAuth, WebhookAuthKind } from "@sugabots/contracts";
+import {
+	WEBHOOK_SECRET_PREFIXES,
+	type WebhookAuth,
+	type WebhookAuthKind,
+	type WebhookHmacAlgorithm,
+	type WebhookSignatureEncoding,
+} from "@sugabots/contracts";
 
 /** A request to a webhook routine's address, as it arrived. */
 export interface Delivery {
@@ -10,19 +16,14 @@ export interface Delivery {
 	readonly payload: unknown;
 }
 
+/** The kinds whose callers send the secret itself rather than signing with it. */
+export type SentSecretAuth = Extract<WebhookAuth, { kind: "api_key" | "bearer" | "basic" }>;
+
 /**
  * How far a signed timestamp may be from now, either way, before the delivery
  * is refused as a replay: the five minutes Slack and Stripe recommend.
  */
 const SIGNED_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
-
-/** Marks each kind's secrets, so people can tell them apart; Basic's password has none. */
-const SECRET_PREFIXES: Record<WebhookAuthKind, string> = {
-	hmac: "whsec_",
-	api_key: "sk_rt_",
-	bearer: "rtb_",
-	basic: "",
-};
 
 /** The headers callers name a delivery by, so a retry lands on the first delivery's run. */
 const DELIVERY_ID_HEADERS = [
@@ -30,17 +31,18 @@ const DELIVERY_ID_HEADERS = [
 	"linear-delivery",
 	"x-github-delivery",
 	"x-shopify-webhook-id",
+	"svix-id",
 	"webhook-id",
 ];
 
 export function generateSecret(kind: WebhookAuthKind): string {
-	return `${SECRET_PREFIXES[kind]}${randomBytes(32).toString("base64url")}`;
+	return `${WEBHOOK_SECRET_PREFIXES[kind]}${randomBytes(32).toString("base64url")}`;
 }
 
 /**
  * Whether `delivery` proves it holds `secret` the way `auth` says, at `now`.
  * A sent secret is compared in constant time; a signature is checked over
- * the raw body.
+ * the raw body, and a signed timestamp must be recent.
  */
 export function deliveryAuthentic(
 	auth: WebhookAuth,
@@ -48,31 +50,54 @@ export function deliveryAuthentic(
 	delivery: Delivery,
 	now: Date,
 ): boolean {
-	if (auth.kind !== "hmac") {
-		const presented = presentedSecret(auth, delivery.headers);
-		return presented !== undefined && sameSecret(presented, secret);
-	}
-	switch (auth.format) {
-		case "body":
-			return bodySignatureValid(
-				auth.algorithm,
-				delivery.headers[auth.header.toLowerCase()],
-				secret,
-				delivery.body,
-			);
-		case "slack":
-			return slackSignatureValid(delivery, secret, now);
-		case "stripe":
-			return stripeSignatureValid(delivery, secret, now);
+	const { headers, body } = delivery;
+	switch (auth.kind) {
+		case "api_key":
+		case "bearer":
+		case "basic": {
+			const presented = presentedSecret(auth, headers);
+			return presented !== undefined && sameSecret(presented, secret);
+		}
+		case "hmac": {
+			const sent = headers[auth.header.toLowerCase()]
+				?.trim()
+				.replace(new RegExp(`^${auth.algorithm}=`, "i"), "");
+			const expected = hmac(auth.algorithm, secret, body);
+			return sent !== undefined && signatureMatches(sent, auth.encoding, expected);
+		}
+		// GitHub signs the body and sends `sha256={hex}`.
+		case "github": {
+			const sent = /^sha256=(.+)$/.exec(headers["x-hub-signature-256"]?.trim() ?? "")?.[1];
+			return sent !== undefined && signatureMatches(sent, "hex", hmac("sha256", secret, body));
+		}
+		// Linear signs the body and sends the hex digest alone.
+		case "linear": {
+			const sent = headers["linear-signature"]?.trim();
+			return sent !== undefined && signatureMatches(sent, "hex", hmac("sha256", secret, body));
+		}
+		// Slack signs `v0:{timestamp}:{body}` and sends `v0={hex}`.
+		case "slack": {
+			const timestamp = headers["x-slack-request-timestamp"]?.trim();
+			const sent = /^v0=(.+)$/.exec(headers["x-slack-signature"]?.trim() ?? "")?.[1];
+			if (!timestamp || !sent || !timestampFresh(timestamp, now)) return false;
+			const expected = hmac("sha256", secret, body, `v0:${timestamp}:`);
+			return signatureMatches(sent, "hex", expected);
+		}
+		// Stripe signs `{t}.{body}` and sends `t={t},v1={hex}`, with a `v1` for
+		// each secret it signs with while one is being rolled.
+		case "stripe": {
+			const fields = keyedFields(headers["stripe-signature"] ?? "", ",", "=");
+			const timestamp = fields.find(([key]) => key === "t")?.[1];
+			if (!timestamp || !timestampFresh(timestamp, now)) return false;
+			const expected = hmac("sha256", secret, body, `${timestamp}.`);
+			return fields.some(([key, sent]) => key === "v1" && signatureMatches(sent, "hex", expected));
+		}
 	}
 }
 
-/**
- * The secret the caller sent in the place `auth` names, for the kinds that
- * send one rather than signing.
- */
+/** The secret the caller sent in the place `auth` names. */
 export function presentedSecret(
-	auth: Exclude<WebhookAuth, { kind: "hmac" }>,
+	auth: SentSecretAuth,
 	headers: Delivery["headers"],
 ): string | undefined {
 	switch (auth.kind) {
@@ -92,18 +117,20 @@ export function presentedSecret(
 }
 
 /**
- * What the delivery calls itself, if anything: Slack and Stripe name their
- * events in the body, and other callers in a header.
+ * What the delivery calls itself, if anything: a header most senders name
+ * their deliveries by, else the body's `event_id` (Slack), or the `id` of a
+ * body that is an event object (Stripe).
  */
-export function deliveryIdOf(auth: WebhookAuth, delivery: Delivery): string | null {
-	if (auth.kind === "hmac" && auth.format === "slack")
-		return bodyString(delivery.payload, "event_id");
-	if (auth.kind === "hmac" && auth.format === "stripe") return bodyString(delivery.payload, "id");
+export function deliveryIdOf(delivery: Delivery): string | null {
 	for (const header of DELIVERY_ID_HEADERS) {
 		const value = nonEmpty(delivery.headers[header]?.trim());
 		if (value) return value;
 	}
-	return null;
+	const eventId = bodyString(delivery.payload, "event_id");
+	if (eventId) return eventId;
+	return bodyString(delivery.payload, "object") === "event"
+		? bodyString(delivery.payload, "id")
+		: null;
 }
 
 /**
@@ -111,56 +138,32 @@ export function deliveryIdOf(auth: WebhookAuth, delivery: Delivery): string | nu
  * sends, signed, before any event.
  */
 export function slackChallengeOf(auth: WebhookAuth, payload: unknown): string | undefined {
-	if (auth.kind !== "hmac" || auth.format !== "slack") return undefined;
-	if (bodyString(payload, "type") !== "url_verification") return undefined;
+	if (auth.kind !== "slack" || bodyString(payload, "type") !== "url_verification") {
+		return undefined;
+	}
 	return bodyString(payload, "challenge") ?? undefined;
 }
 
-/**
- * The signature of `body` is hex or base64, optionally after the algorithm's
- * name (`sha256=`), so Linear's bare hex, GitHub's prefixed hex and Shopify's
- * base64 all verify.
- */
-function bodySignatureValid(
-	algorithm: "sha256" | "sha512",
-	header: string | undefined,
-	secret: string,
+/** The HMAC of `signedBefore` then the body's bytes. */
+function hmac(
+	algorithm: WebhookHmacAlgorithm,
+	key: string | Buffer,
 	body: Uint8Array,
-): boolean {
-	const sent = header?.trim().replace(new RegExp(`^${algorithm}=`, "i"), "");
-	if (!sent) return false;
-	const expected = createHmac(algorithm, secret).update(body).digest();
-	return signatureMatches(sent, expected);
+	signedBefore = "",
+): Buffer {
+	return createHmac(algorithm, key).update(signedBefore).update(body).digest();
 }
 
-/** Slack signs `v0:{timestamp}:{body}` and sends `v0={hex}`. */
-function slackSignatureValid(delivery: Delivery, secret: string, now: Date): boolean {
-	const timestamp = delivery.headers["x-slack-request-timestamp"]?.trim();
-	const sent = /^v0=([0-9a-f]+)$/i.exec(delivery.headers["x-slack-signature"]?.trim() ?? "")?.[1];
-	if (!timestamp || !sent || !timestampFresh(timestamp, now)) return false;
-	const expected = createHmac("sha256", secret)
-		.update(`v0:${timestamp}:`)
-		.update(delivery.body)
-		.digest();
-	return signatureMatches(sent, expected);
-}
-
-/**
- * Stripe signs `{t}.{body}` and sends `t={t},v1={hex}`, with a `v1` for each
- * secret it is signing with while one is being rolled.
- */
-function stripeSignatureValid(delivery: Delivery, secret: string, now: Date): boolean {
-	const fields = (delivery.headers["stripe-signature"] ?? "").split(",").map((field) => {
-		const equals = field.indexOf("=");
-		return [field.slice(0, equals).trim(), field.slice(equals + 1).trim()] as const;
-	});
-	const timestamp = fields.find(([key]) => key === "t")?.[1];
-	if (!timestamp || !timestampFresh(timestamp, now)) return false;
-	const expected = createHmac("sha256", secret)
-		.update(`${timestamp}.`)
-		.update(delivery.body)
-		.digest();
-	return fields.some(([key, value]) => key === "v1" && signatureMatches(value, expected));
+/** `a=1,b=2` as `[["a", "1"], ["b", "2"]]`: split on `separator`, then at the first `assignment`. */
+function keyedFields(value: string, separator: string, assignment: string): [string, string][] {
+	return value
+		.split(separator)
+		.map((field) => field.trim())
+		.filter((field) => field.includes(assignment))
+		.map((field) => {
+			const at = field.indexOf(assignment);
+			return [field.slice(0, at), field.slice(at + 1)];
+		});
 }
 
 /** Whether `timestamp`, in seconds since the epoch, is within the tolerance of `now`. */
@@ -170,10 +173,13 @@ function timestampFresh(timestamp: string, now: Date): boolean {
 	return ageSeconds <= SIGNED_TIMESTAMP_TOLERANCE_SECONDS;
 }
 
-function signatureMatches(sent: string, expected: Buffer): boolean {
-	const decoded = /^[0-9a-f]+$/i.test(sent)
-		? Buffer.from(sent, "hex")
-		: Buffer.from(sent, "base64");
+/** Whether `sent`, written in `encoding`, is `expected`, compared in constant time. */
+function signatureMatches(
+	sent: string,
+	encoding: WebhookSignatureEncoding,
+	expected: Buffer,
+): boolean {
+	const decoded = Buffer.from(sent, encoding);
 	return decoded.length === expected.length && timingSafeEqual(decoded, expected);
 }
 

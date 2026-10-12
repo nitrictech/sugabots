@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, Minus } from "lucide-react";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentChatLink } from "@/lib/links.ts";
+import { activityThreadLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { useRecentRuns } from "@/lib/routines.ts";
 import { useSession } from "@/lib/session.ts";
@@ -14,8 +14,7 @@ import type { PlacedRoutine } from "./RoutineEditor.tsx";
 
 /**
  * A routine's latest runs, newest first: how each went, when, what started
- * it, and how long it took. Each opens its thread in the bot's chat, where
- * its work is.
+ * it, and how long it took. Each opens in Activity, as a page of its own.
  */
 export function RecentRuns({ placed }: { placed: PlacedRoutine }) {
 	const { routine, agent } = placed;
@@ -36,7 +35,7 @@ export function RecentRuns({ placed }: { placed: PlacedRoutine }) {
 					{runs.data.items.map((run) => (
 						<li key={run.id} className="border-border border-b last:border-b-0">
 							<Link
-								{...agentChatLink(placed, { thread: run.threadId })}
+								{...activityThreadLink(placed, run.threadId)}
 								className="focus-ring flex items-center gap-3 px-4 py-[11px] transition-colors hover:bg-panel"
 							>
 								<RunStatus state={run.state} />

@@ -68,28 +68,35 @@ const webhookUsernameSchema = Schema.Trim.check(
 	Schema.isPattern(/^[^:]+$/),
 );
 
-export const webhookHmacAlgorithmSchema = Schema.Literals(["sha256", "sha512"]);
+/**
+ * Senders whose own way of signing is known, so a routine they call needs
+ * only the signing secret they make: GitHub, Stripe, Slack, and Linear,
+ * which signs Standard Webhooks.
+ */
+export const WEBHOOK_SOURCES = ["github", "stripe", "slack", "linear"] as const;
+export type WebhookSource = (typeof WEBHOOK_SOURCES)[number];
+
+export const webhookHmacAlgorithmSchema = Schema.Literals(["sha1", "sha256", "sha512"]);
 export type WebhookHmacAlgorithm = typeof webhookHmacAlgorithmSchema.Type;
 
+export const webhookSignatureEncodingSchema = Schema.Literals(["hex", "base64"]);
+export type WebhookSignatureEncoding = typeof webhookSignatureEncodingSchema.Type;
+
 /**
- * How a webhook routine's caller proves it holds the routine's secret.
- *
- * `hmac` signs the request rather than sending the secret. In the `body`
- * format the signature is over the raw body, in `header`, as hex or base64,
- * optionally prefixed with the algorithm (`sha256=`): Linear, GitHub and
- * Shopify sign this way. `slack` and `stripe` are those services' own
- * formats, which sign a timestamp with the body, so a delivery replayed later
- * is refused.
+ * How a webhook routine's caller proves it holds the routine's secret: as a
+ * known source signs, or, for any other sender, one of the generic kinds.
+ * `hmac` signs the raw body with the secret using `algorithm` and sends the
+ * digest in `header`, written in `encoding`, optionally after the
+ * algorithm's name (`sha256=`). The others send the secret itself.
  */
 export const webhookAuthSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literals(WEBHOOK_SOURCES) }),
 	Schema.Struct({
 		kind: Schema.Literal("hmac"),
-		format: Schema.Literal("body"),
 		header: webhookHeaderSchema,
 		algorithm: webhookHmacAlgorithmSchema,
+		encoding: webhookSignatureEncodingSchema,
 	}),
-	Schema.Struct({ kind: Schema.Literal("hmac"), format: Schema.Literal("slack") }),
-	Schema.Struct({ kind: Schema.Literal("hmac"), format: Schema.Literal("stripe") }),
 	Schema.Struct({ kind: Schema.Literal("api_key"), header: webhookHeaderSchema }),
 	Schema.Struct({ kind: Schema.Literal("bearer") }),
 	Schema.Struct({ kind: Schema.Literal("basic"), username: webhookUsernameSchema }),
@@ -98,13 +105,39 @@ export type WebhookAuth = typeof webhookAuthSchema.Type;
 export type WebhookAuthKind = WebhookAuth["kind"];
 
 /**
+ * What marks the secrets made for each kind, so people can tell them apart.
+ * Basic's password has none, and nor does a source's, which the sender makes.
+ */
+export const WEBHOOK_SECRET_PREFIXES: Record<WebhookAuthKind, string> = {
+	hmac: "whsec_",
+	api_key: "sk_rt_",
+	bearer: "rtb_",
+	basic: "",
+	github: "",
+	stripe: "",
+	slack: "",
+	linear: "",
+};
+
+/**
  * A webhook secret someone brings, such as the signing secret Linear, Slack
- * or Stripe makes for a webhook pointed at the routine.
+ * or Stripe makes for a webhook pointed at the routine. How long it must be
+ * depends on its auth: see `webhookSecretLongEnough`.
  */
 export const webhookSecretSchema = Schema.Trim.check(
-	Schema.isMinLength(MIN_WEBHOOK_SECRET_CHARACTERS),
+	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_WEBHOOK_SECRET_CHARACTERS),
 );
+
+/**
+ * Whether `secret` is long enough for a webhook checked by `kind`. A source's
+ * secret is the one its sender made, however long that is; one made up for
+ * a generic webhook needs `MIN_WEBHOOK_SECRET_CHARACTERS`, to be hard to guess.
+ */
+export function webhookSecretLongEnough(kind: WebhookAuthKind, secret: string): boolean {
+	const sendersOwn = (WEBHOOK_SOURCES as readonly string[]).includes(kind);
+	return sendersOwn || secret.trim().length >= MIN_WEBHOOK_SECRET_CHARACTERS;
+}
 
 const minutesPastMidnightSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 0, maximum: MINUTES_PER_DAY - 1 }),
@@ -218,14 +251,15 @@ export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
 
 /**
  * A webhook trigger as written. Without `auth`, a new routine takes a bearer
- * token and a changed one keeps how it checks callers. Without `secret`, one
- * is made when the routine first needs one or its auth kind changes, and is
- * returned then.
+ * token and a changed one keeps how it checks callers. A null `secret` leaves
+ * the routine without one, so its address alone runs it. Without `secret`,
+ * one is made when the routine first needs one or its auth kind changes, and
+ * is returned then.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
 	auth: Schema.optional(webhookAuthSchema),
-	secret: Schema.optional(webhookSecretSchema),
+	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 	schedule: Schema.optional(Schema.Never),
 	timezone: Schema.optional(Schema.Never),
 });
@@ -379,12 +413,28 @@ export const acceptedRoutineExecutionSchema = Schema.Struct({
 
 export type AcceptedRoutineExecution = typeof acceptedRoutineExecutionSchema.Type;
 
-export const routineSecretSchema = Schema.Struct({ secret: Schema.String });
+/** A webhook routine's new secret, or null when it was left without one. */
+export const routineSecretSchema = Schema.Struct({ secret: Schema.NullOr(Schema.String) });
 export type RoutineSecret = typeof routineSecretSchema.Type;
 
-/** Replaces a webhook routine's secret with `secret`, or with a new one when it is absent. */
+/**
+ * A webhook routine's current secret, for somebody who manages it. A routine
+ * with `none` runs for anybody who has its address; a `hashed` one has a
+ * bearer token made before secrets were kept, which only its hash checks.
+ */
+export const routineCurrentSecretSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("set"), secret: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("none") }),
+	Schema.Struct({ kind: Schema.Literal("hashed") }),
+]);
+export type RoutineCurrentSecret = typeof routineCurrentSecretSchema.Type;
+
+/**
+ * Replaces a webhook routine's secret with `secret`, with a new one when it
+ * is absent, or with none when it is null, so the address alone runs it.
+ */
 export const routineSecretReplacementSchema = Schema.Struct({
-	secret: Schema.optional(webhookSecretSchema),
+	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 });
 export type RoutineSecretReplacement = typeof routineSecretReplacementSchema.Type;
 

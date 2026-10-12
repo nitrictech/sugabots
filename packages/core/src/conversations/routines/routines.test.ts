@@ -44,7 +44,7 @@ import {
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { lockTriggers } from "./acceptance.ts";
-import { RoutineTriggerConflict } from "./routine.ts";
+import { RoutineTriggerConflict, WebhookSecretTooShort } from "./routine.ts";
 import { RoutineRunner } from "./routine-runner.ts";
 import { Routines } from "./routines.ts";
 import { RoutineSettlement } from "./settlement.ts";
@@ -254,6 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			await webhooks.accept({ routineId, delivery: bearerDelivery("incorrect", payload) }),
 		).toBeUndefined();
 		const rotatedSecret = await routines.rotateSecret({ agentId, routineId });
+		if (rotatedSecret === null) throw new Error("A rotation without a secret makes one");
 		expect(
 			await webhooks.accept({ routineId, delivery: bearerDelivery(secret, payload) }),
 		).toBeUndefined();
@@ -278,7 +279,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				instructions: "Triage the issue.",
 				trigger: {
 					kind: "webhook",
-					auth: { kind: "hmac", format: "body", header: "Linear-Signature", algorithm: "sha256" },
+					auth: { kind: "linear" },
 					secret: linearSecret,
 				},
 			},
@@ -308,7 +309,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		).toBeUndefined();
 	});
 
-	it("keeps a webhook's secret while its auth kind stays, and makes a new one when it changes", async () => {
+	it("keeps a webhook's secret whatever its auth becomes", async () => {
 		const created = await routines.create(
 			{ agentId },
 			{
@@ -319,6 +320,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		);
 		const addressed = { agentId, routineId: created.routine.id };
 		expect(created.secret).toMatch(/^sk_rt_/);
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: created.secret });
 
 		const renamedHeader = await routines.update(addressed, {
 			trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
@@ -334,9 +336,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		const basic = await routines.update(addressed, {
 			trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
 		});
-		expect(basic.secret).not.toBeNull();
-		expect(basic.secret).not.toBe(created.secret);
-		const basicAuthorization = `Basic ${Buffer.from(`sugabots:${basic.secret}`).toString("base64")}`;
+		expect(basic.secret).toBeNull();
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: created.secret });
+		const basicAuthorization = `Basic ${Buffer.from(`sugabots:${created.secret}`).toString("base64")}`;
 		expect(
 			await webhooks.accept({
 				routineId: addressed.routineId,
@@ -405,6 +407,88 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			kind: "cron",
 			schedule: { repeat: "cron", expression: "0 10 * * *" },
 		});
+	});
+
+	it("runs a webhook left without a secret for whoever calls its address, until one is set", async () => {
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Open intake",
+				instructions: "Handle it.",
+				trigger: {
+					kind: "webhook",
+					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+					secret: null,
+				},
+			},
+		);
+		const addressed = { agentId, routineId: created.routine.id };
+		expect(created.secret).toBeNull();
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "none" });
+		const unsigned = { ...bearerDelivery(""), headers: {} };
+		expect(
+			await webhooks.accept({ routineId: addressed.routineId, delivery: unsigned }),
+		).toMatchObject({ kind: "run" });
+
+		// Another auth kind doesn't make a secret for a routine left without one.
+		const asBearer = await routines.update(addressed, {
+			trigger: { kind: "webhook", auth: { kind: "bearer" } },
+		});
+		expect(asBearer.secret).toBeNull();
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "none" });
+
+		const secret = "a-token-chosen-for-this-routine";
+		expect(await routines.rotateSecret(addressed, secret)).toBe(secret);
+		expect(
+			await webhooks.accept({
+				routineId: addressed.routineId,
+				delivery: { ...unsigned, headers: { "idempotency-key": "unsigned-again" } },
+			}),
+		).toBeUndefined();
+
+		expect(await routines.rotateSecret(addressed, null)).toBeNull();
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "none" });
+	});
+
+	it("takes a sender's secret however short, and a made-up one only when hard to guess", async () => {
+		const linear = await routines.create(
+			{ agentId },
+			{
+				name: "Linear issues",
+				instructions: "Triage it.",
+				trigger: { kind: "webhook", auth: { kind: "linear" }, secret: "lin_wh_short" },
+			},
+		);
+		expect(linear.secret).toBe("lin_wh_short");
+
+		await expect(
+			routines.create(
+				{ agentId },
+				{
+					name: "Signed alerts",
+					instructions: "Handle input.",
+					trigger: {
+						kind: "webhook",
+						auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+						secret: "too-short",
+					},
+				},
+			),
+		).rejects.toThrow(WebhookSecretTooShort);
+
+		const bearer = await routines.create(
+			{ agentId },
+			{
+				name: "Alerts",
+				instructions: "Handle input.",
+				trigger: { kind: "webhook", auth: { kind: "bearer" } },
+			},
+		);
+		const addressed = { agentId, routineId: bearer.routine.id };
+		await expect(routines.rotateSecret(addressed, "too-short")).rejects.toThrow(
+			WebhookSecretTooShort,
+		);
+		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret: bearer.secret });
 	});
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {
@@ -487,7 +571,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 				Context.get(conversations, Routines.Service)
 					.rotateSecret(addressed)
 					.pipe(
-						Effect.tap((secret) => Effect.sync(() => rotated(secret))),
+						Effect.tap((secret) => Effect.sync(() => rotated(secret ?? ""))),
 						Effect.andThen(Effect.promise(() => rotationHeld)),
 					),
 			).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
@@ -505,7 +589,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(await view.get(addressed)).toMatchObject({ name: "Renamed alerts" });
 	});
 
-	it("refuses a run to a member who may not run routines, whoever asks for it", async () => {
+	it("refuses a member who may not manage routines a run, a removal or the secret, whoever asks", async () => {
 		// Called directly, with no route in front: what a new entry point that
 		// forgot to check would reach.
 		const created = await routines.create(
@@ -531,6 +615,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			routinesAs(member.id).run({ ...routine, requestId: crypto.randomUUID() }),
 		).rejects.toThrow(ActionForbidden);
 		await expect(routinesAs(member.id).remove(routine)).rejects.toThrow(ActionForbidden);
+		await expect(routinesAs(member.id).getSecret(routine)).rejects.toThrow(ActionForbidden);
 		expect((await view.listExecutions(routine))?.items).toEqual([]);
 	});
 

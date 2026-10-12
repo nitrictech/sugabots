@@ -964,7 +964,7 @@ describe("ongoing agent Chat", () => {
 			within(routinePanel)
 				.getByRole("link", { name: "View routine definition" })
 				.getAttribute("href"),
-		).toBe(`/suga/settings/pods/suga-team/agents/${linear.handle}?tab=routines`);
+		).toBe(`/suga/settings/routines/${routineExecution.routineId}`);
 		expect(within(routinePanel).getByLabelText("View webhook payload")).toBeDefined();
 		expect(within(routinePanel).queryByText(/Routine instructions:/)).toBeNull();
 		expect(within(routinePanel).queryByText(/Trigger data \(untrusted\):/)).toBeNull();

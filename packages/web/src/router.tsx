@@ -612,8 +612,6 @@ function SettingsMemberRoute() {
 const settingsPodAgentRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/pods/$pod/agents/$agent",
-	validateSearch: (search: Record<string, unknown>): { tab?: "routines" } =>
-		search.tab === "routines" ? { tab: "routines" } : {},
 	// The dialog waits for the rosters, so its code downloads alongside rather than after.
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsPodAgentRoute,
@@ -773,7 +771,6 @@ function SettingsPodConnectionRoute() {
 
 function SettingsPodAgentRoute() {
 	const { pod: podSlug, agent: handle } = settingsPodAgentRoute.useParams();
-	const { tab } = settingsPodAgentRoute.useSearch();
 	const { found, isPending, error } = usePodAgent(podSlug, handle);
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
 	if (!found) {
@@ -785,7 +782,7 @@ function SettingsPodAgentRoute() {
 	}
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="agents" selectedAgentId={found.agent.id} selectedAgentTab={tab} />
+			<WorkspaceSettings section="agents" selectedAgentId={found.agent.id} />
 		</SettingsLayout>
 	);
 }

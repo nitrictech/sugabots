@@ -4,6 +4,7 @@ import type {
 	AcceptedRoutineExecution,
 	NewRoutine,
 	Routine,
+	RoutineCurrentSecret,
 	RoutineExecutionPage,
 	RoutineExecutionPageQuery,
 	RoutineSchedule,
@@ -12,6 +13,7 @@ import type {
 	WebhookAuth,
 	WorkspaceRoutine,
 } from "@sugabots/contracts";
+import { webhookSecretLongEnough } from "@sugabots/contracts";
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -33,6 +35,7 @@ import {
 	RoutineTriggerRejected,
 	scopeOf,
 	toRoutine,
+	WebhookSecretTooShort,
 } from "./routine.ts";
 import { type InvalidRoutineExecutionCursor, makeView } from "./routine-view.ts";
 import { makeWebhooks } from "./routine-webhooks.ts";
@@ -55,12 +58,15 @@ export interface Interface {
 		input: NewRoutine,
 	) => Effect.Effect<
 		Defined,
-		AuthorizationDenied | RoutineRepository.RoutineNameTaken | InvalidRoutineSchedule,
+		| AuthorizationDenied
+		| RoutineRepository.RoutineNameTaken
+		| InvalidRoutineSchedule
+		| WebhookSecretTooShort,
 		CurrentActor.Service
 	>;
 	/**
 	 * Changes a routine. A webhook routine's secret is kept unless one is
-	 * brought or its auth kind changes; a new one is returned.
+	 * brought; one made for it is returned.
 	 */
 	readonly update: (
 		routine: OnAgent,
@@ -70,22 +76,31 @@ export interface Interface {
 		| AuthorizationDenied
 		| RoutineNotFound
 		| RoutineRepository.RoutineNameTaken
-		| InvalidRoutineSchedule,
+		| InvalidRoutineSchedule
+		| WebhookSecretTooShort,
 		CurrentActor.Service
 	>;
 	readonly remove: (
 		routine: OnAgent,
 	) => Effect.Effect<void, AuthorizationDenied | RoutineNotFound, CurrentActor.Service>;
+	/** A webhook routine's current secret, for somebody who manages it. */
+	readonly getSecret: (
+		routine: OnAgent,
+	) => Effect.Effect<
+		RoutineCurrentSecret,
+		AuthorizationDenied | RoutineNotFound | RoutineTriggerRejected,
+		CurrentActor.Service
+	>;
 	/**
-	 * Replaces a webhook routine's secret with `secret`, or with a new one
-	 * when it is absent, and returns it.
+	 * Replaces a webhook routine's secret with `secret`, with a new one when
+	 * it is absent, or with none when it is null, and returns it.
 	 */
 	readonly rotateSecret: (
 		routine: OnAgent,
-		secret?: string,
+		secret?: string | null,
 	) => Effect.Effect<
-		string,
-		AuthorizationDenied | RoutineNotFound | RoutineTriggerRejected,
+		string | null,
+		AuthorizationDenied | RoutineNotFound | RoutineTriggerRejected | WebhookSecretTooShort,
 		CurrentActor.Service
 	>;
 	/**
@@ -193,7 +208,7 @@ export const make = Effect.gen(function* () {
 							: null;
 					const webhook =
 						input.trigger.kind === "webhook"
-							? webhookCheck(credentials, input.trigger, undefined)
+							? yield* webhookCheck(credentials, input.trigger, undefined)
 							: NO_WEBHOOK;
 					const row = yield* repository.create({
 						workspaceId: owner.workspaceId,
@@ -241,7 +256,7 @@ export const make = Effect.gen(function* () {
 									: current.nextScheduledAt;
 						const webhook =
 							input.trigger?.kind === "webhook"
-								? webhookCheck(
+								? yield* webhookCheck(
 										credentials,
 										input.trigger,
 										current.triggerKind === "webhook" ? current : undefined,
@@ -277,6 +292,31 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		getSecret: (addressed) =>
+			operation(
+				"getSecret",
+				Effect.gen(function* () {
+					const scope = yield* scopeOf(authorization, addressed, "routine.manage");
+					const [current] = yield* query((db) =>
+						db
+							.select({
+								auth: routine.webhookAuth,
+								secret: routine.webhookSecret,
+								digest: routine.webhookSecretDigest,
+							})
+							.from(routine)
+							.where(inScope(scope))
+							.limit(1),
+					);
+					if (!current) return yield* new RoutineNotFound();
+					if (!current.auth) return yield* new RoutineTriggerRejected();
+					if (current.secret !== null) {
+						return { kind: "set" as const, secret: credentials.decrypt(current.secret) };
+					}
+					return { kind: current.digest === null ? ("none" as const) : ("hashed" as const) };
+				}),
+			),
+
 		rotateSecret: (addressed, brought) =>
 			operation(
 				"rotateSecret",
@@ -289,8 +329,11 @@ export const make = Effect.gen(function* () {
 						);
 						if (!current) return yield* new RoutineNotFound();
 						if (!current.auth) return yield* new RoutineTriggerRejected();
-						const secret = brought ?? generateSecret(current.auth.kind);
-						const sealed = credentials.encrypt(secret);
+						if (brought != null && !webhookSecretLongEnough(current.auth.kind, brought)) {
+							return yield* new WebhookSecretTooShort();
+						}
+						const secret = brought === undefined ? generateSecret(current.auth.kind) : brought;
+						const sealed = secret === null ? null : credentials.encrypt(secret);
 						if (!(yield* repository.replaceWebhookSecret(scope, sealed))) {
 							return yield* new RoutineNotFound();
 						}
@@ -397,25 +440,42 @@ function webhookColumnsOf(row: WebhookColumns): WebhookColumns {
 /**
  * How a routine whose trigger is written as `trigger` checks its callers,
  * given how it did before (`current`, absent when it was not a webhook). The
- * secret is kept unless one is brought or the auth kind changes, since each
- * kind's secrets look different; then the new one is returned.
+ * secret, or the lack of one, is kept whatever the auth becomes, unless one
+ * is brought; a null one leaves the routine without. A new webhook without
+ * one brought gets one made, which is returned, and so does one leaving
+ * bearer auth with only the hash of a token made before secrets were kept.
+ * A secret brought for a generic webhook must be long enough to be hard to
+ * guess; a source's is whatever its sender made.
  */
 function webhookCheck(
 	credentials: Credentials.Interface,
 	trigger: Extract<NewRoutine["trigger"], { kind: "webhook" }>,
 	current: WebhookColumns | undefined,
-): { columns: WebhookColumns; secret: string | null } {
+): Effect.Effect<{ columns: WebhookColumns; secret: string | null }, WebhookSecretTooShort> {
 	const auth = trigger.auth ?? current?.webhookAuth ?? DEFAULT_WEBHOOK_AUTH;
-	if (current && current.webhookAuth?.kind === auth.kind && trigger.secret === undefined) {
-		return { columns: { ...webhookColumnsOf(current), webhookAuth: auth }, secret: null };
+	if (typeof trigger.secret === "string" && !webhookSecretLongEnough(auth.kind, trigger.secret)) {
+		return Effect.fail(new WebhookSecretTooShort());
+	}
+	const hashOnly = current?.webhookSecretDigest != null && auth.kind !== "bearer";
+	if (current?.webhookAuth && !hashOnly && trigger.secret === undefined) {
+		return Effect.succeed({
+			columns: { ...webhookColumnsOf(current), webhookAuth: auth },
+			secret: null,
+		});
+	}
+	if (trigger.secret === null) {
+		return Effect.succeed({
+			columns: { webhookAuth: auth, webhookSecret: null, webhookSecretDigest: null },
+			secret: null,
+		});
 	}
 	const secret = trigger.secret ?? generateSecret(auth.kind);
-	return {
+	return Effect.succeed({
 		columns: {
 			webhookAuth: auth,
 			webhookSecret: credentials.encrypt(secret),
 			webhookSecretDigest: null,
 		},
 		secret,
-	};
+	});
 }

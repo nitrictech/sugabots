@@ -4,6 +4,7 @@ import { cn } from "cn";
 import { useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { useActivityFeed } from "@/lib/chats.ts";
+import { activityThreadLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import {
@@ -202,14 +203,14 @@ function itemIdOf(item: ActivityItem): string {
  * own, and a message in its chat, jumped to. Either way the row is marked.
  */
 function activityItemLink(item: ActivityItem, { pod, chatAgent }: ItemPlace) {
+	if (item.kind === "routine" || item.kind === "collaboration") {
+		return activityThreadLink({ pod, agent: chatAgent }, item.threadId);
+	}
 	return linkOptions({
 		from: "/$workspace",
 		to: "./activity/$pod/$agent",
 		params: { pod: pod.slug, agent: chatAgent.handle },
-		search:
-			item.kind === "routine" || item.kind === "collaboration"
-				? { item: item.threadId, threadPage: item.threadId }
-				: { item: item.messageId, message: item.messageId },
+		search: { item: item.messageId, message: item.messageId },
 	});
 }
 
