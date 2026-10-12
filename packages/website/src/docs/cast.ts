@@ -1,15 +1,9 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { ChatAuthor } from "@/components/chat";
 import { bots } from "@/landing/bots";
-
-/** Someone in a demo chat: a person drawn with their initials, or a bot with its face. */
-export type CastMember =
-	| { kind: "person"; name: string; initials: string }
-	| { kind: "self"; name: string }
-	| { kind: "bot"; name: string; look: BotLook };
 
 /** Everyone the docs' demo chats can put words in the mouth of. The landing page's bots, plus the family who use them. */
 export const cast = {
-	you: { kind: "self", name: "You" },
+	you: { kind: "person", name: "You", initials: "Y" },
 	mum: { kind: "person", name: "Mum", initials: "MA" },
 	dad: { kind: "person", name: "Dad", initials: "DA" },
 	sam: { kind: "person", name: "Sam", initials: "SA" },
@@ -19,6 +13,6 @@ export const cast = {
 	researcher: { kind: "bot", name: "Researcher", look: bots.researcher },
 	inboxSorter: { kind: "bot", name: "Inbox Sorter", look: bots.inboxSorter },
 	journal: { kind: "bot", name: "Journal", look: bots.journal },
-} as const satisfies Record<string, CastMember>;
+} as const satisfies Record<string, ChatAuthor>;
 
 export type CastName = keyof typeof cast;

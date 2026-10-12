@@ -16,12 +16,12 @@ export const pods: readonly Pod[] = [
 	},
 	{
 		name: "Family",
-		description: "Trips, birthdays, who's picking up Gran",
+		description: "Trips, birthdays, who's picking up Nan",
 		tint: "sky",
 		bots: ["sky", "yellow", "teal"],
 	},
 	{
-		name: "Flat 4B",
+		name: "Unit 4B",
 		description: "Bills split fairly, bins on Tuesday",
 		tint: "orange",
 		bots: ["orange", "rose"],

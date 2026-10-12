@@ -72,7 +72,7 @@ function LandingPage() {
 	return (
 		<>
 			<SiteHeader />
-			<main id="top" className="mx-auto max-w-3xl px-6">
+			<main id="top" className="mx-auto max-w-5xl px-6">
 				<Hero />
 				<div className="pb-16">
 					<ExplainerVideo />
@@ -84,7 +84,7 @@ function LandingPage() {
 				<OpenSourceSection />
 				<GetStartedSection />
 			</main>
-			<SiteFooter />
+			<SiteFooter width="medium" />
 		</>
 	);
 }
