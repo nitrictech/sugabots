@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in Sugabots doesn't work as it should.
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. For questions and help with your setup, ask on [Discord](https://discord.gg/YPuHCVAsx) instead.
+
+        Please [search the existing issues](https://github.com/nitrictech/sugabots/issues?q=is%3Aissue) first, in case it's already been reported.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug in your own words, and include any error message you saw. Screenshots help. Long AI-written summaries are hard to act on.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the bug.
+      placeholder: |
+        1. Open a pod and start a conversation with a bot
+        2. Ask it to ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sugabots version
+      description: |
+        The version and commit from `/api/health` on your installation, such as http://localhost:3000/api/health, or from the first line of the logs: `sugabots 0.2.0 (a1b2c3d...) listening on ...`. An image tag like `latest` isn't enough. If it says `unknown`, give the commit or tag you deployed from; from a local checkout, that's `git rev-parse --short HEAD`.
+      placeholder: 0.2.0 (a1b2c3d)
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How do you run Sugabots?
+      options:
+        - Quickstart install script
+        - Docker Compose on my own server
+        - Suga template
+        - Another hosting platform
+        - From source with bun run dev
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Anything about your setup that might matter, including where you run Sugabots if it's not in the list above.
+      placeholder: |
+        Hosting platform:
+        Model provider and model:
+        Browser:
+        Operating system:
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant lines from the server logs, such as `docker compose logs sugabots`, or the browser console. Remove API keys, secrets and anything else private first.
+      render: shell

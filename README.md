@@ -200,6 +200,13 @@ To host the web app on an origin of its own instead, set its address in
 `WEB_APP_URL` and build the web app with `VITE_API_URL`; the image still
 serves its own copy at its own address.
 
+## Community and support
+
+- Ask questions and get help on the [Sugabots Discord](https://discord.gg/YPuHCVAsx).
+- Read the docs at [sugabots.ai/docs](https://sugabots.ai/docs).
+- Report bugs and request features in
+  [GitHub issues](https://github.com/nitrictech/sugabots/issues/new/choose).
+
 ## Contributing
 
 To work on Sugabots, see [CONTRIBUTING.md](CONTRIBUTING.md).
