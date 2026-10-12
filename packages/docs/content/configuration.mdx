@@ -22,6 +22,7 @@ set them under `environment` in `compose.yml`.
 | `PORT`                     | `3000`                                 | Port the API binds.                                                                                                                                       |
 | `PUBLIC_URL`               | `http://localhost:` followed by `PORT` | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
 | `WEB_APP_URL`              | `PUBLIC_URL`                           | Where the web app is served, when it is hosted apart from the API. Invite links and connection sign-ins return here.                                      |
+| `CONTENT_ORIGIN`           | unset                                  | An origin of its own for bot-made HTML pages, e.g. `https://pages.example-content.com`, pointed at the same server. It serves pages only, isolated from the app's cookies and site; a separate domain isolates best. Its hostname must differ from the app's, and a proxy in front must pass the request's `Host` header through unchanged, which is how the server tells the two apart. Unset, pages are written into their frame instead. |
 | `SUGABOTS_SKIP_MIGRATIONS` | `false`                                | Docker image only. Set to `true` to skip applying pending migrations on start.                                                                            |
 
 ## Secrets

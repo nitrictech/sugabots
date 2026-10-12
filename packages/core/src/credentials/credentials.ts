@@ -3,10 +3,16 @@ export * as Credentials from "./credentials.ts";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
 
-/** Seals stored credentials: provider API keys, connection secrets and OAuth tokens. */
+/**
+ * Seals stored credentials: provider API keys, connection secrets and OAuth
+ * tokens. A value sealed for a `purpose` opens only for that same purpose,
+ * and one sealed without opens only without, so a value sealed for one use
+ * can never be passed off as another's. An empty `purpose` is refused: the
+ * cipher can't tell it from none.
+ */
 export interface Interface {
-	encrypt(value: string): string;
-	decrypt(value: string): string;
+	encrypt(value: string, purpose?: string): string;
+	decrypt(value: string, purpose?: string): string;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Credentials") {}
@@ -49,9 +55,10 @@ function decodeKey(encodedKey: string) {
 
 function aes(key: Buffer): Interface {
 	return {
-		encrypt(value) {
+		encrypt(value, purpose) {
 			const nonce = randomBytes(12);
 			const cipher = createCipheriv("aes-256-gcm", key, nonce);
+			if (purpose !== undefined) cipher.setAAD(purposeBytes(purpose));
 			const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
 			return [
 				"v1",
@@ -60,16 +67,22 @@ function aes(key: Buffer): Interface {
 				ciphertext.toString("base64url"),
 			].join(".");
 		},
-		decrypt(value) {
+		decrypt(value, purpose) {
 			const [version, nonce, tag, ciphertext] = value.split(".");
 			if (version !== "v1" || !nonce || !tag || !ciphertext)
 				throw new Error("Unsupported encrypted provider credential");
 			const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(nonce, "base64url"));
 			decipher.setAuthTag(Buffer.from(tag, "base64url"));
+			if (purpose !== undefined) decipher.setAAD(purposeBytes(purpose));
 			return Buffer.concat([
 				decipher.update(Buffer.from(ciphertext, "base64url")),
 				decipher.final(),
 			]).toString("utf8");
 		},
 	};
+}
+
+function purposeBytes(purpose: string) {
+	if (purpose === "") throw new Error("A sealing purpose must not be empty");
+	return Buffer.from(purpose, "utf8");
 }

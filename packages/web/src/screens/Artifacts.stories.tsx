@@ -4,6 +4,7 @@ import type {
 	ArtifactVersionSummary,
 	ToolCallPart,
 } from "@sugabots/contracts";
+import { PAGE_CONTENT_POLICY } from "@sugabots/contracts/artifact-pages";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
@@ -12,7 +13,7 @@ import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { ArtifactCards, ArtifactCardView, type WrittenArtifact } from "./ArtifactCards.tsx";
 import { ArtifactListView, ArtifactStageView } from "./Artifacts.tsx";
-import { FRAME_CONTENT_POLICY } from "./HtmlFrame.tsx";
+import { PagesFromContentOrigin } from "./HtmlFrame.tsx";
 
 const now = new Date("2026-10-01T09:30:00.000Z");
 const scribe = { agentId: growthDesk.id, name: growthDesk.name };
@@ -274,7 +275,7 @@ export const HtmlPage = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		const frame = canvas.getByTitle("Pipeline by stage");
 		await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-		await expect(frame.getAttribute("srcdoc")).toContain(FRAME_CONTENT_POLICY);
+		await expect(frame.getAttribute("srcdoc")).toContain(PAGE_CONTENT_POLICY);
 		// An opaque origin: the app cannot reach into the frame, nor the frame out to the app.
 		await expect((frame as HTMLIFrameElement).contentDocument).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
@@ -364,6 +365,7 @@ export const InlineDocument = meta.story({
 	render: ({ onOpen }) => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(plan)}
 				botName={scribe.name}
 				content={planContent}
@@ -388,6 +390,7 @@ export const InlineDeleted = meta.story({
 	render: () => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content="deleted"
@@ -406,6 +409,7 @@ export const InlineFailed = meta.story({
 	render: () => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(plan)}
 				botName={scribe.name}
 				content="failed"
@@ -452,6 +456,7 @@ export const InlinePage = meta.story({
 	render: () => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content={chartPage}
@@ -475,6 +480,7 @@ export const InlinePageLoading = meta.story({
 	render: () => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content={undefined}
@@ -498,6 +504,7 @@ export const InlinePageTall = meta.story({
 	render: () => (
 		<div className="w-full max-w-[620px] p-6 pl-[50px]">
 			<ArtifactCardView
+				podId={revenue.id}
 				artifact={asWritten(dashboard, "Every deal")}
 				botName={scribe.name}
 				content={tallPage}
@@ -510,5 +517,104 @@ export const InlinePageTall = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: "Show all" }));
 		await userEvent.click(await canvas.findByRole("button", { name: "Show less" }));
 		await expect(await canvas.findByRole("button", { name: "Show all" })).toBeVisible();
+	},
+});
+
+const pageAddress = (url: string | null) =>
+	http.get(
+		`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/:version/page`,
+		() => HttpResponse.json({ url }),
+	);
+
+/** In the app, with pages on the content origin. */
+function ContentOriginPreview({ children }: { children: ReactNode }) {
+	return (
+		<QueryPreview>
+			<PagesFromContentOrigin value={true}>{children}</PagesFromContentOrigin>
+		</QueryPreview>
+	);
+}
+
+/**
+ * With a content origin set, the page loads from the address the API gives
+ * out, the app's theme in its fragment, with the frame asking for the page's
+ * policy so Chromium refuses any other site in it.
+ */
+export const PageFromContentOrigin = meta.story({
+	beforeEach({ msw }) {
+		msw.use(pageAddress("https://pages.example-content.com/pages/sealed"));
+	},
+	render: () => (
+		<ContentOriginPreview>
+			<div className="w-full max-w-[620px] p-6 pl-[50px]">
+				<ArtifactCardView
+					podId={revenue.id}
+					artifact={asWritten(dashboard)}
+					botName={scribe.name}
+					content={chartPage}
+					onOpen={fn()}
+				/>
+			</div>
+		</ContentOriginPreview>
+	),
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+		const frame = await canvas.findByTitle("Pipeline by stage");
+		await waitFor(() =>
+			expect(frame.getAttribute("src")).toMatch(
+				/^https:\/\/pages\.example-content\.com\/pages\/sealed#%7B%22colorScheme%22/,
+			),
+		);
+		await expect(frame).toHaveAttribute("csp", PAGE_CONTENT_POLICY);
+		await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+		await expect(frame).not.toHaveAttribute("srcdoc");
+	},
+});
+
+/** Without a content origin, the page is written into its frame as before. */
+export const PageWithoutContentOrigin = meta.story({
+	beforeEach({ msw }) {
+		msw.use(pageAddress(null));
+	},
+	render: PageFromContentOrigin.input.render,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+		const frame = await canvas.findByTitle("Pipeline by stage");
+		await waitFor(() => expect(frame.getAttribute("srcdoc")).toContain(PAGE_CONTENT_POLICY));
+		await expect(frame).not.toHaveAttribute("src");
+	},
+});
+
+/**
+ * When the address can't be had, the card says so and offers to ask again,
+ * rather than leaving a blank space or writing the page into its frame.
+ */
+export const PageAddressFailed = meta.story({
+	beforeEach({ msw }) {
+		let asked = 0;
+		msw.use(
+			http.get(
+				`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/:version/page`,
+				() => {
+					asked += 1;
+					return asked === 1
+						? HttpResponse.json({ message: "unavailable" }, { status: 503 })
+						: HttpResponse.json({ url: "https://pages.example-content.com/pages/sealed" });
+				},
+			),
+		);
+	},
+	render: PageFromContentOrigin.input.render,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"This page couldn't be loaded.",
+		);
+		await expect(canvas.queryByTitle("Pipeline by stage")).toBeNull();
+
+		await userEvent.click(canvas.getByRole("button", { name: "Try again" }));
+
+		const frame = await canvas.findByTitle("Pipeline by stage");
+		await expect(frame.getAttribute("src")).toMatch(/^https:\/\/pages\.example-content\.com\//);
 	},
 });

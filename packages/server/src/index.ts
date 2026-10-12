@@ -2,6 +2,7 @@ import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
 import { Conversations } from "@sugabots/core/conversations/conversations";
@@ -96,6 +97,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	PodSandboxSetup.layer,
 	ConnectionSetup.layer,
 	Artifacts.layer,
+	ArtifactPages.layer,
 	ModelTrials.layer,
 	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));

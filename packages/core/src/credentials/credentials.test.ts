@@ -33,6 +33,18 @@ describe("Credentials.layer", () => {
 		expect(Exit.isSuccess(exit) && exit.value.encrypted).not.toContain("sk-secret");
 	});
 
+	it("opens a value sealed for a purpose only for that purpose", () => {
+		const cipher = Credentials.fromKey(key);
+		const forPages = cipher.encrypt("page", "pages");
+		const stored = cipher.encrypt("sk-secret");
+
+		expect(cipher.decrypt(forPages, "pages")).toBe("page");
+		expect(() => cipher.decrypt(forPages)).toThrow();
+		expect(() => cipher.decrypt(forPages, "other")).toThrow();
+		expect(() => cipher.decrypt(stored, "pages")).toThrow();
+		expect(() => cipher.encrypt("page", "")).toThrow();
+	});
+
 	it.each([
 		["without a key", {}, /is required/],
 		["with a key that is not 32 bytes", { CREDENTIALS_ENCRYPTION_KEY: "not-a-key" }, /32-byte key/],

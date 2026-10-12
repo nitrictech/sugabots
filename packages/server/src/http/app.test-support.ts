@@ -3,6 +3,7 @@ import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -105,6 +106,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
 	unimplemented(PodAdministration.Service),
 	unimplemented(Artifacts.Service),
+	unimplemented(ArtifactPages.Service),
 	unimplemented(AgentAdministration.Service),
 	unimplemented(Onboarding.Service),
 	unimplemented(ModelProviderSetup.Service),

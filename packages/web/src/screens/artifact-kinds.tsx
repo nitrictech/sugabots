@@ -2,6 +2,7 @@ import type { ArtifactKind } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
+import type { PageAt } from "@/lib/artifacts.ts";
 import { FIT_HEIGHT_PX, HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
@@ -17,10 +18,15 @@ export interface ArtifactKindView {
 	file: { extension: string; type: string; contentOf: (content: string) => string };
 	/** How wide its card among the messages may grow once expanded, as a Tailwind class. */
 	cardWidth: string;
-	/** Its content in a card among the messages; `undefined` while it loads. */
-	Inline: (props: { title: string; content: string | undefined; onOpen: () => void }) => ReactNode;
-	/** Its content opened large. */
-	Full: (props: { title: string; content: string }) => ReactNode;
+	/** Its content, version `at`, in a card among the messages; `undefined` while it loads. */
+	Inline: (props: {
+		title: string;
+		content: string | undefined;
+		at: PageAt;
+		onOpen: () => void;
+	}) => ReactNode;
+	/** Its content, version `at`, opened large. */
+	Full: (props: { title: string; content: string; at: PageAt }) => ReactNode;
 }
 
 export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
@@ -47,9 +53,9 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		// The page itself, running: as much room as the reply's text has.
 		cardWidth: "max-w-none",
 		Inline: LivePage,
-		Full: ({ title, content }) => (
+		Full: ({ title, content, at }) => (
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[12px] border border-border">
-				<HtmlFrame html={content} title={title} className="min-h-0 flex-1" />
+				<HtmlFrame html={content} title={title} at={at} className="min-h-0 flex-1" />
 			</div>
 		),
 	},
@@ -85,7 +91,15 @@ function DocumentPreview({
  * A page running in place, so a chart or a form works right in the chat. One
  * taller than the frame is clipped until the person asks to see it all.
  */
-function LivePage({ title, content }: { title: string; content: string | undefined }) {
+function LivePage({
+	title,
+	content,
+	at,
+}: {
+	title: string;
+	content: string | undefined;
+	at: PageAt;
+}) {
 	const figure = useRef<HTMLDivElement>(null);
 	const [pageHeight, setPageHeight] = useState(0);
 	const [expanded, setExpanded] = useState(false);
@@ -101,6 +115,7 @@ function LivePage({ title, content }: { title: string; content: string | undefin
 			<HtmlFrame
 				html={content}
 				title={title}
+				at={at}
 				fitHeight
 				maxHeight={expanded ? Number.POSITIVE_INFINITY : undefined}
 				onPageHeight={setPageHeight}

@@ -39,6 +39,14 @@ export class ArtifactsApi extends HttpApiGroup.make("artifacts")
 			success: artifactSchema,
 			error: refused,
 		}),
+		HttpApiEndpoint.get("pageAddress", `${root}/:artifactId/versions/:version/page`, {
+			params: version,
+			success: Schema.Struct({
+				/** Where the page loads from on the content origin, for a few minutes; `null` when no content origin is set. */
+				url: Schema.NullOr(Schema.String),
+			}),
+			error: refused,
+		}),
 		HttpApiEndpoint.delete("remove", `${root}/:artifactId`, {
 			params: artifact,
 			error: refused,

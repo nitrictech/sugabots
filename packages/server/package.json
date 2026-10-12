@@ -8,7 +8,7 @@
 		".": "./src/http/app.ts"
 	},
 	"scripts": {
-		"dev": "node --watch --env-file-if-exists=../../.env src/index.ts",
+		"dev": "node --env-file-if-exists=../../.env scripts/content-origin-alias.ts && node --watch --env-file-if-exists=../../.env src/index.ts",
 		"start": "node --env-file-if-exists=../../.env src/index.ts",
 		"typecheck": "tsc --noEmit"
 	},

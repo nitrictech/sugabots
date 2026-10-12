@@ -1,7 +1,8 @@
 import { MAX_ARTIFACT_CONTENT_CHARACTERS } from "@sugabots/contracts";
 import { eq, like } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { Credentials } from "../credentials/credentials.ts";
 import {
 	agent,
 	artifactVersion,
@@ -14,8 +15,13 @@ import {
 	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { Installation } from "../installation/installation.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { Artifacts } from "./artifacts.ts";
+import { ArtifactPages } from "./pages.ts";
+
+/** Seals as the test infrastructure's credentials do, to forge tokens in a case. */
+const testCredentials = Credentials.fromKey(Buffer.alloc(32).toString("base64"));
 
 describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => {
 	let by: Artifacts.AgentInThread;
@@ -75,6 +81,103 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 		expect(await runOnPostgres(service.read(by, made.id))).toMatchObject({
 			version: 1,
 			content: "# Uno\n\nDos",
+		});
+	});
+
+	describe("pages on the content origin", () => {
+		const pagesAt = (contentOrigin: string | undefined) =>
+			servedOnPostgresAs(
+				ArtifactPages.Service,
+				ArtifactPages.layer.pipe(
+					Layer.provide(
+						Layer.succeed(
+							Installation.Service,
+							Installation.fromUrls({
+								isProduction: false,
+								publicUrl: "https://sugabots.example.com",
+								...(contentOrigin ? { contentOrigin } : {}),
+							}),
+						),
+					),
+				),
+			);
+		const aPage = async () => {
+			const { service } = await authoring();
+			return runOnPostgres(
+				service.create(by, { kind: "html", title: "Chart", content: "<p>chart</p>" }),
+			);
+		};
+
+		it("gives the pod's people an address on the content origin that opens the page", async () => {
+			const made = await aPage();
+			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
+
+			const address = await pages.address({ podId: by.podId, artifactId: made.id, version: 1 });
+
+			expect(address).toMatch(/^https:\/\/pages\.example-content\.com\/pages\/.+/);
+			const token = address?.split("/pages/")[1] ?? "";
+			expect(await pages.open(token)).toEqual({ title: "Chart", html: "<p>chart</p>" });
+		});
+
+		it("gives no address without a content origin, nor for a document", async () => {
+			const made = await aPage();
+			const { service } = await authoring();
+			const notes = await runOnPostgres(
+				service.create(by, { kind: "document", title: "Notes", content: "# Notes" }),
+			);
+
+			const unset = (await pagesAt(undefined))(memberId);
+			const set = (await pagesAt("https://pages.example-content.com"))(memberId);
+
+			expect(
+				await unset.address({ podId: by.podId, artifactId: made.id, version: 1 }),
+			).toBeUndefined();
+			expect(
+				await set.address({ podId: by.podId, artifactId: notes.id, version: 1 }),
+			).toBeUndefined();
+		});
+
+		it("gives no address for a version the page doesn't have", async () => {
+			const made = await aPage();
+			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
+
+			await expect(
+				pages.address({ podId: by.podId, artifactId: made.id, version: 2 }),
+			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		});
+
+		it("hides a page from people outside its pod", async () => {
+			const made = await aPage();
+			const pages = (await pagesAt("https://pages.example-content.com"))(outsiderId);
+
+			await expect(
+				pages.address({ podId: by.podId, artifactId: made.id, version: 1 }),
+			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		});
+
+		it("refuses a tampered or expired token, and a value sealed for something else", async () => {
+			const made = await aPage();
+			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
+			const sealed = (expiresAt: number, purpose?: string) =>
+				testCredentials.encrypt(
+					JSON.stringify({ podId: by.podId, artifactId: made.id, version: 1, expiresAt }),
+					purpose,
+				);
+
+			const good = sealed(Date.now() + 60_000, ArtifactPages.SEALED_FOR);
+			const flipped = `${good.slice(0, -4)}${good.at(-4) === "A" ? "B" : "A"}${good.slice(-3)}`;
+			await expect(pages.open(flipped)).rejects.toMatchObject({
+				_tag: "ArtifactPageUnavailable",
+			});
+			await expect(
+				pages.open(sealed(Date.now() - 1, ArtifactPages.SEALED_FOR)),
+			).rejects.toMatchObject({
+				_tag: "ArtifactPageUnavailable",
+			});
+			await expect(pages.open(sealed(Date.now() + 60_000))).rejects.toMatchObject({
+				_tag: "ArtifactPageUnavailable",
+			});
+			expect(await pages.open(good)).toMatchObject({ title: "Chart" });
 		});
 	});
 

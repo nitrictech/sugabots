@@ -8,6 +8,7 @@ import { type Session, useSessionFromApi } from "@/lib/session.ts";
 import { reloadWhenADeployReplacesChunks } from "@/lib/stale-chunks.ts";
 import { workspacesQuery } from "@/lib/workspace.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
+import { PagesFromContentOrigin } from "@/screens/HtmlFrame.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
@@ -65,7 +66,9 @@ function SessionRouter({ session }: { session: Session }) {
 	return (
 		<QueryClientProvider client={queries}>
 			<TooltipProvider>
-				<AppRouterProvider router={router} session={session} />
+				<PagesFromContentOrigin value={true}>
+					<AppRouterProvider router={router} session={session} />
+				</PagesFromContentOrigin>
 			</TooltipProvider>
 		</QueryClientProvider>
 	);

@@ -23,6 +23,7 @@ describe("Installation.layer", () => {
 				publicUrl: "http://localhost:4000",
 				webAppUrl: "http://localhost:4000",
 				trustedOrigins: ["http://localhost:4000"],
+				contentOrigin: undefined,
 			},
 		});
 	});
@@ -45,6 +46,21 @@ describe("Installation.layer", () => {
 		});
 	});
 
+	it("serves pages from CONTENT_ORIGIN's origin, kept out of the trusted origins", async () => {
+		expect(
+			await installationFor({
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://pages.example-content.com/ignored/path",
+			}),
+		).toMatchObject({
+			_tag: "Success",
+			value: {
+				trustedOrigins: ["https://sugabots.example.com"],
+				contentOrigin: "https://pages.example-content.com",
+			},
+		});
+	});
+
 	it("runs a test runner's NODE_ENV as development", async () => {
 		expect(await installationFor({ NODE_ENV: "test" })).toMatchObject({
 			_tag: "Success",
@@ -59,6 +75,38 @@ describe("Installation.layer", () => {
 			"a WEB_APP_URL that is not HTTP",
 			{ WEB_APP_URL: "ftp://app.example.com" },
 			/WEB_APP_URL must use HTTP/,
+		],
+		[
+			"a CONTENT_ORIGIN that is the app's own",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com/pages",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's host by another scheme",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "http://sugabots.example.com",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's hostname at another port",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com:8443",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's hostname written with a trailing dot",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com.",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
 		],
 	])("refuses to start with %s", async (_, env, message) => {
 		const exit = await installationFor(env);

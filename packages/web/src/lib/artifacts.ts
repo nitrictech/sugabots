@@ -76,6 +76,43 @@ export function useDeleteArtifact(podId: string) {
 	});
 }
 
+/** One version of one of a pod's pages. */
+export interface PageAt {
+	podId: string;
+	artifactId: string;
+	version: number;
+}
+
+/**
+ * Where the page loads from on the content origin, or `null` when none is set,
+ * asked for only once `enabled`. An address works for ten minutes and a new
+ * one reloads the frame showing it, so each `load` (one frame showing one
+ * content of the page) has its own: never shared, never refetched on its own,
+ * kept apart from the artifacts the app refreshes after writes, and dropped
+ * once its frame is gone. While a new load's address is asked for, the last
+ * one's stays if it was for the same artifact, so the page stays on screen.
+ */
+export function usePageAddress(
+	{ podId, artifactId, version }: PageAt,
+	{ load, enabled }: { load: string; enabled: boolean },
+) {
+	return useQuery({
+		queryKey: ["artifact-pages", podId, artifactId, version, load],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(
+				client.api.artifacts.pageAddress({ params: { podId, artifactId, version } }),
+				{ signal },
+			),
+		enabled,
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: 0,
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === podId && previousQuery.queryKey[2] === artifactId
+				? previous
+				: undefined,
+	});
+}
+
 export function useArtifactVersions(podId: string, artifactId: string) {
 	return useQuery({
 		queryKey: ["artifacts", podId, artifactId, "versions"],
