@@ -136,6 +136,7 @@ export const client = {
 			update: vi.fn(),
 			remove: vi.fn(),
 			run: vi.fn(),
+			getSecret: vi.fn(),
 			rotateSecret: vi.fn(),
 			executions: vi.fn(),
 		},

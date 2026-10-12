@@ -50,13 +50,10 @@ import { AgentRoutines } from "./RoutinesSettings.tsx";
 export function AgentSettingsPage({
 	agent,
 	pod,
-	initialTab,
 }: {
 	agent: Agent;
 	/** The pod this bot lives in, and what the viewer may do in it. */
 	pod: Pod;
-	/** Opens scrolled to its routines, for a link from a routine run. */
-	initialTab?: "routines";
 }) {
 	const [page, setPage] = useState<"card" | "model" | "instructions">("card");
 	const update = useUpdateAgent(agent.id);
@@ -99,7 +96,6 @@ export function AgentSettingsPage({
 		<ContactCard
 			agent={agent}
 			pod={pod}
-			initialTab={initialTab}
 			save={update.mutateAsync}
 			savePending={update.isPending}
 			failure={failure}
@@ -114,7 +110,6 @@ type Save = (change: AgentUpdate) => Promise<unknown>;
 function ContactCard({
 	agent,
 	pod,
-	initialTab,
 	save,
 	savePending,
 	failure,
@@ -123,7 +118,6 @@ function ContactCard({
 }: {
 	agent: Agent;
 	pod: Pod;
-	initialTab?: "routines";
 	save: Save;
 	savePending: boolean;
 	failure: string | undefined;
@@ -198,14 +192,7 @@ function ContactCard({
 				/>
 			</SettingsGroup>
 			<Tools agent={agent} pod={pod} canChange={may.updateAgents} save={save} />
-			<section
-				id="routines"
-				ref={(element) => {
-					if (initialTab === "routines") element?.scrollIntoView();
-				}}
-			>
-				<AgentRoutines agent={agent} pod={pod} />
-			</section>
+			<AgentRoutines agent={agent} pod={pod} />
 			{may.deleteAgents && (
 				<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete bot</SettingsDanger>
 			)}
@@ -282,7 +269,7 @@ function TextRow({
 					}}
 					placeholder={placeholder}
 					maxLength={maxLength}
-					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			) : (
 				<span id={id} className="min-w-0 flex-1 text-[14.5px] text-soft-foreground">

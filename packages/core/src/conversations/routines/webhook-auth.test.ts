@@ -60,64 +60,71 @@ describe("secrets people send", () => {
 	});
 });
 
-describe("signatures over the body", () => {
-	const linear: WebhookAuth = {
+describe("generic HMAC signatures", () => {
+	const signed: WebhookAuth = {
 		kind: "hmac",
-		format: "body",
-		header: "Linear-Signature",
+		header: "X-Signature",
 		algorithm: "sha256",
+		encoding: "hex",
 	};
 
-	it("admits Linear's bare hex signature", () => {
-		const signed = delivery({ "Linear-Signature": hmac("sha256", BODY).digest("hex") });
-		expect(deliveryAuthentic(linear, SECRET, signed, NOW)).toBe(true);
-	});
-
-	it("admits GitHub's signature, prefixed with its algorithm", () => {
-		const github: WebhookAuth = { ...linear, header: "X-Hub-Signature-256" };
-		const signature = `sha256=${hmac("sha256", BODY).digest("hex")}`;
+	it("admits the hex digest of the body, bare or after its algorithm", () => {
+		const signature = hmac("sha256", BODY).digest("hex");
+		expect(deliveryAuthentic(signed, SECRET, delivery({ "X-Signature": signature }), NOW)).toBe(
+			true,
+		);
 		expect(
-			deliveryAuthentic(github, SECRET, delivery({ "X-Hub-Signature-256": signature }), NOW),
+			deliveryAuthentic(signed, SECRET, delivery({ "X-Signature": `sha256=${signature}` }), NOW),
 		).toBe(true);
 	});
 
-	it("admits Shopify's base64 signature", () => {
-		const shopify: WebhookAuth = { ...linear, header: "X-Shopify-Hmac-Sha256" };
-		const signature = hmac("sha256", BODY).digest("base64");
-		expect(
-			deliveryAuthentic(shopify, SECRET, delivery({ "X-Shopify-Hmac-Sha256": signature }), NOW),
-		).toBe(true);
+	it("signs with the algorithm and encoding chosen", () => {
+		const shopify: WebhookAuth = {
+			kind: "hmac",
+			header: "X-Shopify-Hmac-Sha256",
+			algorithm: "sha512",
+			encoding: "base64",
+		};
+		const signature = hmac("sha512", BODY).digest("base64");
+		const sent = delivery({ "X-Shopify-Hmac-Sha256": signature });
+		expect(deliveryAuthentic(shopify, SECRET, sent, NOW)).toBe(true);
+		expect(deliveryAuthentic({ ...shopify, algorithm: "sha256" }, SECRET, sent, NOW)).toBe(false);
 	});
 
-	it("signs with SHA-512 when chosen", () => {
-		const sha512: WebhookAuth = { ...linear, algorithm: "sha512" };
-		const signed = delivery({ "Linear-Signature": hmac("sha512", BODY).digest("hex") });
-		expect(deliveryAuthentic(sha512, SECRET, signed, NOW)).toBe(true);
-		expect(deliveryAuthentic(linear, SECRET, signed, NOW)).toBe(false);
+	it("refuses a signature sent in another header", () => {
+		const sent = delivery({ "X-Other": hmac("sha256", BODY).digest("hex") });
+		expect(deliveryAuthentic(signed, SECRET, sent, NOW)).toBe(false);
 	});
 
 	it("refuses a body changed after signing", () => {
 		const signature = hmac("sha256", BODY).digest("hex");
-		const changed = delivery({ "Linear-Signature": signature }, BODY.replace("ISS-1", "ISS-2"));
-		expect(deliveryAuthentic(linear, SECRET, changed, NOW)).toBe(false);
+		const changed = delivery({ "X-Signature": signature }, BODY.replace("ISS-1", "ISS-2"));
+		expect(deliveryAuthentic(signed, SECRET, changed, NOW)).toBe(false);
 	});
 
-	it("refuses a signature made with another secret", () => {
-		const signature = hmac("sha256", BODY, "another-secret-entirely").digest("hex");
-		expect(
-			deliveryAuthentic(linear, SECRET, delivery({ "Linear-Signature": signature }), NOW),
-		).toBe(false);
+	it("refuses a signature made with another secret, or the secret itself", () => {
+		const forged = hmac("sha256", BODY, "another-secret-entirely").digest("hex");
+		expect(deliveryAuthentic(signed, SECRET, delivery({ "X-Signature": forged }), NOW)).toBe(false);
+		expect(deliveryAuthentic(signed, SECRET, delivery({ "X-Signature": SECRET }), NOW)).toBe(false);
+	});
+});
+
+describe("GitHub and Linear, which sign the body", () => {
+	it("admits GitHub's sha256= signature", () => {
+		const signature = `sha256=${hmac("sha256", BODY).digest("hex")}`;
+		const sent = delivery({ "X-Hub-Signature-256": signature });
+		expect(deliveryAuthentic({ kind: "github" }, SECRET, sent, NOW)).toBe(true);
+		expect(deliveryAuthentic({ kind: "linear" }, SECRET, sent, NOW)).toBe(false);
 	});
 
-	it("refuses the secret itself in place of a signature", () => {
-		expect(deliveryAuthentic(linear, SECRET, delivery({ "Linear-Signature": SECRET }), NOW)).toBe(
-			false,
-		);
+	it("admits Linear's bare hex signature", () => {
+		const sent = delivery({ "Linear-Signature": hmac("sha256", BODY).digest("hex") });
+		expect(deliveryAuthentic({ kind: "linear" }, SECRET, sent, NOW)).toBe(true);
 	});
 });
 
 describe("Slack's signatures", () => {
-	const slack: WebhookAuth = { kind: "hmac", format: "slack" };
+	const slack: WebhookAuth = { kind: "slack" };
 
 	function fromSlack(timestamp: number, body = BODY) {
 		const signature = hmac("sha256", `v0:${timestamp}:${body}`).digest("hex");
@@ -135,6 +142,12 @@ describe("Slack's signatures", () => {
 		expect(deliveryAuthentic(slack, SECRET, fromSlack(NOW_SECONDS - 301), NOW)).toBe(false);
 	});
 
+	it("refuses a delivery without its timestamp", () => {
+		const { headers, ...rest } = fromSlack(NOW_SECONDS);
+		const unstamped = { ...rest, headers: { ...headers, "x-slack-request-timestamp": undefined } };
+		expect(deliveryAuthentic(slack, SECRET, unstamped, NOW)).toBe(false);
+	});
+
 	it("answers its URL check only for a Slack routine", () => {
 		const check = {
 			type: "url_verification",
@@ -147,12 +160,12 @@ describe("Slack's signatures", () => {
 
 	it("names the delivery by its event", () => {
 		const body = JSON.stringify({ type: "event_callback", event_id: "Ev08MFMKH6" });
-		expect(deliveryIdOf(slack, fromSlack(NOW_SECONDS, body))).toBe("Ev08MFMKH6");
+		expect(deliveryIdOf(fromSlack(NOW_SECONDS, body))).toBe("Ev08MFMKH6");
 	});
 });
 
 describe("Stripe's signatures", () => {
-	const stripe: WebhookAuth = { kind: "hmac", format: "stripe" };
+	const stripe: WebhookAuth = { kind: "stripe" };
 
 	function fromStripe(timestamp: number, secrets: string[], body = BODY) {
 		const signatures = secrets.map(
@@ -177,8 +190,12 @@ describe("Stripe's signatures", () => {
 	});
 
 	it("names the delivery by its event", () => {
-		const body = JSON.stringify({ id: "evt_1NG8Du2eZvKYlo2CUI79vXWy", type: "invoice.paid" });
-		expect(deliveryIdOf(stripe, fromStripe(NOW_SECONDS, [SECRET], body))).toBe(
+		const body = JSON.stringify({
+			id: "evt_1NG8Du2eZvKYlo2CUI79vXWy",
+			object: "event",
+			type: "invoice.paid",
+		});
+		expect(deliveryIdOf(fromStripe(NOW_SECONDS, [SECRET], body))).toBe(
 			"evt_1NG8Du2eZvKYlo2CUI79vXWy",
 		);
 	});
@@ -190,11 +207,11 @@ describe("delivery ids", () => {
 		["Linear-Delivery", "234d1a4e-b617-4388-90fe-adc3633d6b72"],
 		["X-GitHub-Delivery", "72d3162e-cc78-11e3-81ab-4c9367dc0958"],
 	])("names a delivery by its %s header", (header, id) => {
-		expect(deliveryIdOf({ kind: "bearer" }, delivery({ [header]: id }))).toBe(id);
+		expect(deliveryIdOf(delivery({ [header]: id }))).toBe(id);
 	});
 
-	it("leaves a delivery without one unnamed", () => {
-		expect(deliveryIdOf({ kind: "bearer" }, delivery({}))).toBeNull();
+	it("leaves a delivery without one unnamed, whatever ids its body holds", () => {
+		expect(deliveryIdOf(delivery({}))).toBeNull();
 	});
 });
 

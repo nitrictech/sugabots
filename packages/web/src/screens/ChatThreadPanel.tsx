@@ -2,9 +2,8 @@ import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sug
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Braces, ChevronLeft, CircleAlert } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
-import { useAgentWithPod } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { routineSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
@@ -261,7 +260,6 @@ function ThreadPage({
 
 function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 	const backToChat = useBackToHere("Chat");
-	const placed = useAgentWithPod(execution.agentId);
 	return (
 		<>
 			{execution.trigger.kind === "webhook" && (
@@ -290,17 +288,13 @@ function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 					</div>
 				</details>
 			)}
-			{placed && (
-				<IconButton
-					label="View routine definition"
-					variant="bar"
-					render={
-						<Link {...agentSettingsLink(placed)} state={backToChat} search={{ tab: "routines" }} />
-					}
-				>
-					<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
-				</IconButton>
-			)}
+			<IconButton
+				label="View routine definition"
+				variant="bar"
+				render={<Link {...routineSettingsLink({ id: execution.routineId })} state={backToChat} />}
+			>
+				<ArrowUpRight aria-hidden size={15} strokeWidth={2.4} />
+			</IconButton>
 		</>
 	);
 }

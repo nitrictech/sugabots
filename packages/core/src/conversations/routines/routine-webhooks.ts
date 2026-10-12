@@ -25,6 +25,8 @@ export const makeWebhooks = Effect.gen(function* () {
 	const credentials = yield* Credentials.Service;
 
 	const authentic = (webhook: EnabledWebhook, delivery: Delivery, now: Date) => {
+		// Left without a secret on purpose, so its address alone runs it.
+		if (webhook.secret === null && webhook.digest === null) return Effect.succeed(true);
 		if (webhook.secret !== null) {
 			const secret = credentials.decrypt(webhook.secret);
 			return Effect.succeed(deliveryAuthentic(webhook.auth, secret, delivery, now));
@@ -47,7 +49,7 @@ export const makeWebhooks = Effect.gen(function* () {
 					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
 					const challenge = slackChallengeOf(found.auth, delivery.payload);
 					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
-					const idempotencyKey = deliveryIdOf(found.auth, delivery);
+					const idempotencyKey = deliveryIdOf(delivery);
 					if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
 						return yield* new RoutineDeliveryIdTooLong();
 					}

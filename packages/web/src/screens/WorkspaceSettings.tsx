@@ -44,7 +44,6 @@ export function WorkspaceSettings({
 	selectedPodId,
 	selectedConnectionId,
 	connectionSignInError,
-	selectedAgentTab,
 	selectedProviderId,
 	modelChoice,
 	selectedMemberId,
@@ -57,7 +56,6 @@ export function WorkspaceSettings({
 	/** The connection of the selected pod open on its own page. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
-	selectedAgentTab?: "routines";
 	/** The provider open on the Models page. */
 	selectedProviderId?: string;
 	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
@@ -90,10 +88,7 @@ export function WorkspaceSettings({
 					<ModelsSettings />
 				)
 			) : section === "agents" ? (
-				<WorkspaceAgentsSettings
-					selectedAgentId={selectedAgentId}
-					selectedAgentTab={selectedAgentTab}
-				/>
+				<WorkspaceAgentsSettings selectedAgentId={selectedAgentId} />
 			) : section === "pods" ? (
 				<WorkspacePodsSettings
 					selectedPodId={selectedPodId}

@@ -17,13 +17,7 @@ import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
  * Every bot you can see, each under its pod's name, beside the open one's
  * contact card. The + makes a bot in whichever pod you choose.
  */
-export function WorkspaceAgentsSettings({
-	selectedAgentId,
-	selectedAgentTab,
-}: {
-	selectedAgentId?: string;
-	selectedAgentTab?: "routines";
-}) {
+export function WorkspaceAgentsSettings({ selectedAgentId }: { selectedAgentId?: string }) {
 	const { agents, isPending, error } = useAgents();
 	const pods = usePods();
 	const navigate = useNavigate();
@@ -89,12 +83,7 @@ export function WorkspaceAgentsSettings({
 				}
 				detail={
 					selected && selectedPod ? (
-						<AgentSettingsPage
-							key={selected.id}
-							agent={selected}
-							pod={selectedPod}
-							initialTab={selectedAgentTab}
-						/>
+						<AgentSettingsPage key={selected.id} agent={selected} pod={selectedPod} />
 					) : (
 						<div className="grid min-h-80 place-items-center p-6">
 							<EmptyState title={selectedAgentId ? "No such bot here" : "No bots yet"}>

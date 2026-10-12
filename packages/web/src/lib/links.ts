@@ -63,6 +63,16 @@ export function connectionSettingsLink(pod: Pod, connection: Pick<Connection, "i
 	});
 }
 
+/** A routine run or collaboration opened in Activity as a page of its own, beside the list, which marks it. */
+export function activityThreadLink({ pod, agent }: AgentInPod, threadId: string) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./activity/$pod/$agent",
+		params: { pod: pod.slug, agent: agent.handle },
+		search: { item: threadId, threadPage: threadId },
+	});
+}
+
 export function agentChatLink({ pod, agent }: AgentInPod, search: { thread?: string } = {}) {
 	return linkOptions({
 		from: "/$workspace",

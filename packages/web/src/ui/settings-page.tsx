@@ -282,7 +282,7 @@ export function SettingsNameRow({
 						if (event.key === "Escape") setDraft(name);
 					}}
 					maxLength={maxLength}
-					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none focus-visible:shadow-(--ring-shadow)"
 				/>
 			</SettingsControlRow>
 			{error && (
@@ -338,7 +338,7 @@ export function SettingsChoiceRow<Value extends string>({
 				options={options}
 				value={value}
 				onChange={onChange}
-				className="max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
+				className="sm:ml-auto max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
 			/>
 		</div>
 	);
@@ -356,7 +356,7 @@ export function SettingsFieldLabel({
 	htmlFor?: string;
 	children: ReactNode;
 }) {
-	const className = "w-[88px] shrink-0 text-[14px] text-foreground";
+	const className = "min-w-[88px] shrink-0 whitespace-nowrap text-[14px] text-foreground";
 	return htmlFor ? (
 		<label htmlFor={htmlFor} className={className}>
 			{children}
