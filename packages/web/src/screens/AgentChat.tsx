@@ -24,8 +24,8 @@ import {
 	useChat,
 	useChatHistory,
 	useChatMessages,
+	useMarkReadWhileSeen,
 	useOptimisticChatItems,
-	useReadWhileShown,
 	useSendChatMessage,
 } from "@/lib/chats.ts";
 import { keepFootInView, useFollowContentGrowth } from "@/lib/follow-latest.ts";
@@ -60,6 +60,13 @@ import { ThreadNotices } from "./ThreadNotices.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
 
 type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
+
+/**
+ * How close to the foot of the log still counts as at the latest message, both
+ * for following new messages and for marking the chat read: about two lines, so
+ * a small nudge up is not taken as scrolling away.
+ */
+const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
 export function AgentChat({
 	agent,
@@ -97,6 +104,9 @@ export function AgentChat({
 	const previousThreadId = useRef<string | undefined>(undefined);
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
+	// Where the log was last scrolled to. `followingLatest` is the intent to stay
+	// at the latest message, which can be set before the scroll that gets there.
+	const [latestInView, setLatestInView] = useState(true);
 	const details = mainThread.data;
 	const host = details?.participants.find(
 		(participant): participant is AgentParticipant =>
@@ -108,10 +118,7 @@ export function AgentChat({
 	const groups = chatGroupsOf(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
-	useReadWhileShown(
-		chat.data?.id,
-		newest?.kind === "message" ? `${newest.message.id}:${newest.message.status}` : newest?.id,
-	);
+	useMarkReadWhileSeen(chat.data?.id, newest, latestInView);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
 	const threadActivityAt = new Map(
 		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
@@ -261,8 +268,11 @@ export function AgentChat({
 					aria-label="Chat messages"
 					onScroll={(event) => {
 						const element = event.currentTarget;
-						followingLatest.current =
-							element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+						const atFoot =
+							element.scrollHeight - element.scrollTop - element.clientHeight <
+							LATEST_IN_VIEW_TOLERANCE_PX;
+						followingLatest.current = atFoot;
+						setLatestInView(atFoot);
 					}}
 					className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4"
 				>

@@ -125,22 +125,39 @@ export function useMarkChatRead(chatId: string | undefined) {
 }
 
 /**
- * Marks the chat read while it is on screen: when it opens, when `newest`
- * changes, and when its tab comes back into view. `newest` names the latest
- * message and how it stands, so a reply streaming in marks it once it
- * arrives and once it finishes, not at every word.
+ * Marks the chat read while the person can see `newest`, its latest item: the
+ * window has focus and `latestInView` holds. Checks when the chat opens, when
+ * `newest` arrives or finishes, when `latestInView` turns true, and when the
+ * window gains focus.
+ *
+ * Focus, not visibility: a window beside the one being worked in is visible,
+ * and what arrives there is unseen until the person comes back to it.
  */
-export function useReadWhileShown(chatId: string | undefined, newest: string | undefined) {
+export function useMarkReadWhileSeen(
+	chatId: string | undefined,
+	newest: ChatMessageItem | undefined,
+	latestInView: boolean,
+) {
 	const { mutate } = useMarkChatRead(chatId);
+	const newestRevision = newest && readRevision(newest);
 	useEffect(() => {
-		if (!chatId || newest === undefined) return;
-		const markIfShown = () => {
-			if (document.visibilityState === "visible") mutate();
+		if (!chatId || newestRevision === undefined || !latestInView) return;
+		const markIfFocused = () => {
+			if (document.hasFocus()) mutate();
 		};
-		markIfShown();
-		document.addEventListener("visibilitychange", markIfShown);
-		return () => document.removeEventListener("visibilitychange", markIfShown);
-	}, [chatId, newest, mutate]);
+		markIfFocused();
+		window.addEventListener("focus", markIfFocused);
+		return () => window.removeEventListener("focus", markIfFocused);
+	}, [chatId, newestRevision, latestInView, mutate]);
+}
+
+/**
+ * What marking a chat read waits on in `item`: a message's id and status, so
+ * a reply streaming in marks it once when it arrives and once when it
+ * finishes, not at every word.
+ */
+function readRevision(item: ChatMessageItem): string {
+	return item.kind === "message" ? `${item.message.id}:${item.message.status}` : item.id;
 }
 
 /** Fetches again what shows which chats are unread: the lists, the rail and activity. */
