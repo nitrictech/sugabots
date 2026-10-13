@@ -1,6 +1,7 @@
 import type { Usage } from "@sugabots/core/accounting/usage";
 import type { Accounts } from "@sugabots/core/accounts/accounts";
 import type { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import type { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
@@ -46,6 +47,7 @@ export type HttpServices =
 	| PodSandboxSetup.Service
 	| ConnectionSetup.Service
 	| Artifacts.Service
+	| ArtifactPages.Service
 	| ModelTrials.Service
 	| Usage.Service
 	| Chats.Service

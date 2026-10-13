@@ -39,6 +39,10 @@ export interface Interface {
 	readonly get: (
 		at: InArtifact,
 	) => Effect.Effect<Artifact, AuthorizationDenied, CurrentActor.Service>;
+	/** What the artifact is, without reading its content. */
+	readonly summary: (
+		at: InArtifact,
+	) => Effect.Effect<ArtifactSummary, AuthorizationDenied, CurrentActor.Service>;
 	/** Its versions, newest first. */
 	readonly versions: (
 		at: InArtifact,
@@ -129,6 +133,14 @@ export const make = Effect.gen(function* () {
 					const found = yield* inReachedPod(podId, artifactId);
 					return yield* shownOrHidden(atVersion(found, found.artifact.currentVersion));
 				}),
+			),
+
+		summary: ({ podId, artifactId }) =>
+			operation(
+				"summary",
+				Effect.map(inReachedPod(podId, artifactId), (found) =>
+					toSummary(found.artifact, found.creator),
+				),
 			),
 
 		versions: ({ podId, artifactId }) =>
@@ -349,6 +361,20 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));
 
 export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
+
+/**
+ * Version `version` of an artifact in `podId`, read without asking who wants
+ * it: only for a caller that has already authorized the read, as a sealed
+ * page address has (see `pages.ts`). `undefined` when there is no such
+ * artifact or version.
+ */
+export const readVersionUnchecked =
+	(blobs: BlobStore.Interface) => (podId: string, artifactId: string, version: number) =>
+		Effect.gen(function* () {
+			const found = yield* artifactIn(podId, artifactId);
+			if (!found) return undefined;
+			return yield* atVersionIn(blobs)(found, version);
+		});
 
 /** A version's content as kept in the blob store. */
 interface StoredContent {

@@ -1,5 +1,27 @@
+import {
+	PAGE_CONTENT_POLICY,
+	PAGE_HEIGHT_MESSAGE,
+	PAGE_HEIGHT_REPORT,
+	type PageTheme,
+	pageThemeCss,
+	withLeadingTags,
+} from "@sugabots/contracts/artifact-pages";
 import { cn } from "cn";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+	type CSSProperties,
+	createContext,
+	type ReactNode,
+	type RefObject,
+	useContext,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
+import { type PageAt, usePageAddress } from "@/lib/artifacts.ts";
+import { Alert } from "@/ui/alert.tsx";
+import { Button } from "@/ui/button.tsx";
 
 /**
  * A bot-written HTML page, shown so that nothing in it can act as the viewer.
@@ -7,11 +29,19 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
  * The page is written by a model, and a model can be steered by anything it
  * read, so it is treated as hostile. `sandbox` without `allow-same-origin`
  * gives the frame an opaque origin: its scripts run, but cannot read the app's
- * cookies or storage or call the API as the viewer. The policy below then
- * stops it loading or sending anything over the network, other than fetching
- * scripts from one CDN. A frame can still navigate itself, which could carry
- * what the page holds out in a URL; that is the page's own content, nothing
- * of the viewer's.
+ * cookies or storage or call the API as the viewer. `PAGE_CONTENT_POLICY`
+ * then stops it loading or sending anything over the network, other than
+ * fetching scripts from one CDN.
+ *
+ * Given `at`, and inside the app, the page is loaded from the installation's
+ * content origin when one is set: an origin of its own, apart from the app's
+ * site and process. The frame's `csp` attribute asks for the page's policy,
+ * which Chromium then holds any document in the frame to, so a page that
+ * navigates itself elsewhere is refused there. Otherwise, as in a preview, the
+ * page is written into the frame, where it can still navigate itself away.
+ * Neither way can stop a running page from leaking what it holds, by
+ * navigating or over WebRTC: that is the page's own content, nothing of the
+ * viewer's.
  *
  * The page is given the app's colour tokens and theme, on a transparent
  * ground, so one that uses them looks like part of the app (see
@@ -23,6 +53,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 export function HtmlFrame({
 	html,
 	title,
+	at,
 	fitHeight = false,
 	maxHeight = FIT_HEIGHT_PX.max,
 	onPageHeight,
@@ -30,6 +61,8 @@ export function HtmlFrame({
 }: {
 	html: string;
 	title: string;
+	/** Which page this is, to load it from the content origin. */
+	at?: PageAt;
 	fitHeight?: boolean;
 	/** In pixels; unbounded with `Infinity`. */
 	maxHeight?: number;
@@ -40,6 +73,7 @@ export function HtmlFrame({
 	const frame = useRef<HTMLIFrameElement>(null);
 	const [pageHeight, setPageHeight] = useState<number>(FIT_HEIGHT_PX.min);
 	const theme = useAppTheme();
+	const fromContentOrigin = useContext(PagesFromContentOrigin);
 
 	useEffect(() => {
 		if (!fitHeight) return;
@@ -47,7 +81,7 @@ export function HtmlFrame({
 			// The frame's origin is opaque, so it is told apart by its window.
 			if (event.source !== frame.current?.contentWindow) return;
 			const reported = (event.data as { type?: unknown; height?: unknown } | null) ?? {};
-			if (reported.type !== HEIGHT_MESSAGE || typeof reported.height !== "number") return;
+			if (reported.type !== PAGE_HEIGHT_MESSAGE || typeof reported.height !== "number") return;
 			setPageHeight(Math.max(FIT_HEIGHT_PX.min, Math.ceil(reported.height)));
 		}
 		window.addEventListener("message", onMessage);
@@ -58,25 +92,126 @@ export function HtmlFrame({
 		if (fitHeight) onPageHeight?.(pageHeight);
 	}, [fitHeight, pageHeight, onPageHeight]);
 
-	const page = fitHeight ? withHeightReport(html) : html;
-	return (
+	const height = fitHeight ? { height: Math.min(pageHeight, maxHeight) } : undefined;
+	const classes = cn("block w-full border-0 bg-transparent", className);
+	const written = (
 		<iframe
 			ref={frame}
 			title={title}
-			srcDoc={withLeadingTags(page, `${POLICY_TAG}${appThemeSheet(theme)}`)}
+			srcDoc={withLeadingTags(
+				fitHeight ? `${html}${PAGE_HEIGHT_REPORT}` : html,
+				`${POLICY_TAG}<style>${pageThemeCss(theme)}</style>`,
+			)}
 			sandbox="allow-scripts"
 			referrerPolicy="no-referrer"
 			loading="lazy"
-			style={fitHeight ? { height: Math.min(pageHeight, maxHeight) } : undefined}
-			className={cn("block w-full border-0 bg-transparent", className)}
+			style={height}
+			className={classes}
 		/>
 	);
+	if (!fromContentOrigin || !at) return written;
+	return (
+		<AddressedPage
+			at={at}
+			html={html}
+			written={written}
+			placeholderStyle={height ?? { height: FIT_HEIGHT_PX.min }}
+			className={classes}
+		>
+			{(url) => (
+				<iframe
+					ref={frame}
+					title={title}
+					src={`${url}#${encodeURIComponent(JSON.stringify(theme))}`}
+					sandbox="allow-scripts"
+					referrerPolicy="no-referrer"
+					style={height}
+					className={classes}
+					// Not yet in React's types: Chromium's embedded enforcement.
+					{...{ csp: PAGE_CONTENT_POLICY }}
+				/>
+			)}
+		</AddressedPage>
+	);
+}
+
+/**
+ * Whether pages may be loaded from the content origin, which takes the API to
+ * hand out their addresses: on in the app, off in a preview with no API.
+ */
+export const PagesFromContentOrigin = createContext(false);
+
+/**
+ * The page at the address the API gives out for it; `written` when no content
+ * origin is set. Nothing is shown in its place while the address is asked
+ * for, and only a way to ask again if it can't be had, so a page is never
+ * shown the weaker way when the stronger one is set up.
+ *
+ * An address is good for minutes and a new one reloads the frame, so each
+ * frame asks for its own once the page comes into view, and again only when
+ * the page's content changes.
+ */
+function AddressedPage({
+	at,
+	html,
+	written,
+	placeholderStyle,
+	className,
+	children,
+}: {
+	at: PageAt;
+	html: string;
+	written: ReactNode;
+	placeholderStyle: CSSProperties;
+	className: string;
+	children: (url: string) => ReactNode;
+}) {
+	const frameId = useId();
+	const [shown, setShown] = useState({ html, revision: 0 });
+	if (shown.html !== html) setShown({ html, revision: shown.revision + 1 });
+	const placeholder = useRef<HTMLDivElement>(null);
+	const seen = useSeen(placeholder);
+	const address = usePageAddress(at, { load: `${frameId}:${shown.revision}`, enabled: seen });
+
+	if (address.data) return address.data.url === null ? written : children(address.data.url);
+	if (address.isError) {
+		return (
+			<div
+				style={placeholderStyle}
+				className={cn(className, "flex flex-col items-center justify-center gap-3")}
+			>
+				<Alert>This page couldn't be loaded.</Alert>
+				<Button
+					variant="secondary"
+					size="sm"
+					disabled={address.isFetching}
+					onClick={() => void address.refetch()}
+				>
+					Try again
+				</Button>
+			</div>
+		);
+	}
+	return <div ref={placeholder} style={placeholderStyle} className={className} />;
+}
+
+/** Whether `element` has been on screen; once true, it stays true. */
+function useSeen(element: RefObject<HTMLElement | null>): boolean {
+	const [seen, setSeen] = useState(false);
+	useEffect(() => {
+		const observed = element.current;
+		if (seen || !observed) return;
+		const observer = new IntersectionObserver((entries) => {
+			if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+		});
+		observer.observe(observed);
+		return () => observer.disconnect();
+	}, [element, seen]);
+	return seen;
 }
 
 /** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a conversation. */
 export const FIT_HEIGHT_PX = { min: 120, max: 560 } as const;
-
-const HEIGHT_MESSAGE = "sugabots:frame-height";
 
 /**
  * The app's tokens a page is given as CSS variables of the same names, which
@@ -106,16 +241,11 @@ export const FRAME_TOKENS = [
 	"--font-mono",
 ] as const;
 
-interface AppTheme {
-	colorScheme: string;
-	tokens: string;
-}
-
 /**
  * The app's colour scheme and tokens, read from the root element and read
  * again when the theme there changes.
  */
-function useAppTheme(): AppTheme {
+function useAppTheme(): PageTheme {
 	const colorScheme = useSyncExternalStore(onRootThemeChange, rootColorScheme);
 	const [tokens] = useState(rootTokens);
 	return { colorScheme, tokens };
@@ -138,54 +268,9 @@ function rootTokens(): string {
 	);
 }
 
-/**
- * A stylesheet giving a page the app's tokens and theme. A frame is only
- * see-through when its `color-scheme` matches the app's, so that is set too.
- * It goes before the page's own styles, so a page can set its own.
- */
-function appThemeSheet({ colorScheme, tokens }: AppTheme): string {
-	return `<style>:root { color-scheme: ${colorScheme}; ${tokens} } html, body { background: transparent; } body { margin: 0; color: var(--body-foreground); font-family: var(--font-sans); }</style>`;
-}
-
-/** Inline code and styles, scripts from one CDN, and data the page embeds; nothing else fetched. */
-export const FRAME_CONTENT_POLICY = [
-	"default-src 'none'",
-	"script-src 'unsafe-inline' https://cdn.jsdelivr.net",
-	"style-src 'unsafe-inline'",
-	"img-src data: blob:",
-	"font-src data:",
-	"media-src data: blob:",
-	"form-action 'none'",
-].join("; ");
-
-const POLICY_TAG = `<meta http-equiv="Content-Security-Policy" content="${FRAME_CONTENT_POLICY}">`;
-
-/**
- * Tells the parent the page's height whenever it changes. The page could post
- * the same message itself, which can only resize its own frame.
- */
-const HEIGHT_REPORT = `<script>new ResizeObserver(() => parent.postMessage({ type: "${HEIGHT_MESSAGE}", height: document.documentElement.scrollHeight }, "*")).observe(document.documentElement);</script>`;
-
-/** `html` with the height report after it, where the page's own document is already parsed. */
-function withHeightReport(html: string): string {
-	return `${html}${HEIGHT_REPORT}`;
-}
+const POLICY_TAG = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CONTENT_POLICY}">`;
 
 /** `html` with the policy before anything else in it. */
 export function withContentPolicy(html: string): string {
 	return withLeadingTags(html, POLICY_TAG);
-}
-
-/**
- * `html` with `tags` before any of the page's own, so a policy among them
- * applies before anything else: the parser puts leading `<meta>` and `<style>`
- * tags in the head it opens. It is not looked for a `<head>` to go in, since
- * the page could hide one in a comment. They go after a doctype rather than
- * before, which would put the page in quirks mode.
- */
-function withLeadingTags(html: string, tags: string): string {
-	const doctype = /^<!doctype[^>]*>/i.exec(html.trimStart());
-	if (!doctype) return `${tags}${html}`;
-	const rest = html.trimStart().slice(doctype[0].length);
-	return `${doctype[0]}${tags}${rest}`;
 }

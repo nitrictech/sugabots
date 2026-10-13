@@ -332,7 +332,11 @@ export function ArtifactStageView({
 			}
 			onClose={onClose}
 		>
-			<kind.Full title={artifact.title} content={artifact.content} />
+			<kind.Full
+				title={artifact.title}
+				content={artifact.content}
+				at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
+			/>
 			{deletion && (
 				<DeleteDialog
 					open={confirmingDelete}

@@ -37,6 +37,7 @@ import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
 import { usageRoutes } from "../routes/usage/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
+import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
 import type { HttpServices } from "./services.ts";
@@ -101,13 +102,16 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	),
 	betterAuthRoutes,
 	desktopViewerRoutes,
+	contentPageRoutes,
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the
 	// router hands to it per request rather than capturing it once.
 	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
 	Layer.provide(
 		HttpRouter.middleware(
-			Effect.map(Installation.Service, ({ trustedOrigins }) => everyRequest(trustedOrigins)),
+			Effect.map(Installation.Service, ({ trustedOrigins, contentOrigin }) =>
+				everyRequest(trustedOrigins, contentOrigin),
+			),
 			{ global: true },
 		),
 	),
@@ -144,7 +148,7 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 }
 
 /** What happens to every request, the outermost first. */
-function everyRequest(origins: readonly string[]) {
+function everyRequest(origins: readonly string[], contentOrigin: string | undefined) {
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
 		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
@@ -153,9 +157,14 @@ function everyRequest(origins: readonly string[]) {
 	const cookieOrigin = requireCookieOrigin(origins);
 	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
 	// send Authorization, but the token issuance header is not exposed to pages.
+	const contentHostOnlyPages = onlyPagesOnContentHost(contentOrigin);
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
-		cors(
-			serverTiming(defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect))))),
+		contentHostOnlyPages(
+			cors(
+				serverTiming(
+					defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect)))),
+				),
+			),
 		);
 }
 

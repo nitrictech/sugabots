@@ -75,7 +75,13 @@ function ArtifactCard({
 			? "deleted"
 			: "failed";
 	return (
-		<ArtifactCardView artifact={artifact} botName={botName} content={content} onOpen={onOpen} />
+		<ArtifactCardView
+			podId={podId}
+			artifact={artifact}
+			botName={botName}
+			content={content}
+			onOpen={onOpen}
+		/>
 	);
 }
 
@@ -89,11 +95,13 @@ const COLLAPSED_WIDTH = "max-w-[560px]";
  * shows it in place, and has a way to open it large.
  */
 export function ArtifactCardView({
+	podId,
 	artifact,
 	botName,
 	content,
 	onOpen,
 }: {
+	podId: string;
 	artifact: WrittenArtifact;
 	botName: string;
 	/**
@@ -179,7 +187,14 @@ export function ArtifactCardView({
 					Open
 				</Button>
 			</div>
-			{showsContent && <kind.Inline title={artifact.title} content={content} onOpen={onOpen} />}
+			{showsContent && (
+				<kind.Inline
+					title={artifact.title}
+					content={content}
+					at={{ podId, artifactId: artifact.artifactId, version: artifact.version }}
+					onOpen={onOpen}
+				/>
+			)}
 		</article>
 	);
 }
