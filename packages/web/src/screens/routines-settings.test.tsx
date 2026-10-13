@@ -262,7 +262,9 @@ describe("the workspace's routines", () => {
 			await screen.findByText(new RegExp(`/hooks/routines/${webhook.routine.id}$`)),
 		).toBeDefined();
 		const secret = await screen.findByLabelText("Signing secret");
-		expect((secret as HTMLInputElement).value).toBe("");
+		await waitFor(() =>
+			expect((secret as HTMLInputElement).value).toBe("whsec_0123456789abcdefghijklmnop"),
+		);
 	});
 
 	it("makes a webhook with the secret its sender made, however short", async () => {
@@ -342,7 +344,7 @@ describe("the workspace's routines", () => {
 		);
 	});
 
-	it("leaves a webhook without a secret when its secret is removed", async () => {
+	it("leaves a webhook without a secret when its secret is cleared", async () => {
 		const webhook: WorkspaceRoutine = {
 			...morningBrief,
 			routine: {
@@ -358,7 +360,12 @@ describe("the workspace's routines", () => {
 		mount(routinePage(webhook));
 		await openTrigger();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+		const secret = await screen.findByLabelText("Signing secret");
+		await waitFor(() =>
+			expect((secret as HTMLInputElement).value).toBe("whsec_0123456789abcdefghijklmnop"),
+		);
+		fireEvent.change(secret, { target: { value: "" } });
+		fireEvent.blur(secret);
 
 		await waitFor(() =>
 			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith({
@@ -371,7 +378,7 @@ describe("the workspace's routines", () => {
 		).toBeDefined();
 	});
 
-	it("saves Slack's signing secret in place of the one it had", async () => {
+	it("saves Slack's signing secret pasted over the one it had once the field is left", async () => {
 		const slack: WorkspaceRoutine = {
 			...morningBrief,
 			routine: {
@@ -391,10 +398,12 @@ describe("the workspace's routines", () => {
 
 		expect(await screen.findByText(/Request URL, and paste its Signing Secret\./)).toBeDefined();
 		const secret = await screen.findByLabelText("Signing secret");
-		expect((secret as HTMLInputElement).value).toBe("");
-		expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+		await waitFor(() =>
+			expect((secret as HTMLInputElement).value).toBe("whsec_0123456789abcdefghijklmnop"),
+		);
 		fireEvent.change(secret, { target: { value: " 8f742231b10e8888abcd99yyyzzz85a5 " } });
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
+		fireEvent.blur(secret);
 
 		await waitFor(() =>
 			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith({
@@ -403,9 +412,10 @@ describe("the workspace's routines", () => {
 			}),
 		);
 		await waitFor(() =>
-			expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true),
+			expect((screen.getByLabelText("Signing secret") as HTMLInputElement).value).toBe(
+				"8f742231b10e8888abcd99yyyzzz85a5",
+			),
 		);
-		expect((secret as HTMLInputElement).value).toBe("");
 	});
 
 	it("asks a generic webhook for a secret long enough to be hard to guess, and says so", async () => {
@@ -422,11 +432,17 @@ describe("the workspace's routines", () => {
 
 		const key = await screen.findByLabelText("Key");
 		fireEvent.change(key, { target: { value: "sk_rt_short" } });
+		fireEvent.blur(key);
 		expect(screen.getByText("A secret needs at least 16 characters.")).toBeDefined();
-		expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
 		fireEvent.change(key, { target: { value: "sk_rt_0123456789abcdef" } });
 		expect(screen.queryByText("A secret needs at least 16 characters.")).toBeNull();
-		expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false);
+		fireEvent.blur(key);
+		await waitFor(() =>
+			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith(
+				expect.objectContaining({ payload: { secret: "sk_rt_0123456789abcdef" } }),
+			),
+		);
 	});
 
 	it("shows a routine's latest runs: how each went, what started it, and how long it took", async () => {
@@ -690,11 +706,10 @@ describe("the workspace's routines", () => {
 		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
 
 		await openTrigger();
-		fireEvent.change(await screen.findByLabelText("Token"), {
-			target: { value: "rtb_0123456789abcdefghijklmnop" },
-		});
+		const token = await screen.findByLabelText("Token");
+		fireEvent.change(token, { target: { value: "rtb_0123456789abcdefghijklmnop" } });
 		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
-		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		fireEvent.blur(token);
 		await waitFor(() =>
 			expect(
 				screen

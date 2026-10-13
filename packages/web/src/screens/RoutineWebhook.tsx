@@ -14,7 +14,6 @@ import { type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useRoutineActions, useRoutineSecret } from "@/lib/routines.ts";
-import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import {
@@ -228,13 +227,14 @@ export function WebhookGroups({
 				<SourceRow auth={auth} onChange={onChangeAuth} />
 			</SettingsGroup>
 			{canManage && saved ? (
-				// Keyed by whether it has a secret, so what was typed clears once that changes.
+				// Keyed by the saved secret, so the field starts again from a newly saved one.
 				<SecretGroup
-					key={saved.kind}
+					key={saved.kind === "set" ? saved.secret : saved.kind}
 					placed={placed}
 					auth={auth}
 					onChangeAuth={onChangeAuth}
 					hasSecret={saved.kind !== "none"}
+					savedSecret={saved.kind === "set" ? saved.secret : ""}
 				/>
 			) : (
 				<SettingsGroup note={authNote(auth)}>
@@ -459,85 +459,79 @@ function CommittedFieldRow({
 }
 
 /**
- * An existing routine's auth and secret, for someone who manages routines,
- * with Remove and Save under them. The secret's field starts blank whether or
- * not one is saved, so a saved one is never shown; Save replaces it with what
- * is typed, and Remove clears it, so the address alone runs the routine.
+ * An existing routine's auth and secret, for someone who manages routines.
+ * The secret's field starts with the saved secret, hidden until Show, or blank
+ * when there is none to show, which an old bearer token kept only as a hash
+ * has. What is typed saves when the field is left or Enter is pressed, and
+ * Escape puts the saved one back. Leaving it blank removes a shown secret, so
+ * the address alone runs the routine.
  */
 function SecretGroup({
 	placed,
 	auth,
 	onChangeAuth,
 	hasSecret,
+	savedSecret,
 }: {
 	placed: PlacedRoutine;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
 	hasSecret: boolean;
+	/** Blank when the routine has none, or has only a hash of one. */
+	savedSecret: string;
 }) {
 	const actions = useRoutineActions();
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useState(savedSecret);
 	const next = draft.trim();
-	const savable = next !== "" && secretReady(auth, next) && !actions.rotateSecret.isPending;
-	const replace = (secret: string | null) =>
-		actions.rotateSecret.mutate(
-			{ agentId: placed.agent.id, routineId: placed.routine.id, secret },
-			{ onSuccess: () => setDraft("") },
-		);
-	const save = () => {
-		if (savable) replace(next);
-	};
+
+	function commit() {
+		if (next === savedSecret || !secretReady(auth, next)) return;
+		actions.rotateSecret.mutate({
+			agentId: placed.agent.id,
+			routineId: placed.routine.id,
+			secret: next === "" ? null : next,
+		});
+	}
+
 	return (
-		<>
-			<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
-				<AuthRows auth={auth} onChange={onChangeAuth} />
-				<SecretField
-					auth={auth}
-					value={draft}
-					onChange={setDraft}
-					onEnter={save}
-					error={
-						actions.rotateSecret.error
-							? failureMessage(actions.rotateSecret.error)
-							: secretReady(auth, next)
-								? undefined
-								: SECRET_TOO_SHORT_NOTE
-					}
-				/>
-			</SettingsGroup>
-			<div className="flex justify-end gap-2">
-				{hasSecret && (
-					<Button
-						variant="secondary"
-						disabled={actions.rotateSecret.isPending}
-						onClick={() => replace(null)}
-					>
-						Remove
-					</Button>
-				)}
-				<Button disabled={!savable} onClick={save}>
-					{actions.rotateSecret.isPending ? "Saving…" : "Save"}
-				</Button>
-			</div>
-		</>
+		<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
+			<AuthRows auth={auth} onChange={onChangeAuth} />
+			<SecretField
+				auth={auth}
+				value={draft}
+				onChange={setDraft}
+				onCommit={commit}
+				onRevert={() => setDraft(savedSecret)}
+				error={
+					actions.rotateSecret.error
+						? failureMessage(actions.rotateSecret.error)
+						: secretReady(auth, next)
+							? undefined
+							: SECRET_TOO_SHORT_NOTE
+				}
+			/>
+		</SettingsGroup>
 	);
 }
 
 /**
  * A secret as a field, typed or pasted in, such as the signing secret a
- * sender made. It shows hidden until Show.
+ * sender made. It shows hidden until Show, and can be copied. `onCommit`
+ * runs when it is left or Enter is pressed, and `onRevert` on Escape.
  */
 function SecretField({
 	auth,
 	value,
 	onChange,
-	onEnter,
+	onCommit,
+	onRevert,
 	error,
 }: {
 	auth: WebhookAuth;
 	value: string;
 	onChange: (value: string) => void;
-	onEnter?: () => void;
+	onCommit?: () => void;
+	onRevert?: () => void;
 	error?: string;
 }) {
 	const id = useId();
@@ -552,8 +546,10 @@ function SecretField({
 					type={shown ? "text" : "password"}
 					value={value}
 					onChange={(event) => onChange(event.target.value)}
+					onBlur={onCommit}
 					onKeyDown={(event) => {
-						if (event.key === "Enter") onEnter?.();
+						if (event.key === "Enter") event.currentTarget.blur();
+						if (event.key === "Escape") onRevert?.();
 					}}
 					autoComplete="off"
 					spellCheck={false}
@@ -561,9 +557,12 @@ function SecretField({
 					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-[13px] text-foreground outline-none placeholder:font-sans placeholder:text-[14.5px] placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 				{value !== "" && (
-					<IconButton label={shown ? "Hide" : "Show"} size="lg" onClick={() => setShown(!shown)}>
-						{shown ? <EyeOff /> : <Eye />}
-					</IconButton>
+					<>
+						<IconButton label={shown ? "Hide" : "Show"} size="lg" onClick={() => setShown(!shown)}>
+							{shown ? <EyeOff /> : <Eye />}
+						</IconButton>
+						<CopyIconButton label={`Copy ${label.toLowerCase()}`} text={value.trim()} size="lg" />
+					</>
 				)}
 			</div>
 			{error && (
