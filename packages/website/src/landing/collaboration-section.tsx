@@ -1,5 +1,4 @@
-import { BotAvatar } from "@/components/bot-avatar";
-import { ChatBubble, ChatMessage, ChatNote } from "@/components/chat";
+import { type ChatAuthor, ChatMessage, ChatText, ChatToolLine } from "@/components/chat";
 import { Emphasis } from "@/components/emphasis";
 import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Section } from "@/components/section";
@@ -14,6 +13,11 @@ function Amount({ children }: { children: string }) {
 		</span>
 	);
 }
+
+const authors = {
+	tripPlanner: { kind: "bot", name: "Trip Planner", look: bots.tripPlanner },
+	budgetKeeper: { kind: "bot", name: "Budget Keeper", look: bots.budgetKeeper },
+} as const satisfies Record<string, ChatAuthor>;
 
 export function CollaborationSection() {
 	return (
@@ -34,26 +38,20 @@ export function CollaborationSection() {
 				<MotionCard variants={riseIn} className="rounded-3xl">
 					{/* The two bots' exchange plays out once the card is in place. */}
 					<Reveal stagger={0.6} delay={0.6}>
-						<CardContent className="flex flex-col gap-3">
-							<ChatNote>Trip Planner with Budget Keeper</ChatNote>
+						<CardContent className="flex flex-col gap-4">
+							<p className="text-sm font-semibold">Collaboration with Budget Keeper</p>
 							<RevealItem>
-								<ChatMessage side="end" avatar={<BotAvatar size="sm" {...bots.tripPlanner} />}>
-									<ChatBubble tone={bots.tripPlanner.color} side="end" size="sm">
-										Four seats at €176. Does that fit the Lisbon budget?
-									</ChatBubble>
+								<ChatMessage author={authors.tripPlanner} time="7:13pm">
+									<ChatText>Four seats at $176. Does that fit the Melbourne budget?</ChatText>
 								</ChatMessage>
 							</RevealItem>
-							<RevealItem className="pl-9 text-xs font-medium text-muted-foreground">
-								Used Sheets for 3s
-							</RevealItem>
 							<RevealItem>
-								<ChatMessage side="start" avatar={<BotAvatar size="sm" {...bots.budgetKeeper} />}>
-									<ChatBubble tone={bots.budgetKeeper.color} side="start" size="sm">
-										Pot has <Amount>€924</Amount>. That leaves <Amount>€220</Amount> after flights.
-									</ChatBubble>
-									<ChatBubble tone={bots.budgetKeeper.color} side="start" size="sm">
-										Fine by me. Hotel needs to stay under €150 a night.
-									</ChatBubble>
+								<ChatMessage author={authors.budgetKeeper} time="7:13pm">
+									<ChatToolLine>Used Sheets for 3s</ChatToolLine>
+									<ChatText>
+										Pot has <Amount>$924</Amount>. That leaves <Amount>$220</Amount> after flights.
+									</ChatText>
+									<ChatText>Fine by me. Hotel needs to stay under $150 a night.</ChatText>
 								</ChatMessage>
 							</RevealItem>
 						</CardContent>

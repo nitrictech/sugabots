@@ -1,10 +1,9 @@
 import { cn } from "cn";
-import { CheckIcon, PlugIcon, XIcon } from "lucide-react";
+import { PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { BotAvatar } from "@/components/bot-avatar";
+import { type ApprovalDecision, ChatApproval, ChatMessage, ChatToolLine } from "@/components/chat";
 import { riseIn } from "@/components/reveal";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cast } from "@/docs/cast";
 
@@ -35,7 +34,10 @@ const outcomeText: Record<Outcome, string> = {
 	runs: "The tool is allowed, so it runs straight away.",
 };
 
-type Decision = "pending" | "allowed" | "denied";
+const decisionOutcomes = {
+	allowed: "Allowed by you",
+	denied: `Denied by you. ${cast.inboxSorter.name} won't go ahead.`,
+} as const;
 
 function Choice<T extends string>({
 	label,
@@ -77,7 +79,7 @@ function Choice<T extends string>({
 export function ApprovalPlayground() {
 	const [setting, setSetting] = useState<ApprovalSetting>("allow");
 	const [tool, setTool] = useState<ToolChoice>("change");
-	const [decision, setDecision] = useState<Decision>("pending");
+	const [decision, setDecision] = useState<ApprovalDecision>("pending");
 	const outcome = outcomeOf(setting);
 	const bot = cast.inboxSorter;
 	const toolLabels = { read: tools.read.label, change: tools.change.label };
@@ -115,44 +117,21 @@ export function ApprovalPlayground() {
 					className="flex min-h-48 flex-col justify-center gap-4 px-5 py-5"
 				>
 					{outcome === "waits" && (
-						<div className="flex max-w-md flex-col gap-3 rounded-3xl rounded-tl-md bg-muted p-4">
-							<span className="flex items-center gap-2 text-sm font-semibold">
-								<BotAvatar size="sm" {...bot.look} />
-								{bot.name} {tools[tool].changes ? "wants to make a change" : "wants to use a tool"}
-							</span>
-							<span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-								<PlugIcon className="size-3.5" />
-								{tools[tool].name}
-							</span>
-							{decision === "pending" ? (
-								<span className="flex gap-2">
-									<Button variant="ghost" size="sm" onClick={() => setDecision("denied")}>
-										Deny
-									</Button>
-									<Button variant="brand" size="sm" onClick={() => setDecision("allowed")}>
-										Allow
-									</Button>
-								</span>
-							) : (
-								<span className="flex items-center gap-1.5 text-sm font-semibold">
-									{decision === "allowed" ? (
-										<>
-											<CheckIcon className="size-4 text-green-600" /> Done
-										</>
-									) : (
-										<>
-											<XIcon className="size-4 text-rose-600" /> Denied by You
-										</>
-									)}
-								</span>
-							)}
-						</div>
+						<ChatMessage author={bot}>
+							<ChatApproval
+								who={`${bot.name} wants to ${tools[tool].changes ? "make a change" : "use a tool"}`}
+								action={tools[tool].name}
+								mark={<PlugIcon className="size-3.5" />}
+								decision={decision}
+								outcomes={decisionOutcomes}
+								onDecide={setDecision}
+							/>
+						</ChatMessage>
 					)}
 					{outcome === "runs" && (
-						<p className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-							<BotAvatar size="xs" {...bot.look} />
-							Used {tools[tool].name} for 2s
-						</p>
+						<ChatMessage author={bot}>
+							<ChatToolLine>Used {tools[tool].name} for 2s</ChatToolLine>
+						</ChatMessage>
 					)}
 					<p className="text-pretty">{outcomeText[outcome]}</p>
 				</motion.div>

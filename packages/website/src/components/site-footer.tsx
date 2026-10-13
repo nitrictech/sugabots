@@ -8,6 +8,7 @@ import { siteLinks } from "@/site-links";
 /** The footer's content width, matched to the page above it. */
 const footerWidth = {
 	narrow: "max-w-3xl",
+	medium: "max-w-5xl",
 	wide: "max-w-7xl",
 };
 

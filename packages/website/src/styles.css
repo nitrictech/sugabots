@@ -32,6 +32,7 @@
 	--color-ring: var(--ring);
 	--color-brand: var(--brand);
 	--color-brand-foreground: var(--brand-foreground);
+	--color-link: var(--link);
 
 	--radius-sm: calc(var(--radius) * 0.6);
 	--radius-md: calc(var(--radius) * 0.8);
@@ -66,6 +67,8 @@
 	--ring: var(--color-zinc-400);
 	--brand: var(--color-indigo-600);
 	--brand-foreground: var(--color-white);
+	/* The app's link colour, for the demo chats' collaboration lines. */
+	--link: #4f5bd5;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -90,6 +93,7 @@
 		--border: var(--color-zinc-800);
 		--input: var(--color-zinc-700);
 		--ring: var(--color-zinc-600);
+		--link: #aebbff;
 	}
 }
 

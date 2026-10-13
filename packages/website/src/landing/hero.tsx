@@ -2,7 +2,6 @@ import { ArrowRightIcon, ArrowUpRightIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { trackCallToActionClick } from "@/analytics";
 import { accentText } from "@/components/accent";
-import { BotCrowd } from "@/components/bot-crowd";
 import { Emphasis } from "@/components/emphasis";
 import { Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { buttonVariants } from "@/components/ui/button";
@@ -13,7 +12,6 @@ export function Hero() {
 	return (
 		<section className="pt-12 pb-10">
 			<Reveal delay={0.2} className="flex flex-col gap-5">
-				<BotCrowd />
 				<motion.h1
 					variants={riseIn}
 					className="text-5xl leading-13 font-black tracking-tight text-balance sm:text-6xl sm:leading-16"

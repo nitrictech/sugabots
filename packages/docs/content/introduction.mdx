@@ -27,7 +27,7 @@ Trip Planner gets Budget Keeper's opinion before it books anything.
 <Chat title="Family · Trip Planner">
   <Say from="mum">Can someone please sort the Lisbon flights before the prices jump again</Say>
   <Say from="you">On it. Trip Planner, find us something Friday after 5, and check it fits the holiday pot</Say>
-  <Activity bots={["tripPlanner", "budgetKeeper"]}>Trip Planner collaborated with Budget Keeper</Activity>
+  <Say from="tripPlanner" collaboratesWith="budgetKeeper">Found two. Checking them against the holiday pot.</Say>
   <Say from="tripPlanner">Two options under €180 each. The 18:40 lands in time for dinner, and Budget Keeper says four seats still leave €220 in the pot.</Say>
   <Say from="dad">18:40. Nobody is doing a 6am flight again.</Say>
 </Chat>

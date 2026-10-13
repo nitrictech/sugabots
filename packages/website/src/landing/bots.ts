@@ -8,4 +8,7 @@ export const bots = {
 	researcher: { color: "ice", face: "arc" },
 	inboxSorter: { color: "yellow", face: "pill" },
 	journal: { color: "teal", face: "dot" },
+	analyst: { color: "green", face: "square" },
+	billSplitter: { color: "orange", face: "wink" },
+	daybook: { color: "purple", face: "wink" },
 } satisfies Record<string, BotLook>;

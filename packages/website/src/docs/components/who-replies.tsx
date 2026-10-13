@@ -1,8 +1,7 @@
 import { cn } from "cn";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { BotAvatar } from "@/components/bot-avatar";
-import { ChatBubble, ChatMessage } from "@/components/chat";
+import { ChatMessage, ChatText } from "@/components/chat";
 import { riseIn } from "@/components/reveal";
 import { Card } from "@/components/ui/card";
 import { cast } from "@/docs/cast";
@@ -69,21 +68,17 @@ export function WhoReplies() {
 					animate="visible"
 					exit="hidden"
 					variants={{ visible: { transition: { staggerChildren: 0.35 } } }}
-					className="flex min-h-56 flex-col gap-3 px-4 py-5 sm:px-6"
+					className="flex min-h-56 flex-col gap-4 px-4 py-5 sm:px-6"
 				>
 					<motion.div variants={riseIn}>
-						<ChatMessage side="end">
-							<ChatBubble tone="self" side="end">
-								{scenario.message}
-							</ChatBubble>
+						<ChatMessage author={cast.you}>
+							<ChatText>{scenario.message}</ChatText>
 						</ChatMessage>
 					</motion.div>
 					<motion.div variants={riseIn}>
 						{scenario.replier ? (
-							<ChatMessage side="start" avatar={<BotAvatar {...scenario.replier.look} />}>
-								<ChatBubble tone={scenario.replier.look.color} side="start">
-									On it!
-								</ChatBubble>
+							<ChatMessage author={scenario.replier}>
+								<ChatText>On it!</ChatText>
 							</ChatMessage>
 						) : (
 							<p className="text-center text-sm font-semibold text-muted-foreground">
