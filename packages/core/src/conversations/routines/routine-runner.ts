@@ -9,7 +9,12 @@ import { ThreadRepository } from "../threads/repository.ts";
 import { Turns } from "../turns/turns.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import { RoutineRepository } from "./repository.ts";
-import type { RoutineNotFound, RoutineTriggerConflict, RoutineTriggerRejected } from "./routine.ts";
+import {
+	type RoutineNotFound,
+	type RoutineTriggerConflict,
+	type RoutineTriggerRejected,
+	scheduleOf,
+} from "./routine.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./schedule.ts";
 
@@ -47,11 +52,11 @@ export const make = Effect.gen(function* () {
 						const now = yield* DateTime.nowAsDate;
 						const due = yield* repository.lockNextDue(now);
 						if (!due) return undefined;
-						if (!due.cronExpression || !due.cronTimezone) {
-							return yield* Effect.die(new Error("Cron Routine has incomplete schedule data"));
+						if (!due.cronTimezone) {
+							return yield* Effect.die(new Error("Scheduled Routine has no time zone"));
 						}
 						const occurrence = yield* latestMissedAndNextOccurrence(
-							due.cronExpression,
+							scheduleOf(due),
 							due.cronTimezone,
 							now,
 						);

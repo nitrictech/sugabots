@@ -211,7 +211,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Weekday briefing",
 				instructions: "Summarise the overnight changes.",
-				trigger: { kind: "cron", expression: "0 9 * * 1-5", timezone: "Australia/Sydney" },
+				trigger: {
+					kind: "cron",
+					schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
+					timezone: "Australia/Sydney",
+				},
 			},
 		);
 		expect(cron.secret).toBeNull();
@@ -341,13 +345,47 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		).toMatchObject({ kind: "run" });
 	});
 
+	it("keeps a schedule picked by its parts, and works out when it runs next", async () => {
+		const schedule = {
+			repeat: "weekly" as const,
+			every: 2,
+			days: ["mon" as const, "thu" as const],
+			times: [9 * 60, 17 * 60 + 30],
+			startsOn: "2026-10-05",
+		};
+		const created = await routines.create(
+			{ agentId },
+			{
+				name: "Fortnightly",
+				instructions: "Review the fortnight.",
+				trigger: { kind: "cron", schedule, timezone: "Australia/Sydney" },
+			},
+		);
+
+		expect(created.routine.trigger).toEqual({
+			kind: "cron",
+			schedule,
+			timezone: "Australia/Sydney",
+			nextScheduledAt: expect.any(String),
+		});
+		const [stored] = await onDatabase((db) =>
+			db.select().from(routine).where(eq(routine.id, created.routine.id)),
+		);
+		expect(stored?.cronExpression).toBeNull();
+		expect(stored?.nextScheduledAt?.getTime()).toBeGreaterThan(Date.now());
+	});
+
 	it("turns a scheduled routine into a webhook, and back", async () => {
 		const created = await routines.create(
 			{ agentId },
 			{
 				name: "Switching",
 				instructions: "Handle it.",
-				trigger: { kind: "cron", expression: "0 9 * * *", timezone: "UTC" },
+				trigger: {
+					kind: "cron",
+					schedule: { repeat: "cron", expression: "0 9 * * *" },
+					timezone: "UTC",
+				},
 			},
 		);
 		const addressed = { agentId, routineId: created.routine.id };
@@ -357,9 +395,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(webhook.secret).toMatch(/^rtb_/);
 
 		const scheduled = await routines.update(addressed, {
-			trigger: { kind: "cron", expression: "0 10 * * *", timezone: "UTC" },
+			trigger: {
+				kind: "cron",
+				schedule: { repeat: "cron", expression: "0 10 * * *" },
+				timezone: "UTC",
+			},
 		});
-		expect(scheduled.routine.trigger).toMatchObject({ kind: "cron", expression: "0 10 * * *" });
+		expect(scheduled.routine.trigger).toMatchObject({
+			kind: "cron",
+			schedule: { repeat: "cron", expression: "0 10 * * *" },
+		});
 	});
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {
@@ -680,7 +725,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{
 				name: "Quarter hourly",
 				instructions: "Check recent activity.",
-				trigger: { kind: "cron", expression: "*/15 * * * *", timezone: "UTC" },
+				trigger: {
+					kind: "cron",
+					schedule: { repeat: "cron", expression: "*/15 * * * *" },
+					timezone: "UTC",
+				},
 			},
 		);
 		await onDatabase((db) =>

@@ -66,7 +66,12 @@ function routine(id: string, name: string, expression: string): Routine {
 		agentId: growthDesk.id,
 		name,
 		instructions: "Do the thing.",
-		trigger: { kind: "cron", expression, timezone: "Australia/Sydney", nextScheduledAt: null },
+		trigger: {
+			kind: "cron",
+			schedule: { repeat: "cron", expression },
+			timezone: "Australia/Sydney",
+			nextScheduledAt: null,
+		},
 		state: "enabled",
 		createdById: null,
 		createdAt: "2026-09-01T00:00:00.000Z",

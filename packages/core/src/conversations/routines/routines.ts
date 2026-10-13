@@ -6,6 +6,7 @@ import type {
 	Routine,
 	RoutineExecutionPage,
 	RoutineExecutionPageQuery,
+	RoutineSchedule,
 	RoutineUpdate,
 	RoutineWebhookChallenge,
 	WebhookAuth,
@@ -93,7 +94,7 @@ export interface Interface {
 	 */
 	readonly previewSchedule: (input: {
 		agentId: string;
-		expression: string;
+		schedule: RoutineSchedule;
 		timezone: string;
 	}) => Effect.Effect<Date[], AuthorizationDenied | InvalidRoutineSchedule, CurrentActor.Service>;
 	/**
@@ -185,7 +186,7 @@ export const make = Effect.gen(function* () {
 					const schedule =
 						input.trigger.kind === "cron" && state === "enabled"
 							? yield* nextOccurrence(
-									input.trigger.expression,
+									input.trigger.schedule,
 									input.trigger.timezone,
 									yield* DateTime.nowAsDate,
 								)
@@ -201,8 +202,7 @@ export const make = Effect.gen(function* () {
 						name: input.name,
 						instructions: input.instructions,
 						triggerKind: input.trigger.kind,
-						cronExpression: input.trigger.kind === "cron" ? input.trigger.expression : null,
-						cronTimezone: input.trigger.kind === "cron" ? input.trigger.timezone : null,
+						...scheduleColumns(input.trigger.kind === "cron" ? input.trigger : undefined),
 						nextScheduledAt: schedule,
 						...webhook.columns,
 						state,
@@ -234,7 +234,7 @@ export const make = Effect.gen(function* () {
 								? null
 								: scheduleChanged || reenabled
 									? yield* nextOccurrence(
-											trigger.expression,
+											trigger.schedule,
 											trigger.timezone,
 											yield* DateTime.nowAsDate,
 										)
@@ -255,8 +255,7 @@ export const make = Effect.gen(function* () {
 							state,
 							results: input.results ?? current.results,
 							triggerKind: trigger.kind,
-							cronExpression: trigger.kind === "cron" ? trigger.expression : null,
-							cronTimezone: trigger.kind === "cron" ? trigger.timezone : null,
+							...scheduleColumns(trigger.kind === "cron" ? trigger : undefined),
 							nextScheduledAt: schedule,
 							...webhook.columns,
 						});
@@ -300,14 +299,12 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		previewSchedule: ({ agentId, expression, timezone }) =>
+		previewSchedule: ({ agentId, schedule, timezone }) =>
 			operation(
 				"previewSchedule",
 				Effect.andThen(
 					authorization.agent(agentId, "routine.manage"),
-					Effect.flatMap(DateTime.nowAsDate, (now) =>
-						upcomingOccurrences(expression, timezone, now),
-					),
+					Effect.flatMap(DateTime.nowAsDate, (now) => upcomingOccurrences(schedule, timezone, now)),
 				),
 			),
 
@@ -359,6 +356,20 @@ export { routineStepsLayer as stepsLayer } from "./steps.ts";
 export interface Defined {
 	routine: Routine;
 	secret: string | null;
+}
+
+/**
+ * Where a scheduled routine's schedule is kept: a written cron expression as
+ * it was, a picked one as its parts. A routine with no schedule has neither.
+ */
+function scheduleColumns(
+	scheduled: { schedule: RoutineSchedule; timezone: string } | undefined,
+): Pick<schema.RoutineRow, "cronExpression" | "schedule" | "cronTimezone"> {
+	if (!scheduled) return { cronExpression: null, schedule: null, cronTimezone: null };
+	const { schedule, timezone } = scheduled;
+	return schedule.repeat === "cron"
+		? { cronExpression: schedule.expression, schedule: null, cronTimezone: timezone }
+		: { cronExpression: null, schedule, cronTimezone: timezone };
 }
 
 /** How a routine that is not a webhook checks its callers: it has none. */

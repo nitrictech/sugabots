@@ -1,4 +1,5 @@
 import type {
+	CalendarSchedule,
 	CollaborationStatus,
 	JsonValue,
 	MessageStatus,
@@ -45,7 +46,9 @@ export const routine = pgTable(
 		name: text("name").notNull(),
 		instructions: text("instructions").notNull(),
 		triggerKind: text("trigger_kind").$type<RoutineTriggerKind>().notNull(),
+		/** A schedule written as cron, kept as it was; a picked one is `schedule` instead. */
 		cronExpression: text("cron_expression"),
+		schedule: jsonb("schedule").$type<CalendarSchedule>(),
 		cronTimezone: text("cron_timezone"),
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		webhookAuth: jsonb("webhook_auth").$type<WebhookAuth>(),
@@ -75,7 +78,7 @@ export const routine = pgTable(
 			"routine_trigger_valid",
 			sql`(
 				${table.triggerKind} = 'cron'
-				and ${table.cronExpression} is not null
+				and (${table.cronExpression} is null) <> (${table.schedule} is null)
 				and ${table.cronTimezone} is not null
 				and ${table.webhookAuth} is null
 				and ${table.webhookSecret} is null
@@ -83,6 +86,7 @@ export const routine = pgTable(
 			) or (
 				${table.triggerKind} = 'webhook'
 				and ${table.cronExpression} is null
+				and ${table.schedule} is null
 				and ${table.cronTimezone} is null
 				and ${table.nextScheduledAt} is null
 				and ${table.webhookAuth} is not null

@@ -53,7 +53,7 @@ function placed(
 
 const cron = (expression: string): Routine["trigger"] => ({
 	kind: "cron",
-	expression,
+	schedule: { repeat: "cron", expression },
 	timezone: "UTC",
 	nextScheduledAt: null,
 });
@@ -97,7 +97,40 @@ const signups = placed(
 	{ kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
 	{ results: "keep_in_run" },
 );
-const everyRoutine = [overnight, morningBrief, churnReport, incidentIntake, slackMentions, signups];
+const standups = placed(8, "Standup notes", chief, personal, {
+	kind: "cron",
+	schedule: {
+		repeat: "weekly",
+		every: 1,
+		days: ["mon", "wed", "fri"],
+		times: [9 * 60, 13 * 60, 17 * 60],
+		startsOn: "2026-09-01",
+	},
+	timezone: "UTC",
+	nextScheduledAt: null,
+});
+const quarterClose = placed(9, "Quarter close", accountManager, revenue, {
+	kind: "cron",
+	schedule: {
+		repeat: "monthly",
+		every: 3,
+		dayOfMonth: "last",
+		times: [10 * 60],
+		startsOn: "2026-09-01",
+	},
+	timezone: "UTC",
+	nextScheduledAt: null,
+});
+const everyRoutine = [
+	overnight,
+	morningBrief,
+	churnReport,
+	incidentIntake,
+	slackMentions,
+	signups,
+	standups,
+	quarterClose,
+];
 
 const routinesAnswer = (items: WorkspaceRoutine[]) =>
 	http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items }));
@@ -122,10 +155,12 @@ export const List = meta.story({
 			{ name: "Workspace routines" },
 			{ timeout: 10_000 },
 		);
+		await expect(await within(list).findByText("Daily · 6:00, Growth Desk")).toBeInTheDocument();
+		await expect(within(list).getByText("Webhook, On-call")).toBeInTheDocument();
+		await expect(within(list).getByText("Mon Wed Fri · 3 times, Chief")).toBeInTheDocument();
 		await expect(
-			await within(list).findByText("Every day at 6:00, Growth Desk"),
+			within(list).getByText("Every 3 months · 10:00, Account Manager"),
 		).toBeInTheDocument();
-		await expect(within(list).getByText("When its address is called, On-call")).toBeInTheDocument();
 		await expect(within(list).getByText("Paused")).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("heading", { name: "Overnight outbound" }),
@@ -142,7 +177,7 @@ export const Scheduled = meta.story({
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Growth Desk · Revenue pod")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).toBeChecked();
-		await expect(canvas.getByRole("radio", { name: "Every day" })).toBeChecked();
+		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
 		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Delete routine" })).toBeInTheDocument();
 	},
@@ -242,6 +277,38 @@ export const RecentRuns = meta.story({
 	},
 });
 
+/** Several times on some days of the week: a row per time, each with a way to remove it, and room for more. */
+export const SeveralTimes = meta.story({
+	render: () => <StoryApp path={pageOf(standups)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("radio", { name: "Weekly" }, { timeout: 10_000 }),
+		).toBeChecked();
+		await expect(canvas.getAllByRole("status", { name: "Time" })).toHaveLength(3);
+		await expect(canvas.getAllByRole("button", { name: "Remove this time" })).toHaveLength(3);
+		await expect(canvas.getByRole("button", { name: "+ Add a time" })).toBeInTheDocument();
+		await expect(
+			canvas.getByText(
+				/Runs every week on Mon, Wed and Fri at 9:00, 13:00 and 17:00, .*UTC.* and posts/,
+			),
+		).toBeInTheDocument();
+	},
+});
+
+/** Every third month on its last day: Every and On the step through their values. */
+export const Monthly = meta.story({
+	render: () => <StoryApp path={pageOf(quarterClose)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("status", { name: "Every" }, { timeout: 10_000 }),
+		).toHaveTextContent("3 months");
+		await expect(canvas.getByRole("status", { name: "On the" })).toHaveTextContent("last day");
+		await expect(
+			canvas.getByText(/Runs every 3 months on the last day at 10:00/),
+		).toBeInTheDocument();
+	},
+});
+
 /** Paused: it says it runs only when asked, and Run now still works. */
 export const Paused = meta.story({
 	render: () => <StoryApp path={pageOf(churnReport)} />,
@@ -331,7 +398,7 @@ export const NewRoutine = meta.story({
 			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Not created yet")).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "Every day" })).toBeChecked();
+		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
 		await expect(canvas.getByText("9:00")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
 		await expect(canvas.queryByRole("switch", { name: "Runs on its own" })).toBeNull();
@@ -346,7 +413,7 @@ export const ChoosingDaysAndABot = meta.story({
 			await canvas.findByRole("radio", { name: "Weekly" }, { timeout: 10_000 }),
 		);
 		await userEvent.click(canvas.getByRole("checkbox", { name: "Friday" }));
-		await expect(canvas.getByText(/Runs Mondays and Fridays at 9:00/)).toBeInTheDocument();
+		await expect(canvas.getByText(/Runs every week on Mon and Fri at 9:00/)).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: /^Bot/ }));
 		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
 	},
