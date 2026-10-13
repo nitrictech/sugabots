@@ -424,9 +424,10 @@ const AT_END_SLACK_PX = 24;
 /**
  * A chat's messages in a scrolling window, opened at the latest of them and
  * kept there as more are added, like a reply after an approval, unless the
- * reader has scrolled up. A short chat sits at the foot of the window.
+ * reader has scrolled up. A short chat sits at the foot of the window. The
+ * window takes focus itself, so a keyboard can scroll a chat with no buttons.
  */
-function ScrolledToEnd({ children }: { children: ReactNode }) {
+function ScrolledToEnd({ label, children }: { label: string; children: ReactNode }) {
 	const scroller = useRef<HTMLDivElement>(null);
 	const content = useRef<HTMLDivElement>(null);
 	useLayoutEffect(() => {
@@ -456,7 +457,11 @@ function ScrolledToEnd({ children }: { children: ReactNode }) {
 	return (
 		<div
 			ref={scroller}
-			className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-width:thin]"
+			role="log"
+			aria-label={label}
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region needs focus for keyboard scrolling.
+			tabIndex={0}
+			className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-width:thin] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-inset"
 		>
 			<div ref={content} className="mt-auto">
 				{children}
@@ -499,7 +504,7 @@ export function PodChat() {
 					 * The first conversation plays out once the window has settled into place. One opened
 					 * from the rail is simply there, as a chat is when you switch to it.
 					 */}
-					<ScrolledToEnd key={selected}>
+					<ScrolledToEnd key={selected} label={`Chat with ${bot.name}`}>
 						<Reveal
 							stagger={FIRST_CHAT_STAGGER_S}
 							delay={FIRST_CHAT_DELAY_S}
