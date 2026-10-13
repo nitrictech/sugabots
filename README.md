@@ -202,7 +202,7 @@ serves its own copy at its own address.
 
 ## Community and support
 
-- Ask questions and get help on the [Sugabots Discord](https://discord.gg/YPuHCVAsx).
+- Ask questions and get help on the [Sugabots Discord](https://sugabots.ai/discord).
 - Read the docs at [sugabots.ai/docs](https://sugabots.ai/docs).
 - Report bugs and request features in
   [GitHub issues](https://github.com/nitrictech/sugabots/issues/new/choose).

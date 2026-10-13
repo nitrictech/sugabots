@@ -2,13 +2,14 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "sugabots-website",
 	"compatibility_date": "2026-09-25",
-	// The site is prerendered. The Worker serves the built files, and Markdown to agents that ask for it.
+	// The site is prerendered. The Worker serves the built files, Markdown to agents that ask for it,
+	// and the site's redirects.
 	"main": "./src/worker.ts",
 	"assets": {
 		"directory": "./dist/client",
 		"binding": "ASSETS",
-		// Only pages need the Worker. A path with a dot is a file, such as a script, an image or
-		// llms.txt, and is served straight from the assets; a missing one gets a plain 404.
+		// Only pages and redirects need the Worker. A path with a dot is a file, such as a script, an
+		// image or llms.txt, and is served straight from the assets; a missing one gets a plain 404.
 		"run_worker_first": ["/*", "!/*.*"]
 	},
 	// `wrangler preview` (preview builds) requires this block; the settings above apply to previews too.

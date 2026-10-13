@@ -1,10 +1,18 @@
 /**
  * Serves the prerendered site, and each page's Markdown version to requests
- * that prefer `text/markdown`, such as AI agents'. Built by Wrangler, not Vite.
+ * that prefer `text/markdown`, such as AI agents', and handles the site's
+ * redirects. Built by Wrangler, not Vite.
  */
 
 import { MARKDOWN_CONTENT_TYPE, markdownPath, markdownResponse } from "./markdown.ts";
+import { DISCORD_PATH } from "./site-links.ts";
 import { fileUrl } from "./site-meta.ts";
+
+/**
+ * The current Discord invite. Links go to `DISCORD_PATH` instead, which
+ * redirects here, so replacing the invite is a change to this line alone.
+ */
+const DISCORD_INVITE = "https://discord.gg/YPuHCVAsx";
 
 export interface Env {
 	/** The built site in `dist/client`. */
@@ -19,6 +27,10 @@ There's no page at this address on the Sugabots site. See [llms.txt](${fileUrl("
 export default {
 	async fetch(request: Request, env: Env) {
 		const { pathname } = new URL(request.url);
+		if (pathname === DISCORD_PATH || pathname === `${DISCORD_PATH}/`) {
+			// Temporary, so browsers don't keep sending people to a replaced invite.
+			return Response.redirect(DISCORD_INVITE, 302);
+		}
 		// Files such as images, scripts and `llms.txt` are served as they are.
 		if (!isPagePath(pathname)) return env.ASSETS.fetch(request);
 		if (!prefersMarkdown(request.headers.get("Accept") ?? "")) {

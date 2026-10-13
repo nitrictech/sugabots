@@ -2,7 +2,7 @@
 
 ## Questions and help
 
-Ask on the [Sugabots Discord](https://discord.gg/YPuHCVAsx). That's the place
+Ask on the [Sugabots Discord](https://sugabots.ai/discord). That's the place
 for help installing or configuring Sugabots, choosing models and connections,
 and talking through ideas. The [docs](https://sugabots.ai/docs) cover
 installing, hosting, configuration and each part of the app.

@@ -206,6 +206,18 @@ describe("Markdown asset responses", () => {
 	});
 });
 
+describe("/discord", () => {
+	it.each([
+		{ name: "a browser", path: "/discord", accept: BROWSER_ACCEPT },
+		{ name: "the path with a trailing slash", path: "/discord/", accept: BROWSER_ACCEPT },
+		{ name: "a request that asks for Markdown", path: "/discord", accept: "text/markdown" },
+	])("temporarily redirects $name to the current Discord invite", async ({ path, accept }) => {
+		const { response } = await get(path, accept);
+		expect(response.status).toBe(302);
+		expect(response.headers.get("Location")).toMatch(/^https:\/\/discord\.gg\/[\w-]+$/);
+	});
+});
+
 describe("a file", () => {
 	it("is served as it is, even to a request that asks for Markdown", async () => {
 		const { response, body } = await get("/og.png", "text/markdown");
