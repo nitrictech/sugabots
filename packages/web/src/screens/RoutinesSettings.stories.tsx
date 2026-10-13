@@ -355,7 +355,7 @@ export const Paused = meta.story({
 	},
 });
 
-/** A webhook: its address, its auth, and a blank field for its secret, which is saved but never shown, with Remove and Save under them. */
+/** A webhook: its address, its auth, and its saved secret, hidden until Show, edited in place. */
 export const Webhook = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
@@ -368,13 +368,13 @@ export const Webhook = meta.story({
 		await expect(canvas.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
 		await expect(canvas.getByLabelText("Header")).toHaveValue("X-Signature");
 		const secret = await canvas.findByLabelText("Signing secret");
-		await expect(secret).toHaveValue("");
-		await expect(canvas.getByRole("button", { name: "Remove" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
+		await expect(secret).toHaveAttribute("type", "password");
+		await expect(canvas.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
 	},
 });
 
-/** From Slack, only its signing secret is asked for, pasted in, which shows Save. */
+/** From Slack, only its signing secret is asked for; Escape puts the saved one back over one pasted in. */
 export const SlackWebhook = meta.story({
 	render: () => <StoryApp path={pageOf(slackMentions)} />,
 	play: async ({ canvas, userEvent }) => {
@@ -384,8 +384,9 @@ export const SlackWebhook = meta.story({
 		await expect(await canvas.findByRole("button", { name: "Source: Slack" })).toBeInTheDocument();
 		await expect(canvas.queryByLabelText("Header")).toBeNull();
 		const secret = await canvas.findByLabelText("Signing secret");
-		await userEvent.type(secret, "8f742231b10e8888abcd99yyyzzz85a5");
-		await expect(canvas.getByRole("button", { name: "Save" })).toBeEnabled();
+		await userEvent.clear(secret);
+		await userEvent.type(secret, "8f742231b10e8888abcd99yyyzzz85a5{Escape}");
+		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
 	},
 });
 
