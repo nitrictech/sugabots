@@ -108,12 +108,13 @@ describe("api", () => {
 	it("decodes a successful response", async () => {
 		const client = createClient({
 			baseUrl: "http://api.test",
-			fetch: respondWith({ status: "ok", version: "1.2.3" }),
+			fetch: respondWith({ status: "ok", version: "1.2.3", commit: "a1b2c3d" }),
 		});
 
 		expect(await Effect.runPromise(client.api.health())).toEqual({
 			status: "ok",
 			version: "1.2.3",
+			commit: "a1b2c3d",
 		});
 	});
 

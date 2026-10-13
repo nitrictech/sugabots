@@ -5,7 +5,10 @@ import { workspaceRoleSchema } from "./workspaces.ts";
 
 export const healthResponseSchema = Schema.Struct({
 	status: Schema.Literal("ok"),
+	/** A release such as `0.2.0`, `edge` for a published build of main, or `unknown`; not always semver. */
 	version: Schema.String,
+	/** The commit the build was made from, or null when the build didn't record one. */
+	commit: Schema.NullOr(Schema.String),
 });
 
 export type HealthResponse = typeof healthResponseSchema.Type;
