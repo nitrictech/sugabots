@@ -3,6 +3,7 @@ import { cn } from "cn";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { Alert } from "@/ui/alert.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
  * The pieces a settings page is made of, as the design draws them: a centred
@@ -308,6 +309,36 @@ export function SettingsControlRow({
 		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
 			<SettingsFieldLabel htmlFor={htmlFor}>{label}</SettingsFieldLabel>
 			{children}
+		</div>
+	);
+}
+
+/**
+ * A field row whose control is a pick-one row of options, such as Schedule /
+ * Webhook. On a phone the options go on a line of their own under the label,
+ * across the row's width, so a long row of them is never cut off.
+ */
+export function SettingsChoiceRow<Value extends string>({
+	label,
+	options,
+	value,
+	onChange,
+}: {
+	label: string;
+	options: readonly { value: Value; label: string }[];
+	value: Value | undefined;
+	onChange: (value: Value) => void;
+}) {
+	return (
+		<div className="flex min-h-[46px] items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
+			<SettingsFieldLabel>{label}</SettingsFieldLabel>
+			<SegmentedControl
+				label={label}
+				options={options}
+				value={value}
+				onChange={onChange}
+				className="max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
+			/>
 		</div>
 	);
 }

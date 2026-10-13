@@ -97,8 +97,19 @@ export function useRoutineActions() {
 				),
 		}),
 		rotateSecret: useMutation({
-			mutationFn: ({ agentId, routineId }: { agentId: string; routineId: string }) =>
-				Effect.runPromise(routines.rotateSecret({ params: { agentId, routineId }, payload: {} })),
+			mutationFn: ({
+				agentId,
+				routineId,
+				secret,
+			}: {
+				agentId: string;
+				routineId: string;
+				/** A secret its sender made, such as Slack's signing secret; a new one is made without it. */
+				secret?: string;
+			}) =>
+				Effect.runPromise(
+					routines.rotateSecret({ params: { agentId, routineId }, payload: { secret } }),
+				),
 			onSuccess: ({ secret }, { routineId }) => keepSecret(routineId, secret),
 		}),
 	};

@@ -156,7 +156,10 @@ describe("the workspace's routines", () => {
 			expect(client.api.routines.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						trigger: { kind: "webhook" },
+						trigger: {
+							kind: "webhook",
+							auth: { kind: "hmac", format: "body", header: "X-Signature", algorithm: "sha256" },
+						},
 						results: "keep_in_run",
 					}),
 				}),
@@ -168,6 +171,111 @@ describe("the workspace's routines", () => {
 		expect(screen.queryByText(secret)).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: "Show" }));
 		expect(screen.getByText(secret)).toBeDefined();
+	});
+
+	it("makes a webhook with the secret its sender made", async () => {
+		client.api.routines.create.mockReturnValue(
+			Effect.succeed({ routine: morningBrief.routine, secret: null }),
+		);
+		mount("/suga/settings/routines/new");
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Stripe events" } });
+		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+		fireEvent.change(await screen.findByLabelText("Instructions"), {
+			target: { value: "Reconcile the payment." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Webhook" }));
+		fireEvent.click(screen.getByRole("radio", { name: "Stripe" }));
+		expect(screen.queryByLabelText("Header")).toBeNull();
+		fireEvent.change(screen.getByLabelText("Secret"), { target: { value: "whsec_short" } });
+		expect(screen.getByText("A pasted secret needs at least 16 characters.")).toBeDefined();
+		expect(screen.getByRole("button", { name: "Create routine" })).toHaveProperty("disabled", true);
+		fireEvent.change(screen.getByLabelText("Secret"), {
+			target: { value: " whsec_0123456789abcdefghij " },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						trigger: {
+							kind: "webhook",
+							auth: { kind: "hmac", format: "stripe" },
+							secret: "whsec_0123456789abcdefghij",
+						},
+					}),
+				}),
+			),
+		);
+	});
+
+	it("saves a webhook's auth as it changes, and shows a request that would run it", async () => {
+		const webhook: WorkspaceRoutine = {
+			...morningBrief,
+			routine: {
+				...morningBrief.routine,
+				trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-API-Key" } },
+			},
+		};
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
+		client.api.routines.update.mockReturnValue(
+			Effect.succeed({ routine: webhook.routine, secret: null }),
+		);
+		mount(routinePage(webhook));
+
+		expect(await screen.findByText(/-H "X-API-Key: \$API_KEY"/)).toBeDefined();
+		expect(screen.getByText(/Send the key in the X-API-Key header\./)).toBeDefined();
+		const header = screen.getByLabelText("Header");
+		fireEvent.change(header, { target: { value: " X-Signup-Key " } });
+		fireEvent.blur(header);
+		await waitFor(() =>
+			expect(client.api.routines.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: webhook.routine.id },
+				payload: {
+					trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
+				},
+			}),
+		);
+
+		fireEvent.click(screen.getByRole("radio", { name: "Basic" }));
+		await waitFor(() =>
+			expect(client.api.routines.update).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: webhook.routine.id },
+				payload: { trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } } },
+			}),
+		);
+	});
+
+	it("takes Slack's signing secret in place of the one it made", async () => {
+		const slack: WorkspaceRoutine = {
+			...morningBrief,
+			routine: {
+				...morningBrief.routine,
+				trigger: { kind: "webhook", auth: { kind: "hmac", format: "slack" } },
+			},
+		};
+		client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [slack] }));
+		client.api.routines.rotateSecret.mockReturnValue(
+			Effect.succeed({ secret: "8f742231b10e8888abcd99yyyzzz85a5" }),
+		);
+		mount(routinePage(slack));
+
+		expect(await screen.findByText(/paste its Signing Secret here/)).toBeDefined();
+		expect(screen.queryByText("Example request")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+		fireEvent.change(screen.getByLabelText("Sender's"), {
+			target: { value: "8f742231b10e8888abcd99yyyzzz85a5" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() =>
+			expect(client.api.routines.rotateSecret).toHaveBeenCalledWith({
+				params: { agentId: linear.id, routineId: slack.routine.id },
+				payload: { secret: "8f742231b10e8888abcd99yyyzzz85a5" },
+			}),
+		);
+		expect(await screen.findByText(/^8f7422•+$/)).toBeDefined();
 	});
 
 	it("turns a routine back on from its page", async () => {
@@ -294,10 +402,10 @@ describe("the workspace's routines", () => {
 		fireEvent.click(await screen.findByRole("switch", { name: "Runs on its own" }));
 		expect((await screen.findByRole("alert")).textContent).toContain("Update unavailable");
 
-		fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-		const confirm = await screen.findByRole("dialog", { name: "Reset the secret?" });
+		fireEvent.click(screen.getByRole("button", { name: "Make a new one" }));
+		const confirm = await screen.findByRole("dialog", { name: "Make a new token?" });
 		expect(client.api.routines.rotateSecret).not.toHaveBeenCalled();
-		fireEvent.click(within(confirm).getByRole("button", { name: "Reset" }));
+		fireEvent.click(within(confirm).getByRole("button", { name: "Make a new one" }));
 		await waitFor(() =>
 			expect(within(confirm).getByRole("alert").textContent).toContain("Rotation unavailable"),
 		);

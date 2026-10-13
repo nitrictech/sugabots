@@ -7,6 +7,7 @@ import {
 	chief,
 	engineering,
 	growthDesk,
+	linearHandler,
 	oncall,
 	personal,
 	revenue,
@@ -74,10 +75,29 @@ const incidentIntake = placed(
 	"Incident intake",
 	oncall,
 	engineering,
-	{ kind: "webhook", auth: { kind: "bearer" } },
+	{
+		kind: "webhook",
+		auth: { kind: "hmac", format: "body", header: "X-Signature", algorithm: "sha256" },
+	},
 	{ results: "keep_in_run" },
 );
-const everyRoutine = [overnight, morningBrief, churnReport, incidentIntake];
+const slackMentions = placed(
+	6,
+	"Slack mentions",
+	accountManager,
+	revenue,
+	{ kind: "webhook", auth: { kind: "hmac", format: "slack" } },
+	{ results: "keep_in_run" },
+);
+const signups = placed(
+	7,
+	"New signup triage",
+	linearHandler,
+	engineering,
+	{ kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
+	{ results: "keep_in_run" },
+);
+const everyRoutine = [overnight, morningBrief, churnReport, incidentIntake, slackMentions, signups];
 
 const routinesAnswer = (items: WorkspaceRoutine[]) =>
 	http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items }));
@@ -170,8 +190,54 @@ export const Webhook = meta.story({
 				{ timeout: 10_000 },
 			),
 		).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "HMAC" })).toBeChecked();
+		await expect(canvas.getByRole("radio", { name: "Plain body" })).toBeChecked();
+		await expect(canvas.getByLabelText("Header")).toHaveValue("X-Signature");
 		await expect(canvas.getByText("Shown only when it's made")).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Make a new one" })).toBeInTheDocument();
+		await expect(canvas.getByText(/X-Signature: sha256=\$SIGNATURE/)).toBeInTheDocument();
+	},
+});
+
+/** Slack signs its own way: no header to set, no example to copy, and its secret pasted in. */
+export const SlackWebhook = meta.story({
+	render: () => <StoryApp path={pageOf(slackMentions)} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: "Paste" }, { timeout: 10_000 }),
+		);
+		await expect(canvas.getByLabelText("Sender's")).toHaveFocus();
+		await expect(canvas.queryByLabelText("Header")).toBeNull();
+		await expect(canvas.queryByText("Example request")).toBeNull();
+		await expect(canvas.getByText(/paste its Signing Secret here/)).toBeInTheDocument();
+	},
+});
+
+/** Basic auth: a username to set, a password, and a request that sends both. */
+export const BasicWebhook = meta.story({
+	render: () => <StoryApp path={pageOf(signups)} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByLabelText("Username", {}, { timeout: 10_000 })).toHaveValue(
+			"sugabots",
+		);
+		await expect(canvas.getByText("Password")).toBeInTheDocument();
+		await expect(canvas.getByText(/-u "sugabots:\$PASSWORD"/)).toBeInTheDocument();
+	},
+});
+
+/** A new webhook signs by default, and takes a secret its sender made, or makes one. */
+export const NewWebhook = meta.story({
+	render: () => <StoryApp path={`${routines}/new`} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("radio", { name: "Webhook" }, { timeout: 10_000 }),
+		);
+		await expect(canvas.getByRole("radio", { name: "HMAC" })).toBeChecked();
+		await expect(canvas.getByLabelText("Secret")).toHaveAttribute(
+			"placeholder",
+			"Made for you, or paste the sender's",
+		);
+		await expect(canvas.getByText(/send the hex digest in X-Signature/)).toBeInTheDocument();
 	},
 });
 

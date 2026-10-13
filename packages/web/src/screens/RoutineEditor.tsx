@@ -2,16 +2,17 @@ import {
 	type Agent,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
+	MIN_WEBHOOK_SECRET_CHARACTERS,
 	type NewRoutine,
 	type Pod,
 	type Routine,
 	type RoutineResults,
 	type RoutineUpdate,
+	type WebhookAuth,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Check, ChevronRight, Minus, Play, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
-import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	cronExpression,
@@ -26,15 +27,14 @@ import {
 	scheduleSummary,
 	stepTime,
 } from "@/lib/routine-schedule.ts";
-import { useRoutineActions, useShownSecret } from "@/lib/routines.ts";
+import { useRoutineActions } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
-import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	PageBackLink,
+	SettingsChoiceRow,
 	SettingsControlRow,
 	SettingsDanger,
 	SettingsFieldLabel,
@@ -45,6 +45,15 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import {
+	authNote,
+	DEFAULT_WEBHOOK_AUTH,
+	NEW_WEBHOOK,
+	NewWebhookRows,
+	pastedSecretReady,
+	type WebhookDraft,
+	WebhookRows,
+} from "./RoutineWebhook.tsx";
 
 /** A bot a routine can belong to, with the pod it lives in. */
 export interface BotChoice {
@@ -115,13 +124,19 @@ export function NewRoutinePage({
 		kind: "preset",
 		schedule: DEFAULT_SCHEDULE,
 	});
+	const [webhook, setWebhook] = useState(NEW_WEBHOOK);
 	const [page, setPage] = useState<"routine" | "instructions">("routine");
 	const actions = useRoutineActions();
 	const bot = choices.find((choice) => choice.agent.id === agentId);
 	const results = chosenResults ?? DEFAULT_RESULTS[kind];
 	const scheduleReady = kind === "webhook" || reading.kind === "other" || hasDays(reading.schedule);
+	const secretReady = kind === "cron" || pastedSecretReady(webhook.secret);
 	const ready =
-		bot !== undefined && name.trim() !== "" && instructions.trim() !== "" && scheduleReady;
+		bot !== undefined &&
+		name.trim() !== "" &&
+		instructions.trim() !== "" &&
+		scheduleReady &&
+		secretReady;
 
 	async function create() {
 		if (!bot || !ready) return;
@@ -129,7 +144,7 @@ export function NewRoutinePage({
 		const input: NewRoutine =
 			kind === "cron"
 				? { ...fields, trigger: { kind: "cron", ...cronTrigger(reading, localTimezone()) } }
-				: { ...fields, trigger: { kind: "webhook" } };
+				: { ...fields, trigger: webhookTrigger(webhook) };
 		try {
 			const created = await actions.create.mutateAsync({ agentId: bot.agent.id, json: input });
 			onCreated(created.routine);
@@ -184,18 +199,23 @@ export function NewRoutinePage({
 				label="When"
 				note={
 					bot &&
-					(scheduleReady
-						? routineSummary({ when: runsWhen(kind, reading), results, bot })
-						: "Pick at least one day for it to run on.")
+					(!scheduleReady
+						? "Pick at least one day for it to run on."
+						: !secretReady
+							? `A pasted secret needs at least ${MIN_WEBHOOK_SECRET_CHARACTERS} characters.`
+							: whenNote({
+									trigger: kind === "cron" ? { kind } : { kind, auth: webhook.auth },
+									reading,
+									results,
+									bot,
+								}))
 				}
 			>
 				<TriggerRow value={kind} onChange={setKind} />
 				{kind === "cron" ? (
 					<ScheduleRows reading={reading} onChange={setReading} />
 				) : (
-					<SettingsControlRow label="Address">
-						<span className="text-[14.5px] text-muted-foreground">Made when you create it</span>
-					</SettingsControlRow>
+					<NewWebhookRows draft={webhook} onChange={setWebhook} />
 				)}
 			</SettingsGroup>
 			<SettingsGroup>
@@ -258,7 +278,7 @@ export function RoutinePage({
 		save({
 			trigger:
 				kind === "webhook"
-					? { kind: "webhook" }
+					? { kind: "webhook", auth: DEFAULT_WEBHOOK_AUTH }
 					: { kind: "cron", ...cronTrigger(reading, timezone) },
 		});
 	}
@@ -321,8 +341,9 @@ export function RoutinePage({
 				note={
 					routine.trigger.kind === "cron" && reading.kind === "preset" && !hasDays(reading.schedule)
 						? "Pick at least one day for it to run on."
-						: routineSummary({
-								when: runsWhen(routine.trigger.kind, reading),
+						: whenNote({
+								trigger: routine.trigger,
+								reading,
 								results: routine.results,
 								bot: placed,
 							})
@@ -333,7 +354,11 @@ export function RoutinePage({
 					{routine.trigger.kind === "cron" ? (
 						<ScheduleRows reading={reading} onChange={setReading} />
 					) : (
-						<WebhookRows placed={placed} />
+						<WebhookRows
+							placed={placed}
+							auth={routine.trigger.auth}
+							onChangeAuth={(auth) => save({ trigger: { kind: "webhook", auth } })}
+						/>
 					)}
 				</Editable>
 			</SettingsGroup>
@@ -368,6 +393,33 @@ function cronTrigger(reading: ScheduleReading, timezone: string) {
 	return { expression, timezone };
 }
 
+/** The trigger a routine being made saves with: its auth, and the sender's secret if one was pasted. */
+function webhookTrigger({ auth, secret }: WebhookDraft) {
+	const pasted = secret.trim();
+	return pasted === ""
+		? { kind: "webhook" as const, auth }
+		: { kind: "webhook" as const, auth, secret: pasted };
+}
+
+/**
+ * The note under When: what the routine does, and for a webhook, what a
+ * caller must send to run it.
+ */
+function whenNote({
+	trigger,
+	reading,
+	results,
+	bot,
+}: {
+	trigger: { kind: "cron" } | { kind: "webhook"; auth: WebhookAuth };
+	reading: ScheduleReading;
+	results: RoutineResults;
+	bot: BotChoice;
+}): string {
+	const summary = routineSummary({ when: runsWhen(trigger.kind, reading), results, bot });
+	return trigger.kind === "webhook" ? `${summary} ${authNote(trigger.auth)}` : summary;
+}
+
 /** What the routine does, under its When: when it runs, and where its result goes. */
 function routineSummary({
 	when,
@@ -386,7 +438,7 @@ function routineSummary({
 
 /** When a routine runs, as the middle of "Runs … and posts the result". */
 function runsWhen(kind: TriggerKind, reading: ScheduleReading): string {
-	if (kind === "webhook") return "whenever the address is called with the secret";
+	if (kind === "webhook") return "each time the address is called with valid auth";
 	if (reading.kind === "other") return "on its own schedule";
 	const summary = scheduleSummary(reading.schedule);
 	// Day names keep their capital; "Every day" and "Weekdays" start the sentence's middle.
@@ -659,14 +711,12 @@ function TriggerRow({
 	onChange: (kind: TriggerKind) => void;
 }) {
 	return (
-		<SettingsControlRow label="Trigger">
-			<SegmentedControl
-				label="Trigger"
-				options={TRIGGER_OPTIONS}
-				value={value}
-				onChange={onChange}
-			/>
-		</SettingsControlRow>
+		<SettingsChoiceRow
+			label="Trigger"
+			options={TRIGGER_OPTIONS}
+			value={value}
+			onChange={onChange}
+		/>
 	);
 }
 
@@ -720,20 +770,18 @@ function ScheduleRows({
 
 	return (
 		<>
-			<SettingsControlRow label="Repeat">
-				<SegmentedControl
-					label="Repeat"
-					options={REPEAT_OPTIONS}
-					value={schedule?.repeat}
-					onChange={(repeat) =>
-						// A daily or weekday schedule has no days of its own, so Weekly starts on Monday.
-						change({
-							repeat,
-							days: schedule?.days.length ? schedule.days : DEFAULT_SCHEDULE.days,
-						})
-					}
-				/>
-			</SettingsControlRow>
+			<SettingsChoiceRow
+				label="Repeat"
+				options={REPEAT_OPTIONS}
+				value={schedule?.repeat}
+				onChange={(repeat) =>
+					// A daily or weekday schedule has no days of its own, so Weekly starts on Monday.
+					change({
+						repeat,
+						days: schedule?.days.length ? schedule.days : DEFAULT_SCHEDULE.days,
+					})
+				}
+			/>
 			{reading.kind === "other" && (
 				<div className="flex flex-col gap-1 border-border border-b px-4 py-3">
 					<span className="text-[14.5px] text-foreground">{reading.label}</span>
@@ -817,78 +865,6 @@ function StepButton({
 		>
 			{children}
 		</button>
-	);
-}
-
-/**
- * A webhook routine's address and secret. The API keeps the secret only to
- * check callers with and hands it over once, when it is made, so it shows
- * only in the tab that made it; Reset makes a new one, which shows then, and
- * the old one stops working at once.
- */
-function WebhookRows({ placed }: { placed: PlacedRoutine }) {
-	const { routine, agent } = placed;
-	const actions = useRoutineActions();
-	const secret = useShownSecret(routine.id);
-	const [confirmingReset, setConfirmingReset] = useState(false);
-	const address = `${apiBaseUrl}/hooks/routines/${routine.id}`;
-
-	return (
-		<>
-			<SettingsControlRow label="Address">
-				<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-					{address}
-				</code>
-				<CopyIconButton label="Copy address" text={address} />
-			</SettingsControlRow>
-			<SettingsControlRow label="Secret">
-				{secret ? (
-					<SecretValue secret={secret} />
-				) : (
-					<span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">
-						Shown only when it's made
-					</span>
-				)}
-				<Button variant="link" size="bare" onClick={() => setConfirmingReset(true)}>
-					Reset
-				</Button>
-			</SettingsControlRow>
-			<DeleteDialog
-				open={confirmingReset}
-				onOpenChange={setConfirmingReset}
-				title="Reset the secret?"
-				description="The current secret stops working straight away, so anything calling this address needs the new one."
-				confirmLabel="Reset"
-				pending={actions.rotateSecret.isPending}
-				error={actions.rotateSecret.error ? failureMessage(actions.rotateSecret.error) : undefined}
-				onDelete={async () => {
-					try {
-						await actions.rotateSecret.mutateAsync({ agentId: agent.id, routineId: routine.id });
-						setConfirmingReset(false);
-					} catch {
-						return;
-					}
-				}}
-			/>
-		</>
-	);
-}
-
-/** How much of a secret stays readable while it is hidden: enough to tell two apart. */
-const SECRET_SHOWN_PREFIX = 6;
-
-function SecretValue({ secret }: { secret: string }) {
-	const [shown, setShown] = useState(false);
-	return (
-		<>
-			<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-				{shown ? secret : `${secret.slice(0, SECRET_SHOWN_PREFIX)}${"•".repeat(12)}`}
-			</code>
-			<Button variant="ghost" size="sm" onClick={() => setShown(!shown)}>
-				{shown ? "Hide" : "Show"}
-			</Button>
-			<CopyIconButton label="Copy secret" text={secret} />
-		</>
 	);
 }
 
