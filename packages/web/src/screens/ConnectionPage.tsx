@@ -7,6 +7,7 @@ import {
 	type Pod,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
+import { projectLinks } from "@sugabots/contracts/project-links";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronDown, Ellipsis, Search } from "lucide-react";
@@ -47,7 +48,7 @@ import {
  */
 
 /** The docs on fixing a connection whose check failed. */
-const TROUBLESHOOTING_URL = "https://sugabots.ai/docs/connections#troubleshooting";
+const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troubleshooting`;
 
 /** More tools than this and the page offers to search them. */
 const SEARCHABLE_TOOL_COUNT = 8;

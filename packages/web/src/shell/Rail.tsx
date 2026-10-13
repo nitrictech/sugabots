@@ -10,6 +10,7 @@ import { usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspacePermissions, useWorkspaces } from "@/lib/workspace.ts";
+import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { NewAgentDialog } from "@/shell/NewAgent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { PodTile } from "@/shell/PodTile.tsx";
@@ -25,8 +26,8 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 type Making = { kind: "pod" } | { kind: "bot"; pod: Pod };
 
 /**
- * The strip down the left edge: the workspace, each shared pod, a way to make one, then Personal, and you at the
- * bottom. Choosing a pod scopes the conversation list
+ * The strip down the left edge: the workspace, each shared pod, a way to make one, then Personal, and Help and you at
+ * the bottom. Choosing a pod scopes the conversation list
  * beside it.
  */
 export function Rail() {
@@ -229,6 +230,7 @@ export function RailView({
 			)}
 
 			<span className="flex-1" />
+			<HelpMenu />
 			{user && (
 				<Tooltip label="Settings" side="right">
 					<Link

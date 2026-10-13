@@ -1,5 +1,9 @@
-import { expect, fn, screen, waitFor } from "storybook/test";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
+import { useState } from "react";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { createQueryClient } from "@/lib/query.ts";
 import { RailView } from "./Rail.tsx";
 import { podsWithBots } from "./story-fixtures.ts";
 
@@ -43,8 +47,19 @@ const meta = preview.meta({
 				<Story />
 			</div>
 		),
+		// The Help menu asks the API for the running version.
+		function Queries(Story) {
+			const [queryClient] = useState(createQueryClient);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
 	],
 });
+
+const API = import.meta.env.VITE_API_URL as string;
 
 /** Default is a pod chosen: its bar on the left edge, the other pods beside it. */
 export const Default = meta.story({
@@ -153,5 +168,44 @@ export const LongWorkspaceName = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: /^Workspace:/ }));
 		await expect(await screen.findByRole("menuitem", { name: longName.name })).toBeVisible();
+	},
+});
+
+/**
+ * The ? above you: links out to the docs, Discord, a new bug report and the
+ * release notes, each in a new tab, then About with the running version.
+ */
+export const HelpMenu = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/health`, () =>
+				HttpResponse.json({
+					status: "ok",
+					version: "0.2.0",
+					commit: "338298a29e743a513c1108ae3829d39c80230781",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Help" }));
+		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitem", { name: /^Documentation/ })).toHaveAttribute(
+			"href",
+			"https://sugabots.ai/docs",
+		);
+		await expect(within(menu).getByRole("menuitem", { name: /^Ask on Discord/ })).toHaveAttribute(
+			"target",
+			"_blank",
+		);
+		await expect(
+			await within(menu).findByRole("menuitem", { name: "About Sugabots 0.2.0" }),
+		).toBeVisible();
+		const report = new URL(
+			within(menu)
+				.getByRole("menuitem", { name: /^Report a bug/ })
+				.getAttribute("href") ?? "",
+		);
+		await expect(report.searchParams.get("version")).toBe("0.2.0 (338298a)");
 	},
 });

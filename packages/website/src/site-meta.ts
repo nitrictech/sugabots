@@ -1,9 +1,11 @@
+import { projectLinks } from "@sugabots/contracts/project-links";
+
 /** The headline, split where the accent colour ends. */
 const headline = { accent: "Multiplayer", rest: "agents on any model" } as const;
 
 /** What the site says about itself: the hero, the page head and the link-preview image. */
 export const siteMeta = {
-	url: "https://sugabots.ai",
+	url: projectLinks.website,
 	headline,
 	title: `Sugabots | ${headline.accent} ${headline.rest}`,
 	description: "An open-source harness where people and agents work together.",
