@@ -1,4 +1,4 @@
-import type { Agent, Pod, Routine, WorkspaceRoutine } from "@sugabots/contracts";
+import type { Agent, Pod, Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -12,7 +12,7 @@ import {
 	personal,
 	revenue,
 } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyPods, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyPods, storyUser, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Routines in settings: every routine beside the open one, or the one being
@@ -160,6 +160,85 @@ export const Instructions = meta.story({
 		);
 		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
 		await expect(canvas.getByRole("button", { name: "Overnight outbound" })).toBeInTheDocument();
+	},
+});
+
+function run(
+	n: number,
+	fields: Pick<RoutineExecution, "trigger" | "state" | "acceptedAt"> & Partial<RoutineExecution>,
+): RoutineExecution {
+	return {
+		id: `0199a3a0-0000-7000-8000-0000000003${n}0`,
+		routineId: overnight.routine.id,
+		workspaceId: storyWorkspace.id,
+		agentId: growthDesk.id,
+		threadId: `0199a3a0-0000-7000-8000-0000000003${n}1`,
+		routineName: overnight.routine.name,
+		instructions: overnight.routine.instructions,
+		error: null,
+		startedAt: fields.acceptedAt,
+		finishedAt: null,
+		...fields,
+	};
+}
+
+const scheduled = (at: string) => ({ kind: "cron" as const, scheduledAt: at, acceptedAt: at });
+
+const overnightRuns = [
+	run(1, {
+		trigger: {
+			kind: "manual",
+			requestedAt: "2026-10-07T22:10:00.000Z",
+			requestedByUserId: storyUser.id,
+			requestId: "0199a3a0-0000-7000-8000-0000000003ff",
+		},
+		acceptedAt: "2026-10-07T22:10:00.000Z",
+		state: "running",
+	}),
+	run(2, {
+		trigger: scheduled("2026-10-07T06:00:00.000Z"),
+		acceptedAt: "2026-10-07T06:00:00.000Z",
+		finishedAt: "2026-10-07T06:00:14.000Z",
+		state: "completed",
+	}),
+	run(3, {
+		trigger: scheduled("2026-10-06T06:00:00.000Z"),
+		acceptedAt: "2026-10-06T06:00:00.000Z",
+		finishedAt: "2026-10-06T06:01:02.000Z",
+		state: "failed",
+		error: "HubSpot timed out",
+	}),
+	run(4, {
+		trigger: {
+			kind: "webhook",
+			receivedAt: "2026-10-05T06:00:00.000Z",
+			idempotencyKey: null,
+			payload: {},
+		},
+		acceptedAt: "2026-10-05T06:00:00.000Z",
+		state: "cancelled",
+	}),
+];
+
+/** Its latest runs: one running, one done, one failed with why, one stopped; each opens its thread. */
+export const RecentRuns = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			routinesAnswer(everyRoutine),
+			http.get(`${API}/agents/:agentId/routines/:routineId/executions`, () =>
+				HttpResponse.json({ items: overnightRuns, nextCursor: null }),
+			),
+			...appHandlers(),
+		);
+	},
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas }) => {
+		const runs = await canvas.findByRole("region", { name: "Recent runs" }, { timeout: 10_000 });
+		await expect(await within(runs).findByText("Run by you")).toBeInTheDocument();
+		await expect(within(runs).getByText("Running…")).toBeInTheDocument();
+		await expect(within(runs).getByText("14s")).toBeInTheDocument();
+		await expect(within(runs).getByText("HubSpot timed out")).toBeInTheDocument();
+		await expect(within(runs).getByText("Cancelled")).toBeInTheDocument();
 	},
 });
 

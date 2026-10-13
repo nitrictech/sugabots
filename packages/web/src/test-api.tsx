@@ -389,6 +389,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.threads.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.list.mockReturnValue(Effect.succeed([]));
 	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
+	client.api.routines.executions.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	// Every crew bot in the pod, none messaged yet.
 	client.api.chats.list.mockImplementation(({ query }: { query: { pod: string } }) => {
 		const pod = pods.find((one) => one.slug === query.pod || one.id === query.pod);

@@ -45,6 +45,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { RecentRuns } from "./RoutineRuns.tsx";
 import {
 	authNote,
 	DEFAULT_WEBHOOK_AUTH,
@@ -367,6 +368,7 @@ export function RoutinePage({
 					<ResultsRow results={routine.results} onChange={(results) => save({ results })} />
 				</Editable>
 			</SettingsGroup>
+			<RecentRuns placed={placed} />
 			{canManage && (
 				<>
 					<SettingsDanger onClick={() => setConfirmingDelete(true)}>Delete routine</SettingsDanger>

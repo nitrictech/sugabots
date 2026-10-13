@@ -333,6 +333,9 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			]),
 		),
 		http.get(api("/agents/:agentId/routines"), () => HttpResponse.json([])),
+		http.get(api("/agents/:agentId/routines/:routineId/executions"), () =>
+			HttpResponse.json({ items: [], nextCursor: null }),
+		),
 	];
 }
 
