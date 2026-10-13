@@ -2,7 +2,7 @@ import { botColorVariables } from "@sugabots/avatars";
 import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
 import type { ReactNode } from "react";
 import { useDetailsOpen } from "@/lib/details-open.ts";
-import { AgentChat, type OpenedArtifact } from "./AgentChat.tsx";
+import { AgentChat, type Staged } from "./AgentChat.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 
 interface AgentPageProps {
@@ -18,9 +18,9 @@ interface AgentPageProps {
 	 */
 	away?: { back: BackTo; trailing: ReactNode };
 	onThreadChange: (threadId: string | undefined) => void;
-	/** An artifact open large beside the chat. */
-	artifact?: OpenedArtifact;
-	onArtifactChange: (artifact: OpenedArtifact | undefined) => void;
+	/** What is open large beside the chat. */
+	staged?: Staged;
+	onStagedChange: (staged: Staged | undefined) => void;
 }
 
 export function AgentPage({ away, ...chat }: AgentPageProps) {

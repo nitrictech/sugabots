@@ -360,7 +360,11 @@ export const Sandbox = meta.story({
 	},
 });
 
-/** While the bot is browsing, the button says the sandbox is in use, with a pulse. */
+/**
+ * While the bot is browsing, its screen shows live in the reply and the header
+ * button pulses. Opening the screen shows the desktop beside the chat, watched
+ * until the person takes over.
+ */
 export const SandboxInUse = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...sandboxHandlers([...conversation, browsing]));
@@ -372,11 +376,16 @@ export const SandboxInUse = meta.story({
 			{ timeout: 10_000 },
 		);
 		await expect(inUse).toHaveTextContent("Sandbox in use");
-		await userEvent.click(inUse);
-		// The dialog opens in a portal, outside the story's canvas.
-		await expect(
-			await within(document.body).findByRole("heading", { name: `${growthDesk.name}'s desktop` }),
-		).toBeVisible();
+		const screen = await canvas.findByRole("article", { name: `${growthDesk.name}'s screen` });
+		await userEvent.click(
+			within(screen).getByRole("button", { name: `Open ${growthDesk.name}'s desktop` }),
+		);
+		const desktop = await canvas.findByRole("region", { name: `${growthDesk.name}'s desktop` });
+		await expect(within(desktop).getByText("has control")).toBeVisible();
+		await userEvent.click(within(desktop).getByRole("button", { name: "Take over" }));
+		await expect(within(desktop).getByRole("button", { name: "Hand back" })).toBeVisible();
+		// Only the desktop beside the chat is connected while it is open.
+		await expect(canvas.queryByRole("article", { name: `${growthDesk.name}'s screen` })).toBeNull();
 	},
 });
 
@@ -462,6 +471,8 @@ const artifactHandlers = () => {
 /**
  * An artifact the bot made, as a card in its reply. Opening it shows it large
  * beside the chat, in the room the pod's list had, and Close brings the list back.
+ * While it is open, the chat shows no artifact cards and there is no Details,
+ * whose place it has taken.
  */
 export const Artifact = meta.story({
 	beforeEach({ msw }) {
@@ -475,10 +486,13 @@ export const Artifact = meta.story({
 		const stage = await canvas.findByRole("region", { name: pricing.title });
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: new RegExp(accountManager.name) })).toBeNull();
+		await expect(canvas.queryByRole("article", { name: pricing.title })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
 		await expect(
 			await canvas.findByRole("link", { name: new RegExp(accountManager.name) }),
 		).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Details" })).toBeVisible();
 	},
 });
 

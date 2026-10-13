@@ -23,9 +23,23 @@ export type ChatPlace =
  * The bar across the top of a bot's chat: its face and name, what it is for,
  * the way into its sandbox's desktop when it has one, and, on its own page,
  * the way into its Details: the ⓘ, or the name, which is how a phone reaches
- * them. On a phone the chat covers the list, so Back returns to it.
+ * them. Not while something is staged beside the chat, which takes Details'
+ * place. On a phone the chat covers the list, so Back returns to it.
  */
-export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; place: ChatPlace }) {
+export function ChatHeader({
+	agent,
+	pod,
+	place,
+	staged,
+	onOpenDesktop,
+}: {
+	agent: Agent;
+	pod: Pod;
+	place: ChatPlace;
+	/** Whether something is open large beside the chat, such as an artifact or the desktop. */
+	staged: boolean;
+	onOpenDesktop: () => void;
+}) {
 	const name = (
 		<>
 			<AgentAvatar color={agent.color} face={agent.face} size={24} className="shrink-0" />
@@ -36,7 +50,7 @@ export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; plac
 		<header className="relative flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 pl-5 max-md:pl-12">
 			<HeaderBack back={place.kind === "away" ? place.back : { to: "pod", pod }} />
 			<h1 className="m-0 flex min-w-0 shrink-0 font-semibold text-[16px] text-foreground max-md:shrink">
-				{place.kind === "own" ? (
+				{place.kind === "own" && !staged ? (
 					<button
 						type="button"
 						onClick={() => place.onDetailsChange(!place.detailsOpen)}
@@ -58,8 +72,10 @@ export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; plac
 			) : (
 				<span className="flex-1" />
 			)}
-			<ChatSandbox agent={agent} pod={pod} />
-			{place.kind === "own" ? (
+			<ChatSandbox agent={agent} pod={pod} onOpen={onOpenDesktop} />
+			{place.kind === "away" ? (
+				place.trailing
+			) : staged ? null : (
 				<IconButton
 					label="Details"
 					variant="bar"
@@ -69,8 +85,6 @@ export function ChatHeader({ agent, pod, place }: { agent: Agent; pod: Pod; plac
 				>
 					<Info size={18} strokeWidth={2} />
 				</IconButton>
-			) : (
-				place.trailing
 			)}
 		</header>
 	);
