@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest something Sugabots should do, or do differently.
+type: Feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please [search the existing issues](https://github.com/nitrictech/sugabots/issues?q=is%3Aissue) first. If someone has already asked for it, add a 👍 or your use case there instead. To talk an idea through before writing it up, join us on [Discord](https://discord.gg/YPuHCVAsx).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or need behind the request, and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Sugabots to do?
+      description: How you'd like it to work. Sketches and examples from other tools help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
+      description: Workarounds or other tools you've tried.

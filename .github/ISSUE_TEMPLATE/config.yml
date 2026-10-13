@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://discord.gg/YPuHCVAsx
+    about: Get help setting up or using Sugabots on Discord.
+  - name: Read the docs
+    url: https://sugabots.ai/docs
+    about: Guides for installing, configuring and using Sugabots.
