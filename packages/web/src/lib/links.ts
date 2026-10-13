@@ -54,6 +54,24 @@ export function podSettingsLink(pod: Pod) {
 	});
 }
 
+/** A routine's page in the workspace's Routines settings. */
+export function routineSettingsLink(routine: { id: string }) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./settings/routines/$routine",
+		params: { routine: routine.id },
+	});
+}
+
+/** A new routine's page, for `agent` when it is made from that bot's settings. */
+export function newRoutineLink(agent?: { id: string }) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./settings/routines/new",
+		search: agent ? { agent: agent.id } : {},
+	});
+}
+
 /** A connection's own page, under its pod's settings. */
 export function connectionSettingsLink(pod: Pod, connection: Pick<Connection, "id">) {
 	return linkOptions({

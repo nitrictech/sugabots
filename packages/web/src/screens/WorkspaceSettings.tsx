@@ -48,6 +48,8 @@ export function WorkspaceSettings({
 	selectedProviderId,
 	modelChoice,
 	selectedMemberId,
+	selectedRoutineId,
+	newRoutine,
 }: {
 	section: WorkspaceSettingSection;
 	selectedAgentId?: string;
@@ -62,6 +64,10 @@ export function WorkspaceSettings({
 	modelChoice?: "default" | "system";
 	/** The membership open on the Members page. */
 	selectedMemberId?: string;
+	/** The routine open on the Routines page. */
+	selectedRoutineId?: string;
+	/** A routine being made on the Routines page, for the bot chosen already, if one is. */
+	newRoutine?: { agentId: string | undefined };
 }) {
 	const { workspace, isPending } = useWorkspace();
 	const session = useSession();
@@ -96,7 +102,11 @@ export function WorkspaceSettings({
 					canCreatePods={may.createPods}
 				/>
 			) : section === "routines" ? (
-				<WorkspaceRoutinesSettings workspaceId={workspace.id} />
+				<WorkspaceRoutinesSettings
+					workspaceId={workspace.id}
+					selectedRoutineId={selectedRoutineId}
+					newRoutine={newRoutine}
+				/>
 			) : (
 				<>
 					{section === "general" && <GeneralSettings role={role} canDelete={may.deleteWorkspace} />}

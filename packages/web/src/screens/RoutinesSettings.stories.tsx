@@ -1,29 +1,26 @@
 import type { Agent, Pod, Routine, WorkspaceRoutine } from "@sugabots/contracts";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
-// A dialog is portalled to the body, so reaching it means `screen` rather
-// than the story's own canvas.
-import { expect, screen, within } from "storybook/test";
+import { HttpResponse, http } from "msw";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
 	chief,
 	engineering,
 	growthDesk,
-	leadResearcher,
-	linearHandler,
 	oncall,
 	personal,
 	revenue,
 } from "@/shell/story-fixtures.ts";
-import { WorkspaceRoutinesSettings } from "./RoutinesSettings.tsx";
+import { appHandlers, StoryApp, storyPods, storyWorkspace } from "../story-app.tsx";
 
-const workspace = {
-	id: "0199a3a0-0000-7000-8000-000000000001",
-	name: "Nitric",
-	slug: "nitric",
-	createdAt: "2026-09-01T00:00:00.000Z",
-};
+/*
+ * Routines in settings: every routine beside the open one, or the one being
+ * made. On a phone the open routine covers the list, with the way back to it.
+ */
+
+const API = import.meta.env.VITE_API_URL as string;
+const routines = `/${storyWorkspace.slug}/settings/routines`;
+const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 function placed(
 	n: number,
@@ -31,18 +28,18 @@ function placed(
 	agent: Agent,
 	pod: Pod,
 	trigger: Routine["trigger"],
-	fields: Partial<Pick<Routine, "state" | "instructions">> = {},
+	fields: Partial<Pick<Routine, "state" | "results">> = {},
 ): WorkspaceRoutine {
 	return {
 		routine: {
 			id: `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`,
-			workspaceId: workspace.id,
+			workspaceId: storyWorkspace.id,
 			agentId: agent.id,
 			name,
 			instructions: `${name}: look over what changed and post a short summary.`,
 			trigger,
 			state: "enabled",
-			results: "keep_in_run",
+			results: "post_to_chat",
 			createdById: null,
 			createdAt: "2026-09-01T00:00:00.000Z",
 			updatedAt: "2026-09-01T00:00:00.000Z",
@@ -62,183 +59,211 @@ const cron = (expression: string): Routine["trigger"] => ({
 
 const overnight = placed(1, "Overnight outbound", growthDesk, revenue, cron("0 6 * * *"));
 const morningBrief = placed(2, "Morning brief", chief, personal, cron("0 8 * * 1-5"));
-const churnReport = placed(3, "Weekly churn report", accountManager, revenue, cron("0 9 * * 1"), {
-	state: "paused",
-});
-const incidentIntake = placed(4, "Incident intake", oncall, engineering, {
-	kind: "webhook",
-	auth: { kind: "bearer" },
-});
-const longInstructions = Array.from(
-	{ length: 60 },
-	(_, step) =>
-		`${step + 1}. Check the next stage of the pipeline and note any deal that has stalled.`,
-).join("\n");
-const pipelineReview = placed(5, "Pipeline review", growthDesk, revenue, cron("0 16 * * 5"), {
-	instructions: longInstructions,
-});
+const churnReport = placed(
+	3,
+	"Weekly churn report",
+	accountManager,
+	revenue,
+	cron("0 9 * * 1,3,5"),
+	{
+		state: "paused",
+	},
+);
+const incidentIntake = placed(
+	4,
+	"Incident intake",
+	oncall,
+	engineering,
+	{ kind: "webhook", auth: { kind: "bearer" } },
+	{ results: "keep_in_run" },
+);
+const everyRoutine = [overnight, morningBrief, churnReport, incidentIntake];
 
-function RoutinesPreview({ items, children }: { items: WorkspaceRoutine[]; children: ReactNode }) {
-	const [queryClient] = useState(() => {
-		const client = new QueryClient({
-			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-		});
-		client.setQueryData(["workspaces"], [workspace]);
-		client.setQueryData(["pods", workspace.id], [revenue, engineering, personal]);
-		client.setQueryData(
-			["agents", workspace.id],
-			[growthDesk, accountManager, leadResearcher, linearHandler, oncall, chief],
-		);
-		client.setQueryData(["routines", "workspace", workspace.id], { items });
-		return client;
-	});
-	useEffect(() => () => queryClient.clear(), [queryClient]);
-	return (
-		<QueryClientProvider client={queryClient}>
-			<div className="flex min-h-screen flex-col bg-background">{children}</div>
-		</QueryClientProvider>
-	);
-}
+const routinesAnswer = (items: WorkspaceRoutine[]) =>
+	http.get(`${API}/workspaces/:workspace/routines`, () => HttpResponse.json({ items }));
+
+const pageOf = (one: WorkspaceRoutine) => `${routines}/${one.routine.id}`;
 
 const meta = preview.meta({
-	title: "Views/RoutinesSettings",
-	component: WorkspaceRoutinesSettings,
+	title: "Views/Routines",
 	tags: ["ai-generated"],
-	args: { workspaceId: workspace.id },
-	parameters: {
-		layout: "fullscreen",
-		docs: { story: { inline: false, height: "720px" } },
-		routines: [overnight, morningBrief, churnReport, incidentIntake],
+	parameters: { layout: "fullscreen" },
+	beforeEach({ msw }) {
+		msw.use(routinesAnswer(everyRoutine), ...appHandlers());
 	},
-	decorators: [
-		(Story, context) => (
-			<RoutinesPreview key={context.id} items={context.parameters.routines}>
-				<Story />
-			</RoutinesPreview>
-		),
-	],
 });
 
-/** Each routine with when it runs and its bot, a way to run it now, and a switch for whether it is on. */
-export const Listing = meta.story({
+/** Every routine with when it runs and its bot, beside the first one. */
+export const List = meta.story({
+	render: () => <StoryApp path={routines} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("Every day at 6:00, Growth Desk")).toBeInTheDocument();
-		await expect(canvas.getByText("Weekdays at 8:00, Chief")).toBeInTheDocument();
-		await expect(canvas.getByText("When its address is called, On-call")).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "Weekly churn report on" })).not.toBeChecked();
+		const list = await canvas.findByRole(
+			"navigation",
+			{ name: "Workspace routines" },
+			{ timeout: 10_000 },
+		);
 		await expect(
-			canvas.getByRole("button", { name: "Run Weekly churn report now" }),
+			await within(list).findByText("Every day at 6:00, Growth Desk"),
 		).toBeInTheDocument();
+		await expect(within(list).getByText("When its address is called, On-call")).toBeInTheDocument();
+		await expect(within(list).getByText("Paused")).toBeInTheDocument();
 		await expect(
-			canvas.getByText("Routines post into the bot's chat when they run."),
+			await canvas.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 	},
 });
 
-/** Nothing made yet: one line saying what a routine is, and New routine above it. */
-export const Empty = meta.story({
-	parameters: { routines: [] },
+/** A scheduled routine: on, with its bot, its schedule, where its result goes, and Run now. */
+export const Scheduled = meta.story({
+	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("No routines yet")).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "New routine" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText("Growth Desk · Revenue pod")).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).toBeChecked();
+		await expect(canvas.getByRole("radio", { name: "Every day" })).toBeChecked();
+		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Delete routine" })).toBeInTheDocument();
+	},
+});
+
+/** Instructions open on a page of their own, with room to write and Save, as a bot's do. */
+export const Instructions = meta.story({
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Instructions/ }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByLabelText("Instructions")).toHaveValue(
+			overnight.routine.instructions,
+		);
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Overnight outbound" })).toBeInTheDocument();
+	},
+});
+
+/** Paused: it says it runs only when asked, and Run now still works. */
+export const Paused = meta.story({
+	render: () => <StoryApp path={pageOf(churnReport)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				"Paused. It only runs when you press Run now.",
+				{},
+				{ timeout: 10_000 },
+			),
+		).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).not.toBeChecked();
+		await expect(canvas.getByRole("checkbox", { name: "Wednesday" })).toBeChecked();
+	},
+});
+
+/** A webhook: its address, and its secret, which shows only in the tab that made it. */
+export const Webhook = meta.story({
+	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				new RegExp(`/hooks/routines/${incidentIntake.routine.id}$`),
+				{},
+				{ timeout: 10_000 },
+			),
+		).toBeInTheDocument();
+		await expect(canvas.getByText("Shown only when it's made")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Reset" })).toBeInTheDocument();
 	},
 });
 
 /**
- * A new routine starts on a daily schedule at 9:00, posting its result to the
- * chat, and waits for a name and instructions.
+ * A new routine starts on a daily schedule at 9:00 on the first bot, posting
+ * its result to the chat, and waits for a name and instructions.
  */
 export const NewRoutine = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-
-		await expect(within(dialog).getByRole("radio", { name: "Every day" })).toBeChecked();
-		await expect(within(dialog).getByText("9:00")).toBeInTheDocument();
-		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+	render: () => <StoryApp path={`${routines}/new`} />,
+	play: async ({ canvas }) => {
 		await expect(
-			within(dialog).getByRole("switch", { name: "Post result to chat" }),
-		).toHaveAttribute("aria-checked", "true");
-		await expect(
-			within(dialog).getByText(/Runs every day at 9:00 and posts the result in Growth Desk's chat/),
+			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		await expect(canvas.getByText("Not created yet")).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "Every day" })).toBeChecked();
+		await expect(canvas.getByText("9:00")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
+		await expect(canvas.queryByRole("switch", { name: "Runs on its own" })).toBeNull();
 	},
 });
 
-/** Weekly adds a row of days to pick from. */
-export const Weekly = meta.story({
+/** Weekly adds a row of days, and the bot list opens in place under its pods. */
+export const ChoosingDaysAndABot = meta.story({
+	render: () => <StoryApp path={`${routines}/new`} />,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-		await userEvent.click(within(dialog).getByRole("radio", { name: "Weekly" }));
-		await userEvent.click(within(dialog).getByRole("checkbox", { name: "Friday" }));
-
-		await expect(within(dialog).getByRole("checkbox", { name: "Monday" })).toBeChecked();
-		await expect(within(dialog).getByText(/Runs Mondays and Fridays at 9:00/)).toBeInTheDocument();
-	},
-});
-
-/** A webhook's address is made when the routine is saved, and its result stays in the run. */
-export const Webhook = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-		await userEvent.click(within(dialog).getByRole("radio", { name: "Webhook" }));
-
-		await expect(within(dialog).getByText("Made when you save")).toBeInTheDocument();
-		await expect(
-			within(dialog).getByRole("switch", { name: "Post result to chat" }),
-		).toHaveAttribute("aria-checked", "false");
-		await expect(
-			within(dialog).getByText(
-				/Runs whenever the address is called .* keeps the result in the run/,
-			),
-		).toBeInTheDocument();
-	},
-});
-
-/** The bot picker lists bots under their pods, with the chosen one ticked. */
-export const ChoosingABot = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "New routine" }));
-		const dialog = await screen.findByRole("dialog", { name: "New routine" });
-		await userEvent.click(within(dialog).getByRole("button", { name: "Bot" }));
-		const picker = await screen.findByRole("dialog", { name: "Bot" });
-
-		await expect(within(picker).getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
-		await expect(within(picker).getByRole("button", { name: "Growth Desk" })).toHaveAttribute(
-			"aria-pressed",
-			"true",
+		await userEvent.click(
+			await canvas.findByRole("radio", { name: "Weekly" }, { timeout: 10_000 }),
 		);
+		await userEvent.click(canvas.getByRole("checkbox", { name: "Friday" }));
+		await expect(canvas.getByText(/Runs Mondays and Fridays at 9:00/)).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: /^Bot/ }));
+		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
 	},
 });
 
-/** An existing routine opens with its bot fixed, and Delete routine at the foot. */
-export const Editing = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /^Overnight outbound/ }));
-		const dialog = await screen.findByRole("dialog", { name: "Edit routine" });
-
-		await expect(within(dialog).getByLabelText("Name")).toHaveValue("Overnight outbound");
-		await expect(within(dialog).queryByRole("button", { name: "Bot" })).toBeNull();
-		await expect(within(dialog).getByText("6:00")).toBeInTheDocument();
+/** Somebody who may not manage a pod's routines reads them without the controls to change them. */
+export const AsAMember = meta.story({
+	beforeEach({ msw }) {
+		const asMember = storyPods.map((pod) => ({
+			...pod,
+			permissions: { ...pod.permissions, manageRoutines: false, runRoutines: false },
+		}));
+		msw.use(routinesAnswer(everyRoutine), ...appHandlers({ role: "member", pods: asMember }));
+	},
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas }) => {
 		await expect(
-			within(dialog).getByRole("button", { name: "Delete routine" }),
+			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
+		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).toBeDisabled();
+		await expect(canvas.queryByRole("button", { name: "Run now" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Delete routine" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "New routine" })).toBeNull();
 	},
 });
 
-/** Instructions too long for the screen scroll inside the dialog, with Back still in view above them. */
-export const LongInstructions = meta.story({
-	parameters: { routines: [pipelineReview] },
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /^Pipeline review/ }));
-		const form = await screen.findByRole("dialog", { name: "Edit routine" });
-		await userEvent.click(within(form).getByRole("button", { name: "Instructions" }));
-		const dialog = await screen.findByRole("dialog", { name: "Instructions" });
+/** Nothing made yet: what a routine is, and New routine. */
+export const Empty = meta.story({
+	beforeEach({ msw }) {
+		msw.use(routinesAnswer([]), ...appHandlers());
+	},
+	render: () => <StoryApp path={routines} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("No routines yet", {}, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.getAllByRole("button", { name: "New routine" }).length).toBeGreaterThan(0);
+	},
+});
 
-		const back = within(dialog).getByRole("button", { name: "Back" }).getBoundingClientRect();
-		await expect(back.top).toBeGreaterThanOrEqual(0);
-		await expect(dialog.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+/** On a phone the list stands alone. */
+export const PhoneList = meta.story({
+	globals: PHONE,
+	render: () => <StoryApp path={routines} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("navigation", { name: "Workspace routines" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("heading", { name: "Overnight outbound" })).toBeNull();
+	},
+});
+
+/** On a phone the open routine covers the list, with the way back to it. */
+export const PhoneRoutine = meta.story({
+	globals: PHONE,
+	render: () => <StoryApp path={pageOf(churnReport)} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("link", { name: "Routines" }, { timeout: 10_000 }),
+		).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Weekly churn report" }),
+		).toBeInTheDocument();
 	},
 });
