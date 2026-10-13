@@ -66,6 +66,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          # The version is the release's, such as 1.2.3, or edge for a push to main.
+          build-args: |
+            SUGABOTS_VERSION=${{ steps.meta.outputs.version }}
+            SUGABOTS_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

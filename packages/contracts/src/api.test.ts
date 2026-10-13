@@ -14,19 +14,25 @@ describe("healthResponseSchema", () => {
 		expect(
 			Schema.decodeUnknownSync(healthResponseSchema)({
 				status: "ok",
-				version: "0.0.0",
+				version: "0.2.0",
+				commit: "a1b2c3d",
 				extra: true,
 			}),
 		).toEqual({
 			status: "ok",
-			version: "0.0.0",
+			version: "0.2.0",
+			commit: "a1b2c3d",
 		});
 	});
 
 	it("rejects an unknown status", () => {
 		expect(
 			Result.isSuccess(
-				Schema.decodeUnknownResult(healthResponseSchema)({ status: "down", version: "0.0.0" }),
+				Schema.decodeUnknownResult(healthResponseSchema)({
+					status: "down",
+					version: "0.2.0",
+					commit: null,
+				}),
 			),
 		).toBe(false);
 	});

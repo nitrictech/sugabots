@@ -51,6 +51,13 @@ COPY --exclude=web --exclude=website packages packages
 COPY --chmod=755 packages/server/docker-entrypoint.sh packages/server/docker-entrypoint.sh
 COPY --from=web /app/packages/web/dist packages/web/dist
 
+# Which build this is, reported by /api/health and the startup log. The publish
+# workflow sets them; without them the image reports its version as `unknown`.
+# Last, because the commit differs on every build.
+ARG SUGABOTS_VERSION SUGABOTS_COMMIT
+ENV SUGABOTS_VERSION=$SUGABOTS_VERSION \
+    SUGABOTS_COMMIT=$SUGABOTS_COMMIT
+
 USER node
 EXPOSE 3000
 

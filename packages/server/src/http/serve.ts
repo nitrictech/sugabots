@@ -1,9 +1,9 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { COMMIT, VERSION } from "@sugabots/core/version";
 import { Config, Duration, Effect, Layer } from "effect";
 import { HttpServer } from "effect/unstable/http";
-import { VERSION } from "../version.ts";
 
 /**
  * How long a client gets to finish what it was sent before its socket is cut.
@@ -30,8 +30,9 @@ export const listeningLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
 		yield* Effect.addFinalizer(() => Effect.promise(() => bus.close()));
+		const build = COMMIT ? `${VERSION} (${COMMIT})` : VERSION;
 		yield* HttpServer.addressFormattedWith((address) =>
-			Effect.log(`sugabots ${VERSION} listening on ${address}`),
+			Effect.log(`sugabots ${build} listening on ${address}`),
 		);
 	}),
 );

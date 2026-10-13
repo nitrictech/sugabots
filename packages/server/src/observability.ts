@@ -1,7 +1,7 @@
+import { VERSION } from "@sugabots/core/version";
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { Otlp, OtlpSerialization } from "effect/unstable/observability";
-import { VERSION } from "./version.ts";
 
 /**
  * Exports the process's traces and Effect logs over OTLP/HTTP, configured by
