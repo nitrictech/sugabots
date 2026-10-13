@@ -20,6 +20,7 @@ const PERMISSIONS: PodPermissions = {
 	useDesktops: true,
 	manageRoutines: true,
 	runRoutines: true,
+	deleteArtifacts: true,
 };
 
 function pod(id: string, name: string, color: Pod["color"]): Pod {

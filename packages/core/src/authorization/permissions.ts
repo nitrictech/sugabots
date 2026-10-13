@@ -276,6 +276,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 		useDesktops: may("sandbox.desktop.use"),
 		manageRoutines: may("routine.manage"),
 		runRoutines: may("routine.run"),
+		deleteArtifacts: may("pod.update"),
 	};
 }
 
