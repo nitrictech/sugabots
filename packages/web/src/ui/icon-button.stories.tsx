@@ -9,7 +9,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { label: "Workspace settings", children: <Settings />, onClick: fn() },
 	argTypes: {
-		variant: { control: "select", options: ["quiet", "outline", "pane", "bar"] },
+		variant: { control: "select", options: ["quiet", "outline", "pane", "bar", "round"] },
 		size: { control: "select", options: ["sm", "default", "lg"] },
 	},
 });
@@ -27,5 +27,8 @@ export const Pane = meta.story({ args: { variant: "pane", size: "lg" } });
 export const Bar = meta.story({
 	args: { variant: "bar", children: <Settings size={16} strokeWidth={2} /> },
 });
+
+/** Round is a filled circle, for a Close or a ⋯ beside other controls. */
+export const Round = meta.story({ args: { variant: "round" } });
 
 export const Disabled = meta.story({ args: { disabled: true } });

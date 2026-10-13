@@ -4,6 +4,7 @@ import { ChevronRight, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import {
+	ARTIFACT_TOOL_PREFIX,
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
 	connectionLabel,
@@ -33,15 +34,15 @@ export function ToolLine({
 	if (calls.length === 0) return null;
 
 	return (
-		<div className={cn("flex flex-col items-start", className)}>
+		<div className={cn("flex min-w-0 flex-col items-start", className)}>
 			<button
 				type="button"
 				aria-expanded={open}
 				aria-controls={listId}
 				onClick={() => setOpen(!open)}
-				className="focus-ring flex items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
+				className="focus-ring flex max-w-full items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-sm transition-colors hover:text-soft-foreground"
 			>
-				{toolLineText(calls, looks)}
+				<span className="min-w-0 truncate">{toolLineText(calls, looks)}</span>
 				<ChevronRight
 					aria-hidden
 					size={10}
@@ -111,6 +112,7 @@ function ToolCallRow({ call, look }: { call: ToolCallPart; look?: ConnectionLook
 function appOf(call: ToolCallPart, look?: ConnectionLook): string {
 	const { handle } = splitToolKey(call.tool);
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
+	if (call.tool.startsWith(ARTIFACT_TOOL_PREFIX)) return "Artifacts";
 	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
 }
 

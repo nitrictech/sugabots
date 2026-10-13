@@ -1,6 +1,5 @@
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { X } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { usePods } from "@/lib/pods.ts";
@@ -10,6 +9,7 @@ import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import { type SettingSection, workspaceSettingGroups } from "@/lib/workspace-settings.ts";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import {
 	CompactBackBar,
 	SettingsGroup,
@@ -17,7 +17,6 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Settings, as a page of the app beside the rail: its sections down the left,
@@ -129,16 +128,7 @@ function SettingsNavigation() {
 				<h1 className="m-0 flex-1 font-extrabold text-foreground text-xl tracking-[-0.02em]">
 					Settings
 				</h1>
-				<Tooltip label="Close settings">
-					<Link
-						from="/$workspace"
-						to="./agents"
-						aria-label="Close settings"
-						className="focus-ring grid size-8 shrink-0 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover"
-					>
-						<X size={15} strokeWidth={2.4} />
-					</Link>
-				</Tooltip>
+				<CloseButton label="Close settings" render={<Link from="/$workspace" to="./agents" />} />
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-2 pb-3">
 				{groups.map((group) => (

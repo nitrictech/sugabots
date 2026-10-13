@@ -16,6 +16,7 @@ import {
 } from "@/lib/tool-names.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Button } from "@/ui/button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog, DialogClose, DialogContent } from "@/ui/dialog.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
@@ -340,12 +341,7 @@ function ReviewSheet({
 					tabIndex={-1}
 					className="flex shrink-0 justify-end px-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] outline-none"
 				>
-					<DialogClose
-						aria-label="Close"
-						className="focus-ring grid size-8 place-items-center rounded-full bg-chip text-soft-foreground transition-colors hover:bg-hover"
-					>
-						<X aria-hidden size={15} strokeWidth={2.4} />
-					</DialogClose>
+					<CloseButton render={<DialogClose />} />
 				</div>
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">

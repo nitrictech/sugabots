@@ -28,6 +28,24 @@ export function podLink(pod: Pod) {
 	return linkOptions({ from: "/$workspace", to: "./pods/$pod", params: { pod: pod.slug } });
 }
 
+/** A pod's artifacts. */
+export function artifactsLink(pod: Pod) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts",
+		params: { pod: pod.slug },
+	});
+}
+
+export function artifactLink(pod: Pod, artifactId: string, search: { version?: number } = {}) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./pods/$pod/artifacts/$artifact",
+		params: { pod: pod.slug, artifact: artifactId },
+		search,
+	});
+}
+
 export function podSettingsLink(pod: Pod) {
 	return linkOptions({
 		from: "/$workspace",
@@ -45,7 +63,11 @@ export function connectionSettingsLink(pod: Pod, connection: Pick<Connection, "i
 	});
 }
 
-export function agentChatLink({ pod, agent }: AgentInPod, search: { thread?: string } = {}) {
+/** A bot's chat in its pod, with `thread` open beside it, or `artifact` open large. */
+export function agentChatLink(
+	{ pod, agent }: AgentInPod,
+	search: { thread?: string; artifact?: string } = {},
+) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./pods/$pod/agents/$agent",

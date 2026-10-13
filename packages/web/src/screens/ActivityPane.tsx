@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useChat, useChatHistory } from "@/lib/chats.ts";
 import { agentChatLink } from "@/lib/links.ts";
+import type { OpenedArtifact } from "./AgentChat.tsx";
 import { AgentPage } from "./AgentPage.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
@@ -24,6 +25,8 @@ export function ActivityPane({
 	threadId,
 	onThreadPageChange,
 	onThreadChange,
+	artifact,
+	onArtifactChange,
 }: {
 	pod: Pod;
 	agent: Agent;
@@ -36,6 +39,8 @@ export function ActivityPane({
 	threadId?: string;
 	onThreadPageChange: (threadId: string) => void;
 	onThreadChange: (threadId: string | undefined) => void;
+	artifact?: OpenedArtifact;
+	onArtifactChange: (artifact: OpenedArtifact | undefined) => void;
 }) {
 	const openChat = (
 		<Link
@@ -65,6 +70,8 @@ export function ActivityPane({
 			focusMessageId={focusMessageId}
 			away={{ back: BACK_TO_ACTIVITY, trailing: openChat }}
 			onThreadChange={onThreadChange}
+			artifact={artifact}
+			onArtifactChange={onArtifactChange}
 		/>
 	);
 }

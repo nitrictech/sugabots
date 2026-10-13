@@ -17,6 +17,9 @@ export const NETWORK_REQUEST_TOOL = "request_network_access";
  */
 export const BROWSER_TOOL_PREFIX = "browser_";
 
+/** The artifact tools' names start with this: one app, the pod's artifacts, read and written. */
+export const ARTIFACT_TOOL_PREFIX = "artifact_";
+
 /**
  * What a connection is called wherever one of its tools is shown. A handle with
  * no connection behind it any more is written out rather than shown raw, so a

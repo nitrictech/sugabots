@@ -7,6 +7,7 @@ import type {
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import {
 	Fragment,
 	type RefObject,
@@ -43,6 +44,7 @@ import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { ArtifactStage } from "./Artifacts.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatHeader, type ChatPlace } from "./ChatHeader.tsx";
@@ -68,6 +70,12 @@ type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
  */
 const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
+/** An artifact open large beside a chat, at its current version when `version` is absent. */
+export interface OpenedArtifact {
+	artifactId: string;
+	version?: number;
+}
+
 export function AgentChat({
 	agent,
 	pod,
@@ -76,6 +84,8 @@ export function AgentChat({
 	focusMessageId,
 	place,
 	onThreadChange,
+	artifact,
+	onArtifactChange,
 }: {
 	agent: Agent;
 	pod: Pod;
@@ -85,7 +95,11 @@ export function AgentChat({
 	focusMessageId?: string;
 	place: ChatPlace;
 	onThreadChange: (threadId: string | undefined) => void;
+	/** Open large beside the chat, in place of any sidebar. */
+	artifact?: OpenedArtifact;
+	onArtifactChange: (artifact: OpenedArtifact | undefined) => void;
 }) {
+	const openArtifact = (artifactId: string) => onArtifactChange({ artifactId });
 	const chat = useChat(pod, agent.id);
 	const messages = useChatMessages(chat.data?.id);
 	const history = useChatHistory(chat.data?.id);
@@ -260,7 +274,12 @@ export function AgentChat({
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
 		<div className="flex min-h-0 min-w-0 flex-1 md:relative">
-			<div className="relative flex min-w-0 flex-1 flex-col">
+			<div
+				className={cn(
+					"relative flex min-w-0 flex-1 flex-col",
+					artifact && "md:w-[400px] md:flex-none md:border-border md:border-r",
+				)}
+			>
 				{header}
 				<div
 					ref={attachViewport}
@@ -306,6 +325,7 @@ export function AgentChat({
 										participants={mentionable}
 										dividers={false}
 										onOpenThread={openThread}
+										onOpenArtifact={openArtifact}
 										podId={pod.id}
 										approvalCapabilities={details.capabilities}
 										queued={queued}
@@ -359,8 +379,16 @@ export function AgentChat({
 					</div>
 				</div>
 			</div>
-			{/* One sidebar at a time: an opened collaboration or run takes Details' place. */}
-			{threadId ? (
+			{/* One beside the chat at a time: an open artifact, else a thread, else Details. */}
+			{artifact ? (
+				<ArtifactStage
+					pod={pod}
+					artifactId={artifact.artifactId}
+					version={artifact.version}
+					onVersionChange={(version) => onArtifactChange({ ...artifact, version })}
+					onClose={() => onArtifactChange(undefined)}
+				/>
+			) : threadId ? (
 				<ChatThreadPanel
 					chatId={chat.data.id}
 					chatAgentId={agent.id}
@@ -369,6 +397,7 @@ export function AgentChat({
 					history={entries}
 					frame={{ kind: "sidebar", onClose: () => onThreadChange(undefined) }}
 					onOpenThread={openThread}
+					onOpenArtifact={openArtifact}
 				/>
 			) : (
 				place.kind === "own" &&

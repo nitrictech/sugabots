@@ -1,10 +1,10 @@
 import type { ChatListItem, Pod } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Plus, Settings2 } from "lucide-react";
+import { Library, Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, podSettingsLink } from "@/lib/links.ts";
+import { agentChatLink, artifactsLink, podSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { ListColumn } from "@/shell/ListColumn.tsx";
@@ -103,6 +103,9 @@ export function ConversationListView({
 							<Plus size={17} strokeWidth={2.2} />
 						</IconButton>
 					)}
+					<IconButton label="Artifacts" variant="bar" render={<Link {...artifactsLink(pod)} />}>
+						<Library size={16} strokeWidth={2} />
+					</IconButton>
 					<IconButton
 						label="Pod settings"
 						variant="bar"
