@@ -59,7 +59,7 @@ export function toRoutine(row: schema.RoutineRow): Routine {
 						timezone: row.cronTimezone ?? "",
 						nextScheduledAt: row.nextScheduledAt?.toISOString() ?? null,
 					}
-				: { kind: "webhook" },
+				: { kind: "webhook", auth: row.webhookAuth ?? { kind: "bearer" } },
 		state: row.state,
 		results: row.results,
 		createdById: row.createdById,
@@ -89,5 +89,14 @@ export class RoutineTriggerRejected
 {
 	get userMessage() {
 		return userText`That Routine cannot accept this trigger`;
+	}
+}
+
+export class RoutineDeliveryIdTooLong
+	extends Data.TaggedError("RoutineDeliveryIdTooLong")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`The delivery's id is too long`;
 	}
 }

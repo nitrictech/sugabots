@@ -9,6 +9,10 @@ export const MAX_ROUTINE_INSTRUCTIONS_CHARACTERS = 20_000;
 export const MAX_CRON_EXPRESSION_CHARACTERS = 200;
 export const MAX_TIMEZONE_CHARACTERS = 100;
 export const MAX_IDEMPOTENCY_KEY_CHARACTERS = 200;
+export const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
+export const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
+export const MIN_WEBHOOK_SECRET_CHARACTERS = 16;
+export const MAX_WEBHOOK_SECRET_CHARACTERS = 500;
 export const DEFAULT_ROUTINE_EXECUTION_PAGE_LIMIT = 20;
 export const MAX_ROUTINE_EXECUTION_PAGE_LIMIT = 100;
 
@@ -45,6 +49,58 @@ export type RoutineTriggerKind = typeof routineTriggerKindSchema.Type;
 export const routineResultsSchema = Schema.Literals(["keep_in_run", "post_to_chat"]);
 export type RoutineResults = typeof routineResultsSchema.Type;
 
+const webhookHeaderSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_WEBHOOK_HEADER_CHARACTERS),
+	// An HTTP field name: RFC 9110's token characters.
+	Schema.isPattern(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/),
+);
+
+const webhookUsernameSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_WEBHOOK_USERNAME_CHARACTERS),
+	// Basic auth joins the username and password with the first colon.
+	Schema.isPattern(/^[^:]+$/),
+);
+
+export const webhookHmacAlgorithmSchema = Schema.Literals(["sha256", "sha512"]);
+export type WebhookHmacAlgorithm = typeof webhookHmacAlgorithmSchema.Type;
+
+/**
+ * How a webhook routine's caller proves it holds the routine's secret.
+ *
+ * `hmac` signs the request rather than sending the secret. In the `body`
+ * format the signature is over the raw body, in `header`, as hex or base64,
+ * optionally prefixed with the algorithm (`sha256=`): Linear, GitHub and
+ * Shopify sign this way. `slack` and `stripe` are those services' own
+ * formats, which sign a timestamp with the body, so a delivery replayed later
+ * is refused.
+ */
+export const webhookAuthSchema = Schema.Union([
+	Schema.Struct({
+		kind: Schema.Literal("hmac"),
+		format: Schema.Literal("body"),
+		header: webhookHeaderSchema,
+		algorithm: webhookHmacAlgorithmSchema,
+	}),
+	Schema.Struct({ kind: Schema.Literal("hmac"), format: Schema.Literal("slack") }),
+	Schema.Struct({ kind: Schema.Literal("hmac"), format: Schema.Literal("stripe") }),
+	Schema.Struct({ kind: Schema.Literal("api_key"), header: webhookHeaderSchema }),
+	Schema.Struct({ kind: Schema.Literal("bearer") }),
+	Schema.Struct({ kind: Schema.Literal("basic"), username: webhookUsernameSchema }),
+]);
+export type WebhookAuth = typeof webhookAuthSchema.Type;
+export type WebhookAuthKind = WebhookAuth["kind"];
+
+/**
+ * A webhook secret someone brings, such as the signing secret Linear, Slack
+ * or Stripe makes for a webhook pointed at the routine.
+ */
+export const webhookSecretSchema = Schema.Trim.check(
+	Schema.isMinLength(MIN_WEBHOOK_SECRET_CHARACTERS),
+	Schema.isMaxLength(MAX_WEBHOOK_SECRET_CHARACTERS),
+);
+
 export const routineTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("cron"),
@@ -52,7 +108,7 @@ export const routineTriggerSchema = Schema.Union([
 		timezone: timezoneSchema,
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
-	Schema.Struct({ kind: Schema.Literal("webhook") }),
+	Schema.Struct({ kind: Schema.Literal("webhook"), auth: webhookAuthSchema }),
 ]);
 
 export type RoutineTrigger = typeof routineTriggerSchema.Type;
@@ -89,6 +145,20 @@ export const workspaceRoutineListSchema = Schema.Struct({
 
 export type WorkspaceRoutineList = typeof workspaceRoutineListSchema.Type;
 
+/**
+ * A webhook trigger as written. Without `auth`, a new routine takes a bearer
+ * token and a changed one keeps how it checks callers. Without `secret`, one
+ * is made when the routine first needs one or its auth kind changes, and is
+ * returned then.
+ */
+const webhookTriggerInputSchema = Schema.Struct({
+	kind: Schema.Literal("webhook"),
+	auth: Schema.optional(webhookAuthSchema),
+	secret: Schema.optional(webhookSecretSchema),
+	expression: Schema.optional(Schema.Never),
+	timezone: Schema.optional(Schema.Never),
+});
+
 const newRoutineBaseSchema = {
 	name: routineNameSchema,
 	instructions: routineInstructionsSchema,
@@ -105,14 +175,7 @@ export const newRoutineSchema = Schema.Union([
 			timezone: timezoneSchema,
 		}),
 	}),
-	Schema.Struct({
-		...newRoutineBaseSchema,
-		trigger: Schema.Struct({
-			kind: Schema.Literal("webhook"),
-			expression: Schema.optional(Schema.Never),
-			timezone: Schema.optional(Schema.Never),
-		}),
-	}),
+	Schema.Struct({ ...newRoutineBaseSchema, trigger: webhookTriggerInputSchema }),
 ]);
 
 export type NewRoutine = typeof newRoutineSchema.Type;
@@ -129,11 +192,7 @@ export const routineUpdateSchema = Schema.Struct({
 				expression: cronExpressionSchema,
 				timezone: timezoneSchema,
 			}),
-			Schema.Struct({
-				kind: Schema.Literal("webhook"),
-				expression: Schema.optional(Schema.Never),
-				timezone: Schema.optional(Schema.Never),
-			}),
+			webhookTriggerInputSchema,
 		]),
 	),
 });
@@ -259,10 +318,14 @@ export const acceptedRoutineExecutionSchema = Schema.Struct({
 
 export type AcceptedRoutineExecution = typeof acceptedRoutineExecutionSchema.Type;
 
-export const routineSecretSchema = Schema.Struct({
-	secret: Schema.String.check(Schema.isMinLength(32)),
-});
+export const routineSecretSchema = Schema.Struct({ secret: Schema.String });
 export type RoutineSecret = typeof routineSecretSchema.Type;
+
+/** Replaces a webhook routine's secret with `secret`, or with a new one when it is absent. */
+export const routineSecretReplacementSchema = Schema.Struct({
+	secret: Schema.optional(webhookSecretSchema),
+});
+export type RoutineSecretReplacement = typeof routineSecretReplacementSchema.Type;
 
 export const acceptedRoutineWebhookSchema = Schema.Struct({
 	executionId: uuidSchema,
@@ -270,9 +333,13 @@ export const acceptedRoutineWebhookSchema = Schema.Struct({
 });
 export type AcceptedRoutineWebhook = typeof acceptedRoutineWebhookSchema.Type;
 
+/** The answer to Slack's check that it may send events to the routine's address. */
+export const routineWebhookChallengeSchema = Schema.Struct({ challenge: Schema.String });
+export type RoutineWebhookChallenge = typeof routineWebhookChallengeSchema.Type;
+
 export const routineWriteResultSchema = Schema.Struct({
 	routine: routineSchema,
-	secret: Schema.NullOr(Schema.String.check(Schema.isMinLength(32))),
+	secret: Schema.NullOr(Schema.String),
 });
 export type RoutineWriteResult = typeof routineWriteResultSchema.Type;
 

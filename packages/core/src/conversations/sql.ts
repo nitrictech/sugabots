@@ -13,6 +13,7 @@ import type {
 	ThreadType,
 	ToolApprovalStatus,
 	ToolCallStatus,
+	WebhookAuth,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
@@ -47,6 +48,13 @@ export const routine = pgTable(
 		cronExpression: text("cron_expression"),
 		cronTimezone: text("cron_timezone"),
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
+		webhookAuth: jsonb("webhook_auth").$type<WebhookAuth>(),
+		/** The webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
+		webhookSecret: text("webhook_secret"),
+		/**
+		 * The scrypt hash of a bearer secret made before secrets were kept
+		 * sealed instead. It still admits callers until the secret is replaced.
+		 */
 		webhookSecretDigest: text("webhook_secret_digest"),
 		state: text("state").$type<RoutineState>().notNull().default("enabled"),
 		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
@@ -69,13 +77,17 @@ export const routine = pgTable(
 				${table.triggerKind} = 'cron'
 				and ${table.cronExpression} is not null
 				and ${table.cronTimezone} is not null
+				and ${table.webhookAuth} is null
+				and ${table.webhookSecret} is null
 				and ${table.webhookSecretDigest} is null
 			) or (
 				${table.triggerKind} = 'webhook'
 				and ${table.cronExpression} is null
 				and ${table.cronTimezone} is null
 				and ${table.nextScheduledAt} is null
-				and ${table.webhookSecretDigest} is not null
+				and ${table.webhookAuth} is not null
+				and (${table.webhookSecret} is null) <> (${table.webhookSecretDigest} is null)
+				and (${table.webhookSecretDigest} is null or ${table.webhookAuth}->>'kind' = 'bearer')
 			)`,
 		),
 		check(

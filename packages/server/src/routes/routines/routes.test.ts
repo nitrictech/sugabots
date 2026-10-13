@@ -1,8 +1,9 @@
 import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { RoutineDeliveryIdTooLong } from "@sugabots/core/conversations/routines/routine";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { unimplemented } from "@sugabots/core/testing";
-import { Effect, Layer, Redacted } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
@@ -15,14 +16,28 @@ const USER_ID = "0199a3a0-0000-7000-8000-000000000008";
 const EXECUTION_ID = "0199a3a0-0000-7000-8000-000000000004";
 const THREAD_ID = "0199a3a0-0000-7000-8000-000000000005";
 
+const GOOD_AUTHORIZATION = "Bearer good-secret";
+
+/**
+ * The app with a webhook double that admits deliveries to `ROUTINE_ID` with
+ * the good authorization, answers a `challenge` body with it, and refuses a
+ * `tooLong` one's id.
+ */
 function webhookApp() {
-	const accept = vi.fn<Routines.WebhooksInterface["accept"]>(({ routineId, secret }) =>
-		Effect.succeed(
-			routineId === ROUTINE_ID && Redacted.value(secret) === "good-secret"
-				? { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false }
-				: undefined,
-		),
-	);
+	const accept = vi.fn<Routines.WebhooksInterface["accept"]>(({ routineId, delivery }) => {
+		if (routineId !== ROUTINE_ID || delivery.headers.authorization !== GOOD_AUTHORIZATION) {
+			return Effect.succeed(undefined);
+		}
+		const payload = delivery.payload as { challenge?: string; tooLong?: boolean };
+		if (payload.tooLong) return Effect.fail(new RoutineDeliveryIdTooLong());
+		if (payload.challenge) {
+			return Effect.succeed({ kind: "challenge" as const, challenge: payload.challenge });
+		}
+		return Effect.succeed({
+			kind: "run" as const,
+			execution: { executionId: EXECUTION_ID, threadId: THREAD_ID, duplicate: false },
+		});
+	});
 	return {
 		app: createTestApp(unimplemented(Routines.Webhooks, { accept })),
 		accept,
@@ -32,9 +47,8 @@ function webhookApp() {
 function deliver(
 	app: ReturnType<typeof webhookApp>["app"],
 	options: {
-		secret?: string;
+		authorization?: string;
 		contentType?: string;
-		idempotencyKey?: string;
 		body?: string;
 		routineId?: string;
 	} = {},
@@ -42,8 +56,7 @@ function deliver(
 	const headers: Record<string, string> = {
 		"content-type": options.contentType ?? "application/json",
 	};
-	if (options.secret) headers.authorization = `Bearer ${options.secret}`;
-	if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
+	if (options.authorization) headers.authorization = options.authorization;
 	return app.request(`/hooks/routines/${options.routineId ?? ROUTINE_ID}`, {
 		method: "POST",
 		headers,
@@ -52,26 +65,33 @@ function deliver(
 }
 
 describe("Routine webhooks", () => {
-	it("authenticates the secret and accepts JSON trigger data", async () => {
+	it("hands the routine the delivery's headers, exact body and JSON", async () => {
 		const { app, accept } = webhookApp();
+		// Spacing a signature covers, which re-encoding the JSON would lose.
+		const body = '{ "orderId":  42 }';
 
-		const response = await deliver(app, {
-			secret: "good-secret",
-			idempotencyKey: "delivery-1",
-		});
+		const response = await deliver(app, { authorization: GOOD_AUTHORIZATION, body });
 
 		expect(response.status).toBe(202);
-		expect(await response.json()).toEqual({
-			executionId: EXECUTION_ID,
-			duplicate: false,
+		expect(await response.json()).toEqual({ executionId: EXECUTION_ID, duplicate: false });
+		const [input] = accept.mock.calls[0] ?? [];
+		expect(input?.routineId).toBe(ROUTINE_ID);
+		expect(input?.delivery.headers.authorization).toBe(GOOD_AUTHORIZATION);
+		expect(new TextDecoder().decode(input?.delivery.body)).toBe(body);
+		expect(input?.delivery.payload).toEqual({ orderId: 42 });
+	});
+
+	it("answers Slack's URL check with its challenge", async () => {
+		const { app } = webhookApp();
+
+		const response = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
+			body: JSON.stringify({ challenge: "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P" }),
 		});
-		const [delivery] = accept.mock.calls[0] ?? [];
-		expect(delivery?.routineId).toBe(ROUTINE_ID);
-		expect(delivery && Redacted.value(delivery.secret)).toBe("good-secret");
-		expect(delivery?.trigger).toMatchObject({
-			kind: "webhook",
-			idempotencyKey: "delivery-1",
-			payload: { orderId: 42 },
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			challenge: "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P",
 		});
 	});
 
@@ -79,27 +99,31 @@ describe("Routine webhooks", () => {
 		const { app } = webhookApp();
 
 		const missing = await deliver(app);
-		const invalid = await deliver(app, { secret: "wrong-secret" });
-		const unknown = await deliver(app, { secret: "good-secret", routineId: OTHER_ROUTINE_ID });
-		const malformed = await deliver(app, { secret: "good-secret", routineId: "not-a-uuid" });
+		const invalid = await deliver(app, { authorization: "Bearer wrong-secret" });
+		const unknown = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
+			routineId: OTHER_ROUTINE_ID,
+		});
 
-		expect(missing.status).toBe(401);
-		expect(invalid.status).toBe(401);
-		expect(unknown.status).toBe(401);
-		expect(malformed.status).toBe(401);
-		expect(await missing.json()).toEqual(await invalid.json());
-		expect(await unknown.json()).toEqual(await malformed.json());
+		expect([missing.status, invalid.status, unknown.status]).toEqual([401, 401, 401]);
+		const [missingBody, invalidBody, unknownBody] = await Promise.all(
+			[missing, invalid, unknown].map((response) => response.json()),
+		);
+		expect(missingBody).toEqual(invalidBody);
+		expect(invalidBody).toEqual(unknownBody);
 	});
 
 	it("rejects non-JSON content before authenticating", async () => {
 		const { app, accept } = webhookApp();
 
-		const response = await deliver(app, {
-			secret: "good-secret",
+		const notJson = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
 			contentType: "text/plain",
 		});
+		const malformed = await deliver(app, { authorization: GOOD_AUTHORIZATION, body: "{" });
 
-		expect(response.status).toBe(400);
+		expect(notJson.status).toBe(400);
+		expect(malformed.status).toBe(400);
 		expect(accept).not.toHaveBeenCalled();
 	});
 
@@ -107,7 +131,7 @@ describe("Routine webhooks", () => {
 		const { app, accept } = webhookApp();
 
 		const response = await deliver(app, {
-			secret: "good-secret",
+			authorization: GOOD_AUTHORIZATION,
 			body: JSON.stringify({ payload: "x".repeat(MAX_JSON_BODY_BYTES) }),
 		});
 
@@ -115,16 +139,15 @@ describe("Routine webhooks", () => {
 		expect(accept).not.toHaveBeenCalled();
 	});
 
-	it("rejects overlong idempotency keys before accepting a trigger", async () => {
-		const { app, accept } = webhookApp();
+	it("rejects a delivery whose id is too long", async () => {
+		const { app } = webhookApp();
 
 		const response = await deliver(app, {
-			secret: "good-secret",
-			idempotencyKey: "x".repeat(201),
+			authorization: GOOD_AUTHORIZATION,
+			body: JSON.stringify({ tooLong: true }),
 		});
 
 		expect(response.status).toBe(400);
-		expect(accept).not.toHaveBeenCalled();
 	});
 });
 

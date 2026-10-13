@@ -29,7 +29,7 @@ const webhookRoutine = {
 	agentId: linear.id,
 	name: "Triage intake",
 	instructions: "Triage the request.",
-	trigger: { kind: "webhook" },
+	trigger: { kind: "webhook", auth: { kind: "bearer" } },
 	state: "enabled",
 	results: "keep_in_run",
 	createdById: null,

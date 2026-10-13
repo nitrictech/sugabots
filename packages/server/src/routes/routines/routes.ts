@@ -1,10 +1,9 @@
-import { MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { Routines } from "@sugabots/core/conversations/routines/routines";
 import { userText } from "@sugabots/errors";
-import { DateTime, Effect, Redacted, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser, bearerToken } from "../../auth/middleware.ts";
+import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -48,8 +47,8 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 						.run({ ...params, requestId: payload.requestId })
 						.pipe(asSessionUser, asHttpError(routineErrors)),
 				)
-				.handle("rotateSecret", ({ params }) =>
-					routines.rotateSecret(params).pipe(
+				.handle("rotateSecret", ({ params, payload }) =>
+					routines.rotateSecret(params, payload.secret).pipe(
 						Effect.map((secret) => ({ secret })),
 						asSessionUser,
 						asHttpError(routineErrors),
@@ -67,34 +66,30 @@ export const routineRoutes = HttpApiBuilder.group(ServerApi, "routines", (handle
 								message: userText`Routine webhooks require a JSON content type`,
 							});
 						}
-						const payload = yield* request.text.pipe(
-							Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))),
-							Effect.mapError(
-								() => new BadRequest({ message: userText`That is not a valid request` }),
-							),
-						);
-						const idempotencyKey = request.headers["idempotency-key"]?.trim() || null;
-						if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
-							return yield* new BadRequest({ message: userText`Idempotency-Key is too long` });
-						}
-						const secret = bearerToken(request.headers.authorization);
-						const receivedAt = DateTime.formatIso(yield* DateTime.now);
-						// Deliberately without a session: the routine's secret is what admits the run.
-						const accepted = secret
-							? yield* webhooks
-									.accept({
-										routineId: params.routineId,
-										secret: Redacted.make(secret),
-										trigger: { kind: "webhook", idempotencyKey, payload, receivedAt },
-									})
-									.pipe(asHttpError(routineErrors))
-							: undefined;
+						const invalid = () =>
+							new BadRequest({ message: userText`That is not a valid request` });
+						// The size check has read the body as text already. JSON is UTF-8,
+						// so encoding it again gives the bytes as sent, which a signature covers.
+						const text = yield* Effect.mapError(request.text, invalid);
+						const payload = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(
+							text,
+						).pipe(Effect.mapError(invalid));
+						const body = new TextEncoder().encode(text);
+						// Deliberately without a session: proving it holds the routine's secret is what admits the run.
+						const accepted = yield* webhooks
+							.accept({
+								routineId: params.routineId,
+								delivery: { headers: request.headers, body, payload },
+							})
+							.pipe(asHttpError(routineErrors));
 						if (!accepted) {
 							return yield* new Unauthorized({
 								message: userText`Invalid Routine webhook credentials`,
 							});
 						}
-						return { executionId: accepted.executionId, duplicate: accepted.duplicate };
+						if (accepted.kind === "challenge") return { challenge: accepted.challenge };
+						const { executionId, duplicate } = accepted.execution;
+						return { executionId, duplicate };
 					}),
 				)
 		);
@@ -110,6 +105,7 @@ const routineErrors = {
 	...refusals,
 	InvalidRoutineExecutionCursor: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
+	RoutineDeliveryIdTooLong: BadRequest,
 	RoutineNameTaken: Conflict,
 	RoutineNotFound: NotFound,
 	RoutineTriggerConflict: Conflict,
