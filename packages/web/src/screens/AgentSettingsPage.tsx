@@ -282,7 +282,7 @@ function TextRow({
 					}}
 					placeholder={placeholder}
 					maxLength={maxLength}
-					className="min-w-0 flex-1 rounded-md bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14.5px] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
 			) : (
 				<span id={id} className="min-w-0 flex-1 text-[14.5px] text-soft-foreground">
