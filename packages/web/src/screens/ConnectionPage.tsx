@@ -10,7 +10,7 @@ import {
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronDown, Ellipsis, Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
 import {
 	bearerAuthorization,
@@ -24,12 +24,8 @@ import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
+import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
+import { MoreMenu } from "@/ui/more-menu.tsx";
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
 import {
 	AccessMenu,
@@ -120,38 +116,30 @@ export function ConnectionPage({
 						Disconnect
 					</Button>
 				)}
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						aria-label={`More for ${connection.name}`}
-						className="focus-ring inline-flex size-[29px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover [&_svg]:size-4"
-					>
-						<Ellipsis aria-hidden />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="min-w-48">
-						{canManage && connection.auth === "oauth" && (
-							<DropdownMenuItem onClick={signIn}>
-								{connection.signedIn ? "Sign in again" : "Sign in"}
-							</DropdownMenuItem>
-						)}
-						{canManage && connection.auth === "header" && (
-							<DropdownMenuItem onClick={() => setReplacingSecret(true)}>
-								{secretActionLabel(connection)}
-							</DropdownMenuItem>
-						)}
-						<DropdownMenuItem onClick={() => actions.test.mutate({ connectionId: connection.id })}>
-							Check connection
+				<MoreMenu label={`More for ${connection.name}`}>
+					{canManage && connection.auth === "oauth" && (
+						<DropdownMenuItem onClick={signIn}>
+							{connection.signedIn ? "Sign in again" : "Sign in"}
 						</DropdownMenuItem>
-						{canManage && (
-							<DropdownMenuItem
-								variant="destructive"
-								className="md:hidden"
-								onClick={() => setRemoving(true)}
-							>
-								Disconnect
-							</DropdownMenuItem>
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
+					)}
+					{canManage && connection.auth === "header" && (
+						<DropdownMenuItem onClick={() => setReplacingSecret(true)}>
+							{secretActionLabel(connection)}
+						</DropdownMenuItem>
+					)}
+					<DropdownMenuItem onClick={() => actions.test.mutate({ connectionId: connection.id })}>
+						Check connection
+					</DropdownMenuItem>
+					{canManage && (
+						<DropdownMenuItem
+							variant="destructive"
+							className="md:hidden"
+							onClick={() => setRemoving(true)}
+						>
+							Disconnect
+						</DropdownMenuItem>
+					)}
+				</MoreMenu>
 			</div>
 			{/* Hidden while none of what it may show applies, so it leaves no gap. */}
 			<div className="flex flex-col gap-3 empty:hidden">

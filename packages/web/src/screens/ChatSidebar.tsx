@@ -1,7 +1,6 @@
 import { cn } from "cn";
-import { X } from "lucide-react";
 import { type ReactNode, type Ref, useState } from "react";
-import { IconButton } from "@/ui/icon-button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 
 /**
  * The column beside a chat: Details, or a collaboration or routine run opened
@@ -85,14 +84,10 @@ export function ChatSidebar({
 					</div>
 					{actions}
 					{/* A sheet closes by its dimmed backdrop on a phone; Close stays for the keyboard. */}
-					<IconButton
-						label="Close"
-						variant="bar"
+					<CloseButton
 						onClick={onClose}
 						className={cn(sheet && "max-md:not-focus-visible:sr-only")}
-					>
-						<X size={16} strokeWidth={2.2} />
-					</IconButton>
+					/>
 				</header>
 				{children}
 			</aside>

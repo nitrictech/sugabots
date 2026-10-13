@@ -31,14 +31,42 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	 * `outline` for a bordered control that sits on a card or panel. `bar` for
 	 * one in the header bar across the top of a list, chat or sidebar: a 30px
 	 * rounded square, whatever `size`, whose icon keeps the size it is given.
+	 * `round` for a close or a ⋯: a 29px filled circle, whatever `size`.
 	 */
-	variant?: "quiet" | "outline" | "pane" | "bar";
+	variant?: IconButtonVariant;
 	side?: "top" | "bottom";
 	/**
 	 * Render this element instead of a `<button>`. For a link that looks like
 	 * an icon button — the settings cog is a route, not an action.
 	 */
 	render?: useRender.RenderProp;
+}
+
+type IconButtonVariant = "quiet" | "outline" | "pane" | "bar" | "round";
+
+/**
+ * An `IconButton`'s look, for a control that has to be another element, such
+ * as the trigger of a menu.
+ */
+export function iconButtonClassName(
+	variant: IconButtonVariant = "quiet",
+	size: keyof typeof sizes = "default",
+): string {
+	return cn(
+		"focus-ring grid shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none",
+		variant === "outline" || variant === "pane" || variant === "round"
+			? "bg-chip text-foreground hover:bg-hover"
+			: variant === "bar"
+				? "rounded-[8px] text-soft-foreground hover:bg-chip"
+				: "text-muted-foreground hover:bg-hover hover:text-foreground",
+		variant === "bar"
+			? "size-[30px]"
+			: variant === "round"
+				? "size-[29px] [&_svg]:size-4"
+				: size === "lg" && variant === "pane"
+					? "size-[34px]"
+					: sizes[size],
+	);
 }
 
 /** IconButton uses label for both its accessible name and tooltip, with surface-relative styling. */
@@ -58,22 +86,7 @@ export function IconButton({
 		props: {
 			type: render ? undefined : "button",
 			"aria-label": label,
-			className: cn(
-				"focus-ring grid shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none",
-				variant === "outline"
-					? "bg-chip text-foreground hover:bg-hover"
-					: variant === "pane"
-						? "bg-chip text-foreground hover:bg-hover"
-						: variant === "bar"
-							? "rounded-[8px] text-soft-foreground hover:bg-chip"
-							: "text-muted-foreground hover:bg-hover hover:text-foreground",
-				variant === "bar"
-					? "size-[30px]"
-					: size === "lg" && variant === "pane"
-						? "size-[34px]"
-						: sizes[size],
-				className,
-			),
+			className: cn(iconButtonClassName(variant, size), className),
 			children,
 			...props,
 		},
