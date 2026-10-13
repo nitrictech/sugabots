@@ -7,7 +7,7 @@ export interface Pod {
 	bots: readonly BotColor[];
 }
 
-export const pods: readonly Pod[] = [
+export const pods = [
 	{
 		name: "Work",
 		description: "Leads, bugs, the Monday report",
@@ -32,4 +32,6 @@ export const pods: readonly Pod[] = [
 		tint: "purple",
 		bots: ["purple"],
 	},
-];
+] as const satisfies readonly Pod[];
+
+export type PodName = (typeof pods)[number]["name"];

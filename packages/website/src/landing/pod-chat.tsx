@@ -18,7 +18,7 @@ import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { bots } from "@/landing/bots";
-import { type Pod, pods } from "@/landing/pods";
+import { type PodName, pods } from "@/landing/pods";
 
 const authors = {
 	you: { kind: "person", name: "You", initials: "Y" },
@@ -36,6 +36,15 @@ const authors = {
 
 type BotAuthor = Extract<ChatAuthor, { kind: "bot" }>;
 
+/**
+ * The Family chat's booking approval. `PodChat` keeps it, because each chat
+ * remounts when its pod is opened and the decision has to outlast that.
+ */
+interface BookingApproval {
+	approval: ApprovalDecision;
+	onDecide: (decision: Exclude<ApprovalDecision, "pending">) => void;
+}
+
 interface Conversation {
 	/** The bot whose chat it is, named in the header. */
 	bot: BotAuthor;
@@ -44,11 +53,11 @@ interface Conversation {
 	/** Whether the pod has other people, so the composer can write to them alone. */
 	sharedWithPeople: boolean;
 	/** Its messages under their day markers, each a `RevealItem` so they play out in turn. */
-	Messages: () => ReactNode;
+	Messages: (props: BookingApproval) => ReactNode;
 }
 
 /** The chat open in each pod: something different the pod's people and bots get done. */
-const conversations: Record<Pod["name"], Conversation> = {
+const conversations: Record<PodName, Conversation> = {
 	Work: {
 		bot: authors.analyst,
 		description: "Leads, bugs and the Monday report",
@@ -75,13 +84,13 @@ const conversations: Record<Pod["name"], Conversation> = {
 	},
 };
 
-const FIRST_POD = "Family";
+const FIRST_POD: PodName = "Family";
 
 /** Seconds between one message of the first chat and the next as it plays out, and before the first. */
 const FIRST_CHAT_STAGGER_S = 0.5;
 const FIRST_CHAT_DELAY_S = 0.5;
 
-const UNREAD_POD = "Work";
+const UNREAD_POD: PodName = "Work";
 const UNREAD_COUNT = 3;
 
 /** A routine's report, and a teammate digging into it with the bot that wrote it. */
@@ -153,8 +162,7 @@ const replyToDecision = {
 } as const;
 
 /** A bot that asks before it books anything. */
-function FamilyMessages() {
-	const [approval, setApproval] = useState<ApprovalDecision>("pending");
+function FamilyMessages({ approval, onDecide }: BookingApproval) {
 	return (
 		<>
 			<ChatDay>Today</ChatDay>
@@ -205,7 +213,7 @@ function FamilyMessages() {
 						mark="F"
 						decision={approval}
 						outcomes={outcomes}
-						onDecide={setApproval}
+						onDecide={onDecide}
 					/>
 					<AnimatePresence initial={false}>
 						{approval !== "pending" && (
@@ -333,10 +341,10 @@ function PodRail({
 	unread,
 	onSelect,
 }: {
-	selected: Pod["name"];
+	selected: PodName;
 	/** Whether the unread pod still has its unread messages. */
 	unread: boolean;
-	onSelect: (pod: Pod["name"]) => void;
+	onSelect: (pod: PodName) => void;
 }) {
 	return (
 		<nav
@@ -459,14 +467,13 @@ function ScrolledToEnd({ children }: { children: ReactNode }) {
 
 /** A demo of the app with a chat open in each pod, chosen from the rail. */
 export function PodChat() {
-	const [selected, setSelected] = useState<Pod["name"]>(FIRST_POD);
+	const [selected, setSelected] = useState<PodName>(FIRST_POD);
 	const [unreadSeen, setUnreadSeen] = useState(false);
 	const [switched, setSwitched] = useState(false);
-	const conversation = conversations[selected];
-	if (!conversation) return null;
-	const { bot, description, sharedWithPeople, Messages } = conversation;
+	const [approval, setApproval] = useState<ApprovalDecision>("pending");
+	const { bot, description, sharedWithPeople, Messages } = conversations[selected];
 
-	function select(pod: Pod["name"]) {
+	function select(pod: PodName) {
 		setSelected(pod);
 		setSwitched(true);
 		if (pod === UNREAD_POD) setUnreadSeen(true);
@@ -499,7 +506,7 @@ export function PodChat() {
 							initial={switched ? "visible" : "hidden"}
 							className="flex flex-col gap-4 px-4 py-5 sm:px-6"
 						>
-							<Messages />
+							<Messages approval={approval} onDecide={setApproval} />
 						</Reveal>
 					</ScrolledToEnd>
 					<Composer bot={bot} sharedWithPeople={sharedWithPeople} />
