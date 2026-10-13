@@ -67,8 +67,9 @@ export function SettingsPage({
 					</div>
 				) : (
 					(title || description) && (
-						<div className="flex items-end gap-4">
-							<div className="flex min-w-0 flex-1 flex-col gap-1.5">
+						// The actions wrap under the title when they leave it too narrow, as on a phone.
+						<div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+							<div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-1.5">
 								{title && (
 									<h2 className="m-0 font-bold text-[24px] text-foreground tracking-[-0.01em]">
 										{title}

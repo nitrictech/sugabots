@@ -134,7 +134,15 @@ export function WorkspaceRoutinesSettings({
 						onCreated={open}
 					/>
 				) : selected ? (
-					<RoutinePage key={selected.routine.id} placed={selected} onDeleted={toList} />
+					<RoutinePage
+						key={selected.routine.id}
+						placed={selected}
+						siblingNames={placed
+							.filter(({ agent }) => agent.id === selected.agent.id)
+							.map(({ routine }) => routine.name)}
+						onDuplicated={(copy) => navigate({ ...routineSettingsLink(copy), replace: true })}
+						onDeleted={toList}
+					/>
 				) : (
 					<EmptyState title="No routines yet">
 						<p className="m-0 text-muted-foreground">
