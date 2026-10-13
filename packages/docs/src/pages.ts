@@ -6,6 +6,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { rolesMarkdown } from "./roles.ts";
 
 /** One MDX file per page, named by its slug. */
 const CONTENT_DIRECTORY = join(import.meta.dirname, "../content");
@@ -13,6 +14,13 @@ const CONTENT_DIRECTORY = join(import.meta.dirname, "../content");
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n+/;
 const CODE_FENCE = /^(```|~~~)/;
 const SECTION_HEADING = /^##\s+(.+)$/;
+const COMPONENT_LINE = /^<([A-Z]\w*)\s*\/>$/gm;
+
+/**
+ * Interactive components whose content a reader of the text would miss, as
+ * the Markdown that says the same. Any other component is left as written.
+ */
+const COMPONENTS_AS_MARKDOWN: Record<string, string> = { RoleMatrix: rolesMarkdown() };
 
 export interface DocSection {
 	/** The heading as it reads, without Markdown: `Make a routine`. */
@@ -53,7 +61,10 @@ function parsePage(slug: string, source: string): DocPage {
 	const description = fields.get("description");
 	if (!title || !description)
 		throw new Error(`docs page ${slug} needs a title and a description in its frontmatter`);
-	const { intro, sections } = splitSections(source.slice(frontmatter[0].length));
+	const body = source
+		.slice(frontmatter[0].length)
+		.replace(COMPONENT_LINE, (line, name: string) => COMPONENTS_AS_MARKDOWN[name] ?? line);
+	const { intro, sections } = splitSections(body);
 	return { slug, title, description, intro, sections };
 }
 

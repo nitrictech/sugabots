@@ -20,6 +20,7 @@ import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-inst
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
+import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
@@ -36,9 +37,9 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * at a server the workspace configured; every call to any of them is recorded
  * as a `tool_call` part of the reply (`calls/`).
  * Connection tools, and the built-in tools a bot needs only now and then,
- * such as `read_docs`, are in the catalog: reached through `tool_search` and
- * `call_tool`, so they cost a line in the turn's note rather than a whole
- * description and schema in every request.
+ * such as `read_docs` and `workspace_access`, are in the catalog: reached
+ * through `tool_search` and `call_tool`, so they cost a line in the turn's
+ * note rather than a whole description and schema in every request.
  *
  * A tool that can't run is still offered, and its calls refused: the tools
  * lead the provider's cached prompt, so changing them mid-thread loses the
@@ -149,7 +150,14 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		};
 	}
 	// Sugabots' own tools in the catalog, which are always there to be found.
-	const builtInFound: Record<string, Tool> = { [READ_DOCS_TOOL]: readDocs };
+	const builtInFound: Record<string, Tool> = {
+		[READ_DOCS_TOOL]: readDocs,
+		[WORKSPACE_ACCESS_TOOL]: workspaceAccessTool({
+			threadId: prepared.context.thread.id,
+			workspaceId: prepared.context.thread.workspaceId,
+			run: deps.run,
+		}),
+	};
 	const catalogTools: Record<string, Tool> = {};
 	for (const [key, found] of Object.entries(builtInFound)) {
 		catalogTools[key] = recorded(key, found, recording);

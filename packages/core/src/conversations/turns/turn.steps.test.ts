@@ -350,7 +350,7 @@ describe("runSegment", () => {
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain("wiki__lookup");
 		expect(turnNote).not.toContain("drive__lookup");
-		expect(turnNote).toContain("- sugabots (1 tool): read_docs");
+		expect(turnNote).toContain("- sugabots (2 tools): read_docs, workspace_access");
 	});
 
 	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
