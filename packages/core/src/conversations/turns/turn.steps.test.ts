@@ -282,7 +282,7 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("reaches connection tools through tool search, asking first only for ones that ask", async () => {
+	it("reaches connection tools, and Sugabots' own occasional ones, through tool search, asking first only for connection tools that ask", async () => {
 		const { execution, turns } = fakes();
 		const lookup = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
@@ -350,6 +350,7 @@ describe("runSegment", () => {
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain("wiki__lookup");
 		expect(turnNote).not.toContain("drive__lookup");
+		expect(turnNote).toContain("- sugabots (1 tool): read_docs");
 	});
 
 	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
