@@ -15,6 +15,7 @@ import {
 	Schedule,
 	Semaphore,
 } from "effect";
+import { Artifacts } from "../../artifacts/artifacts.ts";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { Ids } from "../../ids/ids.ts";
@@ -24,6 +25,7 @@ import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
+import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
@@ -89,6 +91,7 @@ type SegmentServices =
 	| TurnRepository.Service
 	| ToolCallRepository.Service
 	| Collaborations.Service
+	| Artifacts.Authoring
 	| ApprovedToolCalls.Service
 	| AgentRepository.Service
 	| ThreadFiles.Service
@@ -392,6 +395,7 @@ const streamReply = (
 			const turns = yield* TurnRepository.Service;
 			const toolCalls = yield* ToolCallRepository.Service;
 			const collaborations = yield* Collaborations.Service;
+			const artifacts = yield* Artifacts.Authoring;
 			const approvals = yield* ApprovedToolCalls.Service;
 			const agents = yield* AgentRepository.Service;
 			const files = yield* ThreadFiles.Service;
@@ -467,6 +471,7 @@ const streamReply = (
 			};
 			const { tools, catalog } = toolsForTurn(prepared, {
 				collaborations,
+				artifacts,
 				calls: toolCalls,
 				approvals,
 				approvalBoundTools,
@@ -501,7 +506,10 @@ const streamReply = (
 
 			const environment: TurnEnvironment = {
 				now,
-				builtInTools: builtIn.usable,
+				builtInTools: [
+					...builtIn.usable,
+					...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key)),
+				],
 				toolCatalog: toolCatalogNote({
 					catalog,
 					unavailable: connections.unavailable,

@@ -3,7 +3,7 @@ export * as ToolCallRepository from "./repository.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -107,6 +107,11 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	/** Forgets a reply's calls, for a retry that starts the reply again. */
 	readonly forgetReply: (messageId: string) => Effect.Effect<void>;
+	/** What the turn's completed calls to `tools` returned, oldest first. */
+	readonly completedOutputs: (
+		turnId: string,
+		tools: readonly string[],
+	) => Effect.Effect<JsonValue[]>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -378,6 +383,27 @@ export const make = Effect.gen(function* () {
 				"forgetReply",
 				query((db) => db.delete(toolCall).where(eq(toolCall.messageId, messageId))).pipe(
 					Effect.asVoid,
+				),
+			),
+
+		completedOutputs: (turnId, tools) =>
+			operation(
+				"completedOutputs",
+				Effect.map(
+					query((db) =>
+						db
+							.select({ output: toolCall.output })
+							.from(toolCall)
+							.where(
+								and(
+									eq(toolCall.turnId, turnId),
+									inArray(toolCall.tool, [...tools]),
+									eq(toolCall.status, "completed"),
+								),
+							)
+							.orderBy(asc(toolCall.startedAt)),
+					),
+					(rows) => rows.flatMap(({ output }) => (output === null ? [] : [output])),
 				),
 			),
 	});

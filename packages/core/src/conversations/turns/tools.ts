@@ -3,11 +3,13 @@ import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
+import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
+import { artifactTools, MUTATING_ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
@@ -49,8 +51,9 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
 
 export interface ToolDependencies {
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
+	artifacts: Artifacts.AuthoringInterface;
 	/** Where a built-in tool's calls are written down. */
-	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
+	calls: Pick<ToolCallRepository.Interface, "open" | "close" | "completedOutputs">;
 	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
 	approvalBoundTools?: ReadonlySet<string>;
@@ -179,6 +182,22 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 					}
 				: {}),
 		});
+	}
+	const artifacts = artifactTools({
+		by: {
+			workspaceId: prepared.context.thread.workspaceId,
+			podId: prepared.context.agent.podId,
+			agentId: prepared.context.agent.id,
+			threadId: prepared.context.thread.id,
+		},
+		turnId: prepared.turnId,
+		calls: deps.calls,
+		authoring: deps.artifacts,
+		run: deps.run,
+	});
+	for (const [key, tool] of Object.entries(artifacts)) {
+		if (prepared.context.agent.disabledTools.includes(key)) continue;
+		tools[key] = recorded(key, tool, { ...recording, mutating: MUTATING_ARTIFACT_TOOLS.has(key) });
 	}
 	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
 	const catalog = buildCatalog(deps.connections, builtInFound);

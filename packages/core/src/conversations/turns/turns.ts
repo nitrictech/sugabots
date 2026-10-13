@@ -17,6 +17,7 @@ export * as Turns from "./turns.ts";
 import type { ToolApprovalDecision } from "@sugabots/contracts";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
+import { Artifacts } from "../../artifacts/artifacts.ts";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
@@ -154,6 +155,7 @@ export const stepsLayer = turnStepsLayer.pipe(
 			ApprovedToolCalls.layer,
 			AgentRepository.layer,
 			ThreadFiles.layer,
+			Artifacts.authoringLayer,
 		),
 	),
 	Layer.provide(internals),
