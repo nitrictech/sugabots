@@ -32,13 +32,20 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 	);
 }
 
+/** Pins the dialog to the bottom edge at full width below the `sm` breakpoint, undoing the centring. */
+const sheetOnPhoneClassName =
+	"max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-0 max-sm:max-w-full max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:pb-[max(20px,env(safe-area-inset-bottom))]";
+
 function DialogContent({
 	className,
 	children,
 	showCloseButton = true,
+	sheetOnPhone = false,
 	...props
 }: DialogPrimitive.Popup.Props & {
 	showCloseButton?: boolean;
+	/** On a phone, rise from the bottom edge as a sheet instead of floating in the middle. */
+	sheetOnPhone?: boolean;
 }) {
 	return (
 		<DialogPortal>
@@ -55,6 +62,7 @@ function DialogContent({
 				data-slot="dialog-content"
 				className={cn(
 					"fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-20px)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-dialog bg-panel p-4 text-foreground text-sm shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
+					sheetOnPhone && sheetOnPhoneClassName,
 					className,
 				)}
 				{...props}
