@@ -163,19 +163,21 @@ export function scheduleSummary(schedule: CalendarSchedule): string {
 }
 
 /**
- * How a routine starts, short enough for a list's line: "Daily · 22:00",
- * "Mon Wed Fri · 3 times", "Every 3 months · 10:00", "Webhook".
+ * How a routine starts, short enough for a list's line: "Daily at 22:00",
+ * "Mon Wed Fri, 3 times", "Every 3 months at 10:00", "Webhook".
  */
 export function scheduleLabel(routine: Routine): string {
 	if (routine.trigger.kind === "webhook") return "Webhook";
-	const reading = readSchedule(routine.trigger.schedule);
+	return readingLabel(readSchedule(routine.trigger.schedule));
+}
+
+/** A schedule, short enough for a row's value: "Daily at 22:00", "Mon Wed Fri, 3 times". */
+export function readingLabel(reading: ScheduleReading): string {
 	if (reading.kind === "written") return reading.label;
 	const { schedule } = reading;
-	const when =
-		schedule.times.length === 1
-			? formatTime(schedule.times[0] ?? 0)
-			: `${schedule.times.length} times`;
-	return `${repeatLabel(schedule)} · ${when}`;
+	return schedule.times.length === 1
+		? `${repeatLabel(schedule)} at ${formatTime(schedule.times[0] ?? 0)}`
+		: `${repeatLabel(schedule)}, ${schedule.times.length} times`;
 }
 
 function repeatLabel(schedule: CalendarSchedule): string {

@@ -12,7 +12,7 @@ import { RefreshCw, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { agentSettingsLink, routineSettingsLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRoutineActions, useRoutines } from "@/lib/routines.ts";
@@ -153,8 +153,8 @@ function ParticipantRow({
 }
 
 /**
- * The bot's routines, each opening the bot's settings at its routines, with a
- * switch to pause or resume it for whoever may manage them.
+ * The bot's routines, each opening its page in settings, with a switch to
+ * pause or resume it for whoever may manage them.
  */
 function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
@@ -171,9 +171,8 @@ function Routines({ pod, agent }: { pod: Pod; agent: Agent }) {
 						className="flex items-center gap-2.5 border-border border-b pr-3.5 last:border-b-0"
 					>
 						<Link
-							{...agentSettingsLink({ pod, agent })}
+							{...routineSettingsLink(routine)}
 							state={backToChat}
-							search={{ tab: "routines" }}
 							className="focus-ring flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-3.5 transition-colors hover:text-link"
 						>
 							<span className="grid size-[26px] shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground">

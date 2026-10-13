@@ -251,7 +251,7 @@ describe("an admin", () => {
 		mount(page);
 
 		const row = await screen.findByRole("link", { name: /^Morning brief/ });
-		expect(within(row).getByText("Weekdays · 9:00")).toBeDefined();
+		expect(within(row).getByText("Weekdays at 9:00")).toBeDefined();
 		expect(row.getAttribute("href")).toBe(`/suga/settings/routines/${scheduledRoutine.id}`);
 		expect(screen.queryByText(scheduledRoutine.trigger.schedule.expression)).toBeNull();
 	});

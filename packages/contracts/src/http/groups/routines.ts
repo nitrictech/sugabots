@@ -5,6 +5,7 @@ import {
 	acceptedRoutineWebhookSchema,
 	manualRoutineRunSchema,
 	newRoutineSchema,
+	routineCurrentSecretSchema,
 	routineExecutionPageQuerySchema,
 	routineExecutionPageSchema,
 	routineScheduleOccurrencesSchema,
@@ -73,6 +74,11 @@ export class RoutinesApi extends HttpApiGroup.make("routines").add(
 		payload: manualRoutineRunSchema,
 		success: acceptedRoutineExecutionSchema.pipe(HttpApiSchema.status(202)),
 		error: [Conflict, ...refused],
+	}).middleware(Session),
+	HttpApiEndpoint.get("getSecret", "/agents/:agentId/routines/:routineId/secret", {
+		params: routine,
+		success: routineCurrentSecretSchema,
+		error: refused,
 	}).middleware(Session),
 	HttpApiEndpoint.post("rotateSecret", "/agents/:agentId/routines/:routineId/secret", {
 		params: routine,

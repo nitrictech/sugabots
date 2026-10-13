@@ -1,38 +1,50 @@
 import {
 	MIN_WEBHOOK_SECRET_CHARACTERS,
+	WEBHOOK_SECRET_PREFIXES,
+	WEBHOOK_SOURCES,
 	type WebhookAuth,
 	type WebhookAuthKind,
 	type WebhookHmacAlgorithm,
+	type WebhookSignatureEncoding,
+	type WebhookSource,
+	webhookSecretLongEnough,
 } from "@sugabots/contracts";
-import { Eye, EyeOff, RefreshCw } from "lucide-react";
-import { useCallback, useId, useState } from "react";
+import { ChevronDown, Eye, EyeOff, Webhook } from "lucide-react";
+import { type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useRoutineActions, useShownSecret } from "@/lib/routines.ts";
+import { useRoutineActions, useRoutineSecret } from "@/lib/routines.ts";
 import { Button } from "@/ui/button.tsx";
+import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
-import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsChoiceRow, SettingsControlRow, SettingsFieldLabel } from "@/ui/settings-page.tsx";
+import { SettingsControlRow, SettingsFieldLabel, SettingsGroup } from "@/ui/settings-page.tsx";
 import type { PlacedRoutine } from "./RoutineEditor.tsx";
 
 /*
- * How a webhook routine checks who calls it: the auth it asks for, with what
- * each needs, its secret, and a request that would run it. The API returns a
- * secret only when it makes one, so a secret shows only in the tab that made
- * it or brought it.
+ * How a webhook routine checks who calls it: the sender it comes from, which
+ * for a known source needs only that sender's signing secret, or, for any
+ * other sender, the auth it asks for and what that needs; then its secret.
  */
 
 /** What a webhook starts with until somebody chooses: a signature, which most senders make. */
 export const DEFAULT_WEBHOOK_AUTH: WebhookAuth = {
 	kind: "hmac",
-	format: "body",
 	header: "X-Signature",
 	algorithm: "sha256",
+	encoding: "hex",
 };
 
-/** What each kind asks for when it is chosen. */
-const AUTH_DEFAULTS: Record<WebhookAuthKind, WebhookAuth> = {
+type GenericKind = Exclude<WebhookAuthKind, WebhookSource>;
+
+/** What each generic kind asks for when it is chosen. */
+const AUTH_DEFAULTS: Record<GenericKind, WebhookAuth> = {
 	hmac: DEFAULT_WEBHOOK_AUTH,
 	api_key: { kind: "api_key", header: "X-API-Key" },
 	bearer: { kind: "bearer" },
@@ -40,62 +52,108 @@ const AUTH_DEFAULTS: Record<WebhookAuthKind, WebhookAuth> = {
 };
 
 const AUTH_OPTIONS = [
-	{ value: "hmac", label: "HMAC" },
-	{ value: "api_key", label: "API key" },
-	{ value: "bearer", label: "Bearer" },
 	{ value: "basic", label: "Basic" },
-] as const;
+	{ value: "bearer", label: "Bearer" },
+	{ value: "api_key", label: "API key" },
+	{ value: "hmac", label: "HMAC" },
+] as const satisfies readonly { value: GenericKind; label: string }[];
 
-const FORMAT_OPTIONS = [
-	{ value: "body", label: "Plain body" },
-	{ value: "slack", label: "Slack" },
-	{ value: "stripe", label: "Stripe" },
-] as const;
+/** "generic" for any sender, else the source whose own way of signing is known. */
+type SourceChoice = "generic" | WebhookSource;
 
-type HmacFormat = (typeof FORMAT_OPTIONS)[number]["value"];
+const SOURCE_LABELS: Record<SourceChoice, string> = {
+	generic: "Generic",
+	github: "GitHub",
+	stripe: "Stripe",
+	slack: "Slack",
+	linear: "Linear",
+};
+
+/** How each source's signing secret looks, as the placeholder for it. */
+const SOURCE_SECRET_PLACEHOLDERS: Record<WebhookSource, string> = {
+	github: "The secret set on the webhook in GitHub",
+	stripe: "whsec_…",
+	slack: "The app's Signing Secret",
+	linear: "lin_wh_…",
+};
 
 const ALGORITHM_OPTIONS = [
+	{ value: "sha1", label: "SHA-1" },
 	{ value: "sha256", label: "SHA-256" },
 	{ value: "sha512", label: "SHA-512" },
 ] as const satisfies readonly { value: WebhookHmacAlgorithm; label: string }[];
 
-/** What each kind calls its secret. */
-const SECRET_LABELS: Record<WebhookAuthKind, string> = {
-	hmac: "Secret",
+const ENCODING_OPTIONS = [
+	{ value: "hex", label: "Hex" },
+	{ value: "base64", label: "Base64" },
+] as const satisfies readonly { value: WebhookSignatureEncoding; label: string }[];
+
+/** What each generic kind calls its secret; every source calls it a signing secret. */
+const SECRET_LABELS: Record<GenericKind, string> = {
+	hmac: "Signing secret",
 	api_key: "Key",
 	bearer: "Token",
 	basic: "Password",
 };
 
-/** How much of a secret stays readable while it is hidden: enough to tell two apart. */
-const SECRET_SHOWN_PREFIX = 6;
+function isSource(kind: WebhookAuthKind): kind is WebhookSource {
+	return (WEBHOOK_SOURCES as readonly string[]).includes(kind);
+}
 
-/** A webhook routine being made: how it will check callers, and a secret its sender made, if one is pasted. */
+function sourceOf(auth: WebhookAuth): SourceChoice {
+	return isSource(auth.kind) ? auth.kind : "generic";
+}
+
+/** How the secret looks: a source's format, or the prefix of a kind's own secrets. */
+function secretPlaceholder(auth: WebhookAuth): string | undefined {
+	if (isSource(auth.kind)) return SOURCE_SECRET_PLACEHOLDERS[auth.kind];
+	const prefix = WEBHOOK_SECRET_PREFIXES[auth.kind];
+	return prefix === "" ? undefined : `${prefix}…`;
+}
+
+function secretLabel(auth: WebhookAuth): string {
+	return isSource(auth.kind) ? "Signing secret" : SECRET_LABELS[auth.kind];
+}
+
+/** A webhook routine being made: how it will check callers, and its secret. */
 export interface WebhookDraft {
 	auth: WebhookAuth;
-	/** Blank to have one made. */
+	/** Blank for none, so the address alone runs it. */
 	secret: string;
 }
 
 export const NEW_WEBHOOK: WebhookDraft = { auth: DEFAULT_WEBHOOK_AUTH, secret: "" };
 
-/** Whether a pasted secret is long enough to be accepted; a blank one is made instead. */
-export function pastedSecretReady(secret: string): boolean {
+/**
+ * Whether a secret can be saved for `auth`: a source's, however long its
+ * sender made it; one made up for a generic webhook, long enough to be hard
+ * to guess; or none, left empty.
+ */
+export function secretReady(auth: WebhookAuth, secret: string): boolean {
 	const trimmed = secret.trim();
-	return trimmed === "" || trimmed.length >= MIN_WEBHOOK_SECRET_CHARACTERS;
+	return trimmed === "" || webhookSecretLongEnough(auth.kind, trimmed);
 }
+
+/** Why a secret made up for a generic webhook cannot be saved yet. */
+export const SECRET_TOO_SHORT_NOTE = `A secret needs at least ${MIN_WEBHOOK_SECRET_CHARACTERS} characters.`;
+
+/** What the note under a webhook says for a routine without a secret. */
+export const NO_SECRET_NOTE =
+	"With no secret, anyone who has the address can run it. Add one so only the sender can.";
 
 /** What a caller must do to be let in, for the note under the webhook's rows. */
 export function authNote(auth: WebhookAuth): string {
 	switch (auth.kind) {
+		case "github":
+			return "Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret.";
+		case "stripe":
+			return "Add the address as an endpoint in Stripe, and paste its signing secret.";
+		case "slack":
+			return "Set the address as your Slack app's Request URL, and paste its Signing Secret.";
+		case "linear":
+			return "Add the address as a webhook in Linear, and paste its signing secret.";
 		case "hmac":
-			if (auth.format === "slack") {
-				return "Set the address as your Slack app's Request URL, and paste its Signing Secret here.";
-			}
-			if (auth.format === "stripe") {
-				return "Add the address as an endpoint in Stripe, and paste its signing secret here.";
-			}
-			return `Sign the raw request body with the secret using HMAC ${algorithmLabel(auth.algorithm)} and send the hex digest in ${auth.header}.`;
+			return `Sign the raw request body with the secret using HMAC ${labelOf(ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(ENCODING_OPTIONS, auth.encoding).toLowerCase()}.`;
 		case "api_key":
 			return `Send the key in the ${auth.header} header.`;
 		case "bearer":
@@ -105,45 +163,47 @@ export function authNote(auth: WebhookAuth): string {
 	}
 }
 
-/** The webhook rows of a routine being made: its auth, and a place to paste a sender's secret. */
-export function NewWebhookRows({
+/**
+ * The webhook groups of a routine being made: where it comes from, then its
+ * auth and secret, under `note`.
+ */
+export function NewWebhookGroups({
 	draft,
+	note,
 	onChange,
 }: {
 	draft: WebhookDraft;
+	note: ReactNode;
 	onChange: (draft: WebhookDraft) => void;
 }) {
-	const id = useId();
+	const changeAuth = (auth: WebhookAuth) => onChange({ ...draft, auth });
 	return (
 		<>
-			<SettingsControlRow label="Address">
-				<span className="text-[14.5px] text-muted-foreground">Made when you create it</span>
-			</SettingsControlRow>
-			<AuthRows auth={draft.auth} onChange={(auth) => onChange({ ...draft, auth })} />
-			<SettingsControlRow label={SECRET_LABELS[draft.auth.kind]} htmlFor={id}>
-				{draft.auth.kind === "hmac" ? (
-					<input
-						id={id}
-						value={draft.secret}
-						onChange={(event) => onChange({ ...draft, secret: event.target.value })}
-						autoComplete="off"
-						spellCheck={false}
-						placeholder="Made for you, or paste the sender's"
-						className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:font-sans placeholder:text-[14.5px] placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
-					/>
-				) : (
+			<SettingsGroup>
+				<SettingsControlRow label="Address">
 					<span className="text-[14.5px] text-muted-foreground">Made when you create it</span>
-				)}
-			</SettingsControlRow>
+				</SettingsControlRow>
+				<SourceRow auth={draft.auth} onChange={changeAuth} />
+			</SettingsGroup>
+			<SettingsGroup note={note}>
+				<AuthRows auth={draft.auth} onChange={changeAuth} />
+				<SecretField
+					auth={draft.auth}
+					value={draft.secret}
+					onChange={(secret) => onChange({ ...draft, secret })}
+				/>
+			</SettingsGroup>
 		</>
 	);
 }
 
 /**
- * An existing webhook routine's rows: its address, its auth, which saves as it
- * changes, its secret, and an example request.
+ * An existing webhook routine's groups: its address and where it comes from,
+ * then its auth, which saves as it changes, and its secret, under a note of
+ * what a caller must send, or, while it has no secret, that nothing is asked
+ * of them.
  */
-export function WebhookRows({
+export function WebhookGroups({
 	placed,
 	auth,
 	onChangeAuth,
@@ -152,18 +212,42 @@ export function WebhookRows({
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
 }) {
+	const { routine, agent, pod } = placed;
+	const canManage = pod.permissions.manageRoutines;
+	const saved = useRoutineSecret({ agentId: agent.id, routineId: routine.id, canManage }).data;
 	const address = webhookAddress(placed.routine.id);
 	return (
 		<>
-			<SettingsControlRow label="Address">
-				<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-					{address}
-				</code>
-				<CopyIconButton label="Copy address" text={address} size="lg" />
-			</SettingsControlRow>
-			<AuthRows auth={auth} onChange={onChangeAuth} />
-			<SecretRow placed={placed} auth={auth} />
-			<ExampleRequest address={address} auth={auth} />
+			<SettingsGroup>
+				<SettingsControlRow label="Address">
+					<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
+						{address}
+					</code>
+					<CopyIconButton label="Copy address" text={address} size="lg" />
+				</SettingsControlRow>
+				<SourceRow auth={auth} onChange={onChangeAuth} />
+			</SettingsGroup>
+			{canManage && saved ? (
+				// Keyed by whether it has a secret, so what was typed clears once that changes.
+				<SecretGroup
+					key={saved.kind}
+					placed={placed}
+					auth={auth}
+					onChangeAuth={onChangeAuth}
+					hasSecret={saved.kind !== "none"}
+				/>
+			) : (
+				<SettingsGroup note={authNote(auth)}>
+					<AuthRows auth={auth} onChange={onChangeAuth} />
+					<SettingsControlRow label={secretLabel(auth)}>
+						{!canManage && (
+							<span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">
+								Set by people who manage routines
+							</span>
+						)}
+					</SettingsControlRow>
+				</SettingsGroup>
+			)}
 		</>
 	);
 }
@@ -172,11 +256,7 @@ function webhookAddress(routineId: string): string {
 	return `${apiBaseUrl}/hooks/routines/${routineId}`;
 }
 
-function algorithmLabel(algorithm: WebhookHmacAlgorithm): string {
-	return algorithm === "sha256" ? "SHA-256" : "SHA-512";
-}
-
-/** The auth to ask callers for, and what the chosen one needs. */
+/** For a generic webhook, the auth to ask callers for and what it needs. */
 function AuthRows({
 	auth,
 	onChange,
@@ -186,47 +266,38 @@ function AuthRows({
 }) {
 	return (
 		<>
-			<SettingsChoiceRow
-				label="Auth"
-				options={AUTH_OPTIONS}
-				value={auth.kind}
-				onChange={(kind) => onChange(AUTH_DEFAULTS[kind])}
-			/>
-			{auth.kind === "hmac" && (
-				<SettingsChoiceRow
-					label="Format"
-					options={FORMAT_OPTIONS}
-					value={auth.format}
-					onChange={(format: HmacFormat) =>
-						onChange(format === "body" ? DEFAULT_WEBHOOK_AUTH : { kind: "hmac", format })
-					}
+			{!isSource(auth.kind) && (
+				<MenuRow
+					label="Auth"
+					options={AUTH_OPTIONS}
+					value={auth.kind}
+					onChange={(kind) => onChange(AUTH_DEFAULTS[kind])}
 				/>
 			)}
-			{auth.kind === "hmac" && auth.format === "body" && (
+			{(auth.kind === "hmac" || auth.kind === "api_key") && (
+				<CommittedFieldRow
+					key={auth.header}
+					label="Header"
+					value={auth.header}
+					placeholder={auth.kind === "hmac" ? "X-Signature" : "X-API-Key"}
+					onCommit={(header) => onChange({ ...auth, header })}
+				/>
+			)}
+			{auth.kind === "hmac" && (
 				<>
-					<CommittedFieldRow
-						key={auth.header}
-						label="Header"
-						value={auth.header}
-						placeholder="X-Signature"
-						onCommit={(header) => onChange({ ...auth, header })}
-					/>
-					<SettingsChoiceRow
+					<MenuRow
 						label="Algorithm"
 						options={ALGORITHM_OPTIONS}
 						value={auth.algorithm}
 						onChange={(algorithm) => onChange({ ...auth, algorithm })}
 					/>
+					<MenuRow
+						label="Encoding"
+						options={ENCODING_OPTIONS}
+						value={auth.encoding}
+						onChange={(encoding) => onChange({ ...auth, encoding })}
+					/>
 				</>
-			)}
-			{auth.kind === "api_key" && (
-				<CommittedFieldRow
-					key={auth.header}
-					label="Header"
-					value={auth.header}
-					placeholder="X-API-Key"
-					onCommit={(header) => onChange({ ...auth, header })}
-				/>
 			)}
 			{auth.kind === "basic" && (
 				<CommittedFieldRow
@@ -239,6 +310,102 @@ function AuthRows({
 			)}
 		</>
 	);
+}
+
+const SOURCE_OPTIONS = (Object.keys(SOURCE_LABELS) as SourceChoice[]).map((source) => ({
+	value: source,
+	label: SOURCE_LABELS[source],
+}));
+
+/** Where the webhook comes from: a known source, each with its logo, or Generic for any other sender. */
+function SourceRow({
+	auth,
+	onChange,
+}: {
+	auth: WebhookAuth;
+	onChange: (auth: WebhookAuth) => void;
+}) {
+	return (
+		<MenuRow
+			label="Source"
+			options={SOURCE_OPTIONS}
+			value={sourceOf(auth)}
+			mark={(source) => <SourceMark source={source} />}
+			onChange={(source) =>
+				onChange(source === "generic" ? DEFAULT_WEBHOOK_AUTH : { kind: source })
+			}
+		/>
+	);
+}
+
+/**
+ * A row whose value is picked from a menu that opens under its arrow, which
+ * turns while the menu is open. `mark` draws an icon beside each option.
+ */
+function MenuRow<Value extends string>({
+	label,
+	options,
+	value,
+	mark,
+	onChange,
+}: {
+	label: string;
+	options: readonly { value: Value; label: string }[];
+	value: Value;
+	mark?: (value: Value) => ReactNode;
+	onChange: (value: Value) => void;
+}) {
+	const current = options.find((option) => option.value === value);
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				aria-label={`${label}: ${current?.label ?? value}`}
+				className="group focus-ring flex min-h-[46px] w-full cursor-pointer items-center gap-3 border-border border-b px-4 py-2.5 text-left text-[14.5px] text-foreground transition-colors last:border-b-0 hover:bg-panel"
+			>
+				<SettingsFieldLabel>{label}</SettingsFieldLabel>
+				<span className="flex min-w-0 flex-1 items-center gap-2.5">
+					{mark?.(value)}
+					<span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
+				</span>
+				<ChevronDown
+					aria-hidden
+					size={15}
+					strokeWidth={2.4}
+					className="shrink-0 text-subtle-foreground transition-transform group-data-popup-open:rotate-180"
+				/>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-56">
+				{options.map((option) => (
+					<DropdownMenuItem key={option.value} onClick={() => onChange(option.value)}>
+						{mark?.(option.value)}
+						{option.label}
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** A source's logo, or a webhook's for Generic. */
+function SourceMark({ source }: { source: SourceChoice }) {
+	if (source !== "generic") {
+		return <ConnectionMark presetId={source} name={SOURCE_LABELS[source]} size="md" />;
+	}
+	return (
+		<span
+			aria-hidden
+			className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-chip text-soft-foreground"
+		>
+			<Webhook size={14} strokeWidth={2.2} />
+		</span>
+	);
+}
+
+function labelOf<Value extends string>(
+	options: readonly { value: Value; label: string }[],
+	value: Value,
+): string {
+	return options.find((option) => option.value === value)?.label ?? value;
 }
 
 /**
@@ -285,184 +452,125 @@ function CommittedFieldRow({
 				autoComplete="off"
 				spellCheck={false}
 				placeholder={placeholder}
-				className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+				className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 			/>
 		</SettingsControlRow>
 	);
 }
 
 /**
- * The routine's secret, while this tab holds it, with a way to make a new one.
- * A signature can also use the secret its sender made, pasted in.
+ * An existing routine's auth and secret, for someone who manages routines,
+ * with Remove and Save under them. The secret's field starts blank whether or
+ * not one is saved, so a saved one is never shown; Save replaces it with what
+ * is typed, and Remove clears it, so the address alone runs the routine.
  */
-function SecretRow({ placed, auth }: { placed: PlacedRoutine; auth: WebhookAuth }) {
-	const { routine, agent } = placed;
+function SecretGroup({
+	placed,
+	auth,
+	onChangeAuth,
+	hasSecret,
+}: {
+	placed: PlacedRoutine;
+	auth: WebhookAuth;
+	onChangeAuth: (auth: WebhookAuth) => void;
+	hasSecret: boolean;
+}) {
 	const actions = useRoutineActions();
-	const secret = useShownSecret(routine.id);
-	const [shown, setShown] = useState(false);
-	const [confirmingReset, setConfirmingReset] = useState(false);
-	const [pasting, setPasting] = useState(false);
-	const label = SECRET_LABELS[auth.kind];
-	const addressed = { agentId: agent.id, routineId: routine.id };
-
+	const [draft, setDraft] = useState("");
+	const next = draft.trim();
+	const savable = next !== "" && secretReady(auth, next) && !actions.rotateSecret.isPending;
+	const replace = (secret: string | null) =>
+		actions.rotateSecret.mutate(
+			{ agentId: placed.agent.id, routineId: placed.routine.id, secret },
+			{ onSuccess: () => setDraft("") },
+		);
+	const save = () => {
+		if (savable) replace(next);
+	};
 	return (
 		<>
-			<SettingsControlRow label={label}>
-				{secret ? (
-					<code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-						{shown ? secret : `${secret.slice(0, SECRET_SHOWN_PREFIX)}${"•".repeat(12)}`}
-					</code>
-				) : (
-					<span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">
-						Shown only when it's made
-					</span>
-				)}
-				{secret && (
-					<>
-						<IconButton label={shown ? "Hide" : "Show"} size="lg" onClick={() => setShown(!shown)}>
-							{shown ? <EyeOff /> : <Eye />}
-						</IconButton>
-						<CopyIconButton label={`Copy ${label.toLowerCase()}`} text={secret} size="lg" />
-					</>
-				)}
-				{auth.kind === "hmac" && !pasting && (
+			<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
+				<AuthRows auth={auth} onChange={onChangeAuth} />
+				<SecretField
+					auth={auth}
+					value={draft}
+					onChange={setDraft}
+					onEnter={save}
+					error={
+						actions.rotateSecret.error
+							? failureMessage(actions.rotateSecret.error)
+							: secretReady(auth, next)
+								? undefined
+								: SECRET_TOO_SHORT_NOTE
+					}
+				/>
+			</SettingsGroup>
+			<div className="flex justify-end gap-2">
+				{hasSecret && (
 					<Button
-						variant="link"
-						size="bare"
-						className="text-[13.5px]"
-						onClick={() => setPasting(true)}
+						variant="secondary"
+						disabled={actions.rotateSecret.isPending}
+						onClick={() => replace(null)}
 					>
-						Paste
+						Remove
 					</Button>
 				)}
-				<IconButton label="Make a new one" size="lg" onClick={() => setConfirmingReset(true)}>
-					<RefreshCw />
-				</IconButton>
-			</SettingsControlRow>
-			{pasting && (
-				<PasteSecretRow
-					pending={actions.rotateSecret.isPending}
-					error={
-						actions.rotateSecret.error ? failureMessage(actions.rotateSecret.error) : undefined
-					}
-					onCancel={() => setPasting(false)}
-					onSave={async (pasted) => {
-						try {
-							await actions.rotateSecret.mutateAsync({ ...addressed, secret: pasted });
-							setPasting(false);
-						} catch {
-							// The row says why.
-						}
-					}}
-				/>
-			)}
-			<DeleteDialog
-				open={confirmingReset}
-				onOpenChange={setConfirmingReset}
-				title={`Make a new ${label.toLowerCase()}?`}
-				description="The current one stops working straight away, so anything calling this address needs the new one."
-				confirmLabel="Make a new one"
-				pending={actions.rotateSecret.isPending}
-				error={actions.rotateSecret.error ? failureMessage(actions.rotateSecret.error) : undefined}
-				onDelete={async () => {
-					try {
-						await actions.rotateSecret.mutateAsync(addressed);
-						setShown(true);
-						setConfirmingReset(false);
-					} catch {
-						return;
-					}
-				}}
-			/>
+				<Button disabled={!savable} onClick={save}>
+					{actions.rotateSecret.isPending ? "Saving…" : "Save"}
+				</Button>
+			</div>
 		</>
 	);
 }
 
-/** Where a secret the sender made, such as Slack's signing secret, is pasted to replace the routine's. */
-function PasteSecretRow({
-	pending,
+/**
+ * A secret as a field, typed or pasted in, such as the signing secret a
+ * sender made. It shows hidden until Show.
+ */
+function SecretField({
+	auth,
+	value,
+	onChange,
+	onEnter,
 	error,
-	onCancel,
-	onSave,
 }: {
-	pending: boolean;
-	error: string | undefined;
-	onCancel: () => void;
-	onSave: (secret: string) => void;
+	auth: WebhookAuth;
+	value: string;
+	onChange: (value: string) => void;
+	onEnter?: () => void;
+	error?: string;
 }) {
-	const [value, setValue] = useState("");
 	const id = useId();
-	const ready = value.trim().length >= MIN_WEBHOOK_SECRET_CHARACTERS;
-	// Paste was just pressed, so the secret goes straight in.
-	const focusOnOpen = useCallback((input: HTMLInputElement | null) => input?.focus(), []);
+	const [shown, setShown] = useState(false);
+	const label = secretLabel(auth);
 	return (
 		<div className="flex flex-col gap-2 border-border border-b px-4 py-2.5 last:border-b-0">
 			<div className="flex min-h-[26px] items-center gap-3">
-				<SettingsFieldLabel htmlFor={id}>Sender's</SettingsFieldLabel>
+				<SettingsFieldLabel htmlFor={id}>{label}</SettingsFieldLabel>
 				<input
 					id={id}
+					type={shown ? "text" : "password"}
 					value={value}
-					onChange={(event) => setValue(event.target.value)}
+					onChange={(event) => onChange(event.target.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") onEnter?.();
+					}}
 					autoComplete="off"
 					spellCheck={false}
-					ref={focusOnOpen}
-					placeholder="Paste the secret the sender made"
-					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-[13px] text-foreground outline-none placeholder:font-sans placeholder:text-[14.5px] placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+					placeholder={secretPlaceholder(auth)}
+					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-[13px] text-foreground outline-none placeholder:font-sans placeholder:text-[14.5px] placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
-				<Button variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
-					Cancel
-				</Button>
-				<Button size="sm" disabled={!ready || pending} onClick={() => onSave(value.trim())}>
-					Save
-				</Button>
+				{value !== "" && (
+					<IconButton label={shown ? "Hide" : "Show"} size="lg" onClick={() => setShown(!shown)}>
+						{shown ? <EyeOff /> : <Eye />}
+					</IconButton>
+				)}
 			</div>
 			{error && (
 				<span role="alert" className="text-destructive-text text-sm">
 					{error}
 				</span>
 			)}
-		</div>
-	);
-}
-
-/** The line of an example request that carries the auth, for the kinds a person sends by hand. */
-function exampleAuthLine(auth: WebhookAuth): string | undefined {
-	switch (auth.kind) {
-		case "hmac":
-			return auth.format === "body"
-				? `  -H "${auth.header}: ${auth.algorithm}=$SIGNATURE" \\`
-				: undefined;
-		case "api_key":
-			return `  -H "${auth.header}: $API_KEY" \\`;
-		case "bearer":
-			return `  -H "Authorization: Bearer $TOKEN" \\`;
-		case "basic":
-			return `  -u "${auth.username}:$PASSWORD" \\`;
-	}
-}
-
-/**
- * A curl call that would run the routine with the auth chosen, to copy and
- * fill in. Slack and Stripe send their own, so there is none for them.
- */
-function ExampleRequest({ address, auth }: { address: string; auth: WebhookAuth }) {
-	const authLine = exampleAuthLine(auth);
-	if (!authLine) return null;
-	const example = [
-		`curl -X POST ${address} \\`,
-		`  -H "Content-Type: application/json" \\`,
-		authLine,
-		`  -d '{"text": "New signup: acme.io"}'`,
-	].join("\n");
-	return (
-		<div className="flex flex-col gap-2 border-border border-b px-4 py-3 last:border-b-0">
-			<div className="flex items-center gap-3">
-				<span className="flex-1 text-[14px] text-foreground">Example request</span>
-				<CopyIconButton label="Copy example request" text={example} size="lg" />
-			</div>
-			<pre className="m-0 whitespace-pre-wrap break-all rounded-[10px] bg-background px-3.5 py-3 font-mono text-[12px] text-foreground leading-[1.65]">
-				{example}
-			</pre>
 		</div>
 	);
 }

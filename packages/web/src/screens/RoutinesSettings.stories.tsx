@@ -1,6 +1,7 @@
 import type { Agent, Pod, Routine, RoutineExecution, WorkspaceRoutine } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
-import { expect, within } from "storybook/test";
+// A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
+import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -77,7 +78,7 @@ const incidentIntake = placed(
 	engineering,
 	{
 		kind: "webhook",
-		auth: { kind: "hmac", format: "body", header: "X-Signature", algorithm: "sha256" },
+		auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
 	},
 	{ results: "keep_in_run" },
 );
@@ -86,7 +87,10 @@ const slackMentions = placed(
 	"Slack mentions",
 	accountManager,
 	revenue,
-	{ kind: "webhook", auth: { kind: "hmac", format: "slack" } },
+	{
+		kind: "webhook",
+		auth: { kind: "slack" },
+	},
 	{ results: "keep_in_run" },
 );
 const signups = placed(
@@ -155,11 +159,11 @@ export const List = meta.story({
 			{ name: "Workspace routines" },
 			{ timeout: 10_000 },
 		);
-		await expect(await within(list).findByText("Daily · 6:00, Growth Desk")).toBeInTheDocument();
+		await expect(await within(list).findByText("Daily at 6:00, Growth Desk")).toBeInTheDocument();
 		await expect(within(list).getByText("Webhook, On-call")).toBeInTheDocument();
-		await expect(within(list).getByText("Mon Wed Fri · 3 times, Chief")).toBeInTheDocument();
+		await expect(within(list).getByText("Mon Wed Fri, 3 times, Chief")).toBeInTheDocument();
 		await expect(
-			within(list).getByText("Every 3 months · 10:00, Account Manager"),
+			within(list).getByText("Every 3 months at 10:00, Account Manager"),
 		).toBeInTheDocument();
 		await expect(within(list).getByText("Paused")).toBeInTheDocument();
 		await expect(
@@ -168,18 +172,19 @@ export const List = meta.story({
 	},
 });
 
-/** A scheduled routine: on, with its bot, its schedule, where its result goes, and Run now. */
+/** A scheduled routine: on, with its bot, when it runs, where its result goes, and Run now. */
 export const Scheduled = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByText("Growth Desk · Revenue pod")).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).toBeChecked();
-		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
+		await expect(canvas.getByRole("switch", { name: "On" })).toBeChecked();
+		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
+			"Daily at 6:00",
+		);
 		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Delete routine" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "More" })).toBeInTheDocument();
 	},
 });
 
@@ -277,20 +282,33 @@ export const RecentRuns = meta.story({
 	},
 });
 
+/** The trigger opens on a page of its own: its type, the schedule's groups, and when it runs, in which time zone. */
+export const Trigger = meta.story({
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByRole("heading", { name: "Trigger" })).toBeInTheDocument();
+		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
+		await expect(canvas.getByText(/^Runs every day at 6:00, .*UTC.*\.$/)).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Overnight outbound" })).toBeInTheDocument();
+	},
+});
+
 /** Several times on some days of the week: a row per time, each with a way to remove it, and room for more. */
 export const SeveralTimes = meta.story({
 	render: () => <StoryApp path={pageOf(standups)} />,
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByRole("radio", { name: "Weekly" })).toBeChecked();
+		await expect(canvas.getAllByRole("combobox", { name: /^Time / })).toHaveLength(3);
+		await expect(canvas.getAllByRole("button", { name: /^Remove / })).toHaveLength(3);
+		await expect(canvas.getByRole("button", { name: "Add a time" })).toBeInTheDocument();
 		await expect(
-			await canvas.findByRole("radio", { name: "Weekly" }, { timeout: 10_000 }),
-		).toBeChecked();
-		await expect(canvas.getAllByRole("status", { name: "Time" })).toHaveLength(3);
-		await expect(canvas.getAllByRole("button", { name: "Remove this time" })).toHaveLength(3);
-		await expect(canvas.getByRole("button", { name: "+ Add a time" })).toBeInTheDocument();
-		await expect(
-			canvas.getByText(
-				/Runs every week on Mon, Wed and Fri at 9:00, 13:00 and 17:00, .*UTC.* and posts/,
-			),
+			canvas.getByText(/^Runs every week on Mon, Wed and Fri at 9:00, 13:00 and 17:00, .*UTC.*\.$/),
 		).toBeInTheDocument();
 	},
 });
@@ -298,10 +316,13 @@ export const SeveralTimes = meta.story({
 /** Every third month on its last day: Every and On the step through their values. */
 export const Monthly = meta.story({
 	render: () => <StoryApp path={pageOf(quarterClose)} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("status", { name: "Every" }, { timeout: 10_000 }),
-		).toHaveTextContent("3 months");
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
+		);
+		await expect(await canvas.findByRole("status", { name: "Every" })).toHaveTextContent(
+			"3 months",
+		);
 		await expect(canvas.getByRole("status", { name: "On the" })).toHaveTextContent("last day");
 		await expect(
 			canvas.getByText(/Runs every 3 months on the last day at 10:00/),
@@ -309,81 +330,106 @@ export const Monthly = meta.story({
 	},
 });
 
-/** Paused: it says it runs only when asked, and Run now still works. */
+/** ⋯ beside Run now holds what else can be done: Duplicate, and Delete routine. */
+export const MoreMenu = meta.story({
+	render: () => <StoryApp path={pageOf(overnight)} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "More" }, { timeout: 10_000 }));
+		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Delete routine" }),
+		).toBeInTheDocument();
+	},
+});
+
+/** Paused: its switch is off, and Run now still works. */
 export const Paused = meta.story({
 	render: () => <StoryApp path={pageOf(churnReport)} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(
-				"Paused. It only runs when you press Run now.",
-				{},
-				{ timeout: 10_000 },
-			),
-		).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).not.toBeChecked();
-		await expect(canvas.getByRole("checkbox", { name: "Wednesday" })).toBeChecked();
+			await canvas.findByRole("switch", { name: "On" }, { timeout: 10_000 }),
+		).not.toBeChecked();
+		await expect(canvas.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 	},
 });
 
-/** A webhook: its address, and its secret, which shows only in the tab that made it. */
+/** A webhook: its address, its auth, and a blank field for its secret, which is saved but never shown, with Remove and Save under them. */
 export const Webhook = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
+		);
 		await expect(
-			await canvas.findByText(
-				new RegExp(`/hooks/routines/${incidentIntake.routine.id}$`),
-				{},
-				{ timeout: 10_000 },
-			),
+			await canvas.findByText(new RegExp(`/hooks/routines/${incidentIntake.routine.id}$`)),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "HMAC" })).toBeChecked();
-		await expect(canvas.getByRole("radio", { name: "Plain body" })).toBeChecked();
+		await expect(canvas.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
 		await expect(canvas.getByLabelText("Header")).toHaveValue("X-Signature");
-		await expect(canvas.getByText("Shown only when it's made")).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Make a new one" })).toBeInTheDocument();
-		await expect(canvas.getByText(/X-Signature: sha256=\$SIGNATURE/)).toBeInTheDocument();
+		const secret = await canvas.findByLabelText("Signing secret");
+		await expect(secret).toHaveValue("");
+		await expect(canvas.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 });
 
-/** Slack signs its own way: no header to set, no example to copy, and its secret pasted in. */
+/** From Slack, only its signing secret is asked for, pasted in, which shows Save. */
 export const SlackWebhook = meta.story({
 	render: () => <StoryApp path={pageOf(slackMentions)} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: "Paste" }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
 		);
-		await expect(canvas.getByLabelText("Sender's")).toHaveFocus();
+		await expect(await canvas.findByRole("button", { name: "Source: Slack" })).toBeInTheDocument();
 		await expect(canvas.queryByLabelText("Header")).toBeNull();
-		await expect(canvas.queryByText("Example request")).toBeNull();
-		await expect(canvas.getByText(/paste its Signing Secret here/)).toBeInTheDocument();
+		const secret = await canvas.findByLabelText("Signing secret");
+		await userEvent.type(secret, "8f742231b10e8888abcd99yyyzzz85a5");
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeEnabled();
 	},
 });
 
-/** Basic auth: a username to set, a password, and a request that sends both. */
+/** The source menu: Generic, then the senders whose signing is known, each with its logo; picking one closes it. */
+export const SourceMenu = meta.story({
+	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
+		);
+		await userEvent.click(await canvas.findByRole("button", { name: "Source: Generic" }));
+		const menu = await screen.findByRole("menu");
+		for (const source of ["Generic", "GitHub", "Stripe", "Slack", "Linear"]) {
+			await expect(within(menu).getByRole("menuitem", { name: source })).toBeInTheDocument();
+		}
+		await userEvent.click(within(menu).getByRole("menuitem", { name: "Stripe" }));
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+	},
+});
+
+/** Basic auth: a username to set, and a password. */
 export const BasicWebhook = meta.story({
 	render: () => <StoryApp path={pageOf(signups)} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByLabelText("Username", {}, { timeout: 10_000 })).toHaveValue(
-			"sugabots",
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
 		);
+		await expect(await canvas.findByLabelText("Username")).toHaveValue("sugabots");
 		await expect(canvas.getByText("Password")).toBeInTheDocument();
-		await expect(canvas.getByText(/-u "sugabots:\$PASSWORD"/)).toBeInTheDocument();
 	},
 });
 
-/** A new webhook signs by default, and takes a secret its sender made, or makes one. */
+/** A new webhook signs by default, and starts with no secret, which the note warns lets anyone run it. */
 export const NewWebhook = meta.story({
 	render: () => <StoryApp path={`${routines}/new`} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(
-			await canvas.findByRole("radio", { name: "Webhook" }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
 		);
-		await expect(canvas.getByRole("radio", { name: "HMAC" })).toBeChecked();
-		await expect(canvas.getByLabelText("Secret")).toHaveAttribute(
-			"placeholder",
-			"Made for you, or paste the sender's",
-		);
-		await expect(canvas.getByText(/send the hex digest in X-Signature/)).toBeInTheDocument();
+		await userEvent.click(await canvas.findByRole("radio", { name: "Webhook" }));
+		await expect(canvas.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		await expect(canvas.getByLabelText("Signing secret")).toHaveValue("");
+		await expect(
+			canvas.getByText(/^With no secret, anyone who has the address can run it\./),
+		).toBeInTheDocument();
 	},
 });
 
@@ -398,22 +444,28 @@ export const NewRoutine = meta.story({
 			await canvas.findByRole("heading", { name: "New routine" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Not created yet")).toBeInTheDocument();
-		await expect(canvas.getByRole("radio", { name: "Daily" })).toBeChecked();
-		await expect(canvas.getByText("9:00")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
+			"Daily at 9:00",
+		);
 		await expect(canvas.getByRole("button", { name: "Create routine" })).toBeDisabled();
-		await expect(canvas.queryByRole("switch", { name: "Runs on its own" })).toBeNull();
+		await expect(canvas.queryByRole("switch", { name: "On" })).toBeNull();
 	},
 });
 
-/** Weekly adds a row of days, and the bot list opens in place under its pods. */
+/** Weekly adds a row of days, Done goes back, and the bot list opens in place under its pods. */
 export const ChoosingDaysAndABot = meta.story({
 	render: () => <StoryApp path={`${routines}/new`} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(
-			await canvas.findByRole("radio", { name: "Weekly" }, { timeout: 10_000 }),
+			await canvas.findByRole("button", { name: /^Trigger/ }, { timeout: 10_000 }),
 		);
+		await userEvent.click(await canvas.findByRole("radio", { name: "Weekly" }));
 		await userEvent.click(canvas.getByRole("checkbox", { name: "Friday" }));
 		await expect(canvas.getByText(/Runs every week on Mon and Fri at 9:00/)).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Done" }));
+		await expect(canvas.getByRole("button", { name: /^Trigger/ })).toHaveTextContent(
+			"Mon Fri at 9:00",
+		);
 		await userEvent.click(canvas.getByRole("button", { name: /^Bot/ }));
 		await expect(canvas.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
 	},
@@ -433,9 +485,9 @@ export const AsAMember = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Overnight outbound" }, { timeout: 10_000 }),
 		).toBeInTheDocument();
-		await expect(canvas.getByRole("switch", { name: "Runs on its own" })).toBeDisabled();
+		await expect(canvas.getByRole("switch", { name: "On" })).toBeDisabled();
 		await expect(canvas.queryByRole("button", { name: "Run now" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Delete routine" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "More" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New routine" })).toBeNull();
 	},
 });

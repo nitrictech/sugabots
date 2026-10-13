@@ -40,9 +40,8 @@ describe("Routine contracts", () => {
 	});
 
 	it.each([
-		{ kind: "hmac", format: "body", header: "Linear-Signature", algorithm: "sha256" },
-		{ kind: "hmac", format: "slack" },
-		{ kind: "hmac", format: "stripe" },
+		{ kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+		{ kind: "slack" },
 		{ kind: "api_key", header: "X-API-Key" },
 		{ kind: "bearer" },
 		{ kind: "basic", username: "sugabots" },
@@ -60,10 +59,11 @@ describe("Routine contracts", () => {
 		["a header name with a space", { auth: { kind: "api_key", header: "X API Key" } }],
 		["a Basic username with a colon", { auth: { kind: "basic", username: "suga:bots" } }],
 		[
-			"an HMAC format without a header",
-			{ auth: { kind: "hmac", format: "body", algorithm: "sha256" } },
+			"an HMAC signature without a header",
+			{ auth: { kind: "hmac", algorithm: "sha256", encoding: "hex" } },
 		],
-		["a secret too short to be hard to guess", { secret: "short" }],
+		["a source nobody signs as", { auth: { kind: "shopify" } }],
+		["a blank secret", { secret: "   " }],
 	])("rejects a webhook with %s", (_, webhook) => {
 		expect(
 			Schema.decodeUnknownResult(newRoutineSchema)({
