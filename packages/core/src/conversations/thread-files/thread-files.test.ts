@@ -306,6 +306,36 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		await expect(upload(userId, "three.txt")).resolves.toMatchObject({ name: "three.txt" });
 	});
 
+	it("removes an unsent upload for its uploader only, and never a sent one", async () => {
+		const { threadId, userId } = await aThread();
+		const other = await aRoutineOwner();
+		const upload = (name: string) =>
+			files.upload({
+				threadId,
+				uploaderId: userId,
+				name,
+				maxSize: 1024,
+				maxUnsent: 20,
+				content: text(name),
+			});
+		const removed = await upload("removed.txt");
+		const kept = await upload("kept.txt");
+		const sent = await upload("sent.txt");
+		await send(threadId, userId, [sent.id]);
+		const rows = () =>
+			onDatabase((db) =>
+				db.select({ id: threadFile.id }).from(threadFile).where(eq(threadFile.threadId, threadId)),
+			);
+
+		await files.removeUnsentUpload({ threadId, uploaderId: other.userId, fileId: kept.id });
+		await files.removeUnsentUpload({ threadId, uploaderId: userId, fileId: sent.id });
+		await files.removeUnsentUpload({ threadId, uploaderId: userId, fileId: removed.id });
+		// Again, once it is gone.
+		await files.removeUnsentUpload({ threadId, uploaderId: userId, fileId: removed.id });
+
+		expect((await rows()).map(({ id }) => id).sort()).toEqual([kept.id, sent.id].sort());
+	});
+
 	it("removes uploads left unsent, with their blobs, and nothing else", async () => {
 		const { threadId, userId } = await aThread();
 		const upload = (name: string) =>

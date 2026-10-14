@@ -73,6 +73,16 @@ export interface Interface {
 	/** The files in the thread kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (threadId: string) => Effect.Effect<ReadonlyMap<string, string>>;
 	/**
+	 * Removes `fileId` when it is one of `uploaderId`'s unsent uploads in the
+	 * thread, such as one taken off a message before it was sent. Anything
+	 * else, a file already gone included, is left as it is.
+	 */
+	readonly removeUnsentUpload: (file: {
+		threadId: string;
+		uploaderId: string;
+		fileId: string;
+	}) => Effect.Effect<void>;
+	/**
 	 * Removes every upload still unsent `unsentFor` after it was uploaded, and
 	 * returns how many. A blob that cannot be removed is left to go with its
 	 * thread's folder.
@@ -123,6 +133,16 @@ export const make = Effect.gen(function* () {
 			).pipe(Effect.onError(() => blobs.delete(key).pipe(Effect.ignore)));
 			return { id, contentType, size };
 		});
+
+	/** Removes an unsent upload's blob, once its row is gone; one that cannot be removed goes with the thread's folder. */
+	const removeUploadBlob = (threadId: string, fileId: string) =>
+		blobs
+			.delete(fileKey(threadId, fileId))
+			.pipe(
+				Effect.catchCause((cause) =>
+					Effect.logWarning("Removing an unsent upload's blob failed", cause),
+				),
+			);
 
 	return Service.of({
 		write: ({ threadId, toolCallId, content }) =>
@@ -237,6 +257,29 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
+		removeUnsentUpload: ({ threadId, uploaderId, fileId }) =>
+			operation(
+				"removeUnsentUpload",
+				Effect.gen(function* () {
+					// The id comes from the uploader's client, and Postgres rejects a
+					// uuid comparison against anything that is not one.
+					if (!isUuid(fileId)) return;
+					const removed = yield* query((db) =>
+						db
+							.delete(threadFile)
+							.where(
+								and(
+									eq(threadFile.id, fileId),
+									eq(threadFile.threadId, threadId),
+									eq(threadFile.uploaderId, uploaderId),
+									unsentUpload,
+								),
+							)
+							.returning({ id: threadFile.id }),
+					);
+					if (removed.length > 0) yield* removeUploadBlob(threadId, fileId);
+				}),
+			),
 		removeUnsentUploads: (unsentFor) =>
 			operation(
 				"removeUnsentUploads",
@@ -256,18 +299,9 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ id: threadFile.id, threadId: threadFile.threadId }),
 					);
-					yield* Effect.forEach(
-						removed,
-						({ id, threadId }) =>
-							blobs
-								.delete(fileKey(threadId, id))
-								.pipe(
-									Effect.catchCause((cause) =>
-										Effect.logWarning("Removing an unsent upload's blob failed", cause),
-									),
-								),
-						{ discard: true },
-					);
+					yield* Effect.forEach(removed, ({ id, threadId }) => removeUploadBlob(threadId, id), {
+						discard: true,
+					});
 					return removed.length;
 				}),
 			),

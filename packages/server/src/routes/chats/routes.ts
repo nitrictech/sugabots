@@ -78,6 +78,11 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					});
 				}).pipe(Effect.catchTags(storeOutagesAsDefects), asSessionUser, asHttpError(fileErrors)),
 			)
+			.handle("removeFile", ({ params }) =>
+				files
+					.removeUpload({ chatId: params.chatId, fileId: params.fileId })
+					.pipe(asSessionUser, asHttpError(refusals)),
+			)
 			.handle("file", ({ params }) =>
 				files
 					.read({ chatId: params.chatId, fileId: params.fileId })
