@@ -1,6 +1,8 @@
 export * as BlobStore from "./blob-store.ts";
 
+import { NodeFileSystem } from "@effect/platform-node";
 import { Config, Context, Data, Effect, Layer, Stream } from "effect";
+import { fromFileSystem } from "./implementations/filesystem.ts";
 import { fromPostgres } from "./implementations/postgres.ts";
 
 /**
@@ -57,13 +59,15 @@ export const make = Effect.gen(function* () {
 	switch (provider) {
 		case "postgres":
 			return yield* fromPostgres;
+		case "filesystem":
+			return yield* fromFileSystem(yield* Config.String("BLOB_STORE_FILESYSTEM_ROOT"));
 	}
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/** Every implementation's dependencies are infrastructure the entry point provides. */
-export const layer = layerNoDeps;
+/** The database and `Ids` are infrastructure the entry point provides. */
+export const layer = layerNoDeps.pipe(Layer.provide(NodeFileSystem.layer));
 
 /** A blob's path, made by `key`. */
 export type Key = string & { readonly [keyBrand]: true };
@@ -162,6 +166,6 @@ export function atMost<E>(
 	);
 }
 
-const PROVIDERS = ["postgres"] as const;
+const PROVIDERS = ["postgres", "filesystem"] as const;
 
 type Provider = (typeof PROVIDERS)[number];

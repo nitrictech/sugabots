@@ -1,15 +1,71 @@
-import { Effect, Stream } from "effect";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDatabase, onPostgres, type Promised, runOnPostgres } from "../database/testing.ts";
+import { effectRunner } from "../database/database.ts";
+import {
+	closeDatabase,
+	noDatabase,
+	onPostgres,
+	type Promised,
+	promising,
+	runOnPostgres,
+} from "../database/testing.ts";
+import { Ids } from "../ids/ids.ts";
 import { BlobStore } from "./blob-store.ts";
 
-describe.skipIf(!process.env.DATABASE_URL)("blob store, against Postgres", () => {
+/** The blob store `BLOB_STORE_PROVIDER=filesystem` makes, keeping blobs under `root`. */
+function fileSystemRuntime(root: string) {
+	const env = { BLOB_STORE_PROVIDER: "filesystem", BLOB_STORE_FILESYSTEM_ROOT: root };
+	return ManagedRuntime.make(
+		BlobStore.layer.pipe(
+			Layer.provide([noDatabase, Ids.layer, ConfigProvider.layer(ConfigProvider.fromEnv({ env }))]),
+		),
+	);
+}
+
+interface Implementation {
+	name: string;
+	skip: boolean;
+	open: () => Promise<{ blobs: Promised<BlobStore.Interface>; close: () => Promise<void> }>;
+}
+
+const implementations: Implementation[] = [
+	{
+		name: "Postgres",
+		skip: !process.env.DATABASE_URL,
+		open: async () => ({
+			blobs: onPostgres(await runOnPostgres(Effect.service(BlobStore.Service))),
+			close: closeDatabase,
+		}),
+	},
+	{
+		name: "the filesystem",
+		skip: false,
+		open: async () => {
+			const root = await mkdtemp(join(tmpdir(), "blob-store-"));
+			const runtime = fileSystemRuntime(root);
+			const run = effectRunner<BlobStore.Service>(runtime);
+			return {
+				blobs: promising(run)(await run(Effect.service(BlobStore.Service))),
+				close: async () => {
+					await runtime.dispose();
+					await rm(root, { recursive: true, force: true });
+				},
+			};
+		},
+	},
+];
+
+describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name", ({ open }) => {
 	let blobs: Promised<BlobStore.Interface>;
+	let close: () => Promise<void>;
 
 	beforeAll(async () => {
-		blobs = onPostgres(await runOnPostgres(Effect.service(BlobStore.Service)));
+		({ blobs, close } = await open());
 	});
-	afterAll(closeDatabase);
+	afterAll(() => close());
 
 	/** A folder name no other case writes under. */
 	const aFolder = () => crypto.randomUUID();
@@ -111,6 +167,40 @@ describe.skipIf(!process.env.DATABASE_URL)("blob store, against Postgres", () =>
 		expect(await blobs.list(prefix)).toEqual([]);
 		await expect(blobs.get(extended)).resolves.toBeDefined();
 		await expect(blobs.get(wildcard)).resolves.toBeDefined();
+	});
+
+	it("keeps a blob and the blobs beneath its key apart", async () => {
+		const folder = aFolder();
+		const parent = BlobStore.key("tests", folder);
+		const child = BlobStore.key("tests", folder, "..");
+		await blobs.put(parent, text("parent"));
+		await blobs.put(child, text("child"));
+
+		await blobs.deletePrefix(parent);
+		await expect(blobs.get(parent)).resolves.toBeDefined();
+		await expect(blobs.get(child)).rejects.toBeInstanceOf(BlobStore.NotFound);
+
+		await blobs.put(child, text("child"));
+		await blobs.delete(parent);
+		await expect(blobs.list(parent)).resolves.toEqual([
+			{ key: child, contentType: "text/plain; charset=utf-8", size: 5 },
+		]);
+	});
+});
+
+describe("a blob store on the filesystem", () => {
+	it("refuses to start when its directory can't be made", async () => {
+		const parent = await mkdtemp(join(tmpdir(), "blob-store-"));
+		const file = join(parent, "a-file");
+		await writeFile(file, "");
+		const runtime = fileSystemRuntime(join(file, "blobs"));
+
+		await expect(
+			effectRunner<BlobStore.Service>(runtime)(Effect.service(BlobStore.Service)),
+		).rejects.toThrow("BLOB_STORE_FILESYSTEM_ROOT");
+
+		await runtime.dispose();
+		await rm(parent, { recursive: true, force: true });
 	});
 });
 
