@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../attachments.ts";
 import {
 	activityFeedSchema,
 	approvalInboxSchema,
@@ -14,7 +15,7 @@ import {
 } from "../../chats.ts";
 import { messageSchema, newMessageSchema } from "../../threads.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { BadRequest, Conflict, refused } from "../errors.ts";
+import { BadRequest, Conflict, PayloadTooLarge, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
@@ -68,6 +69,23 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			payload: newMessageSchema,
 			success: messageSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
+		}),
+		/**
+		 * Uploads a file to attach to a message the caller then sends. The body
+		 * is the file's bytes, and `Content-Type` its media type.
+		 */
+		HttpApiEndpoint.post("uploadFile", "/chats/:chatId/files", {
+			params: { chatId: Schema.String },
+			query: uploadAttachmentQuerySchema,
+			payload: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array()),
+			success: uploadedAttachmentSchema.pipe(HttpApiSchema.status(201)),
+			error: [BadRequest, PayloadTooLarge, Conflict, ...refused],
+		}),
+		/** A file attached to a message in the chat, with its own media type. */
+		HttpApiEndpoint.get("file", "/chats/:chatId/files/:fileId", {
+			params: { chatId: Schema.String, fileId: Schema.String },
+			success: HttpApiSchema.StreamUint8Array(),
+			error: refused,
 		}),
 	)
 	.middleware(Session) {}

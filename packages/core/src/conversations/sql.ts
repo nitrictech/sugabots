@@ -578,6 +578,12 @@ export const toolCall = pgTable(
 export type ToolCallRow = typeof toolCall.$inferSelect;
 
 /**
+ * Where a thread's file came from: a tool's result too large to hand a model
+ * whole, a person's upload, or a file an agent attached to its own reply.
+ */
+export type ThreadFileKind = "tool_result" | "upload" | "agent_attachment";
+
+/**
  * A file in a thread, which its agents can read. Its bytes are in the blob
  * store, under the thread's folder (see `thread-files/thread-files.ts`).
  */
@@ -588,14 +594,45 @@ export const threadFile = pgTable(
 		threadId: uuid("thread_id")
 			.notNull()
 			.references(() => thread.id, { onDelete: "cascade" }),
-		/** The call whose result this is. */
+		kind: text("kind").$type<ThreadFileKind>().notNull(),
+		/** For a tool result: the call whose result this is. */
 		toolCallId: uuid("tool_call_id").references(() => toolCall.id, { onDelete: "set null" }),
+		/** For an upload, the file's name as the person's computer had it; for an agent's attachment, the name it gave. */
+		name: text("name"),
+		/** For an upload: who uploaded it, the only one who may attach it while it is unsent. */
+		uploaderId: uuid("uploader_id").references(() => user.id, { onDelete: "set null" }),
+		/**
+		 * For an upload, the message it is attached to, unset until that message
+		 * is sent; for an agent's attachment, the reply it was attached to.
+		 */
+		messageId: uuid("message_id").references(() => message.id, { onDelete: "cascade" }),
+		/** For a file on a message: its place among the message's files, from 0. */
+		position: integer("position"),
 		contentType: text("content_type").notNull(),
 		/** In bytes. */
 		size: integer("size").notNull(),
 		createdAt: stamp("created_at"),
 	},
-	(table) => [index("thread_file_thread_idx").on(table.threadId)],
+	(table) => [
+		index("thread_file_thread_idx").on(table.threadId),
+		index("thread_file_message_idx").on(table.messageId),
+		check(
+			"thread_file_kind_valid",
+			sql`${table.kind} in ('tool_result', 'upload', 'agent_attachment')`,
+		),
+		check(
+			"thread_file_source_valid",
+			sql`case ${table.kind}
+				when 'upload' then ${table.name} is not null and ${table.toolCallId} is null
+					and (${table.messageId} is null) = (${table.position} is null)
+				when 'agent_attachment' then ${table.name} is not null and ${table.toolCallId} is null
+					and ${table.uploaderId} is null and ${table.messageId} is not null
+					and ${table.position} is not null
+				else ${table.name} is null and ${table.uploaderId} is null and ${table.messageId} is null
+					and ${table.position} is null
+			end`,
+		),
+	],
 );
 
 export const threadSummary = pgTable("thread_summary", {
