@@ -1,9 +1,24 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { useEffect, useState } from "react";
-import { expect, fn } from "storybook/test";
+import { expect, fn, spyOn } from "storybook/test";
 import preview from "#storybook/preview";
+import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
+import {
+	acmeRequest,
+	boardPackFailed,
+	callRecordingTooLarge,
+	installerRefused,
+	invoicesAtLimit,
+	pricingPageReady,
+	pricingPageUploading,
+} from "./attachment-story-fixtures.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
+
+/** Files attached in a fixed state, with spies for what the composer asks of them. */
+function withFiles(items: readonly ComposerAttachment[], leftOut = 0) {
+	return { items, leftOut, attach: fn(), remove: fn(), retry: fn() };
+}
 
 const mentionable: ThreadParticipant[] = [
 	{
@@ -35,8 +50,8 @@ const meta = preview.meta({
 		onValueChange: fn(),
 		onSubmit: fn(),
 		submitLabel: "Send message",
-		submitDisabled: false,
 		mentionable,
+		attachments: withFiles([]),
 	},
 	decorators: [
 		(Story) => (
@@ -70,7 +85,6 @@ const meta = preview.meta({
 					setValue(next);
 					args.onValueChange(next);
 				}}
-				submitDisabled={args.submitDisabled || !value.trim()}
 			/>
 		);
 	},
@@ -220,8 +234,11 @@ export const SendWithEnter = meta.story({
 export const Sending = meta.story({
 	args: {
 		value: "Please summarise the feedback.",
-		submitDisabled: true,
+		sending: true,
 		submitLabel: "Sending message",
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Sending message" })).toBeDisabled();
 	},
 });
 
@@ -305,5 +322,261 @@ export const ReplyingTo = meta.story({
 		await userEvent.keyboard("{Escape}");
 		await expect(args.replyingTo?.onCancel).toHaveBeenCalledTimes(2);
 		await expect(args.onValueChange).not.toHaveBeenCalled();
+	},
+});
+
+/** The paperclip sits left of the @ and opens the system's file picker straight away. */
+export const AttachFiles = meta.story({
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
+		if (!picker) throw new Error("The composer has no file picker");
+		// The real picker is the system's own window, which a test cannot close.
+		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
+		await userEvent.click(canvas.getByRole("button", { name: "Attach files" }));
+		await expect(openPicker).toHaveBeenCalledOnce();
+	},
+});
+
+/**
+ * Before the chat exists there is nowhere to upload to: the paperclip is off,
+ * and a pasted file is left to the browser rather than lost.
+ */
+export const BeforeTheChatExists = meta.story({
+	args: { attachments: { ...withFiles([]), attach: undefined } },
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		const attachButton = canvas.getByRole("button", { name: "Attach files" });
+		await expect(attachButton).toHaveAttribute("aria-disabled", "true");
+		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
+		if (!picker) throw new Error("The composer has no file picker");
+		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
+		await userEvent.click(attachButton);
+		await expect(openPicker).not.toHaveBeenCalled();
+
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const pasted = new DataTransfer();
+		pasted.items.add(new File(["png"], "image.png", { type: "image/png" }));
+		const paste = new ClipboardEvent("paste", {
+			bubbles: true,
+			cancelable: true,
+			clipboardData: pasted,
+		});
+		input.dispatchEvent(paste);
+		await expect(paste.defaultPrevented).toBe(false);
+	},
+});
+
+/** Files chosen in the system's picker are attached in the order chosen. */
+export const ChooseFiles = meta.story({
+	play: async ({ args, canvasElement, userEvent }) => {
+		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
+		if (!picker) throw new Error("The composer has no file picker");
+		const files = [
+			new File(["%PDF"], "acme-retail-request.pdf", { type: "application/pdf" }),
+			new File(["a,b"], "q4-pipeline.csv", { type: "text/csv" }),
+		];
+		await userEvent.upload(picker, files);
+		await expect(args.attachments.attach).toHaveBeenCalledWith(files);
+	},
+});
+
+/** Pasting a file, such as a screenshot, attaches it rather than writing anything into the draft. */
+export const PasteFiles = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const screenshot = new File(["png"], "image.png", { type: "image/png" });
+		const clipboard = new DataTransfer();
+		clipboard.items.add(screenshot);
+		await userEvent.click(input);
+		await userEvent.paste(clipboard);
+		await expect(args.attachments.attach).toHaveBeenCalledWith([screenshot]);
+		await expect(input).toHaveValue("");
+	},
+});
+
+/**
+ * Cells copied from a spreadsheet, or text from a document, come with a
+ * picture of them beside the text: the text is what is pasted.
+ */
+export const PasteFromOffice = meta.story({
+	play: async ({ args, canvas, userEvent }) => {
+		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
+		const clipboard = new DataTransfer();
+		clipboard.setData("text/plain", "Q3 revenue\t1.2M");
+		clipboard.items.add(new File(["png"], "image.png", { type: "image/png" }));
+		await userEvent.click(input);
+		await userEvent.paste(clipboard);
+		await expect(input).toHaveValue("Q3 revenue\t1.2M");
+		await expect(args.attachments.attach).not.toHaveBeenCalled();
+	},
+});
+
+/**
+ * Attaching: an image uploading, a PDF done and a video too large to send.
+ * Send stays off, and says why, until the upload finishes and the failed file
+ * is removed.
+ */
+export const Attaching = meta.story({
+	args: { attachments: withFiles([pricingPageUploading, acmeRequest, callRecordingTooLarge]) },
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeDisabled();
+		await expect(canvas.getByText("Remove the file that failed")).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("progressbar", { name: "Uploading pricing-page-new.svg" }),
+		).toHaveAttribute("aria-valuenow", "64");
+		// Too large to upload, so there is nothing to retry.
+		await expect(
+			canvas.queryByRole("button", { name: "Retry sales-call-recording.mp4" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "Remove sales-call-recording.mp4" }));
+		await expect(args.attachments.remove).toHaveBeenCalledWith(callRecordingTooLarge.key);
+	},
+});
+
+/** Files still uploading hold Send back, and the hint counts them. */
+export const Uploading = meta.story({
+	args: {
+		value: "Here's the pricing page and Acme's request.",
+		attachments: withFiles([
+			pricingPageUploading,
+			{ ...acmeRequest, upload: { state: "uploading", progress: 0.3 } },
+		]),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeDisabled();
+		await expect(canvas.getByText("2 files uploading")).toBeInTheDocument();
+	},
+});
+
+/**
+ * A failed upload blocks Send until it is retried or removed. Why it failed
+ * is written beneath the files, and describes its buttons. Retry uploads it
+ * again on the same chip.
+ */
+export const FailedBlocksSend = meta.story({
+	args: {
+		value: "Here's Acme's request, the new pricing page and the board pack.",
+		attachments: withFiles([pricingPageReady, acmeRequest, boardPackFailed]),
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeDisabled();
+		await expect(canvas.getByText("Remove or retry the file that failed")).toBeInTheDocument();
+		await expect(canvas.getByText(/The upload didn't finish/)).toBeVisible();
+		const retry = canvas.getByRole("button", { name: "Retry q3-board-pack-v2.pdf" });
+		await expect(retry).toHaveAccessibleDescription(
+			"q3-board-pack-v2.pdf: The upload didn't finish. Check your connection and retry.",
+		);
+		await expect(
+			canvas.getByRole("button", { name: "Remove q3-board-pack-v2.pdf" }),
+		).toHaveAccessibleDescription(/The upload didn't finish/);
+		await userEvent.click(retry);
+		await expect(args.attachments.retry).toHaveBeenCalledWith(boardPackFailed.key);
+	},
+});
+
+/** A file the API refused for what it is offers no Retry, since it would only be refused again. */
+export const RefusedFile = meta.story({
+	args: { attachments: withFiles([acmeRequest, installerRefused]) },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/This kind of file can't be attached/)).toBeVisible();
+		await expect(canvas.getByText("Remove the file that failed")).toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("button", { name: "Retry setup-helper.exe" }),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.getByRole("button", { name: "Remove setup-helper.exe" }),
+		).toHaveAccessibleDescription(/This kind of file can't be attached/);
+	},
+});
+
+/**
+ * Removing a file from the keyboard keeps the focus among the files: on the
+ * next one's remove button, or the one before when it was the last.
+ */
+export const RemoveFromKeyboard = meta.story({
+	args: { attachments: withFiles([pricingPageReady, acmeRequest]) },
+	render: function Removable(args) {
+		const [items, setItems] = useState(args.attachments.items);
+		return (
+			<ChatComposer
+				{...args}
+				attachments={{
+					...args.attachments,
+					items,
+					remove: (key) => {
+						setItems((current) => current.filter((item) => item.key !== key));
+						args.attachments.remove(key);
+					},
+				}}
+			/>
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.tab();
+		await expect(canvas.getByRole("button", { name: "Remove pricing-page-new.svg" })).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		await expect(
+			canvas.getByRole("button", { name: "Remove acme-retail-request.pdf" }),
+		).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		await expect(canvas.getByRole("textbox", { name: "Message Growth Desk" })).toHaveFocus();
+		await expect(canvas.queryByRole("list", { name: "Attached files" })).not.toBeInTheDocument();
+	},
+});
+
+/** With two failed, the hint counts them. */
+export const TwoFailed = meta.story({
+	args: { attachments: withFiles([boardPackFailed, callRecordingTooLarge]) },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Remove or retry the 2 files that failed")).toBeInTheDocument();
+	},
+});
+
+/** Text and two files, all uploaded, so Send turns on. */
+export const ReadyToSend = meta.story({
+	args: {
+		value: "Here's Acme's request and the new pricing page. Can you check the numbers?",
+		attachments: withFiles([pricingPageReady, acmeRequest]),
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Send message" }));
+		await expect(args.onSubmit).toHaveBeenCalledOnce();
+	},
+});
+
+/** A message can be files only: with nothing typed, uploaded files still turn Send on. */
+export const FilesOnly = meta.story({
+	args: { attachments: withFiles([pricingPageReady, acmeRequest]) },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
+	},
+});
+
+/**
+ * FileLimit: 23 files dropped and the first 20 attached. The note says what
+ * was left out, the tray scrolls past two rows, and the paperclip turns off.
+ */
+export const FileLimit = meta.story({
+	args: { attachments: withFiles(invoicesAtLimit, 3) },
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("3 files weren't added. A message can have 20 at most."),
+		).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Attach files" })).toHaveAttribute(
+			"aria-disabled",
+			"true",
+		);
+		await expect(canvas.getByText("20 of 20 files")).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
+	},
+});
+
+/** On a phone the chips are a step smaller, in one row that scrolls sideways. */
+export const AttachingOnPhone = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	args: { attachments: withFiles([pricingPageUploading, acmeRequest, callRecordingTooLarge]) },
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByRole("button", { name: "Remove acme-retail-request.pdf" }),
+		).toBeInTheDocument();
 	},
 });

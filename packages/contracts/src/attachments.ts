@@ -1,8 +1,13 @@
 import { Schema } from "effect";
 import { uuidSchema } from "./uuid.ts";
 
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
 /** The largest file a person can attach to a message, in bytes. */
-export const MAX_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 30 * BYTES_PER_MEGABYTE;
+
+/** `MAX_ATTACHMENT_BYTES` in megabytes, as people are told it. */
+export const MAX_ATTACHMENT_MEGABYTES = MAX_ATTACHMENT_BYTES / BYTES_PER_MEGABYTE;
 
 /** The most files one message can carry, and so the most a person can have uploaded and not yet sent. */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 20;

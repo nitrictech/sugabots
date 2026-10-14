@@ -1,8 +1,19 @@
 export * as ThreadFiles from "./thread-files.ts";
 
-import { userText } from "@sugabots/errors";
+import { type DomainError, userText } from "@sugabots/errors";
 import { and, count, eq, inArray, isNotNull, lt, not, sql } from "drizzle-orm";
-import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
+import {
+	Config,
+	Context,
+	Data,
+	Duration,
+	Effect,
+	ErrorReporter,
+	Layer,
+	Option,
+	Schema,
+	Stream,
+} from "effect";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { threadFile } from "../../database/schema.ts";
@@ -357,7 +368,20 @@ export class FileNotFound
 	}
 }
 
-export class UploadsNotFound extends Data.TaggedError("UploadsNotFound") implements UserFacing {
+/**
+ * A file to send is not one of the sender's unsent uploads, such as one cleared
+ * for waiting too long. A domain error, so a client can tell it apart by its
+ * tag rather than its wording.
+ */
+export class UploadsNotFound
+	extends Schema.TaggedError<UploadsNotFound>()("UploadsNotFound", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "A file to send is not one of the sender's unsent uploads";
+	}
 	get userMessage() {
 		return userText`A file to send is no longer there. Remove it and attach it again`;
 	}
