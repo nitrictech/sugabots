@@ -619,6 +619,49 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		).toHaveLength(0);
 	});
 
+	it("quotes the message a reply answers, but only one in the same chat", async () => {
+		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });
+		const elsewhere = await chats.open({
+			workspace: workspaceId,
+			podId,
+			hostAgentId: recipientAgentId,
+		});
+		const asked = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Ship the **release** today\nand tell the team",
+		});
+		const other = await chats.post({
+			chatId: elsewhere.id,
+			messageId: crypto.randomUUID(),
+			content: "Something else",
+		});
+
+		const reply = await chats.post({
+			chatId: current.id,
+			messageId: crypto.randomUUID(),
+			content: "Actually, tomorrow",
+			replyTo: asked.id,
+		});
+
+		const quoted = { id: asked.id, author: asked.author, preview: "Ship the release today" };
+		expect(reply.replyTo).toEqual(quoted);
+		const page = await view.messages(current.id);
+		expect(page.items).toContainEqual(
+			expect.objectContaining({
+				message: expect.objectContaining({ id: reply.id, replyTo: quoted }),
+			}),
+		);
+		await expect(
+			chats.post({
+				chatId: current.id,
+				messageId: crypto.randomUUID(),
+				content: "About that",
+				replyTo: other.id,
+			}),
+		).rejects.toMatchObject({ _tag: "ReplyTargetNotFound" });
+	});
+
 	it("says which messages wait for the agent's next turn, and announces when one starts waiting", async () => {
 		const threads = onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 		const current = await chats.open({ workspace: workspaceId, podId, hostAgentId: agentId });

@@ -56,6 +56,7 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.message.routineExecutionId,
 			to: r.routineExecution.id,
 		}),
+		replyTo: r.one.message({ from: r.message.replyToMessageId, to: r.message.id }),
 	},
 	threadRead: {
 		user: r.one.user({ from: r.threadRead.userId, to: r.user.id, optional: false }),

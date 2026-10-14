@@ -1,6 +1,6 @@
 export * as ThreadRepository from "./repository.ts";
 
-import type { RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
+import type { Message, RoutineTriggerAuthor, SystemAgentKey } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -23,8 +23,11 @@ import {
 	type PersonIdentity,
 	personAuthor,
 	personColumns,
+	quotedMessageColumns,
 	toMessage,
 	toPerson,
+	toReplyTo,
+	withReplyTo,
 } from "./participants.ts";
 
 /**
@@ -51,7 +54,7 @@ export interface Interface {
 	 * Posts a person's message, making them a participant, and announces it.
 	 * Posting a message again with the same `id` returns the one already
 	 * posted, unchanged and unannounced; an `id` already used by a different
-	 * message fails.
+	 * message fails, and so does quoting a message that is not in the thread.
 	 */
 	readonly post: (input: {
 		/** The id the person's client chose, which makes sending it again safe to detect. */
@@ -59,7 +62,9 @@ export interface Interface {
 		threadId: string;
 		author: PersonIdentity;
 		content: string;
-	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict>;
+		/** The id of the message in the thread that this one quotes and answers. */
+		replyTo?: string;
+	}) => Effect.Effect<Posted | AlreadyPosted, MessageIdConflict | ReplyTargetNotFound>;
 	/** Brings agents into the thread, announcing the ones who were not there yet. */
 	readonly addAgents: (threadId: string, agentIds: readonly string[]) => Effect.Effect<void>;
 	/**
@@ -206,16 +211,24 @@ export const make = Effect.gen(function* () {
 						const [existing] = yield* query((db) =>
 							db.select().from(message).where(eq(message.id, input.id)).limit(1),
 						);
+						const author = personAuthor(input.author);
 						if (existing) {
 							if (
 								existing.threadId !== input.threadId ||
 								existing.authorUserId !== input.author.id ||
-								existing.content !== input.content
+								existing.content !== input.content ||
+								(existing.replyToMessageId ?? undefined) !== input.replyTo
 							) {
 								return yield* new MessageIdConflict();
 							}
-							return { _tag: "AlreadyPosted", message: existing } as const;
+							const replyTo = yield* quotedIn(existing.threadId, existing.replyToMessageId);
+							return {
+								_tag: "AlreadyPosted",
+								message: withReplyTo(toMessage(existing, author), replyTo),
+							} as const;
 						}
+						const replyTo = yield* quotedIn(input.threadId, input.replyTo);
+						if (input.replyTo && !replyTo) return yield* new ReplyTargetNotFound();
 						const created = yield* query((db) =>
 							db
 								.insert(message)
@@ -227,6 +240,7 @@ export const make = Effect.gen(function* () {
 									status: "complete",
 									parts: [{ type: "text", text: input.content }],
 									content: input.content,
+									replyToMessageId: input.replyTo,
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("message")));
@@ -244,16 +258,16 @@ export const make = Effect.gen(function* () {
 								.values({ threadId: input.threadId, userId: input.author.id })
 								.onConflictDoNothing(),
 						);
-						const author = personAuthor(input.author);
+						const posted = withReplyTo(toMessage(created, author), replyTo);
 						yield* emit([
 							ConversationEvent.MessagePosted({
 								threadId: input.threadId,
 								workspaceId: placed.workspaceId,
 								podId: placed.podId,
-								message: toMessage(created, author),
+								message: posted,
 							}),
 						]);
-						return { _tag: "Posted", message: created } as const;
+						return { _tag: "Posted", message: posted } as const;
 					}),
 				),
 			),
@@ -567,13 +581,33 @@ export const layer = Layer.effect(Service, make);
 /** A message posted now, and announced. */
 export interface Posted {
 	readonly _tag: "Posted";
-	readonly message: schema.MessageRow;
+	readonly message: Message;
 }
 
 /** A message posted before with the same id and content, returned as it was. */
 export interface AlreadyPosted {
 	readonly _tag: "AlreadyPosted";
-	readonly message: schema.MessageRow;
+	readonly message: Message;
+}
+
+/** The message `messageId` in `threadId`, as a reply quotes it, or nothing when it is not there. */
+const quotedIn = (threadId: string, messageId: string | null | undefined) =>
+	messageId
+		? query((db) =>
+				db.query.message.findFirst({ where: { id: messageId, threadId }, ...quotedMessageColumns }),
+			).pipe(Effect.map((quoted) => (quoted ? toReplyTo(quoted) : undefined)))
+		: Effect.succeed(undefined);
+
+export class ReplyTargetNotFound
+	extends Data.TaggedError("ReplyTargetNotFound")
+	implements UserFacing
+{
+	override get message() {
+		return "A reply quoted a message that is not in its thread";
+	}
+	get userMessage() {
+		return userText`The message you replied to isn't in this conversation`;
+	}
 }
 
 export class MessageIdConflict extends Data.TaggedError("MessageIdConflict") implements UserFacing {

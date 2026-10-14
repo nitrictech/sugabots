@@ -1,9 +1,16 @@
+import { messageAuthorName } from "@sugabots/contracts";
 import { and, asc, eq, gte } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent, message, thread, user } from "../../database/schema.ts";
 import { messageTextWithPlacedParts } from "./message-text.ts";
-import { participantColumns, toMessage } from "./participants.ts";
+import {
+	participantColumns,
+	quotedMessageColumns,
+	toMessage,
+	toReplyTo,
+	withReplyTo,
+} from "./participants.ts";
 import { loadPlacedParts } from "./placed-parts.ts";
 
 /**
@@ -92,16 +99,26 @@ export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(fun
 		db,
 		rows.map(({ message: row }) => row.id),
 	);
+	const quotedIds = rows.flatMap(({ message: row }) =>
+		row.replyToMessageId ? [row.replyToMessageId] : [],
+	);
+	const quoted =
+		quotedIds.length === 0
+			? []
+			: yield* db.query.message.findMany({
+					where: { id: { in: quotedIds } },
+					...quotedMessageColumns,
+				});
+	const quotedById = new Map(quoted.map((row) => [row.id, toReplyTo(row)]));
 	return rows.map(({ message: row, ...author }) => {
-		const hydrated = toMessage(row, author, placed(row.id));
+		const hydrated = withReplyTo(
+			toMessage(row, author, placed(row.id)),
+			row.replyToMessageId ? quotedById.get(row.replyToMessageId) : undefined,
+		);
 		const content = messageTextWithPlacedParts(hydrated);
-		const authorName =
-			hydrated.author.kind === "routine_trigger"
-				? hydrated.author.routineName
-				: hydrated.author.name;
 		const entry: TranscriptEntry | undefined = content
 			? {
-					author: authorName,
+					author: messageAuthorName(hydrated.author),
 					kind: hydrated.author.kind === "person" ? "person" : "agent",
 					content,
 				}

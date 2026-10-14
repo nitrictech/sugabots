@@ -2,10 +2,11 @@ import type {
 	AgentColor,
 	Message,
 	MessagePart,
+	MessageReplyTo,
 	PersonParticipant,
 	ThreadParticipant,
 } from "@sugabots/contracts";
-import { handleFromName, messageStatusSchema } from "@sugabots/contracts";
+import { handleFromName, messageStatusSchema, quotedPreview } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
@@ -134,6 +135,34 @@ export const agentColumns = {
 	columns: { id: true, name: true, handle: true, color: true, face: true },
 } as const;
 
+/** The columns and relations a relational query reads of a message a reply quotes. */
+export const quotedMessageColumns = {
+	columns: { id: true, content: true, parts: true, routineTrigger: true },
+	with: { authorUser: personColumns, authorAgent: agentColumns },
+} as const;
+
+/** A message read with {@link quotedMessageColumns}. */
+export interface QuotedMessage
+	extends Pick<schema.MessageRow, "id" | "content" | "parts" | "routineTrigger"> {
+	authorUser: PersonIdentity | null;
+	authorAgent: AgentIdentity | null;
+}
+
+/** A quoted message as a reply shows it: who wrote it and its spoken text on one line. */
+export function toReplyTo(quoted: QuotedMessage): MessageReplyTo {
+	return {
+		id: quoted.id,
+		author:
+			quoted.routineTrigger ?? toParticipant(authorRow(quoted.authorUser, quoted.authorAgent)),
+		preview: quotedPreview(quoted),
+	};
+}
+
+/** `shown` with the message it quotes, when it quotes one. */
+export function withReplyTo(shown: Message, replyTo: MessageReplyTo | undefined): Message {
+	return replyTo ? { ...shown, replyTo } : shown;
+}
+
 /** The relations a relational query follows to read a message as the API shows it. */
 export const messageRelations = {
 	authorUser: personColumns,
@@ -144,6 +173,7 @@ export const messageRelations = {
 	},
 	collaborations: { with: { collaborator: { columns: { name: true } } } },
 	routineExecution: { columns: { id: true, threadId: true, routineName: true } },
+	replyTo: quotedMessageColumns,
 } as const;
 
 /** Who a person is, as read with {@link personColumns}. */
@@ -157,6 +187,7 @@ export interface MessageWithRelations extends schema.MessageRow {
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
 	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	routineExecution: Pick<schema.RoutineExecutionRow, "id" | "threadId" | "routineName"> | null;
+	replyTo: QuotedMessage | null;
 }
 
 /** A message read with `messageRelations`, as the API shows it. */
@@ -177,16 +208,19 @@ export function messageFromRelations(
 		error,
 	);
 	const run = stored.routineExecution;
-	return run
-		? {
-				...shown,
-				routineResultOf: {
-					executionId: run.id,
-					threadId: run.threadId,
-					routineName: run.routineName,
-				},
-			}
-		: shown;
+	return {
+		...shown,
+		...(run
+			? {
+					routineResultOf: {
+						executionId: run.id,
+						threadId: run.threadId,
+						routineName: run.routineName,
+					},
+				}
+			: {}),
+		...(stored.replyTo ? { replyTo: toReplyTo(stored.replyTo) } : {}),
+	};
 }
 
 /** Whoever a relational query found, as the row `toParticipant` reads. */
