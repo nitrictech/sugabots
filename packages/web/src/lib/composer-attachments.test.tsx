@@ -131,7 +131,10 @@ describe("useComposerAttachments", () => {
 
 		act(() => request?.answer(201, uploadedAs(file)));
 		await settle();
-		expect(result.current.items[0]?.upload).toEqual({ state: "uploaded", fileId });
+		expect(result.current.items[0]?.upload).toEqual({
+			state: "uploaded",
+			attachment: uploadedAs(file),
+		});
 		expect(sendReadiness(result.current.items)).toEqual({ ready: true });
 	});
 
@@ -223,7 +226,9 @@ describe("useComposerAttachments", () => {
 		act(() => result.current.retry(key ?? ""));
 		act(() => FakeRequest.made[1]?.answer(201, uploadedAs(file)));
 		await settle();
-		expect(result.current.items).toEqual([{ key, file, upload: { state: "uploaded", fileId } }]);
+		expect(result.current.items).toEqual([
+			{ key, file, upload: { state: "uploaded", attachment: uploadedAs(file) } },
+		]);
 	});
 
 	it("takes the uploaded files to send, and puts them back when the message is not sent", async () => {
@@ -238,7 +243,10 @@ describe("useComposerAttachments", () => {
 		act(() => {
 			taken = result.current.takeForSending("");
 		});
-		expect(taken?.fileIds).toEqual([fileId]);
+		// As the message shows them until the API answers.
+		expect(taken?.parts).toEqual([
+			{ type: "file", id: fileId, name: file.name, contentType: file.type, size: file.size },
+		]);
 		expect(result.current.items).toEqual([]);
 
 		act(() => taken?.putBack(new Error("The connection dropped")));
@@ -266,7 +274,7 @@ describe("useComposerAttachments", () => {
 	it("sends text, files or both, but nothing empty and nothing still uploading", async () => {
 		const { result } = renderHook(() => useComposerAttachments(chatId));
 		expect(result.current.takeForSending("   ")).toBeUndefined();
-		expect(result.current.takeForSending("Hello")?.fileIds).toEqual([]);
+		expect(result.current.takeForSending("Hello")?.parts).toEqual([]);
 
 		const file = pdf();
 		act(() => result.current.attach?.([file]));
@@ -277,7 +285,7 @@ describe("useComposerAttachments", () => {
 		act(() => {
 			taken = result.current.takeForSending("");
 		});
-		expect(taken?.fileIds).toEqual([fileId]);
+		expect(taken?.parts).toEqual([{ type: "file", ...uploadedAs(file) }]);
 	});
 
 	it.each([
@@ -365,7 +373,10 @@ describe("useComposerAttachments", () => {
 		act(() => FakeRequest.made[1]?.answer(201, uploadedAs(file, freshId)));
 		await settle();
 		expect(FakeRequest.made[1]?.body).toBe(file);
-		expect(result.current.items[0]?.upload).toEqual({ state: "uploaded", fileId: freshId });
+		expect(result.current.items[0]?.upload).toEqual({
+			state: "uploaded",
+			attachment: uploadedAs(file, freshId),
+		});
 	});
 
 	it("puts files back only once", async () => {

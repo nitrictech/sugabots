@@ -16,6 +16,7 @@ import {
 	podMember,
 	providerModel,
 	thread,
+	threadFile,
 	turn,
 	user,
 	workspace,
@@ -1185,6 +1186,74 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(await found("5%OFF")).toEqual([]);
 		// A full-text match ranks above one found only as a substring, even a newer one.
 		expect(await found("river")).toEqual([said[0], said[4]]);
+	});
+
+	it("finds the files a message carried, even one with nothing else in it", async () => {
+		const details = await createThread({
+			workspaceId,
+			podId,
+			hostAgentId: agentId,
+			initiatorUserId: memberId,
+			message: "Contracts",
+		});
+		const started = new Date(Date.now() - 10 * 60_000);
+		const sent = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(
+					["Here is the signed contract", ""].map((content, index) => ({
+						threadId: details.thread.id,
+						authorUserId: memberId,
+						kind: "text" as const,
+						status: "complete" as const,
+						parts: content ? [{ type: "text" as const, text: content }] : [],
+						content,
+						createdAt: new Date(started.getTime() + index * 60_000),
+					})),
+				)
+				.returning({ id: message.id }),
+		);
+		const [withText, filesOnly] = sent;
+		if (!withText || !filesOnly) throw new Error("Could not create the messages");
+		const attached = await onDatabase((db) =>
+			db
+				.insert(threadFile)
+				.values(
+					[
+						{ messageId: withText.id, name: "contract.pdf", contentType: "application/pdf" },
+						{ messageId: filesOnly.id, name: "chart.png", contentType: "image/png" },
+					].map((file) => ({
+						...file,
+						threadId: details.thread.id,
+						kind: "upload" as const,
+						uploaderId: memberId,
+						position: 0,
+						size: 2048,
+					})),
+				)
+				.returning({ id: threadFile.id, name: threadFile.name }),
+		);
+		const fileIdOf = (name: string) => attached.find((file) => file.name === name)?.id;
+		const search = searchHistoryTool({
+			threadId: details.thread.id,
+			before: new Date(Date.now() + 60_000),
+			run: runOnPostgres,
+		});
+		const found = async (input: { query?: string; after?: string }) => {
+			const result = await search.execute?.(input, { toolCallId: "search", messages: [] } as never);
+			return result && "messages" in result ? result.messages.map(({ text }) => text) : [];
+		};
+
+		expect(await found({ query: "signed contract" })).toEqual([
+			`Here is the signed contract\n[Attached contract.pdf (application/pdf, 2.0 KB) as file ${fileIdOf("contract.pdf")}, which read_thread_file reads]`,
+		]);
+		// By its name, for a message that says nothing else.
+		expect(await found({ query: "chart.png" })).toEqual([
+			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads]`,
+		]);
+		expect(await found({ after: started.toISOString() })).toContain(
+			`[Attached chart.png (image/png, 2.0 KB) as file ${fileIdOf("chart.png")}, which read_thread_file reads]`,
+		);
 	});
 
 	/**
